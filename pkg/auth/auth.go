@@ -1,0 +1,174 @@
+// Package auth handles credential storage and OAuth flows for AI providers.
+//
+// Credentials are stored in ~/.config/go-agent/auth.json with mode 0600.
+// Supports both API keys and OAuth tokens (Claude Max).
+package auth
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Credential represents a stored credential for a provider.
+type Credential struct {
+	Type    string `json:"type"`              // "api_key" or "oauth"
+	Key     string `json:"key,omitempty"`      // API key (type=api_key)
+	Access  string `json:"access,omitempty"`   // OAuth access token (type=oauth)
+	Refresh string `json:"refresh,omitempty"`  // OAuth refresh token (type=oauth)
+	Expires int64  `json:"expires,omitempty"`  // OAuth token expiry (unix ms) (type=oauth)
+}
+
+// IsOAuthToken returns true if the given key is an Anthropic OAuth token.
+func IsOAuthToken(key string) bool {
+	return strings.Contains(key, "sk-ant-oat")
+}
+
+// Store manages credentials on disk.
+type Store struct {
+	path string
+	data map[string]Credential
+	mu   sync.RWMutex
+}
+
+// configDir returns the directory for storing credentials.
+func configDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".config", "go-agent")
+}
+
+// DefaultStorePath returns the default path for the auth store.
+func DefaultStorePath() string {
+	return filepath.Join(configDir(), "auth.json")
+}
+
+// NewStore creates or loads a credential store.
+func NewStore(path string) *Store {
+	if path == "" {
+		path = DefaultStorePath()
+	}
+	s := &Store{
+		path: path,
+		data: make(map[string]Credential),
+	}
+	s.load()
+	return s
+}
+
+func (s *Store) load() {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return // File doesn't exist yet — that's fine
+	}
+	_ = json.Unmarshal(data, &s.data)
+}
+
+func (s *Store) save() error {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("creating config dir: %w", err)
+	}
+
+	data, err := json.MarshalIndent(s.data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling credentials: %w", err)
+	}
+
+	if err := os.WriteFile(s.path, data, 0600); err != nil {
+		return fmt.Errorf("writing credentials: %w", err)
+	}
+	return nil
+}
+
+// Set stores a credential for a provider.
+func (s *Store) Set(provider string, cred Credential) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[provider] = cred
+	return s.save()
+}
+
+// Get retrieves a credential for a provider.
+func (s *Store) Get(provider string) (Credential, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	c, ok := s.data[provider]
+	return c, ok
+}
+
+// Remove deletes a credential for a provider.
+func (s *Store) Remove(provider string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data, provider)
+	return s.save()
+}
+
+// GetAPIKey resolves the API key for a provider.
+// Priority:
+//  1. Environment variable (ANTHROPIC_API_KEY, etc.)
+//  2. OAuth token from store (auto-refreshed if expired)
+//  3. API key from store
+//
+// Returns the key and whether it's an OAuth token.
+func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error) {
+	// 1. Environment variable
+	envKey := envKeyForProvider(provider)
+	if v := os.Getenv(envKey); v != "" {
+		return v, IsOAuthToken(v), nil
+	}
+
+	// 2. Stored credential
+	s.mu.RLock()
+	cred, ok := s.data[provider]
+	s.mu.RUnlock()
+
+	if !ok {
+		return "", false, fmt.Errorf("no credentials for provider %q: set %s or run --login", provider, envKey)
+	}
+
+	switch cred.Type {
+	case "api_key":
+		return cred.Key, false, nil
+
+	case "oauth":
+		// Check if token needs refresh
+		if time.Now().UnixMilli() >= cred.Expires {
+			refreshed, err := RefreshAnthropicToken(cred.Refresh)
+			if err != nil {
+				return "", false, fmt.Errorf("token refresh failed: %w (run --login to re-authenticate)", err)
+			}
+			cred = Credential{
+				Type:    "oauth",
+				Access:  refreshed.Access,
+				Refresh: refreshed.Refresh,
+				Expires: refreshed.Expires,
+			}
+			// Save refreshed token (ignore save errors — the token is still usable)
+			s.mu.Lock()
+			s.data[provider] = cred
+			_ = s.save()
+			s.mu.Unlock()
+		}
+		return cred.Access, true, nil
+
+	default:
+		return "", false, fmt.Errorf("unknown credential type %q for provider %q", cred.Type, provider)
+	}
+}
+
+func envKeyForProvider(provider string) string {
+	switch provider {
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	default:
+		return strings.ToUpper(provider) + "_API_KEY"
+	}
+}

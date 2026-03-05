@@ -1,0 +1,3 @@
+event: message_start
+data: {not valid json at all}
+
