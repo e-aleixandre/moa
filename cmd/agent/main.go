@@ -34,10 +34,20 @@ func main() {
 	// Handle --login
 	if *login {
 		fmt.Println("Logging in to Anthropic (Claude Max)...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
 
-		creds, err := auth.LoginAnthropic(ctx)
+		creds, err := auth.LoginAnthropic(
+			func(url string) {
+				fmt.Println("\nOpening browser for Anthropic authentication...")
+				fmt.Printf("If the browser doesn't open, visit:\n%s\n\n", url)
+				auth.OpenBrowser(url)
+			},
+			func() (string, error) {
+				fmt.Print("Paste the authorization code here: ")
+				var code string
+				_, err := fmt.Scanln(&code)
+				return code, err
+			},
+		)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 			os.Exit(1)
