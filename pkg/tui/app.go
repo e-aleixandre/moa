@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/go-agent/pkg/agent"
 	"github.com/ealeixandre/go-agent/pkg/core"
 )
@@ -413,13 +414,23 @@ func (m *appModel) refreshViewport() {
 	var content strings.Builder
 	content.WriteString(renderBlocks(m.s.blocks, m.renderer))
 
+	// During streaming, apply word wrap + left margin to match glamour's
+	// final rendering. This prevents text from overflowing the viewport
+	// and minimizes the visual "pop" when glamour takes over on completion.
+	wrapWidth := m.width - 2 // match glamour's 2-char left margin
+	if wrapWidth < 20 {
+		wrapWidth = 20
+	}
+
 	// Thinking (dim, shown during streaming only)
 	if m.s.thinkingText != "" {
-		content.WriteString(thinkingStyle.Render(m.s.thinkingText) + "\n")
+		styled := thinkingStyle.Width(wrapWidth).PaddingLeft(2).Render(m.s.thinkingText)
+		content.WriteString(styled + "\n")
 	}
-	// Streaming text (raw, glamour applied when message completes)
+	// Streaming text (word-wrapped to match glamour layout, no markdown rendering)
 	if m.s.streamText != "" {
-		content.WriteString(m.s.streamText)
+		styled := lipgloss.NewStyle().Width(wrapWidth).PaddingLeft(2).Render(m.s.streamText)
+		content.WriteString(styled)
 	}
 
 	m.conversation.SetContent(content.String())
