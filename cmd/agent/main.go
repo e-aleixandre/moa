@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -131,7 +132,7 @@ func main() {
 	// Subscribe: stream assistant text to stdout, tool info to stderr.
 	// Streaming deltas are best-effort (lossy if subscriber buffer fills).
 	// Final output is extracted from returned messages below as source of truth.
-	streamedChars := 0
+	var streamedChars atomic.Int64
 	ag.Subscribe(func(e core.AgentEvent) {
 		switch e.Type {
 		case core.AgentEventMessageUpdate:
@@ -139,7 +140,7 @@ func main() {
 				switch e.AssistantEvent.Type {
 				case core.ProviderEventTextDelta:
 					fmt.Print(e.AssistantEvent.Delta)
-					streamedChars += len(e.AssistantEvent.Delta)
+					streamedChars.Add(int64(len(e.AssistantEvent.Delta)))
 				case core.ProviderEventThinkingDelta:
 					// Optionally show thinking (grey text)
 					fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.AssistantEvent.Delta)
@@ -160,7 +161,7 @@ func main() {
 	msgs, err := ag.Run(ctx, promptContent)
 
 	// If streaming deltas were dropped (lossy buffer), fall back to final messages.
-	if finalText := extractFinalAssistantText(msgs); streamedChars == 0 && finalText != "" {
+	if finalText := extractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
 		fmt.Print(finalText)
 	}
 	fmt.Println() // Final newline

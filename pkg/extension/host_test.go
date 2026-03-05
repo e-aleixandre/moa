@@ -330,4 +330,9 @@ func TestHost_Load_RollbackOnError(t *testing.T) {
 	if len(msgs) > 0 {
 		t.Fatalf("expected no injected messages after rollback, got %d", len(msgs))
 	}
+
+	// Tools registered during failed Init should be rolled back
+	if _, ok := reg.Get("phantom"); ok {
+		t.Fatal("tool 'phantom' should have been rolled back")
+	}
 }

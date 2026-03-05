@@ -51,32 +51,39 @@ func (h *Host) Load(ext Extension) error {
 	return err
 }
 
-// hookSnapshot captures the current hook/observer counts for rollback.
-type hookSnapshot struct {
+// loadSnapshot captures the current hook/observer counts and tool names for rollback.
+type loadSnapshot struct {
 	beforeAgentStart int
 	toolCall         int
 	toolResult       int
 	contextHooks     int
 	observers        map[string]int
+	toolNames        map[string]bool // tools registered before Init
 }
 
-func (h *Host) snapshot() hookSnapshot {
+func (h *Host) snapshot() loadSnapshot {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	obs := make(map[string]int, len(h.observers))
 	for k, v := range h.observers {
 		obs[k] = len(v)
 	}
-	return hookSnapshot{
+	// Snapshot tool names from registry
+	tools := make(map[string]bool)
+	for _, t := range h.tools.All() {
+		tools[t.Name] = true
+	}
+	return loadSnapshot{
 		beforeAgentStart: len(h.beforeAgentStart),
 		toolCall:         len(h.toolCall),
 		toolResult:       len(h.toolResult),
 		contextHooks:     len(h.contextHooks),
 		observers:        obs,
+		toolNames:        tools,
 	}
 }
 
-func (h *Host) restore(s hookSnapshot) {
+func (h *Host) restore(s loadSnapshot) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.beforeAgentStart) > s.beforeAgentStart {
@@ -97,6 +104,12 @@ func (h *Host) restore(s hookSnapshot) {
 			delete(h.observers, k)
 		} else if len(hooks) > prev {
 			h.observers[k] = hooks[:prev]
+		}
+	}
+	// Remove tools that weren't present before Init
+	for _, t := range h.tools.All() {
+		if !s.toolNames[t.Name] {
+			h.tools.Unregister(t.Name)
 		}
 	}
 }

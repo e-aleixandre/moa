@@ -278,6 +278,9 @@ func executeTool(ctx context.Context, registry *core.Registry, tc core.Content, 
 	if !ok {
 		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true
 	}
+	if t.Execute == nil {
+		return core.ErrorResult(fmt.Sprintf("tool %s has no execute function", tc.ToolName)), true
+	}
 
 	emitter.Emit(core.AgentEvent{
 		Type:       core.AgentEventToolExecStart,
