@@ -189,5 +189,9 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	}
 
 	err := agentLoop(ctx, cfg)
-	return a.state.Messages, err
+	// Return a copy — the internal slice is reused across turns (Send appends).
+	// Without this, callers could mutate returned messages and corrupt state.
+	msgs := make([]core.AgentMessage, len(a.state.Messages))
+	copy(msgs, a.state.Messages)
+	return msgs, err
 }

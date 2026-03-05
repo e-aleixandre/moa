@@ -11,8 +11,10 @@ import (
 
 // Deadlines for blocking hooks.
 const (
-	shortDeadline   = 200 * time.Millisecond
-	contextDeadline = 500 * time.Millisecond
+	shortDeadline    = 200 * time.Millisecond
+	contextDeadline  = 500 * time.Millisecond
+	observerDeadline = 5 * time.Second
+	maxObservers     = 64 // max concurrent observer goroutines
 )
 
 // Host manages loaded extensions and dispatches hooks with deadlines and panic recovery.
@@ -22,6 +24,7 @@ type Host struct {
 	toolResult       []ToolResultHook
 	contextHooks     []ContextHook
 	observers        map[string][]ObserverHook
+	observerSem      chan struct{} // limits concurrent observer goroutines
 	tools            *core.Registry
 	logger           *slog.Logger
 	mu               sync.RWMutex
@@ -33,9 +36,10 @@ func NewHost(tools *core.Registry, logger *slog.Logger) *Host {
 		logger = slog.Default()
 	}
 	return &Host{
-		observers: make(map[string][]ObserverHook),
-		tools:     tools,
-		logger:    logger,
+		observers:   make(map[string][]ObserverHook),
+		observerSem: make(chan struct{}, maxObservers),
+		tools:       tools,
+		logger:      logger,
 	}
 }
 
@@ -176,8 +180,10 @@ func (h *Host) FireContext(ctx context.Context, msgs []core.AgentMessage) []core
 	return current
 }
 
-// FireObserver dispatches async observer hooks. Does not block.
-// Each handler runs in its own goroutine with panic recovery.
+// FireObserver dispatches observer hooks with a timeout.
+// Each hook runs in its own goroutine with panic recovery and a deadline.
+// A semaphore limits concurrent observer goroutines to prevent leaks from
+// slow/blocking hooks.
 func (h *Host) FireObserver(event core.AgentEvent) {
 	h.mu.RLock()
 	hooks := h.observers[event.Type]
@@ -185,13 +191,23 @@ func (h *Host) FireObserver(event core.AgentEvent) {
 
 	for _, fn := range hooks {
 		fn := fn
+		// Acquire semaphore slot (non-blocking: drop if full)
+		select {
+		case h.observerSem <- struct{}{}:
+		default:
+			h.logger.Warn("observer semaphore full, dropping", "event", event.Type)
+			continue
+		}
 		go func() {
 			defer func() {
+				<-h.observerSem
 				if r := recover(); r != nil {
 					h.logger.Error("observer hook panic", "event", event.Type, "error", r)
 				}
 			}()
-			fn(context.Background(), event)
+			ctx, cancel := context.WithTimeout(context.Background(), observerDeadline)
+			defer cancel()
+			fn(ctx, event)
 		}()
 	}
 }
