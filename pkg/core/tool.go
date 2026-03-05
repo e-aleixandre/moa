@@ -48,6 +48,12 @@ func ErrorResult(msg string) Result {
 	return Result{Content: []Content{TextContent("Error: " + msg)}, IsError: true}
 }
 
+// ToolCallDecision is returned by tool-call hooks to optionally block execution.
+type ToolCallDecision struct {
+	Block  bool
+	Reason string
+}
+
 // Registry holds registered tools. Thread-safe.
 type Registry struct {
 	mu    sync.RWMutex

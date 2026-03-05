@@ -17,13 +17,7 @@ type BeforeAgentStartHook func(ctx context.Context) (inject []core.AgentMessage,
 
 // ToolCallHook: can block a tool call before execution.
 // Blocking, 200ms deadline.
-type ToolCallHook func(ctx context.Context, toolName string, args map[string]any) *ToolCallDecision
-
-// ToolCallDecision is returned by ToolCallHook to optionally block execution.
-type ToolCallDecision struct {
-	Block  bool
-	Reason string
-}
+type ToolCallHook func(ctx context.Context, toolName string, args map[string]any) *core.ToolCallDecision
 
 // ToolResultHook: can observe or modify a tool result after execution.
 // Blocking, 200ms deadline.

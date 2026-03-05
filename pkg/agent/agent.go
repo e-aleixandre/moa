@@ -17,7 +17,7 @@ type Agent struct {
 	config  AgentConfig
 	state   AgentState
 	tools   *core.Registry
-	ext     *extension.Host
+	hooks   Hooks
 	emitter *Emitter
 	cancel  context.CancelFunc
 	mu      sync.Mutex
@@ -79,7 +79,7 @@ func New(cfg AgentConfig) (*Agent, error) {
 	return &Agent{
 		config:  cfg,
 		tools:   cfg.Tools,
-		ext:     ext,
+		hooks:   ext,
 		emitter: NewEmitter(cfg.Logger),
 	}, nil
 }
@@ -127,7 +127,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, er
 	cfg := &loopConfig{
 		provider:            a.config.Provider,
 		tools:               a.tools,
-		extensions:          a.ext,
+		hooks:               a.hooks,
 		emitter:             a.emitter,
 		state:               &a.state,
 		model:               a.config.Model,

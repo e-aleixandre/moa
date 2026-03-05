@@ -61,7 +61,7 @@ func (h *Host) FireBeforeAgentStart(ctx context.Context) []core.AgentMessage {
 }
 
 // FireToolCall runs tool_call hooks. Returns first blocking decision, or nil.
-func (h *Host) FireToolCall(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
+func (h *Host) FireToolCall(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 	h.mu.RLock()
 	hooks := h.toolCall
 	h.mu.RUnlock()
@@ -171,8 +171,8 @@ func (h *Host) runBeforeAgentStart(ctx context.Context, fn BeforeAgentStartHook)
 	})
 }
 
-func (h *Host) runToolCall(ctx context.Context, fn ToolCallHook, name string, args map[string]any) *ToolCallDecision {
-	return runWithTimeout(ctx, shortDeadline, h.logger, "tool_call:"+name, func(ctx context.Context) *ToolCallDecision {
+func (h *Host) runToolCall(ctx context.Context, fn ToolCallHook, name string, args map[string]any) *core.ToolCallDecision {
+	return runWithTimeout(ctx, shortDeadline, h.logger, "tool_call:"+name, func(ctx context.Context) *core.ToolCallDecision {
 		return fn(ctx, name, args)
 	})
 }

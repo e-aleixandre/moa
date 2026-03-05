@@ -304,9 +304,9 @@ func TestLoop_ToolCallBlocked(t *testing.T) {
 	}
 
 	blocker := &testExtension{initFunc: func(api extension.API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *extension.ToolCallDecision {
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			if name == "bash" {
-				return &extension.ToolCallDecision{Block: true, Reason: "no shell access"}
+				return &core.ToolCallDecision{Block: true, Reason: "no shell access"}
 			}
 			return nil
 		})

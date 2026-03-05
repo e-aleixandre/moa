@@ -1,5 +1,5 @@
 bin/
-agent
+/agent
 *.exe
 *.test
 *.out

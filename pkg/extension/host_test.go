@@ -35,9 +35,9 @@ func TestHost_ToolCallBlock(t *testing.T) {
 
 	// Extension that blocks "bash" tool
 	ext := &testExtension{initFunc: func(api API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			if name == "bash" {
-				return &ToolCallDecision{Block: true, Reason: "bash is blocked"}
+				return &core.ToolCallDecision{Block: true, Reason: "bash is blocked"}
 			}
 			return nil
 		})
@@ -88,7 +88,7 @@ func TestHost_PanicRecovery(t *testing.T) {
 
 	// Extension that panics
 	ext := &testExtension{initFunc: func(api API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			panic("boom!")
 		})
 		return nil
@@ -107,11 +107,11 @@ func TestHost_DeadlineTimeout(t *testing.T) {
 
 	// Extension with a slow hook
 	ext := &testExtension{initFunc: func(api API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			// Simulate slow work that respects context
 			select {
 			case <-time.After(5 * time.Second):
-				return &ToolCallDecision{Block: true, Reason: "slow"}
+				return &core.ToolCallDecision{Block: true, Reason: "slow"}
 			case <-ctx.Done():
 				return nil
 			}
@@ -223,9 +223,9 @@ func TestHook_NonCooperativeTimeout(t *testing.T) {
 
 	// Extension with a hook that ignores context and blocks
 	ext := &testExtension{initFunc: func(api API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			time.Sleep(5 * time.Second) // ignores ctx
-			return &ToolCallDecision{Block: true, Reason: "slow"}
+			return &core.ToolCallDecision{Block: true, Reason: "slow"}
 		})
 		return nil
 	}}
@@ -249,9 +249,9 @@ func TestHook_RepeatedTimeouts(t *testing.T) {
 	host := NewHost(core.NewRegistry(), nil)
 
 	ext := &testExtension{initFunc: func(api API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			time.Sleep(5 * time.Second) // non-cooperative
-			return &ToolCallDecision{Block: true, Reason: "slow"}
+			return &core.ToolCallDecision{Block: true, Reason: "slow"}
 		})
 		return nil
 	}}
@@ -277,14 +277,14 @@ func TestHost_FirstBlockerWins(t *testing.T) {
 
 	// Two extensions, both block, first one should win
 	ext1 := &testExtension{initFunc: func(api API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
-			return &ToolCallDecision{Block: true, Reason: "blocker 1"}
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+			return &core.ToolCallDecision{Block: true, Reason: "blocker 1"}
 		})
 		return nil
 	}}
 	ext2 := &testExtension{initFunc: func(api API) error {
-		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *ToolCallDecision {
-			return &ToolCallDecision{Block: true, Reason: "blocker 2"}
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+			return &core.ToolCallDecision{Block: true, Reason: "blocker 2"}
 		})
 		return nil
 	}}

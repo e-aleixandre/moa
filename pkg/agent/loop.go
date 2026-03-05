@@ -5,15 +5,39 @@ import (
 	"fmt"
 
 	"github.com/ealeixandre/go-agent/pkg/core"
-	"github.com/ealeixandre/go-agent/pkg/extension"
 	"github.com/ealeixandre/go-agent/pkg/tool"
 )
+
+// Hooks is the interface the agent loop needs from the extension system.
+// Defined here (consumer-side) so the loop doesn't depend on extension internals.
+type Hooks interface {
+	FireBeforeAgentStart(ctx context.Context) []core.AgentMessage
+	FireToolCall(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
+	FireToolResult(ctx context.Context, name string, result core.Result, isError bool) core.Result
+	FireContext(ctx context.Context, msgs []core.AgentMessage) []core.AgentMessage
+	FireObserver(event core.AgentEvent)
+}
+
+// noopHooks is the default when no extensions are loaded.
+type noopHooks struct{}
+
+func (noopHooks) FireBeforeAgentStart(context.Context) []core.AgentMessage      { return nil }
+func (noopHooks) FireToolCall(context.Context, string, map[string]any) *core.ToolCallDecision {
+	return nil
+}
+func (noopHooks) FireToolResult(_ context.Context, _ string, r core.Result, _ bool) core.Result {
+	return r
+}
+func (noopHooks) FireContext(_ context.Context, msgs []core.AgentMessage) []core.AgentMessage {
+	return msgs
+}
+func (noopHooks) FireObserver(core.AgentEvent) {}
 
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
 	provider     core.Provider
 	tools        *core.Registry
-	extensions   *extension.Host
+	hooks        Hooks
 	emitter      *Emitter
 	state        *AgentState
 	model        core.Model
@@ -32,9 +56,7 @@ type loopConfig struct {
 // and extension observers. Uses the same event value for both.
 func emitLifecycle(cfg *loopConfig, evt core.AgentEvent) {
 	cfg.emitter.Emit(evt)
-	if cfg.extensions != nil {
-		cfg.extensions.FireObserver(evt)
-	}
+	cfg.hooks.FireObserver(evt)
 }
 
 // agentLoop is the core loop. NO steering/follow-up in V0.
@@ -55,10 +77,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventStart})
 
 	// Fire before_agent_start hooks (can inject messages)
-	if cfg.extensions != nil {
-		injected := cfg.extensions.FireBeforeAgentStart(ctx)
-		cfg.state.Messages = append(cfg.state.Messages, injected...)
-	}
+	injected := cfg.hooks.FireBeforeAgentStart(ctx)
+	cfg.state.Messages = append(cfg.state.Messages, injected...)
 
 	turnCount := 0
 	inTurn := false // track open turn for cleanup
@@ -92,10 +112,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Fire context hooks (can modify message list for this turn)
-		messages := cfg.state.Messages
-		if cfg.extensions != nil {
-			messages = cfg.extensions.FireContext(ctx, messages)
-		}
+		messages := cfg.hooks.FireContext(ctx, cfg.state.Messages)
 
 		// Convert to LLM messages (filter custom messages)
 		llmMessages := defaultConvertToLLM(messages)
@@ -149,66 +166,19 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 			// Guardrail: skip if over limit
 			if maxCalls > 0 && i >= maxCalls {
-				cfg.emitter.Emit(core.AgentEvent{
-					Type:       core.AgentEventToolExecStart,
-					ToolCallID: tc.ToolCallID,
-					ToolName:   tc.ToolName,
-					Args:       tc.Arguments,
-				})
-				skippedResult := core.NewToolResultMessage(
-					tc.ToolCallID, tc.ToolName,
-					[]core.Content{core.TextContent("Tool call skipped: max tool calls per turn exceeded")},
-					true,
-				)
-				cfg.state.Messages = append(cfg.state.Messages, core.WrapMessage(skippedResult))
-				cfg.emitter.Emit(core.AgentEvent{
-					Type:       core.AgentEventToolExecEnd,
-					ToolCallID: tc.ToolCallID,
-					ToolName:   tc.ToolName,
-					IsError:    true,
-					Result:     &core.Result{Content: skippedResult.Content, IsError: true},
-				})
+				rejectToolCall(cfg, tc, "Tool call skipped: max tool calls per turn exceeded")
 				continue
 			}
 
 			// Extension hook: can block
-			if cfg.extensions != nil {
-				if decision := cfg.extensions.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
-					cfg.emitter.Emit(core.AgentEvent{
-						Type:       core.AgentEventToolExecStart,
-						ToolCallID: tc.ToolCallID,
-						ToolName:   tc.ToolName,
-						Args:       tc.Arguments,
-					})
-					cfg.state.Messages = append(cfg.state.Messages, blockedToolResult(tc, decision.Reason))
-					cfg.emitter.Emit(core.AgentEvent{
-						Type:       core.AgentEventToolExecEnd,
-						ToolCallID: tc.ToolCallID,
-						ToolName:   tc.ToolName,
-						IsError:    true,
-						Result:     &core.Result{Content: []core.Content{core.TextContent("Blocked: " + decision.Reason)}, IsError: true},
-					})
-					continue
-				}
+			if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
+				rejectToolCall(cfg, tc, "Tool call blocked: "+decision.Reason)
+				continue
 			}
 
 			// Validate parameters
 			if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
-				cfg.emitter.Emit(core.AgentEvent{
-					Type:       core.AgentEventToolExecStart,
-					ToolCallID: tc.ToolCallID,
-					ToolName:   tc.ToolName,
-					Args:       tc.Arguments,
-				})
-				errMsg := errorToolResult(tc, err.Error())
-				cfg.state.Messages = append(cfg.state.Messages, errMsg)
-				cfg.emitter.Emit(core.AgentEvent{
-					Type:       core.AgentEventToolExecEnd,
-					ToolCallID: tc.ToolCallID,
-					ToolName:   tc.ToolName,
-					IsError:    true,
-					Result:     &core.Result{Content: errMsg.Content, IsError: true},
-				})
+				rejectToolCall(cfg, tc, "Parameter validation error: "+err.Error())
 				continue
 			}
 
@@ -216,9 +186,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			result, isError := executeTool(ctx, cfg.tools, tc, cfg.emitter)
 
 			// Extension hook: can modify result
-			if cfg.extensions != nil {
-				result = cfg.extensions.FireToolResult(ctx, tc.ToolName, result, isError)
-			}
+			result = cfg.hooks.FireToolResult(ctx, tc.ToolName, result, isError)
 
 			cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(tc, result, isError))
 		}
@@ -343,22 +311,26 @@ func executeTool(ctx context.Context, registry *core.Registry, tc core.Content, 
 	return result, isError
 }
 
-// blockedToolResult creates an AgentMessage for a blocked tool call.
-func blockedToolResult(tc core.Content, reason string) core.AgentMessage {
-	return core.WrapMessage(core.NewToolResultMessage(
-		tc.ToolCallID, tc.ToolName,
-		[]core.Content{core.TextContent("Tool call blocked: " + reason)},
-		true,
+// rejectToolCall emits the start/end events and appends an error result
+// for a tool call that was rejected (skipped, blocked, or failed validation).
+func rejectToolCall(cfg *loopConfig, tc core.Content, reason string) {
+	cfg.emitter.Emit(core.AgentEvent{
+		Type:       core.AgentEventToolExecStart,
+		ToolCallID: tc.ToolCallID,
+		ToolName:   tc.ToolName,
+		Args:       tc.Arguments,
+	})
+	result := core.ErrorResult(reason)
+	cfg.state.Messages = append(cfg.state.Messages, core.WrapMessage(
+		core.NewToolResultMessage(tc.ToolCallID, tc.ToolName, result.Content, true),
 	))
-}
-
-// errorToolResult creates an AgentMessage for a tool validation error.
-func errorToolResult(tc core.Content, errMsg string) core.AgentMessage {
-	return core.WrapMessage(core.NewToolResultMessage(
-		tc.ToolCallID, tc.ToolName,
-		[]core.Content{core.TextContent("Parameter validation error: " + errMsg)},
-		true,
-	))
+	cfg.emitter.Emit(core.AgentEvent{
+		Type:       core.AgentEventToolExecEnd,
+		ToolCallID: tc.ToolCallID,
+		ToolName:   tc.ToolName,
+		IsError:    true,
+		Result:     &result,
+	})
 }
 
 // toolResultMessage creates an AgentMessage wrapping a tool result.
