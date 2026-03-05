@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -19,6 +20,7 @@ func newInput() inputModel {
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit
 	ta.SetHeight(3)
+	ta.Cursor.SetMode(cursor.CursorStatic) // no blink → zero idle CPU
 	ta.Focus()
 	return inputModel{textarea: ta, enabled: true}
 }
