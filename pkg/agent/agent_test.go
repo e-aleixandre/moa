@@ -632,6 +632,203 @@ func TestLoop_ToolReturnsErrorResult(t *testing.T) {
 	}
 }
 
+// --- Multi-turn tests ---
+
+func TestSend_MultiTurn(t *testing.T) {
+	provider := NewMockProvider(
+		simpleTextResponse("Hello!"),
+		simpleTextResponse("I remember!"),
+	)
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages after first Send, got %d", len(msgs))
+	}
+
+	msgs, err = ag.Send(context.Background(), "do you remember?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should accumulate: user, assistant, user, assistant
+	if len(msgs) != 4 {
+		t.Fatalf("expected 4 messages after second Send, got %d", len(msgs))
+	}
+	if msgs[0].Role != "user" || msgs[1].Role != "assistant" ||
+		msgs[2].Role != "user" || msgs[3].Role != "assistant" {
+		t.Fatalf("unexpected roles: %s, %s, %s, %s",
+			msgs[0].Role, msgs[1].Role, msgs[2].Role, msgs[3].Role)
+	}
+	if msgs[2].Content[0].Text != "do you remember?" {
+		t.Fatalf("unexpected second user message: %q", msgs[2].Content[0].Text)
+	}
+	if msgs[3].Content[0].Text != "I remember!" {
+		t.Fatalf("unexpected second assistant message: %q", msgs[3].Content[0].Text)
+	}
+}
+
+func TestSend_AutoInit(t *testing.T) {
+	provider := NewMockProvider(simpleTextResponse("Hi there!"))
+	ag := newTestAgent(provider)
+
+	// Send without Run — should auto-initialize
+	msgs, err := ag.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].Role != "user" || msgs[1].Role != "assistant" {
+		t.Fatalf("unexpected roles: %s, %s", msgs[0].Role, msgs[1].Role)
+	}
+}
+
+func TestReset_ClearsState(t *testing.T) {
+	provider := NewMockProvider(
+		simpleTextResponse("First response"),
+		simpleTextResponse("Fresh response"),
+	)
+	ag := newTestAgent(provider)
+
+	_, err := ag.Send(context.Background(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ag.Reset(); err != nil {
+		t.Fatalf("Reset failed: %v", err)
+	}
+
+	msgs, err := ag.Send(context.Background(), "fresh start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should only have 2 messages (history was cleared)
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages after Reset+Send, got %d", len(msgs))
+	}
+	if msgs[0].Content[0].Text != "fresh start" {
+		t.Fatalf("expected 'fresh start', got %q", msgs[0].Content[0].Text)
+	}
+}
+
+func TestReset_WhileRunning_ReturnsError(t *testing.T) {
+	// Provider that blocks forever (until test cancels context)
+	blockingProvider := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 1)
+		go func() {
+			defer close(ch)
+			select {} // block forever
+		}()
+		return ch, nil
+	}
+
+	provider := NewMockProvider(blockingProvider)
+	ag := newTestAgent(provider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start Send in background
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ag.Send(ctx, "will block") //nolint: errcheck
+	}()
+
+	// Poll until agent is running
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		err := ag.Reset()
+		if err != nil && err.Error() == "cannot reset while agent is running" {
+			// Success — Reset correctly detected running state
+			cancel() // cleanup
+			<-done
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	t.Fatal("Reset never returned 'cannot reset while agent is running'")
+}
+
+func TestSend_WhileRunning_ReturnsError(t *testing.T) {
+	// Use a signal channel so we know the provider was called (agent is running).
+	providerCalled := make(chan struct{})
+	blockingProvider := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		close(providerCalled) // signal: agent is definitely running
+		ch := make(chan core.AssistantEvent, 1)
+		go func() {
+			defer close(ch)
+			select {} // block forever
+		}()
+		return ch, nil
+	}
+
+	provider := NewMockProvider(blockingProvider)
+	ag := newTestAgent(provider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start first Send in background
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ag.Send(ctx, "will block") //nolint: errcheck
+	}()
+
+	// Wait until provider is called — agent is definitely running
+	select {
+	case <-providerCalled:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("provider was never called")
+	}
+
+	// Now try concurrent Send — must be rejected
+	_, err := ag.Send(context.Background(), "concurrent")
+	if err == nil || err.Error() != "agent is already running" {
+		cancel()
+		<-done
+		t.Fatalf("expected 'agent is already running', got: %v", err)
+	}
+
+	cancel()
+	<-done
+}
+
+func TestRun_AfterSend_Resets(t *testing.T) {
+	provider := NewMockProvider(
+		simpleTextResponse("Send response"),
+		simpleTextResponse("Run response"),
+	)
+	ag := newTestAgent(provider)
+
+	_, err := ag.Send(context.Background(), "hello via send")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Run should reset state
+	msgs, err := ag.Run(context.Background(), "fresh via run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages after Run (reset), got %d", len(msgs))
+	}
+	if msgs[0].Content[0].Text != "fresh via run" {
+		t.Fatalf("expected 'fresh via run', got %q", msgs[0].Content[0].Text)
+	}
+}
+
 // --- Helper types ---
 
 type testExtension struct {

@@ -12,12 +12,15 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/term"
 	"github.com/ealeixandre/go-agent/pkg/agent"
 	"github.com/ealeixandre/go-agent/pkg/auth"
 	agentcontext "github.com/ealeixandre/go-agent/pkg/context"
 	"github.com/ealeixandre/go-agent/pkg/core"
 	"github.com/ealeixandre/go-agent/pkg/provider/anthropic"
 	"github.com/ealeixandre/go-agent/pkg/tool"
+	"github.com/ealeixandre/go-agent/pkg/tui"
 )
 
 func main() {
@@ -139,6 +142,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --- Mode selection ---
+
+	if promptContent == "" {
+		// Interactive mode — launch TUI
+		app := tui.New(ag, ctx)
+		prog := tea.NewProgram(app, tea.WithAltScreen(), tea.WithContext(ctx))
+		if _, err := prog.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// --- Headless mode (everything below is the existing behavior, unchanged) ---
+
 	// Subscribe: stream assistant text to stdout, tool info to stderr.
 	// Streaming deltas are best-effort (lossy if subscriber buffer fills).
 	// Final output is extracted from returned messages below as source of truth.
@@ -190,7 +208,7 @@ func main() {
 //  1. -p @file.md → read file content
 //  2. -p "text"   → use as-is
 //  3. no -p + stdin is pipe → read stdin
-//  4. no -p + no pipe → error
+//  4. no -p + terminal → empty string (interactive mode)
 func resolvePrompt(p string) (string, error) {
 	if p != "" {
 		if strings.HasPrefix(p, "@") {
@@ -211,9 +229,10 @@ func resolvePrompt(p string) (string, error) {
 	// Check if stdin is a pipe
 	fi, err := os.Stdin.Stat()
 	if err != nil {
-		return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
+		return "", nil // can't stat stdin → assume interactive
 	}
 	if fi.Mode()&os.ModeCharDevice == 0 {
+		// Stdin is a pipe — read it
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return "", fmt.Errorf("reading stdin: %w", err)
@@ -225,7 +244,14 @@ func resolvePrompt(p string) (string, error) {
 		return content, nil
 	}
 
-	return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
+	// Both stdin and stdout must be terminals for interactive mode.
+	// If stdout is redirected (pipe/file), launching a TUI would produce garbage.
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
+	}
+
+	// Terminal — interactive mode
+	return "", nil
 }
 
 // extractFinalAssistantText returns the text content from the last assistant message.
