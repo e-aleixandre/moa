@@ -140,12 +140,10 @@ func isStructuralEvent(e core.AgentEvent) bool {
 
 // --- Bubble Tea interface ---
 
-// Init returns initial commands: cursor blink + event listener.
+// Init returns initial commands: event listener.
+// Cursor is static (no blink) so no BlinkCmd needed — zero idle CPU.
 func (m appModel) Init() tea.Cmd {
-	return tea.Batch(
-		m.input.textarea.Cursor.BlinkCmd(),
-		m.waitForEvent(),
-	)
+	return m.waitForEvent()
 }
 
 // Update is the main message router.
