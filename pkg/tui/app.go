@@ -340,7 +340,13 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		m.status.SetText("thinking...")
 
 	case core.AgentEventMessageEnd:
-		// Flush: save raw text as a completed block (glamour applied during render)
+		// Flush thinking first (persists above the response, dimmed)
+		if m.s.thinkingText != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "thinking", Raw: m.s.thinkingText,
+			})
+		}
+		// Then flush assistant text
 		if m.s.streamText != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "assistant", Raw: m.s.streamText,
@@ -393,7 +399,12 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			}
 		case "assistant":
 			for _, c := range msg.Content {
-				if c.Type == "text" && c.Text != "" {
+				switch {
+				case c.Type == "thinking" && c.Thinking != "":
+					m.s.blocks = append(m.s.blocks, messageBlock{
+						Type: "thinking", Raw: c.Thinking,
+					})
+				case c.Type == "text" && c.Text != "":
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type: "assistant", Raw: c.Text,
 					})

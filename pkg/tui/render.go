@@ -90,6 +90,9 @@ func renderBlocks(blocks []messageBlock, r *renderer) string {
 		switch block.Type {
 		case "user":
 			b.WriteString(FormatUserMessage(block.Raw) + "\n\n")
+		case "thinking":
+			styled := thinkingStyle.Width(r.width - 2).PaddingLeft(2).Render(block.Raw)
+			b.WriteString(styled + "\n")
 		case "assistant":
 			b.WriteString(r.RenderMarkdown(block.Raw) + "\n")
 		case "tool_start":
