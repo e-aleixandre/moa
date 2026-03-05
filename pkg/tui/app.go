@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/go-agent/pkg/agent"
 	"github.com/ealeixandre/go-agent/pkg/core"
 )
@@ -425,23 +424,21 @@ func (m *appModel) refreshViewport() {
 	var content strings.Builder
 	content.WriteString(renderBlocks(m.s.blocks, m.renderer))
 
-	// During streaming, apply word wrap + left margin to match glamour's
-	// final rendering. This prevents text from overflowing the viewport
-	// and minimizes the visual "pop" when glamour takes over on completion.
-	wrapWidth := m.width - 2 // match glamour's 2-char left margin
-	if wrapWidth < 20 {
-		wrapWidth = 20
-	}
-
-	// Thinking (dim, shown during streaming only)
+	// Thinking (dim, word-wrapped, shown during streaming)
 	if m.s.thinkingText != "" {
+		wrapWidth := m.width - 2
+		if wrapWidth < 20 {
+			wrapWidth = 20
+		}
 		styled := thinkingStyle.Width(wrapWidth).PaddingLeft(2).Render(m.s.thinkingText)
 		content.WriteString(styled + "\n")
 	}
-	// Streaming text (word-wrapped to match glamour layout, no markdown rendering)
+	// Streaming text: apply glamour in real-time so inline markdown (backticks,
+	// bold, etc.) renders during streaming, not just on completion. This eliminates
+	// the color "pop" when the message finishes. Glamour is fast enough (~<1ms
+	// for typical message sizes) to run on every render tick at 60fps.
 	if m.s.streamText != "" {
-		styled := lipgloss.NewStyle().Width(wrapWidth).PaddingLeft(2).Render(m.s.streamText)
-		content.WriteString(styled)
+		content.WriteString(m.renderer.RenderMarkdown(m.s.streamText))
 	}
 
 	m.conversation.SetContent(content.String())
