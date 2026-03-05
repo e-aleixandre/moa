@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -38,6 +39,14 @@ type state struct {
 	cleanupOnce  sync.Once // idempotent cleanup
 }
 
+// taggedEvent pairs an agent event with the run generation it was produced in.
+// Tagged at production time (in the subscriber callback), not at consumption time.
+// This prevents late events from being misidentified as belonging to the current run.
+type taggedEvent struct {
+	event core.AgentEvent
+	gen   uint64
+}
+
 // appModel is the root Bubble Tea model. It composes all components,
 // routes messages, manages the agent event bridge, and owns conversation state.
 type appModel struct {
@@ -45,12 +54,13 @@ type appModel struct {
 	s *state
 
 	// Dependencies (pointers/channels are reference types, safe to copy)
-	agent    *agent.Agent
-	renderer *renderer
-	eventCh  chan core.AgentEvent
-	quit     chan struct{}
-	unsub    func()
-	baseCtx  context.Context // parent context for agent runs (carries signal cancellation)
+	agent      *agent.Agent
+	renderer   *renderer
+	eventCh    chan taggedEvent
+	quit       chan struct{}
+	unsub      func()
+	baseCtx    context.Context // parent context for agent runs (carries signal cancellation)
+	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
 
 	// Components
 	conversation conversationModel
@@ -67,24 +77,26 @@ type appModel struct {
 // Subscribes to agent events internally — the caller should NOT register
 // their own subscriber when using TUI mode.
 func New(ag *agent.Agent, ctx context.Context) appModel {
-	eventCh := make(chan core.AgentEvent, 1024)
+	eventCh := make(chan taggedEvent, 1024)
 	quit := make(chan struct{})
+	runGenAddr := &atomic.Uint64{} // shared with subscriber
 
-	// Subscriber bridge: structural events never dropped, deltas are lossy.
+	// Subscriber bridge: events are tagged with the run generation at PRODUCTION
+	// time (when the subscriber receives them from the emitter). This prevents
+	// late events from being misidentified as belonging to the current run.
+	// Structural events never dropped, deltas are lossy.
 	unsub := ag.Subscribe(func(e core.AgentEvent) {
+		gen := runGenAddr.Load()
+		tagged := taggedEvent{event: e, gen: gen}
 		if isStructuralEvent(e) {
-			// Blocking send with safety timeout. Structural events must arrive
-			// to keep UI state consistent (message_start/end, tool_start/end, etc.).
 			select {
-			case eventCh <- e:
+			case eventCh <- tagged:
 			case <-time.After(5 * time.Second):
-				// Shouldn't happen with 1024 buffer. Safety net only.
 			}
 			return
 		}
-		// Deltas: best-effort, drop if channel is full.
 		select {
-		case eventCh <- e:
+		case eventCh <- tagged:
 		default:
 		}
 	})
@@ -97,6 +109,7 @@ func New(ag *agent.Agent, ctx context.Context) appModel {
 		quit:         quit,
 		unsub:        unsub,
 		baseCtx:      ctx,
+		runGenAddr:   runGenAddr,
 		conversation: newConversation(),
 		input:        newInput(),
 		status:       newStatus(),
@@ -165,10 +178,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Bump generation so any late-arriving events from this run are ignored.
-		// Events are buffered in eventCh and may arrive AFTER Send() returns.
-		// Without this, late deltas would append to streamText on top of the
-		// already-rebuilt blocks, causing duplicate text at the end of messages.
+		// Both the local gen and the atomic (shared with subscriber) must be bumped
+		// so events still being enqueued by the subscriber are tagged as stale.
 		m.s.runGen++
+		m.runGenAddr.Store(m.s.runGen)
 		// Rebuild UI from source-of-truth messages.
 		m.reconcileFromMessages(msg.Messages)
 		if msg.Err != nil && msg.Err != context.Canceled {
@@ -292,7 +305,8 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
 	m.s.running = true
-	m.s.runGen++ // new generation — events from previous run will be ignored
+	m.s.runGen++
+	m.runGenAddr.Store(m.s.runGen) // sync with subscriber for production-time tagging
 	m.s.streamState = stateStreaming
 	m.s.streamText = ""
 	m.s.thinkingText = ""
@@ -475,18 +489,19 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 // --- Helpers ---
 
 // waitForEvent returns a Cmd that blocks until the next agent event.
-// Tags the event with the current run generation for scoping.
+// The run generation comes FROM the tagged event (stamped at production time),
+// not captured at Cmd creation time. This is critical: if we captured gen here,
+// late events read after a runGen bump would be mislabeled as current.
 func (m appModel) waitForEvent() tea.Cmd {
 	eventCh := m.eventCh
 	quit := m.quit
-	gen := m.s.runGen
 	return func() tea.Msg {
 		select {
-		case event, ok := <-eventCh:
+		case tagged, ok := <-eventCh:
 			if !ok {
 				return agentDoneMsg{}
 			}
-			return agentEventMsg{Event: event, RunGen: gen}
+			return agentEventMsg{Event: tagged.event, RunGen: tagged.gen}
 		case <-quit:
 			return agentDoneMsg{}
 		}
