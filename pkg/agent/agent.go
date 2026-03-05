@@ -84,16 +84,74 @@ func New(cfg AgentConfig) (*Agent, error) {
 	}, nil
 }
 
-// Run executes a single prompt and blocks until the agent loop finishes.
+// Run initializes state with a new prompt and runs the agent loop.
+// Any previous conversation state is replaced. For multi-turn, use Send.
 // Returns all messages produced during the run.
 // Events are delivered asynchronously to subscribers; there is no guarantee
 // all events are delivered by the time Run returns.
 func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, error) {
+	return a.execute(ctx, func() {
+		a.state = AgentState{
+			Messages: []core.AgentMessage{
+				core.WrapMessage(core.NewUserMessage(prompt)),
+			},
+			Model: a.config.Model,
+		}
+	})
+}
+
+// Send appends a user message and runs the agent loop, continuing the conversation.
+// If no previous state exists (e.g., first call without Run), state is auto-initialized.
+// State mutation is atomic with the "not running" check — concurrent Send calls
+// cannot corrupt state.
+func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, error) {
+	return a.execute(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+		a.state.Messages = append(a.state.Messages,
+			core.WrapMessage(core.NewUserMessage(prompt)))
+	})
+}
+
+// Reset clears conversation state. Returns error if the agent is currently running.
+func (a *Agent) Reset() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot reset while agent is running")
+	}
+	a.state = AgentState{}
+	return nil
+}
+
+// Subscribe registers a listener for agent events.
+// Returns an unsubscribe function. Listeners are async — slow listeners don't block the loop.
+func (a *Agent) Subscribe(fn func(core.AgentEvent)) func() {
+	return a.emitter.Subscribe(fn)
+}
+
+// Abort cancels the current run.
+func (a *Agent) Abort() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		a.cancel()
+	}
+}
+
+// execute runs the agent loop. prepare is called under a.mu to mutate state
+// atomically with the "not running" check. This prevents races where concurrent
+// callers could mutate state before getting the "already running" error.
+func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessage, error) {
 	a.mu.Lock()
 	if a.cancel != nil {
 		a.mu.Unlock()
 		return nil, fmt.Errorf("agent is already running")
 	}
+
+	// Mutate state atomically with the running check
+	prepare()
 
 	// Apply run duration limit
 	if a.config.MaxRunDuration > 0 {
@@ -110,14 +168,6 @@ func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, er
 		a.cancel = nil
 		a.mu.Unlock()
 	}()
-
-	// Initialize state
-	a.state = AgentState{
-		Messages: []core.AgentMessage{
-			core.WrapMessage(core.NewUserMessage(prompt)),
-		},
-		Model: a.config.Model,
-	}
 
 	// Build stream options
 	streamOpts := core.StreamOptions{
@@ -139,21 +189,5 @@ func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, er
 	}
 
 	err := agentLoop(ctx, cfg)
-
 	return a.state.Messages, err
-}
-
-// Subscribe registers a listener for agent events.
-// Returns an unsubscribe function. Listeners are async — slow listeners don't block the loop.
-func (a *Agent) Subscribe(fn func(core.AgentEvent)) func() {
-	return a.emitter.Subscribe(fn)
-}
-
-// Abort cancels the current run.
-func (a *Agent) Abort() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cancel != nil {
-		a.cancel()
-	}
 }
