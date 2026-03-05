@@ -84,13 +84,16 @@ func FormatToolEnd(name string, isError bool) string {
 }
 
 // renderBlocks renders all blocks for the viewport using the given renderer.
-func renderBlocks(blocks []messageBlock, r *renderer) string {
+func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool) string {
 	var b strings.Builder
 	for _, block := range blocks {
 		switch block.Type {
 		case "user":
 			b.WriteString(FormatUserMessage(block.Raw) + "\n\n")
 		case "thinking":
+			if !showThinking {
+				continue
+			}
 			styled := thinkingStyle.Width(r.width - 2).PaddingLeft(2).Render(block.Raw)
 			b.WriteString(styled + "\n")
 		case "assistant":

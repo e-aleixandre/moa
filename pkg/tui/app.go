@@ -29,14 +29,15 @@ const (
 // All mutable conversational state lives here behind a pointer.
 // Accessed only from the Bubble Tea goroutine (single-threaded).
 type state struct {
-	blocks       []messageBlock // conversation history, raw content
-	streamText   string         // current streaming assistant text
-	thinkingText string         // current thinking text
-	dirty        bool           // streamText changed since last render tick
-	running      bool           // agent is running (tick should continue)
-	streamState  streamState
-	runGen       uint64    // incremented on each run; events from old runs are ignored
-	cleanupOnce  sync.Once // idempotent cleanup
+	blocks        []messageBlock // conversation history, raw content
+	streamText    string         // current streaming assistant text
+	thinkingText  string         // current thinking text
+	dirty         bool           // streamText changed since last render tick
+	running       bool           // agent is running (tick should continue)
+	streamState   streamState
+	showThinking  bool      // toggle thinking visibility (Ctrl+T)
+	runGen        uint64    // incremented on each run; events from old runs are ignored
+	cleanupOnce   sync.Once // idempotent cleanup
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -70,13 +71,21 @@ type appModel struct {
 	// Layout
 	width  int
 	height int
+
+	// Config (immutable after creation)
+	liteMode bool // skip streaming render, show only completed messages
+}
+
+// Options configures the TUI.
+type Options struct {
+	LiteMode bool // skip streaming render to reduce CPU usage
 }
 
 // New creates the TUI model. The agent must already be configured.
 // ctx is the parent context for agent runs (e.g., signal-aware context from main).
 // Subscribes to agent events internally — the caller should NOT register
 // their own subscriber when using TUI mode.
-func New(ag *agent.Agent, ctx context.Context) appModel {
+func New(ag *agent.Agent, ctx context.Context, opts Options) appModel {
 	eventCh := make(chan taggedEvent, 1024)
 	quit := make(chan struct{})
 	runGenAddr := &atomic.Uint64{} // shared with subscriber
@@ -102,7 +111,7 @@ func New(ag *agent.Agent, ctx context.Context) appModel {
 	})
 
 	return appModel{
-		s:            &state{},
+		s:            &state{showThinking: true},
 		agent:        ag,
 		renderer:     newRenderer(80),
 		eventCh:      eventCh,
@@ -110,6 +119,7 @@ func New(ag *agent.Agent, ctx context.Context) appModel {
 		unsub:        unsub,
 		baseCtx:      ctx,
 		runGenAddr:   runGenAddr,
+		liteMode:     opts.LiteMode,
 		conversation: newConversation(),
 		input:        newInput(),
 		status:       newStatus(),
@@ -266,6 +276,11 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlD:
 		m.cleanup()
 		return m, tea.Quit
+
+	case tea.KeyCtrlT:
+		m.s.showThinking = !m.s.showThinking
+		m.refreshViewport()
+		return m, nil
 
 	case tea.KeyEnter:
 		if m.s.running {
@@ -436,24 +451,26 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 // refreshViewport re-renders all blocks + streaming text from raw content.
 func (m *appModel) refreshViewport() {
 	var content strings.Builder
-	content.WriteString(renderBlocks(m.s.blocks, m.renderer))
+	content.WriteString(renderBlocks(m.s.blocks, m.renderer, m.s.showThinking))
 
-	// Thinking (dim, word-wrapped, shown during streaming)
-	if m.s.thinkingText != "" {
-		wrapWidth := m.width - 2
-		if wrapWidth < 20 {
-			wrapWidth = 20
+	if !m.liteMode {
+		// Thinking (dim, word-wrapped, shown during streaming)
+		if m.s.thinkingText != "" && m.s.showThinking {
+			wrapWidth := m.width - 2
+			if wrapWidth < 20 {
+				wrapWidth = 20
+			}
+			styled := thinkingStyle.Width(wrapWidth).PaddingLeft(2).Render(m.s.thinkingText)
+			content.WriteString(styled + "\n")
 		}
-		styled := thinkingStyle.Width(wrapWidth).PaddingLeft(2).Render(m.s.thinkingText)
-		content.WriteString(styled + "\n")
+		// Streaming text: apply glamour in real-time so inline markdown (backticks,
+		// bold, etc.) renders during streaming, not just on completion.
+		if m.s.streamText != "" {
+			content.WriteString(m.renderer.RenderMarkdown(m.s.streamText))
+		}
 	}
-	// Streaming text: apply glamour in real-time so inline markdown (backticks,
-	// bold, etc.) renders during streaming, not just on completion. This eliminates
-	// the color "pop" when the message finishes. Glamour is fast enough (~<1ms
-	// for typical message sizes) to run on every render tick at 60fps.
-	if m.s.streamText != "" {
-		content.WriteString(m.renderer.RenderMarkdown(m.s.streamText))
-	}
+	// In lite mode, streaming text is not rendered — the user sees only completed
+	// blocks. The spinner in the status bar indicates the agent is working.
 
 	m.conversation.SetContent(content.String())
 }
