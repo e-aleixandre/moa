@@ -2,15 +2,19 @@ package anthropic
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"strings"
 )
+
+const maxFrameBytes = 10 * 1024 * 1024 // 10MB safety limit per SSE frame
 
 // parseSSEFrames reads an SSE stream properly:
 //   - Accumulates multiple "data:" lines per frame
 //   - Delimited by blank lines (\n\n)
 //   - Handles keep-alive comments (lines starting with ":")
 //   - Uses bufio.Reader with 1MB buffer (no 64KB Scanner limit)
+//   - Frame accumulation capped at maxFrameBytes to prevent unbounded growth
 //
 // onFrame is called for each complete SSE frame with the event type and data.
 // The eventType may be empty if no "event:" field was present.
@@ -19,6 +23,7 @@ func parseSSEFrames(r io.Reader, onFrame func(eventType, data string)) error {
 
 	var eventType string
 	var dataLines []string
+	var frameBytes int
 
 	for {
 		line, err := readLine(reader)
@@ -39,6 +44,7 @@ func parseSSEFrames(r io.Reader, onFrame func(eventType, data string)) error {
 				onFrame(eventType, strings.Join(dataLines, "\n"))
 				eventType = ""
 				dataLines = dataLines[:0]
+				frameBytes = 0
 			}
 			continue
 		}
@@ -61,6 +67,10 @@ func parseSSEFrames(r io.Reader, onFrame func(eventType, data string)) error {
 			case "event":
 				eventType = value
 			case "data":
+				frameBytes += len(value)
+				if frameBytes > maxFrameBytes {
+					return fmt.Errorf("SSE frame exceeds %d byte limit", maxFrameBytes)
+				}
 				dataLines = append(dataLines, value)
 			}
 			// Other fields (id, retry) are ignored for our purposes
