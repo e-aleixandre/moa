@@ -28,6 +28,7 @@ func main() {
 	model := flag.String("model", "claude-sonnet-4-20250514", "Model ID")
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
 	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
+	lite := flag.Bool("lite", false, "Lite mode: skip streaming render to reduce CPU usage")
 	login := flag.Bool("login", false, "Login with Anthropic OAuth (Claude Max)")
 	logout := flag.Bool("logout", false, "Remove stored credentials")
 	flag.Parse()
@@ -146,7 +147,7 @@ func main() {
 
 	if promptContent == "" {
 		// Interactive mode — launch TUI
-		app := tui.New(ag, ctx)
+		app := tui.New(ag, ctx, tui.Options{LiteMode: *lite})
 		prog := tea.NewProgram(app, tea.WithAltScreen(), tea.WithContext(ctx))
 		if _, err := prog.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
