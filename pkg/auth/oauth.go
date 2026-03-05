@@ -45,11 +45,17 @@ func LoginAnthropic(ctx context.Context) (*OAuthCredentials, error) {
 		return nil, fmt.Errorf("generating PKCE: %w", err)
 	}
 
-	// Start local callback server
+	// Generate a random state parameter for CSRF protection
+	oauthState, err := generateState()
+	if err != nil {
+		return nil, fmt.Errorf("generating state: %w", err)
+	}
+
+	// Start local callback server — bind to localhost only
 	codeCh := make(chan callbackResult, 1)
 	redirectURI := fmt.Sprintf("http://localhost:%d%s", callbackPort, callbackPath)
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", callbackPort))
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", callbackPort))
 	if err != nil {
 		return nil, fmt.Errorf("starting callback server on port %d: %w", callbackPort, err)
 	}
@@ -67,9 +73,17 @@ func LoginAnthropic(ctx context.Context) (*OAuthCredentials, error) {
 			return
 		}
 
+		// Validate state to prevent CSRF attacks
+		if state != oauthState {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<html><body><h2>Authentication failed</h2><p>Invalid state parameter.</p></body></html>")
+			codeCh <- callbackResult{err: fmt.Errorf("OAuth state mismatch (possible CSRF)")}
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<html><body><h2>✓ Authentication successful</h2><p>You can close this tab and return to the terminal.</p></body></html>")
-		codeCh <- callbackResult{code: code, state: state}
+		codeCh <- callbackResult{code: code}
 	})
 
 	server := &http.Server{Handler: mux}
@@ -85,7 +99,7 @@ func LoginAnthropic(ctx context.Context) (*OAuthCredentials, error) {
 		"scope":                 {scopes},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-		"state":                 {verifier},
+		"state":                 {oauthState},
 	}
 	authURL := authorizeURL + "?" + params.Encode()
 
@@ -108,7 +122,7 @@ func LoginAnthropic(ctx context.Context) (*OAuthCredentials, error) {
 	}
 
 	// Exchange code for tokens
-	return exchangeToken(result.code, result.state, redirectURI, verifier)
+	return exchangeToken(result.code, oauthState, redirectURI, verifier)
 }
 
 // RefreshAnthropicToken refreshes an expired OAuth token.
@@ -145,9 +159,8 @@ func RefreshAnthropicToken(refreshToken string) (*OAuthCredentials, error) {
 // --- internal ---
 
 type callbackResult struct {
-	code  string
-	state string
-	err   error
+	code string
+	err  error
 }
 
 type tokenResponse struct {
@@ -188,6 +201,15 @@ func exchangeToken(code, state, redirectURI, verifier string) (*OAuthCredentials
 		Refresh: tokenResp.RefreshToken,
 		Expires: time.Now().UnixMilli() + int64(tokenResp.ExpiresIn)*1000 - 5*60*1000,
 	}, nil
+}
+
+// generateState creates a random state token for CSRF protection.
+func generateState() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // generatePKCE creates a PKCE verifier and S256 challenge.

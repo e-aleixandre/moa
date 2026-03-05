@@ -128,7 +128,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Subscribe: stream assistant text to stdout, tool info to stderr
+	// Subscribe: stream assistant text to stdout, tool info to stderr.
+	// Streaming deltas are best-effort (lossy if subscriber buffer fills).
+	// Final output is extracted from returned messages below as source of truth.
+	streamedChars := 0
 	ag.Subscribe(func(e core.AgentEvent) {
 		switch e.Type {
 		case core.AgentEventMessageUpdate:
@@ -136,6 +139,7 @@ func main() {
 				switch e.AssistantEvent.Type {
 				case core.ProviderEventTextDelta:
 					fmt.Print(e.AssistantEvent.Delta)
+					streamedChars += len(e.AssistantEvent.Delta)
 				case core.ProviderEventThinkingDelta:
 					// Optionally show thinking (grey text)
 					fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.AssistantEvent.Delta)
@@ -153,8 +157,13 @@ func main() {
 	})
 
 	// Run
-	_, err = ag.Run(ctx, promptContent)
-	fmt.Println() // Final newline after streaming output
+	msgs, err := ag.Run(ctx, promptContent)
+
+	// If streaming deltas were dropped (lossy buffer), fall back to final messages.
+	if finalText := extractFinalAssistantText(msgs); streamedChars == 0 && finalText != "" {
+		fmt.Print(finalText)
+	}
+	fmt.Println() // Final newline
 
 	if err != nil {
 		if ctx.Err() != nil {
@@ -206,4 +215,21 @@ func resolvePrompt(p string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
+}
+
+// extractFinalAssistantText returns the text content from the last assistant message.
+// Used as fallback when streaming deltas were dropped.
+func extractFinalAssistantText(msgs []core.AgentMessage) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" {
+			var parts []string
+			for _, c := range msgs[i].Content {
+				if c.Type == "text" && c.Text != "" {
+					parts = append(parts, c.Text)
+				}
+			}
+			return strings.Join(parts, "")
+		}
+	}
+	return ""
 }

@@ -58,13 +58,15 @@ func isOAuthToken(key string) bool {
 //   - If channel is returned, exactly one terminal event ("done" or "error")
 //     will be sent before the channel is closed.
 func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-	// Override API key if provided in options
+	// Override API key if provided in options — recompute OAuth mode
 	apiKey := a.apiKey
+	oauthMode := a.isOAuth
 	if req.Options.APIKey != "" {
 		apiKey = req.Options.APIKey
+		oauthMode = isOAuthToken(apiKey)
 	}
 
-	body, err := buildRequestBody(req, a.isOAuth)
+	body, err := buildRequestBody(req, oauthMode)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: building request: %w", err)
 	}
@@ -77,7 +79,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
-	if a.isOAuth {
+	if oauthMode {
 		// OAuth: Bearer auth + Claude Code identity headers (required by Anthropic)
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		httpReq.Header.Set("anthropic-beta", "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14")
@@ -105,7 +107,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	go func() {
 		defer resp.Body.Close()
 		defer close(ch)
-		a.consumeStream(ctx, resp.Body, ch, req.Tools)
+		a.consumeStream(ctx, resp.Body, ch, req.Tools, oauthMode)
 	}()
 
 	return ch, nil
@@ -113,8 +115,8 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 
 // consumeStream parses SSE frames and emits normalized events.
 // Guarantees exactly one terminal event ("done" or "error") before returning.
-func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, tools []core.ToolSpec) {
-	state := &streamState{requestTools: tools}
+func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, tools []core.ToolSpec, oauthMode bool) {
+	state := &streamState{requestTools: tools, isOAuth: oauthMode}
 	sentTerminal := false
 
 	defer func() {
@@ -170,6 +172,7 @@ type streamState struct {
 	toolCallID   string
 	toolCallName string
 	requestTools []core.ToolSpec // original tool specs for reverse name mapping
+	isOAuth      bool           // whether this request used OAuth (for tool name mapping)
 }
 
 // mapEvent converts an Anthropic SSE event to a normalized AssistantEvent.
@@ -291,7 +294,7 @@ func (a *Anthropic) handleContentBlockStart(data string, state *streamState) *co
 
 	case "tool_use":
 		toolName := payload.ContentBlock.Name
-		if a.isOAuth {
+		if state.isOAuth {
 			// Map CC-cased names back to our original tool names
 			toolName = fromClaudeCodeName(toolName, state.requestTools)
 		}
@@ -320,6 +323,7 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 			Type        string `json:"type"`
 			Text        string `json:"text,omitempty"`
 			Thinking    string `json:"thinking,omitempty"`
+			Signature   string `json:"signature,omitempty"`
 			PartialJSON string `json:"partial_json,omitempty"`
 		} `json:"delta"`
 	}
@@ -353,6 +357,14 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 			ContentIndex: idx,
 			Delta:        payload.Delta.Thinking,
 		}
+
+	case "signature_delta":
+		// Thinking block signature — required for multi-turn with thinking.
+		// Must be preserved unmodified in message history.
+		if idx < len(state.message.Content) {
+			state.message.Content[idx].ThinkingSignature += payload.Delta.Signature
+		}
+		return nil // No user-visible event for signatures
 
 	case "input_json_delta":
 		state.jsonAccum += payload.Delta.PartialJSON

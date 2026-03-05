@@ -40,9 +40,65 @@ func NewHost(tools *core.Registry, logger *slog.Logger) *Host {
 }
 
 // Load initializes an extension, giving it access to register hooks and tools.
+// If Init returns an error, any hooks or tools registered during Init are rolled back.
 func (h *Host) Load(ext Extension) error {
 	api := &hostAPI{host: h}
-	return ext.Init(api)
+	snapshot := h.snapshot()
+	err := ext.Init(api)
+	if err != nil {
+		h.restore(snapshot)
+	}
+	return err
+}
+
+// hookSnapshot captures the current hook/observer counts for rollback.
+type hookSnapshot struct {
+	beforeAgentStart int
+	toolCall         int
+	toolResult       int
+	contextHooks     int
+	observers        map[string]int
+}
+
+func (h *Host) snapshot() hookSnapshot {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	obs := make(map[string]int, len(h.observers))
+	for k, v := range h.observers {
+		obs[k] = len(v)
+	}
+	return hookSnapshot{
+		beforeAgentStart: len(h.beforeAgentStart),
+		toolCall:         len(h.toolCall),
+		toolResult:       len(h.toolResult),
+		contextHooks:     len(h.contextHooks),
+		observers:        obs,
+	}
+}
+
+func (h *Host) restore(s hookSnapshot) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.beforeAgentStart) > s.beforeAgentStart {
+		h.beforeAgentStart = h.beforeAgentStart[:s.beforeAgentStart]
+	}
+	if len(h.toolCall) > s.toolCall {
+		h.toolCall = h.toolCall[:s.toolCall]
+	}
+	if len(h.toolResult) > s.toolResult {
+		h.toolResult = h.toolResult[:s.toolResult]
+	}
+	if len(h.contextHooks) > s.contextHooks {
+		h.contextHooks = h.contextHooks[:s.contextHooks]
+	}
+	for k, hooks := range h.observers {
+		prev, ok := s.observers[k]
+		if !ok {
+			delete(h.observers, k)
+		} else if len(hooks) > prev {
+			h.observers[k] = hooks[:prev]
+		}
+	}
 }
 
 // FireBeforeAgentStart calls all before_agent_start hooks, collects injected messages.

@@ -2,6 +2,7 @@ package extension
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -294,5 +295,39 @@ func TestHost_FirstBlockerWins(t *testing.T) {
 	decision := host.FireToolCall(context.Background(), "bash", nil)
 	if decision == nil || decision.Reason != "blocker 1" {
 		t.Fatalf("expected first blocker to win: %+v", decision)
+	}
+}
+
+func TestHost_Load_RollbackOnError(t *testing.T) {
+	reg := core.NewRegistry()
+	host := NewHost(reg, nil)
+
+	// Extension that registers hooks then fails
+	failExt := &testExtension{initFunc: func(api API) error {
+		api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+			return &core.ToolCallDecision{Block: true, Reason: "should be rolled back"}
+		})
+		api.OnBeforeAgentStart(func(ctx context.Context) ([]core.AgentMessage, error) {
+			return nil, nil
+		})
+		api.RegisterTool(core.Tool{Name: "phantom"})
+		return fmt.Errorf("init failed")
+	}}
+
+	err := host.Load(failExt)
+	if err == nil {
+		t.Fatal("expected error from Load")
+	}
+
+	// Hooks should be rolled back — tool call should return nil (no blockers)
+	decision := host.FireToolCall(context.Background(), "bash", nil)
+	if decision != nil {
+		t.Fatalf("expected no tool call hook after rollback, got %+v", decision)
+	}
+
+	// before_agent_start should be empty
+	msgs := host.FireBeforeAgentStart(context.Background())
+	if len(msgs) > 0 {
+		t.Fatalf("expected no injected messages after rollback, got %d", len(msgs))
 	}
 }

@@ -185,8 +185,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// Execute
 			result, isError := executeTool(ctx, cfg.tools, tc, cfg.emitter)
 
-			// Extension hook: can modify result
+			// Extension hook: can modify result (including error status)
 			result = cfg.hooks.FireToolResult(ctx, tc.ToolName, result, isError)
+			isError = result.IsError
 
 			cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(tc, result, isError))
 		}

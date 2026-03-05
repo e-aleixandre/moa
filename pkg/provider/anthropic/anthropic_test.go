@@ -120,6 +120,39 @@ func TestMapEvents_Thinking(t *testing.T) {
 	}
 }
 
+func TestMapEvents_ThinkingSignature(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/sse/thinking_signature.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := mapSSEToEvents(t, string(data))
+
+	assertEventTypes(t, events, []string{
+		core.ProviderEventStart,
+		core.ProviderEventThinkingStart,
+		core.ProviderEventThinkingDelta,
+		// signature_delta is handled but produces no user-facing event
+		core.ProviderEventThinkingEnd,
+		core.ProviderEventTextStart,
+		core.ProviderEventTextDelta,
+		core.ProviderEventTextEnd,
+		core.ProviderEventDone,
+	})
+
+	doneEvt := events[len(events)-1]
+	thinking := doneEvt.Message.Content[0]
+	if thinking.Type != "thinking" {
+		t.Fatalf("expected thinking block, got %q", thinking.Type)
+	}
+	if thinking.ThinkingSignature != "ErUBCkYIAxgCIkD" {
+		t.Errorf("signature not captured: got %q", thinking.ThinkingSignature)
+	}
+	if thinking.Thinking != "Let me reason carefully." {
+		t.Errorf("thinking text: got %q", thinking.Thinking)
+	}
+}
+
 func TestMapEvents_ErrorEvent(t *testing.T) {
 	data, err := os.ReadFile("../../../testdata/sse/error_event.txt")
 	if err != nil {
