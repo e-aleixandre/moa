@@ -1,18 +1,25 @@
-# go-agent
+<p align="center">
+  <img src="logo.png" width="200" alt="Moa logo" />
+</p>
 
-A minimal, extensible coding agent in Go. Primitives, not features.
+<h1 align="center">Moa</h1>
+<p align="center"><strong>My Own Agent</strong> — A minimal, extensible coding agent in Go.</p>
 
-## V0 — Headless Mode
+---
+
+## Quick Start
 
 ```bash
-# Run with a prompt
-agent -p "refactor the handler to use middleware" --model claude-sonnet-4-20250514
+# With API key
+ANTHROPIC_API_KEY=sk-ant-... moa -p "refactor the handler to use middleware"
 
-# From file
-agent -p @prompt.md --model claude-sonnet-4-20250514 --thinking medium
+# With Claude Max (OAuth)
+moa --login
+moa -p "fix the tests"
 
-# From stdin
-echo "fix the tests" | agent --model claude-sonnet-4-20250514
+# From file or stdin
+moa -p @prompt.md --thinking medium
+echo "explain this code" | moa
 ```
 
 ## Build
@@ -28,9 +35,10 @@ make vet     # go vet ./...
 ```
 pkg/core/       Shared types (no import cycles)
 pkg/agent/      Agent loop + event emitter
-pkg/provider/   LLM provider abstraction (Anthropic V0)
-pkg/tool/       Tool registry + built-in tools
-pkg/extension/  Extension API + typed hooks
+pkg/provider/   LLM provider abstraction (Anthropic)
+pkg/tool/       Built-in tools (bash, read, write, edit, grep, find, ls)
+pkg/extension/  Extension system with typed hooks
+pkg/auth/       Credential store + OAuth PKCE flow
 pkg/context/    AGENTS.md loading + system prompt
 cmd/agent/      CLI entrypoint
 ```
@@ -38,4 +46,4 @@ cmd/agent/      CLI entrypoint
 ## Requirements
 
 - Go 1.22+
-- `ANTHROPIC_API_KEY` environment variable
+- `ANTHROPIC_API_KEY` environment variable, or `moa --login` for Claude Max
