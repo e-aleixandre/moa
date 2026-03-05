@@ -164,7 +164,12 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.RunGen != m.s.runGen {
 			return m, nil
 		}
-		// Agent finished. Rebuild UI from source-of-truth messages.
+		// Bump generation so any late-arriving events from this run are ignored.
+		// Events are buffered in eventCh and may arrive AFTER Send() returns.
+		// Without this, late deltas would append to streamText on top of the
+		// already-rebuilt blocks, causing duplicate text at the end of messages.
+		m.s.runGen++
+		// Rebuild UI from source-of-truth messages.
 		m.reconcileFromMessages(msg.Messages)
 		if msg.Err != nil && msg.Err != context.Canceled {
 			m.s.blocks = append(m.s.blocks, messageBlock{
