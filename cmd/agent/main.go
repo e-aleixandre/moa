@@ -34,7 +34,7 @@ func main() {
 	logout := flag.Bool("logout", false, "Remove stored credentials")
 	flag.Parse()
 
-	store := auth.NewStore("")
+	authStore := auth.NewStore("")
 
 	// Handle --login
 	if *login {
@@ -47,7 +47,7 @@ func main() {
 				auth.OpenBrowser(url)
 			},
 			func() (string, error) {
-				fmt.Print("Paste the authorization code here: ")
+				fmt.Print("Paste the callback URL or authorization code here: ")
 				var code string
 				_, err := fmt.Scanln(&code)
 				return code, err
@@ -58,7 +58,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		if err := store.Set("anthropic", auth.Credential{
+		if err := authStore.Set("anthropic", auth.Credential{
 			Type:    "oauth",
 			Access:  creds.Access,
 			Refresh: creds.Refresh,
@@ -74,7 +74,7 @@ func main() {
 
 	// Handle --logout
 	if *logout {
-		if err := store.Remove("anthropic"); err != nil {
+		if err := authStore.Remove("anthropic"); err != nil {
 			fmt.Fprintf(os.Stderr, "Logout failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -100,7 +100,7 @@ func main() {
 	}
 
 	// Resolve API key (env var → OAuth → stored key)
-	apiKey, isOAuth, err := store.GetAPIKey("anthropic")
+	apiKey, isOAuth, err := authStore.GetAPIKey("anthropic")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -127,10 +127,18 @@ func main() {
 	// Build provider
 	prov := anthropic.New(apiKey)
 
+	// Resolve model from registry
+	resolvedModel, knownModel := core.ResolveModel(*model)
+	if !knownModel {
+		fmt.Fprintf(os.Stderr, "warning: unknown model %q — context management disabled (MaxInput unknown)\n", *model)
+		resolvedModel.Provider = "anthropic"
+		resolvedModel.API = "anthropic-messages"
+	}
+
 	// Build agent
 	ag, agErr := agent.New(agent.AgentConfig{
 		Provider:            prov,
-		Model:               core.Model{ID: *model, Provider: "anthropic", API: "anthropic-messages"},
+		Model:               resolvedModel,
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       *thinking,
 		Tools:               toolReg,
@@ -148,20 +156,20 @@ func main() {
 
 	if promptContent == "" {
 		// Interactive mode — launch TUI with session persistence
-		store, err := session.NewStore("")
+		sessionStore, err := session.NewStore("")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: session persistence disabled: %v\n", err)
 		}
 
 		var sess *session.Session
-		if *resume && store != nil {
-			sess, err = store.Latest()
+		if *resume && sessionStore != nil {
+			sess, err = sessionStore.Latest()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not load session: %v\n", err)
 			}
 			if sess != nil {
-				// Restore conversation into agent
-				if err := ag.LoadMessages(sess.Messages); err != nil {
+				// Restore conversation into agent (including compaction state)
+				if err := ag.LoadState(sess.Messages, sess.CompactionEpoch); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
 					sess = nil
 				}
@@ -170,12 +178,12 @@ func main() {
 				fmt.Fprintf(os.Stderr, "No previous session found. Starting fresh.\n")
 			}
 		}
-		if sess == nil && store != nil {
-			sess = store.Create()
+		if sess == nil && sessionStore != nil {
+			sess = sessionStore.Create()
 		}
 
 		app := tui.New(ag, ctx, tui.Config{
-			SessionStore: store,
+			SessionStore: sessionStore,
 			Session:      sess,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx))

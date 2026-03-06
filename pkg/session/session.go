@@ -14,12 +14,13 @@ import (
 
 // Session represents a persistent conversation.
 type Session struct {
-	ID       string                `json:"id"`
-	Created  time.Time             `json:"created"`
-	Updated  time.Time             `json:"updated"`
-	Title    string                `json:"title"`
-	Messages []core.AgentMessage   `json:"messages"`
-	Metadata map[string]any        `json:"metadata,omitempty"` // extensible: model, cost, tags, etc.
+	ID              string              `json:"id"`
+	Created         time.Time           `json:"created"`
+	Updated         time.Time           `json:"updated"`
+	Title           string              `json:"title"`
+	Messages        []core.AgentMessage `json:"messages"`
+	CompactionEpoch int                 `json:"compaction_epoch,omitempty"`
+	Metadata        map[string]any      `json:"metadata,omitempty"` // extensible: model, cost, tags, etc.
 }
 
 // Summary is a lightweight session descriptor without messages.

@@ -5,15 +5,16 @@ type AgentEvent struct {
 	Type string
 
 	// Populated per type:
-	Message        AgentMessage    // message_start, message_end
-	AssistantEvent *AssistantEvent // message_update (streaming deltas)
-	ToolCallID     string          // tool_execution_*
-	ToolName       string          // tool_execution_*
-	Args           map[string]any  // tool_execution_start
-	Result         *Result         // tool_execution_end/update
-	IsError        bool            // tool_execution_end
-	Messages       []AgentMessage  // agent_end (full conversation)
-	Error          error           // agent_error
+	Message        AgentMessage      // message_start, message_end
+	AssistantEvent *AssistantEvent   // message_update (streaming deltas)
+	ToolCallID     string            // tool_execution_*
+	ToolName       string            // tool_execution_*
+	Args           map[string]any    // tool_execution_start
+	Result         *Result           // tool_execution_end/update
+	IsError        bool              // tool_execution_end
+	Messages       []AgentMessage    // agent_end (full conversation)
+	Compaction     *CompactionPayload // compaction_end
+	Error          error             // agent_error, compaction_end (non-fatal)
 }
 
 // Agent event type constants.
@@ -29,4 +30,7 @@ const (
 	AgentEventToolExecStart  = "tool_execution_start"
 	AgentEventToolExecUpdate = "tool_execution_update"
 	AgentEventToolExecEnd    = "tool_execution_end"
+
+	AgentEventCompactionStart = "compaction_start"
+	AgentEventCompactionEnd   = "compaction_end"
 )

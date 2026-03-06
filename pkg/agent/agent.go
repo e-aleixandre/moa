@@ -41,6 +41,10 @@ type AgentConfig struct {
 	// Custom message conversion (nil = default: filter non-LLM messages)
 	ConvertToLLM func([]core.AgentMessage) []core.Message
 
+	// Compaction settings. nil = use DefaultCompactionSettings.
+	// Set Enabled:false to disable.
+	Compaction *core.CompactionSettings
+
 	Logger *slog.Logger
 }
 
@@ -66,6 +70,10 @@ func New(cfg AgentConfig) (*Agent, error) {
 	}
 	if cfg.Tools == nil {
 		cfg.Tools = core.NewRegistry()
+	}
+	if cfg.Compaction == nil {
+		defaults := core.DefaultCompactionSettings
+		cfg.Compaction = &defaults
 	}
 
 	// Set up extension host
@@ -138,6 +146,29 @@ func (a *Agent) LoadMessages(msgs []core.AgentMessage) error {
 		Model:    a.config.Model,
 	}
 	return nil
+}
+
+// LoadState replaces the full conversation state including compaction epoch.
+// Used to restore a previous session with compaction history.
+func (a *Agent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot load state while agent is running")
+	}
+	a.state = AgentState{
+		Messages:        msgs,
+		Model:           a.config.Model,
+		CompactionEpoch: compactionEpoch,
+	}
+	return nil
+}
+
+// CompactionEpoch returns the current compaction epoch.
+func (a *Agent) CompactionEpoch() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.state.CompactionEpoch
 }
 
 // Messages returns a shallow copy of the current conversation messages.
@@ -213,6 +244,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		convertToLLM:        a.config.ConvertToLLM,
+		compaction:          a.config.Compaction,
 	}
 
 	err := agentLoop(ctx, cfg)

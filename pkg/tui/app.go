@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -529,6 +530,25 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		m.s.streamState = stateStreaming
 		m.status.SetText("thinking...")
 		return m.flushBlocks(len(m.s.blocks))
+
+	case core.AgentEventCompactionStart:
+		m.status.SetText("compacting context...")
+		return nil
+
+	case core.AgentEventCompactionEnd:
+		if e.Error != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status",
+				Raw:  "⚠ Compaction failed: " + e.Error.Error() + " (continuing with full context)",
+			})
+		} else if e.Compaction != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status",
+				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", e.Compaction.TokensBefore/1000, e.Compaction.TokensAfter/1000),
+			})
+		}
+		m.status.SetText("thinking...")
+		return m.flushBlocks(len(m.s.blocks))
 	}
 
 	return nil
@@ -575,6 +595,10 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 // the source-of-truth messages. Does NOT rebuild — preserves event-derived blocks
 // (tool_start with args, etc.) that messages don't contain.
 //
+// Only searches unflushed blocks (from flushedCount onwards). This prevents
+// patching an already-flushed block from a previous turn, which would cause
+// flushBlocks to be a no-op (to <= from) and the current turn's content to vanish.
+//
 // Also creates missing blocks: if agentRunResultMsg arrives before the
 // AgentEventMessageEnd event is processed (async emitter race), the assistant/thinking
 // blocks won't exist yet. In that case, append them so flushBlocks can print them.
@@ -599,10 +623,16 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 		}
 	}
 
+	// Search boundary: only patch unflushed blocks (current turn).
+	// flushedCount may lag behind flushScheduledCount, but scheduled blocks
+	// are already queued for tea.Println — patching them is harmless (content
+	// is already rendered). Use flushedCount as the safe lower bound.
+	searchFrom := m.s.flushedCount
+
 	// Patch or create thinking block
 	if lastThinkingText != "" {
 		found := false
-		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+		for i := len(m.s.blocks) - 1; i >= searchFrom; i-- {
 			if m.s.blocks[i].Type == "thinking" {
 				m.s.blocks[i].Raw = lastThinkingText
 				found = true
@@ -610,7 +640,6 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 			}
 		}
 		if !found {
-			// MessageEnd event wasn't processed yet — create the block
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "thinking", Raw: lastThinkingText,
 			})
@@ -620,7 +649,7 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	// Patch or create assistant block
 	if lastAssistantText != "" {
 		found := false
-		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+		for i := len(m.s.blocks) - 1; i >= searchFrom; i-- {
 			if m.s.blocks[i].Type == "assistant" {
 				m.s.blocks[i].Raw = lastAssistantText
 				found = true
@@ -628,7 +657,6 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 			}
 		}
 		if !found {
-			// MessageEnd event wasn't processed yet — create the block
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "assistant", Raw: lastAssistantText,
 			})
@@ -664,6 +692,10 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 		case "tool_result":
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "tool_end", ToolName: msg.ToolName, IsError: msg.IsError,
+			})
+		case "compaction_summary":
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status", Raw: "✂ (conversation compacted)",
 			})
 		}
 	}
@@ -725,6 +757,7 @@ func (m *appModel) saveSession(msgs []core.AgentMessage) tea.Cmd {
 	snapshot := *m.session
 	snapshot.Messages = make([]core.AgentMessage, len(msgs))
 	copy(snapshot.Messages, msgs)
+	snapshot.CompactionEpoch = m.agent.CompactionEpoch()
 
 	store := m.sessionStore
 	return func() tea.Msg {

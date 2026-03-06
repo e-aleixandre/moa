@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Content is a tagged union. Type determines which fields are populated.
 //
@@ -105,4 +108,108 @@ type Usage struct {
 	CacheRead   int `json:"cache_read"`
 	CacheWrite  int `json:"cache_write"`
 	TotalTokens int `json:"total_tokens"`
+}
+
+// EstimateTokens estimates the token count of a single message using
+// a chars/4 heuristic. Conservative (overestimates slightly).
+func EstimateTokens(m Message) int {
+	chars := 0
+	for _, c := range m.Content {
+		switch c.Type {
+		case "text":
+			chars += len(c.Text)
+		case "thinking":
+			chars += len(c.Thinking)
+		case "tool_call":
+			chars += len(c.ToolName)
+			if c.Arguments != nil {
+				b, _ := json.Marshal(c.Arguments)
+				chars += len(b)
+			}
+		case "image":
+			chars += 4800 // ~1200 tokens
+		}
+	}
+	if m.Role == "tool_result" {
+		chars += len(m.ToolName) + len(m.ToolCallID)
+	}
+	if chars == 0 {
+		return 0
+	}
+	return (chars + 3) / 4
+}
+
+// ContextEstimate holds the result of a context size estimation.
+type ContextEstimate struct {
+	Tokens         int // total estimated context tokens
+	UsageTokens    int // from provider-reported usage (0 if none valid)
+	TrailingTokens int // estimated tokens for messages after last valid usage
+	OverheadTokens int // system prompt + tool specs
+}
+
+// EstimateContextTokens estimates total context size including system prompt
+// and tool spec overhead. Uses provider-reported Usage from the last assistant
+// message whose compaction epoch matches the current one. Stale usage from
+// pre-compaction messages is ignored.
+func EstimateContextTokens(msgs []AgentMessage, systemPrompt string, toolSpecs []ToolSpec, compactionEpoch int) ContextEstimate {
+	overhead := (len(systemPrompt) + 3) / 4
+	for _, t := range toolSpecs {
+		overhead += (len(t.Name) + len(t.Description) + len(t.Parameters) + 3) / 4
+	}
+
+	// Find last valid assistant usage (matching current compaction epoch).
+	lastUsageIdx := -1
+	var lastUsage *Usage
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role == "assistant" && m.Usage != nil && m.StopReason != "error" {
+			msgEpoch := 0
+			if m.Custom != nil {
+				if e, ok := m.Custom["compaction_epoch"].(float64); ok {
+					msgEpoch = int(e)
+				}
+				// Also handle int (non-JSON path).
+				if e, ok := m.Custom["compaction_epoch"].(int); ok {
+					msgEpoch = e
+				}
+			}
+			if msgEpoch == compactionEpoch {
+				lastUsageIdx = i
+				lastUsage = m.Usage
+				break
+			}
+		}
+	}
+
+	if lastUsage == nil {
+		// No valid provider usage — estimate everything from chars.
+		total := 0
+		for _, m := range msgs {
+			total += EstimateTokens(m.Message)
+		}
+		return ContextEstimate{
+			Tokens:         total + overhead,
+			TrailingTokens: total,
+			OverheadTokens: overhead,
+		}
+	}
+
+	// Provider usage already includes system prompt + tool specs + all messages
+	// up to the response, so we don't add overhead again.
+	usageTokens := lastUsage.TotalTokens
+	if usageTokens == 0 {
+		usageTokens = lastUsage.Input + lastUsage.Output + lastUsage.CacheRead + lastUsage.CacheWrite
+	}
+
+	trailing := 0
+	for i := lastUsageIdx + 1; i < len(msgs); i++ {
+		trailing += EstimateTokens(msgs[i].Message)
+	}
+
+	return ContextEstimate{
+		Tokens:         usageTokens + trailing,
+		UsageTokens:    usageTokens,
+		TrailingTokens: trailing,
+		OverheadTokens: overhead,
+	}
 }
