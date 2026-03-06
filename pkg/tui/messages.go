@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/ealeixandre/go-agent/pkg/core"
+import "github.com/ealeixandre/moa/pkg/core"
 
 // agentEventMsg wraps an agent event for the TUI event loop.
 // RunGen scopes the event to a specific run — late events from previous runs are ignored.

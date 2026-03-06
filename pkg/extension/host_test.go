@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // testExtension is a simple extension for testing.

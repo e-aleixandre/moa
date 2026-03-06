@@ -3,7 +3,7 @@ package extension
 import (
 	"context"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // --- Hook handler types (each has appropriate return type) ---

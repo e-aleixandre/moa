@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 func TestEmitter_BasicDelivery(t *testing.T) {

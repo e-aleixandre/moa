@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // Anthropic implements core.Provider for the Anthropic Messages API.

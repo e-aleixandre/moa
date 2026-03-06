@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // NewBash creates the bash tool.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 func TestMapEvents_SimpleText(t *testing.T) {

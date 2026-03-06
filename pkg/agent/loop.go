@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
-	"github.com/ealeixandre/go-agent/pkg/tool"
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // Hooks is the interface the agent loop needs from the extension system.
