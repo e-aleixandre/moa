@@ -9,8 +9,8 @@ import (
 )
 
 // messageBlock holds raw conversation content. Never stores pre-rendered text.
-// refreshViewport() renders blocks on demand using current terminal width,
-// so resize reflows correctly.
+// Blocks are rendered on demand (flush to scrollback or View()) using current
+// terminal width, so resize reflows correctly.
 type messageBlock struct {
 	Type     string         // "user", "assistant", "tool_start", "tool_end", "error", "status"
 	Raw      string         // raw content: markdown for assistant, plain text for others
@@ -83,7 +83,34 @@ func FormatToolEnd(name string, isError bool) string {
 	return toolNameStyle.Render(fmt.Sprintf("  [%s]", name)) + " " + icon
 }
 
-// renderBlocks renders all blocks for the viewport using the given renderer.
+// renderSingleBlock renders a single block with trailing spacing that matches
+// renderBlocks (used by expand/Ctrl+O). Returns empty string for hidden blocks
+// (e.g., thinking when showThinking is false). Used by flush logic and View.
+func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) string {
+	switch block.Type {
+	case "user":
+		return FormatUserMessage(block.Raw) + "\n" // blank line after user prompt
+	case "thinking":
+		if !showThinking {
+			return ""
+		}
+		return thinkingStyle.Width(r.width - 2).PaddingLeft(2).Render(block.Raw)
+	case "assistant":
+		return r.RenderMarkdown(block.Raw)
+	case "tool_start":
+		return FormatToolStart(block.ToolName, block.ToolArgs)
+	case "tool_end":
+		return FormatToolEnd(block.ToolName, block.IsError)
+	case "error":
+		return errorStyle.Render(block.Raw)
+	case "status":
+		return statusStyle.Render(block.Raw)
+	default:
+		return ""
+	}
+}
+
+// renderBlocks renders all blocks as a single string. Used by expand mode (Ctrl+O pager).
 func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool) string {
 	var b strings.Builder
 	for _, block := range blocks {

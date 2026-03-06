@@ -20,5 +20,11 @@ type agentRunResultMsg struct {
 	RunGen   uint64
 }
 
-// renderTickMsg triggers a viewport refresh during streaming (~60fps).
+// renderTickMsg triggers a stream cache refresh during streaming (~60fps).
 type renderTickMsg struct{}
+
+// expandDoneMsg signals the pager closed after Ctrl+O expand mode.
+type expandDoneMsg struct{ err error }
+
+// clearThinkingStatusMsg clears the ephemeral Ctrl+T toggle feedback.
+type clearThinkingStatusMsg struct{}
