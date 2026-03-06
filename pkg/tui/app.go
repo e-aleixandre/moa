@@ -42,10 +42,11 @@ type state struct {
 	dirty        bool           // streamText changed since last render tick
 	running      bool           // agent is running (tick should continue)
 	streamState  streamState
-	showThinking bool      // toggle thinking visibility (Ctrl+T)
-	initialized  bool      // first WindowSizeMsg processed (one-shot bottom push done)
-	runGen       uint64    // incremented on each run; events from old runs are ignored
-	cleanupOnce  sync.Once // idempotent cleanup
+	showThinking  bool      // toggle thinking visibility (Ctrl+T)
+	initialized   bool      // first WindowSizeMsg processed (one-shot bottom push done)
+	runGen        uint64    // incremented on each run; events from old runs are ignored
+	cleanupOnce   sync.Once // idempotent cleanup
+	pendingStatus string    // transient status shown in View(), flushed to scrollback on next send
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -331,6 +332,11 @@ func (m appModel) View() string {
 		sections = append(sections, sv)
 	}
 
+	// Pending status (transient — shown until next message send)
+	if m.s.pendingStatus != "" {
+		sections = append(sections, statusStyle.Render(m.s.pendingStatus))
+	}
+
 	// Top status bar (above input)
 	if tv := m.topBar.View(m.width); tv != "" {
 		sections = append(sections, tv)
@@ -502,6 +508,11 @@ func (m *appModel) flushBlocks(to int) tea.Cmd {
 
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
+	// Commit any pending status to scrollback before the user message.
+	if m.s.pendingStatus != "" {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: m.s.pendingStatus})
+		m.s.pendingStatus = ""
+	}
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
 
 	// Set session title from the first user message
@@ -888,23 +899,21 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	var newProvider core.Provider
 	if newModel.Provider != oldModel.Provider {
 		if m.providerFactory == nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: fmt.Sprintf("Cannot switch from %s to %s: no provider factory configured", oldModel.Provider, newModel.Provider),
-			})
-			return m, m.flushBlocks(len(m.s.blocks))
+			m.s.pendingStatus = fmt.Sprintf("✗ Cannot switch from %s to %s: no provider factory", oldModel.Provider, newModel.Provider)
+			return m, nil
 		}
 		prov, err := m.providerFactory(newModel)
 		if err != nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
-			return m, m.flushBlocks(len(m.s.blocks))
+			m.s.pendingStatus = "✗ " + err.Error()
+			return m, nil
 		}
 		newProvider = prov
 	}
 
 	thinkingLevel := m.agent.ThinkingLevel()
 	if err := m.agent.Reconfigure(newProvider, newModel, thinkingLevel); err != nil {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.s.pendingStatus = "✗ " + err.Error()
+		return m, nil
 	}
 
 	name := newModel.Name
@@ -914,10 +923,8 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	m.modelName = name
 	m.topBar.UpdateModelSegment(name)
 	m.refreshContextSegment()
-	m.s.blocks = append(m.s.blocks, messageBlock{
-		Type: "status", Raw: fmt.Sprintf("✓ Switched to %s (%s)", name, newModel.Provider),
-	})
-	return m, m.flushBlocks(len(m.s.blocks))
+	m.s.pendingStatus = fmt.Sprintf("✓ Switched to %s (%s)", name, newModel.Provider)
+	return m, nil
 }
 
 // cycleScopedModel cycles through scoped/pinned models via Ctrl+P.
@@ -958,15 +965,13 @@ func (m appModel) cycleScopedModel() (tea.Model, tea.Cmd) {
 // handleModelSwitch processes `/model <spec>`.
 func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
 	if m.s.running {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot switch model while agent is running"})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.s.pendingStatus = "Cannot switch model while agent is running"
+		return m, nil
 	}
 
 	newModel, known := core.ResolveModel(spec)
 	if !known {
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "status", Raw: fmt.Sprintf("⚠ Unknown model %q — context management disabled", spec),
-		})
+		m.s.pendingStatus = fmt.Sprintf("⚠ Unknown model %q — context management disabled", spec)
 	}
 
 	return m.switchToModel(newModel)
@@ -975,29 +980,25 @@ func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
 // handleThinkingSwitch processes `/thinking <level>`.
 func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 	if m.s.running {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot change thinking while agent is running"})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.s.pendingStatus = "✗ Cannot change thinking while agent is running"
+		return m, nil
 	}
 
 	valid := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
 	if !valid[level] {
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "error", Raw: "Invalid thinking level. Options: off, minimal, low, medium, high",
-		})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.s.pendingStatus = "✗ Invalid thinking level. Options: off, minimal, low, medium, high"
+		return m, nil
 	}
 
 	model := m.agent.Model()
 	if err := m.agent.Reconfigure(nil, model, level); err != nil {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.s.pendingStatus = "✗ " + err.Error()
+		return m, nil
 	}
 
 	m.topBar.UpdateThinkingSegment(level)
-	m.s.blocks = append(m.s.blocks, messageBlock{
-		Type: "status", Raw: fmt.Sprintf("✓ Thinking level: %s", level),
-	})
-	return m, m.flushBlocks(len(m.s.blocks))
+	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", level)
+	return m, nil
 }
 
 // --- Session persistence ---
