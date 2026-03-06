@@ -14,19 +14,21 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
+
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/auth"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/provider/anthropic"
+	"github.com/ealeixandre/moa/pkg/provider/openai"
+	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
 )
 
 func main() {
 	p := flag.String("p", "", "Prompt text or @file to read prompt from file")
-	model := flag.String("model", "claude-sonnet-4-20250514", "Model ID")
+	modelFlag := flag.String("model", "sonnet", "Model: alias (sonnet, opus, codex) or provider/model-id")
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
 	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
 	resume := flag.Bool("resume", false, "Resume the most recent session")
@@ -99,15 +101,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve API key (env var → OAuth → stored key)
-	apiKey, isOAuth, err := authStore.GetAPIKey("anthropic")
+	// Resolve model from registry.
+	resolvedModel, knownModel := core.ResolveModel(*modelFlag)
+	if !knownModel {
+		fmt.Fprintf(os.Stderr, "warning: unknown model %q — context management disabled\n", *modelFlag)
+	}
+
+	// Build provider for the resolved model.
+	prov, err := buildProvider(resolvedModel, authStore)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
-	}
-
-	if isOAuth {
-		fmt.Fprintf(os.Stderr, "\033[90m(using Claude Max OAuth)\033[0m\n")
 	}
 
 	// Load AGENTS.md
@@ -123,17 +127,6 @@ func main() {
 
 	// Build system prompt
 	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs())
-
-	// Build provider
-	prov := anthropic.New(apiKey)
-
-	// Resolve model from registry
-	resolvedModel, knownModel := core.ResolveModel(*model)
-	if !knownModel {
-		fmt.Fprintf(os.Stderr, "warning: unknown model %q — context management disabled (MaxInput unknown)\n", *model)
-		resolvedModel.Provider = "anthropic"
-		resolvedModel.API = "anthropic-messages"
-	}
 
 	// Build agent
 	ag, agErr := agent.New(agent.AgentConfig{
@@ -185,6 +178,7 @@ func main() {
 		app := tui.New(ag, ctx, tui.Config{
 			SessionStore: sessionStore,
 			Session:      sess,
+			ModelName:    modelDisplayName(resolvedModel),
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx))
 		if _, err := prog.Run(); err != nil {
@@ -194,11 +188,8 @@ func main() {
 		return
 	}
 
-	// --- Headless mode (everything below is the existing behavior, unchanged) ---
+	// --- Headless mode ---
 
-	// Subscribe: stream assistant text to stdout, tool info to stderr.
-	// Streaming deltas are best-effort (lossy if subscriber buffer fills).
-	// Final output is extracted from returned messages below as source of truth.
 	var streamedChars atomic.Int64
 	ag.Subscribe(func(e core.AgentEvent) {
 		switch e.Type {
@@ -209,7 +200,6 @@ func main() {
 					fmt.Print(e.AssistantEvent.Delta)
 					streamedChars.Add(int64(len(e.AssistantEvent.Delta)))
 				case core.ProviderEventThinkingDelta:
-					// Optionally show thinking (grey text)
 					fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.AssistantEvent.Delta)
 				}
 			}
@@ -224,14 +214,12 @@ func main() {
 		}
 	})
 
-	// Run
 	msgs, err := ag.Run(ctx, promptContent)
 
-	// If streaming deltas were dropped (lossy buffer), fall back to final messages.
 	if finalText := extractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
 		fmt.Print(finalText)
 	}
-	fmt.Println() // Final newline
+	fmt.Println()
 
 	if err != nil {
 		if ctx.Err() != nil {
@@ -243,11 +231,40 @@ func main() {
 	}
 }
 
+// buildProvider creates the appropriate provider based on the model's Provider field.
+func buildProvider(model core.Model, authStore *auth.Store) (core.Provider, error) {
+	switch model.Provider {
+	case "openai":
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("OPENAI_API_KEY not set (required for %s)", model.ID)
+		}
+		return openai.New(apiKey), nil
+
+	case "anthropic", "":
+		apiKey, isOAuth, err := authStore.GetAPIKey("anthropic")
+		if err != nil {
+			return nil, err
+		}
+		if isOAuth {
+			fmt.Fprintf(os.Stderr, "\033[90m(using Claude Max OAuth)\033[0m\n")
+		}
+		return anthropic.New(apiKey), nil
+
+	default:
+		return nil, fmt.Errorf("unsupported provider: %q (model %s)", model.Provider, model.ID)
+	}
+}
+
+// modelDisplayName returns a compact name for TUI display.
+func modelDisplayName(m core.Model) string {
+	if m.Name != "" {
+		return m.Name
+	}
+	return m.ID
+}
+
 // resolvePrompt resolves the prompt from flag, @file, or stdin pipe.
-//  1. -p @file.md → read file content
-//  2. -p "text"   → use as-is
-//  3. no -p + stdin is pipe → read stdin
-//  4. no -p + terminal → empty string (interactive mode)
 func resolvePrompt(p string) (string, error) {
 	if p != "" {
 		if strings.HasPrefix(p, "@") {
@@ -265,13 +282,11 @@ func resolvePrompt(p string) (string, error) {
 		return p, nil
 	}
 
-	// Check if stdin is a pipe
 	fi, err := os.Stdin.Stat()
 	if err != nil {
-		return "", nil // can't stat stdin → assume interactive
+		return "", nil
 	}
 	if fi.Mode()&os.ModeCharDevice == 0 {
-		// Stdin is a pipe — read it
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return "", fmt.Errorf("reading stdin: %w", err)
@@ -283,18 +298,13 @@ func resolvePrompt(p string) (string, error) {
 		return content, nil
 	}
 
-	// Both stdin and stdout must be terminals for interactive mode.
-	// If stdout is redirected (pipe/file), launching a TUI would produce garbage.
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
 	}
 
-	// Terminal — interactive mode
 	return "", nil
 }
 
-// extractFinalAssistantText returns the text content from the last assistant message.
-// Used as fallback when streaming deltas were dropped.
 func extractFinalAssistantText(msgs []core.AgentMessage) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == "assistant" {
