@@ -25,3 +25,14 @@ type renderTickMsg struct{}
 
 // clearThinkingStatusMsg clears the ephemeral Ctrl+T toggle feedback.
 type clearThinkingStatusMsg struct{}
+
+// sessionSavedMsg signals an async session save completed.
+type sessionSavedMsg struct{ err error }
+
+// flushDoneMsg signals that tea.Println has been processed and it's safe
+// to advance flushedCount. Prevents the visual flash where View() renders
+// empty because flushedCount was advanced before println executed.
+type flushDoneMsg struct {
+	upTo  int // advance flushedCount to this value
+	epoch int // must match current flushEpoch (stale after /clear)
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/auth"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/provider/anthropic"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
@@ -28,6 +29,7 @@ func main() {
 	model := flag.String("model", "claude-sonnet-4-20250514", "Model ID")
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
 	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
+	resume := flag.Bool("resume", false, "Resume the most recent session")
 	login := flag.Bool("login", false, "Login with Anthropic OAuth (Claude Max)")
 	logout := flag.Bool("logout", false, "Remove stored credentials")
 	flag.Parse()
@@ -145,8 +147,37 @@ func main() {
 	// --- Mode selection ---
 
 	if promptContent == "" {
-		// Interactive mode — launch TUI
-		app := tui.New(ag, ctx)
+		// Interactive mode — launch TUI with session persistence
+		store, err := session.NewStore("")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: session persistence disabled: %v\n", err)
+		}
+
+		var sess *session.Session
+		if *resume && store != nil {
+			sess, err = store.Latest()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load session: %v\n", err)
+			}
+			if sess != nil {
+				// Restore conversation into agent
+				if err := ag.LoadMessages(sess.Messages); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
+					sess = nil
+				}
+			}
+			if sess == nil {
+				fmt.Fprintf(os.Stderr, "No previous session found. Starting fresh.\n")
+			}
+		}
+		if sess == nil && store != nil {
+			sess = store.Create()
+		}
+
+		app := tui.New(ag, ctx, tui.Config{
+			SessionStore: store,
+			Session:      sess,
+		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx))
 		if _, err := prog.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
