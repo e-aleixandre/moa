@@ -10,25 +10,30 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
+// responsesSSE helpers build Responses API SSE payloads.
+func sseEvent(data string) string {
+	return "data: " + data + "\n\n"
+}
+
 func TestStream_TextResponse(t *testing.T) {
-	// Mock server that returns a simple text streaming response.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("bad auth: %s", r.Header.Get("Authorization"))
 		}
+		// Verify it hits /v1/responses.
+		if r.URL.Path != "/v1/responses" {
+			t.Errorf("wrong path: %s", r.URL.Path)
+		}
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w, `data: {"id":"chatcmpl-1","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-1","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-1","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-1","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}
-
-data: [DONE]
-
-`)
+		fmt.Fprint(w,
+			sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}],"status":"in_progress"}}`)+
+				sseEvent(`{"type":"response.output_text.delta","delta":"Hello"}`)+
+				sseEvent(`{"type":"response.output_text.delta","delta":" world"}`)+
+				sseEvent(`{"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Hello world"}],"status":"completed"}}`)+
+				sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}`),
+		)
 	}))
 	defer server.Close()
 
@@ -71,7 +76,7 @@ data: [DONE]
 	if finalMsg.Usage == nil || finalMsg.Usage.TotalTokens != 12 {
 		t.Fatalf("usage: %+v", finalMsg.Usage)
 	}
-	if finalMsg.StopReason != "stop" {
+	if finalMsg.StopReason != "end_turn" {
 		t.Fatalf("stop reason: %s", finalMsg.StopReason)
 	}
 }
@@ -80,17 +85,14 @@ func TestStream_ToolCallResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w, `data: {"id":"chatcmpl-2","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"bash","arguments":""}}]},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-2","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"comm"}}]},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-2","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"and\":\"ls\"}"}}]},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-2","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
-
-data: [DONE]
-
-`)
+		fmt.Fprint(w,
+			sseEvent(`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"bash","arguments":""}}`)+
+				sseEvent(`{"type":"response.function_call_arguments.delta","delta":"{\"comm"}`)+
+				sseEvent(`{"type":"response.function_call_arguments.delta","delta":"and\":\"ls\"}"}`)+
+				sseEvent(`{"type":"response.function_call_arguments.done","arguments":"{\"command\":\"ls\"}"}`)+
+				sseEvent(`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"bash","arguments":"{\"command\":\"ls\"}","status":"completed"}}`)+
+				sseEvent(`{"type":"response.completed","response":{"id":"resp_2","status":"completed"}}`),
+		)
 	}))
 	defer server.Close()
 
@@ -103,12 +105,14 @@ data: [DONE]
 		t.Fatal(err)
 	}
 
-	var gotToolStart, gotDone bool
+	var gotToolStart, gotToolEnd, gotDone bool
 	var finalMsg *core.Message
 	for event := range ch {
 		switch event.Type {
 		case core.ProviderEventToolCallStart:
 			gotToolStart = true
+		case core.ProviderEventToolCallEnd:
+			gotToolEnd = true
 		case core.ProviderEventDone:
 			gotDone = true
 			finalMsg = event.Message
@@ -120,11 +124,13 @@ data: [DONE]
 	if !gotToolStart {
 		t.Fatal("expected tool call start")
 	}
+	if !gotToolEnd {
+		t.Fatal("expected tool call end")
+	}
 	if !gotDone {
 		t.Fatal("expected done")
 	}
 
-	// Verify tool call in final message.
 	var toolCall *core.Content
 	for _, c := range finalMsg.Content {
 		if c.Type == "tool_call" {
@@ -147,125 +153,92 @@ data: [DONE]
 	}
 }
 
-func TestStream_SparseToolCallIndices(t *testing.T) {
+func TestStream_ThinkingResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		// Tool calls at indices 0 and 2 (sparse — index 1 is skipped).
-		fmt.Fprint(w, `data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"call_c","type":"function","function":{"name":"write","arguments":""}}]},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"function":{"arguments":"{\"path\":\"b.txt\"}"}}]},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
-
-data: [DONE]
-
-`)
+		fmt.Fprint(w,
+			sseEvent(`{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1"}}`)+
+				sseEvent(`{"type":"response.reasoning_summary_text.delta","delta":"I think "}`)+
+				sseEvent(`{"type":"response.reasoning_summary_text.delta","delta":"therefore"}`)+
+				sseEvent(`{"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","summary":[{"text":"I think therefore"}]}}`)+
+				sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
+				sseEvent(`{"type":"response.output_text.delta","delta":"Answer"}`)+
+				sseEvent(`{"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Answer"}],"status":"completed"}}`)+
+				sseEvent(`{"type":"response.completed","response":{"id":"resp_3","status":"completed"}}`),
+		)
 	}))
 	defer server.Close()
 
 	prov := NewWithBaseURL("key", server.URL)
 	ch, err := prov.Stream(context.Background(), core.Request{
 		Model:    core.Model{ID: "gpt-5.3-codex"},
-		Messages: []core.Message{core.NewUserMessage("test")},
+		Messages: []core.Message{core.NewUserMessage("think")},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	var thinking, text string
+	var gotDone bool
 	var finalMsg *core.Message
 	for event := range ch {
-		if event.Type == core.ProviderEventDone {
-			finalMsg = event.Message
-		}
-		if event.Type == core.ProviderEventError {
-			t.Fatalf("error: %v", event.Error)
-		}
-	}
-
-	// Both tool calls (index 0 and 2) should be present.
-	toolCalls := 0
-	for _, c := range finalMsg.Content {
-		if c.Type == "tool_call" {
-			toolCalls++
-		}
-	}
-	if toolCalls != 2 {
-		t.Fatalf("expected 2 tool calls, got %d", toolCalls)
-	}
-}
-
-func TestStream_MalformedJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(200)
-		// Mix of valid and malformed chunks.
-		fmt.Fprint(w, `data: {"id":"chatcmpl-4","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
-
-data: {invalid json here
-
-data: {"id":"chatcmpl-4","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"content":"works"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-4","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-data: [DONE]
-
-`)
-	}))
-	defer server.Close()
-
-	prov := NewWithBaseURL("key", server.URL)
-	ch, err := prov.Stream(context.Background(), core.Request{
-		Model:    core.Model{ID: "gpt-5.3-codex"},
-		Messages: []core.Message{core.NewUserMessage("test")},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var text string
-	var gotDone bool
-	for event := range ch {
-		if event.Type == core.ProviderEventTextDelta {
+		switch event.Type {
+		case core.ProviderEventThinkingDelta:
+			thinking += event.Delta
+		case core.ProviderEventTextDelta:
 			text += event.Delta
-		}
-		if event.Type == core.ProviderEventDone {
+		case core.ProviderEventDone:
 			gotDone = true
-		}
-		if event.Type == core.ProviderEventError {
+			finalMsg = event.Message
+		case core.ProviderEventError:
 			t.Fatalf("error: %v", event.Error)
 		}
 	}
 
+	if thinking != "I think therefore" {
+		t.Fatalf("thinking: %q", thinking)
+	}
+	if text != "Answer" {
+		t.Fatalf("text: %q", text)
+	}
 	if !gotDone {
 		t.Fatal("expected done")
 	}
-	if text != "works" {
-		t.Fatalf("expected 'works', got %q", text)
+	// Final message should have both thinking and text content.
+	hasThinking := false
+	hasText := false
+	for _, c := range finalMsg.Content {
+		if c.Type == "thinking" {
+			hasThinking = true
+			if c.ThinkingSignature == "" {
+				t.Fatal("thinking should have signature")
+			}
+		}
+		if c.Type == "text" {
+			hasText = true
+		}
+	}
+	if !hasThinking {
+		t.Fatal("expected thinking content")
+	}
+	if !hasText {
+		t.Fatal("expected text content")
 	}
 }
 
-func TestStream_ContextCancellation(t *testing.T) {
+func TestStream_ErrorEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		// Send first chunk then hang.
-		fmt.Fprint(w, `data: {"id":"chatcmpl-5","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}
-
-`)
-		w.(http.Flusher).Flush()
-		// Block until client disconnects.
-		<-r.Context().Done()
+		fmt.Fprint(w,
+			sseEvent(`{"type":"error","code":"rate_limit","message":"too many requests"}`),
+		)
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
 	prov := NewWithBaseURL("key", server.URL)
-	ch, err := prov.Stream(ctx, core.Request{
+	ch, err := prov.Stream(context.Background(), core.Request{
 		Model:    core.Model{ID: "gpt-5.3-codex"},
 		Messages: []core.Message{core.NewUserMessage("test")},
 	})
@@ -273,11 +246,6 @@ func TestStream_ContextCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Read first event, then cancel.
-	<-ch
-	cancel()
-
-	// Should get error event and channel close.
 	gotError := false
 	for event := range ch {
 		if event.Type == core.ProviderEventError {
@@ -285,7 +253,7 @@ func TestStream_ContextCancellation(t *testing.T) {
 		}
 	}
 	if !gotError {
-		t.Fatal("expected error after cancellation")
+		t.Fatal("expected error event")
 	}
 }
 
@@ -303,5 +271,85 @@ func TestStream_HTTPError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestStream_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		fmt.Fprint(w,
+			sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
+				sseEvent(`{"type":"response.output_text.delta","delta":"hi"}`),
+		)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(ctx, core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	<-ch // read first event
+	cancel()
+
+	gotError := false
+	for event := range ch {
+		if event.Type == core.ProviderEventError {
+			gotError = true
+		}
+	}
+	if !gotError {
+		t.Fatal("expected error after cancellation")
+	}
+}
+
+func TestNewOAuth_UsesCodexEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/codex/responses" {
+			t.Errorf("expected /codex/responses, got %s", r.URL.Path)
+		}
+		if r.Header.Get("chatgpt-account-id") != "acct_123" {
+			t.Errorf("missing chatgpt-account-id header")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		fmt.Fprint(w,
+			sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
+				sseEvent(`{"type":"response.output_text.delta","delta":"ok"}`)+
+				sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+		)
+	}))
+	defer server.Close()
+
+	prov := NewOAuth("token", "acct_123")
+	prov.baseURL = server.URL
+
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotDone bool
+	for event := range ch {
+		if event.Type == core.ProviderEventDone {
+			gotDone = true
+		}
+		if event.Type == core.ProviderEventError {
+			t.Fatalf("error: %v", event.Error)
+		}
+	}
+	if !gotDone {
+		t.Fatal("expected done")
 	}
 }
