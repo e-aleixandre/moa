@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -108,7 +110,7 @@ func TestBash_ExitCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := result.Content[0].Text
-	if !contains(text, "Exit code: 42") {
+	if !strings.Contains(text, "Exit code: 42") {
 		t.Fatalf("expected exit code in output: %q", text)
 	}
 }
@@ -139,7 +141,7 @@ func TestRead_TextFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := result.Content[0].Text
-	if !contains(text, "line1") || !contains(text, "line3") {
+	if !strings.Contains(text, "line1") || !strings.Contains(text, "line3") {
 		t.Fatalf("expected file content: %q", text)
 	}
 }
@@ -159,7 +161,7 @@ func TestRead_WithOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := result.Content[0].Text
-	if !contains(text, "line2") || !contains(text, "line3") {
+	if !strings.Contains(text, "line2") || !strings.Contains(text, "line3") {
 		t.Fatalf("expected lines 2-3: %q", text)
 	}
 }
@@ -171,7 +173,7 @@ func TestRead_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(result.Content[0].Text, "Error") {
+	if !strings.Contains(result.Content[0].Text, "Error") {
 		t.Fatal("expected error result for missing file")
 	}
 }
@@ -187,7 +189,7 @@ func TestWrite_CreateFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(result.Content[0].Text, "Wrote") {
+	if !strings.Contains(result.Content[0].Text, "Wrote") {
 		t.Fatalf("expected success: %q", result.Content[0].Text)
 	}
 
@@ -214,12 +216,12 @@ func TestEdit_ReplaceExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(result.Content[0].Text, "Edited") {
+	if !strings.Contains(result.Content[0].Text, "Edited") {
 		t.Fatalf("expected success: %q", result.Content[0].Text)
 	}
 
 	data, _ := os.ReadFile(path)
-	if !contains(string(data), "\"world\"") {
+	if !strings.Contains(string(data), "\"world\"") {
 		t.Fatalf("edit not applied: %s", string(data))
 	}
 }
@@ -235,7 +237,7 @@ func TestEdit_NotFound(t *testing.T) {
 		"oldText": "nonexistent",
 		"newText": "replacement",
 	}, nil)
-	if !contains(result.Content[0].Text, "not found") {
+	if !strings.Contains(result.Content[0].Text, "not found") {
 		t.Fatalf("expected not found: %q", result.Content[0].Text)
 	}
 }
@@ -251,7 +253,7 @@ func TestEdit_MultipleMatches(t *testing.T) {
 		"oldText": "hello",
 		"newText": "world",
 	}, nil)
-	if !contains(result.Content[0].Text, "3 locations") {
+	if !strings.Contains(result.Content[0].Text, "3 locations") {
 		t.Fatalf("expected multiple match error: %q", result.Content[0].Text)
 	}
 }
@@ -268,7 +270,7 @@ func TestLs_Directory(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := result.Content[0].Text
-	if !contains(text, "a.txt") || !contains(text, "b.txt") || !contains(text, "subdir/") {
+	if !strings.Contains(text, "a.txt") || !strings.Contains(text, "b.txt") || !strings.Contains(text, "subdir/") {
 		t.Fatalf("expected directory listing: %q", text)
 	}
 }
@@ -373,15 +375,144 @@ func TestFind_DefaultPath(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
+func TestGrep_DashPattern(t *testing.T) {
+	tmp := t.TempDir()
+	os.WriteFile(filepath.Join(tmp, "test.txt"), []byte("hello -test world\n"), 0o644)
+
+	grep := NewGrep(ToolConfig{WorkspaceRoot: tmp})
+	result, err := grep.Execute(context.Background(), map[string]any{
+		"pattern":       "-test",
+		"fixed_strings": true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("pattern starting with dash should not error: %q", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "-test") {
+		t.Fatalf("expected match, got: %q", result.Content[0].Text)
+	}
 }
 
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func TestFind_DashPattern(t *testing.T) {
+	tmp := t.TempDir()
+	os.WriteFile(filepath.Join(tmp, "-test.txt"), []byte("x"), 0o644)
+
+	find := NewFind(ToolConfig{WorkspaceRoot: tmp})
+	result, err := find.Execute(context.Background(), map[string]any{
+		"pattern": "-test*",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return false
+	if result.IsError {
+		t.Fatalf("pattern starting with dash should not error: %q", result.Content[0].Text)
+	}
 }
+
+func TestRead_ExactLimitLines(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "test.txt")
+	os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{
+		"path":  "test.txt",
+		"limit": float64(3),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := result.Content[0].Text
+	if strings.Contains(text, "truncated") {
+		t.Fatalf("file with exactly limit lines should NOT show truncation: %q", text)
+	}
+}
+
+func TestRead_EmptyFileWithOffset(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "empty.txt")
+	os.WriteFile(path, []byte(""), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{
+		"path":   "empty.txt",
+		"offset": float64(5),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Empty file — should not panic, just return empty or "past end"
+	_ = result
+}
+
+func TestRead_OffsetPastEOF(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "test.txt")
+	os.WriteFile(path, []byte("line1\nline2\n"), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{
+		"path":   "test.txt",
+		"offset": float64(100),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "past end") {
+		t.Fatalf("expected 'past end' message, got: %q", text)
+	}
+}
+
+func TestRead_UTF8Boundary(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "test.txt")
+	// Write content that, after byte truncation, might cut a multi-byte char.
+	// Each '€' is 3 bytes (U+20AC). Fill up to just over maxOutputBytes.
+	euro := strings.Repeat("€", (maxOutputBytes/3)+10)
+	os.WriteFile(path, []byte(euro), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{
+		"path":  "test.txt",
+		"limit": float64(maxOutputLines),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := result.Content[0].Text
+	// The output must be valid UTF-8 (truncation walked back to boundary)
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError && size <= 1 {
+			t.Fatalf("invalid UTF-8 at byte %d in output", i)
+		}
+		i += size
+	}
+}
+
+func TestRead_LongLine(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "test.txt")
+	// Write a single line longer than maxOutputBytes
+	long := strings.Repeat("x", maxOutputBytes+1000)
+	os.WriteFile(path, []byte(long), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{"path": "test.txt"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "truncated") {
+		t.Fatalf("expected truncation notice, got: %q", text[:100])
+	}
+	// Should not exceed maxOutputBytes + truncation notice length
+	if len(text) > maxOutputBytes+200 {
+		t.Fatalf("output too large: %d bytes", len(text))
+	}
+}
+
+

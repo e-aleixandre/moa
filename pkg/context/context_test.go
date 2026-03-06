@@ -1,7 +1,6 @@
 package agentcontext
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,5 +116,4 @@ func TestBuildSystemPrompt_Empty(t *testing.T) {
 	}
 }
 
-// Ensure json import is used
-var _ = json.Marshal
+

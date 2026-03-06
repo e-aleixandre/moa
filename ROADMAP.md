@@ -15,48 +15,54 @@ Core loop, streaming, tools, extensions, OAuth. Done.
 
 ---
 
-## V1 — Interactive Agent
+## V1 — Interactive Agent ✅
 
-Make it actually usable as a daily coding tool.
-
-### P0 — Must have
-
-- [ ] **Conversation mode** — REPL loop. User types, agent responds, repeat. Multi-turn with history. `moa` with no `-p` enters interactive mode.
-- [ ] **Tool confirmation** — Dangerous tools (bash, write, edit) require user approval before execution. `--yolo` flag to skip.
-- [ ] **System prompt engineering** — A real, detailed system prompt tuned for coding tasks. The current one is a placeholder.
-- [ ] **Context management** — Token counting (tiktoken or estimate), automatic truncation/summarization when approaching context window limits.
-- [ ] **Session persistence** — Save/resume conversations. `moa --resume` to continue where you left off.
-
-### P1 — Should have
-
-- [ ] **TUI** — Markdown rendering, syntax highlighting, spinners, tool output formatting. Bubble Tea or similar.
-- [ ] **Streaming tool output** — Show bash output as it runs, not after completion.
-- [ ] **Cost tracking** — Track tokens and estimated cost per session. Show on exit.
-- [ ] **Compact/summarize** — When context gets long, summarize older turns to free space.
-- [ ] **File context** — Auto-include relevant files in context (e.g., files mentioned in errors, recently edited).
-
-### P2 — Nice to have
-
-- [ ] **More providers** — OpenAI (GPT-4.1), Google (Gemini), local (Ollama). Provider interface already supports this.
-- [ ] **MCP support** — Model Context Protocol for external tool servers.
-- [ ] **Git awareness** — Auto-detect repo, show diffs, suggest commits.
-- [ ] **Parallel tool execution** — Run independent tool calls concurrently.
-- [ ] **Custom tools** — Load tools from config/extensions without recompiling.
+- [x] Conversation mode (REPL loop, multi-turn)
+- [x] TUI with Bubble Tea (markdown rendering, syntax highlighting, streaming)
+- [x] Streaming tool output (bash output as it runs)
+- [x] Session persistence (save/resume with `--resume`)
+- [x] System prompt (adapted from pi agent, tuned for coding)
 
 ---
 
-## Decisions to make
+## V2 — Production Agent
 
-- **TUI library**: Bubble Tea vs Lip Gloss vs raw ANSI? Bubble Tea is the Go standard for TUIs.
-- **Token counting**: Use tiktoken-go or estimate by chars? tiktoken-go adds a dependency but is accurate.
-- **Session format**: JSON file per session? SQLite? Flat files in `~/.config/moa/sessions/`?
-- **Config file**: YAML/TOML/JSON for model defaults, tool permissions, etc.?
+Make it robust enough to be a daily driver.
+
+### Context
+
+- [ ] **Token counting** — Track token usage per turn. Tiktoken-go or provider-reported counts.
+- [ ] **Context window management** — Detect when approaching limit, warn or auto-act.
+- [ ] **Compact / summarize** — When context grows too long, summarize older turns to free space. Keep recent turns intact. The LLM does the summarization.
+
+### Providers
+
+- [ ] **OpenAI provider** — GPT-4.1 / o3. Provider interface already supports this, mainly mapping to their API format.
+- [ ] **Cost tracking** — Track tokens and estimated cost per session. Show on exit or on demand.
+
+### Tool execution
+
+- [ ] **Parallel tool calls** — When the LLM returns multiple tool_use blocks, execute independent calls concurrently. Go makes this natural (goroutines + WaitGroup). TUI needs to show N tools running at once.
+
+### MCP
+
+- [ ] **MCP client** — Model Context Protocol for external tool servers. Core feature, not extension. Must be lightweight: zero cost when no servers are configured. JSON-RPC over stdio. Discover tools → register in tool registry → route calls.
 
 ---
 
-## Non-goals (V1)
+## Later / Ideas
+
+- More providers (Gemini, Ollama/local)
+- Git awareness (auto-detect repo, show diffs, suggest commits)
+- Custom tools (load from config without recompiling)
+- Web search / fetch as built-in tools
+
+---
+
+## Non-goals
 
 - Web UI
 - Multi-agent orchestration
 - Plugin marketplace
-- Language server / IDE integration
+- IDE integration
+- Tool confirmation (the agent is YOLO by design — implement via extension if wanted)

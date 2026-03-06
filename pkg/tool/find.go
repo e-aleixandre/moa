@@ -1,7 +1,6 @@
 package tool
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +14,7 @@ func NewFind(cfg ToolConfig) core.Tool {
 	return core.Tool{
 		Name:        "find",
 		Label:       "Find",
-		Description: "Search for files by glob pattern. Respects .gitignore. Truncated to 1000 results or 50KB.",
+		Description: "Search for files by glob pattern. Respects .gitignore when fd is available. Truncated to 1000 results or 50KB.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -56,7 +55,9 @@ func NewFind(cfg ToolConfig) core.Tool {
 			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 			cmd.Dir = cfg.WorkspaceRoot
 
-			var stdout, stderr bytes.Buffer
+			var stdout, stderr cappedBuffer
+			stdout.max = maxOutputBytes
+			stderr.max = maxOutputBytes
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 
@@ -73,8 +74,11 @@ func NewFind(cfg ToolConfig) core.Tool {
 				return core.TextResult("No files found."), nil
 			}
 
+			// Truncate by lines
 			output = truncateLines(output, 1000)
-			output = truncateOutput(output, maxOutputBytes)
+			if stdout.truncated {
+				output += "\n\n[output truncated]"
+			}
 
 			return core.TextResult(output), nil
 		},
@@ -90,7 +94,7 @@ func buildFindArgs(pattern, searchPath, fileType string) []string {
 		} else if fileType == "d" {
 			args = append(args, "--type", "d")
 		}
-		args = append(args, pattern, searchPath)
+		args = append(args, "--", pattern, searchPath)
 		return args
 	}
 

@@ -1,12 +1,10 @@
 package tool
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strings"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -16,7 +14,7 @@ func NewGrep(cfg ToolConfig) core.Tool {
 	return core.Tool{
 		Name:        "grep",
 		Label:       "Grep",
-		Description: "Search file contents for a pattern (regex or literal). Respects .gitignore. Returns matching lines with file paths and line numbers. Truncated to 100 matches or 50KB.",
+		Description: "Search file contents for a pattern (regex or literal). Respects .gitignore when ripgrep (rg) is available. Returns matching lines with file paths and line numbers. Truncated to 100 matches or 50KB.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -60,7 +58,9 @@ func NewGrep(cfg ToolConfig) core.Tool {
 			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 			cmd.Dir = cfg.WorkspaceRoot
 
-			var stdout, stderr bytes.Buffer
+			var stdout, stderr cappedBuffer
+			stdout.max = maxOutputBytes
+			stderr.max = maxOutputBytes
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 
@@ -79,9 +79,11 @@ func NewGrep(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(fmt.Sprintf("grep failed: %v", err)), nil
 			}
 
-			// Truncate
+			// Truncate by lines
 			output = truncateLines(output, 100)
-			output = truncateOutput(output, maxOutputBytes)
+			if stdout.truncated {
+				output += "\n\n[output truncated]"
+			}
 
 			return core.TextResult(output), nil
 		},
@@ -101,7 +103,7 @@ func buildGrepArgs(params map[string]any, pattern, searchPath string) []string {
 		if include != "" {
 			args = append(args, "--glob", include)
 		}
-		args = append(args, pattern, searchPath)
+		args = append(args, "--", pattern, searchPath)
 		return args
 	}
 
@@ -113,15 +115,8 @@ func buildGrepArgs(params map[string]any, pattern, searchPath string) []string {
 	if include != "" {
 		args = append(args, "--include="+include)
 	}
-	args = append(args, pattern, searchPath)
+	args = append(args, "--", pattern, searchPath)
 	return args
 }
 
-// truncateGrepLines is like truncateLines but uses the first N non-empty lines that contain matches.
-func truncateGrepLines(s string, maxLines int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) <= maxLines {
-		return s
-	}
-	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n\n[truncated — showing %d of %d matches]", maxLines, len(lines))
-}
+

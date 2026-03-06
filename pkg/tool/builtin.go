@@ -1,7 +1,9 @@
 package tool
 
 import (
+	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,6 +113,7 @@ func getString(params map[string]any, key, def string) string {
 }
 
 // getInt extracts an integer parameter or returns a default.
+// Fractional float64 values (e.g. 2.6) are rejected — returns default.
 func getInt(params map[string]any, key string, def int) int {
 	v, ok := params[key]
 	if !ok {
@@ -118,6 +121,9 @@ func getInt(params map[string]any, key string, def int) int {
 	}
 	switch n := v.(type) {
 	case float64:
+		if n != math.Trunc(n) {
+			return def
+		}
 		return int(n)
 	case int:
 		return n
@@ -162,3 +168,37 @@ const (
 	maxOutputBytes = 50 * 1024  // 50KB
 	maxOutputLines = 2000
 )
+
+// cappedBuffer accumulates up to max bytes. Once full, further writes are
+// silently discarded. This prevents OOM when commands produce huge output
+// (e.g., cat /dev/urandom). The truncated flag tells the caller to append a notice.
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	max       int
+	truncated bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.truncated {
+		return len(p), nil // accept but discard
+	}
+	remaining := b.max - b.buf.Len()
+	if remaining <= 0 {
+		b.truncated = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		b.buf.Write(p[:remaining])
+		b.truncated = true
+		return len(p), nil // report full write to caller
+	}
+	return b.buf.Write(p)
+}
+
+func (b *cappedBuffer) String() string {
+	return b.buf.String()
+}
+
+func (b *cappedBuffer) Len() int {
+	return b.buf.Len()
+}

@@ -116,15 +116,13 @@ func (s *Store) List() ([]Summary, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		// Read file to get metadata (skip .tmp files)
-		if strings.HasSuffix(e.Name(), ".tmp") {
-			continue
-		}
 		data, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
 		if err != nil {
 			continue // skip unreadable files
 		}
-		// Parse only summary fields (fast — stops at messages)
+		// Parse into Summary struct. json.Unmarshal still reads the full file
+		// including messages (discards unknown fields). Acceptable for now.
+		// TODO: sidecar .meta.json for O(1) listing when session count grows.
 		var sum Summary
 		if err := json.Unmarshal(data, &sum); err != nil {
 			continue // skip corrupt files
