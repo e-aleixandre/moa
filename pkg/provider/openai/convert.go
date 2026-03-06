@@ -7,30 +7,37 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
-// openaiRequest is the JSON body for POST /v1/chat/completions.
-type openaiRequest struct {
-	Model          string           `json:"model"`
-	Messages       []map[string]any `json:"messages"`
-	Tools          []map[string]any `json:"tools,omitempty"`
-	Stream         bool             `json:"stream"`
-	StreamOptions  *streamOptions   `json:"stream_options,omitempty"`
-	MaxTokens      *int             `json:"max_completion_tokens,omitempty"`
-	Temperature    *float64         `json:"temperature,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+// responsesRequest is the JSON body for POST /v1/responses (or /codex/responses).
+type responsesRequest struct {
+	Model        string           `json:"model"`
+	Input        []map[string]any `json:"input"`
+	Instructions string           `json:"instructions,omitempty"`
+	Tools        []map[string]any `json:"tools,omitempty"`
+	Stream       bool             `json:"stream"`
+	Store        bool             `json:"store"`
+	MaxTokens    *int             `json:"max_output_tokens,omitempty"`
+	Temperature  *float64         `json:"temperature,omitempty"`
+	Reasoning    *reasoning       `json:"reasoning,omitempty"`
+	ToolChoice   string           `json:"tool_choice,omitempty"`
+	Include      []string         `json:"include,omitempty"`
 }
 
-type streamOptions struct {
-	IncludeUsage bool `json:"include_usage"`
+type reasoning struct {
+	Effort  string `json:"effort"`
+	Summary string `json:"summary,omitempty"`
 }
 
 func buildRequestBody(req core.Request) ([]byte, error) {
-	r := openaiRequest{
-		Model:  req.Model.ID,
-		Stream: true,
-		StreamOptions: &streamOptions{IncludeUsage: true},
+	r := responsesRequest{
+		Model:        req.Model.ID,
+		Stream:       true,
+		Store:        false,
+		Instructions: req.System,
+		ToolChoice:   "auto",
+		Include:      []string{"reasoning.encrypted_content"},
 	}
 
-	r.Messages = convertMessages(req.System, req.Messages)
+	r.Input = convertMessages(req.Messages)
 
 	if len(req.Tools) > 0 {
 		r.Tools = convertToolSpecs(req.Tools)
@@ -43,14 +50,14 @@ func buildRequestBody(req core.Request) ([]byte, error) {
 		r.Temperature = req.Options.Temperature
 	}
 
-	// Map thinking level to OpenAI reasoning_effort.
-	r.ReasoningEffort = mapReasoningEffort(req.Options.ThinkingLevel)
+	if effort := mapReasoningEffort(req.Options.ThinkingLevel); effort != "" {
+		r.Reasoning = &reasoning{Effort: effort, Summary: "auto"}
+	}
 
 	return json.Marshal(r)
 }
 
-// mapReasoningEffort maps our thinking levels to OpenAI reasoning_effort.
-// Only applicable to o-series and codex models; others ignore it.
+// mapReasoningEffort maps our thinking levels to OpenAI reasoning effort.
 func mapReasoningEffort(level string) string {
 	switch level {
 	case "off", "":
@@ -66,59 +73,39 @@ func mapReasoningEffort(level string) string {
 	}
 }
 
-// convertMessages maps core messages to OpenAI Chat Completions format.
-func convertMessages(system string, msgs []core.Message) []map[string]any {
+// convertMessages maps core messages to Responses API input format.
+func convertMessages(msgs []core.Message) []map[string]any {
 	var result []map[string]any
 
-	// System prompt as developer message (recommended for newer models).
-	if system != "" {
-		result = append(result, map[string]any{
-			"role":    "developer",
-			"content": system,
-		})
-	}
-
 	for _, msg := range msgs {
-		apiMsg := convertMessage(msg)
-		if apiMsg != nil {
-			result = append(result, apiMsg)
-		}
+		items := convertMessage(msg)
+		result = append(result, items...)
 	}
 
 	return result
 }
 
-func convertMessage(msg core.Message) map[string]any {
+func convertMessage(msg core.Message) []map[string]any {
 	switch msg.Role {
 	case "user":
-		return map[string]any{
-			"role":    "user",
-			"content": convertUserContent(msg.Content),
+		return []map[string]any{
+			{
+				"role":    "user",
+				"content": convertUserContent(msg.Content),
+			},
 		}
 
 	case "assistant":
-		m := map[string]any{
-			"role": "assistant",
-		}
-		// Extract text and tool calls separately.
-		text := extractTextParts(msg.Content)
-		toolCalls := extractToolCalls(msg.Content)
-
-		if text != "" {
-			m["content"] = text
-		}
-		if len(toolCalls) > 0 {
-			m["tool_calls"] = toolCalls
-		}
-		return m
+		return convertAssistantMessage(msg)
 
 	case "tool_result":
-		// OpenAI uses role:"tool" with tool_call_id.
 		text := extractTextParts(msg.Content)
-		return map[string]any{
-			"role":         "tool",
-			"tool_call_id": msg.ToolCallID,
-			"content":      text,
+		return []map[string]any{
+			{
+				"type":    "function_call_output",
+				"call_id": msg.ToolCallID,
+				"output":  text,
+			},
 		}
 
 	default:
@@ -126,37 +113,62 @@ func convertMessage(msg core.Message) map[string]any {
 	}
 }
 
-// convertUserContent handles text and image content blocks.
-func convertUserContent(blocks []core.Content) any {
-	// If only text, send as string for simplicity.
-	texts := make([]string, 0)
-	hasNonText := false
-	for _, b := range blocks {
-		if b.Type == "text" {
-			texts = append(texts, b.Text)
-		} else {
-			hasNonText = true
+// convertAssistantMessage converts an assistant message to Responses API items.
+// In the Responses API, assistant content is represented as individual output items
+// (message, function_call, reasoning) at the top level of the input array.
+func convertAssistantMessage(msg core.Message) []map[string]any {
+	var items []map[string]any
+
+	for _, c := range msg.Content {
+		switch c.Type {
+		case "text":
+			items = append(items, map[string]any{
+				"type": "message",
+				"role": "assistant",
+				"content": []map[string]any{
+					{"type": "output_text", "text": c.Text, "annotations": []any{}},
+				},
+				"status": "completed",
+			})
+
+		case "tool_call":
+			argsJSON, _ := json.Marshal(c.Arguments)
+			items = append(items, map[string]any{
+				"type":      "function_call",
+				"call_id":   c.ToolCallID,
+				"name":      c.ToolName,
+				"arguments": string(argsJSON),
+			})
+
+		case "thinking":
+			// Re-serialize the encrypted reasoning item if we have a signature.
+			if c.ThinkingSignature != "" {
+				var item map[string]any
+				if json.Unmarshal([]byte(c.ThinkingSignature), &item) == nil {
+					items = append(items, item)
+				}
+			}
 		}
 	}
-	if !hasNonText {
-		return strings.Join(texts, "\n")
-	}
 
-	// Mixed content → array.
+	return items
+}
+
+// convertUserContent handles text and image content blocks.
+func convertUserContent(blocks []core.Content) []map[string]any {
 	var parts []map[string]any
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
 			parts = append(parts, map[string]any{
-				"type": "text",
+				"type": "input_text",
 				"text": b.Text,
 			})
 		case "image":
 			parts = append(parts, map[string]any{
-				"type": "image_url",
-				"image_url": map[string]any{
-					"url": "data:" + b.MimeType + ";base64," + b.Data,
-				},
+				"type":      "input_image",
+				"detail":    "auto",
+				"image_url": "data:" + b.MimeType + ";base64," + b.Data,
 			})
 		}
 	}
@@ -173,42 +185,21 @@ func extractTextParts(blocks []core.Content) string {
 	return strings.Join(parts, "")
 }
 
-func extractToolCalls(blocks []core.Content) []map[string]any {
-	var calls []map[string]any
-	for _, b := range blocks {
-		if b.Type != "tool_call" {
-			continue
-		}
-		argsJSON, _ := json.Marshal(b.Arguments)
-		calls = append(calls, map[string]any{
-			"id":   b.ToolCallID,
-			"type": "function",
-			"function": map[string]any{
-				"name":      b.ToolName,
-				"arguments": string(argsJSON),
-			},
-		})
-	}
-	return calls
-}
-
 func convertToolSpecs(specs []core.ToolSpec) []map[string]any {
 	result := make([]map[string]any, 0, len(specs))
 	for _, s := range specs {
-		fn := map[string]any{
+		tool := map[string]any{
+			"type":        "function",
 			"name":        s.Name,
 			"description": s.Description,
 		}
 		if len(s.Parameters) > 0 {
 			var schema any
 			if err := json.Unmarshal(s.Parameters, &schema); err == nil {
-				fn["parameters"] = schema
+				tool["parameters"] = schema
 			}
 		}
-		result = append(result, map[string]any{
-			"type":     "function",
-			"function": fn,
-		})
+		result = append(result, tool)
 	}
 	return result
 }

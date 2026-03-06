@@ -12,50 +12,74 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
-// chunk is the SSE JSON payload from OpenAI streaming.
-type chunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+// Responses API SSE event types we handle.
+const (
+	eventOutputItemAdded    = "response.output_item.added"
+	eventOutputTextDelta    = "response.output_text.delta"
+	eventFuncCallArgsDelta  = "response.function_call_arguments.delta"
+	eventFuncCallArgsDone   = "response.function_call_arguments.done"
+	eventOutputItemDone     = "response.output_item.done"
+	eventCompleted          = "response.completed"
+	eventFailed             = "response.failed"
+	eventError              = "error"
+	// Reasoning summary events (thinking).
+	eventReasoningSummaryDelta = "response.reasoning_summary_text.delta"
+)
+
+// event is the raw SSE JSON payload from the Responses API.
+type event struct {
+	Type     string `json:"type"`
+	Item     *item  `json:"item,omitempty"`
+	Delta    string `json:"delta,omitempty"`
+	Response *struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Usage  *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+		Error *struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	} `json:"response,omitempty"`
+	// For function_call_arguments.done
+	Arguments string `json:"arguments,omitempty"`
+	// For error events
+	Message string `json:"message,omitempty"`
+	Code    string `json:"code,omitempty"`
 }
 
-// streamState tracks the evolving message across SSE chunks.
+type item struct {
+	Type      string `json:"type"` // "message", "function_call", "reasoning"
+	ID        string `json:"id,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Content   []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content,omitempty"`
+	Summary []struct {
+		Text string `json:"text"`
+	} `json:"summary,omitempty"`
+}
+
+// streamState tracks the evolving message across SSE events.
 type streamState struct {
-	message   core.Message
-	started   bool
-	toolCalls map[int]*toolCallState // index → accumulator
+	message core.Message
+	started bool
+
+	// Current function call being streamed.
+	currentCallID   string
+	currentCallName string
+	currentArgsJSON strings.Builder
+	contentIndex    int
 }
 
-type toolCallState struct {
-	id       string
-	name     string
-	argsJSON strings.Builder
-}
-
-// consumeStream parses SSE lines from OpenAI and emits normalized events.
-// Guarantees exactly one terminal event before returning.
+// consumeStream parses Responses API SSE and emits normalized AssistantEvents.
 func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent) {
 	state := &streamState{
 		message: core.Message{
@@ -63,7 +87,7 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 			Provider:  "openai",
 			Timestamp: time.Now().Unix(),
 		},
-		toolCalls: make(map[int]*toolCallState),
+		contentIndex: -1,
 	}
 	sentTerminal := false
 
@@ -95,125 +119,214 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 			return
 		}
 
-		// Skip empty lines and comments.
 		if line == "" || strings.HasPrefix(line, ":") {
 			continue
 		}
-
+		// Some Responses API events use "event:" lines — we only need "data:" lines.
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
 		data := line[6:]
-
 		if data == "[DONE]" {
-			// Finalize: build complete tool calls into message content.
-			finalizeTool(state)
-			final := state.message
-			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
-			sentTerminal = true
-			return
+			break
 		}
 
-		var c chunk
-		if err := json.Unmarshal([]byte(data), &c); err != nil {
-			continue // skip malformed chunks
-		}
-
-		if c.Model != "" {
-			state.message.Model = c.Model
-		}
-
-		// Usage (only in last chunk with stream_options.include_usage).
-		if c.Usage != nil {
-			state.message.Usage = &core.Usage{
-				Input:       c.Usage.PromptTokens,
-				Output:      c.Usage.CompletionTokens,
-				TotalTokens: c.Usage.TotalTokens,
-			}
-		}
-
-		if len(c.Choices) == 0 {
+		var ev event
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			continue
 		}
 
-		choice := c.Choices[0]
-		delta := choice.Delta
+		terminal := processEvent(state, &ev, ch)
+		if terminal {
+			sentTerminal = true
+			return
+		}
+	}
 
-		// First chunk: emit start.
+	// If we reach here without a terminal event (unlikely for well-behaved servers),
+	// emit done with what we have.
+	if !sentTerminal {
+		final := state.message
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
+		sentTerminal = true
+	}
+}
+
+// processEvent handles a single SSE event. Returns true if it emitted a terminal event.
+func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) bool {
+	switch ev.Type {
+	case eventOutputItemAdded:
+		if ev.Item == nil {
+			return false
+		}
 		if !state.started {
 			state.started = true
 			partial := state.message
 			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &partial}
 		}
+		switch ev.Item.Type {
+		case "function_call":
+			state.contentIndex++
+			state.currentCallID = ev.Item.CallID
+			state.currentCallName = ev.Item.Name
+			state.currentArgsJSON.Reset()
+			if ev.Item.Arguments != "" {
+				state.currentArgsJSON.WriteString(ev.Item.Arguments)
+			}
+			ch <- core.AssistantEvent{
+				Type:         core.ProviderEventToolCallStart,
+				ContentIndex: state.contentIndex,
+			}
+		case "message":
+			state.contentIndex++
+		case "reasoning":
+			state.contentIndex++
+		}
 
-		// Text delta.
-		if delta.Content != "" {
-			state.message.Content = appendOrUpdateText(state.message.Content, delta.Content)
+	case eventOutputTextDelta:
+		if !state.started {
+			state.started = true
+			partial := state.message
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &partial}
+		}
+		if ev.Delta != "" {
+			state.message.Content = appendOrUpdateText(state.message.Content, ev.Delta)
 			ch <- core.AssistantEvent{
 				Type:  core.ProviderEventTextDelta,
-				Delta: delta.Content,
+				Delta: ev.Delta,
 			}
 		}
 
-		// Tool call deltas.
-		for _, tc := range delta.ToolCalls {
-			tcs, exists := state.toolCalls[tc.Index]
-			if !exists {
-				tcs = &toolCallState{}
-				state.toolCalls[tc.Index] = tcs
-			}
-			if tc.ID != "" {
-				tcs.id = tc.ID
-			}
-			if tc.Function.Name != "" {
-				tcs.name = tc.Function.Name
-				// Emit tool call start.
-				ch <- core.AssistantEvent{
-					Type:         core.ProviderEventToolCallStart,
-					ContentIndex: tc.Index,
-				}
-			}
-			if tc.Function.Arguments != "" {
-				tcs.argsJSON.WriteString(tc.Function.Arguments)
-				ch <- core.AssistantEvent{
-					Type:         core.ProviderEventToolCallDelta,
-					ContentIndex: tc.Index,
-					Delta:        tc.Function.Arguments,
-				}
+	case eventReasoningSummaryDelta:
+		if ev.Delta != "" {
+			ch <- core.AssistantEvent{
+				Type:  core.ProviderEventThinkingDelta,
+				Delta: ev.Delta,
 			}
 		}
 
-		// Finish reason.
-		if choice.FinishReason != "" {
-			state.message.StopReason = choice.FinishReason
+	case eventFuncCallArgsDelta:
+		if ev.Delta != "" {
+			state.currentArgsJSON.WriteString(ev.Delta)
+			ch <- core.AssistantEvent{
+				Type:         core.ProviderEventToolCallDelta,
+				ContentIndex: state.contentIndex,
+				Delta:        ev.Delta,
+			}
 		}
-	}
-}
 
-// finalizeTool converts accumulated tool call state into message content blocks.
-// Handles sparse indices by finding the max index and iterating over the range.
-func finalizeTool(state *streamState) {
-	if len(state.toolCalls) == 0 {
-		return
-	}
-	maxIdx := 0
-	for idx := range state.toolCalls {
-		if idx > maxIdx {
-			maxIdx = idx
-		}
-	}
-	for i := 0; i <= maxIdx; i++ {
-		tc, ok := state.toolCalls[i]
-		if !ok {
-			continue
+	case eventFuncCallArgsDone:
+		argsStr := ev.Arguments
+		if argsStr == "" {
+			argsStr = state.currentArgsJSON.String()
 		}
 		var args map[string]any
-		if s := tc.argsJSON.String(); s != "" {
-			json.Unmarshal([]byte(s), &args)
+		if argsStr != "" {
+			json.Unmarshal([]byte(argsStr), &args)
 		}
 		state.message.Content = append(state.message.Content,
-			core.ToolCallContent(tc.id, tc.name, args),
+			core.ToolCallContent(state.currentCallID, state.currentCallName, args),
 		)
+		ch <- core.AssistantEvent{
+			Type:         core.ProviderEventToolCallEnd,
+			ContentIndex: state.contentIndex,
+		}
+
+	case eventOutputItemDone:
+		if ev.Item == nil {
+			return false
+		}
+		switch ev.Item.Type {
+		case "message":
+			// Reconcile final text from the done event.
+			var text string
+			for _, c := range ev.Item.Content {
+				if c.Type == "output_text" {
+					text += c.Text
+				}
+			}
+			if text != "" {
+				// Overwrite accumulated text with final authoritative version.
+				replaceText(&state.message, text)
+			}
+		case "reasoning":
+			// Store the encrypted reasoning item as thinking signature.
+			if raw, err := json.Marshal(ev.Item); err == nil {
+				var thinkingText string
+				for _, s := range ev.Item.Summary {
+					if thinkingText != "" {
+						thinkingText += "\n\n"
+					}
+					thinkingText += s.Text
+				}
+				state.message.Content = append(state.message.Content,
+					core.Content{
+						Type:              "thinking",
+						Text:              thinkingText,
+						ThinkingSignature: string(raw),
+					},
+				)
+			}
+		}
+
+	case eventCompleted:
+		if ev.Response != nil {
+			state.message.StopReason = mapStatus(ev.Response.Status)
+			if ev.Response.Usage != nil {
+				state.message.Usage = &core.Usage{
+					Input:       ev.Response.Usage.InputTokens,
+					Output:      ev.Response.Usage.OutputTokens,
+					TotalTokens: ev.Response.Usage.TotalTokens,
+				}
+			}
+			state.message.Model = ev.Response.ID
+		}
+		// If any tool calls, stop reason should be tool_use.
+		for _, c := range state.message.Content {
+			if c.Type == "tool_call" {
+				state.message.StopReason = "tool_use"
+				break
+			}
+		}
+		final := state.message
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
+		return true
+
+	case eventFailed:
+		errMsg := "response failed"
+		if ev.Response != nil && ev.Response.Error != nil {
+			errMsg = ev.Response.Error.Message
+		}
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("openai: %s", errMsg)}
+		return true
+
+	case eventError:
+		errMsg := ev.Message
+		if errMsg == "" {
+			errMsg = ev.Code
+		}
+		if errMsg == "" {
+			errMsg = "unknown error"
+		}
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("openai: %s", errMsg)}
+		return true
+	}
+
+	return false
+}
+
+func mapStatus(status string) string {
+	switch status {
+	case "completed":
+		return "end_turn"
+	case "cancelled":
+		return "cancelled"
+	case "failed":
+		return "error"
+	case "incomplete":
+		return "max_tokens"
+	default:
+		return status
 	}
 }
 
@@ -226,6 +339,17 @@ func appendOrUpdateText(blocks []core.Content, text string) []core.Content {
 		}
 	}
 	return append(blocks, core.TextContent(text))
+}
+
+// replaceText overwrites all text content with the final authoritative version.
+func replaceText(msg *core.Message, text string) {
+	for i := range msg.Content {
+		if msg.Content[i].Type == "text" {
+			msg.Content[i].Text = text
+			return
+		}
+	}
+	msg.Content = append(msg.Content, core.TextContent(text))
 }
 
 // readLine reads a single line handling long lines.

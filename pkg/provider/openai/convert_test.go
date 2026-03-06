@@ -32,18 +32,18 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 	if parsed["stream"] != true {
 		t.Fatal("stream should be true")
 	}
-
-	msgs, _ := parsed["messages"].([]any)
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	if parsed["instructions"] != "You are helpful." {
+		t.Fatalf("instructions: %v", parsed["instructions"])
 	}
 
-	first := msgs[0].(map[string]any)
-	if first["role"] != "developer" {
-		t.Fatalf("first message role: %v", first["role"])
+	input, _ := parsed["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input item, got %d", len(input))
 	}
-	if first["content"] != "You are helpful." {
-		t.Fatalf("system content: %v", first["content"])
+
+	first := input[0].(map[string]any)
+	if first["role"] != "user" {
+		t.Fatalf("first input role: %v", first["role"])
 	}
 }
 
@@ -78,9 +78,8 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 	if tool["type"] != "function" {
 		t.Fatalf("tool type: %v", tool["type"])
 	}
-	fn := tool["function"].(map[string]any)
-	if fn["name"] != "bash" {
-		t.Fatalf("tool name: %v", fn["name"])
+	if tool["name"] != "bash" {
+		t.Fatalf("tool name: %v", tool["name"])
 	}
 }
 
@@ -98,19 +97,27 @@ func TestBuildRequestBody_ReasoningEffort(t *testing.T) {
 
 	var parsed map[string]any
 	json.Unmarshal(body, &parsed)
-	if parsed["reasoning_effort"] != "high" {
-		t.Fatalf("reasoning_effort: %v", parsed["reasoning_effort"])
+	r, ok := parsed["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatal("expected reasoning object")
+	}
+	if r["effort"] != "high" {
+		t.Fatalf("effort: %v", r["effort"])
 	}
 }
 
 func TestConvertMessage_ToolResult(t *testing.T) {
 	msg := core.NewToolResultMessage("call-1", "bash", []core.Content{core.TextContent("output")}, false)
 	result := convertMessage(msg)
-	if result["role"] != "tool" {
-		t.Fatalf("role: %v", result["role"])
+	if len(result) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(result))
 	}
-	if result["tool_call_id"] != "call-1" {
-		t.Fatalf("tool_call_id: %v", result["tool_call_id"])
+	item := result[0]
+	if item["type"] != "function_call_output" {
+		t.Fatalf("type: %v", item["type"])
+	}
+	if item["call_id"] != "call-1" {
+		t.Fatalf("call_id: %v", item["call_id"])
 	}
 }
 
@@ -122,16 +129,19 @@ func TestConvertMessage_AssistantWithToolCalls(t *testing.T) {
 			core.ToolCallContent("tc-1", "bash", map[string]any{"command": "ls"}),
 		},
 	}
-	result := convertMessage(msg)
-	if result["content"] != "I'll run this" {
-		t.Fatalf("content: %v", result["content"])
+	items := convertMessage(msg)
+	// Should produce 2 items: a message item and a function_call item.
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
 	}
-	calls, ok := result["tool_calls"].([]map[string]any)
-	if !ok || len(calls) != 1 {
-		t.Fatal("expected 1 tool call")
+	if items[0]["type"] != "message" {
+		t.Fatalf("first item type: %v", items[0]["type"])
 	}
-	if calls[0]["id"] != "tc-1" {
-		t.Fatalf("tool call id: %v", calls[0]["id"])
+	if items[1]["type"] != "function_call" {
+		t.Fatalf("second item type: %v", items[1]["type"])
+	}
+	if items[1]["call_id"] != "tc-1" {
+		t.Fatalf("call_id: %v", items[1]["call_id"])
 	}
 }
 
