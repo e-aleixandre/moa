@@ -72,9 +72,11 @@ type appModel struct {
 	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
 
 	// Components
-	input  inputModel
-	status statusModel
-	picker pickerModel
+	input      inputModel
+	status     statusModel
+	picker     pickerModel
+	topBar     *StatusLine
+	bottomBar  *StatusLine
 
 	// Session persistence
 	sessionStore *session.Store   // nil if persistence is disabled
@@ -133,24 +135,35 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		}
 	})
 
-	return appModel{
-		s:            &state{showThinking: true},
-		agent:        ag,
-		renderer:     newRenderer(80),
-		eventCh:      eventCh,
-		quit:         quit,
-		unsub:        unsub,
-		baseCtx:      ctx,
-		runGenAddr:   runGenAddr,
-		input:           newInput(),
-		status:          newStatus(),
-		picker:          newPicker(),
-		sessionStore:    cfg.SessionStore,
-		session:         cfg.Session,
-		modelName:       cfg.ModelName,
+	m := appModel{
+		s:              &state{showThinking: true},
+		agent:          ag,
+		renderer:       newRenderer(80),
+		eventCh:        eventCh,
+		quit:           quit,
+		unsub:          unsub,
+		baseCtx:        ctx,
+		runGenAddr:     runGenAddr,
+		input:          newInput(),
+		status:         newStatus(),
+		picker:         newPicker(),
+		topBar:         NewStatusLine(statusLineStyle),
+		bottomBar:      NewStatusLine(statusLineStyle),
+		sessionStore:   cfg.SessionStore,
+		session:        cfg.Session,
+		modelName:      cfg.ModelName,
 		providerFactory: cfg.ProviderFactory,
-		scopedModels:    make(map[string]bool),
+		scopedModels:   make(map[string]bool),
 	}
+
+	// Initialize status line segments.
+	if cfg.ModelName != "" {
+		m.topBar.UpdateModelSegment(cfg.ModelName)
+	}
+	m.topBar.UpdateThinkingSegment(ag.ThinkingLevel())
+	m.topBar.UpdateContextSegment(0)
+
+	return m
 }
 
 // isStructuralEvent returns true for events that must not be dropped.
@@ -190,15 +203,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.s.initialized {
 			m.s.initialized = true
 
-			// Show model info on startup.
-			if m.modelName != "" {
-				m.s.blocks = append(m.s.blocks, messageBlock{
-					Type: "status", Raw: "model: " + m.modelName,
-				})
-			}
-
 			if m.session != nil && len(m.session.Messages) > 0 {
 				m.rebuildFromMessages(m.session.Messages)
+				m.refreshContextSegment()
 			}
 
 			if len(m.s.blocks) > 0 {
@@ -324,6 +331,11 @@ func (m appModel) View() string {
 		sections = append(sections, sv)
 	}
 
+	// Top status bar (above input)
+	if tv := m.topBar.View(m.width); tv != "" {
+		sections = append(sections, tv)
+	}
+
 	// Model picker (replaces input when active)
 	if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
@@ -331,6 +343,11 @@ func (m appModel) View() string {
 		}
 	} else if iv := m.input.View(); iv != "" {
 		sections = append(sections, iv)
+	}
+
+	// Bottom status bar (below input)
+	if bv := m.bottomBar.View(m.width); bv != "" {
+		sections = append(sections, bv)
 	}
 
 	if len(sections) == 0 {
@@ -395,6 +412,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.agent.Reconfigure(nil, model, level); err != nil {
 			return m, nil
 		}
+		m.topBar.UpdateThinkingSegment(level)
 		m.status.SetText("thinking: " + level)
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return clearThinkingStatusMsg{}
@@ -637,6 +655,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	m.s.streamCache = ""
 	m.status.SetText("")
 	m.input.SetEnabled(true)
+	m.refreshContextSegment()
 
 	if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
@@ -892,6 +911,8 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 		name = newModel.ID
 	}
 	m.modelName = name
+	m.topBar.UpdateModelSegment(name)
+	m.refreshContextSegment()
 	m.s.blocks = append(m.s.blocks, messageBlock{
 		Type: "status", Raw: fmt.Sprintf("✓ Switched to %s (%s)", name, newModel.Provider),
 	})
@@ -971,6 +992,7 @@ func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 		return m, m.flushBlocks(len(m.s.blocks))
 	}
 
+	m.topBar.UpdateThinkingSegment(level)
 	m.s.blocks = append(m.s.blocks, messageBlock{
 		Type: "status", Raw: fmt.Sprintf("✓ Thinking level: %s", level),
 	})
@@ -1037,6 +1059,23 @@ func (m *appModel) cleanup() {
 		}
 		m.agent.Abort()
 	})
+}
+
+// refreshContextSegment recalculates the context usage percentage and updates
+// the top bar segment. Called after agent runs and model switches.
+func (m *appModel) refreshContextSegment() {
+	if m.agent == nil {
+		return
+	}
+	model := m.agent.Model()
+	if model.MaxInput <= 0 {
+		m.topBar.Remove(SegmentContext)
+		return
+	}
+	msgs := m.agent.Messages()
+	estimate := core.EstimateContextTokens(msgs, "", nil, m.agent.CompactionEpoch())
+	pct := (estimate.Tokens * 100) / model.MaxInput
+	m.topBar.UpdateContextSegment(pct)
 }
 
 // thinkingLevels defines the cycle order for Shift+Tab.
