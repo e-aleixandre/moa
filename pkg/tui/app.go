@@ -38,6 +38,7 @@ type state struct {
 	running      bool           // agent is running (tick should continue)
 	streamState  streamState
 	showThinking bool      // toggle thinking visibility (Ctrl+T)
+	expandMode   bool      // full-screen conversation pager is active
 	initialized  bool      // first WindowSizeMsg processed (one-shot bottom push done)
 	runGen       uint64    // incremented on each run; events from old runs are ignored
 	cleanupOnce  sync.Once // idempotent cleanup
@@ -69,6 +70,7 @@ type appModel struct {
 	// Components
 	input  inputModel
 	status statusModel
+	expand expandModel
 
 	// Layout
 	width  int
@@ -115,6 +117,7 @@ func New(ag *agent.Agent, ctx context.Context) appModel {
 		runGenAddr: runGenAddr,
 		input:      newInput(),
 		status:     newStatus(),
+		expand:     newExpand(),
 	}
 }
 
@@ -140,6 +143,32 @@ func (m appModel) Init() tea.Cmd {
 
 // Update is the main message router.
 func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Expand mode: route everything to the pager (except resize and agent events)
+	if m.s.expandMode {
+		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			m.width = msg.Width
+			m.height = msg.Height
+			m.expand.SetSize(msg.Width, msg.Height)
+			return m, nil
+		case tea.KeyMsg:
+			if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD {
+				m.cleanup()
+				return m, tea.Quit
+			}
+			shouldClose, cmd := m.expand.Update(msg)
+			if shouldClose {
+				m.s.expandMode = false
+				return m, tea.ClearScreen
+			}
+			return m, cmd
+		default:
+			// Mouse events → viewport scroll
+			_, cmd := m.expand.Update(msg)
+			return m, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -199,10 +228,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case expandDoneMsg:
-		// Returned from pager, nothing to restore
-		return m, nil
-
 	case clearScreenDoneMsg:
 		// Clear command finished, nothing to do
 		return m, nil
@@ -232,9 +257,13 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the active zone only. Completed blocks are in terminal scrollback
 // (flushed via tea.Println). View() shows only unflushed blocks + streaming + status + input.
+// In expand mode, delegates to the full-screen pager.
 func (m appModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+	if m.s.expandMode {
+		return m.expand.View()
 	}
 	var sections []string
 
@@ -318,15 +347,15 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlO:
-		// Expand mode: show full conversation in pager
-		if m.s.running {
-			// Can't expand while agent is running (would pause event processing)
-			return m, nil
-		}
+		// Expand mode: full-screen conversation pager
 		if len(m.s.blocks) == 0 {
 			return m, nil
 		}
-		return m, expandConversation(m.s.blocks, m.renderer, m.s.showThinking)
+		m.s.expandMode = true
+		m.expand.SetSize(m.width, m.height)
+		content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
+		m.expand.SetContent(content)
+		return m, tea.ClearScreen
 
 	case tea.KeyEnter:
 		if m.s.running {
