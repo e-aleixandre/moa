@@ -35,7 +35,6 @@ type state struct {
 	flushedCount        int            // blocks confirmed in scrollback (hidden from View)
 	flushScheduledCount int            // blocks scheduled for tea.Println (not yet confirmed)
 	flushEpoch          int            // incremented on /clear to invalidate stale flushDoneMsg
-	resumeCache         string         // pre-rendered resumed blocks (cleared on first flush)
 	streamText   string         // current streaming assistant text
 	thinkingText string         // current thinking text
 	streamCache  string         // cached glamour render of streamText (updated by renderTick)
@@ -174,12 +173,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			if m.session != nil && len(m.session.Messages) > 0 {
 				m.rebuildFromMessages(m.session.Messages)
-				// Render once for View() display, mark as already scheduled
-				// so flushBlocks won't try to tea.Println them (which causes jumps).
-				// New blocks added after this point get flushed normally.
-				m.s.resumeCache = renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
+				content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
 				m.s.flushedCount = len(m.s.blocks)
 				m.s.flushScheduledCount = len(m.s.blocks)
+				return m, tea.Println(content)
 			}
 		}
 		return m, nil
@@ -226,7 +223,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.upTo = len(m.s.blocks)
 			}
 			m.s.flushedCount = msg.upTo
-			m.s.resumeCache = ""
 		}
 		return m, nil
 
@@ -272,10 +268,6 @@ func (m appModel) View() string {
 		return "Loading..."
 	}
 	var sections []string
-
-	if m.s.resumeCache != "" {
-		sections = append(sections, m.s.resumeCache)
-	}
 
 	for _, block := range m.s.blocks[m.s.flushedCount:] {
 		if rendered := renderSingleBlock(block, m.renderer, m.s.showThinking); rendered != "" {
@@ -692,7 +684,6 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.flushedCount = 0
 		m.s.flushScheduledCount = 0
 		m.s.flushEpoch++
-		m.s.resumeCache = ""
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
