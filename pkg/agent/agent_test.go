@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -929,6 +930,205 @@ func TestSendAfterLoadMessages(t *testing.T) {
 	}
 	if msgs[3].Content[0].Text != "continued" {
 		t.Errorf("msgs[3] = %q, want 'continued'", msgs[3].Content[0].Text)
+	}
+}
+
+// --- Compaction tests ---
+
+// largeTextResponse returns a handler that streams a large text response
+// with a given Usage to simulate a big context.
+func largeTextResponse(text string, usage *core.Usage) func(req core.Request) (<-chan core.AssistantEvent, error) {
+	return func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 10)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role:       "assistant",
+				Content:    []core.Content{core.TextContent(text)},
+				StopReason: "end_turn",
+				Timestamp:  time.Now().Unix(),
+				Usage:      usage,
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, ContentIndex: 0, Delta: text}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+}
+
+func TestLoop_CompactionTriggered(t *testing.T) {
+	// Use a small context window (1000 tokens) so small messages trigger compaction.
+	// The large response (~500 tokens text) fills the window quickly.
+	bigText := strings.Repeat("x", 2000) // 2000 chars ≈ 500 tokens
+
+	prov := NewMockProvider(
+		// Turn 1: large response.
+		largeTextResponse(bigText, &core.Usage{TotalTokens: 900}),
+		// Summarization call from compaction.
+		simpleTextResponse("## Goal\nTest compaction"),
+		// Turn 2: normal response after compaction.
+		simpleTextResponse("second response"),
+	)
+
+	reg := core.NewRegistry()
+	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
+	ag, err := New(AgentConfig{
+		Provider:            prov,
+		Model:               core.Model{ID: "test", MaxInput: 1000},
+		Compaction:          &settings,
+		Tools:               reg,
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Track compaction events.
+	var compactionEvents []core.AgentEvent
+	var mu sync.Mutex
+	ag.Subscribe(func(e core.AgentEvent) {
+		if e.Type == core.AgentEventCompactionStart || e.Type == core.AgentEventCompactionEnd {
+			mu.Lock()
+			compactionEvents = append(compactionEvents, e)
+			mu.Unlock()
+		}
+	})
+
+	// Turn 1.
+	msgs, err := ag.Run(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d", len(msgs))
+	}
+
+	// Turn 2: should trigger compaction before the provider call.
+	msgs, err = ag.Send(context.Background(), "continue")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify compaction happened: first message should be compaction_summary.
+	if len(msgs) == 0 {
+		t.Fatal("expected messages")
+	}
+	if msgs[0].Role != "compaction_summary" {
+		t.Fatalf("first message should be compaction_summary, got %s", msgs[0].Role)
+	}
+
+	// Verify epoch incremented.
+	if ag.CompactionEpoch() != 1 {
+		t.Fatalf("expected epoch 1, got %d", ag.CompactionEpoch())
+	}
+
+	// Verify compaction events fired (async — poll).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(compactionEvents)
+		mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(compactionEvents) < 2 {
+		t.Fatalf("expected at least 2 compaction events, got %d", len(compactionEvents))
+	}
+	if compactionEvents[0].Type != core.AgentEventCompactionStart {
+		t.Fatalf("expected compaction_start, got %s", compactionEvents[0].Type)
+	}
+	if compactionEvents[1].Type != core.AgentEventCompactionEnd {
+		t.Fatalf("expected compaction_end, got %s", compactionEvents[1].Type)
+	}
+	if compactionEvents[1].Compaction == nil {
+		t.Fatal("expected CompactionPayload")
+	}
+}
+
+func TestLoop_CompactionDisabled(t *testing.T) {
+	prov := NewMockProvider(
+		simpleTextResponse("response"),
+	)
+	reg := core.NewRegistry()
+	disabled := core.CompactionSettings{Enabled: false}
+	ag, err := New(AgentConfig{
+		Provider:            prov,
+		Model:               core.Model{ID: "test", MaxInput: 200_000},
+		Compaction:          &disabled,
+		Tools:               reg,
+		MaxTurns:            10,
+		MaxRunDuration:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ag.Run(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ag.CompactionEpoch() != 0 {
+		t.Fatalf("compaction should not have fired, epoch=%d", ag.CompactionEpoch())
+	}
+}
+
+func TestDefaultConvertToLLM_CompactionSummary(t *testing.T) {
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "compaction_summary", Content: []core.Content{core.TextContent("summary text")}}},
+		core.WrapMessage(core.NewUserMessage("hello")),
+		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("hi")}}),
+	}
+	llm := defaultConvertToLLM(msgs)
+	if len(llm) != 3 {
+		t.Fatalf("expected 3 LLM messages, got %d", len(llm))
+	}
+	// First should be converted to user role with wrapper.
+	if llm[0].Role != "user" {
+		t.Fatalf("expected user role for summary, got %s", llm[0].Role)
+	}
+	text := llm[0].Content[0].Text
+	if !contains(text, "<summary>") || !contains(text, "summary text") {
+		t.Fatalf("expected wrapped summary, got: %s", text)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLoadState(t *testing.T) {
+	prov := NewMockProvider(simpleTextResponse("ok"))
+	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
+
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "compaction_summary", Content: []core.Content{core.TextContent("old summary")}}},
+		core.WrapMessage(core.NewUserMessage("old msg")),
+	}
+	if err := ag.LoadState(msgs, 3); err != nil {
+		t.Fatal(err)
+	}
+	if ag.CompactionEpoch() != 3 {
+		t.Fatalf("expected epoch 3, got %d", ag.CompactionEpoch())
+	}
+	loaded := ag.Messages()
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(loaded))
 	}
 }
 

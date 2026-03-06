@@ -191,6 +191,181 @@ func TestResultConstructors(t *testing.T) {
 	}
 }
 
+func TestEstimateTokens_Text(t *testing.T) {
+	m := NewUserMessage("hello world") // 11 chars → ceil(11/4) = 3
+	got := EstimateTokens(m)
+	if got != 3 {
+		t.Fatalf("expected 3, got %d", got)
+	}
+}
+
+func TestEstimateTokens_ToolCall(t *testing.T) {
+	m := Message{
+		Role: "assistant",
+		Content: []Content{
+			ToolCallContent("id-1", "bash", map[string]any{"command": "ls -la"}),
+		},
+	}
+	got := EstimateTokens(m)
+	// "bash" (4) + JSON of {"command":"ls -la"} (~20 chars) → ~24 chars → 6 tokens
+	if got < 5 || got > 10 {
+		t.Fatalf("expected 5-10, got %d", got)
+	}
+}
+
+func TestEstimateTokens_Image(t *testing.T) {
+	m := Message{
+		Role:    "user",
+		Content: []Content{ImageContent("base64...", "image/png")},
+	}
+	got := EstimateTokens(m)
+	if got != 1200 { // 4800/4
+		t.Fatalf("expected 1200, got %d", got)
+	}
+}
+
+func TestEstimateTokens_Empty(t *testing.T) {
+	m := Message{Role: "user"}
+	got := EstimateTokens(m)
+	if got != 0 {
+		t.Fatalf("expected 0, got %d", got)
+	}
+}
+
+func TestEstimateTokens_ToolResult(t *testing.T) {
+	m := NewToolResultMessage("call-1", "bash", []Content{TextContent("output text")}, false)
+	got := EstimateTokens(m)
+	// "output text" (11) + "bash" (4) + "call-1" (6) = 21 chars → ceil(21/4) = 6
+	want := (11 + 4 + 6 + 3) / 4
+	if got != want {
+		t.Fatalf("expected %d, got %d", want, got)
+	}
+}
+
+func TestEstimateContextTokens_NoUsage(t *testing.T) {
+	msgs := []AgentMessage{
+		WrapMessage(NewUserMessage("hello world")),          // 11 chars → 3
+		WrapMessage(Message{Role: "assistant", Content: []Content{TextContent("hi there!")}}), // 9 chars → 3
+	}
+	est := EstimateContextTokens(msgs, "system prompt here", nil, 0)
+	// Messages: 3 + 3 = 6. System prompt: "system prompt here" (18 chars) → 5.
+	if est.Tokens != est.TrailingTokens+est.OverheadTokens {
+		t.Fatalf("tokens mismatch: total=%d, trailing=%d, overhead=%d", est.Tokens, est.TrailingTokens, est.OverheadTokens)
+	}
+	if est.UsageTokens != 0 {
+		t.Fatalf("expected UsageTokens=0, got %d", est.UsageTokens)
+	}
+	if est.OverheadTokens == 0 {
+		t.Fatal("expected non-zero overhead")
+	}
+}
+
+func TestEstimateContextTokens_WithUsage(t *testing.T) {
+	msgs := []AgentMessage{
+		WrapMessage(NewUserMessage("first")),
+		{
+			Message: Message{
+				Role:    "assistant",
+				Content: []Content{TextContent("response")},
+				Usage:   &Usage{Input: 100, Output: 50},
+			},
+			Custom: map[string]any{"compaction_epoch": 0},
+		},
+		WrapMessage(NewUserMessage("second")), // 6 chars → 2
+	}
+	est := EstimateContextTokens(msgs, "sys", nil, 0)
+	if est.UsageTokens != 150 { // Input(100) + Output(50)
+		t.Fatalf("expected UsageTokens=150, got %d", est.UsageTokens)
+	}
+	if est.TrailingTokens != 2 { // "second" = 6 chars → 2
+		t.Fatalf("expected TrailingTokens=2, got %d", est.TrailingTokens)
+	}
+	if est.Tokens != 152 { // 150 + 2
+		t.Fatalf("expected Tokens=152, got %d", est.Tokens)
+	}
+}
+
+func TestEstimateContextTokens_StaleUsage(t *testing.T) {
+	msgs := []AgentMessage{
+		WrapMessage(NewUserMessage("first")),
+		{
+			Message: Message{
+				Role:    "assistant",
+				Content: []Content{TextContent("old response")},
+				Usage:   &Usage{TotalTokens: 99999}, // stale
+			},
+			Custom: map[string]any{"compaction_epoch": 0},
+		},
+		WrapMessage(NewUserMessage("second")),
+	}
+	// Epoch 1 doesn't match the assistant's epoch 0 → usage ignored.
+	est := EstimateContextTokens(msgs, "", nil, 1)
+	if est.UsageTokens != 0 {
+		t.Fatalf("expected stale usage to be ignored, got UsageTokens=%d", est.UsageTokens)
+	}
+	if est.TrailingTokens == 0 {
+		t.Fatal("expected non-zero trailing (all estimated)")
+	}
+}
+
+func TestEstimateContextTokens_ToolSpecOverhead(t *testing.T) {
+	specs := []ToolSpec{
+		{Name: "bash", Description: "Execute commands", Parameters: json.RawMessage(`{"type":"object"}`)},
+	}
+	est := EstimateContextTokens(nil, "system", specs, 0)
+	if est.OverheadTokens == 0 {
+		t.Fatal("expected overhead from system prompt + tool specs")
+	}
+	// Just system: "system" (6 chars) → 2.
+	// Tool: "bash" (4) + "Execute commands" (16) + `{"type":"object"}` (17) → 37 chars → 10.
+	// Total overhead ≈ 12.
+	if est.OverheadTokens < 10 {
+		t.Fatalf("expected overhead >= 10, got %d", est.OverheadTokens)
+	}
+}
+
+func TestShouldCompact(t *testing.T) {
+	s := CompactionSettings{Enabled: true, ReserveTokens: 16384, KeepRecent: 20000}
+
+	// Below threshold → false
+	if ShouldCompact(100_000, 200_000, s) {
+		t.Fatal("100K < 200K-16K, should not compact")
+	}
+	// Above threshold → true
+	if !ShouldCompact(190_000, 200_000, s) {
+		t.Fatal("190K > 200K-16K, should compact")
+	}
+	// Exactly at threshold → false
+	if ShouldCompact(183_616, 200_000, s) {
+		t.Fatal("at threshold, should not compact")
+	}
+	// Just above → true
+	if !ShouldCompact(183_617, 200_000, s) {
+		t.Fatal("just above threshold, should compact")
+	}
+}
+
+func TestShouldCompact_Disabled(t *testing.T) {
+	s := CompactionSettings{Enabled: false, ReserveTokens: 16384}
+	if ShouldCompact(999_999, 200_000, s) {
+		t.Fatal("disabled should always return false")
+	}
+}
+
+func TestShouldCompact_ZeroWindow(t *testing.T) {
+	s := CompactionSettings{Enabled: true, ReserveTokens: 16384}
+	if ShouldCompact(100_000, 0, s) {
+		t.Fatal("zero window should return false")
+	}
+}
+
+func TestShouldCompact_ReserveExceedsWindow(t *testing.T) {
+	s := CompactionSettings{Enabled: true, ReserveTokens: 300_000}
+	if ShouldCompact(100_000, 200_000, s) {
+		t.Fatal("reserve >= window should return false")
+	}
+}
+
 func TestAssistantEvent_IsTerminal(t *testing.T) {
 	tests := []struct {
 		typ  string

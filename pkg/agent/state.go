@@ -4,6 +4,7 @@ import "github.com/ealeixandre/moa/pkg/core"
 
 // AgentState holds the mutable state during an agent run.
 type AgentState struct {
-	Messages []core.AgentMessage
-	Model    core.Model
+	Messages        []core.AgentMessage
+	Model           core.Model
+	CompactionEpoch int // incremented after each compaction; invalidates stale Usage
 }

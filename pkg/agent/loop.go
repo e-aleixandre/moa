@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ealeixandre/moa/pkg/compaction"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -17,21 +18,6 @@ type Hooks interface {
 	FireContext(ctx context.Context, msgs []core.AgentMessage) []core.AgentMessage
 	FireObserver(event core.AgentEvent)
 }
-
-// noopHooks is the default when no extensions are loaded.
-type noopHooks struct{}
-
-func (noopHooks) FireBeforeAgentStart(context.Context) []core.AgentMessage      { return nil }
-func (noopHooks) FireToolCall(context.Context, string, map[string]any) *core.ToolCallDecision {
-	return nil
-}
-func (noopHooks) FireToolResult(_ context.Context, _ string, r core.Result, _ bool) core.Result {
-	return r
-}
-func (noopHooks) FireContext(_ context.Context, msgs []core.AgentMessage) []core.AgentMessage {
-	return msgs
-}
-func (noopHooks) FireObserver(core.AgentEvent) {}
 
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
@@ -50,6 +36,9 @@ type loopConfig struct {
 
 	// Custom conversion (nil = default)
 	convertToLLM func([]core.AgentMessage) []core.Message
+
+	// Compaction
+	compaction *core.CompactionSettings
 }
 
 // emitLifecycle emits a lifecycle event to both the emitter (subscribers)
@@ -104,6 +93,42 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			return loopErr
 		}
 
+		// === COMPACTION CHECK ===
+		// Invariant: runs once per iteration, before provider call, after
+		// prior turn is fully committed to cfg.state.Messages.
+		if cfg.compaction != nil && cfg.compaction.Enabled && cfg.model.MaxInput > 0 {
+			estimate := core.EstimateContextTokens(
+				cfg.state.Messages, cfg.systemPrompt, cfg.tools.Specs(), cfg.state.CompactionEpoch,
+			)
+			if core.ShouldCompact(estimate.Tokens, cfg.model.MaxInput, *cfg.compaction) {
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
+
+				result, compacted, err := compaction.Compact(
+					ctx, cfg.provider, cfg.model, cfg.streamOpts,
+					cfg.state.Messages, estimate.Tokens, cfg.model.MaxInput, *cfg.compaction,
+				)
+				if err != nil {
+					// Non-fatal: log and continue with full context.
+					emitLifecycle(cfg, core.AgentEvent{
+						Type: core.AgentEventCompactionEnd, Error: err,
+					})
+				} else if result != nil {
+					cfg.state.Messages = compacted
+					cfg.state.CompactionEpoch++
+					emitLifecycle(cfg, core.AgentEvent{
+						Type: core.AgentEventCompactionEnd,
+						Compaction: &core.CompactionPayload{
+							Summary:       result.Summary,
+							TokensBefore:  result.TokensBefore,
+							TokensAfter:   result.TokensAfter,
+							ReadFiles:     result.ReadFiles,
+							ModifiedFiles: result.ModifiedFiles,
+						},
+					})
+				}
+			}
+		}
+
 		// Guardrail: max turns
 		turnCount++
 		if cfg.maxTurns > 0 && turnCount > cfg.maxTurns {
@@ -115,9 +140,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		messages := cfg.hooks.FireContext(ctx, cfg.state.Messages)
 
 		// Convert to LLM messages (filter custom messages)
-		llmMessages := defaultConvertToLLM(messages)
+		var llmMessages []core.Message
 		if cfg.convertToLLM != nil {
 			llmMessages = cfg.convertToLLM(messages)
+		} else {
+			llmMessages = defaultConvertToLLM(messages)
 		}
 
 		inTurn = true
@@ -146,7 +173,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			return loopErr
 		}
 
-		cfg.state.Messages = append(cfg.state.Messages, core.WrapMessage(*assistantMsg))
+		// Stamp assistant message with current compaction epoch for usage tracking.
+		wrapped := core.WrapMessage(*assistantMsg)
+		if cfg.state.CompactionEpoch > 0 {
+			if wrapped.Custom == nil {
+				wrapped.Custom = make(map[string]any)
+			}
+			wrapped.Custom["compaction_epoch"] = cfg.state.CompactionEpoch
+		}
+		cfg.state.Messages = append(cfg.state.Messages, wrapped)
 
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
@@ -251,9 +286,26 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 }
 
 // defaultConvertToLLM filters AgentMessages to LLM-compatible Messages.
+// Converts compaction_summary to a user message with a wrapper.
 func defaultConvertToLLM(msgs []core.AgentMessage) []core.Message {
 	var result []core.Message
 	for _, m := range msgs {
+		if m.Role == "compaction_summary" {
+			text := ""
+			for _, c := range m.Content {
+				if c.Type == "text" {
+					text += c.Text
+				}
+			}
+			result = append(result, core.Message{
+				Role: "user",
+				Content: []core.Content{core.TextContent(
+					"The conversation history before this point was compacted into the following summary:\n\n<summary>\n" + text + "\n</summary>",
+				)},
+				Timestamp: m.Timestamp,
+			})
+			continue
+		}
 		if m.IsLLMMessage() {
 			result = append(result, m.Message)
 		}
