@@ -29,15 +29,18 @@ const (
 // All mutable conversational state lives here behind a pointer.
 // Accessed only from the Bubble Tea goroutine (single-threaded).
 type state struct {
-	blocks        []messageBlock // conversation history, raw content
-	streamText    string         // current streaming assistant text
-	thinkingText  string         // current thinking text
-	dirty         bool           // streamText changed since last render tick
-	running       bool           // agent is running (tick should continue)
-	streamState   streamState
-	showThinking  bool      // toggle thinking visibility (Ctrl+T)
-	runGen        uint64    // incremented on each run; events from old runs are ignored
-	cleanupOnce   sync.Once // idempotent cleanup
+	blocks       []messageBlock // conversation history, raw content
+	flushedCount int            // blocks [0..flushedCount) are in terminal scrollback
+	streamText   string         // current streaming assistant text
+	thinkingText string         // current thinking text
+	streamCache  string         // cached glamour render of streamText (updated by renderTick)
+	dirty        bool           // streamText changed since last render tick
+	running      bool           // agent is running (tick should continue)
+	streamState  streamState
+	showThinking bool      // toggle thinking visibility (Ctrl+T)
+	initialized  bool      // first WindowSizeMsg processed (one-shot bottom push done)
+	runGen       uint64    // incremented on each run; events from old runs are ignored
+	cleanupOnce  sync.Once // idempotent cleanup
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -64,28 +67,19 @@ type appModel struct {
 	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
 
 	// Components
-	conversation conversationModel
-	input        inputModel
-	status       statusModel
+	input  inputModel
+	status statusModel
 
 	// Layout
 	width  int
 	height int
-
-	// Config (immutable after creation)
-	liteMode bool // skip streaming render, show only completed messages
-}
-
-// Options configures the TUI.
-type Options struct {
-	LiteMode bool // skip streaming render to reduce CPU usage
 }
 
 // New creates the TUI model. The agent must already be configured.
 // ctx is the parent context for agent runs (e.g., signal-aware context from main).
 // Subscribes to agent events internally — the caller should NOT register
 // their own subscriber when using TUI mode.
-func New(ag *agent.Agent, ctx context.Context, opts Options) appModel {
+func New(ag *agent.Agent, ctx context.Context) appModel {
 	eventCh := make(chan taggedEvent, 1024)
 	quit := make(chan struct{})
 	runGenAddr := &atomic.Uint64{} // shared with subscriber
@@ -111,18 +105,16 @@ func New(ag *agent.Agent, ctx context.Context, opts Options) appModel {
 	})
 
 	return appModel{
-		s:            &state{showThinking: true},
-		agent:        ag,
-		renderer:     newRenderer(80),
-		eventCh:      eventCh,
-		quit:         quit,
-		unsub:        unsub,
-		baseCtx:      ctx,
-		runGenAddr:   runGenAddr,
-		liteMode:     opts.LiteMode,
-		conversation: newConversation(),
-		input:        newInput(),
-		status:       newStatus(),
+		s:          &state{showThinking: true},
+		agent:      ag,
+		renderer:   newRenderer(80),
+		eventCh:    eventCh,
+		quit:       quit,
+		unsub:      unsub,
+		baseCtx:    ctx,
+		runGenAddr: runGenAddr,
+		input:      newInput(),
+		status:     newStatus(),
 	}
 }
 
@@ -148,22 +140,29 @@ func (m appModel) Init() tea.Cmd {
 
 // Update is the main message router.
 func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.renderer.SetWidth(msg.Width)
-		// Layout: viewport gets all height minus input (3 lines) and status (1 line) and gap
-		vpHeight := msg.Height - 5
-		if vpHeight < 1 {
-			vpHeight = 1
-		}
-		m.conversation.SetSize(msg.Width, vpHeight)
 		m.input.SetWidth(msg.Width)
 		m.status.SetWidth(msg.Width)
-		m.refreshViewport()
+		// Invalidate stream cache so next tick re-renders with new width
+		if m.s.streamText != "" {
+			m.s.dirty = true
+		}
+		// One-shot: on first WindowSizeMsg, push blank lines to scrollback
+		// so the input appears at the bottom of the terminal.
+		// These lines live in scrollback (via tea.Println), outside BT's
+		// managed area — they don't interfere with future rendering.
+		if !m.s.initialized {
+			m.s.initialized = true
+			// Input is ~5 lines (textarea 3 + border/padding). Leave room.
+			padding := msg.Height - 5
+			if padding > 0 {
+				return m, tea.Println(strings.Repeat("\n", padding))
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -171,50 +170,47 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentEventMsg:
 		// Ignore late events from previous runs
+		var flushCmd tea.Cmd
 		if msg.RunGen == m.s.runGen {
-			m.handleAgentEvent(msg.Event)
+			flushCmd = m.handleAgentEvent(msg.Event)
 		}
-		return m, m.waitForEvent()
+		return m, tea.Batch(flushCmd, m.waitForEvent())
 
 	case agentDoneMsg:
 		// Channel closed or quit signaled. Don't re-subscribe.
 		return m, nil
 
 	case agentRunResultMsg:
-		// Ignore results from previous runs (e.g., aborted run finishing late)
-		if msg.RunGen != m.s.runGen {
-			return m, nil
-		}
-		// Bump generation so any late-arriving events from this run are ignored.
-		// Both the local gen and the atomic (shared with subscriber) must be bumped
-		// so events still being enqueued by the subscriber are tagged as stale.
-		m.s.runGen++
-		m.runGenAddr.Store(m.s.runGen)
-		// Rebuild UI from source-of-truth messages.
-		m.reconcileFromMessages(msg.Messages)
-		if msg.Err != nil && msg.Err != context.Canceled {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: "Error: " + msg.Err.Error(),
-			})
-		}
-		m.s.running = false
-		m.s.streamState = stateIdle
-		m.s.streamText = ""
-		m.s.thinkingText = ""
-		m.status.SetText("")
-		m.input.SetEnabled(true)
-		m.refreshViewport()
-		return m, nil
+		return m.handleRunResult(msg)
 
 	case renderTickMsg:
 		if m.s.dirty {
-			m.refreshViewport()
+			if m.s.streamText != "" {
+				m.s.streamCache = m.renderer.RenderMarkdown(m.s.streamText)
+			} else {
+				m.s.streamCache = ""
+			}
 			m.s.dirty = false
 		}
 		// Tick runs while agent is running (not just stateStreaming),
 		// so it survives tool_exec transitions.
 		if m.s.running {
 			return m, renderTick()
+		}
+		return m, nil
+
+	case expandDoneMsg:
+		// Returned from pager, nothing to restore
+		return m, nil
+
+	case clearScreenDoneMsg:
+		// Clear command finished, nothing to do
+		return m, nil
+
+	case clearThinkingStatusMsg:
+		// Clear the ephemeral thinking toggle feedback
+		if !m.s.running {
+			m.status.SetText("")
 		}
 		return m, nil
 
@@ -225,36 +221,65 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Pass through to sub-components
-	var cmd tea.Cmd
 	if m.s.streamState == stateIdle {
+		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
-		cmds = append(cmds, cmd)
+		return m, cmd
 	}
-	// Always propagate to conversation for scroll (PgUp/PgDn/mouse)
-	m.conversation, cmd = m.conversation.Update(msg)
-	cmds = append(cmds, cmd)
 
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
-// View renders the full TUI layout.
+// View renders the active zone only. Completed blocks are in terminal scrollback
+// (flushed via tea.Println). View() shows only unflushed blocks + streaming + status + input.
 func (m appModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
 	}
 	var sections []string
-	sections = append(sections, m.conversation.View())
+
+	// Unflushed completed blocks (tool_start/tool_end during a run, before flush)
+	for _, block := range m.s.blocks[m.s.flushedCount:] {
+		if rendered := renderSingleBlock(block, m.renderer, m.s.showThinking); rendered != "" {
+			sections = append(sections, rendered)
+		}
+	}
+
+	// Streaming thinking (if visible and active)
+	if m.s.thinkingText != "" && m.s.showThinking {
+		wrapWidth := m.width - 2
+		if wrapWidth < 20 {
+			wrapWidth = 20
+		}
+		styled := thinkingStyle.Width(wrapWidth).PaddingLeft(2).Render(m.s.thinkingText)
+		sections = append(sections, styled)
+	}
+
+	// Streaming assistant text (from cache, updated by renderTick)
+	if m.s.streamCache != "" {
+		sections = append(sections, m.s.streamCache)
+	}
+
+	// Status bar
 	if sv := m.status.View(); sv != "" {
 		sections = append(sections, sv)
 	}
-	sections = append(sections, m.input.View())
+
+	// Input
+	if iv := m.input.View(); iv != "" {
+		sections = append(sections, iv)
+	}
+
+	if len(sections) == 0 {
+		return m.input.View()
+	}
 	return strings.Join(sections, "\n")
 }
 
 // --- Key handling ---
 
 // handleKey processes global shortcuts. All other keys propagate to
-// the focused component (input when idle, conversation when running).
+// the focused component (input when idle).
 func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -264,7 +289,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "status", Raw: "(interrupted)",
 			})
-			m.refreshViewport()
 			return m, nil
 		}
 		// Idle → quit
@@ -277,15 +301,36 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlT:
 		m.s.showThinking = !m.s.showThinking
-		m.refreshViewport()
+		// Only affects: (1) unflushed blocks in View(), (2) streaming thinking, (3) Ctrl+O expand
+		// Already-flushed scrollback is not modified (would require clear+reprint).
+		// Show brief feedback so user knows the toggle state.
+		if m.s.showThinking {
+			m.status.SetText("thinking visible")
+		} else {
+			m.status.SetText("thinking hidden (new messages only)")
+		}
+		// Clear the status after a short delay unless the agent is running
+		if !m.s.running {
+			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+				return clearThinkingStatusMsg{}
+			})
+		}
 		return m, nil
+
+	case tea.KeyCtrlO:
+		// Expand mode: show full conversation in pager
+		if m.s.running {
+			// Can't expand while agent is running (would pause event processing)
+			return m, nil
+		}
+		if len(m.s.blocks) == 0 {
+			return m, nil
+		}
+		return m, expandConversation(m.s.blocks, m.renderer, m.s.showThinking)
 
 	case tea.KeyEnter:
 		if m.s.running {
-			// While running: propagate to conversation for scroll
-			var cmd tea.Cmd
-			m.conversation, cmd = m.conversation.Update(msg)
-			return m, cmd
+			return m, nil
 		}
 		text := m.input.Submit()
 		if text == "" {
@@ -297,19 +342,36 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startAgentRun(text)
 	}
 
-	// All other keys: propagate to focused component
-	var cmds []tea.Cmd
+	// All other keys: propagate to input when idle
 	if m.s.streamState == stateIdle {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
-		cmds = append(cmds, cmd)
-	} else {
-		// While running: keys go to conversation (scroll with arrows/pgup/pgdn)
-		var cmd tea.Cmd
-		m.conversation, cmd = m.conversation.Update(msg)
-		cmds = append(cmds, cmd)
+		return m, cmd
 	}
-	return m, tea.Batch(cmds...)
+
+	return m, nil
+}
+
+// --- Flush logic ---
+
+// flushBlocks renders blocks [from..to) and returns a single tea.Println Cmd.
+// Joins all blocks into one string to guarantee ordering (single Println = single write).
+func (m *appModel) flushBlocks(from, to int) tea.Cmd {
+	if from >= to {
+		return nil
+	}
+	var parts []string
+	for i := from; i < to; i++ {
+		rendered := renderSingleBlock(m.s.blocks[i], m.renderer, m.s.showThinking)
+		if rendered != "" {
+			parts = append(parts, rendered)
+		}
+	}
+	m.s.flushedCount = to
+	if len(parts) == 0 {
+		return nil
+	}
+	return tea.Println(strings.Join(parts, "\n"))
 }
 
 // --- Agent interaction ---
@@ -317,38 +379,49 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
+
+	// Flush user message to scrollback
+	userFlush := m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+
 	m.s.running = true
 	m.s.runGen++
 	m.runGenAddr.Store(m.s.runGen) // sync with subscriber for production-time tagging
 	m.s.streamState = stateStreaming
 	m.s.streamText = ""
 	m.s.thinkingText = ""
+	m.s.streamCache = ""
 	m.input.SetEnabled(false)
 	m.status.SetText("thinking...")
-	m.refreshViewport()
 
 	agentRef := m.agent
 	gen := m.s.runGen
 	baseCtx := m.baseCtx
-	return m, tea.Batch(
-		// Cmd 1: run agent (blocks until complete)
-		func() tea.Msg {
-			msgs, err := agentRef.Send(baseCtx, text)
-			return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
-		},
-		// Cmd 2: start render tick
-		renderTick(),
-		// Cmd 3: spinner
-		m.status.spinner.Tick,
+
+	// tea.Sequence guarantees: user message prints BEFORE agent starts.
+	// renderTick and spinner can batch concurrently (no ordering need).
+	return m, tea.Sequence(
+		userFlush,
+		tea.Batch(
+			// Cmd 1: run agent (blocks until complete)
+			func() tea.Msg {
+				msgs, err := agentRef.Send(baseCtx, text)
+				return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
+			},
+			// Cmd 2: start render tick
+			renderTick(),
+			// Cmd 3: spinner
+			m.status.spinner.Tick,
+		),
 	)
 }
 
 // handleAgentEvent processes a single agent event, updating TUI state.
-func (m *appModel) handleAgentEvent(e core.AgentEvent) {
+// Returns a tea.Cmd to flush blocks to scrollback (or nil).
+func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 	switch e.Type {
 	case core.AgentEventMessageUpdate:
 		if e.AssistantEvent == nil {
-			return
+			return nil
 		}
 		switch e.AssistantEvent.Type {
 		case core.ProviderEventTextDelta:
@@ -358,12 +431,15 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 			m.s.thinkingText += e.AssistantEvent.Delta
 			m.s.dirty = true
 		}
+		return nil
 
 	case core.AgentEventMessageStart:
 		m.s.streamText = ""
 		m.s.thinkingText = ""
+		m.s.streamCache = ""
 		m.s.streamState = stateStreaming
 		m.status.SetText("thinking...")
+		return nil
 
 	case core.AgentEventMessageEnd:
 		// Flush thinking first (persists above the response, dimmed)
@@ -380,7 +456,8 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		}
 		m.s.streamText = ""
 		m.s.thinkingText = ""
-		m.s.dirty = true
+		m.s.streamCache = ""
+		return m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
 
 	case core.AgentEventToolExecStart:
 		m.s.streamState = stateToolRunning
@@ -388,7 +465,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "tool_start", ToolName: e.ToolName, ToolArgs: e.Args,
 		})
-		m.s.dirty = true
+		return m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
 
 	case core.AgentEventToolExecEnd:
 		m.s.blocks = append(m.s.blocks, messageBlock{
@@ -396,23 +473,116 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		})
 		m.s.streamState = stateStreaming
 		m.status.SetText("thinking...")
-		m.s.dirty = true
+		return m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
 	}
+
+	return nil
 }
 
 // --- Reconciliation ---
 
-// reconcileFromMessages rebuilds UI state from the agent's source-of-truth messages.
-// Always rebuilds unconditionally: streaming deltas are lossy by design,
-// so the UI may have partial/truncated text. The final messages from Send()
-// are the only reliable source of content.
-func (m *appModel) reconcileFromMessages(msgs []core.AgentMessage) {
+// handleRunResult processes the final result from agent.Send().
+func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
+	// Ignore results from previous runs (e.g., aborted run finishing late)
+	if msg.RunGen != m.s.runGen {
+		return m, nil
+	}
+	// Bump generation so any late-arriving events from this run are ignored.
+	m.s.runGen++
+	m.runGenAddr.Store(m.s.runGen)
+
+	// Patch: correct last assistant/thinking content from source-of-truth.
+	// Does NOT rebuild blocks — preserves event-derived blocks (tool_start, etc.).
+	m.patchFromMessages(msg.Messages)
+
+	// Flush any blocks that weren't flushed by events (edge case: dropped events)
+	flushCmd := m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+
+	m.s.running = false
+	m.s.streamState = stateIdle
+	m.s.streamText = ""
+	m.s.thinkingText = ""
+	m.s.streamCache = ""
+	m.status.SetText("")
+	m.input.SetEnabled(true)
+
+	if msg.Err != nil && msg.Err != context.Canceled {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Error: " + msg.Err.Error(),
+		})
+		errorFlush := m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+		return m, tea.Batch(flushCmd, errorFlush)
+	}
+	return m, flushCmd
+}
+
+// patchFromMessages corrects the last assistant/thinking block content from
+// the source-of-truth messages. Does NOT rebuild — preserves event-derived blocks
+// (tool_start with args, etc.) that messages don't contain.
+//
+// Also creates missing blocks: if agentRunResultMsg arrives before the
+// AgentEventMessageEnd event is processed (async emitter race), the assistant/thinking
+// blocks won't exist yet. In that case, append them so flushBlocks can print them.
+func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	if msgs == nil {
 		return
 	}
-	m.rebuildFromMessages(msgs)
+	// Extract the final assistant text from source-of-truth messages.
+	var lastAssistantText string
+	var lastThinkingText string
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" {
+			for _, c := range msgs[i].Content {
+				if c.Type == "text" && c.Text != "" {
+					lastAssistantText = c.Text
+				}
+				if c.Type == "thinking" && c.Thinking != "" {
+					lastThinkingText = c.Thinking
+				}
+			}
+			break
+		}
+	}
+
+	// Patch or create thinking block
+	if lastThinkingText != "" {
+		found := false
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			if m.s.blocks[i].Type == "thinking" {
+				m.s.blocks[i].Raw = lastThinkingText
+				found = true
+				break
+			}
+		}
+		if !found {
+			// MessageEnd event wasn't processed yet — create the block
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "thinking", Raw: lastThinkingText,
+			})
+		}
+	}
+
+	// Patch or create assistant block
+	if lastAssistantText != "" {
+		found := false
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			if m.s.blocks[i].Type == "assistant" {
+				m.s.blocks[i].Raw = lastAssistantText
+				found = true
+				break
+			}
+		}
+		if !found {
+			// MessageEnd event wasn't processed yet — create the block
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "assistant", Raw: lastAssistantText,
+			})
+		}
+	}
 }
 
+// rebuildFromMessages reconstructs blocks from the agent's source-of-truth messages.
+// Used only for initial recovery — normal flow uses patchFromMessages.
 func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	m.s.blocks = m.s.blocks[:0]
 	for _, msg := range msgs {
@@ -444,35 +614,6 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	}
 }
 
-// --- Viewport ---
-
-// refreshViewport re-renders all blocks + streaming text from raw content.
-func (m *appModel) refreshViewport() {
-	var content strings.Builder
-	content.WriteString(renderBlocks(m.s.blocks, m.renderer, m.s.showThinking))
-
-	if !m.liteMode {
-		// Thinking (dim, word-wrapped, shown during streaming)
-		if m.s.thinkingText != "" && m.s.showThinking {
-			wrapWidth := m.width - 2
-			if wrapWidth < 20 {
-				wrapWidth = 20
-			}
-			styled := thinkingStyle.Width(wrapWidth).PaddingLeft(2).Render(m.s.thinkingText)
-			content.WriteString(styled + "\n")
-		}
-		// Streaming text: apply glamour in real-time so inline markdown (backticks,
-		// bold, etc.) renders during streaming, not just on completion.
-		if m.s.streamText != "" {
-			content.WriteString(m.renderer.RenderMarkdown(m.s.streamText))
-		}
-	}
-	// In lite mode, streaming text is not rendered — the user sees only completed
-	// blocks. The spinner in the status bar indicates the agent is working.
-
-	m.conversation.SetContent(content.String())
-}
-
 // --- Commands ---
 
 func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
@@ -482,13 +623,21 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "error", Raw: err.Error(),
 			})
-		} else {
-			m.s.blocks = m.s.blocks[:0]
-			m.s.streamText = ""
-			m.s.thinkingText = ""
+			return m, nil
 		}
-		m.refreshViewport()
-		return m, nil
+		m.s.blocks = m.s.blocks[:0]
+		m.s.flushedCount = 0
+		m.s.streamText = ""
+		m.s.thinkingText = ""
+		m.s.streamCache = ""
+		// Clear screen + scrollback via the system clear command, then
+		// tell BT to repaint. ExecProcess bypasses BT's renderer entirely
+		// so escape sequences don't interfere with its internal state.
+		// Falls back to ClearScreen if clear(1) isn't available.
+		return m, tea.Sequence(
+			clearScreen(),
+			func() tea.Msg { return tea.ClearScreen() },
+		)
 	case "exit", "quit":
 		m.cleanup()
 		return m, tea.Quit
@@ -496,7 +645,6 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "error", Raw: "Unknown command: /" + cmd,
 		})
-		m.refreshViewport()
 		return m, nil
 	}
 }
@@ -505,8 +653,7 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 // waitForEvent returns a Cmd that blocks until the next agent event.
 // The run generation comes FROM the tagged event (stamped at production time),
-// not captured at Cmd creation time. This is critical: if we captured gen here,
-// late events read after a runGen bump would be mislabeled as current.
+// not captured at Cmd creation time.
 func (m appModel) waitForEvent() tea.Cmd {
 	eventCh := m.eventCh
 	quit := m.quit
