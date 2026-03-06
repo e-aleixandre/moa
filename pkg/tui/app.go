@@ -74,6 +74,7 @@ type appModel struct {
 	// Components
 	input  inputModel
 	status statusModel
+	picker pickerModel
 
 	// Session persistence
 	sessionStore *session.Store   // nil if persistence is disabled
@@ -84,6 +85,7 @@ type appModel struct {
 
 	// Provider switching
 	providerFactory ProviderFactory
+	scopedModels    map[string]bool // model IDs pinned for Ctrl+P cycling
 
 	// Layout
 	width  int
@@ -140,12 +142,14 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		unsub:        unsub,
 		baseCtx:      ctx,
 		runGenAddr:   runGenAddr,
-		input:        newInput(),
-		status:       newStatus(),
+		input:           newInput(),
+		status:          newStatus(),
+		picker:          newPicker(),
 		sessionStore:    cfg.SessionStore,
 		session:         cfg.Session,
 		modelName:       cfg.ModelName,
 		providerFactory: cfg.ProviderFactory,
+		scopedModels:    make(map[string]bool),
 	}
 }
 
@@ -320,8 +324,12 @@ func (m appModel) View() string {
 		sections = append(sections, sv)
 	}
 
-	// Input
-	if iv := m.input.View(); iv != "" {
+	// Model picker (replaces input when active)
+	if m.picker.active {
+		if pv := m.picker.View(m.width); pv != "" {
+			sections = append(sections, pv)
+		}
+	} else if iv := m.input.View(); iv != "" {
 		sections = append(sections, iv)
 	}
 
@@ -336,6 +344,11 @@ func (m appModel) View() string {
 // handleKey processes global shortcuts. All other keys propagate to
 // the focused component (input when idle).
 func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Picker mode: intercept all keys.
+	if m.picker.active {
+		return m.handlePickerKey(msg)
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
 		if m.s.running {
@@ -372,6 +385,26 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			})
 		}
 		return m, nil
+
+	case tea.KeyShiftTab:
+		if m.s.running {
+			return m, nil
+		}
+		level := cycleThinkingLevel(m.agent.ThinkingLevel())
+		model := m.agent.Model()
+		if err := m.agent.Reconfigure(nil, model, level); err != nil {
+			return m, nil
+		}
+		m.status.SetText("thinking: " + level)
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return clearThinkingStatusMsg{}
+		})
+
+	case tea.KeyCtrlP:
+		if m.s.running {
+			return m, nil
+		}
+		return m.cycleScopedModel()
 
 	case tea.KeyCtrlO:
 		// Reprint: clear screen+scrollback, then print all blocks cleanly.
@@ -737,17 +770,12 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	}
 
 	switch cmd {
-	case "model":
-		// No argument: show current model and thinking level.
-		model := m.agent.Model()
-		thinking := m.agent.ThinkingLevel()
-		name := model.Name
-		if name == "" {
-			name = model.ID
-		}
-		info := fmt.Sprintf("model: %s (%s) | thinking: %s", name, model.Provider, thinking)
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: info})
-		return m, m.flushBlocks(len(m.s.blocks))
+	case "model", "models":
+		// No argument: open the picker.
+		currentModel := m.agent.Model()
+		m.picker.Open(currentModel.ID, m.scopedModels)
+		m.input.SetEnabled(false)
+		return m, nil
 
 	case "thinking":
 		thinking := m.agent.ThinkingLevel()
@@ -792,28 +820,53 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleModelSwitch processes `/model <spec>`.
-func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
-	if m.s.running {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot switch model while agent is running"})
-		return m, m.flushBlocks(len(m.s.blocks))
-	}
-	if m.providerFactory == nil {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Model switching not available"})
-		return m, m.flushBlocks(len(m.s.blocks))
-	}
+// handlePickerKey routes keys to the model picker.
+func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		// Close without switching.
+		m.scopedModels = m.picker.ScopedIDs()
+		m.picker.Close()
+		m.input.SetEnabled(true)
+		return m, nil
 
-	newModel, known := core.ResolveModel(spec)
-	if !known {
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "status", Raw: fmt.Sprintf("⚠ Unknown model %q — context management disabled", spec),
-		})
-	}
+	case tea.KeyUp:
+		m.picker.MoveUp()
+		return m, nil
+	case tea.KeyDown:
+		m.picker.MoveDown()
+		return m, nil
 
-	// Check if provider needs to change.
+	case tea.KeyEnter:
+		// Select and switch to highlighted model.
+		selected := m.picker.Selected()
+		m.scopedModels = m.picker.ScopedIDs()
+		m.picker.Close()
+		m.input.SetEnabled(true)
+		return m.switchToModel(selected)
+
+	case tea.KeyRunes:
+		switch string(msg.Runes) {
+		case " ":
+			m.picker.ToggleScoped()
+			return m, nil
+		case "j":
+			m.picker.MoveDown()
+			return m, nil
+		case "k":
+			m.picker.MoveUp()
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// switchToModel performs the actual model switch (shared by picker and /model <spec>).
+func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	oldModel := m.agent.Model()
+
 	var newProvider core.Provider
-	if newModel.Provider != oldModel.Provider {
+	if newModel.Provider != oldModel.Provider && m.providerFactory != nil {
 		prov, err := m.providerFactory(newModel)
 		if err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
@@ -837,6 +890,58 @@ func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
 		Type: "status", Raw: fmt.Sprintf("✓ Switched to %s (%s)", name, newModel.Provider),
 	})
 	return m, m.flushBlocks(len(m.s.blocks))
+}
+
+// cycleScopedModel cycles through scoped/pinned models via Ctrl+P.
+func (m appModel) cycleScopedModel() (tea.Model, tea.Cmd) {
+	if len(m.scopedModels) == 0 {
+		m.status.SetText("no pinned models — use /models to pin some")
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return clearThinkingStatusMsg{}
+		})
+	}
+
+	// Build ordered list of scoped models (deterministic from registry order).
+	all := core.ListModels()
+	var scoped []core.Model
+	for _, e := range all {
+		if m.scopedModels[e.Model.ID] {
+			scoped = append(scoped, e.Model)
+		}
+	}
+
+	if len(scoped) == 0 {
+		return m, nil
+	}
+
+	// Find current model in scoped list, advance to next.
+	currentID := m.agent.Model().ID
+	nextIdx := 0
+	for i, s := range scoped {
+		if s.ID == currentID {
+			nextIdx = (i + 1) % len(scoped)
+			break
+		}
+	}
+
+	return m.switchToModel(scoped[nextIdx])
+}
+
+// handleModelSwitch processes `/model <spec>`.
+func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
+	if m.s.running {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot switch model while agent is running"})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+
+	newModel, known := core.ResolveModel(spec)
+	if !known {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status", Raw: fmt.Sprintf("⚠ Unknown model %q — context management disabled", spec),
+		})
+	}
+
+	return m.switchToModel(newModel)
 }
 
 // handleThinkingSwitch processes `/thinking <level>`.
@@ -926,4 +1031,17 @@ func (m *appModel) cleanup() {
 		}
 		m.agent.Abort()
 	})
+}
+
+// thinkingLevels defines the cycle order for Shift+Tab.
+var thinkingLevels = []string{"off", "minimal", "low", "medium", "high"}
+
+// cycleThinkingLevel advances to the next thinking level, wrapping at the end.
+func cycleThinkingLevel(current string) string {
+	for i, level := range thinkingLevels {
+		if level == current {
+			return thinkingLevels[(i+1)%len(thinkingLevels)]
+		}
+	}
+	return "medium" // fallback
 }

@@ -1,6 +1,9 @@
 package core
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
@@ -105,4 +108,44 @@ func ResolveModel(spec string) (Model, bool) {
 	}
 
 	return Model{ID: spec}, false
+}
+
+// ListModels returns all unique known models, deduplicated by ID,
+// sorted by provider then name. Each model also carries its shortest alias.
+type ModelEntry struct {
+	Model Model
+	Alias string // shortest alias, empty if none
+}
+
+func ListModels() []ModelEntry {
+	// Deduplicate by canonical ID.
+	byID := make(map[string]Model)
+	for _, m := range knownModels {
+		byID[m.ID] = m
+	}
+
+	// Build reverse alias map: canonical ID → shortest alias.
+	aliases := make(map[string]string)
+	for alias, canonicalID := range modelAliases {
+		if existing, ok := aliases[canonicalID]; !ok || len(alias) < len(existing) {
+			aliases[canonicalID] = alias
+		}
+	}
+
+	result := make([]ModelEntry, 0, len(byID))
+	for _, m := range byID {
+		result = append(result, ModelEntry{
+			Model: m,
+			Alias: aliases[m.ID],
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Model.Provider != result[j].Model.Provider {
+			return result[i].Model.Provider < result[j].Model.Provider
+		}
+		return result[i].Model.Name < result[j].Model.Name
+	})
+
+	return result
 }
