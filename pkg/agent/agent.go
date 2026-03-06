@@ -171,6 +171,68 @@ func (a *Agent) CompactionEpoch() int {
 	return a.state.CompactionEpoch
 }
 
+// Reconfigure swaps the provider, model, and/or thinking level mid-conversation.
+// Preserves conversation history. Strips thinking blocks from historical assistant
+// messages to avoid invalid signatures when the model changes.
+// Returns error if the agent is currently running.
+func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLevel string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot reconfigure while agent is running")
+	}
+
+	oldProvider := a.config.Model.Provider
+	oldModel := a.config.Model.ID
+
+	if provider != nil {
+		a.config.Provider = provider
+	}
+	a.config.Model = model
+	a.config.ThinkingLevel = thinkingLevel
+	a.state.Model = model
+
+	// Strip thinking blocks from history when the model changes.
+	// Thinking signatures are model-specific and become invalid.
+	if model.ID != oldModel || model.Provider != oldProvider {
+		stripThinkingFromHistory(a.state.Messages)
+	}
+
+	return nil
+}
+
+// Model returns the current model.
+func (a *Agent) Model() core.Model {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.Model
+}
+
+// ThinkingLevel returns the current thinking level.
+func (a *Agent) ThinkingLevel() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.ThinkingLevel
+}
+
+// stripThinkingFromHistory removes thinking content blocks from assistant
+// messages. Thinking signatures are model-specific — sending stale signatures
+// to a different model causes errors.
+func stripThinkingFromHistory(msgs []core.AgentMessage) {
+	for i := range msgs {
+		if msgs[i].Role != "assistant" {
+			continue
+		}
+		filtered := msgs[i].Content[:0]
+		for _, c := range msgs[i].Content {
+			if c.Type != "thinking" {
+				filtered = append(filtered, c)
+			}
+		}
+		msgs[i].Content = filtered
+	}
+}
+
 // Messages returns a shallow copy of the current conversation messages.
 // The returned slice is independent (append-safe), but individual messages
 // share content slices with the internal state. Safe for reading (e.g., JSON

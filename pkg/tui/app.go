@@ -82,16 +82,24 @@ type appModel struct {
 	// Display
 	modelName string
 
+	// Provider switching
+	providerFactory ProviderFactory
+
 	// Layout
 	width  int
 	height int
 }
 
+// ProviderFactory creates a provider for a given model.
+// Returns the provider or an error (e.g. missing API key).
+type ProviderFactory func(model core.Model) (core.Provider, error)
+
 // Config configures the TUI. All fields are optional.
 type Config struct {
-	SessionStore *session.Store   // persistence backend (nil = no persistence)
-	Session      *session.Session // session to resume (nil = fresh start)
-	ModelName    string           // display name for the active model (shown on startup)
+	SessionStore    *session.Store   // persistence backend (nil = no persistence)
+	Session         *session.Session // session to resume (nil = fresh start)
+	ModelName       string           // display name for the active model (shown on startup)
+	ProviderFactory ProviderFactory  // creates providers for /model switching (nil = switching disabled)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -134,9 +142,10 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		runGenAddr:   runGenAddr,
 		input:        newInput(),
 		status:       newStatus(),
-		sessionStore: cfg.SessionStore,
-		session:      cfg.Session,
-		modelName:    cfg.ModelName,
+		sessionStore:    cfg.SessionStore,
+		session:         cfg.Session,
+		modelName:       cfg.ModelName,
+		providerFactory: cfg.ProviderFactory,
 	}
 }
 
@@ -719,7 +728,32 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 // --- Commands ---
 
 func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
+	// Commands with arguments.
+	if strings.HasPrefix(cmd, "model ") {
+		return m.handleModelSwitch(strings.TrimSpace(cmd[6:]))
+	}
+	if strings.HasPrefix(cmd, "thinking ") {
+		return m.handleThinkingSwitch(strings.TrimSpace(cmd[9:]))
+	}
+
 	switch cmd {
+	case "model":
+		// No argument: show current model and thinking level.
+		model := m.agent.Model()
+		thinking := m.agent.ThinkingLevel()
+		name := model.Name
+		if name == "" {
+			name = model.ID
+		}
+		info := fmt.Sprintf("model: %s (%s) | thinking: %s", name, model.Provider, thinking)
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: info})
+		return m, m.flushBlocks(len(m.s.blocks))
+
+	case "thinking":
+		thinking := m.agent.ThinkingLevel()
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "thinking: " + thinking})
+		return m, m.flushBlocks(len(m.s.blocks))
+
 	case "clear":
 		if err := m.agent.Reset(); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -756,6 +790,80 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		})
 		return m, nil
 	}
+}
+
+// handleModelSwitch processes `/model <spec>`.
+func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
+	if m.s.running {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot switch model while agent is running"})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+	if m.providerFactory == nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Model switching not available"})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+
+	newModel, known := core.ResolveModel(spec)
+	if !known {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status", Raw: fmt.Sprintf("⚠ Unknown model %q — context management disabled", spec),
+		})
+	}
+
+	// Check if provider needs to change.
+	oldModel := m.agent.Model()
+	var newProvider core.Provider
+	if newModel.Provider != oldModel.Provider {
+		prov, err := m.providerFactory(newModel)
+		if err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			return m, m.flushBlocks(len(m.s.blocks))
+		}
+		newProvider = prov
+	}
+
+	thinkingLevel := m.agent.ThinkingLevel()
+	if err := m.agent.Reconfigure(newProvider, newModel, thinkingLevel); err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+
+	name := newModel.Name
+	if name == "" {
+		name = newModel.ID
+	}
+	m.modelName = name
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type: "status", Raw: fmt.Sprintf("✓ Switched to %s (%s)", name, newModel.Provider),
+	})
+	return m, m.flushBlocks(len(m.s.blocks))
+}
+
+// handleThinkingSwitch processes `/thinking <level>`.
+func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
+	if m.s.running {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot change thinking while agent is running"})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+
+	valid := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
+	if !valid[level] {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Invalid thinking level. Options: off, minimal, low, medium, high",
+		})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+
+	model := m.agent.Model()
+	if err := m.agent.Reconfigure(nil, model, level); err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type: "status", Raw: fmt.Sprintf("✓ Thinking level: %s", level),
+	})
+	return m, m.flushBlocks(len(m.s.blocks))
 }
 
 // --- Session persistence ---

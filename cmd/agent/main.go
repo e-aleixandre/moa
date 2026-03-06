@@ -176,9 +176,12 @@ func main() {
 		}
 
 		app := tui.New(ag, ctx, tui.Config{
-			SessionStore: sessionStore,
-			Session:      sess,
-			ModelName:    modelDisplayName(resolvedModel),
+			SessionStore:    sessionStore,
+			Session:         sess,
+			ModelName:       modelDisplayName(resolvedModel),
+			ProviderFactory: func(model core.Model) (core.Provider, error) {
+				return buildProvider(model, authStore)
+			},
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx))
 		if _, err := prog.Run(); err != nil {
