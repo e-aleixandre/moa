@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
-	"github.com/ealeixandre/go-agent/pkg/extension"
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/extension"
 )
 
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.

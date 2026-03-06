@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // newTestModel creates a minimal appModel for state-level tests.

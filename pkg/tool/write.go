@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // NewWrite creates the write tool.

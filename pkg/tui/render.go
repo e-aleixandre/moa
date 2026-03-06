@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/ealeixandre/go-agent/pkg/tool"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // messageBlock holds raw conversation content. Never stores pre-rendered text.

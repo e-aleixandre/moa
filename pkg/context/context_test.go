@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 func TestLoadAgentsMD_Global(t *testing.T) {

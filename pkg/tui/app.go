@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/ealeixandre/go-agent/pkg/agent"
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 const renderInterval = 16 * time.Millisecond // ~60fps

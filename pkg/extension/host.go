@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // Deadlines for blocking hooks.

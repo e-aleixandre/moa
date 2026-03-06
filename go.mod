@@ -1,4 +1,4 @@
-module github.com/ealeixandre/go-agent
+module github.com/ealeixandre/moa
 
 go 1.25.0
 

@@ -14,13 +14,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
-	"github.com/ealeixandre/go-agent/pkg/agent"
-	"github.com/ealeixandre/go-agent/pkg/auth"
-	agentcontext "github.com/ealeixandre/go-agent/pkg/context"
-	"github.com/ealeixandre/go-agent/pkg/core"
-	"github.com/ealeixandre/go-agent/pkg/provider/anthropic"
-	"github.com/ealeixandre/go-agent/pkg/tool"
-	"github.com/ealeixandre/go-agent/pkg/tui"
+	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/auth"
+	agentcontext "github.com/ealeixandre/moa/pkg/context"
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/provider/anthropic"
+	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/ealeixandre/moa/pkg/tui"
 )
 
 func main() {

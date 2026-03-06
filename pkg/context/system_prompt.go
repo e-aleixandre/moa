@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // toolSnippets provides concise one-line descriptions for built-in tools.

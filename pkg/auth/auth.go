@@ -1,6 +1,6 @@
 // Package auth handles credential storage and OAuth flows for AI providers.
 //
-// Credentials are stored in ~/.config/go-agent/auth.json with mode 0600.
+// Credentials are stored in ~/.config/moa/auth.json with mode 0600.
 // Supports both API keys and OAuth tokens (Claude Max).
 package auth
 
@@ -41,7 +41,7 @@ func configDir() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".config", "go-agent")
+	return filepath.Join(home, ".config", "moa")
 }
 
 // DefaultStorePath returns the default path for the auth store.

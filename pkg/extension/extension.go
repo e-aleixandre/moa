@@ -3,7 +3,7 @@ package extension
 import (
 	"log/slog"
 
-	"github.com/ealeixandre/go-agent/pkg/core"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // Extension is a Go-native extension that registers hooks and tools.
