@@ -16,16 +16,24 @@ import (
 
 // Credential represents a stored credential for a provider.
 type Credential struct {
-	Type    string `json:"type"`              // "api_key" or "oauth"
-	Key     string `json:"key,omitempty"`      // API key (type=api_key)
-	Access  string `json:"access,omitempty"`   // OAuth access token (type=oauth)
-	Refresh string `json:"refresh,omitempty"`  // OAuth refresh token (type=oauth)
-	Expires int64  `json:"expires,omitempty"`  // OAuth token expiry (unix ms) (type=oauth)
+	Type      string `json:"type"`                        // "api_key" or "oauth"
+	Key       string `json:"key,omitempty"`                // API key (type=api_key)
+	Access    string `json:"access,omitempty"`             // OAuth access token (type=oauth)
+	Refresh   string `json:"refresh,omitempty"`            // OAuth refresh token (type=oauth)
+	Expires   int64  `json:"expires,omitempty"`            // OAuth token expiry (unix ms) (type=oauth)
+	AccountID string `json:"account_id,omitempty"`         // Provider-specific account ID (e.g., OpenAI chatgpt_account_id)
 }
 
-// IsOAuthToken returns true if the given key is an Anthropic OAuth token.
+// IsOAuthToken returns true if the given key looks like an OAuth token
+// rather than a standard API key. Detects Anthropic OAuth (sk-ant-oat)
+// and JWT tokens (three dot-separated segments, as used by OpenAI OAuth).
 func IsOAuthToken(key string) bool {
-	return strings.HasPrefix(key, "sk-ant-oat")
+	if strings.HasPrefix(key, "sk-ant-oat") {
+		return true
+	}
+	// JWTs have exactly 3 dot-separated parts.
+	parts := strings.Split(key, ".")
+	return len(parts) == 3 && len(parts[0]) > 10
 }
 
 // Store manages credentials on disk.
@@ -167,15 +175,16 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 	case "oauth":
 		// Check if token needs refresh
 		if time.Now().UnixMilli() >= cred.Expires {
-			refreshed, err := RefreshAnthropicToken(cred.Refresh)
+			refreshed, err := refreshOAuthToken(provider, cred.Refresh)
 			if err != nil {
-				return "", false, fmt.Errorf("token refresh failed: %w (run --login to re-authenticate)", err)
+				return "", false, fmt.Errorf("token refresh failed: %w (run --login %s to re-authenticate)", err, provider)
 			}
 			cred = Credential{
-				Type:    "oauth",
-				Access:  refreshed.Access,
-				Refresh: refreshed.Refresh,
-				Expires: refreshed.Expires,
+				Type:      "oauth",
+				Access:    refreshed.Access,
+				Refresh:   refreshed.Refresh,
+				Expires:   refreshed.Expires,
+				AccountID: refreshed.AccountID,
 			}
 			// Save refreshed token (ignore save errors — the token is still usable)
 			s.mu.Lock()
@@ -187,6 +196,26 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 
 	default:
 		return "", false, fmt.Errorf("unknown credential type %q for provider %q", cred.Type, provider)
+	}
+}
+
+// GetAccountID returns the stored account ID for a provider (e.g., OpenAI chatgpt_account_id).
+func (s *Store) GetAccountID(provider string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if cred, ok := s.data[provider]; ok {
+		return cred.AccountID
+	}
+	return ""
+}
+
+// refreshOAuthToken dispatches to the correct provider's refresh function.
+func refreshOAuthToken(provider, refreshToken string) (*OAuthCredentials, error) {
+	switch provider {
+	case "openai":
+		return RefreshOpenAIToken(refreshToken)
+	default:
+		return RefreshAnthropicToken(refreshToken)
 	}
 }
 

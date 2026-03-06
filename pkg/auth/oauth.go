@@ -29,9 +29,10 @@ var oauthClient = &http.Client{Timeout: 30 * time.Second}
 
 // OAuthCredentials holds the result of an OAuth login/refresh.
 type OAuthCredentials struct {
-	Access  string `json:"access"`
-	Refresh string `json:"refresh"`
-	Expires int64  `json:"expires"` // Unix milliseconds
+	Access    string `json:"access"`
+	Refresh   string `json:"refresh"`
+	Expires   int64  `json:"expires"`              // Unix milliseconds
+	AccountID string `json:"account_id,omitempty"` // OpenAI chatgpt_account_id
 }
 
 // LoginAnthropic runs the Anthropic OAuth PKCE flow (device code style):

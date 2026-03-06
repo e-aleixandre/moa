@@ -238,33 +238,81 @@ func handleLogin(provider string, authStore *auth.Store) {
 		fmt.Println("✓ Login successful! Credentials saved.")
 
 	case "openai":
-		fmt.Print("Enter your OpenAI API key: ")
-		// Read key without echo if possible.
-		var key string
-		if term.IsTerminal(int(os.Stdin.Fd())) {
-			keyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println() // newline after hidden input
+		fmt.Println("Choose auth method:")
+		fmt.Println("  1) ChatGPT Plus/Pro subscription (OAuth)")
+		fmt.Println("  2) API key")
+		fmt.Print("Choice [1]: ")
+		var choice string
+		fmt.Scanln(&choice)
+		choice = strings.TrimSpace(choice)
+		if choice == "" {
+			choice = "1"
+		}
+
+		switch choice {
+		case "1":
+			fmt.Println("Logging in to OpenAI (ChatGPT subscription)...")
+			creds, err := auth.LoginOpenAI(
+				func(url string) {
+					fmt.Println("\nOpening browser for OpenAI authentication...")
+					fmt.Printf("If the browser doesn't open, visit:\n%s\n\n", url)
+					auth.OpenBrowser(url)
+				},
+				func() (string, error) {
+					fmt.Print("Paste the callback URL or authorization code here: ")
+					var code string
+					_, err := fmt.Scanln(&code)
+					return code, err
+				},
+			)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to read key: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 				os.Exit(1)
 			}
-			key = strings.TrimSpace(string(keyBytes))
-		} else {
-			fmt.Scanln(&key)
-			key = strings.TrimSpace(key)
-		}
-		if key == "" {
-			fmt.Fprintf(os.Stderr, "No key provided.\n")
+			if err := authStore.Set("openai", auth.Credential{
+				Type:      "oauth",
+				Access:    creds.Access,
+				Refresh:   creds.Refresh,
+				Expires:   creds.Expires,
+				AccountID: creds.AccountID,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("✓ OpenAI OAuth login successful!")
+
+		case "2":
+			fmt.Print("Enter your OpenAI API key: ")
+			var key string
+			if term.IsTerminal(int(os.Stdin.Fd())) {
+				keyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to read key: %v\n", err)
+					os.Exit(1)
+				}
+				key = strings.TrimSpace(string(keyBytes))
+			} else {
+				fmt.Scanln(&key)
+				key = strings.TrimSpace(key)
+			}
+			if key == "" {
+				fmt.Fprintf(os.Stderr, "No key provided.\n")
+				os.Exit(1)
+			}
+			if err := authStore.Set("openai", auth.Credential{
+				Type: "api_key",
+				Key:  key,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("✓ OpenAI API key saved.")
+
+		default:
+			fmt.Fprintf(os.Stderr, "Invalid choice.\n")
 			os.Exit(1)
 		}
-		if err := authStore.Set("openai", auth.Credential{
-			Type: "api_key",
-			Key:  key,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("✓ OpenAI API key saved.")
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai\n", provider)
@@ -276,9 +324,14 @@ func handleLogin(provider string, authStore *auth.Store) {
 func buildProvider(model core.Model, authStore *auth.Store) (core.Provider, error) {
 	switch model.Provider {
 	case "openai":
-		apiKey, _, err := authStore.GetAPIKey("openai")
+		apiKey, isOAuth, err := authStore.GetAPIKey("openai")
 		if err != nil {
 			return nil, err
+		}
+		if isOAuth {
+			accountID := authStore.GetAccountID("openai")
+			fmt.Fprintf(os.Stderr, "\033[90m(using ChatGPT subscription OAuth)\033[0m\n")
+			return openai.NewOAuth(apiKey, accountID), nil
 		}
 		return openai.New(apiKey), nil
 

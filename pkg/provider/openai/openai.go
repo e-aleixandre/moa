@@ -15,17 +15,29 @@ import (
 
 // OpenAI implements core.Provider for the OpenAI Chat Completions API.
 type OpenAI struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
+	apiKey    string
+	baseURL   string
+	accountID string // ChatGPT OAuth account ID (empty for API key auth)
+	client    *http.Client
 }
 
-// New creates an OpenAI provider.
+// New creates an OpenAI provider using an API key.
 func New(apiKey string) *OpenAI {
 	return &OpenAI{
 		apiKey:  apiKey,
 		baseURL: "https://api.openai.com",
 		client:  &http.Client{Timeout: 10 * time.Minute},
+	}
+}
+
+// NewOAuth creates an OpenAI provider using ChatGPT subscription OAuth.
+// Uses the ChatGPT backend API and sends the account ID header.
+func NewOAuth(accessToken, accountID string) *OpenAI {
+	return &OpenAI{
+		apiKey:    accessToken,
+		baseURL:   "https://chatgpt.com/backend-api",
+		accountID: accountID,
+		client:    &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -55,6 +67,9 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	if o.accountID != "" {
+		httpReq.Header.Set("chatgpt-account-id", o.accountID)
+	}
 
 	resp, err := o.client.Do(httpReq)
 	if err != nil {
