@@ -171,9 +171,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.s.initialized {
 			m.s.initialized = true
 
+			// Rebuild blocks but don't flush — View() renders them inline.
+			// They get flushed to scrollback when the user sends their first message.
 			if m.session != nil && len(m.session.Messages) > 0 {
 				m.rebuildFromMessages(m.session.Messages)
-				return m, m.flushBlocks(len(m.s.blocks))
 			}
 		}
 		return m, nil
