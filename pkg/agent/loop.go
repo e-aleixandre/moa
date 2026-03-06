@@ -93,12 +93,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			return loopErr
 		}
 
+		// Cache tool specs once per iteration (avoids repeated sort+allocate).
+		toolSpecs := cfg.tools.Specs()
+
 		// === COMPACTION CHECK ===
 		// Invariant: runs once per iteration, before provider call, after
 		// prior turn is fully committed to cfg.state.Messages.
 		if cfg.compaction != nil && cfg.compaction.Enabled && cfg.model.MaxInput > 0 {
 			estimate := core.EstimateContextTokens(
-				cfg.state.Messages, cfg.systemPrompt, cfg.tools.Specs(), cfg.state.CompactionEpoch,
+				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
 			if core.ShouldCompact(estimate.Tokens, cfg.model.MaxInput, *cfg.compaction) {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
@@ -125,6 +128,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 							ModifiedFiles: result.ModifiedFiles,
 						},
 					})
+				} else {
+					// No cut point found — nothing to compact. Still close the lifecycle.
+					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionEnd})
 				}
 			}
 		}
@@ -155,7 +161,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			Model:    cfg.model,
 			System:   cfg.systemPrompt,
 			Messages: llmMessages,
-			Tools:    cfg.tools.Specs(),
+			Tools:    toolSpecs,
 			Options:  cfg.streamOpts,
 		}
 

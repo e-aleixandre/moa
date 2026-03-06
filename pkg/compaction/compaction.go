@@ -76,10 +76,6 @@ const maxSerializationChars = 400_000
 func SerializeForSummary(msgs []core.AgentMessage) string {
 	var b strings.Builder
 	for _, m := range msgs {
-		if b.Len() > maxSerializationChars {
-			b.WriteString("\n[...truncated]\n")
-			break
-		}
 		switch m.Role {
 		case "user":
 			b.WriteString("[User]: ")
@@ -105,6 +101,11 @@ func SerializeForSummary(msgs []core.AgentMessage) string {
 			b.WriteString("[Previous summary]: ")
 			b.WriteString(extractText(m.Message))
 			b.WriteByte('\n')
+		}
+		// Check AFTER writing so even a single huge message doesn't blow past the cap.
+		if b.Len() > maxSerializationChars {
+			b.WriteString("\n[...truncated]\n")
+			break
 		}
 	}
 	return b.String()

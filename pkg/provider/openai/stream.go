@@ -191,8 +191,18 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 }
 
 // finalizeTool converts accumulated tool call state into message content blocks.
+// Handles sparse indices by finding the max index and iterating over the range.
 func finalizeTool(state *streamState) {
-	for i := 0; i < len(state.toolCalls); i++ {
+	if len(state.toolCalls) == 0 {
+		return
+	}
+	maxIdx := 0
+	for idx := range state.toolCalls {
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	for i := 0; i <= maxIdx; i++ {
 		tc, ok := state.toolCalls[i]
 		if !ok {
 			continue
