@@ -4,8 +4,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // inputModel wraps textarea for user input.
@@ -14,13 +16,38 @@ type inputModel struct {
 	enabled  bool
 }
 
+// Input box styles
+var (
+	inputBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("8")).
+				Padding(0, 1)
+
+	inputActiveBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("12")).
+				Padding(0, 1)
+)
+
 func newInput() inputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Ask anything... (Ctrl+D to exit)"
+	ta.Placeholder = "Ask anything... (Shift+Enter for newline)"
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit
 	ta.SetHeight(3)
 	ta.Cursor.SetMode(cursor.CursorStatic) // no blink → zero idle CPU
+
+	// Remove the CursorLine background highlight — it only covers lines with
+	// text, leaving empty lines unhighlighted, which looks inconsistent.
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
+
+	// Enter submits (handled by handleKey). Shift+Enter / Alt+Enter insert newline.
+	ta.KeyMap.InsertNewline = key.NewBinding(
+		key.WithKeys("shift+enter", "alt+enter"),
+		key.WithHelp("shift+enter", "new line"),
+	)
+
 	ta.Focus()
 	return inputModel{textarea: ta, enabled: true}
 }
@@ -42,9 +69,14 @@ func (m *inputModel) SetEnabled(enabled bool) {
 	}
 }
 
-// SetWidth sets the textarea width.
+// SetWidth sets the textarea width, accounting for border + padding.
 func (m *inputModel) SetWidth(width int) {
-	m.textarea.SetWidth(width)
+	// Border (1+1) + padding (1+1) = 4 horizontal characters
+	inner := width - 4
+	if inner < 10 {
+		inner = 10
+	}
+	m.textarea.SetWidth(inner)
 }
 
 // Update passes events to the textarea when enabled.
@@ -57,12 +89,12 @@ func (m inputModel) Update(msg tea.Msg) (inputModel, tea.Cmd) {
 	return m, cmd
 }
 
-// View renders the textarea.
 func (m inputModel) View() string {
+	style := inputActiveBorderStyle
 	if !m.enabled {
-		return ""
+		style = inputBorderStyle
 	}
-	return m.textarea.View()
+	return style.Render(m.textarea.View())
 }
 
 // --- Command parsing ---
