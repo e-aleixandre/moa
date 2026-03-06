@@ -501,18 +501,16 @@ func (m *appModel) flushBlocks(to int) tea.Cmd {
 		// Nothing to print, but still confirm the advance
 		return done
 	}
-	return tea.Sequence(tea.Println(strings.Join(parts, "\n")), done)
+	body := strings.TrimRight(strings.Join(parts, "\n"), "\n")
+	return tea.Sequence(tea.Println(body), done)
 }
 
 // --- Agent interaction ---
 
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
-	// Commit any pending status to scrollback before the user message.
-	if m.s.pendingStatus != "" {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: m.s.pendingStatus})
-		m.s.pendingStatus = ""
-	}
+	// Clear transient status — it's live-only, never persisted to scrollback.
+	m.s.pendingStatus = ""
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
 
 	// Set session title from the first user message

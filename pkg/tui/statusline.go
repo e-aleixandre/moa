@@ -93,7 +93,49 @@ func (sl *StatusLine) View(width int) string {
 	}
 
 	content := strings.Join(parts, statusLineSep)
+	// Force single physical line — multiline reflow causes visual corruption
+	// with tea.Println-based scrollback in non-alt-screen mode.
+	content = strings.ReplaceAll(content, "\n", " ")
+	if width > 0 {
+		content = truncateVisible(content, width-2) // account for style padding
+	}
 	return sl.style.Width(width).Render(content)
+}
+
+// truncateVisible truncates a string to maxWidth visible characters,
+// preserving ANSI escape sequences. Uses lipgloss width measurement.
+func truncateVisible(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	w := lipgloss.Width(s)
+	if w <= maxWidth {
+		return s
+	}
+	// Walk runes, tracking visible width. Keep all ANSI escapes.
+	var result strings.Builder
+	inEscape := false
+	visible := 0
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			result.WriteRune(r)
+			continue
+		}
+		if inEscape {
+			result.WriteRune(r)
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		if visible >= maxWidth {
+			break
+		}
+		result.WriteRune(r)
+		visible++
+	}
+	return result.String()
 }
 
 // --- Built-in segment updaters ---
