@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -364,6 +365,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Sequence(clearScreen(), tea.Println(content))
 
 	case tea.KeyEnter:
+		if msg.Alt {
+			// Option/Alt+Enter → pass to textarea for newline insertion
+			break
+		}
 		if m.s.running {
 			return m, nil
 		}
@@ -562,7 +567,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	m.status.SetText("")
 	m.input.SetEnabled(true)
 
-	if msg.Err != nil && msg.Err != context.Canceled {
+	if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "error", Raw: "Error: " + msg.Err.Error(),
 		})

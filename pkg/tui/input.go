@@ -31,7 +31,7 @@ var (
 
 func newInput() inputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Ask anything... (Ctrl+J for newline)"
+	ta.Placeholder = "Ask anything... (Option+Enter for newline)"
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit
 	ta.SetHeight(3)
