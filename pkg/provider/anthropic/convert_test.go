@@ -9,7 +9,7 @@ import (
 
 func TestBuildRequestBody_Basic(t *testing.T) {
 	req := core.Request{
-		Model:  core.Model{ID: "claude-sonnet-4-6-20260218"},
+		Model:  core.Model{ID: "claude-sonnet-4-6"},
 		System: "You are a helpful assistant.",
 		Messages: []core.Message{
 			core.NewUserMessage("Hello"),
@@ -27,7 +27,7 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if body["model"] != "claude-sonnet-4-6-20260218" {
+	if body["model"] != "claude-sonnet-4-6" {
 		t.Errorf("model: got %v", body["model"])
 	}
 	if body["stream"] != true {
@@ -47,7 +47,7 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 
 func TestBuildRequestBody_WithTools(t *testing.T) {
 	req := core.Request{
-		Model: core.Model{ID: "claude-sonnet-4-6-20260218"},
+		Model: core.Model{ID: "claude-sonnet-4-6"},
 		Messages: []core.Message{
 			core.NewUserMessage("List files"),
 		},
@@ -86,7 +86,7 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 
 func TestBuildRequestBody_WithThinking(t *testing.T) {
 	req := core.Request{
-		Model: core.Model{ID: "claude-sonnet-4-6-20260218"},
+		Model: core.Model{ID: "claude-sonnet-4-6"},
 		Messages: []core.Message{
 			core.NewUserMessage("Think hard"),
 		},
@@ -220,7 +220,7 @@ func TestConvertToolSpecs_ValidSchema(t *testing.T) {
 
 func TestBuildRequestBody_OAuth_SystemPreamble(t *testing.T) {
 	req := core.Request{
-		Model:  core.Model{ID: "claude-sonnet-4-6-20260218"},
+		Model:  core.Model{ID: "claude-sonnet-4-6"},
 		System: "You are a test agent.",
 		Messages: []core.Message{
 			core.NewUserMessage("Hello"),

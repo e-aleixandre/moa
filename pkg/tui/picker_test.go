@@ -10,7 +10,7 @@ func TestPickerOpenClose(t *testing.T) {
 		t.Fatal("should not be active initially")
 	}
 
-	p.Open("claude-sonnet-4-6-20260218", nil)
+	p.Open("claude-sonnet-4-6", nil)
 	if !p.active {
 		t.Fatal("should be active after Open")
 	}
@@ -20,7 +20,7 @@ func TestPickerOpenClose(t *testing.T) {
 
 	// Cursor should be on the current model.
 	selected := p.Selected()
-	if selected.ID != "claude-sonnet-4-6-20260218" {
+	if selected.ID != "claude-sonnet-4-6" {
 		t.Fatalf("cursor should start on current model, got %s", selected.ID)
 	}
 
@@ -129,7 +129,7 @@ func TestCycleThinkingLevel(t *testing.T) {
 
 func TestPickerView(t *testing.T) {
 	p := newPicker()
-	p.Open("claude-sonnet-4-6-20260218", nil)
+	p.Open("claude-sonnet-4-6", nil)
 
 	view := p.View(80)
 	if view == "" {
