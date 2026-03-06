@@ -8,25 +8,29 @@ import (
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
 	// --- Anthropic ---
-	"claude-sonnet-4-20250514": {
-		ID: "claude-sonnet-4-20250514", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Sonnet 4", MaxInput: 200_000, MaxOutput: 16384,
+	"claude-opus-4-6-20260205": {
+		ID: "claude-opus-4-6-20260205", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Opus 4.6", MaxInput: 200_000, MaxOutput: 16384,
 	},
-	"claude-sonnet-4-0": {
-		ID: "claude-sonnet-4-20250514", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Sonnet 4", MaxInput: 200_000, MaxOutput: 16384,
+	"claude-opus-4-6": {
+		ID: "claude-opus-4-6-20260205", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Opus 4.6", MaxInput: 200_000, MaxOutput: 16384,
 	},
-	"claude-opus-4-20250514": {
-		ID: "claude-opus-4-20250514", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Opus 4", MaxInput: 200_000, MaxOutput: 16384,
+	"claude-sonnet-4-6-20260218": {
+		ID: "claude-sonnet-4-6-20260218", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Sonnet 4.6", MaxInput: 200_000, MaxOutput: 16384,
 	},
-	"claude-opus-4-0": {
-		ID: "claude-opus-4-20250514", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Opus 4", MaxInput: 200_000, MaxOutput: 16384,
+	"claude-sonnet-4-6": {
+		ID: "claude-sonnet-4-6-20260218", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Sonnet 4.6", MaxInput: 200_000, MaxOutput: 16384,
 	},
-	"claude-haiku-3.5-20241022": {
-		ID: "claude-haiku-3.5-20241022", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Haiku 3.5", MaxInput: 200_000, MaxOutput: 8192,
+	"claude-haiku-4-5-20251001": {
+		ID: "claude-haiku-4-5-20251001", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Haiku 4.5", MaxInput: 200_000, MaxOutput: 8192,
+	},
+	"claude-haiku-4-5": {
+		ID: "claude-haiku-4-5-20251001", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Haiku 4.5", MaxInput: 200_000, MaxOutput: 8192,
 	},
 
 	// --- OpenAI ---
@@ -55,9 +59,9 @@ var knownModels = map[string]Model{
 // Short aliases → full model ID.
 var modelAliases = map[string]string{
 	// Anthropic
-	"sonnet":  "claude-sonnet-4-20250514",
-	"opus":    "claude-opus-4-20250514",
-	"haiku":   "claude-haiku-3.5-20241022",
+	"sonnet": "claude-sonnet-4-6-20260218",
+	"opus":   "claude-opus-4-6-20260205",
+	"haiku":  "claude-haiku-4-5-20251001",
 	// OpenAI
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
@@ -68,7 +72,7 @@ var modelAliases = map[string]string{
 //
 // Accepted formats:
 //   - "sonnet"                     → alias lookup
-//   - "claude-sonnet-4-20250514"   → direct registry lookup
+//   - "claude-sonnet-4-6-20260218"   → direct registry lookup
 //   - "anthropic/claude-sonnet-4"  → provider prefix (strips prefix, looks up rest)
 //   - "openai/gpt-5.3-codex"      → provider prefix
 //

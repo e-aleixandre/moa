@@ -7,7 +7,7 @@ func TestResolveModel_Alias(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok")
 	}
-	if m.ID != "claude-sonnet-4-20250514" {
+	if m.ID != "claude-sonnet-4-6-20260218" {
 		t.Fatalf("got %s", m.ID)
 	}
 	if m.Provider != "anthropic" {
@@ -43,7 +43,7 @@ func TestResolveModel_ProviderPrefixAlias(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok for provider/alias")
 	}
-	if m.ID != "claude-sonnet-4-20250514" {
+	if m.ID != "claude-sonnet-4-6-20260218" {
 		t.Fatalf("id: %s", m.ID)
 	}
 }
