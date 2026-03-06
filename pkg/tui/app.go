@@ -174,7 +174,12 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			if m.session != nil && len(m.session.Messages) > 0 {
 				m.rebuildFromMessages(m.session.Messages)
+				// Render once for View() display, mark as already scheduled
+				// so flushBlocks won't try to tea.Println them (which causes jumps).
+				// New blocks added after this point get flushed normally.
 				m.s.resumeCache = renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
+				m.s.flushedCount = len(m.s.blocks)
+				m.s.flushScheduledCount = len(m.s.blocks)
 			}
 		}
 		return m, nil
