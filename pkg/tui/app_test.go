@@ -336,25 +336,44 @@ func TestWindowResize_NoDirtyWhenNotStreaming(t *testing.T) {
 	}
 }
 
-// --- Test 6: Ctrl+O disabled while running ---
+// --- Test 6: Ctrl+O expand mode ---
 
-func TestCtrlO_DisabledWhileRunning(t *testing.T) {
+func TestCtrlO_EntersExpandMode(t *testing.T) {
+	m := newTestModel()
+	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
+
+	result, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	rm := result.(appModel)
+	if !rm.s.expandMode {
+		t.Error("expandMode should be true after Ctrl+O")
+	}
+	if cmd == nil {
+		t.Error("expected ClearScreen Cmd")
+	}
+}
+
+func TestCtrlO_WorksWhileRunning(t *testing.T) {
 	m := newTestModel()
 	m.s.running = true
 	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
-	if cmd != nil {
-		t.Error("expected nil Cmd for Ctrl+O while running")
+	result, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	rm := result.(appModel)
+	// In-process pager doesn't pause event processing, so it works while running
+	if !rm.s.expandMode {
+		t.Error("expandMode should be true even while running")
 	}
 }
 
 func TestCtrlO_DisabledWhenEmpty(t *testing.T) {
 	m := newTestModel()
-	m.s.running = false
 	m.s.blocks = nil
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	result, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	rm := result.(appModel)
+	if rm.s.expandMode {
+		t.Error("expandMode should be false with no blocks")
+	}
 	if cmd != nil {
 		t.Error("expected nil Cmd for Ctrl+O with no blocks")
 	}
