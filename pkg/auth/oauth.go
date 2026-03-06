@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -24,6 +25,8 @@ const (
 	scopes       = "org:create_api_key user:profile user:inference"
 )
 
+var oauthClient = &http.Client{Timeout: 30 * time.Second}
+
 // OAuthCredentials holds the result of an OAuth login/refresh.
 type OAuthCredentials struct {
 	Access  string `json:"access"`
@@ -46,6 +49,12 @@ func LoginAnthropic(openURL func(string), promptCode func() (string, error)) (*O
 		return nil, fmt.Errorf("generating PKCE: %w", err)
 	}
 
+	// Generate a separate state parameter (not reusing PKCE verifier)
+	state, err := randomState()
+	if err != nil {
+		return nil, fmt.Errorf("generating state: %w", err)
+	}
+
 	// Build authorize URL
 	params := url.Values{
 		"code":                  {"true"},
@@ -55,14 +64,14 @@ func LoginAnthropic(openURL func(string), promptCode func() (string, error)) (*O
 		"scope":                 {scopes},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-		"state":                 {verifier},
+		"state":                 {state},
 	}
 	authURL := authorizeURL + "?" + params.Encode()
 
 	// Open browser
 	openURL(authURL)
 
-	// Wait for user to paste the authorization code (format: code#state)
+	// Wait for user to paste the authorization code or callback URL
 	raw, err := promptCode()
 	if err != nil {
 		return nil, fmt.Errorf("reading auth code: %w", err)
@@ -72,15 +81,15 @@ func LoginAnthropic(openURL func(string), promptCode func() (string, error)) (*O
 		return nil, fmt.Errorf("empty authorization code")
 	}
 
-	// Parse code#state format
-	parts := strings.SplitN(raw, "#", 2)
-	code := parts[0]
-	state := ""
-	if len(parts) == 2 {
-		state = parts[1]
+	// Parse input: supports callback URL (?code=...&state=...) or code#state
+	code, returnedState := parseAuthInput(raw)
+
+	// Validate state to prevent CSRF
+	if returnedState != state {
+		return nil, fmt.Errorf("authorization failed: state mismatch — paste the full callback URL or code#state value and retry")
 	}
 
-	// Exchange code for tokens
+	// Exchange token using our original state (trusted local value)
 	return exchangeToken(code, state, verifier)
 }
 
@@ -92,7 +101,7 @@ func RefreshAnthropicToken(refreshToken string) (*OAuthCredentials, error) {
 		"refresh_token": {refreshToken},
 	}
 
-	resp, err := http.PostForm(tokenURL, body)
+	resp, err := oauthClient.PostForm(tokenURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}
@@ -132,9 +141,18 @@ func exchangeToken(code, state, verifier string) (*OAuthCredentials, error) {
 		"redirect_uri":  redirectURI,
 		"code_verifier": verifier,
 	}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling token request: %w", err)
+	}
 
-	resp, err := http.Post(tokenURL, "application/json", strings.NewReader(string(body)))
+	req, err := http.NewRequest("POST", tokenURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("building token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := oauthClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange request: %w", err)
 	}
@@ -157,6 +175,30 @@ func exchangeToken(code, state, verifier string) (*OAuthCredentials, error) {
 	}, nil
 }
 
+// parseAuthInput extracts code and state from user input.
+// Supports:
+//  1. Full callback URL: https://...?code=ABC&state=XYZ
+//  2. code#state format: ABC#XYZ
+//
+// Returns empty state if format is unrecognized (state validation will reject it).
+func parseAuthInput(raw string) (code, state string) {
+	// Try URL format first
+	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
+		q := u.Query()
+		if c := q.Get("code"); c != "" {
+			return c, q.Get("state")
+		}
+	}
+
+	// Try code#state format
+	if parts := strings.SplitN(raw, "#", 2); len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+
+	// Unrecognized format — return empty state (validation will reject)
+	return raw, ""
+}
+
 // generatePKCE creates a PKCE verifier and S256 challenge.
 func generatePKCE() (verifier, challenge string, err error) {
 	buf := make([]byte, 32)
@@ -167,6 +209,15 @@ func generatePKCE() (verifier, challenge string, err error) {
 	h := sha256.Sum256([]byte(verifier))
 	challenge = base64.RawURLEncoding.EncodeToString(h[:])
 	return verifier, challenge, nil
+}
+
+// randomState generates a random state parameter for OAuth CSRF protection.
+func randomState() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // OpenBrowser opens a URL in the default browser.

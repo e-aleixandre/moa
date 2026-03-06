@@ -1,14 +1,17 @@
 package tool
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -85,7 +88,17 @@ func NewRead(cfg ToolConfig) core.Tool {
 	}
 }
 
+const maxImageBytes = 10 * 1024 * 1024 // 10 MB
+
 func readImage(path, mimeType string) (core.Result, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
+	}
+	if info.Size() > maxImageBytes {
+		return core.ErrorResult(fmt.Sprintf("image too large (%d MB, max 10 MB)", info.Size()/(1024*1024))), nil
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
@@ -103,43 +116,110 @@ func readImage(path, mimeType string) (core.Result, error) {
 }
 
 func readTextFile(resolved, displayPath string, offset, limit int) (core.Result, error) {
-	data, err := os.ReadFile(resolved)
+	f, err := os.Open(resolved)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
 	}
+	defer f.Close()
 
-	content := string(data)
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
+	reader := bufio.NewReader(f)
+	lineNum := 0
+	collected := 0
+	var b strings.Builder
+	truncatedByBytes := false
+	truncatedByLines := false
+	hitEOF := false
 
-	// Apply offset (1-indexed)
-	startIdx := offset - 1
-	if startIdx >= totalLines {
-		return core.TextResult(fmt.Sprintf("(file has %d lines, offset %d is past end)", totalLines, offset)), nil
+	for !hitEOF {
+		// Read line in chunks via ReadSlice to avoid materializing huge lines.
+		// ReadSlice returns bufio.ErrBufferFull when the line exceeds buffer size;
+		// we keep consuming chunks until we see a newline or EOF.
+		isPrefix := true
+		lineComplete := false
+		lineNum++
+
+		for isPrefix {
+			chunk, sliceErr := reader.ReadSlice('\n')
+			if sliceErr == bufio.ErrBufferFull {
+				// Partial line — more data follows without newline
+			} else if sliceErr == io.EOF {
+				isPrefix = false
+				lineComplete = true
+				hitEOF = true
+				if len(chunk) == 0 {
+					// True EOF — no trailing content after last newline
+					lineNum--
+					goto done
+				}
+			} else if sliceErr != nil {
+				return core.ErrorResult(fmt.Sprintf("read error: %v", sliceErr)), nil
+			} else {
+				// Found newline — line is complete
+				isPrefix = false
+				lineComplete = true
+			}
+
+			if lineNum < offset {
+				continue // skip lines before offset (don't store chunk)
+			}
+			if collected >= limit && lineComplete {
+				truncatedByLines = true
+				goto done
+			}
+
+			// Enforce byte limit while consuming chunks
+			remaining := maxOutputBytes - b.Len()
+			if remaining <= 0 {
+				truncatedByBytes = true
+				goto done
+			}
+			if len(chunk) > remaining {
+				b.Write(chunk[:remaining])
+				truncatedByBytes = true
+				goto done
+			}
+			b.Write(chunk)
+		}
+
+		if lineNum >= offset && lineComplete {
+			collected++
+		}
+		// Check limit only after counting — peek to see if more data exists.
+		if collected >= limit && !hitEOF {
+			if _, peekErr := reader.Peek(1); peekErr == nil {
+				truncatedByLines = true
+			}
+			break
+		}
 	}
-	if startIdx < 0 {
-		startIdx = 0
+
+done:
+	if collected == 0 && lineNum > 0 && lineNum < offset {
+		return core.TextResult(fmt.Sprintf("(offset %d is past end of file, which has %d lines)", offset, lineNum)), nil
 	}
 
-	endIdx := startIdx + limit
-	truncated := false
-	if endIdx > totalLines {
-		endIdx = totalLines
-	} else if endIdx < totalLines {
-		truncated = true
+	result := b.String()
+
+	// Ensure valid UTF-8 after byte truncation
+	if truncatedByBytes {
+		result = safeUTF8Truncate(result)
 	}
 
-	result := strings.Join(lines[startIdx:endIdx], "\n")
-
-	// Also truncate by bytes
-	if len(result) > maxOutputBytes {
-		result = result[:maxOutputBytes]
-		truncated = true
-	}
-
-	if truncated {
-		result += fmt.Sprintf("\n\n[truncated — showing lines %d-%d of %d. Use offset/limit for more.]", offset, startIdx+endIdx-startIdx, totalLines)
+	if truncatedByLines || truncatedByBytes {
+		endLine := offset + collected - 1
+		if collected == 0 {
+			endLine = offset
+		}
+		result += fmt.Sprintf("\n\n[truncated — showing lines %d-%d. Use offset/limit for more.]", offset, endLine)
 	}
 
 	return core.TextResult(result), nil
+}
+
+// safeUTF8Truncate walks back from the end of s to a valid UTF-8 boundary.
+func safeUTF8Truncate(s string) string {
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }

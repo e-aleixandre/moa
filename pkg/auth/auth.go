@@ -25,7 +25,7 @@ type Credential struct {
 
 // IsOAuthToken returns true if the given key is an Anthropic OAuth token.
 func IsOAuthToken(key string) bool {
-	return strings.Contains(key, "sk-ant-oat")
+	return strings.HasPrefix(key, "sk-ant-oat")
 }
 
 // Store manages credentials on disk.
@@ -81,8 +81,34 @@ func (s *Store) save() error {
 		return fmt.Errorf("marshaling credentials: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, data, 0600); err != nil {
+	// Atomic write: unique temp file + sync + rename to prevent corruption
+	tmp, err := os.CreateTemp(dir, "auth-*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("writing credentials: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("syncing credentials: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0600); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("setting permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("renaming credentials: %w", err)
 	}
 	return nil
 }

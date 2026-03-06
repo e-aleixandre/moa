@@ -207,6 +207,103 @@ func TestPatchFromMessages_PreservesToolBlocks(t *testing.T) {
 	}
 }
 
+// Regression test: multi-turn scenario where MessageEnd is missed.
+// Without the fix, patchFromMessages would find the flushed turn-1 assistant
+// block, patch it, and flushBlocks would be a no-op → message disappears.
+func TestPatchFromMessages_DoesNotPatchFlushedBlocks(t *testing.T) {
+	m := newTestModel()
+
+	// Turn 1: user + assistant blocks, already flushed to scrollback
+	m.s.blocks = []messageBlock{
+		{Type: "user", Raw: "turn 1 question"},
+		{Type: "assistant", Raw: "turn 1 answer"},
+		// Turn 2: user block flushed, but MessageEnd not yet processed
+		{Type: "user", Raw: "turn 2 question"},
+	}
+	m.s.flushedCount = 3 // all 3 blocks are flushed
+	m.s.flushScheduledCount = 3
+
+	// agent.Send returns with turn-2 assistant text, but MessageEnd was missed
+	m.patchFromMessages([]core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "turn 1 question"}}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{{Type: "text", Text: "turn 1 answer"}}}},
+		{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "turn 2 question"}}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			{Type: "text", Text: "turn 2 answer"},
+		}}},
+	})
+
+	// CRITICAL: turn 1 assistant must NOT be overwritten
+	if m.s.blocks[1].Raw != "turn 1 answer" {
+		t.Errorf("turn 1 assistant was overwritten: got %q, want %q", m.s.blocks[1].Raw, "turn 1 answer")
+	}
+
+	// Turn 2 assistant must be APPENDED (not patched into turn 1)
+	if len(m.s.blocks) != 4 {
+		t.Fatalf("blocks = %d, want 4 (new block appended)", len(m.s.blocks))
+	}
+	if m.s.blocks[3].Type != "assistant" || m.s.blocks[3].Raw != "turn 2 answer" {
+		t.Errorf("blocks[3] = %+v, want assistant 'turn 2 answer'", m.s.blocks[3])
+	}
+
+	// flushBlocks should now have something to flush (block index 3)
+	cmd := m.flushBlocks(len(m.s.blocks))
+	if cmd == nil {
+		t.Error("expected non-nil flush Cmd for the new appended block")
+	}
+	if m.s.flushScheduledCount != 4 {
+		t.Errorf("flushScheduledCount = %d, want 4", m.s.flushScheduledCount)
+	}
+}
+
+// Same scenario but with thinking blocks too.
+func TestPatchFromMessages_DoesNotPatchFlushedThinking(t *testing.T) {
+	m := newTestModel()
+
+	// Turn 1 fully flushed with thinking
+	m.s.blocks = []messageBlock{
+		{Type: "user", Raw: "q1"},
+		{Type: "thinking", Raw: "think1"},
+		{Type: "assistant", Raw: "a1"},
+		// Turn 2 user flushed, MessageEnd missed
+		{Type: "user", Raw: "q2"},
+	}
+	m.s.flushedCount = 4
+	m.s.flushScheduledCount = 4
+
+	m.patchFromMessages([]core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "q1"}}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			{Type: "thinking", Thinking: "think1"},
+			{Type: "text", Text: "a1"},
+		}}},
+		{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "q2"}}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			{Type: "thinking", Thinking: "think2"},
+			{Type: "text", Text: "a2"},
+		}}},
+	})
+
+	// Turn 1 blocks untouched
+	if m.s.blocks[1].Raw != "think1" {
+		t.Errorf("turn 1 thinking overwritten: %q", m.s.blocks[1].Raw)
+	}
+	if m.s.blocks[2].Raw != "a1" {
+		t.Errorf("turn 1 assistant overwritten: %q", m.s.blocks[2].Raw)
+	}
+
+	// Turn 2 blocks appended
+	if len(m.s.blocks) != 6 {
+		t.Fatalf("blocks = %d, want 6", len(m.s.blocks))
+	}
+	if m.s.blocks[4].Type != "thinking" || m.s.blocks[4].Raw != "think2" {
+		t.Errorf("blocks[4] = %+v, want thinking 'think2'", m.s.blocks[4])
+	}
+	if m.s.blocks[5].Type != "assistant" || m.s.blocks[5].Raw != "a2" {
+		t.Errorf("blocks[5] = %+v, want assistant 'a2'", m.s.blocks[5])
+	}
+}
+
 func TestPatchFromMessages_NilMessages(t *testing.T) {
 	m := newTestModel()
 	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}

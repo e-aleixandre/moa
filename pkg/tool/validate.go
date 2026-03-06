@@ -3,6 +3,8 @@ package tool
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"reflect"
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -59,7 +61,7 @@ func validateValue(schema *schemaNode, val any, path string) error {
 	if len(schema.Enum) > 0 {
 		found := false
 		for _, e := range schema.Enum {
-			if fmt.Sprintf("%v", e) == fmt.Sprintf("%v", val) {
+			if enumEquals(e, val) {
 				found = true
 				break
 			}
@@ -79,7 +81,7 @@ func validateValue(schema *schemaNode, val any, path string) error {
 		if _, ok := val.(string); !ok {
 			return fmt.Errorf("parameter %s: expected string, got %T", path, val)
 		}
-	case "number", "integer":
+	case "number":
 		switch val.(type) {
 		case float64, int, int64, float32:
 			// ok
@@ -87,6 +89,23 @@ func validateValue(schema *schemaNode, val any, path string) error {
 			// ok
 		default:
 			return fmt.Errorf("parameter %s: expected number, got %T", path, val)
+		}
+	case "integer":
+		switch n := val.(type) {
+		case float64:
+			if n != math.Trunc(n) {
+				return fmt.Errorf("parameter %s: expected integer, got %v", path, n)
+			}
+		case int, int64:
+			// ok
+		case json.Number:
+			// Verify the json.Number represents an integer value
+			f, err := n.Float64()
+			if err != nil || f != math.Trunc(f) {
+				return fmt.Errorf("parameter %s: expected integer, got %v", path, n)
+			}
+		default:
+			return fmt.Errorf("parameter %s: expected integer, got %T", path, val)
 		}
 	case "boolean":
 		if _, ok := val.(bool); !ok {
@@ -123,6 +142,39 @@ func ValidateToolCall(registry *core.Registry, toolName string, args map[string]
 		return fmt.Errorf("unknown tool: %s", toolName)
 	}
 	return ValidateParams(t, args)
+}
+
+// enumEquals compares two values for enum membership with numeric-awareness.
+// JSON numbers deserialize as float64 but enum values in schemas may be int.
+// Falls back to reflect.DeepEqual for non-comparable types (maps, slices).
+func enumEquals(a, b any) bool {
+	af, aOk := toFloat64(a)
+	bf, bOk := toFloat64(b)
+	if aOk && bOk {
+		return af == bf
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	default:
+		return 0, false
+	}
 }
 
 // summarizeArgs creates a short string summary of tool arguments for logging.

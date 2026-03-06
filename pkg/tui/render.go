@@ -111,28 +111,13 @@ func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) strin
 }
 
 // renderBlocks renders all blocks as a single string. Used by expand mode (Ctrl+O pager).
+// Delegates to renderSingleBlock for each block, adding a newline separator.
 func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool) string {
 	var b strings.Builder
 	for _, block := range blocks {
-		switch block.Type {
-		case "user":
-			b.WriteString(FormatUserMessage(block.Raw) + "\n\n")
-		case "thinking":
-			if !showThinking {
-				continue
-			}
-			styled := thinkingStyle.Width(r.width - 2).PaddingLeft(2).Render(block.Raw)
-			b.WriteString(styled + "\n")
-		case "assistant":
-			b.WriteString(r.RenderMarkdown(block.Raw) + "\n")
-		case "tool_start":
-			b.WriteString(FormatToolStart(block.ToolName, block.ToolArgs) + "\n")
-		case "tool_end":
-			b.WriteString(FormatToolEnd(block.ToolName, block.IsError) + "\n")
-		case "error":
-			b.WriteString(errorStyle.Render(block.Raw) + "\n")
-		case "status":
-			b.WriteString(statusStyle.Render(block.Raw) + "\n")
+		if s := renderSingleBlock(block, r, showThinking); s != "" {
+			b.WriteString(s)
+			b.WriteByte('\n')
 		}
 	}
 	return b.String()

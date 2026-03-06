@@ -47,7 +47,7 @@ func (a *Anthropic) IsOAuth() bool {
 
 // isOAuthToken returns true if the key is an Anthropic OAuth token.
 func isOAuthToken(key string) bool {
-	return strings.Contains(key, "sk-ant-oat")
+	return strings.HasPrefix(key, "sk-ant-oat")
 }
 
 // Stream sends a request to the Anthropic Messages API and returns a channel

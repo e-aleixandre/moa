@@ -1,7 +1,6 @@
 package tool
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -88,10 +87,15 @@ func NewBash(cfg ToolConfig) core.Tool {
 			var stdout, stderr cappedBuffer
 			stdout.max = maxOutputBytes
 			stderr.max = maxOutputBytes
-			var mu sync.Mutex
 
-			stdoutPipe, _ := cmd.StdoutPipe()
-			stderrPipe, _ := cmd.StderrPipe()
+			stdoutPipe, err := cmd.StdoutPipe()
+			if err != nil {
+				return core.ErrorResult(fmt.Sprintf("stdout pipe: %v", err)), nil
+			}
+			stderrPipe, err := cmd.StderrPipe()
+			if err != nil {
+				return core.ErrorResult(fmt.Sprintf("stderr pipe: %v", err)), nil
+			}
 
 			if err := cmd.Start(); err != nil {
 				return core.ErrorResult(fmt.Sprintf("failed to start: %v", err)), nil
@@ -108,9 +112,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 					n, err := r.Read(tmp)
 					if n > 0 {
 						chunk := string(tmp[:n])
-						mu.Lock()
 						buf.Write(tmp[:n])
-						mu.Unlock()
 						if onUpdate != nil {
 							onUpdate(core.TextResult(chunk))
 						}
@@ -125,7 +127,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 			go streamReader(stderrPipe, &stderr)
 
 			wg.Wait()
-			err := cmd.Wait()
+			err = cmd.Wait()
 
 			// Check context FIRST — on timeout, cmd.Wait() may return
 			// an ExitError (SIGTERM exit), masking the real cause.
@@ -182,32 +184,4 @@ func secondsToDuration(s int) time.Duration {
 	return time.Duration(s) * time.Second
 }
 
-// cappedBuffer accumulates up to max bytes. Once full, further writes are
-// silently discarded. This prevents OOM when commands produce huge output
-// (e.g., cat /dev/urandom). The truncated flag tells the caller to append a notice.
-type cappedBuffer struct {
-	buf       bytes.Buffer
-	max       int
-	truncated bool
-}
 
-func (b *cappedBuffer) Write(p []byte) (int, error) {
-	if b.truncated {
-		return len(p), nil // accept but discard
-	}
-	remaining := b.max - b.buf.Len()
-	if remaining <= 0 {
-		b.truncated = true
-		return len(p), nil
-	}
-	if len(p) > remaining {
-		b.buf.Write(p[:remaining])
-		b.truncated = true
-		return len(p), nil // report full write to caller
-	}
-	return b.buf.Write(p)
-}
-
-func (b *cappedBuffer) String() string {
-	return b.buf.String()
-}
