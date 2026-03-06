@@ -1,7 +1,10 @@
 package core
 
+import "strings"
+
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
+	// --- Anthropic ---
 	"claude-sonnet-4-20250514": {
 		ID: "claude-sonnet-4-20250514", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Sonnet 4", MaxInput: 200_000, MaxOutput: 16384,
@@ -22,14 +25,84 @@ var knownModels = map[string]Model{
 		ID: "claude-haiku-3.5-20241022", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Haiku 3.5", MaxInput: 200_000, MaxOutput: 8192,
 	},
+
+	// --- OpenAI ---
+	"gpt-5.3-codex": {
+		ID: "gpt-5.3-codex", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.3 Codex", MaxInput: 400_000, MaxOutput: 16384,
+	},
+	"gpt-5.3-codex-spark": {
+		ID: "gpt-5.3-codex-spark", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.3 Codex Spark", MaxInput: 128_000, MaxOutput: 16384,
+	},
+	"gpt-5.2-codex": {
+		ID: "gpt-5.2-codex", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
+	},
+	"o3": {
+		ID: "o3", Provider: "openai", API: "openai-chat",
+		Name: "o3", MaxInput: 200_000, MaxOutput: 100_000,
+	},
+	"o4-mini": {
+		ID: "o4-mini", Provider: "openai", API: "openai-chat",
+		Name: "o4-mini", MaxInput: 200_000, MaxOutput: 100_000,
+	},
 }
 
-// ResolveModel returns a fully-populated Model for a known model ID.
-// For unknown models, returns a Model with MaxInput=0 (disables context
-// management) and ok=false so callers can warn.
-func ResolveModel(id string) (Model, bool) {
-	if m, ok := knownModels[id]; ok {
+// Short aliases → full model ID.
+var modelAliases = map[string]string{
+	// Anthropic
+	"sonnet":  "claude-sonnet-4-20250514",
+	"opus":    "claude-opus-4-20250514",
+	"haiku":   "claude-haiku-3.5-20241022",
+	// OpenAI
+	"codex":       "gpt-5.3-codex",
+	"codex-spark": "gpt-5.3-codex-spark",
+	"codex-5.2":   "gpt-5.2-codex",
+}
+
+// ResolveModel resolves a model specifier to a fully-populated Model.
+//
+// Accepted formats:
+//   - "sonnet"                     → alias lookup
+//   - "claude-sonnet-4-20250514"   → direct registry lookup
+//   - "anthropic/claude-sonnet-4"  → provider prefix (strips prefix, looks up rest)
+//   - "openai/gpt-5.3-codex"      → provider prefix
+//
+// For unknown models, returns a Model with MaxInput=0 and ok=false.
+func ResolveModel(spec string) (Model, bool) {
+	// Check alias first.
+	if full, ok := modelAliases[spec]; ok {
+		if m, ok2 := knownModels[full]; ok2 {
+			return m, true
+		}
+	}
+
+	// Direct lookup.
+	if m, ok := knownModels[spec]; ok {
 		return m, true
 	}
-	return Model{ID: id}, false
+
+	// Try provider/model format.
+	if idx := strings.IndexByte(spec, '/'); idx > 0 {
+		provider := spec[:idx]
+		modelID := spec[idx+1:]
+
+		// Alias after stripping provider.
+		if full, ok := modelAliases[modelID]; ok {
+			if m, ok2 := knownModels[full]; ok2 {
+				return m, true
+			}
+		}
+
+		// Direct lookup of model ID part.
+		if m, ok := knownModels[modelID]; ok {
+			return m, true
+		}
+
+		// Unknown model with explicit provider.
+		return Model{ID: modelID, Provider: provider}, false
+	}
+
+	return Model{ID: spec}, false
 }

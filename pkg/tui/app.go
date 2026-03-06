@@ -79,6 +79,9 @@ type appModel struct {
 	sessionStore *session.Store   // nil if persistence is disabled
 	session      *session.Session // current session (nil if no persistence)
 
+	// Display
+	modelName string
+
 	// Layout
 	width  int
 	height int
@@ -88,6 +91,7 @@ type appModel struct {
 type Config struct {
 	SessionStore *session.Store   // persistence backend (nil = no persistence)
 	Session      *session.Session // session to resume (nil = fresh start)
+	ModelName    string           // display name for the active model (shown on startup)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -132,6 +136,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		status:       newStatus(),
 		sessionStore: cfg.SessionStore,
 		session:      cfg.Session,
+		modelName:    cfg.ModelName,
 	}
 }
 
@@ -172,8 +177,18 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.s.initialized {
 			m.s.initialized = true
 
+			// Show model info on startup.
+			if m.modelName != "" {
+				m.s.blocks = append(m.s.blocks, messageBlock{
+					Type: "status", Raw: "model: " + m.modelName,
+				})
+			}
+
 			if m.session != nil && len(m.session.Messages) > 0 {
 				m.rebuildFromMessages(m.session.Messages)
+			}
+
+			if len(m.s.blocks) > 0 {
 				content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
 				m.s.flushedCount = len(m.s.blocks)
 				m.s.flushScheduledCount = len(m.s.blocks)
