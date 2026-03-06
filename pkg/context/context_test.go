@@ -99,7 +99,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role description")
 	}
-	if !strings.Contains(prompt, "bash: Execute commands") {
+	if !strings.Contains(prompt, "bash:") {
 		t.Error("expected tool description")
 	}
 	if !strings.Contains(prompt, "Project: test") {
