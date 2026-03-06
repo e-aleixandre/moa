@@ -147,6 +147,148 @@ data: [DONE]
 	}
 }
 
+func TestStream_SparseToolCallIndices(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		// Tool calls at indices 0 and 2 (sparse — index 1 is skipped).
+		fmt.Fprint(w, `data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"call_c","type":"function","function":{"name":"write","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"function":{"arguments":"{\"path\":\"b.txt\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`)
+	}))
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var finalMsg *core.Message
+	for event := range ch {
+		if event.Type == core.ProviderEventDone {
+			finalMsg = event.Message
+		}
+		if event.Type == core.ProviderEventError {
+			t.Fatalf("error: %v", event.Error)
+		}
+	}
+
+	// Both tool calls (index 0 and 2) should be present.
+	toolCalls := 0
+	for _, c := range finalMsg.Content {
+		if c.Type == "tool_call" {
+			toolCalls++
+		}
+	}
+	if toolCalls != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", toolCalls)
+	}
+}
+
+func TestStream_MalformedJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		// Mix of valid and malformed chunks.
+		fmt.Fprint(w, `data: {"id":"chatcmpl-4","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {invalid json here
+
+data: {"id":"chatcmpl-4","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"content":"works"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-4","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`)
+	}))
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var text string
+	var gotDone bool
+	for event := range ch {
+		if event.Type == core.ProviderEventTextDelta {
+			text += event.Delta
+		}
+		if event.Type == core.ProviderEventDone {
+			gotDone = true
+		}
+		if event.Type == core.ProviderEventError {
+			t.Fatalf("error: %v", event.Error)
+		}
+	}
+
+	if !gotDone {
+		t.Fatal("expected done")
+	}
+	if text != "works" {
+		t.Fatalf("expected 'works', got %q", text)
+	}
+}
+
+func TestStream_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		// Send first chunk then hang.
+		fmt.Fprint(w, `data: {"id":"chatcmpl-5","model":"gpt-5.3-codex","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}
+
+`)
+		w.(http.Flusher).Flush()
+		// Block until client disconnects.
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(ctx, core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read first event, then cancel.
+	<-ch
+	cancel()
+
+	// Should get error event and channel close.
+	gotError := false
+	for event := range ch {
+		if event.Type == core.ProviderEventError {
+			gotError = true
+		}
+	}
+	if !gotError {
+		t.Fatal("expected error after cancellation")
+	}
+}
+
 func TestStream_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)

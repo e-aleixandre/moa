@@ -866,7 +866,13 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	oldModel := m.agent.Model()
 
 	var newProvider core.Provider
-	if newModel.Provider != oldModel.Provider && m.providerFactory != nil {
+	if newModel.Provider != oldModel.Provider {
+		if m.providerFactory == nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: fmt.Sprintf("Cannot switch from %s to %s: no provider factory configured", oldModel.Provider, newModel.Provider),
+			})
+			return m, m.flushBlocks(len(m.s.blocks))
+		}
 		prov, err := m.providerFactory(newModel)
 		if err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})

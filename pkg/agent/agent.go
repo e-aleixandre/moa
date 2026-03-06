@@ -218,12 +218,24 @@ func (a *Agent) ThinkingLevel() string {
 // stripThinkingFromHistory removes thinking content blocks from assistant
 // messages. Thinking signatures are model-specific — sending stale signatures
 // to a different model causes errors.
+// Allocates new content slices (doesn't mutate original slices that may be
+// shared with async session saves).
 func stripThinkingFromHistory(msgs []core.AgentMessage) {
 	for i := range msgs {
 		if msgs[i].Role != "assistant" {
 			continue
 		}
-		filtered := msgs[i].Content[:0]
+		hasThinking := false
+		for _, c := range msgs[i].Content {
+			if c.Type == "thinking" {
+				hasThinking = true
+				break
+			}
+		}
+		if !hasThinking {
+			continue
+		}
+		filtered := make([]core.Content, 0, len(msgs[i].Content))
 		for _, c := range msgs[i].Content {
 			if c.Type != "thinking" {
 				filtered = append(filtered, c)
