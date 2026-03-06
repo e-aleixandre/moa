@@ -856,6 +856,10 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.picker.MoveDown()
 		return m, nil
 
+	case tea.KeySpace:
+		m.picker.ToggleScoped()
+		return m, nil
+
 	case tea.KeyEnter:
 		// Select and switch to highlighted model.
 		selected := m.picker.Selected()
@@ -866,9 +870,6 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyRunes:
 		switch string(msg.Runes) {
-		case " ":
-			m.picker.ToggleScoped()
-			return m, nil
 		case "j":
 			m.picker.MoveDown()
 			return m, nil
