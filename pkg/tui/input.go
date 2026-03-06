@@ -31,21 +31,19 @@ var (
 
 func newInput() inputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Ask anything... (Shift+Enter for newline)"
+	ta.Placeholder = "Ask anything... (Ctrl+J for newline)"
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit
 	ta.SetHeight(3)
 	ta.Cursor.SetMode(cursor.CursorStatic) // no blink → zero idle CPU
 
-	// Remove the CursorLine background highlight — it only covers lines with
-	// text, leaving empty lines unhighlighted, which looks inconsistent.
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
 
-	// Enter submits (handled by handleKey). Shift+Enter / Alt+Enter insert newline.
+	// Ctrl+J inserts newline (works in all terminals + tmux).
+	// shift+enter / alt+enter kept as extras for terminals that support them.
 	ta.KeyMap.InsertNewline = key.NewBinding(
-		key.WithKeys("shift+enter", "alt+enter"),
-		key.WithHelp("shift+enter", "new line"),
+		key.WithKeys("ctrl+j", "shift+enter", "alt+enter"),
 	)
 
 	ta.Focus()

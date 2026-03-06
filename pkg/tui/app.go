@@ -317,18 +317,19 @@ func (m appModel) View() string {
 // the focused component (input when idle).
 func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
-	case tea.KeyCtrlC:
+	case tea.KeyCtrlC, tea.KeyEsc:
 		if m.s.running {
-			// Abort current run, stay in TUI
 			m.agent.Abort()
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "status", Raw: "(interrupted)",
 			})
 			return m, nil
 		}
-		// Idle → quit
-		m.cleanup()
-		return m, tea.Quit
+		if msg.Type == tea.KeyCtrlC {
+			m.cleanup()
+			return m, tea.Quit
+		}
+		return m, nil
 
 	case tea.KeyCtrlD:
 		m.cleanup()
