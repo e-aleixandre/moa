@@ -171,17 +171,21 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.s.initialized {
 			m.s.initialized = true
 
-			// Resuming a session: rebuild blocks from messages and flush to scrollback.
-			if m.session != nil && len(m.session.Messages) > 0 {
-				m.rebuildFromMessages(m.session.Messages)
-				return m, m.flushBlocks(len(m.s.blocks))
+			var cmds []tea.Cmd
+
+			// Push input to bottom of terminal
+			if padding := msg.Height - 5; padding > 0 {
+				cmds = append(cmds, tea.Println(strings.Repeat("\n", padding)))
 			}
 
-			// New session: push blank lines to scrollback so the input
-			// appears at the bottom. These live outside BT's managed area.
-			padding := msg.Height - 5
-			if padding > 0 {
-				return m, tea.Println(strings.Repeat("\n", padding))
+			// Resuming a session: rebuild blocks and flush to scrollback
+			if m.session != nil && len(m.session.Messages) > 0 {
+				m.rebuildFromMessages(m.session.Messages)
+				cmds = append(cmds, m.flushBlocks(len(m.s.blocks)))
+			}
+
+			if len(cmds) > 0 {
+				return m, tea.Sequence(cmds...)
 			}
 		}
 		return m, nil
