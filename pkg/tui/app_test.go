@@ -23,7 +23,7 @@ func newTestModel() appModel {
 
 // --- Test 1: flushBlocks ordering and flushedCount ---
 
-func TestFlushBlocks_UpdatesFlushedCount(t *testing.T) {
+func TestFlushBlocks_SchedulesButDoesNotAdvanceFlushedCount(t *testing.T) {
 	m := newTestModel()
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "hello"},
@@ -31,22 +31,54 @@ func TestFlushBlocks_UpdatesFlushedCount(t *testing.T) {
 		{Type: "assistant", Raw: "world"},
 	}
 
-	// Flush all 3 blocks
-	cmd := m.flushBlocks(0, 3)
-	if m.s.flushedCount != 3 {
-		t.Errorf("flushedCount = %d, want 3", m.s.flushedCount)
+	// Schedule flush of all 3 blocks
+	cmd := m.flushBlocks(3)
+	// flushedCount stays at 0 (deferred until flushDoneMsg)
+	if m.s.flushedCount != 0 {
+		t.Errorf("flushedCount = %d, want 0 (deferred)", m.s.flushedCount)
+	}
+	// flushScheduledCount advances immediately
+	if m.s.flushScheduledCount != 3 {
+		t.Errorf("flushScheduledCount = %d, want 3", m.s.flushScheduledCount)
 	}
 	if cmd == nil {
 		t.Error("expected non-nil Cmd for flush, got nil")
 	}
 
-	// No-op flush (already flushed)
-	cmd = m.flushBlocks(3, 3)
+	// No-op flush (already scheduled)
+	cmd = m.flushBlocks(3)
 	if cmd != nil {
 		t.Error("expected nil Cmd for no-op flush, got non-nil")
 	}
-	if m.s.flushedCount != 3 {
-		t.Errorf("flushedCount = %d, want 3 after no-op", m.s.flushedCount)
+}
+
+func TestFlushDoneMsg_AdvancesFlushedCount(t *testing.T) {
+	m := newTestModel()
+	m.s.blocks = []messageBlock{
+		{Type: "user", Raw: "hello"},
+		{Type: "assistant", Raw: "world"},
+	}
+	m.s.flushScheduledCount = 2
+
+	// Simulate flushDoneMsg
+	result, _ := m.Update(flushDoneMsg{upTo: 2, epoch: 0})
+	rm := result.(appModel)
+	if rm.s.flushedCount != 2 {
+		t.Errorf("flushedCount = %d, want 2", rm.s.flushedCount)
+	}
+}
+
+func TestFlushDoneMsg_IgnoresStaleEpoch(t *testing.T) {
+	m := newTestModel()
+	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
+	m.s.flushScheduledCount = 1
+	m.s.flushEpoch = 2 // current epoch is 2
+
+	// flushDoneMsg from epoch 1 (stale — before /clear)
+	result, _ := m.Update(flushDoneMsg{upTo: 1, epoch: 1})
+	rm := result.(appModel)
+	if rm.s.flushedCount != 0 {
+		t.Errorf("flushedCount = %d, want 0 (stale epoch ignored)", rm.s.flushedCount)
 	}
 }
 
@@ -57,19 +89,19 @@ func TestFlushBlocks_SkipsEmptyBlocks(t *testing.T) {
 		{Type: "thinking", Raw: "hmm"}, // hidden when showThinking=false
 	}
 
-	cmd := m.flushBlocks(0, 1)
-	if m.s.flushedCount != 1 {
-		t.Errorf("flushedCount = %d, want 1", m.s.flushedCount)
+	cmd := m.flushBlocks(1)
+	if m.s.flushScheduledCount != 1 {
+		t.Errorf("flushScheduledCount = %d, want 1", m.s.flushScheduledCount)
 	}
-	// All rendered parts are empty → nil Cmd
-	if cmd != nil {
-		t.Error("expected nil Cmd when all blocks render empty, got non-nil")
+	// All rendered parts are empty → returns a done func (not nil, to confirm the advance)
+	if cmd == nil {
+		t.Error("expected non-nil Cmd (done func for empty flush)")
 	}
 }
 
 // --- Test 2: handleAgentEvent message_end flushes blocks ---
 
-func TestHandleAgentEvent_MessageEnd_FlushesBlocks(t *testing.T) {
+func TestHandleAgentEvent_MessageEnd_AppendsButDoesNotFlush(t *testing.T) {
 	m := newTestModel()
 	m.s.streamText = "hello world"
 	m.s.thinkingText = "let me think"
@@ -100,12 +132,16 @@ func TestHandleAgentEvent_MessageEnd_FlushesBlocks(t *testing.T) {
 		t.Errorf("streamCache = %q, want empty", m.s.streamCache)
 	}
 
-	// Should have flushed
-	if m.s.flushedCount != 2 {
-		t.Errorf("flushedCount = %d, want 2", m.s.flushedCount)
+	// NOT flushed — blocks stay visible in View().
+	// They get flushed by the next tool event or agentRunResultMsg.
+	if m.s.flushedCount != 0 {
+		t.Errorf("flushedCount = %d, want 0 (deferred)", m.s.flushedCount)
 	}
-	if cmd == nil {
-		t.Error("expected non-nil flush Cmd")
+	if m.s.flushScheduledCount != 0 {
+		t.Errorf("flushScheduledCount = %d, want 0 (deferred)", m.s.flushScheduledCount)
+	}
+	if cmd != nil {
+		t.Error("expected nil Cmd (deferred flush)")
 	}
 }
 
@@ -269,9 +305,13 @@ func TestHandleRunResult_FlushesUnflushedBlocks(t *testing.T) {
 	_ = cmd
 
 	rm := result.(appModel)
-	// All blocks should be flushed
-	if rm.s.flushedCount != 3 {
-		t.Errorf("flushedCount = %d, want 3", rm.s.flushedCount)
+	// Blocks should be scheduled for flush (not yet confirmed)
+	if rm.s.flushScheduledCount != 3 {
+		t.Errorf("flushScheduledCount = %d, want 3", rm.s.flushScheduledCount)
+	}
+	// flushedCount stays at 1 until flushDoneMsg confirms
+	if rm.s.flushedCount != 1 {
+		t.Errorf("flushedCount = %d, want 1 (deferred)", rm.s.flushedCount)
 	}
 
 	// State should be reset
@@ -371,6 +411,8 @@ func TestClear_ResetsState(t *testing.T) {
 		{Type: "assistant", Raw: "world"},
 	}
 	m.s.flushedCount = 2
+	m.s.flushScheduledCount = 2
+	m.s.flushEpoch = 0
 	m.s.streamText = "streaming..."
 	m.s.thinkingText = "thinking..."
 	m.s.streamCache = "cached"
@@ -378,6 +420,8 @@ func TestClear_ResetsState(t *testing.T) {
 	// Simulate what /clear does (minus agent.Reset which needs a real agent)
 	m.s.blocks = m.s.blocks[:0]
 	m.s.flushedCount = 0
+	m.s.flushScheduledCount = 0
+	m.s.flushEpoch++
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
@@ -387,6 +431,12 @@ func TestClear_ResetsState(t *testing.T) {
 	}
 	if m.s.flushedCount != 0 {
 		t.Errorf("flushedCount = %d, want 0", m.s.flushedCount)
+	}
+	if m.s.flushScheduledCount != 0 {
+		t.Errorf("flushScheduledCount = %d, want 0", m.s.flushScheduledCount)
+	}
+	if m.s.flushEpoch != 1 {
+		t.Errorf("flushEpoch = %d, want 1", m.s.flushEpoch)
 	}
 	if m.s.streamText != "" {
 		t.Errorf("streamText = %q, want empty", m.s.streamText)
@@ -401,7 +451,7 @@ func TestClear_ResetsState(t *testing.T) {
 
 // --- Test: handleAgentEvent tool events ---
 
-func TestHandleAgentEvent_ToolStart_FlushesImmediately(t *testing.T) {
+func TestHandleAgentEvent_ToolStart_SchedulesFlush(t *testing.T) {
 	m := newTestModel()
 
 	cmd := m.handleAgentEvent(core.AgentEvent{
@@ -416,8 +466,12 @@ func TestHandleAgentEvent_ToolStart_FlushesImmediately(t *testing.T) {
 	if m.s.blocks[0].Type != "tool_start" {
 		t.Errorf("blocks[0].Type = %q, want tool_start", m.s.blocks[0].Type)
 	}
-	if m.s.flushedCount != 1 {
-		t.Errorf("flushedCount = %d, want 1", m.s.flushedCount)
+	// Scheduled but not yet confirmed
+	if m.s.flushScheduledCount != 1 {
+		t.Errorf("flushScheduledCount = %d, want 1", m.s.flushScheduledCount)
+	}
+	if m.s.flushedCount != 0 {
+		t.Errorf("flushedCount = %d, want 0 (deferred)", m.s.flushedCount)
 	}
 	if cmd == nil {
 		t.Error("expected non-nil flush Cmd")
@@ -427,13 +481,14 @@ func TestHandleAgentEvent_ToolStart_FlushesImmediately(t *testing.T) {
 	}
 }
 
-func TestHandleAgentEvent_ToolEnd_FlushesImmediately(t *testing.T) {
+func TestHandleAgentEvent_ToolEnd_SchedulesFlush(t *testing.T) {
 	m := newTestModel()
-	// Pre-existing tool_start block (already flushed)
+	// Pre-existing tool_start block (already confirmed flushed)
 	m.s.blocks = []messageBlock{
 		{Type: "tool_start", ToolName: "bash"},
 	}
 	m.s.flushedCount = 1
+	m.s.flushScheduledCount = 1
 
 	cmd := m.handleAgentEvent(core.AgentEvent{
 		Type:     core.AgentEventToolExecEnd,
@@ -447,8 +502,9 @@ func TestHandleAgentEvent_ToolEnd_FlushesImmediately(t *testing.T) {
 	if m.s.blocks[1].Type != "tool_end" {
 		t.Errorf("blocks[1].Type = %q, want tool_end", m.s.blocks[1].Type)
 	}
-	if m.s.flushedCount != 2 {
-		t.Errorf("flushedCount = %d, want 2", m.s.flushedCount)
+	// Scheduled but not yet confirmed
+	if m.s.flushScheduledCount != 2 {
+		t.Errorf("flushScheduledCount = %d, want 2", m.s.flushScheduledCount)
 	}
 	if cmd == nil {
 		t.Error("expected non-nil flush Cmd")

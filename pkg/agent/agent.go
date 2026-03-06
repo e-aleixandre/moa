@@ -125,6 +125,33 @@ func (a *Agent) Reset() error {
 	return nil
 }
 
+// LoadMessages replaces the conversation history with the given messages.
+// Used to restore a previous session. Returns error if the agent is running.
+func (a *Agent) LoadMessages(msgs []core.AgentMessage) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot load messages while agent is running")
+	}
+	a.state = AgentState{
+		Messages: msgs,
+		Model:    a.config.Model,
+	}
+	return nil
+}
+
+// Messages returns a shallow copy of the current conversation messages.
+// The returned slice is independent (append-safe), but individual messages
+// share content slices with the internal state. Safe for reading (e.g., JSON
+// marshaling for session persistence) but callers should not mutate content.
+func (a *Agent) Messages() []core.AgentMessage {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	msgs := make([]core.AgentMessage, len(a.state.Messages))
+	copy(msgs, a.state.Messages)
+	return msgs
+}
+
 // Subscribe registers a listener for agent events.
 // Returns an unsubscribe function. Listeners are async — slow listeners don't block the loop.
 func (a *Agent) Subscribe(fn func(core.AgentEvent)) func() {

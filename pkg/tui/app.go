@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 const renderInterval = 16 * time.Millisecond // ~60fps
@@ -29,8 +30,10 @@ const (
 // All mutable conversational state lives here behind a pointer.
 // Accessed only from the Bubble Tea goroutine (single-threaded).
 type state struct {
-	blocks       []messageBlock // conversation history, raw content
-	flushedCount int            // blocks [0..flushedCount) are in terminal scrollback
+	blocks              []messageBlock // conversation history, raw content
+	flushedCount        int            // blocks confirmed in scrollback (hidden from View)
+	flushScheduledCount int            // blocks scheduled for tea.Println (not yet confirmed)
+	flushEpoch          int            // incremented on /clear to invalidate stale flushDoneMsg
 	streamText   string         // current streaming assistant text
 	thinkingText string         // current thinking text
 	streamCache  string         // cached glamour render of streamText (updated by renderTick)
@@ -70,16 +73,26 @@ type appModel struct {
 	input  inputModel
 	status statusModel
 
+	// Session persistence
+	sessionStore *session.Store   // nil if persistence is disabled
+	session      *session.Session // current session (nil if no persistence)
+
 	// Layout
 	width  int
 	height int
+}
+
+// Config configures the TUI. All fields are optional.
+type Config struct {
+	SessionStore *session.Store   // persistence backend (nil = no persistence)
+	Session      *session.Session // session to resume (nil = fresh start)
 }
 
 // New creates the TUI model. The agent must already be configured.
 // ctx is the parent context for agent runs (e.g., signal-aware context from main).
 // Subscribes to agent events internally — the caller should NOT register
 // their own subscriber when using TUI mode.
-func New(ag *agent.Agent, ctx context.Context) appModel {
+func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 	eventCh := make(chan taggedEvent, 1024)
 	quit := make(chan struct{})
 	runGenAddr := &atomic.Uint64{} // shared with subscriber
@@ -105,16 +118,18 @@ func New(ag *agent.Agent, ctx context.Context) appModel {
 	})
 
 	return appModel{
-		s:          &state{showThinking: true},
-		agent:      ag,
-		renderer:   newRenderer(80),
-		eventCh:    eventCh,
-		quit:       quit,
-		unsub:      unsub,
-		baseCtx:    ctx,
-		runGenAddr: runGenAddr,
-		input:      newInput(),
-		status:     newStatus(),
+		s:            &state{showThinking: true},
+		agent:        ag,
+		renderer:     newRenderer(80),
+		eventCh:      eventCh,
+		quit:         quit,
+		unsub:        unsub,
+		baseCtx:      ctx,
+		runGenAddr:   runGenAddr,
+		input:        newInput(),
+		status:       newStatus(),
+		sessionStore: cfg.SessionStore,
+		session:      cfg.Session,
 	}
 }
 
@@ -151,13 +166,18 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.s.streamText != "" {
 			m.s.dirty = true
 		}
-		// One-shot: on first WindowSizeMsg, push blank lines to scrollback
-		// so the input appears at the bottom of the terminal.
-		// These lines live in scrollback (via tea.Println), outside BT's
-		// managed area — they don't interfere with future rendering.
+		// One-shot initialization on first WindowSizeMsg (renderer width is now set).
 		if !m.s.initialized {
 			m.s.initialized = true
-			// Input is ~5 lines (textarea 3 + border/padding). Leave room.
+
+			// Resuming a session: rebuild blocks from messages and flush to scrollback.
+			if m.session != nil && len(m.session.Messages) > 0 {
+				m.rebuildFromMessages(m.session.Messages)
+				return m, m.flushBlocks(len(m.s.blocks))
+			}
+
+			// New session: push blank lines to scrollback so the input
+			// appears at the bottom. These live outside BT's managed area.
 			padding := msg.Height - 5
 			if padding > 0 {
 				return m, tea.Println(strings.Repeat("\n", padding))
@@ -199,6 +219,17 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case flushDoneMsg:
+		// Confirm blocks are in scrollback — safe to hide from View().
+		// Ignore stale messages from before /clear.
+		if msg.epoch == m.s.flushEpoch && msg.upTo > m.s.flushedCount {
+			if msg.upTo > len(m.s.blocks) {
+				msg.upTo = len(m.s.blocks)
+			}
+			m.s.flushedCount = msg.upTo
+		}
+		return m, nil
+
 	case clearScreenDoneMsg:
 		// Clear command finished, nothing to do
 		return m, nil
@@ -207,6 +238,13 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clear the ephemeral thinking toggle feedback
 		if !m.s.running {
 			m.status.SetText("")
+		}
+		return m, nil
+
+	case sessionSavedMsg:
+		// Session saved asynchronously. Log errors but don't interrupt the user.
+		if msg.err != nil {
+			// TODO: consider a subtle status indicator for save failures
 		}
 		return m, nil
 
@@ -350,12 +388,21 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- Flush logic ---
 
-// flushBlocks renders blocks [from..to) and returns a single tea.Println Cmd.
-// Joins all blocks into one string to guarantee ordering (single Println = single write).
-func (m *appModel) flushBlocks(from, to int) tea.Cmd {
-	if from >= to {
+// flushBlocks schedules blocks up to index `to` for printing to scrollback.
+// Uses two counters to prevent the visual flash:
+//   - flushScheduledCount: advanced immediately (prevents double-scheduling)
+//   - flushedCount: advanced only after tea.Println executes (via flushDoneMsg)
+//
+// View() uses flushedCount, so blocks stay visible until the print is confirmed.
+func (m *appModel) flushBlocks(to int) tea.Cmd {
+	from := m.s.flushScheduledCount
+	if from < m.s.flushedCount {
+		from = m.s.flushedCount
+	}
+	if to <= from {
 		return nil
 	}
+
 	var parts []string
 	for i := from; i < to; i++ {
 		rendered := renderSingleBlock(m.s.blocks[i], m.renderer, m.s.showThinking)
@@ -363,11 +410,16 @@ func (m *appModel) flushBlocks(from, to int) tea.Cmd {
 			parts = append(parts, rendered)
 		}
 	}
-	m.s.flushedCount = to
+	m.s.flushScheduledCount = to
+	epoch := m.s.flushEpoch
+
+	done := func() tea.Msg { return flushDoneMsg{upTo: to, epoch: epoch} }
+
 	if len(parts) == 0 {
-		return nil
+		// Nothing to print, but still confirm the advance
+		return done
 	}
-	return tea.Println(strings.Join(parts, "\n"))
+	return tea.Sequence(tea.Println(strings.Join(parts, "\n")), done)
 }
 
 // --- Agent interaction ---
@@ -376,8 +428,13 @@ func (m *appModel) flushBlocks(from, to int) tea.Cmd {
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
 
+	// Set session title from the first user message
+	if m.session != nil {
+		m.session.SetTitle(text, 80)
+	}
+
 	// Flush user message to scrollback
-	userFlush := m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+	userFlush := m.flushBlocks(len(m.s.blocks))
 
 	m.s.running = true
 	m.s.runGen++
@@ -438,13 +495,15 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		return nil
 
 	case core.AgentEventMessageEnd:
-		// Flush thinking first (persists above the response, dimmed)
+		// Append blocks but DON'T flush to scrollback yet.
+		// Keep them as unflushed so View() renders them directly — this avoids
+		// a visual flash where streamCache is cleared but tea.Println hasn't
+		// printed yet. Blocks get flushed by the next tool event or agentRunResultMsg.
 		if m.s.thinkingText != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "thinking", Raw: m.s.thinkingText,
 			})
 		}
-		// Then flush assistant text
 		if m.s.streamText != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "assistant", Raw: m.s.streamText,
@@ -453,7 +512,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
-		return m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+		return nil
 
 	case core.AgentEventToolExecStart:
 		m.s.streamState = stateToolRunning
@@ -461,7 +520,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "tool_start", ToolName: e.ToolName, ToolArgs: e.Args,
 		})
-		return m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+		return m.flushBlocks(len(m.s.blocks))
 
 	case core.AgentEventToolExecEnd:
 		m.s.blocks = append(m.s.blocks, messageBlock{
@@ -469,7 +528,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		})
 		m.s.streamState = stateStreaming
 		m.status.SetText("thinking...")
-		return m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+		return m.flushBlocks(len(m.s.blocks))
 	}
 
 	return nil
@@ -492,7 +551,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	m.patchFromMessages(msg.Messages)
 
 	// Flush any blocks that weren't flushed by events (edge case: dropped events)
-	flushCmd := m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
+	flushCmd := m.flushBlocks(len(m.s.blocks))
 
 	m.s.running = false
 	m.s.streamState = stateIdle
@@ -506,10 +565,10 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "error", Raw: "Error: " + msg.Err.Error(),
 		})
-		errorFlush := m.flushBlocks(m.s.flushedCount, len(m.s.blocks))
-		return m, tea.Batch(flushCmd, errorFlush)
+		errorFlush := m.flushBlocks(len(m.s.blocks))
+		return m, tea.Batch(flushCmd, errorFlush, m.saveSession(msg.Messages))
 	}
-	return m, flushCmd
+	return m, tea.Batch(flushCmd, m.saveSession(msg.Messages))
 }
 
 // patchFromMessages corrects the last assistant/thinking block content from
@@ -623,9 +682,16 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		m.s.blocks = m.s.blocks[:0]
 		m.s.flushedCount = 0
+		m.s.flushScheduledCount = 0
+		m.s.flushEpoch++ // invalidate any in-flight flushDoneMsg
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
+		// Delete old session, create fresh one
+		if m.sessionStore != nil && m.session != nil {
+			_ = m.sessionStore.Delete(m.session.ID)
+			m.session = m.sessionStore.Create()
+		}
 		// Clear screen + scrollback via the system clear command, then
 		// tell BT to repaint. ExecProcess bypasses BT's renderer entirely
 		// so escape sequences don't interfere with its internal state.
@@ -642,6 +708,28 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			Type: "error", Raw: "Unknown command: /" + cmd,
 		})
 		return m, nil
+	}
+}
+
+// --- Session persistence ---
+
+// saveSession returns a Cmd that asynchronously saves the session to disk.
+// Takes a snapshot of messages to avoid races with the BT goroutine.
+// Returns nil if persistence is disabled.
+func (m *appModel) saveSession(msgs []core.AgentMessage) tea.Cmd {
+	if m.sessionStore == nil || m.session == nil {
+		return nil
+	}
+	// Snapshot: copy session metadata + messages for the async goroutine.
+	// The BT goroutine may modify m.session before the write completes.
+	snapshot := *m.session
+	snapshot.Messages = make([]core.AgentMessage, len(msgs))
+	copy(snapshot.Messages, msgs)
+
+	store := m.sessionStore
+	return func() tea.Msg {
+		err := store.Save(&snapshot)
+		return sessionSavedMsg{err: err}
 	}
 }
 

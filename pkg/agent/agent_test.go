@@ -829,6 +829,109 @@ func TestRun_AfterSend_Resets(t *testing.T) {
 	}
 }
 
+// --- LoadMessages / Messages ---
+
+func TestLoadMessages(t *testing.T) {
+	prov := NewMockProvider(simpleTextResponse("hello"))
+	ag, err := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("previous question")),
+		{Message: core.Message{
+			Role:    "assistant",
+			Content: []core.Content{{Type: "text", Text: "previous answer"}},
+		}},
+	}
+
+	if err := ag.LoadMessages(msgs); err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+
+	// Messages() should return a copy
+	got := ag.Messages()
+	if len(got) != 2 {
+		t.Fatalf("Messages() = %d, want 2", len(got))
+	}
+	if got[0].Content[0].Text != "previous question" {
+		t.Errorf("Messages()[0] = %q, want 'previous question'", got[0].Content[0].Text)
+	}
+
+	// Appending to the returned slice should not affect internal state
+	got = append(got, core.WrapMessage(core.NewUserMessage("extra")))
+	got2 := ag.Messages()
+	if len(got2) != 2 {
+		t.Error("Messages() should return an independent slice (append-safe)")
+	}
+}
+
+func TestLoadMessages_WhileRunning(t *testing.T) {
+	// Create a provider that blocks until cancelled
+	prov := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent)
+		// Channel stays open until provider's Stream ctx is cancelled
+		return ch, nil
+	})
+
+	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start a run in background
+	done := make(chan struct{})
+	go func() {
+		ag.Run(ctx, "block forever")
+		close(done)
+	}()
+
+	// Give it time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// LoadMessages should fail while running
+	err := ag.LoadMessages([]core.AgentMessage{})
+	if err == nil {
+		t.Error("expected error from LoadMessages while running")
+	}
+
+	cancel()
+	<-done
+}
+
+func TestSendAfterLoadMessages(t *testing.T) {
+	// First call: simpleTextResponse for the resumed Send
+	prov := NewMockProvider(simpleTextResponse("continued"))
+	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
+
+	// Load previous conversation
+	ag.LoadMessages([]core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("first")),
+		{Message: core.Message{
+			Role:    "assistant",
+			Content: []core.Content{{Type: "text", Text: "first response"}},
+		}},
+	})
+
+	// Send continues the conversation
+	msgs, err := ag.Send(context.Background(), "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have: first user + first assistant + second user + second assistant
+	if len(msgs) != 4 {
+		t.Fatalf("Messages = %d, want 4", len(msgs))
+	}
+	if msgs[2].Content[0].Text != "second" {
+		t.Errorf("msgs[2] = %q, want 'second'", msgs[2].Content[0].Text)
+	}
+	if msgs[3].Content[0].Text != "continued" {
+		t.Errorf("msgs[3] = %q, want 'continued'", msgs[3].Content[0].Text)
+	}
+}
+
 // --- Helper types ---
 
 type testExtension struct {
