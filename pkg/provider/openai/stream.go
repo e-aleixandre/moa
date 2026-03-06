@@ -28,9 +28,10 @@ const (
 
 // event is the raw SSE JSON payload from the Responses API.
 type event struct {
-	Type     string `json:"type"`
-	Item     *item  `json:"item,omitempty"`
-	Delta    string `json:"delta,omitempty"`
+	Type     string          `json:"type"`
+	Item     *item           `json:"item,omitempty"`
+	ItemRaw  json.RawMessage `json:"-"` // full JSON of item (set during parsing)
+	Delta    string          `json:"delta,omitempty"`
 	Response *struct {
 		ID     string `json:"id"`
 		Status string `json:"status"`
@@ -63,6 +64,7 @@ type item struct {
 		Text string `json:"text"`
 	} `json:"content,omitempty"`
 	Summary []struct {
+		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"summary,omitempty"`
 }
@@ -134,6 +136,16 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 		var ev event
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			continue
+		}
+		// For output_item.done events, preserve the raw JSON of the item so we
+		// can store it verbatim as ThinkingSignature (avoids losing unknown fields).
+		if ev.Type == eventOutputItemDone {
+			var raw struct {
+				Item json.RawMessage `json:"item"`
+			}
+			if json.Unmarshal([]byte(data), &raw) == nil {
+				ev.ItemRaw = raw.Item
+			}
 		}
 
 		terminal := processEvent(state, &ev, ch)
@@ -250,23 +262,30 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 				replaceText(&state.message, text)
 			}
 		case "reasoning":
-			// Store the encrypted reasoning item as thinking signature.
-			if raw, err := json.Marshal(ev.Item); err == nil {
-				var thinkingText string
-				for _, s := range ev.Item.Summary {
-					if thinkingText != "" {
-						thinkingText += "\n\n"
-					}
-					thinkingText += s.Text
+			// Store the raw item JSON as ThinkingSignature so it can be sent
+			// back verbatim in future requests (preserves encrypted_content,
+			// summary[].type, and any other fields the API requires).
+			signature := string(ev.ItemRaw)
+			if signature == "" {
+				// Fallback: re-marshal the parsed item (lossy but better than nothing).
+				if raw, err := json.Marshal(ev.Item); err == nil {
+					signature = string(raw)
 				}
-				state.message.Content = append(state.message.Content,
-					core.Content{
-						Type:              "thinking",
-						Text:              thinkingText,
-						ThinkingSignature: string(raw),
-					},
-				)
 			}
+			var thinkingText string
+			for _, s := range ev.Item.Summary {
+				if thinkingText != "" {
+					thinkingText += "\n\n"
+				}
+				thinkingText += s.Text
+			}
+			state.message.Content = append(state.message.Content,
+				core.Content{
+					Type:              "thinking",
+					Text:              thinkingText,
+					ThinkingSignature: signature,
+				},
+			)
 		}
 
 	case eventCompleted:
