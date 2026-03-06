@@ -1112,6 +1112,156 @@ func searchString(s, substr string) bool {
 	return false
 }
 
+func TestReconfigure_SwapModel(t *testing.T) {
+	prov1 := NewMockProvider(simpleTextResponse("from model 1"))
+	prov2 := NewMockProvider(simpleTextResponse("from model 2"))
+
+	ag, _ := New(AgentConfig{
+		Provider: prov1,
+		Model:    core.Model{ID: "model-1", Provider: "prov-a"},
+	})
+
+	// First turn with model 1.
+	_, err := ag.Run(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reconfigure to model 2 (different provider).
+	err = ag.Reconfigure(prov2, core.Model{ID: "model-2", Provider: "prov-b"}, "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify model changed.
+	if ag.Model().ID != "model-2" {
+		t.Fatalf("expected model-2, got %s", ag.Model().ID)
+	}
+	if ag.ThinkingLevel() != "high" {
+		t.Fatalf("expected thinking high, got %s", ag.ThinkingLevel())
+	}
+
+	// Second turn with model 2 — conversation continues.
+	msgs, err := ag.Send(context.Background(), "continue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should have messages from both turns.
+	if len(msgs) < 4 {
+		t.Fatalf("expected at least 4 messages, got %d", len(msgs))
+	}
+}
+
+func TestReconfigure_StripsThinking(t *testing.T) {
+	prov := NewMockProvider(simpleTextResponse("ok"))
+	ag, _ := New(AgentConfig{
+		Provider: prov,
+		Model:    core.Model{ID: "model-1", Provider: "anthropic"},
+	})
+
+	// Manually inject a message with thinking blocks.
+	ag.LoadMessages([]core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("hello")),
+		core.WrapMessage(core.Message{
+			Role: "assistant",
+			Content: []core.Content{
+				core.ThinkingContent("secret reasoning"),
+				core.TextContent("visible response"),
+			},
+		}),
+	})
+
+	// Reconfigure to a different model.
+	err := ag.Reconfigure(nil, core.Model{ID: "model-2", Provider: "anthropic"}, "medium")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Thinking blocks should be stripped.
+	msgs := ag.Messages()
+	for _, m := range msgs {
+		if m.Role == "assistant" {
+			for _, c := range m.Content {
+				if c.Type == "thinking" {
+					t.Fatal("thinking blocks should have been stripped")
+				}
+			}
+			if len(m.Content) != 1 || m.Content[0].Text != "visible response" {
+				t.Fatalf("expected only text content, got %+v", m.Content)
+			}
+		}
+	}
+}
+
+func TestReconfigure_SameModelKeepsThinking(t *testing.T) {
+	prov := NewMockProvider(simpleTextResponse("ok"))
+	ag, _ := New(AgentConfig{
+		Provider: prov,
+		Model:    core.Model{ID: "model-1", Provider: "anthropic"},
+	})
+
+	ag.LoadMessages([]core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("hello")),
+		core.WrapMessage(core.Message{
+			Role: "assistant",
+			Content: []core.Content{
+				core.ThinkingContent("reasoning"),
+				core.TextContent("response"),
+			},
+		}),
+	})
+
+	// Reconfigure same model, different thinking level — should NOT strip.
+	err := ag.Reconfigure(nil, core.Model{ID: "model-1", Provider: "anthropic"}, "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := ag.Messages()
+	hasThinking := false
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if c.Type == "thinking" {
+				hasThinking = true
+			}
+		}
+	}
+	if !hasThinking {
+		t.Fatal("thinking blocks should be preserved when model doesn't change")
+	}
+}
+
+func TestReconfigure_WhileRunning(t *testing.T) {
+	blocker := make(chan struct{})
+	prov := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 5)
+		go func() {
+			defer close(ch)
+			<-blocker
+			msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent("done")}, StopReason: "end_turn"}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	})
+
+	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go ag.Run(ctx, "hello")
+	time.Sleep(50 * time.Millisecond) // let it start
+
+	err := ag.Reconfigure(nil, core.Model{ID: "other"}, "high")
+	if err == nil {
+		t.Fatal("expected error while running")
+	}
+
+	close(blocker)
+	time.Sleep(100 * time.Millisecond)
+}
+
 func TestLoadState(t *testing.T) {
 	prov := NewMockProvider(simpleTextResponse("ok"))
 	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
