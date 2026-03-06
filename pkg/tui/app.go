@@ -35,6 +35,7 @@ type state struct {
 	flushedCount        int            // blocks confirmed in scrollback (hidden from View)
 	flushScheduledCount int            // blocks scheduled for tea.Println (not yet confirmed)
 	flushEpoch          int            // incremented on /clear to invalidate stale flushDoneMsg
+	resumeCache         string         // pre-rendered resumed blocks (cleared on first flush)
 	streamText   string         // current streaming assistant text
 	thinkingText string         // current thinking text
 	streamCache  string         // cached glamour render of streamText (updated by renderTick)
@@ -171,10 +172,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.s.initialized {
 			m.s.initialized = true
 
-			// Rebuild blocks but don't flush — View() renders them inline.
-			// They get flushed to scrollback when the user sends their first message.
 			if m.session != nil && len(m.session.Messages) > 0 {
 				m.rebuildFromMessages(m.session.Messages)
+				m.s.resumeCache = renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
 			}
 		}
 		return m, nil
@@ -221,6 +221,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.upTo = len(m.s.blocks)
 			}
 			m.s.flushedCount = msg.upTo
+			m.s.resumeCache = ""
 		}
 		return m, nil
 
@@ -267,7 +268,10 @@ func (m appModel) View() string {
 	}
 	var sections []string
 
-	// Unflushed completed blocks (tool_start/tool_end during a run, before flush)
+	if m.s.resumeCache != "" {
+		sections = append(sections, m.s.resumeCache)
+	}
+
 	for _, block := range m.s.blocks[m.s.flushedCount:] {
 		if rendered := renderSingleBlock(block, m.renderer, m.s.showThinking); rendered != "" {
 			sections = append(sections, rendered)
@@ -682,7 +686,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.blocks = m.s.blocks[:0]
 		m.s.flushedCount = 0
 		m.s.flushScheduledCount = 0
-		m.s.flushEpoch++ // invalidate any in-flight flushDoneMsg
+		m.s.flushEpoch++
+		m.s.resumeCache = ""
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
