@@ -11,10 +11,14 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
+func cfgWith(root string) ToolConfig {
+	return ToolConfig{WorkspaceRoot: root}
+}
+
 func TestSafePath_Normal(t *testing.T) {
 	tmp := t.TempDir()
 
-	p, err := safePath(tmp, "subdir/file.txt")
+	p, err := safePath(cfgWith(tmp), "subdir/file.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +31,7 @@ func TestSafePath_Normal(t *testing.T) {
 func TestSafePath_EscapeDetected(t *testing.T) {
 	tmp := t.TempDir()
 
-	_, err := safePath(tmp, "../../../etc/passwd")
+	_, err := safePath(cfgWith(tmp), "../../../etc/passwd")
 	if err == nil {
 		t.Fatal("expected error for path escape")
 	}
@@ -36,7 +40,7 @@ func TestSafePath_EscapeDetected(t *testing.T) {
 func TestSafePath_AbsoluteOutside(t *testing.T) {
 	tmp := t.TempDir()
 
-	_, err := safePath(tmp, "/etc/passwd")
+	_, err := safePath(cfgWith(tmp), "/etc/passwd")
 	if err == nil {
 		t.Fatal("expected error for absolute path outside workspace")
 	}
@@ -52,7 +56,7 @@ func TestSafePath_SymlinkEscape(t *testing.T) {
 		t.Skip("cannot create symlinks")
 	}
 
-	_, err := safePath(tmp, "escape/secret.txt")
+	_, err := safePath(cfgWith(tmp), "escape/secret.txt")
 	if err == nil {
 		t.Fatal("expected error for symlink escape")
 	}
@@ -60,12 +64,47 @@ func TestSafePath_SymlinkEscape(t *testing.T) {
 
 func TestSafePath_NoRoot(t *testing.T) {
 	// Empty root means no restriction
-	p, err := safePath("", "/tmp/file.txt")
+	p, err := safePath(ToolConfig{}, "/tmp/file.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p != "/tmp/file.txt" {
 		t.Fatalf("expected /tmp/file.txt, got %s", p)
+	}
+}
+
+func TestSafePath_DisableSandbox(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := ToolConfig{WorkspaceRoot: tmp, DisableSandbox: true}
+
+	p, err := safePath(cfg, "/etc/passwd")
+	if err != nil {
+		t.Fatal("DisableSandbox should allow any path")
+	}
+	if p != "/etc/passwd" {
+		t.Fatalf("expected /etc/passwd, got %s", p)
+	}
+}
+
+func TestSafePath_AllowedPaths(t *testing.T) {
+	tmp := t.TempDir()
+	outside := t.TempDir()
+	cfg := ToolConfig{WorkspaceRoot: tmp, AllowedPaths: []string{outside}}
+
+	// Path inside allowed dir should work
+	target := filepath.Join(outside, "file.txt")
+	p, err := safePath(cfg, target)
+	if err != nil {
+		t.Fatalf("AllowedPaths should permit %s: %v", target, err)
+	}
+	if p != target {
+		t.Fatalf("expected %s, got %s", target, p)
+	}
+
+	// Path outside both workspace and allowed dirs should fail
+	_, err = safePath(cfg, "/etc/passwd")
+	if err == nil {
+		t.Fatal("should reject paths outside workspace and AllowedPaths")
 	}
 }
 

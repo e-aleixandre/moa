@@ -14,7 +14,9 @@ import (
 
 // ToolConfig provides shared configuration for built-in tools.
 type ToolConfig struct {
-	WorkspaceRoot string        // Required. All path operations resolve relative to this.
+	WorkspaceRoot  string   // Required. All path operations resolve relative to this.
+	DisableSandbox bool     // When true, safePath allows any absolute path (YOLO mode).
+	AllowedPaths   []string // Additional directories allowed outside WorkspaceRoot.
 	BashTimeout   time.Duration // Default: 5 minutes.
 }
 
@@ -40,11 +42,23 @@ func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) {
 // safePath resolves a path relative to WorkspaceRoot.
 // If the path is absolute, it's used as-is but still checked for escapes.
 // Returns error if the resolved path escapes the workspace via .. or symlinks.
-func safePath(root, path string) (string, error) {
-	if root == "" {
-		// No workspace restriction
+// spillOutputDir is the directory under /tmp where tool output spill files
+// are created. Exported via SpillOutputDir() for safePath whitelisting.
+var spillOutputDir = filepath.Join(os.TempDir(), "moa-output")
+
+// SpillOutputDir returns the directory where tool output spill files are stored.
+func SpillOutputDir() string { return spillOutputDir }
+
+func safePath(cfg ToolConfig, path string) (string, error) {
+	root := cfg.WorkspaceRoot
+
+	if root == "" || cfg.DisableSandbox {
+		// No workspace restriction (YOLO mode)
 		if filepath.IsAbs(path) {
 			return filepath.Clean(path), nil
+		}
+		if root != "" {
+			return filepath.Clean(filepath.Join(root, path)), nil
 		}
 		return filepath.Abs(path)
 	}
@@ -93,6 +107,16 @@ func safePath(root, path string) (string, error) {
 	}
 
 	if !strings.HasPrefix(realResolved, realRoot+string(os.PathSeparator)) && realResolved != realRoot {
+		// Check AllowedPaths before rejecting
+		for _, ap := range cfg.AllowedPaths {
+			realAP, err := filepath.EvalSymlinks(ap)
+			if err != nil {
+				realAP = filepath.Clean(ap)
+			}
+			if realResolved == realAP || strings.HasPrefix(realResolved, realAP+string(os.PathSeparator)) {
+				return resolved, nil
+			}
+		}
 		return "", fmt.Errorf("path %q escapes workspace %q", path, root)
 	}
 

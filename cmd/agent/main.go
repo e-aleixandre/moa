@@ -37,6 +37,7 @@ func main() {
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
 	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
 	resume := flag.Bool("resume", false, "Resume the most recent session")
+	yolo := flag.Bool("yolo", false, "Disable path sandbox (allow access to any file)")
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	flag.Parse()
@@ -93,11 +94,18 @@ func main() {
 	agentHome := os.Getenv("AGENT_HOME")
 	agentsMD, _ := agentcontext.LoadAgentsMD(cwd, agentHome)
 
-	// Build tool registry
+	// Load config: global (~/.moa/config.json) + project (<cwd>/.moa/config.json)
+	moaCfg := core.LoadMoaConfig(cwd)
+
+	// Build tool registry.
+	// Always allow the spill output dir so the model can read truncated output files.
+	allowedPaths := append(moaCfg.AllowedPaths, tool.SpillOutputDir())
 	toolReg := core.NewRegistry()
 	tool.RegisterBuiltins(toolReg, tool.ToolConfig{
-		WorkspaceRoot: cwd,
-		BashTimeout:   5 * time.Minute,
+		WorkspaceRoot:  cwd,
+		DisableSandbox: *yolo || moaCfg.DisableSandbox,
+		AllowedPaths:   allowedPaths,
+		BashTimeout:    5 * time.Minute,
 	})
 
 	// Build system prompt

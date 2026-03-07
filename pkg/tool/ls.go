@@ -29,7 +29,7 @@ func NewLs(cfg ToolConfig) core.Tool {
 		}`),
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			path := getString(params, "path", ".")
-			resolved, err := safePath(cfg.WorkspaceRoot, path)
+			resolved, err := safePath(cfg, path)
 			if err != nil {
 				return core.ErrorResult(err.Error()), nil
 			}
