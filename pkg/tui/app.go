@@ -631,6 +631,24 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		// tools complete, so we can update them in-place with results.
 		return nil
 
+	case core.AgentEventToolExecUpdate:
+		// Streaming output from a running tool (e.g. bash stdout chunks).
+		// Append to the matching block's result so it renders live in View().
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			b := &m.s.blocks[i]
+			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
+				if e.Result != nil {
+					for _, c := range e.Result.Content {
+						if c.Type == "text" {
+							b.ToolResult += c.Text
+						}
+					}
+				}
+				break
+			}
+		}
+		return nil
+
 	case core.AgentEventToolExecEnd:
 		m.s.activeTools--
 		// Find the matching block and update it with the result.
