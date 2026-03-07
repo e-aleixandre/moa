@@ -142,18 +142,20 @@ func truncateVisible(s string, maxWidth int) string {
 
 // Segment keys for built-in segments. Extensions should use their own unique keys.
 const (
-	SegmentModel    = "model"
-	SegmentThinking = "thinking"
-	SegmentCost     = "cost"
-	SegmentContext  = "context"
+	SegmentModel       = "model"
+	SegmentThinking    = "thinking"
+	SegmentPermissions = "permissions"
+	SegmentCost        = "cost"
+	SegmentContext     = "context"
 )
 
 // Segment priorities (lower = further left).
 const (
-	PriorityModel    = 10
-	PriorityThinking = 20
-	PriorityCost     = 80
-	PriorityContext  = 90 // rightmost of the built-ins
+	PriorityModel       = 10
+	PriorityThinking    = 20
+	PriorityPermissions = 30
+	PriorityCost        = 80
+	PriorityContext     = 90 // rightmost of the built-ins
 )
 
 // statusLineSep is rebuilt by RebuildUI via rebuildStatusLineVars.
@@ -187,6 +189,15 @@ func (sl *StatusLine) UpdateModelSegment(name string) {
 func (sl *StatusLine) UpdateThinkingSegment(level string) {
 	text := statusLineKeyStyle.Render("thinking ") + statusLineValueStyle.Render(level)
 	sl.Set(SegmentThinking, text, PriorityThinking)
+}
+
+// UpdatePermissionsSegment sets the permissions mode segment.
+func (sl *StatusLine) UpdatePermissionsSegment(mode string) {
+	if mode == "" || mode == "yolo" {
+		sl.Remove(SegmentPermissions)
+		return
+	}
+	sl.Set(SegmentPermissions, mode, PriorityPermissions)
 }
 
 // UpdateCostSegment sets the session cost segment.

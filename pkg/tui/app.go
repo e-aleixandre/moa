@@ -181,6 +181,9 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		m.topBar.UpdateModelSegment(cfg.ModelName)
 	}
 	m.topBar.UpdateThinkingSegment(ag.ThinkingLevel())
+	if m.permGate != nil {
+		m.topBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
+	}
 	m.topBar.UpdateContextSegment(0)
 
 	return m
@@ -530,6 +533,26 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.cycleScopedModel()
+
+	case tea.KeyCtrlY:
+		// Rotate permission mode: yolo → ask → auto → yolo
+		if m.s.running {
+			return m, nil
+		}
+		var next permission.Mode
+		if m.permGate == nil {
+			next = permission.ModeAsk
+		} else {
+			switch m.permGate.Mode() {
+			case permission.ModeAsk:
+				next = permission.ModeAuto
+			case permission.ModeAuto:
+				next = permission.ModeYolo
+			default:
+				next = permission.ModeAsk
+			}
+		}
+		return m.handlePermissionsSwitch(string(next))
 
 	case tea.KeyCtrlO:
 		// Toggle expanded view: clear screen+scrollback, reprint all blocks.
@@ -1350,6 +1373,7 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 	if newMode == permission.ModeYolo {
 		m.permGate = nil
 		m.agent.SetPermissionCheck(nil)
+		m.topBar.UpdatePermissionsSegment("")
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "permissions: yolo (all tools auto-approved)",
 		})
@@ -1360,6 +1384,7 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 			m.permGate.SetMode(newMode)
 		}
 		m.agent.SetPermissionCheck(m.permGate.Check)
+		m.topBar.UpdatePermissionsSegment(string(newMode))
 		// Start listening for permission requests from the gate
 		cmds = append(cmds, m.waitForPermission())
 		m.s.blocks = append(m.s.blocks, messageBlock{
