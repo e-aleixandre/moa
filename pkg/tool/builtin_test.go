@@ -745,4 +745,29 @@ func TestHeadTailBuffer_NoSpillWhenNotTruncated(t *testing.T) {
 	}
 }
 
+func TestHeadTailBuffer_AcceptedBytes(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 10
+	b.tailMax = 10
+
+	// First write fits entirely in head
+	accepted, _ := b.Write([]byte("12345"))
+	if accepted != 5 {
+		t.Fatalf("expected 5 accepted, got %d", accepted)
+	}
+
+	// Second write partially fits (5 of 8 bytes)
+	accepted, _ = b.Write([]byte("67890abc"))
+	if accepted != 5 {
+		t.Fatalf("expected 5 accepted (head had 5 remaining), got %d", accepted)
+	}
+
+	// Third write: head is full, nothing accepted
+	accepted, _ = b.Write([]byte("more data"))
+	if accepted != 0 {
+		t.Fatalf("expected 0 accepted (head full), got %d", accepted)
+	}
+	b.Close()
+}
+
 
