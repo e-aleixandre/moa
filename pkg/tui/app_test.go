@@ -746,7 +746,7 @@ func TestRenderSingleBlock_UnknownType(t *testing.T) {
 func TestSummarizeToolBlock_Bash(t *testing.T) {
 	block := messageBlock{
 		Type: "tool", ToolName: "bash",
-		ToolArgs: map[string]any{"command": "ls -la"},
+		ToolArgs:   map[string]any{"command": "ls -la"},
 		ToolResult: "file1.go\nfile2.go", ToolDone: true,
 	}
 	action, target, body, footer := summarizeToolBlock(block)
@@ -786,7 +786,7 @@ func TestSummarizeToolBlock_Write(t *testing.T) {
 func TestSummarizeToolBlock_WriteError(t *testing.T) {
 	block := messageBlock{
 		Type: "tool", ToolName: "write",
-		ToolArgs: map[string]any{"path": "/etc/test", "content": "x"},
+		ToolArgs:   map[string]any{"path": "/etc/test", "content": "x"},
 		ToolResult: "permission denied", ToolDone: true, IsError: true,
 	}
 	_, _, body, _ := summarizeToolBlock(block)
@@ -823,6 +823,9 @@ func TestTruncateBlockText(t *testing.T) {
 	if !strings.Contains(footer, "20 total") {
 		t.Errorf("footer = %q, want '20 total'", footer)
 	}
+	if strings.Contains(footer, "ctrl+o") {
+		t.Errorf("footer should not mention ctrl+o, got %q", footer)
+	}
 }
 
 func TestRenderToolBlock_FullWidth(t *testing.T) {
@@ -843,6 +846,59 @@ func TestRenderToolBlock_FullWidth(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "package main") {
 		t.Error("should contain file content as body")
+	}
+}
+
+func TestRenderToolBlock_Structure(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs:   map[string]any{"command": "ls"},
+		ToolResult: "file1\nfile2\nfile3", ToolDone: true,
+	}
+	rendered := renderToolBlock(block, 60)
+	lines := strings.Split(rendered, "\n")
+
+	// title + blank + 3 body = 5 lines minimum
+	if len(lines) < 5 {
+		t.Fatalf("lines = %d, want >= 5", len(lines))
+	}
+	// Every line must be padded to full width (60 chars visible).
+	// lipgloss strips ANSI in test env, so we check visible width.
+	for i, line := range lines {
+		vis := len(line) // no ANSI in test → len == visible width
+		if vis != 60 {
+			t.Errorf("line %d visible width = %d, want 60: %q", i, vis, line)
+		}
+	}
+}
+
+func TestRenderToolBlock_TrailingNewline(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs: map[string]any{"command": "pwd"},
+		ToolDone: true, ToolResult: "/home",
+	}
+	r := newRenderer(80)
+	rendered := renderSingleBlock(block, r, false)
+	if !strings.HasSuffix(rendered, "\n") {
+		t.Error("tool block should end with trailing newline for spacing")
+	}
+}
+
+func TestRenderToolBlock_ConsecutiveToolsHaveGap(t *testing.T) {
+	blocks := []messageBlock{
+		{Type: "tool", ToolName: "bash", ToolArgs: map[string]any{"command": "ls"}, ToolDone: true, ToolResult: "a"},
+		{Type: "tool", ToolName: "bash", ToolArgs: map[string]any{"command": "pwd"}, ToolDone: true, ToolResult: "b"},
+	}
+	r := newRenderer(60)
+	var parts []string
+	for _, b := range blocks {
+		parts = append(parts, renderSingleBlock(b, r, false))
+	}
+	joined := strings.Join(parts, "\n")
+	// Trailing "\n" from each block + "\n" join = "\n\n" = blank line gap
+	if !strings.Contains(joined, "\n\n") {
+		t.Error("consecutive tool blocks should have a blank-line gap")
 	}
 }
 
