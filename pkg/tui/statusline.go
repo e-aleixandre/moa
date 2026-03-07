@@ -154,33 +154,26 @@ const (
 	PriorityContext  = 90 // rightmost of the built-ins
 )
 
-// Separator between segments.
-var statusLineSep = statusLineSepStyle.Render("  ·  ")
+// statusLineSep is rebuilt by RebuildStyles via rebuildStatusLineVars.
+var statusLineSep string
 
-// Styles
+// Context usage level styles — rebuilt by RebuildStyles.
 var (
-	statusLineStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("7")).
-			Background(lipgloss.Color("236"))
-
-	statusLineSepStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240"))
-
-	statusLineKeyStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("8"))
-
-	statusLineValueStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("15"))
-
-	statusLineContextLowStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("2")) // green
-
-	statusLineContextMedStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("3")) // yellow
-
-	statusLineContextHighStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("1")) // red
+	statusLineStyle            lipgloss.Style
+	statusLineContextLowStyle  lipgloss.Style
+	statusLineContextMedStyle  lipgloss.Style
+	statusLineContextHighStyle lipgloss.Style
 )
+
+// rebuildStatusLineVars is called by RebuildStyles to update derived vars.
+func rebuildStatusLineVars() {
+	t := ActiveTheme
+	statusLineSep = statusLineSepStyle.Render("  ·  ")
+	statusLineStyle = lipgloss.NewStyle().Foreground(t.Text).Background(t.Surface0)
+	statusLineContextLowStyle = lipgloss.NewStyle().Foreground(t.Green)
+	statusLineContextMedStyle = lipgloss.NewStyle().Foreground(t.Yellow)
+	statusLineContextHighStyle = lipgloss.NewStyle().Foreground(t.Red)
+}
 
 // UpdateModelSegment sets the model segment.
 func (sl *StatusLine) UpdateModelSegment(name string) {

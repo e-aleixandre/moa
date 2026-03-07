@@ -73,7 +73,7 @@ func TestFlushBlocks_SchedulesButDoesNotAdvanceFlushedCount(t *testing.T) {
 	m := newTestModel()
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "hello"},
-		{Type: "tool_start", ToolName: "bash", ToolArgs: map[string]any{"command": "ls"}},
+		{Type: "tool", ToolName: "bash", ToolArgs: map[string]any{"command": "ls"}, ToolDone: true},
 		{Type: "assistant", Raw: "world"},
 	}
 
@@ -214,8 +214,7 @@ func TestPatchFromMessages_PreservesToolBlocks(t *testing.T) {
 	m := newTestModel()
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "do something"},
-		{Type: "tool_start", ToolName: "bash", ToolArgs: map[string]any{"command": "ls -la"}},
-		{Type: "tool_end", ToolName: "bash", IsError: false},
+		{Type: "tool", ToolName: "bash", ToolArgs: map[string]any{"command": "ls -la"}, ToolDone: true},
 		{Type: "thinking", Raw: "partial thinking"},
 		{Type: "assistant", Raw: "partial response"},
 	}
@@ -229,27 +228,27 @@ func TestPatchFromMessages_PreservesToolBlocks(t *testing.T) {
 		}}},
 	})
 
-	// Should still have 5 blocks (tool blocks preserved)
-	if len(m.s.blocks) != 5 {
-		t.Fatalf("blocks = %d, want 5", len(m.s.blocks))
+	// Should still have 4 blocks (tool block preserved as single unified block)
+	if len(m.s.blocks) != 4 {
+		t.Fatalf("blocks = %d, want 4", len(m.s.blocks))
 	}
 
-	// tool_start preserved with original args
-	if m.s.blocks[1].Type != "tool_start" || m.s.blocks[1].ToolName != "bash" {
-		t.Errorf("blocks[1] = %+v, want tool_start", m.s.blocks[1])
+	// tool block preserved with original args
+	if m.s.blocks[1].Type != "tool" || m.s.blocks[1].ToolName != "bash" {
+		t.Errorf("blocks[1] = %+v, want tool", m.s.blocks[1])
 	}
 	if m.s.blocks[1].ToolArgs["command"] != "ls -la" {
 		t.Errorf("tool args = %v, want 'ls -la'", m.s.blocks[1].ToolArgs)
 	}
 
 	// thinking corrected
-	if m.s.blocks[3].Raw != "full thinking text" {
-		t.Errorf("thinking = %q, want 'full thinking text'", m.s.blocks[3].Raw)
+	if m.s.blocks[2].Raw != "full thinking text" {
+		t.Errorf("thinking = %q, want 'full thinking text'", m.s.blocks[2].Raw)
 	}
 
 	// assistant corrected
-	if m.s.blocks[4].Raw != "full response text" {
-		t.Errorf("assistant = %q, want 'full response text'", m.s.blocks[4].Raw)
+	if m.s.blocks[3].Raw != "full response text" {
+		t.Errorf("assistant = %q, want 'full response text'", m.s.blocks[3].Raw)
 	}
 }
 
@@ -393,11 +392,10 @@ func TestPatchFromMessages_CreatesMissingBlocks(t *testing.T) {
 
 func TestPatchFromMessages_CreatesMissingAssistantOnly(t *testing.T) {
 	m := newTestModel()
-	// Tool blocks exist but no assistant block
+	// Tool block exists but no assistant block
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "hello"},
-		{Type: "tool_start", ToolName: "bash", ToolArgs: map[string]any{"command": "ls"}},
-		{Type: "tool_end", ToolName: "bash"},
+		{Type: "tool", ToolName: "bash", ToolArgs: map[string]any{"command": "ls"}, ToolDone: true},
 	}
 
 	m.patchFromMessages([]core.AgentMessage{
@@ -407,15 +405,15 @@ func TestPatchFromMessages_CreatesMissingAssistantOnly(t *testing.T) {
 		}}},
 	})
 
-	// Should have appended assistant block, keeping tool blocks intact
-	if len(m.s.blocks) != 4 {
-		t.Fatalf("blocks = %d, want 4", len(m.s.blocks))
+	// Should have appended assistant block, keeping tool block intact
+	if len(m.s.blocks) != 3 {
+		t.Fatalf("blocks = %d, want 3", len(m.s.blocks))
 	}
-	if m.s.blocks[1].Type != "tool_start" {
-		t.Errorf("blocks[1] = %+v, want tool_start", m.s.blocks[1])
+	if m.s.blocks[1].Type != "tool" {
+		t.Errorf("blocks[1] = %+v, want tool", m.s.blocks[1])
 	}
-	if m.s.blocks[3].Type != "assistant" || m.s.blocks[3].Raw != "done" {
-		t.Errorf("blocks[3] = %+v, want assistant block", m.s.blocks[3])
+	if m.s.blocks[2].Type != "assistant" || m.s.blocks[2].Raw != "done" {
+		t.Errorf("blocks[2] = %+v, want assistant block", m.s.blocks[2])
 	}
 }
 
@@ -594,63 +592,123 @@ func TestClear_ResetsState(t *testing.T) {
 
 // --- Test: handleAgentEvent tool events ---
 
-func TestHandleAgentEvent_ToolStart_SchedulesFlush(t *testing.T) {
+func TestHandleAgentEvent_ToolStart_StaysInLiveArea(t *testing.T) {
 	m := newTestModel()
 
 	cmd := m.handleAgentEvent(core.AgentEvent{
-		Type:     core.AgentEventToolExecStart,
-		ToolName: "bash",
-		Args:     map[string]any{"command": "ls"},
+		Type:       core.AgentEventToolExecStart,
+		ToolCallID: "tc-1",
+		ToolName:   "bash",
+		Args:       map[string]any{"command": "ls"},
 	})
 
 	if len(m.s.blocks) != 1 {
 		t.Fatalf("blocks = %d, want 1", len(m.s.blocks))
 	}
-	if m.s.blocks[0].Type != "tool_start" {
-		t.Errorf("blocks[0].Type = %q, want tool_start", m.s.blocks[0].Type)
+	if m.s.blocks[0].Type != "tool" {
+		t.Errorf("blocks[0].Type = %q, want tool", m.s.blocks[0].Type)
 	}
-	// Scheduled but not yet confirmed
-	if m.s.flushScheduledCount != 1 {
-		t.Errorf("flushScheduledCount = %d, want 1", m.s.flushScheduledCount)
+	if m.s.blocks[0].ToolDone {
+		t.Error("block should not be done yet")
 	}
-	if m.s.flushedCount != 0 {
-		t.Errorf("flushedCount = %d, want 0 (deferred)", m.s.flushedCount)
+	// Tool blocks stay in the live area (not flushed) until all tools complete.
+	if m.s.flushScheduledCount != 0 {
+		t.Errorf("flushScheduledCount = %d, want 0", m.s.flushScheduledCount)
 	}
-	if cmd == nil {
-		t.Error("expected non-nil flush Cmd")
+	if cmd != nil {
+		t.Error("expected nil cmd (no flush)")
 	}
 	if m.s.streamState != stateToolRunning {
 		t.Errorf("streamState = %d, want stateToolRunning", m.s.streamState)
 	}
+	if m.s.activeTools != 1 {
+		t.Errorf("activeTools = %d, want 1", m.s.activeTools)
+	}
 }
 
-func TestHandleAgentEvent_ToolEnd_SchedulesFlush(t *testing.T) {
+func TestHandleAgentEvent_ToolEnd_UpdatesBlockAndFlushes(t *testing.T) {
 	m := newTestModel()
-	// Pre-existing tool_start block (already confirmed flushed)
+	// Simulate a running tool block in the live area.
 	m.s.blocks = []messageBlock{
-		{Type: "tool_start", ToolName: "bash"},
+		{Type: "tool", ToolCallID: "tc-1", ToolName: "bash"},
 	}
-	m.s.flushedCount = 1
-	m.s.flushScheduledCount = 1
+	m.s.activeTools = 1
+	m.s.streamState = stateToolRunning
 
+	result := core.TextResult("file1.go\nfile2.go")
 	cmd := m.handleAgentEvent(core.AgentEvent{
-		Type:     core.AgentEventToolExecEnd,
-		ToolName: "bash",
-		IsError:  false,
+		Type:       core.AgentEventToolExecEnd,
+		ToolCallID: "tc-1",
+		ToolName:   "bash",
+		IsError:    false,
+		Result:     &result,
 	})
 
-	if len(m.s.blocks) != 2 {
-		t.Fatalf("blocks = %d, want 2", len(m.s.blocks))
+	// Block should be updated in-place.
+	if len(m.s.blocks) != 1 {
+		t.Fatalf("blocks = %d, want 1 (updated in-place)", len(m.s.blocks))
 	}
-	if m.s.blocks[1].Type != "tool_end" {
-		t.Errorf("blocks[1].Type = %q, want tool_end", m.s.blocks[1].Type)
+	if !m.s.blocks[0].ToolDone {
+		t.Error("block should be done")
 	}
-	// Scheduled but not yet confirmed
-	if m.s.flushScheduledCount != 2 {
-		t.Errorf("flushScheduledCount = %d, want 2", m.s.flushScheduledCount)
+	if m.s.blocks[0].ToolResult != "file1.go\nfile2.go" {
+		t.Errorf("ToolResult = %q, want file content", m.s.blocks[0].ToolResult)
+	}
+	// All tools done → flush.
+	if m.s.flushScheduledCount != 1 {
+		t.Errorf("flushScheduledCount = %d, want 1", m.s.flushScheduledCount)
 	}
 	if cmd == nil {
 		t.Error("expected non-nil flush Cmd")
+	}
+	if m.s.streamState != stateStreaming {
+		t.Errorf("streamState = %d, want stateStreaming", m.s.streamState)
+	}
+	if m.s.activeTools != 0 {
+		t.Errorf("activeTools = %d, want 0", m.s.activeTools)
+	}
+}
+
+func TestHandleAgentEvent_ParallelTools_FlushOnlyWhenAllDone(t *testing.T) {
+	m := newTestModel()
+
+	// Two tools start.
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecStart, ToolCallID: "tc-1", ToolName: "bash",
+	})
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecStart, ToolCallID: "tc-2", ToolName: "read",
+	})
+
+	if m.s.activeTools != 2 {
+		t.Fatalf("activeTools = %d, want 2", m.s.activeTools)
+	}
+	if len(m.s.blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2", len(m.s.blocks))
+	}
+
+	// First tool finishes — should NOT flush.
+	r1 := core.TextResult("done")
+	cmd := m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-1", ToolName: "bash", Result: &r1,
+	})
+	if cmd != nil {
+		t.Error("should not flush while tools still running")
+	}
+	if m.s.activeTools != 1 {
+		t.Errorf("activeTools = %d, want 1", m.s.activeTools)
+	}
+
+	// Second tool finishes — should flush all.
+	r2 := core.TextResult("content")
+	cmd = m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-2", ToolName: "read", Result: &r2,
+	})
+	if cmd == nil {
+		t.Error("should flush when all tools done")
+	}
+	if m.s.activeTools != 0 {
+		t.Errorf("activeTools = %d, want 0", m.s.activeTools)
 	}
 }
 

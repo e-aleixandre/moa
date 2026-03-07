@@ -624,26 +624,36 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
 		}
 		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "tool_start", ToolName: e.ToolName, ToolArgs: e.Args,
+			Type: "tool", ToolCallID: e.ToolCallID, ToolName: e.ToolName, ToolArgs: e.Args,
 		})
-		return m.flushBlocks(len(m.s.blocks))
+		// Don't flush — tool blocks stay in the live View() area until all
+		// tools complete, so we can update them in-place with results.
+		return nil
 
 	case core.AgentEventToolExecEnd:
 		m.s.activeTools--
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "tool_end", ToolName: e.ToolName, IsError: e.IsError,
-		})
+		// Find the matching block and update it with the result.
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			b := &m.s.blocks[i]
+			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
+				b.ToolDone = true
+				b.IsError = e.IsError
+				b.ToolResult = toolResultText(e.Result)
+				break
+			}
+		}
 		if m.s.activeTools <= 0 {
 			m.s.activeTools = 0
 			m.s.streamState = stateStreaming
 			m.status.SetText("thinking...")
-		} else if m.s.activeTools == 1 {
-			// Find the remaining active tool name for a better status message.
+			return m.flushBlocks(len(m.s.blocks))
+		}
+		if m.s.activeTools == 1 {
 			m.status.SetText("running tool...")
 		} else {
 			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
 		}
-		return m.flushBlocks(len(m.s.blocks))
+		return nil
 
 	case core.AgentEventCompactionStart:
 		m.status.SetText("compacting context...")
@@ -681,7 +691,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	m.runGenAddr.Store(m.s.runGen)
 
 	// Patch: correct last assistant/thinking content from source-of-truth.
-	// Does NOT rebuild blocks — preserves event-derived blocks (tool_start, etc.).
+	// Does NOT rebuild blocks — preserves event-derived blocks (tool with args, etc.).
 	m.patchFromMessages(msg.Messages)
 
 	// Flush any blocks that weren't flushed by events (edge case: dropped events)
@@ -708,7 +718,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 
 // patchFromMessages corrects the last assistant/thinking block content from
 // the source-of-truth messages. Does NOT rebuild — preserves event-derived blocks
-// (tool_start with args, etc.) that messages don't contain.
+// (tool blocks with args and results, etc.) that messages don't contain.
 //
 // Only searches unflushed blocks (from flushedCount onwards). This prevents
 // patching an already-flushed block from a previous turn, which would cause
@@ -783,6 +793,10 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 // Used only for initial recovery — normal flow uses patchFromMessages.
 func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	m.s.blocks = m.s.blocks[:0]
+
+	// Collect tool_call content from assistant messages to pair with tool_results.
+	pendingCalls := make(map[string]core.Content) // ToolCallID → tool_call Content
+
 	for _, msg := range msgs {
 		switch msg.Role {
 		case "user":
@@ -802,11 +816,29 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type: "assistant", Raw: c.Text,
 					})
+				case c.Type == "tool_call":
+					pendingCalls[c.ToolCallID] = c
 				}
 			}
 		case "tool_result":
+			tc := pendingCalls[msg.ToolCallID]
+			delete(pendingCalls, msg.ToolCallID)
+
+			resultText := ""
+			for _, c := range msg.Content {
+				if c.Type == "text" {
+					resultText += c.Text
+				}
+			}
+
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "tool_end", ToolName: msg.ToolName, IsError: msg.IsError,
+				Type:       "tool",
+				ToolCallID: msg.ToolCallID,
+				ToolName:   msg.ToolName,
+				ToolArgs:   tc.Arguments,
+				ToolResult: truncateLines(strings.TrimSpace(resultText), maxToolResultLines),
+				ToolDone:   true,
+				IsError:    msg.IsError,
 			})
 		case "compaction_summary":
 			m.s.blocks = append(m.s.blocks, messageBlock{
