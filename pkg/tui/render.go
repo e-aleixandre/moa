@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
@@ -25,7 +26,10 @@ type messageBlock struct {
 	IsError    bool           // true if the tool returned an error
 }
 
-const maxToolPreviewLines = 10
+const (
+	maxToolPreviewLines = 10
+	toolPadLeft         = 2 // chars of padding inside the block
+)
 
 // renderer caches the glamour TermRenderer. Recreated only on width change.
 type renderer struct {
@@ -39,7 +43,6 @@ func newRenderer(width int) *renderer {
 	return r
 }
 
-// SetWidth updates the renderer width and rebuilds glamour if changed.
 func (r *renderer) SetWidth(width int) {
 	if r.width != width {
 		r.width = width
@@ -57,7 +60,6 @@ func (r *renderer) rebuild() {
 	}
 }
 
-// RenderMarkdown applies glamour to a complete message.
 func (r *renderer) RenderMarkdown(text string) string {
 	if r.glamour == nil || strings.TrimSpace(text) == "" {
 		return text
@@ -69,45 +71,76 @@ func (r *renderer) RenderMarkdown(text string) string {
 	return strings.TrimRight(out, "\n")
 }
 
-// FormatUserMessage formats a user message with the ❯ prefix.
 func FormatUserMessage(text string) string {
 	return userPrefixStyle.Render("❯ ") + text
 }
 
-// renderToolBlock renders a full-width panel: title line, body content, footer.
-// Matches pi's style: subtle background, green action, peach target, no borders.
+// --- Tool block rendering ---
+//
+// Background colors in lipgloss break when inner Style.Render() calls emit
+// ANSI reset (\e[0m) — the reset kills the outer Background for the rest of
+// the line. Fix: every text span and every padding space carries its own
+// explicit Background, so each segment re-establishes it after the prior reset.
+
+// renderToolBlock renders a full-width panel with Surface0 background.
+// Each line is independently styled so the background is continuous.
 func renderToolBlock(block messageBlock, width int) string {
 	action, target, body, footer := summarizeToolBlock(block)
+	bg := ActiveTheme.Surface0
+	bgS := lipgloss.NewStyle().Background(bg)
+	pad := bgS.Render(strings.Repeat(" ", toolPadLeft))
 
-	// Title: action target [running…]
-	title := toolActionStyle.Render(action)
+	// Title line: action [target] [running…]
+	title := pad + toolActionStyle.Background(bg).Render(action)
 	if target != "" {
-		title += " " + toolTargetStyle.Render(target)
+		title += bgS.Render(" ") + toolTargetStyle.Background(bg).Render(target)
 	}
 	if !block.ToolDone {
-		title += " " + toolDimStyle.Render("running…")
+		title += bgS.Render(" ") + toolDimStyle.Background(bg).Render("running…")
 	}
 
-	// Assemble content lines
 	var lines []string
-	lines = append(lines, title)
+	lines = append(lines, bgPadRight(title, width, bg))
+
 	if body != "" {
+		lines = append(lines, bgEmptyLine(width, bg))
+
 		bodyStyle := toolBodyStyle
 		if block.IsError {
 			bodyStyle = toolErrorBodyStyle
 		}
-		lines = append(lines, "") // blank line between title and body
-		lines = append(lines, bodyStyle.Render(body))
-	}
-	if footer != "" {
-		lines = append(lines, toolFooterStyle.Render(footer))
+		for _, bl := range strings.Split(body, "\n") {
+			content := pad + bodyStyle.Background(bg).Render(bl)
+			lines = append(lines, bgPadRight(content, width, bg))
+		}
 	}
 
-	return toolBlockStyle.Width(width).Render(strings.Join(lines, "\n"))
+	if footer != "" {
+		lines = append(lines, bgPadRight(
+			pad+toolFooterStyle.Background(bg).Render(footer),
+			width, bg))
+	}
+
+	return strings.Join(lines, "\n")
 }
 
-// renderSingleBlock renders a single block. Returns empty string for hidden blocks
-// (e.g., thinking when showThinking is false). Used by flush logic and View.
+// bgPadRight pads a pre-styled line to width with background-colored spaces.
+func bgPadRight(line string, width int, bg lipgloss.Color) string {
+	vis := lipgloss.Width(line)
+	pad := width - vis
+	if pad <= 0 {
+		return line
+	}
+	return line + lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
+}
+
+// bgEmptyLine returns a full-width line of background-colored spaces.
+func bgEmptyLine(width int, bg lipgloss.Color) string {
+	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", width))
+}
+
+// --- Block rendering ---
+
 func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) string {
 	switch block.Type {
 	case "user":
@@ -120,7 +153,9 @@ func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) strin
 	case "assistant":
 		return r.RenderMarkdown(block.Raw)
 	case "tool":
-		return renderToolBlock(block, r.width)
+		// Trailing newline creates a blank-line gap between consecutive tool
+		// blocks (and before the next assistant text) when joined by "\n".
+		return renderToolBlock(block, r.width) + "\n"
 	case "error":
 		return errorStyle.Render(block.Raw)
 	case "status":
@@ -142,9 +177,8 @@ func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool) string 
 	return b.String()
 }
 
-// --- Tool block content ---
+// --- Tool result extraction ---
 
-// toolResultText extracts text content from a tool Result for block storage.
 func toolResultText(result *core.Result) string {
 	if result == nil {
 		return ""
@@ -158,16 +192,14 @@ func toolResultText(result *core.Result) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// summarizeToolBlock extracts the display components for a tool block.
-// Returns action (verb), target (path/command), body (content), and footer (truncation hint).
+// --- Tool block content summarization ---
+
 func summarizeToolBlock(block messageBlock) (action, target, body, footer string) {
 	switch block.ToolName {
 	case "bash":
 		action = "bash"
 		target, _ = stringArg(block.ToolArgs, "command")
-		if block.IsError {
-			body = block.ToolResult
-		} else if block.ToolDone {
+		if block.IsError || block.ToolDone {
 			body = block.ToolResult
 		}
 
@@ -249,7 +281,7 @@ func truncateBlockText(text string, maxLines int) (body, footer string) {
 	total := len(lines)
 	remaining := total - maxLines
 	return strings.Join(lines[:maxLines], "\n"),
-		fmt.Sprintf("… (%d more lines, %d total, ctrl+o to expand)", remaining, total)
+		fmt.Sprintf("… (%d more lines, %d total)", remaining, total)
 }
 
 func stringArg(args map[string]any, key string) (string, bool) {
