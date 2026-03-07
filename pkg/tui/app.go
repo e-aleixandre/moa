@@ -246,13 +246,15 @@ func (m appModel) waitForPermission() tea.Cmd {
 func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		sizeChanged := m.width != msg.Width || m.height != msg.Height
 		m.width = msg.Width
 		m.height = msg.Height
 		m.renderer.SetWidth(msg.Width)
 		m.input.SetWidth(msg.Width)
 		m.status.SetWidth(msg.Width)
-		// Invalidate stream cache so next tick re-renders with new width
-		if m.s.streamText != "" {
+		// Invalidate stream cache so next tick re-renders with new width.
+		// The live area is still owned by View(); only scrollback needs explicit repaint.
+		if m.s.streamText != "" && sizeChanged {
 			m.s.dirty = true
 		}
 		// One-shot initialization on first WindowSizeMsg (renderer width is now set).
@@ -270,8 +272,15 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.s.flushScheduledCount = len(m.s.blocks)
 				return m, tea.Println(content)
 			}
+			return m, nil
 		}
-		return m, nil
+		// Repaint scrollback only on actual terminal resize, not on synthetic
+		// WindowSizeMsg from tea.Exec/forceRepaint (which would cause a loop).
+		if !sizeChanged || m.sessionBrowser.active || m.s.flushedCount == 0 {
+			return m, nil
+		}
+		content := renderBlocks(m.s.blocks[:m.s.flushedCount], m.renderer, m.s.showThinking, m.s.expanded)
+		return m, tea.Sequence(clearScreen(), tea.Println(content))
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)

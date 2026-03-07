@@ -363,9 +363,4 @@ func truncateLine(s string, width int) string {
 	return s[:width-1] + "…"
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+
