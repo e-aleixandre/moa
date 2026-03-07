@@ -44,6 +44,7 @@ type state struct {
 	streamState         streamState
 	activeTools         int                   // number of tool calls currently executing
 	showThinking        bool                  // toggle thinking visibility (Ctrl+T)
+	expanded            bool                  // toggle expanded tool results (Ctrl+O)
 	initialized         bool                  // first WindowSizeMsg processed (one-shot bottom push done)
 	runGen              uint64                // incremented on each run; events from old runs are ignored
 	cleanupOnce         sync.Once             // idempotent cleanup
@@ -442,13 +443,13 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.cycleScopedModel()
 
 	case tea.KeyCtrlO:
-		// Reprint: clear screen+scrollback, then print all blocks cleanly.
-		// Gives a fresh view with source-of-truth content and current thinking toggle.
-		// tmux scroll works natively since blocks go to scrollback via tea.Println.
+		// Toggle expanded view: clear screen+scrollback, reprint all blocks.
+		// First press expands tool results in full; second press collapses back.
 		if len(m.s.blocks) == 0 {
 			return m, nil
 		}
-		content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, true)
+		m.s.expanded = !m.s.expanded
+		content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, m.s.expanded)
 		return m, tea.Sequence(clearScreen(), tea.Println(content))
 
 	case tea.KeyEnter:
