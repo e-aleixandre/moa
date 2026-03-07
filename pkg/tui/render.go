@@ -90,7 +90,7 @@ func renderToolBlock(block messageBlock, width int, expanded bool) string {
 	if expanded {
 		maxLines = 0
 	}
-	action, target, body, footer := summarizeToolBlock(block, maxLines)
+	action, target, header, body, footer := summarizeToolBlock(block, maxLines)
 	bg := ActiveTheme.Surface0
 	bgS := lipgloss.NewStyle().Background(bg)
 	pad := bgS.Render(strings.Repeat(" ", toolPadLeft))
@@ -107,9 +107,17 @@ func renderToolBlock(block messageBlock, width int, expanded bool) string {
 	var lines []string
 	lines = append(lines, bgPadRight(title, width, bg))
 
-	if body != "" {
+	if header != "" || body != "" {
 		lines = append(lines, bgEmptyLine(width, bg))
+	}
 
+	if header != "" {
+		lines = append(lines, bgPadRight(
+			pad+toolFooterStyle.Background(bg).Render(header),
+			width, bg))
+	}
+
+	if body != "" {
 		bodyStyle := toolBodyStyle
 		if block.IsError {
 			bodyStyle = toolErrorBodyStyle
@@ -205,12 +213,16 @@ func toolResultText(result *core.Result) string {
 // --- Tool block content summarization ---
 
 // summarizeToolBlock extracts display components. maxLines=0 means no truncation.
-func summarizeToolBlock(block messageBlock, maxLines int) (action, target, body, footer string) {
+// header appears above body (tail-truncated tools), footer appears below (head-truncated).
+func summarizeToolBlock(block messageBlock, maxLines int) (action, target, header, body, footer string) {
+	tail := false // tail truncation: keep last N lines (bash, default)
+
 	switch block.ToolName {
 	case "bash":
 		action = "bash"
 		target, _ = stringArg(block.ToolArgs, "command")
 		body = block.ToolResult
+		tail = true
 
 	case "read":
 		action = "read"
@@ -257,18 +269,44 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, body,
 		action = block.ToolName
 		target = sortedArgSummary(block.ToolArgs)
 		body = block.ToolResult
+		tail = true
 	}
 
 	if body != "" && maxLines > 0 {
-		body, footer = truncateBlockText(body, maxLines)
+		if tail {
+			header, body = truncateBlockTextTail(body, maxLines)
+		} else {
+			body, footer = truncateBlockText(body, maxLines)
+		}
 	} else if body != "" {
 		body = strings.TrimSpace(body)
 	}
-	return action, target, body, footer
+	return action, target, header, body, footer
 }
 
 // --- Helpers ---
 
+// truncateBlockTextTail keeps the LAST maxLines. Returns (header, body).
+// header shows the count of hidden lines above.
+func truncateBlockTextTail(text string, maxLines int) (header, body string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", ""
+	}
+	lines := strings.Split(text, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) <= maxLines {
+		return "", strings.Join(lines, "\n")
+	}
+	total := len(lines)
+	hidden := total - maxLines
+	return fmt.Sprintf("… (%d previous lines, %d total, ctrl+o to expand)", hidden, total),
+		strings.Join(lines[total-maxLines:], "\n")
+}
+
+// truncateBlockText keeps the FIRST maxLines. Returns (body, footer).
 func truncateBlockText(text string, maxLines int) (body, footer string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
