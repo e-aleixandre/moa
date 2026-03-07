@@ -11,36 +11,44 @@ var knownModels = map[string]Model{
 	"claude-opus-4-6": {
 		ID: "claude-opus-4-6", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Opus 4.6", MaxInput: 200_000, MaxOutput: 16384,
+		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25},
 	},
 	"claude-sonnet-4-6": {
 		ID: "claude-sonnet-4-6", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Sonnet 4.6", MaxInput: 200_000, MaxOutput: 16384,
+		Pricing: &Pricing{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75},
 	},
 	"claude-haiku-4-5": {
 		ID: "claude-haiku-4-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Haiku 4.5", MaxInput: 200_000, MaxOutput: 8192,
+		Pricing: &Pricing{Input: 1, Output: 5, CacheRead: 0.1, CacheWrite: 1.25},
 	},
 
 	// --- OpenAI ---
 	"gpt-5.3-codex": {
 		ID: "gpt-5.3-codex", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.3 Codex", MaxInput: 400_000, MaxOutput: 16384,
+		Pricing: &Pricing{Input: 1.75, Output: 14, CacheRead: 0.175},
 	},
 	"gpt-5.3-codex-spark": {
 		ID: "gpt-5.3-codex-spark", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.3 Codex Spark", MaxInput: 128_000, MaxOutput: 16384,
+		Pricing: &Pricing{Input: 1.75, Output: 14, CacheRead: 0.175},
 	},
 	"gpt-5.2-codex": {
 		ID: "gpt-5.2-codex", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
+		Pricing: &Pricing{Input: 1.25, Output: 10, CacheRead: 0.125},
 	},
 	"o3": {
 		ID: "o3", Provider: "openai", API: "openai-chat",
 		Name: "o3", MaxInput: 200_000, MaxOutput: 100_000,
+		Pricing: &Pricing{Input: 1, Output: 4, CacheRead: 0.1},
 	},
 	"o4-mini": {
 		ID: "o4-mini", Provider: "openai", API: "openai-chat",
 		Name: "o4-mini", MaxInput: 200_000, MaxOutput: 100_000,
+		Pricing: &Pricing{Input: 0.55, Output: 2.2, CacheRead: 0.055},
 	},
 }
 

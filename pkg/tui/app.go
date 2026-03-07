@@ -50,6 +50,7 @@ type state struct {
 	cleanupOnce         sync.Once             // idempotent cleanup
 	pendingStatus       string                // transient generic status shown in View(), never persisted
 	pendingTimeline     *pendingTimelineEvent // live timeline event shown in View() until next send
+	sessionCost         float64               // accumulated USD cost this session
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -755,6 +756,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	m.status.SetText("")
 	m.input.SetEnabled(true)
 	m.refreshContextSegment()
+	m.accumulateCost(msg.Messages)
 
 	if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
@@ -1246,6 +1248,26 @@ func (m *appModel) cleanup() {
 		}
 		m.agent.Abort()
 	})
+}
+
+// accumulateCost extracts Usage from the last assistant message and adds its
+// cost to the session total. Updates the top bar cost segment.
+func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
+	if msgs == nil || m.agent == nil {
+		return
+	}
+	model := m.agent.Model()
+	if model.Pricing == nil {
+		return
+	}
+	// Find last assistant message with usage
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" && msgs[i].Usage != nil {
+			m.s.sessionCost += model.Pricing.Cost(*msgs[i].Usage)
+			m.topBar.UpdateCostSegment(m.s.sessionCost)
+			break
+		}
+	}
 }
 
 // refreshContextSegment recalculates the context usage percentage and updates
