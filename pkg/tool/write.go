@@ -37,7 +37,7 @@ func NewWrite(cfg ToolConfig) core.Tool {
 				return core.ErrorResult("path is required"), nil
 			}
 
-			resolved, err := safePath(cfg.WorkspaceRoot, path)
+			resolved, err := safePath(cfg, path)
 			if err != nil {
 				return core.ErrorResult(err.Error()), nil
 			}

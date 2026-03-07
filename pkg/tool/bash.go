@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,7 +49,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 				cwd = cfg.WorkspaceRoot
 			}
 			if cfg.WorkspaceRoot != "" {
-				validCwd, err := safePath(cfg.WorkspaceRoot, cwd)
+				validCwd, err := safePath(cfg, cwd)
 				if err != nil {
 					return core.ErrorResult(fmt.Sprintf("invalid cwd: %v", err)), nil
 				}
@@ -85,14 +84,13 @@ func NewBash(cfg ToolConfig) core.Tool {
 
 			// Capture stdout and stderr, streaming via onUpdate.
 			// Buffers keep head + tail to preserve both the start and end of output.
-			spillDir := filepath.Join(cfg.WorkspaceRoot, ".moa", "tmp")
 			var stdout, stderr headTailBuffer
 			stdout.headMax = maxOutputBytes / 2
 			stdout.tailMax = maxOutputBytes / 2
-			stdout.SpillDir = spillDir
+			stdout.SpillDir = spillOutputDir
 			stderr.headMax = maxOutputBytes / 2
 			stderr.tailMax = maxOutputBytes / 2
-			stderr.SpillDir = spillDir
+			stderr.SpillDir = spillOutputDir
 
 			stdoutPipe, err := cmd.StdoutPipe()
 			if err != nil {
