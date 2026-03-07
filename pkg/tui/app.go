@@ -313,61 +313,74 @@ func (m appModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
 	}
-	var sections []string
+
+	// Content blocks — joined with "\n\n" (one blank line between blocks).
+	var content []string
 
 	for _, block := range m.s.blocks[m.s.flushedCount:] {
 		if rendered := renderSingleBlock(block, m.renderer, m.s.showThinking); rendered != "" {
-			sections = append(sections, rendered)
+			content = append(content, rendered)
 		}
 	}
 
 	// Streaming thinking (if visible and active)
 	if m.s.thinkingText != "" && m.s.showThinking {
-		sections = append(sections, GetActiveLayout().RenderThinking(m.s.thinkingText, m.width, ActiveTheme)+"\n")
+		content = append(content, GetActiveLayout().RenderThinking(m.s.thinkingText, m.width, ActiveTheme))
 	}
 
 	// Streaming assistant text (from cache, updated by renderTick)
 	if m.s.streamCache != "" {
-		sections = append(sections, GetActiveLayout().RenderAssistantText(m.s.streamCache, m.width)+"\n")
+		content = append(content, GetActiveLayout().RenderAssistantText(m.s.streamCache, m.width))
 	}
 
-	// Status bar
+	// Status bar (spinner)
 	if sv := m.status.View(); sv != "" {
-		sections = append(sections, sv)
+		content = append(content, sv)
 	}
 
 	// Pending status (transient generic feedback — shown until next message send)
 	l := GetActiveLayout()
 	if m.s.pendingStatus != "" {
-		sections = append(sections, l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
+		content = append(content, l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
 	}
 	if m.s.pendingTimeline != nil {
-		sections = append(sections, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
+		content = append(content, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
 	}
 
-	// Top status bar (above input)
+	// UI chrome — joined with "\n" (no extra blank lines).
+	var chrome []string
+
 	if tv := m.topBar.View(m.width); tv != "" {
-		sections = append(sections, tv)
+		chrome = append(chrome, tv)
 	}
-
-	// Model picker (replaces input when active)
 	if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
-			sections = append(sections, pv)
+			chrome = append(chrome, pv)
 		}
 	} else if iv := m.input.View(); iv != "" {
-		sections = append(sections, iv)
+		chrome = append(chrome, iv)
 	}
-
-	// Bottom status bar (below input)
 	if bv := m.bottomBar.View(m.width); bv != "" {
-		sections = append(sections, bv)
+		chrome = append(chrome, bv)
 	}
 
-	if len(sections) == 0 {
+	// Assemble: content (with blank-line gaps) + chrome (tight)
+	var final []string
+	if len(content) > 0 {
+		contentStr := strings.Join(content, "\n\n")
+		if m.s.flushedCount > 0 {
+			contentStr = "\n" + contentStr // blank line gap from scrollback
+		}
+		final = append(final, contentStr)
+	}
+	if len(chrome) > 0 {
+		final = append(final, strings.Join(chrome, "\n"))
+	}
+
+	if len(final) == 0 {
 		return m.input.View()
 	}
-	return strings.Join(sections, "\n")
+	return strings.Join(final, "\n\n")
 }
 
 // --- Key handling ---
@@ -509,7 +522,10 @@ func (m *appModel) flushBlocks(to int) tea.Cmd {
 		// Nothing to print, but still confirm the advance
 		return done
 	}
-	body := strings.TrimRight(strings.Join(parts, "\n"), "\n")
+	body := strings.TrimRight(strings.Join(parts, "\n\n"), "\n")
+	if from > 0 {
+		body = "\n" + body // blank line gap from previous flush batch
+	}
 	return tea.Sequence(tea.Println(body), done)
 }
 

@@ -84,27 +84,26 @@ func renderSingleBlockEx(block messageBlock, r *renderer, showThinking bool, exp
 	t := ActiveTheme
 	w := r.width
 
-	// Each block type gets a trailing "\n" for inter-block breathing room.
-	// flushBlocks uses strings.Join(parts, "\n"), so trailing "\n" here
-	// means: content\n + \n(join) + next = one blank line gap.
-	// Tool blocks have their own internal top/bottom padding lines.
+	// Blocks return clean content — no trailing/leading newlines for spacing.
+	// Each render path (renderBlocks, flushBlocks, View) joins with "\n\n"
+	// to produce exactly one blank line between blocks.
 	switch block.Type {
 	case "user":
-		return l.RenderUserMessage(block.Raw, w, t) + "\n"
+		return l.RenderUserMessage(block.Raw, w, t)
 	case "thinking":
 		if !showThinking {
 			return ""
 		}
-		return l.RenderThinking(block.Raw, w, t) + "\n"
+		return l.RenderThinking(block.Raw, w, t)
 	case "assistant":
-		return l.RenderAssistantText(r.RenderMarkdown(block.Raw), w) + "\n"
+		return l.RenderAssistantText(r.RenderMarkdown(block.Raw), w)
 	case "tool":
 		data := buildToolBlockData(block, expanded)
 		return l.RenderToolBlock(data, w, t)
 	case "error":
-		return l.RenderError(block.Raw, w, t) + "\n"
+		return l.RenderError(block.Raw, w, t)
 	case "status":
-		return l.RenderStatus(block.Raw, w, t) + "\n"
+		return l.RenderStatus(block.Raw, w, t)
 	default:
 		return ""
 	}
@@ -113,14 +112,13 @@ func renderSingleBlockEx(block messageBlock, r *renderer, showThinking bool, exp
 // renderBlocks renders all blocks. Used by session restore (expanded=false)
 // and Ctrl+O reprint (expanded=true).
 func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool, expanded bool) string {
-	var b strings.Builder
+	var parts []string
 	for _, block := range blocks {
 		if s := renderSingleBlockEx(block, r, showThinking, expanded); s != "" {
-			b.WriteString(s)
-			b.WriteByte('\n')
+			parts = append(parts, s)
 		}
 	}
-	return b.String()
+	return strings.Join(parts, "\n\n")
 }
 
 // --- Tool result extraction ---
