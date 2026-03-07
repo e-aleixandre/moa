@@ -154,10 +154,10 @@ const (
 	PriorityContext  = 90 // rightmost of the built-ins
 )
 
-// statusLineSep is rebuilt by RebuildStyles via rebuildStatusLineVars.
+// statusLineSep is rebuilt by RebuildUI via rebuildStatusLineVars.
 var statusLineSep string
 
-// Context usage level styles — rebuilt by RebuildStyles.
+// Context usage level styles — rebuilt by RebuildUI.
 var (
 	statusLineStyle            lipgloss.Style
 	statusLineContextLowStyle  lipgloss.Style
@@ -165,7 +165,7 @@ var (
 	statusLineContextHighStyle lipgloss.Style
 )
 
-// rebuildStatusLineVars is called by RebuildStyles to update derived vars.
+// rebuildStatusLineVars is called by RebuildUI to update derived vars.
 func rebuildStatusLineVars() {
 	t := ActiveTheme
 	statusLineSep = statusLineSepStyle.Render("  ·  ")

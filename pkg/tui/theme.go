@@ -6,7 +6,7 @@ import "github.com/charmbracelet/lipgloss"
 // Follows the Catppuccin naming convention: base/surface for backgrounds,
 // text/subtext/overlay for text hierarchy, and named accents.
 //
-// Extensions can swap ActiveTheme and call RebuildStyles() to retheme at runtime.
+// Set ActiveTheme and call RebuildUI() before the TUI starts to apply a new theme.
 type Theme struct {
 	// Backgrounds (darkest → lightest)
 	Base    lipgloss.Color
@@ -72,5 +72,5 @@ var CatppuccinMocha = Theme{
 }
 
 // ActiveTheme is the current color palette used by all TUI styles.
-// Change this and call RebuildStyles() to apply a new theme.
+// Change this and call RebuildUI() to apply a new theme.
 var ActiveTheme = CatppuccinMocha

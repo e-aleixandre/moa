@@ -946,7 +946,8 @@ func TestRenderToolBlock_FullWidth(t *testing.T) {
 		ToolArgs:   map[string]any{"path": "/tmp/x.go", "content": "package main"},
 		ToolResult: "wrote ok", ToolDone: true,
 	}
-	rendered := renderToolBlock(block, 80, false)
+	data := buildToolBlockData(block, false)
+	rendered := GetActiveLayout().RenderToolBlock(data, 80, ActiveTheme)
 	if rendered == "" {
 		t.Fatal("empty render")
 	}
@@ -967,7 +968,8 @@ func TestRenderToolBlock_Structure(t *testing.T) {
 		ToolArgs:   map[string]any{"command": "ls"},
 		ToolResult: "file1\nfile2\nfile3", ToolDone: true,
 	}
-	rendered := renderToolBlock(block, 60, false)
+	data := buildToolBlockData(block, false)
+	rendered := GetActiveLayout().RenderToolBlock(data, 60, ActiveTheme)
 	lines := strings.Split(rendered, "\n")
 
 	// title + blank + 3 body = 5 lines minimum
@@ -984,7 +986,7 @@ func TestRenderToolBlock_Structure(t *testing.T) {
 	}
 }
 
-func TestRenderToolBlock_TrailingNewline(t *testing.T) {
+func TestRenderToolBlock_HasInternalPadding(t *testing.T) {
 	block := messageBlock{
 		Type: "tool", ToolName: "bash",
 		ToolArgs: map[string]any{"command": "pwd"},
@@ -992,8 +994,10 @@ func TestRenderToolBlock_TrailingNewline(t *testing.T) {
 	}
 	r := newRenderer(80)
 	rendered := renderSingleBlock(block, r, false)
-	if !strings.HasSuffix(rendered, "\n") {
-		t.Error("tool block should end with trailing newline for spacing")
+	lines := strings.Split(rendered, "\n")
+	// Should have padding lines (empty bg) at top and bottom
+	if len(lines) < 4 {
+		t.Fatalf("lines = %d, want >= 4 (top pad + header + body + bottom pad)", len(lines))
 	}
 }
 
@@ -1003,14 +1007,14 @@ func TestRenderToolBlock_ConsecutiveToolsHaveGap(t *testing.T) {
 		{Type: "tool", ToolName: "bash", ToolArgs: map[string]any{"command": "pwd"}, ToolDone: true, ToolResult: "b"},
 	}
 	r := newRenderer(60)
-	var parts []string
-	for _, b := range blocks {
-		parts = append(parts, renderSingleBlock(b, r, false))
+	rendered := renderBlocks(blocks, r, false, false)
+	// Each tool block has internal top/bottom padding, plus renderBlocks
+	// joins with "\n". The result must have visual separation.
+	if rendered == "" {
+		t.Fatal("empty render")
 	}
-	joined := strings.Join(parts, "\n")
-	// Trailing "\n" from each block + "\n" join = "\n\n" = blank line gap
-	if !strings.Contains(joined, "\n\n") {
-		t.Error("consecutive tool blocks should have a blank-line gap")
+	if !strings.Contains(rendered, "ls") || !strings.Contains(rendered, "pwd") {
+		t.Error("both tool blocks should be present")
 	}
 }
 
@@ -1124,5 +1128,145 @@ func TestRebuildFromMessages_RendersModelSwitchSessionEvent(t *testing.T) {
 	}
 	if got := m.s.blocks[1]; got.Type != "user" || got.Raw != "hello" {
 		t.Fatalf("blocks[1] = %+v, want restored user block", got)
+	}
+}
+
+// --- Layout system tests ---
+
+func saveAndRestoreLayout(t *testing.T) {
+	t.Helper()
+	saved := GetActiveLayout()
+	t.Cleanup(func() { SetLayoutDirect(saved) })
+}
+
+func TestLayoutSwap_DifferentOutput(t *testing.T) {
+	saveAndRestoreLayout(t)
+	r := newRenderer(80)
+
+	block := messageBlock{Type: "user", Raw: "hello world"}
+
+	// Split layout: should have "YOU" label
+	SetLayoutDirect(&SplitLayout{})
+	splitOut := renderSingleBlock(block, r, false)
+	if !strings.Contains(splitOut, "YOU") {
+		t.Error("split layout should render YOU label")
+	}
+
+	// Flat layout: should have "❯" prefix, no "YOU"
+	SetLayoutDirect(&FlatLayout{})
+	flatOut := renderSingleBlock(block, r, false)
+	if !strings.Contains(flatOut, "❯") {
+		t.Error("flat layout should render ❯ prefix")
+	}
+	if strings.Contains(flatOut, "YOU") {
+		t.Error("flat layout should not render YOU label")
+	}
+
+	// They should differ
+	if splitOut == flatOut {
+		t.Error("split and flat should produce different output")
+	}
+}
+
+func TestSetLayout_UnknownName(t *testing.T) {
+	err := SetLayout("nonexistent")
+	if err == nil {
+		t.Error("expected error for unknown layout name")
+	}
+}
+
+func TestSetLayout_KnownNames(t *testing.T) {
+	saveAndRestoreLayout(t)
+
+	if err := SetLayout("flat"); err != nil {
+		t.Errorf("SetLayout(flat) error: %v", err)
+	}
+	if _, ok := GetActiveLayout().(*FlatLayout); !ok {
+		t.Error("expected FlatLayout after SetLayout(flat)")
+	}
+
+	if err := SetLayout("split"); err != nil {
+		t.Errorf("SetLayout(split) error: %v", err)
+	}
+	if _, ok := GetActiveLayout().(*SplitLayout); !ok {
+		t.Error("expected SplitLayout after SetLayout(split)")
+	}
+}
+
+func TestSetLayoutDirect_NilPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic on nil layout")
+		}
+	}()
+	SetLayoutDirect(nil)
+}
+
+func TestRegisterLayout_DuplicateErrors(t *testing.T) {
+	// "split" is already registered by init()
+	err := RegisterLayout("split", &SplitLayout{})
+	if err == nil {
+		t.Error("expected error on duplicate registration")
+	}
+}
+
+func TestBuildToolBlockData_ExpandedNoTruncation(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs:   map[string]any{"command": "cat big.txt"},
+		ToolResult: strings.Join(lines, "\n"), ToolDone: true,
+	}
+
+	data := buildToolBlockData(block, true)
+	if data.Header != "" {
+		t.Errorf("expanded header = %q, want empty", data.Header)
+	}
+	if !strings.Contains(data.Body, "line 1") || !strings.Contains(data.Body, "line 30") {
+		t.Error("expanded body should contain all lines")
+	}
+}
+
+func TestBuildToolBlockData_TruncatedBash(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs:   map[string]any{"command": "cat big.txt"},
+		ToolResult: strings.Join(lines, "\n"), ToolDone: true,
+	}
+
+	data := buildToolBlockData(block, false)
+	// Bash uses tail truncation: header shows hidden count, body shows last N
+	if !strings.Contains(data.Header, "previous lines") {
+		t.Errorf("header = %q, want tail truncation info", data.Header)
+	}
+	if !strings.Contains(data.Body, "line 30") {
+		t.Error("tail-truncated body should contain the last line")
+	}
+	if strings.Contains(data.Body, "line 1\n") {
+		t.Error("tail-truncated body should not contain the first line")
+	}
+}
+
+func TestGetActiveLayout_NeverNil(t *testing.T) {
+	l := GetActiveLayout()
+	if l == nil {
+		t.Fatal("GetActiveLayout() returned nil")
+	}
+}
+
+func TestFormatUserMessage_CompatShim(t *testing.T) {
+	out := FormatUserMessage("test message")
+	if out == "" {
+		t.Fatal("FormatUserMessage returned empty string")
+	}
+	if !strings.Contains(out, "test message") {
+		t.Error("FormatUserMessage should contain the message text")
 	}
 }

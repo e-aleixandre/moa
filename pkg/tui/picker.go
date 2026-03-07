@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
@@ -27,27 +26,8 @@ type pickerEntry struct {
 	current bool // currently active model
 }
 
-// Styles for the picker.
-var (
-	pickerBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("8")).
-			Padding(0, 1)
-
-	pickerSelected = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("12"))
-
-	pickerScoped = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("10"))
-
-	pickerDim = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8"))
-
-	pickerHeader = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8")).
-			Italic(true)
-)
+// pickerBorderStyle, pickerSelectedStyle, pickerScopedStyle, pickerDimStyle,
+// pickerHeaderStyle are theme-derived. Rebuilt by RebuildUI() in styles.go.
 
 func newPicker() pickerModel {
 	return pickerModel{}
@@ -120,7 +100,7 @@ func (p pickerModel) View(width int) string {
 	}
 
 	var lines []string
-	lines = append(lines, pickerHeader.Render("Models — ↑↓ navigate · enter select · space pin · esc close"))
+	lines = append(lines, pickerHeaderStyle.Render("Models — ↑↓ navigate · enter select · space pin · esc close"))
 	lines = append(lines, "")
 
 	lastProvider := ""
@@ -128,7 +108,7 @@ func (p pickerModel) View(width int) string {
 		// Provider header.
 		if e.model.Provider != lastProvider {
 			lastProvider = e.model.Provider
-			lines = append(lines, pickerDim.Render("  "+strings.ToUpper(e.model.Provider)))
+			lines = append(lines, pickerDimStyle.Render("  "+strings.ToUpper(e.model.Provider)))
 		}
 
 		line := p.renderEntry(i, e)
@@ -140,7 +120,7 @@ func (p pickerModel) View(width int) string {
 	if innerWidth < 30 {
 		innerWidth = 30
 	}
-	return pickerBorder.Width(innerWidth).Render(content)
+	return pickerBorderStyle.Width(innerWidth).Render(content)
 }
 
 func (p pickerModel) renderEntry(idx int, e pickerEntry) string {
@@ -177,10 +157,10 @@ func (p pickerModel) renderEntry(idx int, e pickerEntry) string {
 	text := fmt.Sprintf("%s%s%s%s%s", cursor, pin, name, alias, current)
 
 	if idx == p.cursor {
-		return pickerSelected.Render(text)
+		return pickerSelectedStyle.Render(text)
 	}
 	if e.scoped {
-		return pickerScoped.Render(text)
+		return pickerScopedStyle.Render(text)
 	}
 	return text
 }
