@@ -154,9 +154,19 @@ func (SplitLayout) RenderToolBlock(block ToolBlockData, width int, theme Theme) 
 		diffAdd := lipgloss.NewStyle().Foreground(theme.Green).Background(bg)
 		diffDel := lipgloss.NewStyle().Foreground(theme.Red).Background(bg)
 		diffHunk := lipgloss.NewStyle().Foreground(theme.Overlay0).Background(bg)
+		stderrStyle := lipgloss.NewStyle().Foreground(theme.Maroon).Background(bg)
+		inStderr := false
 		for _, bl := range strings.Split(block.Body, "\n") {
+			if bl == "STDERR:" {
+				inStderr = true
+				content := pad + stderrStyle.Bold(true).Render(bl)
+				lines = append(lines, bgPadRight(content, width, bg))
+				continue
+			}
 			style := bodyStyle
-			if block.IsDiff {
+			if inStderr {
+				style = stderrStyle
+			} else if block.IsDiff {
 				switch {
 				case strings.HasPrefix(bl, "+"):
 					style = diffAdd
