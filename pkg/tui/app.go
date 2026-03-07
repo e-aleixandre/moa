@@ -283,6 +283,25 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case compactResultMsg:
+		m.status.SetText("")
+		if msg.Err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Compaction failed: " + msg.Err.Error(),
+			})
+		} else if msg.Payload == nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status", Raw: "Nothing to compact",
+			})
+		} else {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status",
+				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", msg.Payload.TokensBefore/1000, msg.Payload.TokensAfter/1000),
+			})
+		}
+		m.refreshContextSegment()
+		return m, m.flushBlocks(len(m.s.blocks))
+
 	case sessionSavedMsg:
 		// Session saved asynchronously. Log errors but don't interrupt the user.
 		if msg.err != nil {
@@ -938,6 +957,14 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			clearScreen(),
 			func() tea.Msg { return tea.ClearScreen() },
 		)
+	case "compact":
+		m.status.SetText("compacting context...")
+		agent := m.agent
+		return m, func() tea.Msg {
+			payload, err := agent.Compact(context.Background())
+			return compactResultMsg{Payload: payload, Err: err}
+		}
+
 	case "exit", "quit":
 		m.cleanup()
 		return m, tea.Quit

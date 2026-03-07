@@ -36,3 +36,9 @@ type flushDoneMsg struct {
 	upTo  int // advance flushedCount to this value
 	epoch int // must match current flushEpoch (stale after /clear)
 }
+
+// compactResultMsg carries the result of a manual /compact command.
+type compactResultMsg struct {
+	Payload *core.CompactionPayload
+	Err     error
+}

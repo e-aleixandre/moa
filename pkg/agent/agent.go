@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/compaction"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/extension"
 )
@@ -276,6 +277,60 @@ func (a *Agent) Messages() []core.AgentMessage {
 // Returns an unsubscribe function. Listeners are async — slow listeners don't block the loop.
 func (a *Agent) Subscribe(fn func(core.AgentEvent)) func() {
 	return a.emitter.Subscribe(fn)
+}
+
+// Compact forces context compaction regardless of the auto-compaction threshold.
+// Returns the compaction payload on success, nil if there was nothing to compact,
+// or an error if the agent is running or compaction fails.
+func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
+	a.mu.Lock()
+	if a.cancel != nil {
+		a.mu.Unlock()
+		return nil, fmt.Errorf("cannot compact while agent is running")
+	}
+
+	msgs := a.state.Messages
+	model := a.config.Model
+	provider := a.config.Provider
+	settings := a.config.Compaction
+	epoch := a.state.CompactionEpoch
+	a.mu.Unlock()
+
+	if settings == nil {
+		defaults := core.DefaultCompactionSettings
+		settings = &defaults
+	}
+	if model.MaxInput <= 0 {
+		return nil, fmt.Errorf("model has no context window configured")
+	}
+
+	toolSpecs := a.tools.Specs()
+	estimate := core.EstimateContextTokens(msgs, a.config.SystemPrompt, toolSpecs, epoch)
+
+	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel}
+	result, compacted, err := compaction.Compact(
+		ctx, provider, model, streamOpts,
+		msgs, estimate.Tokens, model.MaxInput, *settings,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+
+	a.mu.Lock()
+	a.state.Messages = compacted
+	a.state.CompactionEpoch++
+	a.mu.Unlock()
+
+	return &core.CompactionPayload{
+		Summary:       result.Summary,
+		TokensBefore:  result.TokensBefore,
+		TokensAfter:   result.TokensAfter,
+		ReadFiles:     result.ReadFiles,
+		ModifiedFiles: result.ModifiedFiles,
+	}, nil
 }
 
 // Abort cancels the current run.
