@@ -110,6 +110,13 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 		}
 	}
 
+	// Prompt caching — add cache_control breakpoints.
+	// Anthropic caches everything up to each breakpoint. Three breakpoints:
+	// 1. Last system block (system prompt is identical turn-to-turn)
+	// 2. Last tool definition (tool specs are identical turn-to-turn)
+	// 3. Last content block of the last user message (caches conversation history)
+	addCacheBreakpoints(&ar)
+
 	return json.Marshal(ar)
 }
 
@@ -306,5 +313,34 @@ func resolveThinking(req core.Request) *thinkingConfig {
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 32000}
 	default:
 		return nil // "off" or empty
+	}
+}
+
+var cacheControl = map[string]string{"type": "ephemeral"}
+
+// addCacheBreakpoints marks the last system block, last tool, and last user
+// message content block with cache_control for Anthropic prompt caching.
+func addCacheBreakpoints(ar *anthropicRequest) {
+	// 1. Last system block
+	if blocks, ok := ar.System.([]map[string]any); ok && len(blocks) > 0 {
+		blocks[len(blocks)-1]["cache_control"] = cacheControl
+	}
+
+	// 2. Last tool
+	if len(ar.Tools) > 0 {
+		ar.Tools[len(ar.Tools)-1]["cache_control"] = cacheControl
+	}
+
+	// 3. Last content block of the final user message (caches conversation history).
+	// Walk backwards to find the last user-role message.
+	for i := len(ar.Messages) - 1; i >= 0; i-- {
+		if ar.Messages[i]["role"] == "user" {
+			if content, ok := ar.Messages[i]["content"].([]any); ok && len(content) > 0 {
+				if block, ok := content[len(content)-1].(map[string]any); ok {
+					block["cache_control"] = cacheControl
+				}
+			}
+			break
+		}
 	}
 }

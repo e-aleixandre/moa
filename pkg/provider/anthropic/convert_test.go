@@ -324,6 +324,126 @@ func TestConvertAssistantContent_NilArguments(t *testing.T) {
 	}
 }
 
+func TestCacheBreakpoints_SystemAndTools(t *testing.T) {
+	req := core.Request{
+		Model:  core.Model{ID: "claude-sonnet-4-6"},
+		System: "You are helpful.",
+		Messages: []core.Message{
+			core.NewUserMessage("Hello"),
+		},
+		Tools: []core.ToolSpec{
+			{Name: "bash", Description: "Run commands", Parameters: json.RawMessage(`{"type":"object"}`)},
+			{Name: "read", Description: "Read files", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	// Last system block should have cache_control
+	system := body["system"].([]any)
+	lastSys := system[len(system)-1].(map[string]any)
+	cc, ok := lastSys["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatal("last system block should have cache_control")
+	}
+	if cc["type"] != "ephemeral" {
+		t.Errorf("cache_control type: got %v", cc["type"])
+	}
+
+	// Last tool should have cache_control
+	tools := body["tools"].([]any)
+	lastTool := tools[len(tools)-1].(map[string]any)
+	cc, ok = lastTool["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatal("last tool should have cache_control")
+	}
+	if cc["type"] != "ephemeral" {
+		t.Errorf("cache_control type: got %v", cc["type"])
+	}
+
+	// First tool should NOT have cache_control
+	firstTool := tools[0].(map[string]any)
+	if firstTool["cache_control"] != nil {
+		t.Error("first tool should not have cache_control")
+	}
+}
+
+func TestCacheBreakpoints_LastUserMessage(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "claude-sonnet-4-6"},
+		Messages: []core.Message{
+			core.NewUserMessage("First"),
+			{Role: "assistant", Content: []core.Content{core.TextContent("Reply")}},
+			core.NewUserMessage("Second"),
+		},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	// Last message should be the second user message with cache_control
+	msgs := body["messages"].([]any)
+	lastMsg := msgs[len(msgs)-1].(map[string]any)
+	if lastMsg["role"] != "user" {
+		t.Fatalf("last message role: got %v", lastMsg["role"])
+	}
+	content := lastMsg["content"].([]any)
+	lastBlock := content[len(content)-1].(map[string]any)
+	cc, ok := lastBlock["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatal("last user message content block should have cache_control")
+	}
+	if cc["type"] != "ephemeral" {
+		t.Errorf("cache_control type: got %v", cc["type"])
+	}
+
+	// First user message should NOT have cache_control
+	firstMsg := msgs[0].(map[string]any)
+	firstContent := firstMsg["content"].([]any)
+	firstBlock := firstContent[0].(map[string]any)
+	if firstBlock["cache_control"] != nil {
+		t.Error("first user message should not have cache_control")
+	}
+}
+
+func TestCacheBreakpoints_NoToolsNoPanic(t *testing.T) {
+	req := core.Request{
+		Model:    core.Model{ID: "claude-sonnet-4-6"},
+		Messages: []core.Message{core.NewUserMessage("Hi")},
+	}
+
+	// Should not panic with no system, no tools
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	// Just verify it doesn't panic and produces valid JSON
+	if body["model"] != "claude-sonnet-4-6" {
+		t.Errorf("model: got %v", body["model"])
+	}
+}
+
 func TestConvertMessages_MergeConsecutive(t *testing.T) {
 	// Two consecutive tool_results should merge into one user message
 	msgs := []core.Message{
