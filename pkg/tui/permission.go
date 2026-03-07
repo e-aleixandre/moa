@@ -10,33 +10,50 @@ import (
 
 // permOption is one choice in the permission prompt.
 type permOption struct {
-	label    string // e.g. "Yes", "Yes, always allow Bash(git:*)", "No"
+	label    string
 	approved bool
-	allow    string // glob pattern to add (empty for plain yes/no)
+	allow    string // ask mode: glob pattern to add
+	addRule  bool   // auto mode: option 3 triggers rule input
 }
 
 // permissionPrompt replaces the input area with a numbered selector
 // when tool permissions require user approval.
 type permissionPrompt struct {
 	active   bool
+	mode     permission.Mode
 	request  permission.Request
 	options  []permOption
 	cursor   int
-	amending bool   // Tab pressed: editing the selected option's text
+	amending bool   // Tab: editing feedback after the selected option
 	amendBuf string // text after ", "
+	ruleMode bool   // auto mode: typing a rule in option 3
+	ruleBuf  string
 }
 
-func (p *permissionPrompt) Show(req permission.Request) {
-	pattern := permission.GenerateAllowPattern(req.ToolName, req.Args)
+func (p *permissionPrompt) Show(req permission.Request, mode permission.Mode) {
 	p.active = true
+	p.mode = mode
 	p.request = req
 	p.cursor = 0
 	p.amending = false
 	p.amendBuf = ""
-	p.options = []permOption{
-		{label: "Yes", approved: true},
-		{label: fmt.Sprintf("Yes, always allow %s", pattern), approved: true, allow: pattern},
-		{label: "No", approved: false},
+	p.ruleMode = false
+	p.ruleBuf = ""
+
+	switch mode {
+	case permission.ModeAuto:
+		p.options = []permOption{
+			{label: "Yes", approved: true},
+			{label: "No", approved: false},
+			{label: "Add rule", addRule: true},
+		}
+	default: // ModeAsk
+		pattern := permission.GenerateAllowPattern(req.ToolName, req.Args)
+		p.options = []permOption{
+			{label: "Yes", approved: true},
+			{label: fmt.Sprintf("Yes, always allow %s", pattern), approved: true, allow: pattern},
+			{label: "No", approved: false},
+		}
 	}
 }
 
@@ -63,6 +80,16 @@ func (p *permissionPrompt) Cancel() {
 	p.respond(permission.Response{Approved: false})
 }
 
+// SaveRule stores the typed rule and stays on the prompt.
+// Returns the rule text (caller adds it to the gate).
+func (p *permissionPrompt) SaveRule() string {
+	rule := strings.TrimSpace(p.ruleBuf)
+	p.ruleMode = false
+	p.ruleBuf = ""
+	p.cursor = 0 // back to Yes
+	return rule
+}
+
 func (p *permissionPrompt) View(width int, theme Theme) string {
 	if !p.active {
 		return ""
@@ -74,17 +101,18 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 	sel := lipgloss.NewStyle().Foreground(theme.Text).Bold(true)
 	normal := lipgloss.NewStyle().Foreground(theme.Subtext1)
 	body := lipgloss.NewStyle().Foreground(theme.Text)
+	green := lipgloss.NewStyle().Foreground(theme.Green)
 
 	summary := permissionSummary(p.request.ToolName, p.request.Args)
 
 	var lines []string
 
-	// Header: "⚠ approve write?"
+	// Header
 	lines = append(lines, warn.Render(fmt.Sprintf("  ⚠ approve %s?", p.request.ToolName)))
 
-	// Tool summary (command, path, etc.)
+	// Tool summary
 	if summary != "" {
-		maxW := width - 4
+		maxW := width - 6
 		if maxW > 0 && lipgloss.Width(summary) > maxW {
 			summary = summary[:maxW-1] + "…"
 		}
@@ -104,7 +132,9 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 
 		var text string
 		if i == p.cursor {
-			if p.amending {
+			if opt.addRule && p.ruleMode {
+				text = sel.Render(opt.label+": ") + body.Render(p.ruleBuf+"█")
+			} else if p.amending {
 				text = sel.Render(opt.label+", ") + body.Render(p.amendBuf+"█")
 			} else {
 				text = sel.Render(opt.label)
@@ -116,8 +146,22 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, numStr, text))
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, dim.Render("  Esc cancel · Tab amend"))
+	// Show saved rules count if any exist in auto mode
+	if p.mode == permission.ModeAuto {
+		lines = append(lines, "")
+		if p.ruleMode {
+			lines = append(lines, dim.Render("  Enter save · Esc cancel"))
+		} else {
+			hint := "  Esc cancel · Tab amend"
+			lines = append(lines, dim.Render(hint))
+		}
+	} else {
+		lines = append(lines, "")
+		lines = append(lines, dim.Render("  Esc cancel · Tab amend"))
+	}
+
+	// Show status after saving a rule
+	_ = green // used by caller status blocks
 
 	content := strings.Join(lines, "\n")
 	innerWidth := width - 4
