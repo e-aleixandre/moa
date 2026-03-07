@@ -67,8 +67,14 @@ Make it robust enough to be a daily driver.
 ### TUI
 
 - [x] **Theme system** — Separated Theme (colors) from Layout (rendering). Split + Flat layouts, Catppuccin Mocha default. Theme-derived styles throughout.
+- [x] **Command palette** — Type `/` to see all commands with descriptions, filterable as you type. Arrow keys navigate, Enter/Tab accept, Esc close. Renders below input with fixed height (6 items + scroll), no layout shift.
+- [x] **Permission policies** — Three modes cycled with Ctrl+Y or `/permissions`:
+  - **yolo**: all tools auto-approved (default, backwards-compatible).
+  - **ask**: deny globs → allow globs → ask user. `[2]` "always allow" generates a glob pattern automatically (e.g. `Bash(git:*)`). Claude Code-compatible glob format.
+  - **auto**: AI evaluator (haiku) with natural language rules → ask user (fallback). Conservative baseline: approve reads, ask for mutations, deny only when a user rule says so. `[3]` "Add rule" to teach the system inline.
+  - All modes: Tab on Yes/No for feedback ("No, use a different filename" → model receives as denial reason). Esc cancels + aborts.
+  - Permission mode shown in status bar. Gate architecture: channel-based coordination between agent loop and TUI.
 - [ ] **Session browser** — `session.Store` has `List()` returning Summary (ID, title, date). A `/sessions` command that opens a picker (reuse `pickerModel` pattern) to navigate and resume sessions without leaving the TUI.
-- [ ] **Permission policies** — Per-tool approval rules: "read always OK, write asks confirmation, bash asks if contains rm/sudo". Granular control instead of all-or-nothing.
 
 ### Agent capabilities
 
