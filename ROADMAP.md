@@ -47,7 +47,7 @@ Make it robust enough to be a daily driver.
 
 ### Tool execution
 
-- [ ] **Parallel tool calls** — When the LLM returns multiple tool_use blocks, execute independent calls concurrently. Go makes this natural (goroutines + WaitGroup). TUI needs to show N tools running at once.
+- [x] **Parallel tool calls** — Multiple tool calls execute concurrently (goroutines + WaitGroup). Three-phase: pre-flight (hooks, validation) → concurrent execution → sequential collect (ordered results). TUI shows "running N tools..." status.
 
 ### MCP
 

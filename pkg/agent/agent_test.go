@@ -599,6 +599,265 @@ func TestLoop_MaxToolCallsPerTurn_SkippedResults(t *testing.T) {
 	}
 }
 
+func TestParallelToolCalls_ConcurrentExecution(t *testing.T) {
+	// 3 tool calls that each sleep 100ms. If parallel, total < 250ms.
+	// If sequential, total ≥ 300ms.
+	sleepTool := core.Tool{
+		Name:        "slow",
+		Description: "Sleeps briefly",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			time.Sleep(100 * time.Millisecond)
+			id, _ := params["id"].(string)
+			return core.TextResult("done-" + id), nil
+		},
+	}
+
+	threeToolCalls := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 5)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role: "assistant",
+				Content: []core.Content{
+					core.ToolCallContent("tc-1", "slow", map[string]any{"id": "a"}),
+					core.ToolCallContent("tc-2", "slow", map[string]any{"id": "b"}),
+					core.ToolCallContent("tc-3", "slow", map[string]any{"id": "c"}),
+				},
+				StopReason: "tool_use",
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+
+	provider := NewMockProvider(threeToolCalls, simpleTextResponse("All done."))
+	reg := core.NewRegistry()
+	reg.Register(sleepTool)
+	ag, err := New(AgentConfig{
+		Provider:       provider,
+		Model:          core.Model{ID: "test"},
+		Tools:          reg,
+		MaxTurns:       10,
+		MaxRunDuration: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	msgs, err := ag.Run(context.Background(), "Do three things")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify concurrency: 3 × 100ms should complete in < 250ms if parallel.
+	if elapsed >= 250*time.Millisecond {
+		t.Fatalf("expected parallel execution (< 250ms), took %v", elapsed)
+	}
+
+	// Verify result ordering matches tool call ordering.
+	var results []string
+	for _, m := range msgs {
+		if m.Role == "tool_result" {
+			for _, c := range m.Content {
+				if c.Type == "text" {
+					results = append(results, c.Text)
+				}
+			}
+		}
+	}
+	want := []string{"done-a", "done-b", "done-c"}
+	if len(results) != len(want) {
+		t.Fatalf("expected %d results, got %d", len(want), len(results))
+	}
+	for i, r := range results {
+		if r != want[i] {
+			t.Errorf("result[%d] = %q, want %q", i, r, want[i])
+		}
+	}
+}
+
+func TestParallelToolCalls_SingleCallRegression(t *testing.T) {
+	echoTool := core.Tool{
+		Name:        "echo",
+		Description: "Echoes",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			text, _ := params["text"].(string)
+			return core.TextResult("echo: " + text), nil
+		},
+	}
+
+	provider := NewMockProvider(
+		toolCallResponse("tc-1", "echo", map[string]any{"text": "hello"}),
+		simpleTextResponse("Done."),
+	)
+	ag := newTestAgent(provider, echoTool)
+
+	msgs, err := ag.Run(context.Background(), "Echo something")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var toolResults []core.AgentMessage
+	for _, m := range msgs {
+		if m.Role == "tool_result" {
+			toolResults = append(toolResults, m)
+		}
+	}
+	if len(toolResults) != 1 {
+		t.Fatalf("expected 1 tool_result, got %d", len(toolResults))
+	}
+	if toolResults[0].IsError {
+		t.Fatal("tool result should not be error")
+	}
+}
+
+func TestParallelToolCalls_EventOrder(t *testing.T) {
+	// Verify that tool_execution_start events come before tool_execution_end,
+	// and that all ends are emitted in order even with concurrent execution.
+	sleepTool := core.Tool{
+		Name:        "slow",
+		Description: "Sleeps",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			time.Sleep(50 * time.Millisecond)
+			id, _ := params["id"].(string)
+			return core.TextResult("done-" + id), nil
+		},
+	}
+
+	twoToolCalls := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 5)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role: "assistant",
+				Content: []core.Content{
+					core.ToolCallContent("tc-1", "slow", map[string]any{"id": "a"}),
+					core.ToolCallContent("tc-2", "slow", map[string]any{"id": "b"}),
+				},
+				StopReason: "tool_use",
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+
+	provider := NewMockProvider(twoToolCalls, simpleTextResponse("Done."))
+	reg := core.NewRegistry()
+	reg.Register(sleepTool)
+	ag, err := New(AgentConfig{
+		Provider:       provider,
+		Model:          core.Model{ID: "test"},
+		Tools:          reg,
+		MaxTurns:       10,
+		MaxRunDuration: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collector := collectEvents(ag)
+	_, err = ag.Run(context.Background(), "Do two things")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for events to propagate.
+	if !waitForEvent(collector, core.AgentEventEnd, 2*time.Second) {
+		t.Fatal("timeout waiting for agent_end")
+	}
+
+	events := collector.snapshot()
+
+	// All starts must come before all ends (since starts are emitted before
+	// concurrent execution, and ends are emitted sequentially after).
+	var starts, ends []string
+	lastStartIdx := -1
+	firstEndIdx := len(events)
+	for i, e := range events {
+		switch e.Type {
+		case core.AgentEventToolExecStart:
+			starts = append(starts, e.ToolCallID)
+			lastStartIdx = i
+		case core.AgentEventToolExecEnd:
+			ends = append(ends, e.ToolCallID)
+			if i < firstEndIdx {
+				firstEndIdx = i
+			}
+		}
+	}
+
+	if len(starts) != 2 || len(ends) != 2 {
+		t.Fatalf("expected 2 starts + 2 ends, got %d starts + %d ends", len(starts), len(ends))
+	}
+	if lastStartIdx >= firstEndIdx {
+		t.Fatal("expected all tool_execution_start events before any tool_execution_end")
+	}
+	// Ends must be in order (tc-1, tc-2) since Phase 3 is sequential.
+	if ends[0] != "tc-1" || ends[1] != "tc-2" {
+		t.Fatalf("tool_execution_end order = %v, want [tc-1, tc-2]", ends)
+	}
+}
+
+func TestParallelToolCalls_ContextCancellation(t *testing.T) {
+	// A tool that blocks until context is cancelled.
+	blockTool := core.Tool{
+		Name:        "block",
+		Description: "Blocks",
+		Parameters:  json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			<-ctx.Done()
+			return core.ErrorResult(ctx.Err().Error()), ctx.Err()
+		},
+	}
+
+	twoToolCalls := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 5)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role: "assistant",
+				Content: []core.Content{
+					core.ToolCallContent("tc-1", "block", nil),
+					core.ToolCallContent("tc-2", "block", nil),
+				},
+				StopReason: "tool_use",
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+
+	provider := NewMockProvider(twoToolCalls)
+	reg := core.NewRegistry()
+	reg.Register(blockTool)
+	ag, err := New(AgentConfig{
+		Provider:       provider,
+		Model:          core.Model{ID: "test"},
+		Tools:          reg,
+		MaxTurns:       10,
+		MaxRunDuration: 500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ag.Run(context.Background(), "Block forever")
+	if err == nil {
+		t.Fatal("expected error from context cancellation")
+	}
+}
+
 func TestLoop_ToolReturnsErrorResult(t *testing.T) {
 	failTool := core.Tool{
 		Name:        "fail",

@@ -42,6 +42,7 @@ type state struct {
 	dirty               bool           // streamText changed since last render tick
 	running             bool           // agent is running (tick should continue)
 	streamState         streamState
+	activeTools         int // number of tool calls currently executing
 	showThinking        bool                  // toggle thinking visibility (Ctrl+T)
 	initialized         bool                  // first WindowSizeMsg processed (one-shot bottom push done)
 	runGen              uint64                // incremented on each run; events from old runs are ignored
@@ -615,19 +616,33 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		return nil
 
 	case core.AgentEventToolExecStart:
+		m.s.activeTools++
 		m.s.streamState = stateToolRunning
-		m.status.SetText("running " + e.ToolName + "...")
+		if m.s.activeTools == 1 {
+			m.status.SetText("running " + e.ToolName + "...")
+		} else {
+			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
+		}
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "tool_start", ToolName: e.ToolName, ToolArgs: e.Args,
 		})
 		return m.flushBlocks(len(m.s.blocks))
 
 	case core.AgentEventToolExecEnd:
+		m.s.activeTools--
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "tool_end", ToolName: e.ToolName, IsError: e.IsError,
 		})
-		m.s.streamState = stateStreaming
-		m.status.SetText("thinking...")
+		if m.s.activeTools <= 0 {
+			m.s.activeTools = 0
+			m.s.streamState = stateStreaming
+			m.status.SetText("thinking...")
+		} else if m.s.activeTools == 1 {
+			// Find the remaining active tool name for a better status message.
+			m.status.SetText("running tool...")
+		} else {
+			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
+		}
 		return m.flushBlocks(len(m.s.blocks))
 
 	case core.AgentEventCompactionStart:

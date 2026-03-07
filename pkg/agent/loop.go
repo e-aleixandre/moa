@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/ealeixandre/moa/pkg/compaction"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -197,41 +198,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			break // No tools → done
 		}
 
-		// Execute tool calls — respect MaxToolCallsPerTurn limit
-		maxCalls := cfg.maxToolCallsPerTurn
-		for i, tc := range toolCalls {
-			if ctx.Err() != nil {
-				loopErr = ctx.Err()
-				return loopErr
-			}
-
-			// Guardrail: skip if over limit
-			if maxCalls > 0 && i >= maxCalls {
-				rejectToolCall(cfg, tc, "Tool call skipped: max tool calls per turn exceeded")
-				continue
-			}
-
-			// Extension hook: can block
-			if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
-				rejectToolCall(cfg, tc, "Tool call blocked: "+decision.Reason)
-				continue
-			}
-
-			// Validate parameters
-			if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
-				rejectToolCall(cfg, tc, "Parameter validation error: "+err.Error())
-				continue
-			}
-
-			// Execute
-			result, isError := executeTool(ctx, cfg.tools, tc, cfg.emitter)
-
-			// Extension hook: can modify result (including error status)
-			result = cfg.hooks.FireToolResult(ctx, tc.ToolName, result, isError)
-			isError = result.IsError
-
-			cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(tc, result, isError))
-		}
+		// Execute tool calls concurrently.
+		executeTools(ctx, cfg, toolCalls)
 
 		inTurn = false
 		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
@@ -330,9 +298,103 @@ func extractToolCalls(msg *core.Message) []core.Content {
 	return calls
 }
 
-// executeTool runs a tool and returns the result.
-func executeTool(ctx context.Context, registry *core.Registry, tc core.Content, emitter *Emitter) (core.Result, bool) {
-	t, ok := registry.Get(tc.ToolName)
+// toolExecSlot holds the state for one tool call during parallel execution.
+type toolExecSlot struct {
+	tc       core.Content
+	approved bool
+	reject   string      // rejection reason (empty if approved)
+	result   core.Result // populated after execution
+	isError  bool
+}
+
+// executeTools runs tool calls concurrently using a three-phase approach:
+//
+//  1. Pre-flight (sequential): guardrails, extension hooks, validation.
+//     Rejected calls are handled immediately via rejectToolCall.
+//  2. Execute (concurrent): approved calls run in parallel goroutines.
+//     Each writes to its own slot — no shared mutable state.
+//  3. Collect (sequential, in original order): run FireToolResult hooks,
+//     emit tool_execution_end, append tool_result messages.
+//
+// Result messages are always appended in the same order as tool calls,
+// regardless of execution completion order.
+func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) {
+	slots := make([]toolExecSlot, len(toolCalls))
+
+	// Phase 1: pre-flight (sequential).
+	maxCalls := cfg.maxToolCallsPerTurn
+	for i, tc := range toolCalls {
+		slots[i].tc = tc
+
+		if maxCalls > 0 && i >= maxCalls {
+			slots[i].reject = "Tool call skipped: max tool calls per turn exceeded"
+			continue
+		}
+		if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
+			slots[i].reject = "Tool call blocked: " + decision.Reason
+			continue
+		}
+		if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
+			slots[i].reject = "Parameter validation error: " + err.Error()
+			continue
+		}
+		slots[i].approved = true
+	}
+
+	// Emit start events for approved calls.
+	for i := range slots {
+		if !slots[i].approved {
+			continue
+		}
+		cfg.emitter.Emit(core.AgentEvent{
+			Type:       core.AgentEventToolExecStart,
+			ToolCallID: slots[i].tc.ToolCallID,
+			ToolName:   slots[i].tc.ToolName,
+			Args:       slots[i].tc.Arguments,
+		})
+	}
+
+	// Phase 2: execute approved calls concurrently.
+	var wg sync.WaitGroup
+	for i := range slots {
+		if !slots[i].approved {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+		}(i)
+	}
+	wg.Wait()
+
+	// Phase 3: collect results in original order.
+	// Rejected calls emit start+end and append error results here (not in
+	// pre-flight) to preserve the original tool call ordering in Messages.
+	for i := range slots {
+		if !slots[i].approved {
+			rejectToolCall(cfg, slots[i].tc, slots[i].reject)
+			continue
+		}
+
+		result := cfg.hooks.FireToolResult(ctx, slots[i].tc.ToolName, slots[i].result, slots[i].isError)
+		isError := result.IsError
+
+		cfg.emitter.Emit(core.AgentEvent{
+			Type:       core.AgentEventToolExecEnd,
+			ToolCallID: slots[i].tc.ToolCallID,
+			ToolName:   slots[i].tc.ToolName,
+			Result:     &result,
+			IsError:    isError,
+		})
+		cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(slots[i].tc, result, isError))
+	}
+}
+
+// runTool calls a tool's Execute function and streams partial results.
+// No lifecycle events — the caller controls event ordering.
+func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (core.Result, bool) {
+	t, ok := cfg.tools.Get(tc.ToolName)
 	if !ok {
 		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true
 	}
@@ -340,15 +402,8 @@ func executeTool(ctx context.Context, registry *core.Registry, tc core.Content, 
 		return core.ErrorResult(fmt.Sprintf("tool %s has no execute function", tc.ToolName)), true
 	}
 
-	emitter.Emit(core.AgentEvent{
-		Type:       core.AgentEventToolExecStart,
-		ToolCallID: tc.ToolCallID,
-		ToolName:   tc.ToolName,
-		Args:       tc.Arguments,
-	})
-
 	onUpdate := func(partial core.Result) {
-		emitter.Emit(core.AgentEvent{
+		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecUpdate,
 			ToolCallID: tc.ToolCallID,
 			ToolName:   tc.ToolName,
@@ -357,20 +412,10 @@ func executeTool(ctx context.Context, registry *core.Registry, tc core.Content, 
 	}
 
 	result, err := t.Execute(ctx, tc.Arguments, onUpdate)
-	isError := err != nil || result.IsError
 	if err != nil {
-		result = core.ErrorResult(err.Error())
+		return core.ErrorResult(err.Error()), true
 	}
-
-	emitter.Emit(core.AgentEvent{
-		Type:       core.AgentEventToolExecEnd,
-		ToolCallID: tc.ToolCallID,
-		ToolName:   tc.ToolName,
-		Result:     &result,
-		IsError:    isError,
-	})
-
-	return result, isError
+	return result, result.IsError
 }
 
 // rejectToolCall emits the start/end events and appends an error result
