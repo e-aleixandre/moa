@@ -58,12 +58,37 @@ func (e *Evaluator) Evaluate(ctx context.Context, toolName string, args map[stri
 func buildEvalPrompt(toolName string, args map[string]any, rules []string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are a security evaluator for a coding agent. ")
-	sb.WriteString("Decide if this tool call should be allowed to execute.\n\n")
+	sb.WriteString(`You are a security gate for a coding agent running on the user's machine.
+Decide whether this tool call is safe to execute WITHOUT asking the user.
+
+DEFAULT POLICY (apply when no user rules override):
+- DENY any command that modifies system state: installing packages, changing
+  system config, modifying environment, running services, network requests
+  with side effects (curl -X POST, wget, ssh, etc.).
+- DENY reading files that may contain secrets: .env, credentials, keys,
+  tokens, auth configs, password files, private keys, cloud configs
+  (~/.aws/*, ~/.ssh/*, etc.).
+- DENY destructive file operations: deleting files, overwriting configs,
+  rm, truncating.
+- APPROVE read-only operations on regular source code, docs, configs
+  that are clearly not sensitive (reading .go, .ts, .md, Makefile, etc.).
+- APPROVE running safe read-only commands: ls, cat, grep, find, go build,
+  go test, npm test, git status, git log, git diff, etc.
+- ASK for anything in between: writes to source files, git commits,
+  commands you're unsure about.
+
+`)
+
+	if len(rules) > 0 {
+		sb.WriteString("USER RULES (override the defaults above):\n")
+		for _, r := range rules {
+			sb.WriteString(fmt.Sprintf("- %s\n", r))
+		}
+		sb.WriteString("\n")
+	}
 
 	sb.WriteString(fmt.Sprintf("Tool: %s\n", toolName))
 
-	// Show relevant args
 	if len(args) > 0 {
 		sb.WriteString("Arguments:\n")
 		for k, v := range args {
@@ -75,17 +100,12 @@ func buildEvalPrompt(toolName string, args map[string]any, rules []string) strin
 		}
 	}
 
-	if len(rules) > 0 {
-		sb.WriteString("\nUser-provided rules:\n")
-		for _, r := range rules {
-			sb.WriteString(fmt.Sprintf("- %s\n", r))
-		}
-	}
-
-	sb.WriteString("\nRespond with exactly one word: APPROVE, DENY, or ASK\n")
-	sb.WriteString("- APPROVE: the action is clearly safe or explicitly allowed by a rule\n")
-	sb.WriteString("- DENY: the action is clearly dangerous or explicitly forbidden by a rule\n")
-	sb.WriteString("- ASK: you're unsure — escalate to the user for confirmation\n")
+	sb.WriteString(`
+Respond with exactly one word: APPROVE, DENY, or ASK.
+- APPROVE: clearly safe, or explicitly allowed by a user rule.
+- DENY: clearly dangerous, sensitive, or explicitly forbidden by a user rule.
+- ASK: uncertain — let the user decide.
+`)
 
 	return sb.String()
 }
