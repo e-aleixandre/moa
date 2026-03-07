@@ -87,6 +87,7 @@ type appModel struct {
 	input      inputModel
 	status     statusModel
 	picker     pickerModel
+	cmdPalette cmdPalette
 	permPrompt permissionPrompt
 	topBar     *StatusLine
 	bottomBar  *StatusLine
@@ -420,8 +421,14 @@ func (m appModel) View() string {
 		if pv := m.picker.View(m.width); pv != "" {
 			chrome = append(chrome, pv)
 		}
-	} else if iv := m.input.View(); iv != "" {
-		chrome = append(chrome, iv)
+	} else {
+		// Command palette (above input)
+		if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
+			chrome = append(chrome, pv)
+		}
+		if iv := m.input.View(); iv != "" {
+			chrome = append(chrome, iv)
+		}
 	}
 	if bv := m.bottomBar.View(m.width); bv != "" {
 		chrome = append(chrome, bv)
@@ -463,6 +470,11 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
+		if m.cmdPalette.active {
+			m.cmdPalette.Close()
+			m.input.textarea.Reset()
+			return m, nil
+		}
 		if m.s.running {
 			m.agent.Abort()
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -537,6 +549,33 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.s.running {
 			return m, nil
 		}
+
+		// Command palette: accept selected command
+		if m.cmdPalette.active {
+			selected := m.cmdPalette.Selected()
+			m.cmdPalette.Close()
+			if selected != "" {
+				// Find command def to check if it takes args
+				hasArgs := false
+				for _, cmd := range allCommands {
+					if cmd.Name == selected && cmd.Args != "" {
+						hasArgs = true
+						break
+					}
+				}
+				if hasArgs {
+					// Replace input with "/command " so user can type args
+					m.input.textarea.Reset()
+					m.input.textarea.SetValue("/" + selected + " ")
+					// Move cursor to end
+					m.input.textarea.CursorEnd()
+					return m, nil
+				}
+				return m.handleCommand(selected)
+			}
+			return m, nil
+		}
+
 		text := m.input.Submit()
 		if text == "" {
 			return m, nil
@@ -545,12 +584,40 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.handleCommand(cmd)
 		}
 		return m.startAgentRun(text)
+
+	case tea.KeyTab:
+		// Tab also accepts palette selection
+		if m.cmdPalette.active {
+			selected := m.cmdPalette.Selected()
+			m.cmdPalette.Close()
+			if selected != "" {
+				m.input.textarea.Reset()
+				m.input.textarea.SetValue("/" + selected + " ")
+				m.input.textarea.CursorEnd()
+			}
+			return m, nil
+		}
+
+	case tea.KeyUp:
+		if m.cmdPalette.active {
+			m.cmdPalette.MoveUp()
+			return m, nil
+		}
+
+	case tea.KeyDown:
+		if m.cmdPalette.active {
+			m.cmdPalette.MoveDown()
+			return m, nil
+		}
+
 	}
 
-	// All other keys: propagate to input when idle
+	// All other keys: propagate to input when idle, then update palette
 	if m.s.streamState == stateIdle {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		// Update command palette based on current input text
+		m.cmdPalette.Update(m.input.textarea.Value())
 		return m, cmd
 	}
 
@@ -971,6 +1038,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	if strings.HasPrefix(cmd, "thinking ") {
 		return m.handleThinkingSwitch(strings.TrimSpace(cmd[9:]))
 	}
+	if strings.HasPrefix(cmd, "permissions ") {
+		return m.handlePermissionsSwitch(strings.TrimSpace(cmd[12:]))
+	}
 
 	switch cmd {
 	case "model", "models":
@@ -983,6 +1053,23 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "thinking":
 		thinking := m.agent.ThinkingLevel()
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "thinking: " + thinking})
+		return m, m.flushBlocks(len(m.s.blocks))
+
+	case "permissions":
+		mode := "yolo"
+		if m.permGate != nil {
+			mode = string(m.permGate.Mode())
+		}
+		info := "permissions: " + mode
+		if m.permGate != nil {
+			if patterns := m.permGate.AllowPatterns(); len(patterns) > 0 {
+				info += "\nallow: " + strings.Join(patterns, ", ")
+			}
+			if rules := m.permGate.Rules(); len(rules) > 0 {
+				info += "\nrules: " + strings.Join(rules, ", ")
+			}
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: info})
 		return m, m.flushBlocks(len(m.s.blocks))
 
 	case "clear":
@@ -1243,6 +1330,44 @@ func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
 	}
 
 	return m.switchToModel(newModel)
+}
+
+// handlePermissionsSwitch processes `/permissions <mode>`.
+func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
+	valid := map[string]permission.Mode{
+		"yolo": permission.ModeYolo,
+		"ask":  permission.ModeAsk,
+		"auto": permission.ModeAuto,
+	}
+
+	newMode, ok := valid[modeStr]
+	if !ok {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Invalid permission mode. Options: yolo, ask, auto",
+		})
+		return m, m.flushBlocks(len(m.s.blocks))
+	}
+
+	if newMode == permission.ModeYolo {
+		// Disable the gate entirely
+		m.permGate = nil
+		m.agent.SetPermissionCheck(nil)
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status", Raw: "permissions: yolo (all tools auto-approved)",
+		})
+	} else {
+		if m.permGate == nil {
+			// Create a new gate
+			m.permGate = permission.New(newMode, permission.Config{})
+		} else {
+			m.permGate.SetMode(newMode)
+		}
+		m.agent.SetPermissionCheck(m.permGate.Check)
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
+		})
+	}
+	return m, m.flushBlocks(len(m.s.blocks))
 }
 
 // handleThinkingSwitch processes `/thinking <level>`.

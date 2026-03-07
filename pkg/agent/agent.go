@@ -222,6 +222,18 @@ func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLe
 	return nil
 }
 
+// SetPermissionCheck swaps the permission check function at runtime.
+// nil disables permission checks. Returns error if the agent is running.
+func (a *Agent) SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot change permissions while agent is running")
+	}
+	a.config.PermissionCheck = fn
+	return nil
+}
+
 // Model returns the current model.
 func (a *Agent) Model() core.Model {
 	a.mu.Lock()
