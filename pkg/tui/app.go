@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -83,11 +84,12 @@ type appModel struct {
 	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
 
 	// Components
-	input     inputModel
-	status    statusModel
-	picker    pickerModel
-	topBar    *StatusLine
-	bottomBar *StatusLine
+	input      inputModel
+	status     statusModel
+	picker     pickerModel
+	permPrompt permissionPrompt
+	topBar     *StatusLine
+	bottomBar  *StatusLine
 
 	// Session persistence
 	sessionStore *session.Store   // nil if persistence is disabled
@@ -99,6 +101,9 @@ type appModel struct {
 	// Provider switching
 	providerFactory ProviderFactory
 	scopedModels    map[string]bool // model IDs pinned for Ctrl+P cycling
+
+	// Permissions
+	permGate *permission.Gate
 
 	// Layout
 	width  int
@@ -112,10 +117,11 @@ type ProviderFactory func(model core.Model) (core.Provider, error)
 
 // Config configures the TUI. All fields are optional.
 type Config struct {
-	SessionStore    *session.Store   // persistence backend (nil = no persistence)
-	Session         *session.Session // session to resume (nil = fresh start)
-	ModelName       string           // display name for the active model (shown on startup)
-	ProviderFactory ProviderFactory  // creates providers for /model switching (nil = switching disabled)
+	SessionStore    *session.Store    // persistence backend (nil = no persistence)
+	Session         *session.Session  // session to resume (nil = fresh start)
+	ModelName       string            // display name for the active model (shown on startup)
+	ProviderFactory ProviderFactory   // creates providers for /model switching (nil = switching disabled)
+	PermissionGate  *permission.Gate  // permission gate (nil = yolo, no prompts)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -166,6 +172,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		modelName:       cfg.ModelName,
 		providerFactory: cfg.ProviderFactory,
 		scopedModels:    make(map[string]bool),
+		permGate:        cfg.PermissionGate,
 	}
 
 	// Initialize status line segments.
@@ -195,7 +202,28 @@ func isStructuralEvent(e core.AgentEvent) bool {
 // Init returns initial commands: event listener.
 // Cursor is static (no blink) so no BlinkCmd needed — zero idle CPU.
 func (m appModel) Init() tea.Cmd {
-	return m.waitForEvent()
+	cmds := []tea.Cmd{m.waitForEvent()}
+	if m.permGate != nil {
+		cmds = append(cmds, m.waitForPermission())
+	}
+	return tea.Batch(cmds...)
+}
+
+// waitForPermission listens for the next permission request from the gate.
+func (m appModel) waitForPermission() tea.Cmd {
+	gate := m.permGate
+	ctx := m.baseCtx
+	return func() tea.Msg {
+		select {
+		case req, ok := <-gate.Requests():
+			if !ok {
+				return nil
+			}
+			return permissionRequestMsg{Request: req}
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
 // Update is the main message router.
@@ -310,6 +338,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case permissionRequestMsg:
+		m.permPrompt.Show(msg.Request)
+		return m, nil
+
 	case sessionSavedMsg:
 		// Session saved asynchronously. Log errors but don't interrupt the user.
 		if msg.err != nil {
@@ -380,7 +412,11 @@ func (m appModel) View() string {
 	if tv := m.topBar.View(m.width); tv != "" {
 		chrome = append(chrome, tv)
 	}
-	if m.picker.active {
+	if m.permPrompt.active {
+		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
+			chrome = append(chrome, pv)
+		}
+	} else if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
 			chrome = append(chrome, pv)
 		}
@@ -415,6 +451,11 @@ func (m appModel) View() string {
 // handleKey processes global shortcuts. All other keys propagate to
 // the focused component (input when idle).
 func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Permission prompt: intercept all keys.
+	if m.permPrompt.active {
+		return m.handlePermissionKey(msg)
+	}
+
 	// Picker mode: intercept all keys.
 	if m.picker.active {
 		return m.handlePickerKey(msg)
@@ -1004,6 +1045,28 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 }
 
 // handlePickerKey routes keys to the model picker.
+// handlePermissionKey routes keys to the permission prompt.
+func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	if m.permGate != nil {
+		cmd = m.waitForPermission()
+	}
+
+	switch msg.String() {
+	case "y", "Y":
+		m.permPrompt.Approve()
+		return m, cmd
+	case "n", "N":
+		m.permPrompt.Deny()
+		return m, cmd
+	case "ctrl+c", "esc":
+		m.permPrompt.Deny()
+		m.agent.Abort()
+		return m, cmd
+	}
+	return m, nil
+}
+
 func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:

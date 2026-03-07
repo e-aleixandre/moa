@@ -6,12 +6,20 @@ import (
 	"path/filepath"
 )
 
-// MoaConfig holds sandbox and path settings. Loaded from config files
-// at three levels: global (~/.moa/config.json), project (<cwd>/.moa/config.json),
-// and session (--yolo flag). Merged with OR for booleans, concatenation for slices.
+// MoaConfig holds sandbox, path, and permission settings. Loaded from config
+// files at three levels: global (~/.moa/config.json), project (<cwd>/.moa/config.json),
+// and session (flags). Merged with OR for booleans, concatenation for slices.
 type MoaConfig struct {
-	DisableSandbox bool     `json:"disable_sandbox"` // YOLO mode: allow any file path
-	AllowedPaths   []string `json:"allowed_paths"`   // Additional directories accessible outside workspace
+	DisableSandbox bool              `json:"disable_sandbox"` // YOLO mode: allow any file path
+	AllowedPaths   []string          `json:"allowed_paths"`   // Additional directories accessible outside workspace
+	Permissions    PermissionsConfig `json:"permissions"`     // Tool execution permission policy
+}
+
+// PermissionsConfig controls tool execution approval.
+type PermissionsConfig struct {
+	Mode  string   `json:"mode"`  // "yolo", "ask", or "auto" (default: "yolo")
+	Model string   `json:"model"` // Model for auto mode evaluator (e.g. "haiku")
+	Rules []string `json:"rules"` // Natural language rules for auto mode
 }
 
 // LoadMoaConfig reads and merges config from global and project levels.
@@ -45,8 +53,21 @@ func loadConfigFile(path string) MoaConfig {
 }
 
 func mergeConfigs(base, override MoaConfig) MoaConfig {
-	return MoaConfig{
+	merged := MoaConfig{
 		DisableSandbox: base.DisableSandbox || override.DisableSandbox,
 		AllowedPaths:   append(base.AllowedPaths, override.AllowedPaths...),
+		Permissions: PermissionsConfig{
+			Mode:  base.Permissions.Mode,
+			Model: base.Permissions.Model,
+			Rules: append(base.Permissions.Rules, override.Permissions.Rules...),
+		},
 	}
+	// Override wins for scalar fields
+	if override.Permissions.Mode != "" {
+		merged.Permissions.Mode = override.Permissions.Mode
+	}
+	if override.Permissions.Model != "" {
+		merged.Permissions.Model = override.Permissions.Model
+	}
+	return merged
 }

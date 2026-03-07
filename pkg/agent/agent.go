@@ -39,6 +39,11 @@ type AgentConfig struct {
 	MaxToolCallsPerTurn int           // Default: 20. 0 = unlimited.
 	MaxRunDuration      time.Duration // Default: 30m. 0 = unlimited.
 
+	// Permission check called before each tool execution. May block waiting
+	// for user approval. Return nil to approve, blocking decision to reject.
+	// nil = no permission checks (all tools auto-approved).
+	PermissionCheck func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
+
 	// Custom message conversion (nil = default: filter non-LLM messages)
 	ConvertToLLM func([]core.AgentMessage) []core.Message
 
@@ -388,6 +393,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		convertToLLM:        a.config.ConvertToLLM,
+		permissionCheck:     a.config.PermissionCheck,
 		compaction:          a.config.Compaction,
 	}
 

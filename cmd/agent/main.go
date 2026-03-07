@@ -19,6 +19,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/auth"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/provider/anthropic"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -37,7 +38,8 @@ func main() {
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
 	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
 	resume := flag.Bool("resume", false, "Resume the most recent session")
-	yolo := flag.Bool("yolo", false, "Disable path sandbox (allow access to any file)")
+	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
+	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	flag.Parse()
@@ -111,8 +113,25 @@ func main() {
 	// Build system prompt
 	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs())
 
+	// Build permission gate.
+	// Priority: --yolo flag > --permissions flag > config > default (yolo)
+	permMode := permission.Mode(moaCfg.Permissions.Mode)
+	if *perms != "" {
+		permMode = permission.Mode(*perms)
+	}
+	if *yolo {
+		permMode = permission.ModeYolo
+	}
+	if permMode == "" {
+		permMode = permission.ModeYolo
+	}
+	var permGate *permission.Gate
+	if permMode != permission.ModeYolo {
+		permGate = permission.New(permMode, moaCfg.Permissions.Rules)
+	}
+
 	// Build agent
-	ag, agErr := agent.New(agent.AgentConfig{
+	agentCfg := agent.AgentConfig{
 		Provider:            providerBuild.Provider,
 		Model:               resolvedModel,
 		SystemPrompt:        systemPrompt,
@@ -122,7 +141,11 @@ func main() {
 		MaxTurns:            *maxTurns,
 		MaxToolCallsPerTurn: 20,
 		MaxRunDuration:      30 * time.Minute,
-	})
+	}
+	if permGate != nil {
+		agentCfg.PermissionCheck = permGate.Check
+	}
+	ag, agErr := agent.New(agentCfg)
 	if agErr != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", agErr)
 		os.Exit(1)
@@ -159,9 +182,10 @@ func main() {
 		}
 
 		app := tui.New(ag, ctx, tui.Config{
-			SessionStore: sessionStore,
-			Session:      sess,
-			ModelName:    modelDisplayName(resolvedModel),
+			SessionStore:   sessionStore,
+			Session:        sess,
+			ModelName:      modelDisplayName(resolvedModel),
+			PermissionGate: permGate,
 			ProviderFactory: func(model core.Model) (core.Provider, error) {
 				build, err := buildProvider(model, authStore)
 				if err != nil {
