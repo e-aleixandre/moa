@@ -1052,6 +1052,37 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		listenCmd = m.waitForPermission()
 	}
 
+	// Rule input mode: capture text
+	if m.permPrompt.ruleMode {
+		switch msg.String() {
+		case "enter":
+			rule := strings.TrimSpace(m.permPrompt.ruleBuf)
+			if rule != "" && m.permGate != nil {
+				m.permGate.AddRule(rule)
+				m.s.blocks = append(m.s.blocks, messageBlock{
+					Type: "status", Raw: fmt.Sprintf("✓ Added rule: %s", rule),
+				})
+			}
+			m.permPrompt.ruleMode = false
+			m.permPrompt.ruleBuf = ""
+			return m, nil // stay on prompt, let user y/n/a with the new rule
+		case "esc":
+			m.permPrompt.ruleMode = false
+			m.permPrompt.ruleBuf = ""
+			return m, nil
+		case "backspace":
+			if len(m.permPrompt.ruleBuf) > 0 {
+				m.permPrompt.ruleBuf = m.permPrompt.ruleBuf[:len(m.permPrompt.ruleBuf)-1]
+			}
+			return m, nil
+		default:
+			if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
+				m.permPrompt.ruleBuf += msg.String()
+			}
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "y", "Y":
 		m.permPrompt.Approve()
@@ -1060,7 +1091,6 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.permPrompt.Deny()
 		return m, listenCmd
 	case "a", "A":
-		// Always allow: add pattern and approve this call
 		if m.permGate != nil {
 			pattern := m.permPrompt.AllowPattern()
 			m.permGate.AddAllow(pattern)
@@ -1070,6 +1100,10 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.permPrompt.Approve()
 		return m, listenCmd
+	case "r", "R":
+		m.permPrompt.ruleMode = true
+		m.permPrompt.ruleBuf = ""
+		return m, nil
 	case "ctrl+c", "esc":
 		m.permPrompt.Deny()
 		m.agent.Abort()

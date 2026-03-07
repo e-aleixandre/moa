@@ -40,6 +40,7 @@ func main() {
 	resume := flag.Bool("resume", false, "Resume the most recent session")
 	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
 	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
+	permsModel := flag.String("permissions-model", "", "Model for auto-mode AI evaluator (e.g. haiku)")
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	flag.Parse()
@@ -127,11 +128,31 @@ func main() {
 	}
 	var permGate *permission.Gate
 	if permMode != permission.ModeYolo {
-		permGate = permission.New(permMode, permission.Config{
+		permCfg := permission.Config{
 			Allow: moaCfg.Permissions.Allow,
 			Deny:  moaCfg.Permissions.Deny,
 			Rules: moaCfg.Permissions.Rules,
-		})
+		}
+
+		// Build AI evaluator for auto mode
+		if permMode == permission.ModeAuto {
+			evalModelSpec := moaCfg.Permissions.Model
+			if *permsModel != "" {
+				evalModelSpec = *permsModel
+			}
+			if evalModelSpec == "" {
+				evalModelSpec = "haiku" // sensible default: cheap and fast
+			}
+			evalModel, _ := core.ResolveModel(evalModelSpec)
+			evalProvider, err := buildProvider(evalModel, authStore)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: auto permissions disabled (evaluator provider: %v)\n", err)
+			} else {
+				permCfg.Evaluator = permission.NewEvaluator(evalProvider.Provider, evalModel)
+			}
+		}
+
+		permGate = permission.New(permMode, permCfg)
 	}
 
 	// Build agent
