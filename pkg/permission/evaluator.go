@@ -61,26 +61,20 @@ func buildEvalPrompt(toolName string, args map[string]any, rules []string) strin
 	sb.WriteString(`You are a security gate for a coding agent running on the user's machine.
 Decide whether this tool call is safe to execute WITHOUT asking the user.
 
-DEFAULT POLICY (apply when no user rules override):
-- DENY any command that modifies system state: installing packages, changing
-  system config, modifying environment, running services, network requests
-  with side effects (curl -X POST, wget, ssh, etc.).
-- DENY reading files that may contain secrets: .env, credentials, keys,
-  tokens, auth configs, password files, private keys, cloud configs
-  (~/.aws/*, ~/.ssh/*, etc.).
-- DENY destructive file operations: deleting files, overwriting configs,
-  rm, truncating.
-- APPROVE read-only operations on regular source code, docs, configs
-  that are clearly not sensitive (reading .go, .ts, .md, Makefile, etc.).
-- APPROVE running safe read-only commands: ls, cat, grep, find, go build,
-  go test, npm test, git status, git log, git diff, etc.
-- ASK for anything in between: writes to source files, git commits,
-  commands you're unsure about.
+DEFAULT POLICY (apply when no user rules say otherwise):
+- APPROVE read-only operations that don't leak sensitive data: reading
+  source code, docs, configs. Running safe commands: ls, cat, grep, find,
+  go build, go test, npm test, git status, git log, git diff, etc.
+- ASK for anything that modifies state: writing/deleting files, installing
+  packages, running commands with side effects, git commits/push, network
+  requests, reading potentially sensitive files (.env, keys, credentials,
+  ~/.ssh/*, ~/.aws/*), or anything you're unsure about.
+- Never DENY on your own. Only DENY when a user rule explicitly forbids it.
 
 `)
 
 	if len(rules) > 0 {
-		sb.WriteString("USER RULES (override the defaults above):\n")
+		sb.WriteString("USER RULES (override the defaults above — may APPROVE or DENY):\n")
 		for _, r := range rules {
 			sb.WriteString(fmt.Sprintf("- %s\n", r))
 		}
