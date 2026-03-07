@@ -11,14 +11,14 @@ var (
 	// Thinking
 	thinkingStyle lipgloss.Style
 
-	// Tool blocks
-	toolBlockStyle   lipgloss.Style // left-bordered container
-	toolHeaderStyle  lipgloss.Style // tool name in the header
-	toolSuccessStyle lipgloss.Style // ✓ icon
-	toolErrorStyle   lipgloss.Style // ✗ icon
-	toolRunningStyle lipgloss.Style // ● icon
-	toolArgsStyle    lipgloss.Style // args summary
-	toolResultStyle  lipgloss.Style // result text
+	// Tool blocks — full-width panels with subtle background
+	toolBlockStyle     lipgloss.Style // outer container
+	toolActionStyle    lipgloss.Style // verb: "write", "bash", "read"
+	toolTargetStyle    lipgloss.Style // path, command, query
+	toolBodyStyle      lipgloss.Style // code / result content
+	toolErrorBodyStyle lipgloss.Style // error content
+	toolFooterStyle    lipgloss.Style // "… (N more lines, M total, ctrl+o to expand)"
+	toolDimStyle       lipgloss.Style // "running…"
 
 	// Status / spinner
 	statusStyle  lipgloss.Style
@@ -33,11 +33,6 @@ var (
 	statusLineSepStyle   lipgloss.Style
 )
 
-// toolBlockBorder is a minimal left-only border.
-var toolBlockBorder = lipgloss.Border{
-	Left: "│",
-}
-
 // RebuildStyles derives all styles from ActiveTheme.
 // Called once at init; call again after swapping ActiveTheme.
 func RebuildStyles() {
@@ -47,16 +42,14 @@ func RebuildStyles() {
 	thinkingStyle = lipgloss.NewStyle().Foreground(t.Overlay0)
 
 	toolBlockStyle = lipgloss.NewStyle().
-		Border(toolBlockBorder, false, false, false, true).
-		BorderForeground(t.Surface2).
-		PaddingLeft(1).
-		MarginLeft(2)
-	toolHeaderStyle = lipgloss.NewStyle().Foreground(t.Sapphire).Bold(true)
-	toolSuccessStyle = lipgloss.NewStyle().Foreground(t.Green)
-	toolErrorStyle = lipgloss.NewStyle().Foreground(t.Red)
-	toolRunningStyle = lipgloss.NewStyle().Foreground(t.Yellow)
-	toolArgsStyle = lipgloss.NewStyle().Foreground(t.Subtext0)
-	toolResultStyle = lipgloss.NewStyle().Foreground(t.Overlay1)
+		Background(t.Surface0).
+		Padding(0, 2)
+	toolActionStyle = lipgloss.NewStyle().Foreground(t.Green).Bold(true)
+	toolTargetStyle = lipgloss.NewStyle().Foreground(t.Peach)
+	toolBodyStyle = lipgloss.NewStyle().Foreground(t.Subtext1)
+	toolErrorBodyStyle = lipgloss.NewStyle().Foreground(t.Maroon)
+	toolFooterStyle = lipgloss.NewStyle().Foreground(t.Overlay0).Italic(true)
+	toolDimStyle = lipgloss.NewStyle().Foreground(t.Overlay0)
 
 	statusStyle = lipgloss.NewStyle().Foreground(t.Overlay1)
 	spinnerStyle = lipgloss.NewStyle().Foreground(t.Sapphire)

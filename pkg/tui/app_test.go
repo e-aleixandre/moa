@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -736,6 +738,111 @@ func TestRenderSingleBlock_UnknownType(t *testing.T) {
 	result := renderSingleBlock(block, r, true)
 	if result != "" {
 		t.Errorf("expected empty for unknown type, got %q", result)
+	}
+}
+
+// --- Test: summarizeToolBlock ---
+
+func TestSummarizeToolBlock_Bash(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs: map[string]any{"command": "ls -la"},
+		ToolResult: "file1.go\nfile2.go", ToolDone: true,
+	}
+	action, target, body, footer := summarizeToolBlock(block)
+	if action != "bash" {
+		t.Errorf("action = %q, want bash", action)
+	}
+	if target != "ls -la" {
+		t.Errorf("target = %q, want 'ls -la'", target)
+	}
+	if body != "file1.go\nfile2.go" {
+		t.Errorf("body = %q", body)
+	}
+	if footer != "" {
+		t.Errorf("footer = %q, want empty", footer)
+	}
+}
+
+func TestSummarizeToolBlock_Write(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "write",
+		ToolArgs:   map[string]any{"path": "/tmp/test.go", "content": "package main\n"},
+		ToolResult: "Successfully wrote 13 bytes", ToolDone: true,
+	}
+	action, target, body, _ := summarizeToolBlock(block)
+	if action != "write" {
+		t.Errorf("action = %q", action)
+	}
+	if target != "/tmp/test.go" {
+		t.Errorf("target = %q", target)
+	}
+	// Body should be the content arg, not the result.
+	if body != "package main" {
+		t.Errorf("body = %q, want content", body)
+	}
+}
+
+func TestSummarizeToolBlock_WriteError(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "write",
+		ToolArgs: map[string]any{"path": "/etc/test", "content": "x"},
+		ToolResult: "permission denied", ToolDone: true, IsError: true,
+	}
+	_, _, body, _ := summarizeToolBlock(block)
+	if body != "permission denied" {
+		t.Errorf("on error, body should be result, got %q", body)
+	}
+}
+
+func TestSummarizeToolBlock_BashRunning(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs: map[string]any{"command": "sleep 10"},
+	}
+	_, _, body, _ := summarizeToolBlock(block)
+	if body != "" {
+		t.Errorf("running bash should have no body, got %q", body)
+	}
+}
+
+func TestTruncateBlockText(t *testing.T) {
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	text := strings.Join(lines, "\n")
+
+	body, footer := truncateBlockText(text, 10)
+	if !strings.HasPrefix(body, "line 1\n") {
+		t.Errorf("body should start with line 1, got %q", body[:20])
+	}
+	if !strings.Contains(footer, "10 more lines") {
+		t.Errorf("footer = %q, want '10 more lines'", footer)
+	}
+	if !strings.Contains(footer, "20 total") {
+		t.Errorf("footer = %q, want '20 total'", footer)
+	}
+}
+
+func TestRenderToolBlock_FullWidth(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "write",
+		ToolArgs:   map[string]any{"path": "/tmp/x.go", "content": "package main"},
+		ToolResult: "wrote ok", ToolDone: true,
+	}
+	rendered := renderToolBlock(block, 80)
+	if rendered == "" {
+		t.Fatal("empty render")
+	}
+	if !strings.Contains(rendered, "write") {
+		t.Error("should contain action 'write'")
+	}
+	if !strings.Contains(rendered, "/tmp/x.go") {
+		t.Error("should contain target path")
+	}
+	if !strings.Contains(rendered, "package main") {
+		t.Error("should contain file content as body")
 	}
 }
 
