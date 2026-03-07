@@ -64,6 +64,9 @@ func New(mode Mode, cfg Config) *Gate {
 // Mode returns the active permission mode.
 func (g *Gate) Mode() Mode { return g.mode }
 
+// SetMode changes the permission mode at runtime.
+func (g *Gate) SetMode(mode Mode) { g.mode = mode }
+
 // Requests returns the channel the UI listens on for approval requests.
 func (g *Gate) Requests() <-chan Request { return g.reqCh }
 

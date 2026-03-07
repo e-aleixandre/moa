@@ -91,12 +91,14 @@ func (m inputModel) View() string {
 // Unknown /prefixes are treated as regular text (avoids false positives
 // with paths like /etc/passwd or URLs).
 var knownCommands = map[string]bool{
-	"clear":    true,
-	"exit":     true,
-	"quit":     true,
-	"model":    true,
-	"models":   true,
-	"thinking": true,
+	"clear":       true,
+	"exit":        true,
+	"quit":        true,
+	"model":       true,
+	"models":      true,
+	"thinking":    true,
+	"compact":     true,
+	"permissions": true,
 }
 
 // ParseCommand returns (command string with args, true) only if text starts with a known /command.
