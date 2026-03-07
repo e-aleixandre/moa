@@ -51,6 +51,7 @@ type state struct {
 	pendingStatus       string                // transient generic status shown in View(), never persisted
 	pendingTimeline     *pendingTimelineEvent // live timeline event shown in View() until next send
 	sessionCost         float64               // accumulated USD cost this session
+	runStartMsgCount    int                   // message count at start of current run (for delta cost)
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -285,6 +286,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case compactResultMsg:
+		m.s.running = false
+		m.input.SetEnabled(true)
 		m.status.SetText("")
 		if msg.Err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -301,7 +304,11 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 		m.refreshContextSegment()
-		return m, m.flushBlocks(len(m.s.blocks))
+		cmds := []tea.Cmd{m.flushBlocks(len(m.s.blocks))}
+		if m.agent != nil {
+			cmds = append(cmds, m.saveSession(m.agent.Messages()))
+		}
+		return m, tea.Batch(cmds...)
 
 	case sessionSavedMsg:
 		// Session saved asynchronously. Log errors but don't interrupt the user.
@@ -572,6 +579,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 
 	m.s.running = true
 	m.s.runGen++
+	m.s.runStartMsgCount = len(m.agent.Messages())
 	m.runGenAddr.Store(m.s.runGen) // sync with subscriber for production-time tagging
 	m.s.streamState = stateStreaming
 	m.s.streamText = ""
@@ -946,6 +954,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.streamCache = ""
 		m.s.pendingStatus = ""
 		m.s.pendingTimeline = nil
+		m.s.sessionCost = 0
+		m.topBar.UpdateCostSegment(0)
 		// Delete old session, create fresh one
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
@@ -960,10 +970,19 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			func() tea.Msg { return tea.ClearScreen() },
 		)
 	case "compact":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Cannot compact while agent is running",
+			})
+			return m, nil
+		}
+		m.s.running = true
+		m.input.SetEnabled(false)
 		m.status.SetText("compacting context...")
 		agent := m.agent
+		ctx := m.baseCtx
 		return m, func() tea.Msg {
-			payload, err := agent.Compact(context.Background())
+			payload, err := agent.Compact(ctx)
 			return compactResultMsg{Payload: payload, Err: err}
 		}
 
@@ -1250,8 +1269,8 @@ func (m *appModel) cleanup() {
 	})
 }
 
-// accumulateCost extracts Usage from the last assistant message and adds its
-// cost to the session total. Updates the top bar cost segment.
+// accumulateCost sums Usage from all new assistant messages added during the
+// last run (msgs[runStartMsgCount:]) and adds the cost to the session total.
 func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
 	if msgs == nil || m.agent == nil {
 		return
@@ -1260,14 +1279,16 @@ func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
 	if model.Pricing == nil {
 		return
 	}
-	// Find last assistant message with usage
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" && msgs[i].Usage != nil {
-			m.s.sessionCost += model.Pricing.Cost(*msgs[i].Usage)
-			m.topBar.UpdateCostSegment(m.s.sessionCost)
-			break
+	start := m.s.runStartMsgCount
+	if start > len(msgs) {
+		return
+	}
+	for _, msg := range msgs[start:] {
+		if msg.Role == "assistant" && msg.Usage != nil {
+			m.s.sessionCost += model.Pricing.Cost(*msg.Usage)
 		}
 	}
+	m.topBar.UpdateCostSegment(m.s.sessionCost)
 }
 
 // refreshContextSegment recalculates the context usage percentage and updates
