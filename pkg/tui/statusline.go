@@ -193,9 +193,8 @@ func (sl *StatusLine) UpdateThinkingSegment(level string) {
 
 // UpdatePermissionsSegment sets the permissions mode segment.
 func (sl *StatusLine) UpdatePermissionsSegment(mode string) {
-	if mode == "" || mode == "yolo" {
-		sl.Remove(SegmentPermissions)
-		return
+	if mode == "" {
+		mode = "yolo"
 	}
 	sl.Set(SegmentPermissions, mode, PriorityPermissions)
 }
