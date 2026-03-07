@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/ealeixandre/moa/pkg/core"
+import (
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
+)
 
 // agentEventMsg wraps an agent event for the TUI event loop.
 // RunGen scopes the event to a specific run — late events from previous runs are ignored.
@@ -41,4 +44,9 @@ type flushDoneMsg struct {
 type compactResultMsg struct {
 	Payload *core.CompactionPayload
 	Err     error
+}
+
+// permissionRequestMsg carries a tool permission request from the agent loop.
+type permissionRequestMsg struct {
+	Request permission.Request
 }

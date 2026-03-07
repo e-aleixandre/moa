@@ -38,6 +38,9 @@ type loopConfig struct {
 	// Custom conversion (nil = default)
 	convertToLLM func([]core.AgentMessage) []core.Message
 
+	// Permission check (nil = all approved)
+	permissionCheck func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
+
 	// Compaction
 	compaction *core.CompactionSettings
 }
@@ -329,6 +332,13 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		if maxCalls > 0 && i >= maxCalls {
 			slots[i].reject = "Tool call skipped: max tool calls per turn exceeded"
 			continue
+		}
+		// Permission check (may block waiting for user approval)
+		if cfg.permissionCheck != nil {
+			if decision := cfg.permissionCheck(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
+				slots[i].reject = "Permission denied: " + decision.Reason
+				continue
+			}
 		}
 		if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
 			slots[i].reject = "Tool call blocked: " + decision.Reason
