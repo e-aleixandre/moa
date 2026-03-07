@@ -188,11 +188,18 @@ func TestAuto_FallsBackToAsk(t *testing.T) {
 	}
 }
 
-func TestAuto_AllowListStillWorks(t *testing.T) {
+func TestAuto_IgnoresGlobs(t *testing.T) {
+	// Auto mode doesn't use allow/deny globs — only the AI evaluator + rules
 	g := New(ModeAuto, Config{Allow: []string{"Bash(git:*)"}})
 
+	go func() {
+		req := <-g.Requests()
+		req.Response <- Response{Approved: true}
+	}()
+
+	// Even though "Bash(git:*)" is in allow, auto mode ignores it and asks
 	d := g.Check(context.Background(), "bash", map[string]any{"command": "git log"})
 	if d != nil {
-		t.Error("allow list should work in auto mode too")
+		t.Error("should approve after user says yes")
 	}
 }

@@ -88,6 +88,9 @@ func (g *Gate) AddAllow(pattern string) {
 	g.allow = append(g.allow, pattern)
 }
 
+// SetEvaluator replaces the AI evaluator (for runtime mode switches).
+func (g *Gate) SetEvaluator(e *Evaluator) { g.evaluator = e }
+
 // AddRule appends a natural language rule (for auto mode).
 func (g *Gate) AddRule(rule string) {
 	g.rules = append(g.rules, rule)
@@ -96,6 +99,9 @@ func (g *Gate) AddRule(rule string) {
 // Check decides whether a tool call may proceed. May block waiting for user
 // approval. Returns nil to approve, or a blocking ToolCallDecision to reject.
 // Called from the agent loop goroutine.
+//
+// ask mode: readOnly → deny globs → allow globs → ask user
+// auto mode: readOnly → AI evaluator (rules) → ask user (fallback)
 func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 	if g.mode == ModeYolo {
 		return nil
@@ -105,25 +111,25 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 		return nil
 	}
 
-	// Deny list checked first (both ask and auto modes)
-	if matchPolicy(g.deny, name, args) {
-		return &core.ToolCallDecision{Block: true, Reason: "denied by policy"}
-	}
-
-	// Allow list checked before asking (both ask and auto modes)
-	if matchPolicy(g.allow, name, args) {
-		return nil
-	}
-
-	// Auto mode: AI evaluator decides before falling back to user
-	if g.mode == ModeAuto && g.evaluator != nil {
-		switch g.evaluator.Evaluate(ctx, name, args, g.rules) {
-		case DecisionApprove:
+	switch g.mode {
+	case ModeAsk:
+		if matchPolicy(g.deny, name, args) {
+			return &core.ToolCallDecision{Block: true, Reason: "denied by policy"}
+		}
+		if matchPolicy(g.allow, name, args) {
 			return nil
-		case DecisionDeny:
-			return &core.ToolCallDecision{Block: true, Reason: "denied by AI evaluator"}
-		case DecisionAsk:
-			// fall through to user prompt
+		}
+
+	case ModeAuto:
+		if g.evaluator != nil {
+			switch g.evaluator.Evaluate(ctx, name, args, g.rules) {
+			case DecisionApprove:
+				return nil
+			case DecisionDeny:
+				return &core.ToolCallDecision{Block: true, Reason: "denied by AI evaluator"}
+			case DecisionAsk:
+				// fall through to user prompt
+			}
 		}
 	}
 
