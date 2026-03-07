@@ -35,15 +35,26 @@ var readOnly = map[string]bool{
 type Gate struct {
 	mode  Mode
 	reqCh chan Request
+	allow []string // glob patterns auto-approved in ask mode
+	deny  []string // glob patterns always denied
 	rules []string // natural language rules for auto mode
 }
 
-// New creates a Gate with the given mode and initial rules.
-func New(mode Mode, rules []string) *Gate {
+// Config holds the gate's initial settings from merged config files.
+type Config struct {
+	Allow []string // glob patterns: "Bash(npm:*)", "edit"
+	Deny  []string // glob patterns always denied
+	Rules []string // natural language rules for auto mode
+}
+
+// New creates a Gate with the given mode and config.
+func New(mode Mode, cfg Config) *Gate {
 	return &Gate{
 		mode:  mode,
 		reqCh: make(chan Request),
-		rules: rules,
+		allow: cfg.Allow,
+		deny:  cfg.Deny,
+		rules: cfg.Rules,
 	}
 }
 
@@ -56,8 +67,15 @@ func (g *Gate) Requests() <-chan Request { return g.reqCh }
 // Rules returns the current rule set (for AI evaluator).
 func (g *Gate) Rules() []string { return g.rules }
 
-// AddRule appends a rule. Thread-safety: only called from the TUI goroutine
-// (single writer), and read by the evaluator under the same sequential flow.
+// Allow returns the current allow patterns.
+func (g *Gate) AllowPatterns() []string { return g.allow }
+
+// AddAllow appends a glob allow pattern (for ask mode "always allow").
+func (g *Gate) AddAllow(pattern string) {
+	g.allow = append(g.allow, pattern)
+}
+
+// AddRule appends a natural language rule (for auto mode).
 func (g *Gate) AddRule(rule string) {
 	g.rules = append(g.rules, rule)
 }
@@ -71,6 +89,16 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 	}
 
 	if readOnly[name] {
+		return nil
+	}
+
+	// Deny list checked first (both ask and auto modes)
+	if matchPolicy(g.deny, name, args) {
+		return &core.ToolCallDecision{Block: true, Reason: "denied by policy"}
+	}
+
+	// Allow list checked before asking (both ask and auto modes)
+	if matchPolicy(g.allow, name, args) {
 		return nil
 	}
 

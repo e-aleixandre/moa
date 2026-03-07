@@ -33,6 +33,14 @@ func (p *permissionPrompt) Deny() {
 	}
 }
 
+// AllowPattern returns the glob pattern that would be added for "always allow".
+func (p *permissionPrompt) AllowPattern() string {
+	if !p.active {
+		return ""
+	}
+	return permission.GenerateAllowPattern(p.request.ToolName, p.request.Args)
+}
+
 func (p *permissionPrompt) View(width int, theme Theme) string {
 	if !p.active {
 		return ""
@@ -46,14 +54,10 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 	// Tool summary: most relevant arg
 	summary := permissionSummary(p.request.ToolName, p.request.Args)
 
-	// Render: ⚠ approve bash?
-	//         git status && npm test
-	//         [y] approve  [n] deny
 	var lines []string
 	lines = append(lines, warn.Render(fmt.Sprintf("  ⚠ approve %s?", p.request.ToolName)))
 
 	if summary != "" {
-		// Truncate long summaries
 		maxW := width - 4
 		if maxW > 0 && lipgloss.Width(summary) > maxW {
 			summary = summary[:maxW-1] + "…"
@@ -61,9 +65,11 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 		lines = append(lines, body.Render("  "+summary))
 	}
 
+	pattern := p.AllowPattern()
 	keys := "  " +
 		key.Render("[y]") + dim.Render(" approve  ") +
-		key.Render("[n]") + dim.Render(" deny")
+		key.Render("[n]") + dim.Render(" deny  ") +
+		key.Render("[a]") + dim.Render(" always allow "+pattern)
 	lines = append(lines, keys)
 
 	return strings.Join(lines, "\n")

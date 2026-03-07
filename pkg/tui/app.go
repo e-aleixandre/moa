@@ -1047,22 +1047,33 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 // handlePickerKey routes keys to the model picker.
 // handlePermissionKey routes keys to the permission prompt.
 func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+	var listenCmd tea.Cmd
 	if m.permGate != nil {
-		cmd = m.waitForPermission()
+		listenCmd = m.waitForPermission()
 	}
 
 	switch msg.String() {
 	case "y", "Y":
 		m.permPrompt.Approve()
-		return m, cmd
+		return m, listenCmd
 	case "n", "N":
 		m.permPrompt.Deny()
-		return m, cmd
+		return m, listenCmd
+	case "a", "A":
+		// Always allow: add pattern and approve this call
+		if m.permGate != nil {
+			pattern := m.permPrompt.AllowPattern()
+			m.permGate.AddAllow(pattern)
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status", Raw: fmt.Sprintf("✓ Added allow rule: %s", pattern),
+			})
+		}
+		m.permPrompt.Approve()
+		return m, listenCmd
 	case "ctrl+c", "esc":
 		m.permPrompt.Deny()
 		m.agent.Abort()
-		return m, cmd
+		return m, listenCmd
 	}
 	return m, nil
 }
