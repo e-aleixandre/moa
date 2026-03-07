@@ -837,14 +837,26 @@ func TestSummarizeToolBlock_WriteError(t *testing.T) {
 	}
 }
 
-func TestSummarizeToolBlock_BashRunning(t *testing.T) {
+func TestSummarizeToolBlock_BashRunningWithStreaming(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs:   map[string]any{"command": "make test"},
+		ToolResult: "PASS pkg/core\n",
+	}
+	_, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	if body != "PASS pkg/core" {
+		t.Errorf("running bash with streamed output should show body, got %q", body)
+	}
+}
+
+func TestSummarizeToolBlock_BashNoOutputYet(t *testing.T) {
 	block := messageBlock{
 		Type: "tool", ToolName: "bash",
 		ToolArgs: map[string]any{"command": "sleep 10"},
 	}
 	_, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if body != "" {
-		t.Errorf("running bash should have no body, got %q", body)
+		t.Errorf("bash with no output should have empty body, got %q", body)
 	}
 }
 

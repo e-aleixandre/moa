@@ -210,16 +210,12 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, body,
 	case "bash":
 		action = "bash"
 		target, _ = stringArg(block.ToolArgs, "command")
-		if block.IsError || block.ToolDone {
-			body = block.ToolResult
-		}
+		body = block.ToolResult
 
 	case "read":
 		action = "read"
 		target, _ = stringArg(block.ToolArgs, "path")
-		if block.ToolDone {
-			body = block.ToolResult
-		}
+		body = block.ToolResult
 
 	case "write":
 		action = "write"
@@ -246,9 +242,7 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, body,
 		} else if queries, ok := block.ToolArgs["queries"].([]any); ok {
 			target = fmt.Sprintf("%d queries", len(queries))
 		}
-		if block.ToolDone {
-			body = block.ToolResult
-		}
+		body = block.ToolResult
 
 	case "fetch_content":
 		action = "fetch"
@@ -257,16 +251,12 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, body,
 		} else if urls, ok := block.ToolArgs["urls"].([]any); ok {
 			target = fmt.Sprintf("%d URLs", len(urls))
 		}
-		if block.ToolDone {
-			body = block.ToolResult
-		}
+		body = block.ToolResult
 
 	default:
 		action = block.ToolName
 		target = sortedArgSummary(block.ToolArgs)
-		if block.ToolDone {
-			body = block.ToolResult
-		}
+		body = block.ToolResult
 	}
 
 	if body != "" && maxLines > 0 {
