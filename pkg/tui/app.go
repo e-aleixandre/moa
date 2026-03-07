@@ -183,6 +183,8 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 	m.topBar.UpdateThinkingSegment(ag.ThinkingLevel())
 	if m.permGate != nil {
 		m.topBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
+	} else {
+		m.topBar.UpdatePermissionsSegment("yolo")
 	}
 	m.topBar.UpdateContextSegment(0)
 
