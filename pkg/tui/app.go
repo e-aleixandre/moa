@@ -473,7 +473,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cmdPalette.active {
 			m.cmdPalette.Close()
 			m.input.textarea.Reset()
-			return m, nil
+			return m, m.forceRepaint()
 		}
 		if m.s.running {
 			m.agent.Abort()
@@ -564,16 +564,14 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 				if hasArgs {
-					// Replace input with "/command " so user can type args
 					m.input.textarea.Reset()
 					m.input.textarea.SetValue("/" + selected + " ")
-					// Move cursor to end
 					m.input.textarea.CursorEnd()
-					return m, nil
+					return m, m.forceRepaint()
 				}
 				return m.handleCommand(selected)
 			}
-			return m, nil
+			return m, m.forceRepaint()
 		}
 
 		text := m.input.Submit()
@@ -595,7 +593,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.input.textarea.SetValue("/" + selected + " ")
 				m.input.textarea.CursorEnd()
 			}
-			return m, nil
+			return m, m.forceRepaint()
 		}
 
 	case tea.KeyUp:
@@ -1474,6 +1472,16 @@ func firstTextContent(content []core.Content) string {
 // waitForEvent returns a Cmd that blocks until the next agent event.
 // The run generation comes FROM the tagged event (stamped at production time),
 // not captured at Cmd creation time.
+// forceRepaint sends a synthetic WindowSizeMsg to force Bubble Tea to
+// fully repaint. Fixes ghost lines when the view height shrinks
+// (e.g. command palette closing).
+func (m appModel) forceRepaint() tea.Cmd {
+	w, h := m.width, m.height
+	return func() tea.Msg {
+		return tea.WindowSizeMsg{Width: w, Height: h}
+	}
+}
+
 func (m appModel) waitForEvent() tea.Cmd {
 	eventCh := m.eventCh
 	quit := m.quit
