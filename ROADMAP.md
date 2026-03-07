@@ -74,7 +74,7 @@ Make it robust enough to be a daily driver.
   - **auto**: AI evaluator (haiku) with natural language rules → ask user (fallback). Conservative baseline: approve reads, ask for mutations, deny only when a user rule says so. `[3]` "Add rule" to teach the system inline.
   - All modes: Tab on Yes/No for feedback ("No, use a different filename" → model receives as denial reason). Esc cancels + aborts.
   - Permission mode shown in status bar. Gate architecture: channel-based coordination between agent loop and TUI.
-- [ ] **Session browser** — `session.Store` has `List()` returning Summary (ID, title, date). A `/sessions` command that opens a picker (reuse `pickerModel` pattern) to navigate and resume sessions without leaving the TUI.
+- [x] **Session browser** — `--resume` opens a startup browser inside the main TUI (no restart/flicker). Filterable session list with preview of the latest messages for the highlighted session. Enter opens the selected session, Ctrl+N starts a fresh one. `--resume <id>` opens that session directly; `--continue` resumes the latest session.
 
 ### Agent capabilities
 
