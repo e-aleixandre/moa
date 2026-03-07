@@ -1,0 +1,105 @@
+package permission
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/ealeixandre/moa/pkg/core"
+)
+
+// Decision is the AI evaluator's verdict.
+type Decision int
+
+const (
+	DecisionApprove Decision = iota
+	DecisionDeny
+	DecisionAsk // escalate to user
+)
+
+// Evaluator uses a lightweight LLM to decide whether a tool call is safe.
+type Evaluator struct {
+	provider core.Provider
+	model    core.Model
+}
+
+// NewEvaluator creates an evaluator with the given provider and model.
+func NewEvaluator(provider core.Provider, model core.Model) *Evaluator {
+	return &Evaluator{provider: provider, model: model}
+}
+
+// Evaluate asks the LLM whether the tool call should be approved, denied,
+// or escalated to the user. Rules are natural language instructions that
+// guide the decision.
+func (e *Evaluator) Evaluate(ctx context.Context, toolName string, args map[string]any, rules []string) Decision {
+	prompt := buildEvalPrompt(toolName, args, rules)
+
+	req := core.Request{
+		Model:    e.model,
+		Messages: []core.Message{core.NewUserMessage(prompt)},
+		Options:  core.StreamOptions{ThinkingLevel: "off"},
+	}
+
+	stream, err := e.provider.Stream(ctx, req)
+	if err != nil {
+		return DecisionAsk // on error, escalate to user
+	}
+
+	var response strings.Builder
+	for event := range stream {
+		if event.Type == core.ProviderEventTextDelta {
+			response.WriteString(event.Delta)
+		}
+	}
+
+	return parseDecision(response.String())
+}
+
+func buildEvalPrompt(toolName string, args map[string]any, rules []string) string {
+	var sb strings.Builder
+
+	sb.WriteString("You are a security evaluator for a coding agent. ")
+	sb.WriteString("Decide if this tool call should be allowed to execute.\n\n")
+
+	sb.WriteString(fmt.Sprintf("Tool: %s\n", toolName))
+
+	// Show relevant args
+	if len(args) > 0 {
+		sb.WriteString("Arguments:\n")
+		for k, v := range args {
+			val := fmt.Sprintf("%v", v)
+			if len(val) > 500 {
+				val = val[:500] + "..."
+			}
+			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, val))
+		}
+	}
+
+	if len(rules) > 0 {
+		sb.WriteString("\nUser-provided rules:\n")
+		for _, r := range rules {
+			sb.WriteString(fmt.Sprintf("- %s\n", r))
+		}
+	}
+
+	sb.WriteString("\nRespond with exactly one word: APPROVE, DENY, or ASK\n")
+	sb.WriteString("- APPROVE: the action is clearly safe or explicitly allowed by a rule\n")
+	sb.WriteString("- DENY: the action is clearly dangerous or explicitly forbidden by a rule\n")
+	sb.WriteString("- ASK: you're unsure — escalate to the user for confirmation\n")
+
+	return sb.String()
+}
+
+func parseDecision(response string) Decision {
+	s := strings.TrimSpace(strings.ToUpper(response))
+
+	// Handle responses that might have extra text
+	if strings.Contains(s, "APPROVE") {
+		return DecisionApprove
+	}
+	if strings.Contains(s, "DENY") {
+		return DecisionDeny
+	}
+	// Default to ask when uncertain
+	return DecisionAsk
+}

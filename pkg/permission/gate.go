@@ -33,28 +33,31 @@ var readOnly = map[string]bool{
 
 // Gate mediates tool permissions. Created once, shared between agent and TUI.
 type Gate struct {
-	mode  Mode
-	reqCh chan Request
-	allow []string // glob patterns auto-approved in ask mode
-	deny  []string // glob patterns always denied
-	rules []string // natural language rules for auto mode
+	mode      Mode
+	reqCh     chan Request
+	allow     []string   // glob patterns auto-approved in ask mode
+	deny      []string   // glob patterns always denied
+	rules     []string   // natural language rules for auto mode
+	evaluator *Evaluator // AI evaluator for auto mode (nil = fallback to ask)
 }
 
 // Config holds the gate's initial settings from merged config files.
 type Config struct {
-	Allow []string // glob patterns: "Bash(npm:*)", "edit"
-	Deny  []string // glob patterns always denied
-	Rules []string // natural language rules for auto mode
+	Allow     []string   // glob patterns: "Bash(npm:*)", "edit"
+	Deny      []string   // glob patterns always denied
+	Rules     []string   // natural language rules for auto mode
+	Evaluator *Evaluator // AI evaluator (nil in ask mode)
 }
 
 // New creates a Gate with the given mode and config.
 func New(mode Mode, cfg Config) *Gate {
 	return &Gate{
-		mode:  mode,
-		reqCh: make(chan Request),
-		allow: cfg.Allow,
-		deny:  cfg.Deny,
-		rules: cfg.Rules,
+		mode:      mode,
+		reqCh:     make(chan Request),
+		allow:     cfg.Allow,
+		deny:      cfg.Deny,
+		rules:     cfg.Rules,
+		evaluator: cfg.Evaluator,
 	}
 }
 
@@ -102,7 +105,17 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 		return nil
 	}
 
-	// TODO(auto): AI evaluator goes here. For now, auto falls through to ask.
+	// Auto mode: AI evaluator decides before falling back to user
+	if g.mode == ModeAuto && g.evaluator != nil {
+		switch g.evaluator.Evaluate(ctx, name, args, g.rules) {
+		case DecisionApprove:
+			return nil
+		case DecisionDeny:
+			return &core.ToolCallDecision{Block: true, Reason: "denied by AI evaluator"}
+		case DecisionAsk:
+			// fall through to user prompt
+		}
+	}
 
 	return g.askUser(ctx, name, args)
 }

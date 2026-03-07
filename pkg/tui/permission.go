@@ -10,13 +10,17 @@ import (
 
 // permissionPrompt shows a tool approval dialog when permissions require it.
 type permissionPrompt struct {
-	active  bool
-	request permission.Request
+	active   bool
+	request  permission.Request
+	ruleMode bool   // true when user is typing a rule
+	ruleBuf  string // rule text being typed
 }
 
 func (p *permissionPrompt) Show(req permission.Request) {
 	p.active = true
 	p.request = req
+	p.ruleMode = false
+	p.ruleBuf = ""
 }
 
 func (p *permissionPrompt) Approve() {
@@ -65,12 +69,20 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 		lines = append(lines, body.Render("  "+summary))
 	}
 
-	pattern := p.AllowPattern()
-	keys := "  " +
-		key.Render("[y]") + dim.Render(" approve  ") +
-		key.Render("[n]") + dim.Render(" deny  ") +
-		key.Render("[a]") + dim.Render(" always allow "+pattern)
-	lines = append(lines, keys)
+	if p.ruleMode {
+		ruleLabel := "  " + dim.Render("rule: ") + body.Render(p.ruleBuf+"█")
+		lines = append(lines, ruleLabel)
+		hint := "  " + dim.Render("enter to save, esc to cancel")
+		lines = append(lines, hint)
+	} else {
+		pattern := p.AllowPattern()
+		keys := "  " +
+			key.Render("[y]") + dim.Render(" approve  ") +
+			key.Render("[n]") + dim.Render(" deny  ") +
+			key.Render("[a]") + dim.Render(" always allow "+pattern+"  ") +
+			key.Render("[r]") + dim.Render(" add rule")
+		lines = append(lines, keys)
+	}
 
 	return strings.Join(lines, "\n")
 }
