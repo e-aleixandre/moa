@@ -589,6 +589,56 @@ func TestWindowResize_NoDirtyWhenNotStreaming(t *testing.T) {
 	}
 }
 
+func TestWindowResize_RepaintsFlushedScrollback(t *testing.T) {
+	m := newTestModel()
+	m.s.initialized = true
+	m.width = 80
+	m.height = 24
+	m.s.blocks = []messageBlock{
+		{Type: "user", Raw: "hello"},
+		{Type: "assistant", Raw: "world"},
+	}
+	m.s.flushedCount = 2
+	m.s.flushScheduledCount = 2
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if cmd == nil {
+		t.Fatal("expected repaint command when scrollback exists")
+	}
+}
+
+func TestWindowResize_DoesNotRepaintWhenOnlyLiveAreaExists(t *testing.T) {
+	m := newTestModel()
+	m.s.initialized = true
+	m.width = 80
+	m.height = 24
+	m.s.blocks = []messageBlock{{Type: "assistant", Raw: "live"}}
+	m.s.flushedCount = 0
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if cmd != nil {
+		t.Fatal("expected no repaint command when nothing is in scrollback")
+	}
+}
+
+func TestWindowResize_SameSizeDoesNotRepaint(t *testing.T) {
+	m := newTestModel()
+	m.s.initialized = true
+	m.width = 120
+	m.height = 40
+	m.s.blocks = []messageBlock{
+		{Type: "user", Raw: "hello"},
+		{Type: "assistant", Raw: "world"},
+	}
+	m.s.flushedCount = 2
+	m.s.flushScheduledCount = 2
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if cmd != nil {
+		t.Fatal("expected no repaint when size did not change (prevents loop from tea.Exec)")
+	}
+}
+
 // --- Test 6: Ctrl+O reprint ---
 
 func TestCtrlO_ReturnsCmdWithBlocks(t *testing.T) {
