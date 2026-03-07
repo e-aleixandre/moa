@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
 
@@ -12,12 +13,19 @@ import (
 // Blocks are rendered on demand (flush to scrollback or View()) using current
 // terminal width, so resize reflows correctly.
 type messageBlock struct {
-	Type     string         // "user", "assistant", "tool_start", "tool_end", "error", "status"
-	Raw      string         // raw content: markdown for assistant, plain text for others
-	ToolName string         // for tool_start, tool_end
-	ToolArgs map[string]any // for tool_start
-	IsError  bool           // for tool_end
+	Type string // "user", "assistant", "tool", "error", "status", "thinking"
+	Raw  string // raw content: markdown for assistant, plain text for others
+
+	// Tool blocks (Type == "tool")
+	ToolCallID string         // matches AgentEvent.ToolCallID
+	ToolName   string         // tool name
+	ToolArgs   map[string]any // call arguments
+	ToolResult string         // truncated result text (populated on completion)
+	ToolDone   bool           // true after tool_execution_end
+	IsError    bool           // true if the tool returned an error
 }
+
+const maxToolResultLines = 4
 
 // renderer caches the glamour TermRenderer. Recreated only on width change.
 type renderer struct {
@@ -68,19 +76,35 @@ func FormatUserMessage(text string) string {
 	return userPrefixStyle.Render("❯ ") + text
 }
 
-// FormatToolStart formats the beginning of a tool call.
-func FormatToolStart(name string, args map[string]any) string {
-	summary := tool.SummarizeArgs(args)
-	return toolNameStyle.Render(fmt.Sprintf("  [%s]", name)) + " " + toolArgsStyle.Render(summary)
-}
-
-// FormatToolEnd formats the result of a tool call.
-func FormatToolEnd(name string, isError bool) string {
-	icon := toolSuccessStyle.Render("✓")
-	if isError {
+// renderToolBlock renders a unified tool block with left border, showing
+// the tool name, arguments summary, and (if done) a truncated result.
+func renderToolBlock(block messageBlock, width int) string {
+	// Status icon.
+	var icon string
+	if !block.ToolDone {
+		icon = toolRunningStyle.Render("●")
+	} else if block.IsError {
 		icon = toolErrorStyle.Render("✗")
+	} else {
+		icon = toolSuccessStyle.Render("✓")
 	}
-	return toolNameStyle.Render(fmt.Sprintf("  [%s]", name)) + " " + icon
+
+	// Header: icon + name + args
+	header := icon + " " + toolHeaderStyle.Render(block.ToolName)
+	if summary := tool.SummarizeArgs(block.ToolArgs); summary != "" {
+		header += " " + toolArgsStyle.Render(summary)
+	}
+
+	content := header
+	if block.ToolResult != "" {
+		content += "\n" + toolResultStyle.Render(block.ToolResult)
+	}
+
+	blockWidth := width - 4 // margin(2) + border(1) + padding(1)
+	if blockWidth < 40 {
+		blockWidth = 40
+	}
+	return toolBlockStyle.Width(blockWidth).Render(content)
 }
 
 // renderSingleBlock renders a single block with trailing spacing that matches
@@ -97,10 +121,8 @@ func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) strin
 		return thinkingStyle.Width(r.width - 2).PaddingLeft(2).Render(block.Raw)
 	case "assistant":
 		return r.RenderMarkdown(block.Raw)
-	case "tool_start":
-		return FormatToolStart(block.ToolName, block.ToolArgs)
-	case "tool_end":
-		return FormatToolEnd(block.ToolName, block.IsError)
+	case "tool":
+		return renderToolBlock(block, r.width)
 	case "error":
 		return errorStyle.Render(block.Raw)
 	case "status":
@@ -121,4 +143,35 @@ func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool) string 
 		}
 	}
 	return b.String()
+}
+
+// toolResultText extracts and truncates the text content from a tool result.
+func toolResultText(result *core.Result) string {
+	if result == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, c := range result.Content {
+		if c.Type == "text" {
+			sb.WriteString(c.Text)
+		}
+	}
+	return truncateLines(strings.TrimSpace(sb.String()), maxToolResultLines)
+}
+
+// truncateLines limits text to maxLines, appending a count of hidden lines.
+func truncateLines(text string, maxLines int) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	// Trim trailing blank lines.
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) <= maxLines {
+		return strings.Join(lines, "\n")
+	}
+	remaining := len(lines) - maxLines
+	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n… (%d more lines)", remaining)
 }
