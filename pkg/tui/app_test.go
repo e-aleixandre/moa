@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
@@ -19,6 +22,49 @@ func newTestModel() appModel {
 		width:    80,
 		height:   24,
 	}
+}
+
+type staticProvider struct{ text string }
+
+func (p staticProvider) Stream(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 3)
+	msg := core.Message{
+		Role:       "assistant",
+		Content:    []core.Content{core.TextContent(p.text)},
+		StopReason: "end_turn",
+		Timestamp:  time.Now().Unix(),
+	}
+	ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+	if p.text != "" {
+		ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: p.text, ContentIndex: 0}
+	}
+	ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+	close(ch)
+	return ch, nil
+}
+
+func newSwitchTestApp(t *testing.T) appModel {
+	t.Helper()
+	ag, err := agent.New(agent.AgentConfig{
+		Provider:      staticProvider{text: "ok"},
+		Model:         core.Model{ID: "claude-sonnet-4-6", Provider: "anthropic", Name: "Claude Sonnet 4.6", MaxInput: 200_000},
+		ThinkingLevel: "medium",
+	})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	m := New(ag, context.Background(), Config{
+		ModelName: "Claude Sonnet 4.6",
+		ProviderFactory: func(model core.Model) (core.Provider, error) {
+			return staticProvider{text: "ok"}, nil
+		},
+	})
+	m.width = 80
+	m.height = 24
+	m.renderer.SetWidth(80)
+	m.input.SetWidth(80)
+	m.status.SetWidth(80)
+	return m
 }
 
 // --- Test 1: flushBlocks ordering and flushedCount ---
@@ -635,4 +681,115 @@ func TestRenderSingleBlock_UnknownType(t *testing.T) {
 	}
 }
 
+func TestSwitchToModel_SetsPendingTimeline(t *testing.T) {
+	m := newSwitchTestApp(t)
 
+	result, _ := m.switchToModel(core.Model{
+		ID: "gpt-5.3-codex", Provider: "openai", Name: "GPT-5.3 Codex", MaxInput: 400_000,
+	})
+	rm := result.(appModel)
+
+	if rm.s.pendingTimeline == nil {
+		t.Fatal("expected pending timeline event")
+	}
+	if got, want := rm.s.pendingTimeline.Text, "✓ Switched to GPT-5.3 Codex (openai)"; got != want {
+		t.Fatalf("pending timeline = %q, want %q", got, want)
+	}
+	if rm.s.pendingStatus != "" {
+		t.Fatalf("pending status = %q, want empty", rm.s.pendingStatus)
+	}
+	if len(rm.s.blocks) != 0 {
+		t.Fatalf("blocks = %d, want 0 before send", len(rm.s.blocks))
+	}
+	if got := rm.agent.Model().ID; got != "gpt-5.3-codex" {
+		t.Fatalf("agent model = %q, want gpt-5.3-codex", got)
+	}
+}
+
+func TestSwitchToModel_OverwritesPendingTimeline(t *testing.T) {
+	m := newSwitchTestApp(t)
+
+	result, _ := m.switchToModel(core.Model{
+		ID: "gpt-5.3-codex", Provider: "openai", Name: "GPT-5.3 Codex", MaxInput: 400_000,
+	})
+	m = result.(appModel)
+	result, _ = m.switchToModel(core.Model{
+		ID: "o3", Provider: "openai", Name: "o3", MaxInput: 200_000,
+	})
+	rm := result.(appModel)
+
+	if rm.s.pendingTimeline == nil {
+		t.Fatal("expected pending timeline event")
+	}
+	if got, want := rm.s.pendingTimeline.Text, "✓ Switched to o3 (openai)"; got != want {
+		t.Fatalf("pending timeline = %q, want %q", got, want)
+	}
+	if len(rm.s.blocks) != 0 {
+		t.Fatalf("blocks = %d, want 0 before send", len(rm.s.blocks))
+	}
+}
+
+func TestStartAgentRun_CommitsPendingTimelineBeforeUserBlock(t *testing.T) {
+	m := newSwitchTestApp(t)
+
+	result, _ := m.switchToModel(core.Model{
+		ID: "gpt-5.3-codex", Provider: "openai", Name: "GPT-5.3 Codex", MaxInput: 400_000,
+	})
+	m = result.(appModel)
+	result, cmd := m.startAgentRun("hello")
+	rm := result.(appModel)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil command")
+	}
+	if rm.s.pendingTimeline != nil {
+		t.Fatal("pending timeline should be cleared after commit")
+	}
+	if len(rm.s.blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2", len(rm.s.blocks))
+	}
+	if got := rm.s.blocks[0]; got.Type != "status" || got.Raw != "✓ Switched to GPT-5.3 Codex (openai)" {
+		t.Fatalf("blocks[0] = %+v, want committed switch status", got)
+	}
+	if got := rm.s.blocks[1]; got.Type != "user" || got.Raw != "hello" {
+		t.Fatalf("blocks[1] = %+v, want user block", got)
+	}
+	msgs := rm.agent.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("agent messages = %d, want 1 committed session event before Send executes", len(msgs))
+	}
+	if msgs[0].Role != "session_event" {
+		t.Fatalf("messages[0].Role = %q, want session_event", msgs[0].Role)
+	}
+	if eventType(msgs[0].Custom) != "model_switch" {
+		t.Fatalf("messages[0].Custom[event] = %q, want model_switch", eventType(msgs[0].Custom))
+	}
+	if got, want := firstTextContent(msgs[0].Content), "✓ Switched to GPT-5.3 Codex (openai)"; got != want {
+		t.Fatalf("messages[0] text = %q, want %q", got, want)
+	}
+}
+
+func TestRebuildFromMessages_RendersModelSwitchSessionEvent(t *testing.T) {
+	m := newTestModel()
+
+	m.rebuildFromMessages([]core.AgentMessage{
+		{
+			Message: core.Message{
+				Role:    "session_event",
+				Content: []core.Content{core.TextContent("✓ Switched to GPT-5.3 Codex (openai)")},
+			},
+			Custom: map[string]any{"event": "model_switch"},
+		},
+		core.WrapMessage(core.NewUserMessage("hello")),
+	})
+
+	if len(m.s.blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2", len(m.s.blocks))
+	}
+	if got := m.s.blocks[0]; got.Type != "status" || got.Raw != "✓ Switched to GPT-5.3 Codex (openai)" {
+		t.Fatalf("blocks[0] = %+v, want restored switch status", got)
+	}
+	if got := m.s.blocks[1]; got.Type != "user" || got.Raw != "hello" {
+		t.Fatalf("blocks[1] = %+v, want restored user block", got)
+	}
+}

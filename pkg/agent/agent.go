@@ -164,6 +164,21 @@ func (a *Agent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
 	return nil
 }
 
+// AppendMessage appends a non-LLM message to the current conversation state.
+// Used by the TUI to persist timeline events before the next user turn.
+func (a *Agent) AppendMessage(msg core.AgentMessage) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot append message while agent is running")
+	}
+	a.state.Messages = append(a.state.Messages, msg)
+	if a.state.Model.ID == "" {
+		a.state.Model = a.config.Model
+	}
+	return nil
+}
+
 // CompactionEpoch returns the current compaction epoch.
 func (a *Agent) CompactionEpoch() int {
 	a.mu.Lock()

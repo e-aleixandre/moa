@@ -26,6 +26,11 @@ import (
 	"github.com/ealeixandre/moa/pkg/tui"
 )
 
+type ProviderBuildResult struct {
+	Provider   core.Provider
+	AuthNotice string
+}
+
 func main() {
 	p := flag.String("p", "", "Prompt text or @file to read prompt from file")
 	modelFlag := flag.String("model", "sonnet", "Model: alias (sonnet, opus, codex) or provider/model-id")
@@ -78,7 +83,7 @@ func main() {
 	}
 
 	// Build provider for the resolved model.
-	prov, err := buildProvider(resolvedModel, authStore)
+	providerBuild, err := buildProvider(resolvedModel, authStore)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -100,7 +105,7 @@ func main() {
 
 	// Build agent
 	ag, agErr := agent.New(agent.AgentConfig{
-		Provider:            prov,
+		Provider:            providerBuild.Provider,
 		Model:               resolvedModel,
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       *thinking,
@@ -146,11 +151,15 @@ func main() {
 		}
 
 		app := tui.New(ag, ctx, tui.Config{
-			SessionStore:    sessionStore,
-			Session:         sess,
-			ModelName:       modelDisplayName(resolvedModel),
+			SessionStore: sessionStore,
+			Session:      sess,
+			ModelName:    modelDisplayName(resolvedModel),
 			ProviderFactory: func(model core.Model) (core.Provider, error) {
-				return buildProvider(model, authStore)
+				build, err := buildProvider(model, authStore)
+				if err != nil {
+					return nil, err
+				}
+				return build.Provider, nil
 			},
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx))
@@ -162,6 +171,8 @@ func main() {
 	}
 
 	// --- Headless mode ---
+
+	printAuthNotice(os.Stderr, providerBuild.AuthNotice)
 
 	var streamedChars atomic.Int64
 	ag.Subscribe(func(e core.AgentEvent) {
@@ -321,33 +332,45 @@ func handleLogin(provider string, authStore *auth.Store) {
 }
 
 // buildProvider creates the appropriate provider based on the model's Provider field.
-func buildProvider(model core.Model, authStore *auth.Store) (core.Provider, error) {
+// It must stay side-effect free because the TUI reuses it while Bubble Tea owns
+// the terminal. Callers decide whether any auth notice should be rendered.
+func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult, error) {
 	switch model.Provider {
 	case "openai":
 		apiKey, isOAuth, err := authStore.GetAPIKey("openai")
 		if err != nil {
-			return nil, err
+			return ProviderBuildResult{}, err
 		}
 		if isOAuth {
 			accountID := authStore.GetAccountID("openai")
-			fmt.Fprintf(os.Stderr, "\033[90m(using ChatGPT subscription OAuth)\033[0m\n")
-			return openai.NewOAuth(apiKey, accountID), nil
+			return ProviderBuildResult{
+				Provider:   openai.NewOAuth(apiKey, accountID),
+				AuthNotice: "ChatGPT subscription OAuth",
+			}, nil
 		}
-		return openai.New(apiKey), nil
+		return ProviderBuildResult{Provider: openai.New(apiKey)}, nil
 
 	case "anthropic", "":
 		apiKey, isOAuth, err := authStore.GetAPIKey("anthropic")
 		if err != nil {
-			return nil, err
+			return ProviderBuildResult{}, err
 		}
+		build := ProviderBuildResult{Provider: anthropic.New(apiKey)}
 		if isOAuth {
-			fmt.Fprintf(os.Stderr, "\033[90m(using Claude Max OAuth)\033[0m\n")
+			build.AuthNotice = "Claude Max OAuth"
 		}
-		return anthropic.New(apiKey), nil
+		return build, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported provider: %q (model %s)", model.Provider, model.ID)
+		return ProviderBuildResult{}, fmt.Errorf("unsupported provider: %q (model %s)", model.Provider, model.ID)
 	}
+}
+
+func printAuthNotice(w io.Writer, notice string) {
+	if notice == "" {
+		return
+	}
+	fmt.Fprintf(w, "\033[90m(using %s)\033[0m\n", notice)
 }
 
 // modelDisplayName returns a compact name for TUI display.
