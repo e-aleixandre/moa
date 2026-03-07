@@ -18,6 +18,8 @@ type MoaConfig struct {
 // PermissionsConfig controls tool execution approval.
 type PermissionsConfig struct {
 	Mode  string   `json:"mode"`  // "yolo", "ask", or "auto" (default: "yolo")
+	Allow []string `json:"allow"` // Glob patterns auto-approved in ask mode: "Bash(npm:*)", "edit"
+	Deny  []string `json:"deny"`  // Glob patterns always denied (checked before allow)
 	Model string   `json:"model"` // Model for auto mode evaluator (e.g. "haiku")
 	Rules []string `json:"rules"` // Natural language rules for auto mode
 }
@@ -59,6 +61,8 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		Permissions: PermissionsConfig{
 			Mode:  base.Permissions.Mode,
 			Model: base.Permissions.Model,
+			Allow: append(base.Permissions.Allow, override.Permissions.Allow...),
+			Deny:  append(base.Permissions.Deny, override.Permissions.Deny...),
 			Rules: append(base.Permissions.Rules, override.Permissions.Rules...),
 		},
 	}

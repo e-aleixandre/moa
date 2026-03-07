@@ -127,7 +127,11 @@ func main() {
 	}
 	var permGate *permission.Gate
 	if permMode != permission.ModeYolo {
-		permGate = permission.New(permMode, moaCfg.Permissions.Rules)
+		permGate = permission.New(permMode, permission.Config{
+			Allow: moaCfg.Permissions.Allow,
+			Deny:  moaCfg.Permissions.Deny,
+			Rules: moaCfg.Permissions.Rules,
+		})
 	}
 
 	// Build agent

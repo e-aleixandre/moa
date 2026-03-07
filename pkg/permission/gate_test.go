@@ -7,7 +7,7 @@ import (
 )
 
 func TestYolo_ApprovesEverything(t *testing.T) {
-	g := New(ModeYolo, nil)
+	g := New(ModeYolo, Config{})
 
 	for _, tool := range []string{"bash", "write", "edit", "read", "ls"} {
 		if d := g.Check(context.Background(), tool, nil); d != nil {
@@ -17,7 +17,7 @@ func TestYolo_ApprovesEverything(t *testing.T) {
 }
 
 func TestAsk_ApprovesReadOnly(t *testing.T) {
-	g := New(ModeAsk, nil)
+	g := New(ModeAsk, Config{})
 
 	for _, tool := range []string{"read", "ls", "grep", "find"} {
 		if d := g.Check(context.Background(), tool, nil); d != nil {
@@ -27,12 +27,11 @@ func TestAsk_ApprovesReadOnly(t *testing.T) {
 }
 
 func TestAsk_BlocksWriteTools(t *testing.T) {
-	g := New(ModeAsk, nil)
+	g := New(ModeAsk, Config{})
 
 	for _, tool := range []string{"bash", "write", "edit"} {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 
-		// Respond with denial from a goroutine
 		go func() {
 			select {
 			case req := <-g.Requests():
@@ -50,7 +49,7 @@ func TestAsk_BlocksWriteTools(t *testing.T) {
 }
 
 func TestAsk_ApprovesWhenUserSaysYes(t *testing.T) {
-	g := New(ModeAsk, nil)
+	g := New(ModeAsk, Config{})
 
 	go func() {
 		req := <-g.Requests()
@@ -64,10 +63,10 @@ func TestAsk_ApprovesWhenUserSaysYes(t *testing.T) {
 }
 
 func TestAsk_ContextCancellation(t *testing.T) {
-	g := New(ModeAsk, nil)
+	g := New(ModeAsk, Config{})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
+	cancel()
 
 	d := g.Check(ctx, "bash", nil)
 	if d == nil || !d.Block {
@@ -76,7 +75,7 @@ func TestAsk_ContextCancellation(t *testing.T) {
 }
 
 func TestAsk_RequestCarriesToolInfo(t *testing.T) {
-	g := New(ModeAsk, nil)
+	g := New(ModeAsk, Config{})
 	args := map[string]any{"command": "rm -rf /"}
 
 	go func() {
@@ -93,10 +92,54 @@ func TestAsk_RequestCarriesToolInfo(t *testing.T) {
 	g.Check(context.Background(), "bash", args)
 }
 
-func TestAuto_FallsBackToAsk(t *testing.T) {
-	g := New(ModeAuto, []string{"allow npm scripts"})
+func TestAsk_AllowListAutoApproves(t *testing.T) {
+	g := New(ModeAsk, Config{Allow: []string{"Bash(git:*)", "Bash(npm:*)"}})
 
-	// Auto mode without evaluator should still ask for write tools
+	// Allowed by pattern — no user prompt needed
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "git status"})
+	if d != nil {
+		t.Error("git should be auto-approved by allow list")
+	}
+
+	d = g.Check(context.Background(), "bash", map[string]any{"command": "npm test"})
+	if d != nil {
+		t.Error("npm should be auto-approved by allow list")
+	}
+}
+
+func TestAsk_DenyListBlocksBeforeAllow(t *testing.T) {
+	g := New(ModeAsk, Config{
+		Allow: []string{"Bash(rm:*)"},  // would allow...
+		Deny:  []string{"Bash(rm:*)"}, // ...but deny takes priority
+	})
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
+	if d == nil || !d.Block {
+		t.Error("deny should override allow")
+	}
+}
+
+func TestAsk_AddAllowAtRuntime(t *testing.T) {
+	g := New(ModeAsk, Config{})
+
+	// Initially asks
+	go func() {
+		req := <-g.Requests()
+		req.Response <- true
+	}()
+	g.Check(context.Background(), "bash", map[string]any{"command": "go test ./..."})
+
+	// After adding allow, auto-approves
+	g.AddAllow("Bash(go:*)")
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "go test ./..."})
+	if d != nil {
+		t.Error("should auto-approve after AddAllow")
+	}
+}
+
+func TestAuto_FallsBackToAsk(t *testing.T) {
+	g := New(ModeAuto, Config{Rules: []string{"allow npm scripts"}})
+
 	go func() {
 		req := <-g.Requests()
 		req.Response <- true
@@ -105,5 +148,14 @@ func TestAuto_FallsBackToAsk(t *testing.T) {
 	d := g.Check(context.Background(), "write", map[string]any{"path": "test.txt"})
 	if d != nil {
 		t.Error("should approve when user approves in auto fallback")
+	}
+}
+
+func TestAuto_AllowListStillWorks(t *testing.T) {
+	g := New(ModeAuto, Config{Allow: []string{"Bash(git:*)"}})
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "git log"})
+	if d != nil {
+		t.Error("allow list should work in auto mode too")
 	}
 }
