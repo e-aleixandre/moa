@@ -1390,9 +1390,25 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 		} else {
 			m.permGate.SetMode(newMode)
 		}
+
+		// Auto mode needs an AI evaluator
+		if newMode == permission.ModeAuto {
+			evalSpec := "haiku"
+			evalModel, _ := core.ResolveModel(evalSpec)
+			if m.providerFactory != nil {
+				prov, err := m.providerFactory(evalModel)
+				if err == nil {
+					m.permGate.SetEvaluator(permission.NewEvaluator(prov, evalModel))
+				} else {
+					m.s.blocks = append(m.s.blocks, messageBlock{
+						Type: "error", Raw: fmt.Sprintf("auto evaluator unavailable: %v (will fall back to ask)", err),
+					})
+				}
+			}
+		}
+
 		m.agent.SetPermissionCheck(m.permGate.Check)
 		m.topBar.UpdatePermissionsSegment(string(newMode))
-		// Start listening for permission requests from the gate
 		cmds = append(cmds, m.waitForPermission())
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
