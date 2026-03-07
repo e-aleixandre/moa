@@ -419,6 +419,7 @@ func (m appModel) View() string {
 		chrome = append(chrome, tv)
 	}
 	if m.permPrompt.active {
+		// Permission prompt replaces the input area entirely
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			chrome = append(chrome, pv)
 		}
@@ -1162,62 +1163,66 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		listenCmd = m.waitForPermission()
 	}
 
-	// Rule input mode: capture text
-	if m.permPrompt.ruleMode {
-		switch msg.String() {
-		case "enter":
-			rule := strings.TrimSpace(m.permPrompt.ruleBuf)
-			if rule != "" && m.permGate != nil {
-				m.permGate.AddRule(rule)
-				m.s.blocks = append(m.s.blocks, messageBlock{
-					Type: "status", Raw: fmt.Sprintf("✓ Added rule: %s", rule),
-				})
-			}
-			m.permPrompt.ruleMode = false
-			m.permPrompt.ruleBuf = ""
-			return m, nil // stay on prompt, let user y/n/a with the new rule
-		case "esc":
-			m.permPrompt.ruleMode = false
-			m.permPrompt.ruleBuf = ""
+	// Amend mode: user is typing additional text after the option
+	if m.permPrompt.amending {
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.permPrompt.Confirm()
+			return m, listenCmd
+		case tea.KeyEsc:
+			m.permPrompt.amending = false
+			m.permPrompt.amendBuf = ""
 			return m, nil
-		case "backspace":
-			if len(m.permPrompt.ruleBuf) > 0 {
-				m.permPrompt.ruleBuf = m.permPrompt.ruleBuf[:len(m.permPrompt.ruleBuf)-1]
+		case tea.KeyBackspace:
+			if len(m.permPrompt.amendBuf) > 0 {
+				m.permPrompt.amendBuf = m.permPrompt.amendBuf[:len(m.permPrompt.amendBuf)-1]
+			} else {
+				// Backspace on empty amend exits amend mode
+				m.permPrompt.amending = false
 			}
 			return m, nil
 		default:
-			if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
-				m.permPrompt.ruleBuf += msg.String()
+			if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+				m.permPrompt.amendBuf += msg.String()
 			}
 			return m, nil
 		}
 	}
 
-	switch msg.String() {
-	case "y", "Y":
-		m.permPrompt.Approve()
-		return m, listenCmd
-	case "n", "N":
-		m.permPrompt.Deny()
-		return m, listenCmd
-	case "a", "A":
-		if m.permGate != nil {
-			pattern := m.permPrompt.AllowPattern()
-			m.permGate.AddAllow(pattern)
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status", Raw: fmt.Sprintf("✓ Added allow rule: %s", pattern),
-			})
+	// Normal mode: navigate and select
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.permPrompt.cursor > 0 {
+			m.permPrompt.cursor--
 		}
-		m.permPrompt.Approve()
-		return m, listenCmd
-	case "r", "R":
-		m.permPrompt.ruleMode = true
-		m.permPrompt.ruleBuf = ""
 		return m, nil
-	case "ctrl+c", "esc":
-		m.permPrompt.Deny()
+	case tea.KeyDown:
+		if m.permPrompt.cursor < len(m.permPrompt.options)-1 {
+			m.permPrompt.cursor++
+		}
+		return m, nil
+	case tea.KeyEnter:
+		m.permPrompt.Confirm()
+		return m, listenCmd
+	case tea.KeyTab:
+		m.permPrompt.amending = true
+		m.permPrompt.amendBuf = ""
+		return m, nil
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.permPrompt.Cancel()
 		m.agent.Abort()
 		return m, listenCmd
+	case tea.KeyRunes:
+		// Number keys for quick selection
+		s := msg.String()
+		if len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
+			idx := int(s[0]-'1')
+			if idx < len(m.permPrompt.options) {
+				m.permPrompt.cursor = idx
+				m.permPrompt.Confirm()
+				return m, listenCmd
+			}
+		}
 	}
 	return m, nil
 }

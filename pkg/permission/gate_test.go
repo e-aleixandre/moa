@@ -35,7 +35,7 @@ func TestAsk_BlocksWriteTools(t *testing.T) {
 		go func() {
 			select {
 			case req := <-g.Requests():
-				req.Response <- false
+				req.Response <- Response{Approved: false}
 			case <-ctx.Done():
 			}
 		}()
@@ -53,7 +53,7 @@ func TestAsk_ApprovesWhenUserSaysYes(t *testing.T) {
 
 	go func() {
 		req := <-g.Requests()
-		req.Response <- true
+		req.Response <- Response{Approved: true}
 	}()
 
 	d := g.Check(context.Background(), "bash", map[string]any{"command": "ls"})
@@ -86,10 +86,47 @@ func TestAsk_RequestCarriesToolInfo(t *testing.T) {
 		if req.Args["command"] != "rm -rf /" {
 			t.Errorf("expected command in args")
 		}
-		req.Response <- false
+		req.Response <- Response{Approved: false}
 	}()
 
 	g.Check(context.Background(), "bash", args)
+}
+
+func TestAsk_DenialWithFeedback(t *testing.T) {
+	g := New(ModeAsk, Config{})
+
+	go func() {
+		req := <-g.Requests()
+		req.Response <- Response{Approved: false, Feedback: "use a different filename"}
+	}()
+
+	d := g.Check(context.Background(), "write", map[string]any{"path": "test.txt"})
+	if d == nil || !d.Block {
+		t.Fatal("should block")
+	}
+	if d.Reason != "use a different filename" {
+		t.Errorf("expected feedback as reason, got: %s", d.Reason)
+	}
+}
+
+func TestAsk_AllowViaResponse(t *testing.T) {
+	g := New(ModeAsk, Config{})
+
+	go func() {
+		req := <-g.Requests()
+		req.Response <- Response{Approved: true, Allow: "Bash(git:*)"}
+	}()
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "git status"})
+	if d != nil {
+		t.Error("should approve")
+	}
+
+	// The pattern should now be in the allow list
+	d = g.Check(context.Background(), "bash", map[string]any{"command": "git log"})
+	if d != nil {
+		t.Error("git should be auto-approved after allow was added")
+	}
 }
 
 func TestAsk_AllowListAutoApproves(t *testing.T) {
@@ -125,7 +162,7 @@ func TestAsk_AddAllowAtRuntime(t *testing.T) {
 	// Initially asks
 	go func() {
 		req := <-g.Requests()
-		req.Response <- true
+		req.Response <- Response{Approved: true}
 	}()
 	g.Check(context.Background(), "bash", map[string]any{"command": "go test ./..."})
 
@@ -142,7 +179,7 @@ func TestAuto_FallsBackToAsk(t *testing.T) {
 
 	go func() {
 		req := <-g.Requests()
-		req.Response <- true
+		req.Response <- Response{Approved: true}
 	}()
 
 	d := g.Check(context.Background(), "write", map[string]any{"path": "test.txt"})
