@@ -103,8 +103,22 @@ func (FlatLayout) RenderToolBlock(block ToolBlockData, width int, theme Theme) s
 	}
 
 	if block.Body != "" {
+		diffAdd := lipgloss.NewStyle().Foreground(theme.Green).Background(bg)
+		diffDel := lipgloss.NewStyle().Foreground(theme.Red).Background(bg)
+		diffHunk := lipgloss.NewStyle().Foreground(theme.Overlay0).Background(bg)
 		for _, bl := range strings.Split(block.Body, "\n") {
-			content := pad + bodyStyle.Background(bg).Render(bl)
+			style := bodyStyle.Background(bg)
+			if block.IsDiff {
+				switch {
+				case strings.HasPrefix(bl, "+"):
+					style = diffAdd
+				case strings.HasPrefix(bl, "-"):
+					style = diffDel
+				case strings.HasPrefix(bl, "@@"):
+					style = diffHunk
+				}
+			}
+			content := pad + style.Render(bl)
 			lines = append(lines, bgPadRight(content, width, bg))
 		}
 	}

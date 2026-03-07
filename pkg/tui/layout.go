@@ -33,6 +33,7 @@ type ToolBlockData struct {
 	Header   string // tail-truncation notice (above body) — may be empty
 	Body     string // content — may be empty (e.g. running tool with no output yet)
 	Footer   string // head-truncation notice (below body) — may be empty
+	IsDiff   bool   // true when Body contains unified diff (color +/- lines)
 	Done     bool
 	IsError  bool
 }
@@ -111,6 +112,7 @@ func buildToolBlockData(block messageBlock, expanded bool) ToolBlockData {
 		Header:   header,
 		Body:     body,
 		Footer:   footer,
+		IsDiff:   block.ToolDiff != "" && !block.IsError,
 		Done:     block.ToolDone,
 		IsError:  block.IsError,
 	}
@@ -147,6 +149,8 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 		target, _ = stringArg(block.ToolArgs, "path")
 		if block.IsError {
 			body = block.ToolResult
+		} else if block.ToolDiff != "" {
+			body = block.ToolDiff
 		} else if newText, ok := stringArg(block.ToolArgs, "newText"); ok {
 			body = newText
 		}

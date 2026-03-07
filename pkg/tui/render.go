@@ -23,6 +23,7 @@ type messageBlock struct {
 	ToolName   string         // tool name
 	ToolArgs   map[string]any // call arguments
 	ToolResult string         // raw result text (populated on completion)
+	ToolDiff   string         // diff output for edit tool (from onUpdate, preserved across ToolExecEnd)
 	ToolDone   bool           // true after tool_execution_end
 	IsError    bool           // true if the tool returned an error
 }
