@@ -791,7 +791,7 @@ func TestSummarizeToolBlock_Bash(t *testing.T) {
 		ToolArgs:   map[string]any{"command": "ls -la"},
 		ToolResult: "file1.go\nfile2.go", ToolDone: true,
 	}
-	action, target, body, footer := summarizeToolBlock(block, maxToolPreviewLines)
+	action, target, _, body, footer := summarizeToolBlock(block, maxToolPreviewLines)
 	if action != "bash" {
 		t.Errorf("action = %q, want bash", action)
 	}
@@ -812,7 +812,7 @@ func TestSummarizeToolBlock_Write(t *testing.T) {
 		ToolArgs:   map[string]any{"path": "/tmp/test.go", "content": "package main\n"},
 		ToolResult: "Successfully wrote 13 bytes", ToolDone: true,
 	}
-	action, target, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	action, target, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if action != "write" {
 		t.Errorf("action = %q", action)
 	}
@@ -831,7 +831,7 @@ func TestSummarizeToolBlock_WriteError(t *testing.T) {
 		ToolArgs:   map[string]any{"path": "/etc/test", "content": "x"},
 		ToolResult: "permission denied", ToolDone: true, IsError: true,
 	}
-	_, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	_, _, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if body != "permission denied" {
 		t.Errorf("on error, body should be result, got %q", body)
 	}
@@ -843,7 +843,7 @@ func TestSummarizeToolBlock_BashRunningWithStreaming(t *testing.T) {
 		ToolArgs:   map[string]any{"command": "make test"},
 		ToolResult: "PASS pkg/core\n",
 	}
-	_, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	_, _, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if body != "PASS pkg/core" {
 		t.Errorf("running bash with streamed output should show body, got %q", body)
 	}
@@ -854,7 +854,7 @@ func TestSummarizeToolBlock_BashNoOutputYet(t *testing.T) {
 		Type: "tool", ToolName: "bash",
 		ToolArgs: map[string]any{"command": "sleep 10"},
 	}
-	_, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	_, _, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if body != "" {
 		t.Errorf("bash with no output should have empty body, got %q", body)
 	}
@@ -882,6 +882,31 @@ func TestTruncateBlockText(t *testing.T) {
 	}
 }
 
+func TestTruncateBlockTextTail(t *testing.T) {
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	text := strings.Join(lines, "\n")
+
+	header, body := truncateBlockTextTail(text, 10)
+	if !strings.HasSuffix(body, "line 20") {
+		t.Errorf("body should end with line 20, got %q", body[len(body)-20:])
+	}
+	if strings.Contains(body, "line 1\n") {
+		t.Error("body should not contain first lines")
+	}
+	if !strings.Contains(header, "10 previous lines") {
+		t.Errorf("header = %q, want '10 previous lines'", header)
+	}
+	if !strings.Contains(header, "20 total") {
+		t.Errorf("header = %q, want '20 total'", header)
+	}
+	if !strings.Contains(header, "ctrl+o to expand") {
+		t.Errorf("header should mention ctrl+o, got %q", header)
+	}
+}
+
 func TestSummarizeToolBlock_ExpandedNoTruncation(t *testing.T) {
 	lines := make([]string, 30)
 	for i := range lines {
@@ -893,19 +918,22 @@ func TestSummarizeToolBlock_ExpandedNoTruncation(t *testing.T) {
 		ToolResult: strings.Join(lines, "\n"), ToolDone: true,
 	}
 
-	// Normal mode: truncated
-	_, _, body, footer := summarizeToolBlock(block, maxToolPreviewLines)
-	if !strings.Contains(footer, "20 more lines") {
-		t.Errorf("normal footer = %q, want truncation info", footer)
+	// Normal mode: tail-truncated (bash shows last N lines)
+	_, _, header, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	if !strings.Contains(header, "20 previous lines") {
+		t.Errorf("header = %q, want tail truncation info", header)
 	}
-	if strings.Contains(body, "line 30") {
-		t.Error("normal body should not contain last line")
+	if !strings.Contains(body, "line 30") {
+		t.Error("tail-truncated body should contain the LAST line")
+	}
+	if strings.Contains(body, "line 1\n") {
+		t.Error("tail-truncated body should NOT contain the first line")
 	}
 
 	// Expanded mode: full content
-	_, _, bodyExp, footerExp := summarizeToolBlock(block, 0)
-	if footerExp != "" {
-		t.Errorf("expanded footer = %q, want empty", footerExp)
+	_, _, headerExp, bodyExp, _ := summarizeToolBlock(block, 0)
+	if headerExp != "" {
+		t.Errorf("expanded header = %q, want empty", headerExp)
 	}
 	if !strings.Contains(bodyExp, "line 30") {
 		t.Error("expanded body should contain all lines")
