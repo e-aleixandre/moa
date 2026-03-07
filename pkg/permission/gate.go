@@ -18,12 +18,19 @@ const (
 	ModeAuto Mode = "auto" // AI evaluator decides; falls back to ask if no evaluator
 )
 
+// Response carries the user's decision back to the agent loop.
+type Response struct {
+	Approved bool
+	Feedback string // optional: denial reason or approval note
+	Allow    string // non-empty: add this glob pattern to the allow list
+}
+
 // Request is sent to the UI when user approval is needed.
 // The receiver must send exactly one value on Response.
 type Request struct {
 	ToolName string
 	Args     map[string]any
-	Response chan<- bool // true = approved
+	Response chan<- Response
 }
 
 // readOnly tools never require approval (even in ask/auto mode).
@@ -125,7 +132,7 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 
 // askUser sends a request to the UI and blocks until the user responds.
 func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-	respCh := make(chan bool, 1)
+	respCh := make(chan Response, 1)
 
 	select {
 	case g.reqCh <- Request{ToolName: name, Args: args, Response: respCh}:
@@ -134,11 +141,18 @@ func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *c
 	}
 
 	select {
-	case approved := <-respCh:
-		if approved {
+	case resp := <-respCh:
+		if resp.Allow != "" {
+			g.AddAllow(resp.Allow)
+		}
+		if resp.Approved {
 			return nil
 		}
-		return &core.ToolCallDecision{Block: true, Reason: "denied by user"}
+		reason := "denied by user"
+		if resp.Feedback != "" {
+			reason = resp.Feedback
+		}
+		return &core.ToolCallDecision{Block: true, Reason: reason}
 	case <-ctx.Done():
 		return &core.ToolCallDecision{Block: true, Reason: "cancelled"}
 	}

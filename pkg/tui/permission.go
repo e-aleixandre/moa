@@ -8,41 +8,59 @@ import (
 	"github.com/ealeixandre/moa/pkg/permission"
 )
 
-// permissionPrompt shows a tool approval dialog when permissions require it.
+// permOption is one choice in the permission prompt.
+type permOption struct {
+	label    string // e.g. "Yes", "Yes, always allow Bash(git:*)", "No"
+	approved bool
+	allow    string // glob pattern to add (empty for plain yes/no)
+}
+
+// permissionPrompt replaces the input area with a numbered selector
+// when tool permissions require user approval.
 type permissionPrompt struct {
 	active   bool
 	request  permission.Request
-	ruleMode bool   // true when user is typing a rule
-	ruleBuf  string // rule text being typed
+	options  []permOption
+	cursor   int
+	amending bool   // Tab pressed: editing the selected option's text
+	amendBuf string // text after ", "
 }
 
 func (p *permissionPrompt) Show(req permission.Request) {
+	pattern := permission.GenerateAllowPattern(req.ToolName, req.Args)
 	p.active = true
 	p.request = req
-	p.ruleMode = false
-	p.ruleBuf = ""
+	p.cursor = 0
+	p.amending = false
+	p.amendBuf = ""
+	p.options = []permOption{
+		{label: "Yes", approved: true},
+		{label: fmt.Sprintf("Yes, always allow %s", pattern), approved: true, allow: pattern},
+		{label: "No", approved: false},
+	}
 }
 
-func (p *permissionPrompt) Approve() {
+func (p *permissionPrompt) respond(resp permission.Response) {
 	if p.active {
-		p.request.Response <- true
+		p.request.Response <- resp
 		p.active = false
 	}
 }
 
-func (p *permissionPrompt) Deny() {
-	if p.active {
-		p.request.Response <- false
-		p.active = false
+func (p *permissionPrompt) Confirm() {
+	if !p.active || p.cursor >= len(p.options) {
+		return
 	}
+	opt := p.options[p.cursor]
+	p.respond(permission.Response{
+		Approved: opt.approved,
+		Feedback: strings.TrimSpace(p.amendBuf),
+		Allow:    opt.allow,
+	})
 }
 
-// AllowPattern returns the glob pattern that would be added for "always allow".
-func (p *permissionPrompt) AllowPattern() string {
-	if !p.active {
-		return ""
-	}
-	return permission.GenerateAllowPattern(p.request.ToolName, p.request.Args)
+func (p *permissionPrompt) Cancel() {
+	p.respond(permission.Response{Approved: false})
 }
 
 func (p *permissionPrompt) View(width int, theme Theme) string {
@@ -52,15 +70,19 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 
 	warn := lipgloss.NewStyle().Foreground(theme.Yellow).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(theme.Overlay0)
-	key := lipgloss.NewStyle().Foreground(theme.Mauve).Bold(true)
+	num := lipgloss.NewStyle().Foreground(theme.Overlay1)
+	sel := lipgloss.NewStyle().Foreground(theme.Text).Bold(true)
+	normal := lipgloss.NewStyle().Foreground(theme.Subtext1)
 	body := lipgloss.NewStyle().Foreground(theme.Text)
 
-	// Tool summary: most relevant arg
 	summary := permissionSummary(p.request.ToolName, p.request.Args)
 
 	var lines []string
+
+	// Header: "⚠ approve write?"
 	lines = append(lines, warn.Render(fmt.Sprintf("  ⚠ approve %s?", p.request.ToolName)))
 
+	// Tool summary (command, path, etc.)
 	if summary != "" {
 		maxW := width - 4
 		if maxW > 0 && lipgloss.Width(summary) > maxW {
@@ -69,22 +91,40 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 		lines = append(lines, body.Render("  "+summary))
 	}
 
-	if p.ruleMode {
-		ruleLabel := "  " + dim.Render("rule: ") + body.Render(p.ruleBuf+"█")
-		lines = append(lines, ruleLabel)
-		hint := "  " + dim.Render("enter to save, esc to cancel")
-		lines = append(lines, hint)
-	} else {
-		pattern := p.AllowPattern()
-		keys := "  " +
-			key.Render("[y]") + dim.Render(" approve  ") +
-			key.Render("[n]") + dim.Render(" deny  ") +
-			key.Render("[a]") + dim.Render(" always allow "+pattern+"  ") +
-			key.Render("[r]") + dim.Render(" add rule")
-		lines = append(lines, keys)
+	lines = append(lines, "")
+
+	// Options
+	for i, opt := range p.options {
+		cursor := "  "
+		if i == p.cursor {
+			cursor = "▸ "
+		}
+
+		numStr := num.Render(fmt.Sprintf("%d.", i+1))
+
+		var text string
+		if i == p.cursor {
+			if p.amending {
+				text = sel.Render(opt.label+", ") + body.Render(p.amendBuf+"█")
+			} else {
+				text = sel.Render(opt.label)
+			}
+		} else {
+			text = normal.Render(opt.label)
+		}
+
+		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, numStr, text))
 	}
 
-	return strings.Join(lines, "\n")
+	lines = append(lines, "")
+	lines = append(lines, dim.Render("  Esc cancel · Tab amend"))
+
+	content := strings.Join(lines, "\n")
+	innerWidth := width - 4
+	if innerWidth < 30 {
+		innerWidth = 30
+	}
+	return pickerBorderStyle.Width(innerWidth).Render(content)
 }
 
 // permissionSummary extracts the most relevant arg for display.
@@ -99,7 +139,6 @@ func permissionSummary(toolName string, args map[string]any) string {
 			return path
 		}
 	}
-	// Fallback: show all args compactly
 	if len(args) == 0 {
 		return ""
 	}
