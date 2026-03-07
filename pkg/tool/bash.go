@@ -83,10 +83,12 @@ func NewBash(cfg ToolConfig) core.Tool {
 			cmd.WaitDelay = 5 * time.Second
 
 			// Capture stdout and stderr, streaming via onUpdate.
-			// Buffers are capped at maxOutputBytes to prevent OOM on huge output.
-			var stdout, stderr cappedBuffer
-			stdout.max = maxOutputBytes
-			stderr.max = maxOutputBytes
+			// Buffers keep head + tail to preserve both the start and end of output.
+			var stdout, stderr headTailBuffer
+			stdout.headMax = maxOutputBytes / 2
+			stdout.tailMax = maxOutputBytes / 2
+			stderr.headMax = maxOutputBytes / 2
+			stderr.tailMax = maxOutputBytes / 2
 
 			stdoutPipe, err := cmd.StdoutPipe()
 			if err != nil {
@@ -105,7 +107,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 			var wg sync.WaitGroup
 			wg.Add(2)
 
-			streamReader := func(r io.Reader, buf *cappedBuffer) {
+			streamReader := func(r io.Reader, buf *headTailBuffer) {
 				defer wg.Done()
 				tmp := make([]byte, 4096)
 				for {
@@ -144,15 +146,15 @@ func NewBash(cfg ToolConfig) core.Tool {
 				}
 			}
 
+			stdout.Close()
+			stderr.Close()
+
 			out := stdout.String()
 			errOut := stderr.String()
 
 			var result strings.Builder
 			if out != "" {
 				result.WriteString(out)
-				if stdout.truncated {
-					result.WriteString("\n\n[output truncated]")
-				}
 			}
 			if errOut != "" {
 				if result.Len() > 0 {
@@ -160,9 +162,6 @@ func NewBash(cfg ToolConfig) core.Tool {
 				}
 				result.WriteString("STDERR:\n")
 				result.WriteString(errOut)
-				if stderr.truncated {
-					result.WriteString("\n\n[output truncated]")
-				}
 			}
 			if exitCode != 0 {
 				if result.Len() > 0 {
