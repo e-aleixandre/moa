@@ -323,17 +323,12 @@ func (m appModel) View() string {
 
 	// Streaming thinking (if visible and active)
 	if m.s.thinkingText != "" && m.s.showThinking {
-		wrapWidth := m.width - 2
-		if wrapWidth < 20 {
-			wrapWidth = 20
-		}
-		styled := thinkingStyle.Width(wrapWidth).PaddingLeft(2).Render(m.s.thinkingText)
-		sections = append(sections, styled)
+		sections = append(sections, GetActiveLayout().RenderThinking(m.s.thinkingText, m.width, ActiveTheme)+"\n")
 	}
 
 	// Streaming assistant text (from cache, updated by renderTick)
 	if m.s.streamCache != "" {
-		sections = append(sections, m.s.streamCache)
+		sections = append(sections, GetActiveLayout().RenderAssistantText(m.s.streamCache, m.width)+"\n")
 	}
 
 	// Status bar
@@ -342,11 +337,12 @@ func (m appModel) View() string {
 	}
 
 	// Pending status (transient generic feedback — shown until next message send)
+	l := GetActiveLayout()
 	if m.s.pendingStatus != "" {
-		sections = append(sections, renderLiveNotice(m.s.pendingStatus, m.width))
+		sections = append(sections, l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
 	}
 	if m.s.pendingTimeline != nil {
-		sections = append(sections, renderLiveNotice(m.s.pendingTimeline.Text, m.width))
+		sections = append(sections, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
 	}
 
 	// Top status bar (above input)
@@ -1168,14 +1164,6 @@ func firstTextContent(content []core.Content) string {
 		}
 	}
 	return ""
-}
-
-func renderLiveNotice(text string, width int) string {
-	text = strings.ReplaceAll(text, "\n", " ")
-	if width > 0 {
-		text = truncateVisible(text, width)
-	}
-	return statusStyle.Render(text)
 }
 
 // --- Helpers ---

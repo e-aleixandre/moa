@@ -16,18 +16,8 @@ type inputModel struct {
 	enabled  bool
 }
 
-// Input box styles
-var (
-	inputBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("8")).
-				Padding(0, 1)
-
-	inputActiveBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("12")).
-				Padding(0, 1)
-)
+// inputBorderStyle and inputActiveBorderStyle are theme-derived.
+// Rebuilt by RebuildUI() in styles.go.
 
 func newInput() inputModel {
 	ta := textarea.New()
