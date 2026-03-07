@@ -302,6 +302,28 @@ func TestToolNameRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConvertAssistantContent_NilArguments(t *testing.T) {
+	// Anthropic requires "input" to be a dict, never null.
+	blocks := []core.Content{
+		core.ToolCallContent("tc-1", "pwd", nil),
+	}
+	result := convertAssistantContent(blocks, false)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(result))
+	}
+	input := result[0].(map[string]any)["input"]
+	if input == nil {
+		t.Fatal("input should not be nil")
+	}
+	m, ok := input.(map[string]any)
+	if !ok {
+		t.Fatalf("input should be map[string]any, got %T", input)
+	}
+	if len(m) != 0 {
+		t.Fatalf("input should be empty map, got %v", m)
+	}
+}
+
 func TestConvertMessages_MergeConsecutive(t *testing.T) {
 	// Two consecutive tool_results should merge into one user message
 	msgs := []core.Message{
