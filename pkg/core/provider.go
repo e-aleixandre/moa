@@ -37,12 +37,37 @@ type ToolSpec struct {
 
 // Model identifies an LLM model.
 type Model struct {
-	ID        string `json:"id"`
-	Provider  string `json:"provider"`
-	API       string `json:"api"`
-	Name      string `json:"name"`
-	MaxInput  int    `json:"max_input"`
-	MaxOutput int    `json:"max_output"`
+	ID        string   `json:"id"`
+	Provider  string   `json:"provider"`
+	API       string   `json:"api"`
+	Name      string   `json:"name"`
+	MaxInput  int      `json:"max_input"`
+	MaxOutput int      `json:"max_output"`
+	Pricing   *Pricing `json:"pricing,omitempty"`
+}
+
+// Pricing holds per-token costs in USD per million tokens.
+type Pricing struct {
+	Input      float64 `json:"input"`       // $/M input tokens
+	Output     float64 `json:"output"`      // $/M output tokens
+	CacheRead  float64 `json:"cache_read"`  // $/M cached input tokens
+	CacheWrite float64 `json:"cache_write"` // $/M cache write tokens
+}
+
+// Cost calculates the USD cost for a given Usage.
+func (p *Pricing) Cost(u Usage) float64 {
+	if p == nil {
+		return 0
+	}
+	const m = 1_000_000.0
+	cost := float64(u.Input)*p.Input/m + float64(u.Output)*p.Output/m
+	if p.CacheRead > 0 {
+		cost += float64(u.CacheRead) * p.CacheRead / m
+	}
+	if p.CacheWrite > 0 {
+		cost += float64(u.CacheWrite) * p.CacheWrite / m
+	}
+	return cost
 }
 
 // StreamOptions configures an LLM request.

@@ -144,6 +144,7 @@ func truncateVisible(s string, maxWidth int) string {
 const (
 	SegmentModel    = "model"
 	SegmentThinking = "thinking"
+	SegmentCost     = "cost"
 	SegmentContext  = "context"
 )
 
@@ -151,6 +152,7 @@ const (
 const (
 	PriorityModel    = 10
 	PriorityThinking = 20
+	PriorityCost     = 80
 	PriorityContext  = 90 // rightmost of the built-ins
 )
 
@@ -185,6 +187,22 @@ func (sl *StatusLine) UpdateModelSegment(name string) {
 func (sl *StatusLine) UpdateThinkingSegment(level string) {
 	text := statusLineKeyStyle.Render("thinking ") + statusLineValueStyle.Render(level)
 	sl.Set(SegmentThinking, text, PriorityThinking)
+}
+
+// UpdateCostSegment sets the session cost segment.
+func (sl *StatusLine) UpdateCostSegment(cost float64) {
+	if cost <= 0 {
+		sl.Remove(SegmentCost)
+		return
+	}
+	var val string
+	if cost < 0.01 {
+		val = fmt.Sprintf("$%.4f", cost)
+	} else {
+		val = fmt.Sprintf("$%.2f", cost)
+	}
+	text := statusLineKeyStyle.Render("cost ") + statusLineValueStyle.Render(val)
+	sl.Set(SegmentCost, text, PriorityCost)
 }
 
 // UpdateContextSegment sets the context usage segment.

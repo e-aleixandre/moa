@@ -110,3 +110,43 @@ func TestListModels_SortedByProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestPricing_Cost(t *testing.T) {
+	p := &Pricing{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75}
+	u := Usage{Input: 1_000_000, Output: 500_000, CacheRead: 2_000_000, CacheWrite: 100_000}
+	cost := p.Cost(u)
+	// 1M * 3/1M + 500K * 15/1M + 2M * 0.3/1M + 100K * 3.75/1M
+	// = 3.0 + 7.5 + 0.6 + 0.375 = 11.475
+	want := 11.475
+	if cost < want-0.001 || cost > want+0.001 {
+		t.Errorf("cost = %f, want %f", cost, want)
+	}
+}
+
+func TestPricing_Cost_NilPricing(t *testing.T) {
+	var p *Pricing
+	cost := p.Cost(Usage{Input: 1000, Output: 500})
+	if cost != 0 {
+		t.Errorf("nil pricing should return 0, got %f", cost)
+	}
+}
+
+func TestPricing_Cost_NoCacheFields(t *testing.T) {
+	p := &Pricing{Input: 1, Output: 4}
+	u := Usage{Input: 1_000_000, Output: 1_000_000, CacheRead: 500_000}
+	cost := p.Cost(u)
+	// CacheRead price is 0, so only Input + Output
+	// 1M * 1/1M + 1M * 4/1M = 5.0
+	want := 5.0
+	if cost < want-0.001 || cost > want+0.001 {
+		t.Errorf("cost = %f, want %f", cost, want)
+	}
+}
+
+func TestKnownModels_HavePricing(t *testing.T) {
+	for id, m := range knownModels {
+		if m.Pricing == nil {
+			t.Errorf("model %s has no pricing", id)
+		}
+	}
+}
