@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Moa TUI Mockup</title>
+<style>
+  /* Catppuccin Mocha palette */
+  :root {
+    --base:      #1e1e2e;
+    --mantle:    #181825;
+    --crust:     #11111b;
+    --surface0:  #313244;
+    --surface1:  #45475a;
+    --surface2:  #585b70;
+    --text:      #cdd6f4;
+    --subtext1:  #bac2de;
+    --subtext0:  #a6adc8;
+    --overlay2:  #9399b2;
+    --overlay1:  #7f849c;
+    --overlay0:  #6c7086;
+    --rosewater: #f5e0dc;
+    --flamingo:  #f2cdcd;
+    --pink:      #f5c2e7;
+    --mauve:     #cba6f7;
+    --red:       #f38ba8;
+    --maroon:    #eba0ac;
+    --peach:     #fab387;
+    --yellow:    #f9e2af;
+    --green:     #a6e3a1;
+    --teal:      #94e2d5;
+    --sky:       #89dceb;
+    --sapphire:  #74c7ec;
+    --blue:      #89b4fa;
+    --lavender:  #b4befe;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--base);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 0;
+  }
+
+  .terminal {
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 12px 0;
+  }
+
+  /* --- User message --- */
+  .user-msg {
+    padding: 8px 0;
+  }
+  .user-msg .prompt { color: var(--blue); font-weight: bold; }
+  .user-msg .text { color: var(--text); }
+
+  /* --- Assistant text --- */
+  .assistant-msg {
+    padding: 4px 0;
+    color: var(--text);
+  }
+  .assistant-msg code {
+    background: var(--surface0);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+
+  /* --- Tool block --- */
+  .tool-block {
+    background: var(--surface0);
+    padding: 6px 16px;
+    margin: 6px 0;
+  }
+
+  .tool-title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .tool-action {
+    color: var(--green);
+    font-weight: bold;
+  }
+  .tool-target {
+    color: var(--peach);
+  }
+  .tool-dim {
+    color: var(--overlay0);
+  }
+
+  .tool-body {
+    color: var(--subtext1);
+    margin-top: 8px;
+    white-space: pre;
+  }
+
+  .tool-body.error {
+    color: var(--maroon);
+  }
+
+  .tool-header-notice,
+  .tool-footer-notice {
+    color: var(--overlay0);
+    font-style: italic;
+    margin-top: 4px;
+  }
+  .tool-header-notice {
+    margin-top: 8px;
+    margin-bottom: 2px;
+  }
+
+  /* --- Status line --- */
+  .status-line {
+    background: var(--surface0);
+    color: var(--text);
+    padding: 2px 12px;
+    margin-top: 16px;
+    font-size: 12px;
+    display: flex;
+    gap: 4px;
+  }
+  .status-line .key { color: var(--overlay1); }
+  .status-line .val { color: var(--text); }
+  .status-line .sep { color: var(--surface2); }
+
+  /* --- Spinner / status --- */
+  .status-msg {
+    color: var(--overlay1);
+    padding: 4px 0;
+  }
+  .status-msg .spinner { color: var(--sapphire); }
+
+  /* --- Thinking --- */
+  .thinking {
+    color: var(--overlay0);
+    padding: 2px 0 2px 16px;
+  }
+
+  /* --- Section divider --- */
+  .spacer { height: 12px; }
+
+  /* --- Code blocks (assistant markdown) --- */
+  .code-block {
+    background: var(--surface0);
+    color: var(--text);
+    padding: 8px 16px;
+    margin: 8px 16px;
+    font-size: 13px;
+    line-height: 1.45;
+    overflow-x: auto;
+  }
+  .code-block .kw          { color: var(--mauve); }
+  .code-block .kw-namespace { color: var(--teal); }
+  .code-block .kw-type     { color: var(--yellow); }
+  .code-block .kw-decl     { color: var(--red); }
+  .code-block .str         { color: var(--green); }
+  .code-block .num         { color: var(--peach); }
+  .code-block .name-func   { color: var(--blue); }
+  .code-block .name-other  { color: var(--text); }
+  .code-block .name-class  { color: var(--yellow); }
+  .code-block .op          { color: var(--sky); font-weight: bold; }
+  .code-block .comment     { color: var(--overlay0); font-style: italic; }
+
+  /* --- Labels for the mockup --- */
+  .mockup-label {
+    color: var(--mauve);
+    font-size: 11px;
+    padding: 20px 0 4px 0;
+    border-bottom: 1px solid var(--surface1);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div class="terminal">
+
+  <div class="mockup-label">User prompt</div>
+
+  <div class="user-msg">
+    <span class="prompt">❯ </span><span class="text">crea un endpoint REST para gestionar usuarios con CRUD básico</span>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Assistant text → tool calls</div>
+
+  <div class="assistant-msg">
+    Voy a crear el endpoint. Primero escribo el modelo y luego el handler.
+  </div>
+
+  <div class="spacer"></div>
+
+  <!-- WRITE block -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">write</span>
+      <span class="tool-target">pkg/api/models/user.go</span>
+    </div>
+    <div class="tool-body">package models
+
+type User struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type CreateUserRequest struct {
+	Name  string `json:"name" validate:"required"`
+	Email string `json:"email" validate:"required,email"`</div>
+    <div class="tool-footer-notice">… (12 more lines, 22 total, ctrl+o to expand)</div>
+  </div>
+
+  <!-- WRITE block 2 -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">write</span>
+      <span class="tool-target">pkg/api/handlers/user.go</span>
+    </div>
+    <div class="tool-body">package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/example/app/pkg/api/models"
+)
+
+func HandleCreateUser(w http.ResponseWriter, r *http.Request) {</div>
+    <div class="tool-footer-notice">… (45 more lines, 55 total, ctrl+o to expand)</div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Bash with tail truncation (last 10 lines)</div>
+
+  <!-- BASH block -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">bash</span>
+      <span class="tool-target">go test -race ./pkg/api/...</span>
+    </div>
+    <div class="tool-header-notice">… (8 previous lines, 18 total, ctrl+o to expand)</div>
+    <div class="tool-body">=== RUN   TestCreateUser
+--- PASS: TestCreateUser (0.01s)
+=== RUN   TestGetUser
+--- PASS: TestGetUser (0.00s)
+=== RUN   TestUpdateUser
+--- PASS: TestUpdateUser (0.01s)
+=== RUN   TestDeleteUser
+--- PASS: TestDeleteUser (0.00s)
+PASS
+ok  	github.com/example/app/pkg/api	0.245s</div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Read block</div>
+
+  <!-- READ block -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">read</span>
+      <span class="tool-target">go.mod</span>
+    </div>
+    <div class="tool-body">module github.com/example/app
+
+go 1.23
+
+require (
+	github.com/go-chi/chi/v5 v5.0.12
+	github.com/go-playground/validator/v10 v10.19.0
+)</div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Edit block</div>
+
+  <!-- EDIT block -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">edit</span>
+      <span class="tool-target">pkg/api/routes.go</span>
+    </div>
+    <div class="tool-body">	r.Route("/users", func(r chi.Router) {
+		r.Post("/", handlers.HandleCreateUser)
+		r.Get("/{id}", handlers.HandleGetUser)
+		r.Put("/{id}", handlers.HandleUpdateUser)
+		r.Delete("/{id}", handlers.HandleDeleteUser)
+	})</div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Tool running (streaming)</div>
+
+  <!-- BASH running -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">bash</span>
+      <span class="tool-target">go build -o bin/server ./cmd/server</span>
+      <span class="tool-dim">running…</span>
+    </div>
+    <div class="tool-body">pkg/api/handlers/user.go:23:15: undefined: models.UpdateUserRequest
+pkg/api/handlers/user.go:41:9: cannot use err (variable of type error) as</div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Tool error</div>
+
+  <!-- BASH error -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">bash</span>
+      <span class="tool-target">rm -rf /etc/important</span>
+    </div>
+    <div class="tool-body error">rm: cannot remove '/etc/important': Permission denied</div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Search block</div>
+
+  <!-- SEARCH block -->
+  <div class="tool-block">
+    <div class="tool-title">
+      <span class="tool-action">search</span>
+      <span class="tool-target">go chi router middleware authentication</span>
+    </div>
+    <div class="tool-body">Chi provides built-in middleware for common tasks. For authentication,
+you can use jwtauth middleware from the go-chi/jwtauth package which
+integrates directly with chi's middleware chain...</div>
+    <div class="tool-footer-notice">… (15 more lines, 18 total, ctrl+o to expand)</div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Assistant with code block (Catppuccin syntax highlight)</div>
+
+  <div class="assistant-msg">
+    He creado el CRUD completo. Aquí tienes un ejemplo de cómo usarlo:
+  </div>
+
+  <pre class="code-block"><span class="kw-namespace">package</span> <span class="name-other">main</span>
+
+<span class="kw-namespace">import</span> <span class="str">"net/http"</span>
+
+<span class="kw">func</span> <span class="name-func">main</span>() {
+	<span class="name-other">r</span> <span class="op">:=</span> <span class="name-func">chi.NewRouter</span>()
+	<span class="name-other">r</span>.<span class="name-func">Use</span>(<span class="name-other">middleware</span>.<span class="name-other">Logger</span>)
+
+	<span class="name-other">r</span>.<span class="name-func">Route</span>(<span class="str">"/users"</span>, <span class="kw">func</span>(<span class="name-other">r</span> <span class="name-other">chi</span>.<span class="name-other">Router</span>) {
+		<span class="name-other">r</span>.<span class="name-func">Post</span>(<span class="str">"/"</span>, <span class="name-other">handlers</span>.<span class="name-func">HandleCreateUser</span>)
+		<span class="name-other">r</span>.<span class="name-func">Get</span>(<span class="str">"/{id}"</span>, <span class="name-other">handlers</span>.<span class="name-func">HandleGetUser</span>)
+	})
+
+	<span class="name-other">http</span>.<span class="name-func">ListenAndServe</span>(<span class="str">":3000"</span>, <span class="name-other">r</span>) <span class="comment">// TODO: handle error</span>
+}</pre>
+
+  <div class="assistant-msg" style="margin-top: 8px;">
+    Los handlers están en <code>pkg/api/handlers/user.go</code> y las rutas en <code>pkg/api/routes.go</code>. Los tests pasan correctamente.
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="mockup-label">Status line</div>
+
+  <div class="status-line">
+    <span class="key">model</span> <span class="val">sonnet-4</span>
+    <span class="sep"> · </span>
+    <span class="key">ctx</span> <span class="val" style="color: var(--green)">12%</span>
+    <span class="sep"> · </span>
+    <span class="key">session</span> <span class="val">a3f8c2d1</span>
+    <span class="sep"> · </span>
+    <span class="val" style="color: var(--overlay0)">idle</span>
+  </div>
+
+</div>
+</body>
+</html>

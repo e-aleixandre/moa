@@ -52,7 +52,7 @@ func (r *renderer) SetWidth(width int) {
 
 func (r *renderer) rebuild() {
 	gr, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStylesFromJSONBytes(glamourStyleJSON),
 		glamour.WithWordWrap(r.width),
 	)
 	if err == nil {
