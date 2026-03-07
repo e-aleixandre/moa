@@ -52,8 +52,8 @@ Make it robust enough to be a daily driver.
 ### Tool execution
 
 - [x] **Parallel tool calls** — Multiple tool calls execute concurrently (goroutines + WaitGroup). Three-phase: pre-flight (hooks, validation) → concurrent execution → sequential collect (ordered results). TUI shows "running N tools..." status.
-- [ ] **Diff visual in edit/write** — The edit tool has before/after content. Emit a ToolExecUpdate with a unified diff (or changed lines). No external dependency needed — `os/exec` with system `diff` or simple internal diffing.
-- [ ] **Streaming stderr in bash** — `streamReader` currently mixes stdout and stderr. If TUI received typed chunks (stdout vs stderr), stderr could render dimmed/red. Two pipes already exist — just differentiate the partial result.
+- [x] **Diff visual in edit/write** — The edit tool has before/after content. Emit a ToolExecUpdate with a unified diff (or changed lines). No external dependency needed — `os/exec` with system `diff` or simple internal diffing.
+- [x] **Streaming stderr in bash** — `streamReader` currently mixes stdout and stderr. If TUI received typed chunks (stdout vs stderr), stderr could render dimmed/red. Two pipes already exist — just differentiate the partial result.
 
 ### Configuration
 

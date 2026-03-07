@@ -109,14 +109,14 @@ func NewBash(cfg ToolConfig) core.Tool {
 			var wg sync.WaitGroup
 			wg.Add(2)
 
-			streamReader := func(r io.Reader, buf *headTailBuffer) {
+			streamReader := func(r io.Reader, buf *headTailBuffer, live bool) {
 				defer wg.Done()
 				tmp := make([]byte, 4096)
 				for {
 					n, err := r.Read(tmp)
 					if n > 0 {
 						accepted, _ := buf.Write(tmp[:n])
-						if onUpdate != nil && accepted > 0 {
+						if live && onUpdate != nil && accepted > 0 {
 							onUpdate(core.TextResult(string(tmp[:accepted])))
 						}
 					}
@@ -126,8 +126,8 @@ func NewBash(cfg ToolConfig) core.Tool {
 				}
 			}
 
-			go streamReader(stdoutPipe, &stdout)
-			go streamReader(stderrPipe, &stderr)
+			go streamReader(stdoutPipe, &stdout, true)
+			go streamReader(stderrPipe, &stderr, true)
 
 			wg.Wait()
 			err = cmd.Wait()
