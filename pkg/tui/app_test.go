@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 // newTestModel creates a minimal appModel for state-level tests.
@@ -67,6 +68,75 @@ func newSwitchTestApp(t *testing.T) appModel {
 	m.input.SetWidth(80)
 	m.status.SetWidth(80)
 	return m
+}
+
+func TestNew_StartInSessionBrowserDisablesInput(t *testing.T) {
+	ag, err := agent.New(agent.AgentConfig{
+		Provider: staticProvider{text: "ok"},
+		Model:    core.Model{ID: "claude-sonnet-4-6", Provider: "anthropic", Name: "Claude Sonnet 4.6", MaxInput: 200_000},
+	})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	m := New(ag, context.Background(), Config{StartInSessionBrowser: true})
+	if !m.sessionBrowser.active {
+		t.Fatal("session browser should start active")
+	}
+	if m.input.enabled {
+		t.Fatal("input should be disabled while the browser is active")
+	}
+}
+
+func TestActivateSession_ClosesBrowserAndRebuildsBlocks(t *testing.T) {
+	m := newSwitchTestApp(t)
+	m.sessionBrowser.Open()
+	m.input.SetEnabled(false)
+
+	sess := &session.Session{
+		ID: "abc123",
+		Messages: []core.AgentMessage{
+			core.WrapMessage(core.NewUserMessage("hello")),
+			{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("world")}}},
+		},
+	}
+
+	result, cmd := m.activateSession(sess)
+	rm := result.(appModel)
+	if cmd == nil {
+		t.Fatal("expected redraw command")
+	}
+	if rm.sessionBrowser.active {
+		t.Fatal("session browser should close after opening a session")
+	}
+	if !rm.input.enabled {
+		t.Fatal("input should be re-enabled")
+	}
+	if rm.session != sess {
+		t.Fatal("session should be set")
+	}
+	if len(rm.s.blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2", len(rm.s.blocks))
+	}
+	if rm.s.blocks[0].Type != "user" || rm.s.blocks[1].Type != "assistant" {
+		t.Fatalf("unexpected blocks: %+v", rm.s.blocks)
+	}
+}
+
+func TestSessionBrowser_FilterSelectsMatchingSession(t *testing.T) {
+	b := newSessionBrowser()
+	b.Open()
+	b.SetSummaries([]session.Summary{
+		{ID: "aaa111", Title: "first permission fix"},
+		{ID: "bbb222", Title: "session browser preview"},
+	})
+
+	changed := b.AppendFilter("preview")
+	if !changed {
+		t.Fatal("expected selection to change after filtering")
+	}
+	if got := b.SelectedID(); got != "bbb222" {
+		t.Fatalf("selected id = %q, want bbb222", got)
+	}
 }
 
 // --- Test 1: flushBlocks ordering and flushedCount ---

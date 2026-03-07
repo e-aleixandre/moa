@@ -3,6 +3,7 @@ package tui
 import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 // agentEventMsg wraps an agent event for the TUI event loop.
@@ -49,4 +50,23 @@ type compactResultMsg struct {
 // permissionRequestMsg carries a tool permission request from the agent loop.
 type permissionRequestMsg struct {
 	Request permission.Request
+}
+
+// sessionBrowserLoadedMsg carries the session list shown by --resume.
+type sessionBrowserLoadedMsg struct {
+	Summaries []session.Summary
+	Err       error
+}
+
+// sessionPreviewLoadedMsg carries the preview for the currently highlighted session.
+type sessionPreviewLoadedMsg struct {
+	ID      string
+	Session *session.Session
+	Err     error
+}
+
+// sessionOpenLoadedMsg carries the session chosen in the browser.
+type sessionOpenLoadedMsg struct {
+	Session *session.Session
+	Err     error
 }

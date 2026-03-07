@@ -32,18 +32,55 @@ type ProviderBuildResult struct {
 	AuthNotice string
 }
 
+type resumeFlag struct {
+	Enabled bool
+	ID      string
+}
+
+func (r *resumeFlag) String() string {
+	if !r.Enabled {
+		return ""
+	}
+	return r.ID
+}
+
+func (r *resumeFlag) Set(value string) error {
+	r.Enabled = true
+	switch value {
+	case "", "true":
+		r.ID = ""
+	case "false":
+		r.Enabled = false
+		r.ID = ""
+	default:
+		r.ID = strings.TrimSpace(value)
+	}
+	return nil
+}
+
+func (r *resumeFlag) IsBoolFlag() bool { return true }
+
 func main() {
+	os.Args = normalizeArgs(os.Args)
+
 	p := flag.String("p", "", "Prompt text or @file to read prompt from file")
 	modelFlag := flag.String("model", "sonnet", "Model: alias (sonnet, opus, codex) or provider/model-id")
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
 	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
-	resume := flag.Bool("resume", false, "Resume the most recent session")
+	continueFlag := flag.Bool("continue", false, "Resume the most recent session")
+	var resume resumeFlag
+	flag.Var(&resume, "resume", "Open the session browser, or resume a specific session with --resume <id>")
 	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
 	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
 	permsModel := flag.String("permissions-model", "", "Model for auto-mode AI evaluator (e.g. haiku)")
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	flag.Parse()
+
+	if *continueFlag && resume.Enabled {
+		fmt.Fprintln(os.Stderr, "error: use either --continue or --resume, not both")
+		os.Exit(1)
+	}
 
 	authStore := auth.NewStore("")
 
@@ -186,31 +223,42 @@ func main() {
 		}
 
 		var sess *session.Session
-		if *resume && sessionStore != nil {
-			sess, err = sessionStore.Latest()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not load session: %v\n", err)
-			}
-			if sess != nil {
-				// Restore conversation into agent (including compaction state)
-				if err := ag.LoadState(sess.Messages, sess.CompactionEpoch); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
-					sess = nil
+		startInSessionBrowser := false
+		if sessionStore != nil {
+			switch {
+			case resume.Enabled && resume.ID == "":
+				startInSessionBrowser = true
+			case resume.Enabled:
+				sess, err = sessionStore.Load(resume.ID)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not load session %q: %v\n", resume.ID, err)
+				}
+			case *continueFlag:
+				sess, err = sessionStore.Latest()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not load latest session: %v\n", err)
+				}
+				if sess == nil {
+					fmt.Fprintf(os.Stderr, "No previous session found. Starting fresh.\n")
 				}
 			}
-			if sess == nil {
-				fmt.Fprintf(os.Stderr, "No previous session found. Starting fresh.\n")
+		}
+		if sess != nil {
+			if err := ag.LoadState(sess.Messages, sess.CompactionEpoch); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
+				sess = nil
 			}
 		}
-		if sess == nil && sessionStore != nil {
+		if sess == nil && sessionStore != nil && !startInSessionBrowser {
 			sess = sessionStore.Create()
 		}
 
 		app := tui.New(ag, ctx, tui.Config{
-			SessionStore:   sessionStore,
-			Session:        sess,
-			ModelName:      modelDisplayName(resolvedModel),
-			PermissionGate: permGate,
+			SessionStore:          sessionStore,
+			Session:               sess,
+			StartInSessionBrowser: startInSessionBrowser,
+			ModelName:             modelDisplayName(resolvedModel),
+			PermissionGate:        permGate,
 			ProviderFactory: func(model core.Model) (core.Provider, error) {
 				build, err := buildProvider(model, authStore)
 				if err != nil {
@@ -477,6 +525,23 @@ func resolvePrompt(p string) (string, error) {
 	}
 
 	return "", nil
+}
+
+func normalizeArgs(args []string) []string {
+	if len(args) <= 1 {
+		return args
+	}
+	out := []string{args[0]}
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if (arg == "--resume" || arg == "-resume") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			out = append(out, arg+"="+args[i+1])
+			i++
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
 }
 
 func extractFinalAssistantText(msgs []core.AgentMessage) string {

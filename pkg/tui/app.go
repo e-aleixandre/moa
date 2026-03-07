@@ -84,13 +84,14 @@ type appModel struct {
 	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
 
 	// Components
-	input      inputModel
-	status     statusModel
-	picker     pickerModel
-	cmdPalette cmdPalette
-	permPrompt permissionPrompt
-	topBar     *StatusLine
-	bottomBar  *StatusLine
+	input          inputModel
+	status         statusModel
+	picker         pickerModel
+	cmdPalette     cmdPalette
+	permPrompt     permissionPrompt
+	sessionBrowser sessionBrowser
+	topBar         *StatusLine
+	bottomBar      *StatusLine
 
 	// Session persistence
 	sessionStore *session.Store   // nil if persistence is disabled
@@ -118,11 +119,12 @@ type ProviderFactory func(model core.Model) (core.Provider, error)
 
 // Config configures the TUI. All fields are optional.
 type Config struct {
-	SessionStore    *session.Store    // persistence backend (nil = no persistence)
-	Session         *session.Session  // session to resume (nil = fresh start)
-	ModelName       string            // display name for the active model (shown on startup)
-	ProviderFactory ProviderFactory   // creates providers for /model switching (nil = switching disabled)
-	PermissionGate  *permission.Gate  // permission gate (nil = yolo, no prompts)
+	SessionStore          *session.Store   // persistence backend (nil = no persistence)
+	Session               *session.Session // session to resume (nil = fresh start)
+	StartInSessionBrowser bool             // open the session browser before entering chat
+	ModelName             string           // display name for the active model (shown on startup)
+	ProviderFactory       ProviderFactory  // creates providers for /model switching (nil = switching disabled)
+	PermissionGate        *permission.Gate // permission gate (nil = yolo, no prompts)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -166,6 +168,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		input:           newInput(),
 		status:          newStatus(),
 		picker:          newPicker(),
+		sessionBrowser:  newSessionBrowser(),
 		topBar:          NewStatusLine(statusLineStyle),
 		bottomBar:       NewStatusLine(statusLineStyle),
 		sessionStore:    cfg.SessionStore,
@@ -187,6 +190,10 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		m.topBar.UpdatePermissionsSegment("yolo")
 	}
 	m.topBar.UpdateContextSegment(0)
+	if cfg.StartInSessionBrowser {
+		m.sessionBrowser.Open()
+		m.input.SetEnabled(false)
+	}
 
 	return m
 }
@@ -211,6 +218,9 @@ func (m appModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.waitForEvent()}
 	if m.permGate != nil {
 		cmds = append(cmds, m.waitForPermission())
+	}
+	if m.sessionBrowser.active {
+		cmds = append(cmds, m.loadSessionBrowser())
 	}
 	return tea.Batch(cmds...)
 }
@@ -352,6 +362,31 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.permPrompt.Show(msg.Request, mode)
 		return m, nil
 
+	case sessionBrowserLoadedMsg:
+		m.sessionBrowser.SetLoadError(msg.Err)
+		if msg.Err != nil {
+			return m, nil
+		}
+		m.sessionBrowser.SetSummaries(msg.Summaries)
+		if id := m.sessionBrowser.SelectedID(); id != "" {
+			return m, m.loadSessionPreview(id)
+		}
+		return m, nil
+
+	case sessionPreviewLoadedMsg:
+		if !m.sessionBrowser.active || msg.ID != m.sessionBrowser.SelectedID() {
+			return m, nil
+		}
+		m.sessionBrowser.SetPreview(msg.Session, msg.Err)
+		return m, nil
+
+	case sessionOpenLoadedMsg:
+		if msg.Err != nil {
+			m.sessionBrowser.previewErr = msg.Err.Error()
+			return m, nil
+		}
+		return m.activateSession(msg.Session)
+
 	case sessionSavedMsg:
 		// Session saved asynchronously. Log errors but don't interrupt the user.
 		if msg.err != nil {
@@ -381,6 +416,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m appModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+	if m.sessionBrowser.active {
+		return m.sessionBrowser.View(m.width, m.height)
 	}
 
 	// Content blocks — joined with "\n\n" (one blank line between blocks).
@@ -468,6 +506,10 @@ func (m appModel) View() string {
 // handleKey processes global shortcuts. All other keys propagate to
 // the focused component (input when idle).
 func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.sessionBrowser.active {
+		return m.handleSessionBrowserKey(msg)
+	}
+
 	// Permission prompt: intercept all keys.
 	if m.permPrompt.active {
 		return m.handlePermissionKey(msg)
@@ -1278,6 +1320,49 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m appModel) handleSessionBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC, tea.KeyEsc:
+		m.cleanup()
+		return m, tea.Quit
+	case tea.KeyCtrlN:
+		return m.activateSession(m.newSession())
+	case tea.KeyUp:
+		if m.sessionBrowser.MoveUp() {
+			return m, m.loadSessionPreview(m.sessionBrowser.SelectedID())
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.sessionBrowser.MoveDown(m.sessionBrowser.visibleListRows(m.height)) {
+			return m, m.loadSessionPreview(m.sessionBrowser.SelectedID())
+		}
+		return m, nil
+	case tea.KeyEnter:
+		if sel := m.sessionBrowser.Selected(); sel != nil {
+			return m, m.loadSessionByID(sel.ID)
+		}
+		return m, nil
+	case tea.KeyBackspace:
+		if m.sessionBrowser.BackspaceFilter() {
+			if id := m.sessionBrowser.SelectedID(); id != "" {
+				return m, m.loadSessionPreview(id)
+			}
+		}
+		return m, nil
+	case tea.KeyRunes, tea.KeySpace:
+		if msg.String() == "" {
+			return m, nil
+		}
+		if m.sessionBrowser.AppendFilter(msg.String()) {
+			if id := m.sessionBrowser.SelectedID(); id != "" {
+				return m, m.loadSessionPreview(id)
+			}
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
@@ -1491,6 +1576,93 @@ func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 	m.topBar.UpdateThinkingSegment(level)
 	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", level)
 	return m, nil
+}
+
+func (m appModel) loadSessionBrowser() tea.Cmd {
+	store := m.sessionStore
+	return func() tea.Msg {
+		if store == nil {
+			return sessionBrowserLoadedMsg{}
+		}
+		summaries, err := store.List()
+		return sessionBrowserLoadedMsg{Summaries: summaries, Err: err}
+	}
+}
+
+func (m appModel) loadSessionPreview(id string) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	store := m.sessionStore
+	return func() tea.Msg {
+		if store == nil {
+			return sessionPreviewLoadedMsg{ID: id}
+		}
+		sess, err := store.Load(id)
+		return sessionPreviewLoadedMsg{ID: id, Session: sess, Err: err}
+	}
+}
+
+func (m appModel) loadSessionByID(id string) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	store := m.sessionStore
+	return func() tea.Msg {
+		if store == nil {
+			return sessionOpenLoadedMsg{}
+		}
+		sess, err := store.Load(id)
+		return sessionOpenLoadedMsg{Session: sess, Err: err}
+	}
+}
+
+func (m appModel) newSession() *session.Session {
+	if m.sessionStore == nil {
+		return nil
+	}
+	return m.sessionStore.Create()
+}
+
+func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
+	if sess == nil {
+		sess = m.newSession()
+		if err := m.agent.Reset(); err != nil {
+			m.sessionBrowser.previewErr = err.Error()
+			return m, nil
+		}
+	} else if err := m.agent.LoadState(sess.Messages, sess.CompactionEpoch); err != nil {
+		m.sessionBrowser.previewErr = err.Error()
+		return m, nil
+	}
+
+	m.session = sess
+	m.sessionBrowser.Close()
+	m.input.SetEnabled(true)
+	m.s.blocks = m.s.blocks[:0]
+	m.s.flushedCount = 0
+	m.s.flushScheduledCount = 0
+	m.s.streamText = ""
+	m.s.thinkingText = ""
+	m.s.streamCache = ""
+	m.s.pendingStatus = ""
+	m.s.pendingTimeline = nil
+	m.s.sessionCost = 0
+	m.topBar.UpdateCostSegment(0)
+
+	if sess != nil && len(sess.Messages) > 0 {
+		m.rebuildFromMessages(sess.Messages)
+	}
+	m.refreshContextSegment()
+
+	if len(m.s.blocks) == 0 {
+		return m, tea.Sequence(clearScreen(), m.forceRepaint())
+	}
+
+	content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, false)
+	m.s.flushedCount = len(m.s.blocks)
+	m.s.flushScheduledCount = len(m.s.blocks)
+	return m, tea.Sequence(clearScreen(), tea.Println(content), m.forceRepaint())
 }
 
 // --- Session persistence ---

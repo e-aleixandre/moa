@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -114,5 +115,31 @@ func TestPrintAuthNotice(t *testing.T) {
 	printAuthNotice(&buf, "")
 	if buf.Len() != 0 {
 		t.Fatalf("printAuthNotice should be silent for empty notice, got %q", buf.String())
+	}
+}
+
+func TestNormalizeArgs_RewritesResumeID(t *testing.T) {
+	args := []string{"moa", "--resume", "abc123", "--model", "sonnet"}
+	got := normalizeArgs(args)
+	want := []string{"moa", "--resume=abc123", "--model", "sonnet"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestResumeFlag_Set(t *testing.T) {
+	var rf resumeFlag
+	if err := rf.Set("true"); err != nil {
+		t.Fatalf("Set(true): %v", err)
+	}
+	if !rf.Enabled || rf.ID != "" {
+		t.Fatalf("resumeFlag after Set(true) = %+v", rf)
+	}
+
+	if err := rf.Set("abc123"); err != nil {
+		t.Fatalf("Set(abc123): %v", err)
+	}
+	if !rf.Enabled || rf.ID != "abc123" {
+		t.Fatalf("resumeFlag after Set(abc123) = %+v", rf)
 	}
 }
