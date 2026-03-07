@@ -671,6 +671,48 @@ func TestHandleAgentEvent_ToolEnd_UpdatesBlockAndFlushes(t *testing.T) {
 	}
 }
 
+func TestHandleAgentEvent_ToolUpdate_StreamsOutput(t *testing.T) {
+	m := newTestModel()
+
+	// Start a bash tool.
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecStart, ToolCallID: "tc-1", ToolName: "bash",
+		Args: map[string]any{"command": "make test"},
+	})
+	if m.s.blocks[0].ToolResult != "" {
+		t.Fatal("result should be empty before any update")
+	}
+
+	// Stream two chunks.
+	r1 := core.TextResult("PASS pkg/core\n")
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecUpdate, ToolCallID: "tc-1", Result: &r1,
+	})
+	r2 := core.TextResult("PASS pkg/tui\n")
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecUpdate, ToolCallID: "tc-1", Result: &r2,
+	})
+
+	if m.s.blocks[0].ToolResult != "PASS pkg/core\nPASS pkg/tui\n" {
+		t.Errorf("accumulated result = %q", m.s.blocks[0].ToolResult)
+	}
+	if m.s.blocks[0].ToolDone {
+		t.Error("should still be running")
+	}
+
+	// End replaces with final result.
+	final := core.TextResult("ok\n2 passed")
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-1", ToolName: "bash", Result: &final,
+	})
+	if m.s.blocks[0].ToolResult != "ok\n2 passed" {
+		t.Errorf("final result = %q, want 'ok\\n2 passed'", m.s.blocks[0].ToolResult)
+	}
+	if !m.s.blocks[0].ToolDone {
+		t.Error("should be done")
+	}
+}
+
 func TestHandleAgentEvent_ParallelTools_FlushOnlyWhenAllDone(t *testing.T) {
 	m := newTestModel()
 
