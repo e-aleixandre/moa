@@ -169,36 +169,133 @@ const (
 	maxOutputLines = 2000
 )
 
-// cappedBuffer accumulates up to max bytes. Once full, further writes are
-// silently discarded. This prevents OOM when commands produce huge output
-// (e.g., cat /dev/urandom). The truncated flag tells the caller to append a notice.
-type cappedBuffer struct {
-	buf       bytes.Buffer
-	max       int
-	truncated bool
+// headTailBuffer keeps the first headMax bytes and the last tailMax bytes
+// of streamed output. When total input exceeds headMax, excess is routed
+// to a circular tail buffer that retains only the most recent tailMax bytes.
+// This preserves the beginning (command echo, first results) and end (errors,
+// summaries) of large outputs.
+//
+// When truncation occurs, the full output is also spilled to a temp file so
+// the model can explore it with read (offset/limit), grep, etc. without
+// re-executing the command.
+type headTailBuffer struct {
+	head       bytes.Buffer
+	tail       []byte // circular buffer
+	tailPos    int    // next write position in tail
+	tailFull   bool   // tail has wrapped at least once
+	headMax    int
+	tailMax    int
+	totalBytes int    // total bytes written (for truncation notice)
+	truncated  bool   // head is full, overflow goes to tail
+	spillFile  *os.File // temp file for full output (created lazily on truncation)
+	SpillPath  string   // path to temp file (empty if no truncation)
 }
 
-func (b *cappedBuffer) Write(p []byte) (int, error) {
-	if b.truncated {
-		return len(p), nil // accept but discard
-	}
-	remaining := b.max - b.buf.Len()
-	if remaining <= 0 {
+func (b *headTailBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	b.totalBytes += n
+
+	if !b.truncated {
+		remaining := b.headMax - b.head.Len()
+		if remaining >= n {
+			b.head.Write(p)
+			return n, nil
+		}
+		// Partially fill head, overflow to tail
+		if remaining > 0 {
+			b.head.Write(p[:remaining])
+			p = p[remaining:]
+		}
 		b.truncated = true
-		return len(p), nil
+		if b.tailMax > 0 {
+			b.tail = make([]byte, b.tailMax)
+		}
+		// Spill full output to temp file: write head first, then overflow
+		b.initSpillFile()
 	}
-	if len(p) > remaining {
-		b.buf.Write(p[:remaining])
-		b.truncated = true
-		return len(p), nil // report full write to caller
+
+	// Write overflow to spill file
+	if b.spillFile != nil {
+		b.spillFile.Write(p)
 	}
-	return b.buf.Write(p)
+
+	// Write overflow to circular tail buffer
+	if b.tailMax <= 0 {
+		return n, nil
+	}
+	for len(p) > 0 {
+		space := b.tailMax - b.tailPos
+		if space >= len(p) {
+			copy(b.tail[b.tailPos:], p)
+			b.tailPos += len(p)
+			if b.tailPos == b.tailMax {
+				b.tailPos = 0
+				b.tailFull = true
+			}
+			break
+		}
+		copy(b.tail[b.tailPos:], p[:space])
+		p = p[space:]
+		b.tailPos = 0
+		b.tailFull = true
+	}
+	return n, nil
 }
 
-func (b *cappedBuffer) String() string {
-	return b.buf.String()
+// initSpillFile creates a temp file and writes the head content to it.
+func (b *headTailBuffer) initSpillFile() {
+	f, err := os.CreateTemp("", "moa-output-*.txt")
+	if err != nil {
+		return // best effort — truncation still works without spill
+	}
+	b.spillFile = f
+	b.SpillPath = f.Name()
+	// Write the head bytes already captured
+	f.Write(b.head.Bytes())
 }
 
-func (b *cappedBuffer) Len() int {
-	return b.buf.Len()
+// Close closes the spill file if open. Must be called when done.
+func (b *headTailBuffer) Close() {
+	if b.spillFile != nil {
+		b.spillFile.Close()
+		b.spillFile = nil
+	}
+}
+
+// String returns the buffered output. If truncated, includes a notice
+// between head and tail with the spill file path.
+func (b *headTailBuffer) String() string {
+	if !b.truncated {
+		return b.head.String()
+	}
+	var sb strings.Builder
+	sb.Write(b.head.Bytes())
+
+	tailData := b.tailString()
+	omitted := b.totalBytes - b.head.Len() - len(tailData)
+	if omitted < 0 {
+		omitted = 0
+	}
+	if b.SpillPath != "" {
+		sb.WriteString(fmt.Sprintf("\n\n[... %d bytes truncated — full output at %s ...]\n\n", omitted, b.SpillPath))
+	} else {
+		sb.WriteString(fmt.Sprintf("\n\n[... %d bytes truncated ...]\n\n", omitted))
+	}
+	sb.WriteString(tailData)
+	return sb.String()
+}
+
+// tailString returns the tail buffer contents in order.
+func (b *headTailBuffer) tailString() string {
+	if !b.truncated || b.tailMax <= 0 {
+		return ""
+	}
+	if !b.tailFull {
+		return string(b.tail[:b.tailPos])
+	}
+	// Circular: data from tailPos..end + 0..tailPos
+	var sb strings.Builder
+	sb.Write(b.tail[b.tailPos:])
+	sb.Write(b.tail[:b.tailPos])
+	return sb.String()
 }

@@ -515,4 +515,195 @@ func TestRead_LongLine(t *testing.T) {
 	}
 }
 
+// --- headTailBuffer tests ---
+
+func TestHeadTailBuffer_SmallInput(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 100
+	b.tailMax = 100
+	b.Write([]byte("hello world"))
+	out := b.String()
+	if out != "hello world" {
+		t.Errorf("got %q", out)
+	}
+	if b.truncated {
+		t.Error("should not be truncated")
+	}
+}
+
+func TestHeadTailBuffer_ExactHead(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 5
+	b.tailMax = 5
+	b.Write([]byte("12345"))
+	if b.truncated {
+		t.Error("exactly headMax should not truncate")
+	}
+	if b.String() != "12345" {
+		t.Errorf("got %q", b.String())
+	}
+}
+
+func TestHeadTailBuffer_HeadPlusTail(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 10
+	b.tailMax = 10
+
+	// Write 30 bytes: head gets 10, tail gets last 10
+	b.Write([]byte("HHHHHHHHHH"))          // fills head (10 bytes)
+	b.Write([]byte("middle-data-ignored")) // 19 bytes to tail
+	b.Write([]byte("TTTTTTTTTT"))          // last 10 to tail
+	b.Close()
+	defer func() {
+		if b.SpillPath != "" {
+			os.Remove(b.SpillPath)
+		}
+	}()
+
+	out := b.String()
+	if !strings.HasPrefix(out, "HHHHHHHHHH") {
+		t.Error("should start with head content")
+	}
+	if !strings.HasSuffix(out, "TTTTTTTTTT") {
+		t.Errorf("should end with tail content, got suffix: %q", out[len(out)-20:])
+	}
+	if !strings.Contains(out, "truncated") {
+		t.Error("should contain truncation notice")
+	}
+}
+
+func TestHeadTailBuffer_TailWraps(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 5
+	b.tailMax = 5
+
+	// Head: "AAAAA", then overflow: write 20 bytes, tail should keep last 5
+	b.Write([]byte("AAAAA"))
+	b.Write([]byte("12345678901234567890"))
+	b.Close()
+	defer func() {
+		if b.SpillPath != "" {
+			os.Remove(b.SpillPath)
+		}
+	}()
+
+	out := b.String()
+	if !strings.HasPrefix(out, "AAAAA") {
+		t.Error("head should be preserved")
+	}
+	if !strings.HasSuffix(out, "67890") {
+		t.Errorf("tail should have last 5 bytes, got: %q", out)
+	}
+}
+
+func TestHeadTailBuffer_MultipleSmallWrites(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 3
+	b.tailMax = 4
+
+	for _, c := range "ABCDEFGHIJ" {
+		b.Write([]byte(string(c)))
+	}
+	b.Close()
+	defer func() {
+		if b.SpillPath != "" {
+			os.Remove(b.SpillPath)
+		}
+	}()
+
+	out := b.String()
+	if !strings.HasPrefix(out, "ABC") {
+		t.Errorf("head should be ABC, got prefix: %q", out[:3])
+	}
+	if !strings.HasSuffix(out, "GHIJ") {
+		t.Errorf("tail should be GHIJ, got: %q", out)
+	}
+}
+
+func TestHeadTailBuffer_ZeroTail(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 5
+	b.tailMax = 0
+
+	b.Write([]byte("ABCDEFGHIJ"))
+	b.Close()
+	defer func() {
+		if b.SpillPath != "" {
+			os.Remove(b.SpillPath)
+		}
+	}()
+	out := b.String()
+	if !strings.HasPrefix(out, "ABCDE") {
+		t.Error("head should be preserved")
+	}
+	if !strings.Contains(out, "truncated") {
+		t.Error("should contain truncation notice")
+	}
+}
+
+func TestHeadTailBuffer_SplitWrite(t *testing.T) {
+	// Write that partially fills head and overflows to tail
+	var b headTailBuffer
+	b.headMax = 5
+	b.tailMax = 5
+
+	b.Write([]byte("ABCDEFGHIJ")) // 10 bytes in one write
+	b.Close()
+	defer func() {
+		if b.SpillPath != "" {
+			os.Remove(b.SpillPath)
+		}
+	}()
+	out := b.String()
+	if !strings.HasPrefix(out, "ABCDE") {
+		t.Errorf("head: got %q", out)
+	}
+	if !strings.HasSuffix(out, "FGHIJ") {
+		t.Errorf("tail: got %q", out)
+	}
+}
+
+func TestHeadTailBuffer_SpillFile(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 10
+	b.tailMax = 10
+
+	// Write 50 bytes — should trigger spill
+	data := "HHHHHHHHHH" + "MMMMMMMMMMMMMMMMMMMM" + "TTTTTTTTTT"
+	b.Write([]byte(data))
+	b.Close()
+
+	if b.SpillPath == "" {
+		t.Fatal("expected spill file to be created on truncation")
+	}
+	defer os.Remove(b.SpillPath)
+
+	// Spill file should contain the complete output
+	spillData, err := os.ReadFile(b.SpillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(spillData) != data {
+		t.Errorf("spill file content mismatch: got %d bytes, want %d", len(spillData), len(data))
+	}
+
+	// String() should reference the spill path
+	out := b.String()
+	if !strings.Contains(out, b.SpillPath) {
+		t.Error("truncation notice should include spill file path")
+	}
+}
+
+func TestHeadTailBuffer_NoSpillWhenNotTruncated(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 100
+	b.tailMax = 100
+	b.Write([]byte("small"))
+	b.Close()
+	if b.SpillPath != "" {
+		os.Remove(b.SpillPath)
+		t.Error("should not create spill file for small output")
+	}
+}
+
 

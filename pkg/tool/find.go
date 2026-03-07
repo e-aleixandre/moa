@@ -55,13 +55,17 @@ func NewFind(cfg ToolConfig) core.Tool {
 			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 			cmd.Dir = cfg.WorkspaceRoot
 
-			var stdout, stderr cappedBuffer
-			stdout.max = maxOutputBytes
-			stderr.max = maxOutputBytes
+			var stdout, stderr headTailBuffer
+			stdout.headMax = maxOutputBytes / 2
+			stdout.tailMax = maxOutputBytes / 2
+			stderr.headMax = maxOutputBytes / 2
+			stderr.tailMax = maxOutputBytes / 2
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 
 			err := cmd.Run()
+			stdout.Close()
+			stderr.Close()
 
 			output := stdout.String()
 			if output == "" {
@@ -76,9 +80,6 @@ func NewFind(cfg ToolConfig) core.Tool {
 
 			// Truncate by lines
 			output = truncateLines(output, 1000)
-			if stdout.truncated {
-				output += "\n\n[output truncated]"
-			}
 
 			return core.TextResult(output), nil
 		},
