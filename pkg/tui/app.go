@@ -1346,8 +1346,8 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 		return m, m.flushBlocks(len(m.s.blocks))
 	}
 
+	cmds := []tea.Cmd{}
 	if newMode == permission.ModeYolo {
-		// Disable the gate entirely
 		m.permGate = nil
 		m.agent.SetPermissionCheck(nil)
 		m.s.blocks = append(m.s.blocks, messageBlock{
@@ -1355,17 +1355,19 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 		})
 	} else {
 		if m.permGate == nil {
-			// Create a new gate
 			m.permGate = permission.New(newMode, permission.Config{})
 		} else {
 			m.permGate.SetMode(newMode)
 		}
 		m.agent.SetPermissionCheck(m.permGate.Check)
+		// Start listening for permission requests from the gate
+		cmds = append(cmds, m.waitForPermission())
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
 		})
 	}
-	return m, m.flushBlocks(len(m.s.blocks))
+	cmds = append(cmds, m.flushBlocks(len(m.s.blocks)))
+	return m, tea.Batch(cmds...)
 }
 
 // handleThinkingSwitch processes `/thinking <level>`.
