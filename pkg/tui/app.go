@@ -42,7 +42,7 @@ type state struct {
 	dirty               bool           // streamText changed since last render tick
 	running             bool           // agent is running (tick should continue)
 	streamState         streamState
-	activeTools         int // number of tool calls currently executing
+	activeTools         int                   // number of tool calls currently executing
 	showThinking        bool                  // toggle thinking visibility (Ctrl+T)
 	initialized         bool                  // first WindowSizeMsg processed (one-shot bottom push done)
 	runGen              uint64                // incremented on each run; events from old runs are ignored
@@ -836,7 +836,7 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 				ToolCallID: msg.ToolCallID,
 				ToolName:   msg.ToolName,
 				ToolArgs:   tc.Arguments,
-				ToolResult: truncateLines(strings.TrimSpace(resultText), maxToolResultLines),
+				ToolResult: strings.TrimSpace(resultText),
 				ToolDone:   true,
 				IsError:    msg.IsError,
 			})
