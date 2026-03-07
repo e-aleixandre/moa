@@ -345,7 +345,11 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case permissionRequestMsg:
-		m.permPrompt.Show(msg.Request)
+		mode := permission.ModeAsk
+		if m.permGate != nil {
+			mode = m.permGate.Mode()
+		}
+		m.permPrompt.Show(msg.Request, mode)
 		return m, nil
 
 	case sessionSavedMsg:
@@ -1163,7 +1167,37 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		listenCmd = m.waitForPermission()
 	}
 
-	// Amend mode: user is typing additional text after the option
+	// Rule input mode (auto mode, option "Add rule")
+	if m.permPrompt.ruleMode {
+		switch msg.Type {
+		case tea.KeyEnter:
+			if rule := m.permPrompt.SaveRule(); rule != "" && m.permGate != nil {
+				m.permGate.AddRule(rule)
+				m.s.blocks = append(m.s.blocks, messageBlock{
+					Type: "status", Raw: fmt.Sprintf("✓ rule added: %s", rule),
+				})
+			}
+			return m, nil // stay on prompt — user still needs to Yes/No
+		case tea.KeyEsc:
+			m.permPrompt.ruleMode = false
+			m.permPrompt.ruleBuf = ""
+			return m, nil
+		case tea.KeyBackspace:
+			if len(m.permPrompt.ruleBuf) > 0 {
+				m.permPrompt.ruleBuf = m.permPrompt.ruleBuf[:len(m.permPrompt.ruleBuf)-1]
+			} else {
+				m.permPrompt.ruleMode = false
+			}
+			return m, nil
+		default:
+			if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+				m.permPrompt.ruleBuf += msg.String()
+			}
+			return m, nil
+		}
+	}
+
+	// Amend mode: typing feedback after the selected option
 	if m.permPrompt.amending {
 		switch msg.Type {
 		case tea.KeyEnter:
@@ -1177,7 +1211,6 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.permPrompt.amendBuf) > 0 {
 				m.permPrompt.amendBuf = m.permPrompt.amendBuf[:len(m.permPrompt.amendBuf)-1]
 			} else {
-				// Backspace on empty amend exits amend mode
 				m.permPrompt.amending = false
 			}
 			return m, nil
@@ -1202,9 +1235,21 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyEnter:
+		opt := m.permPrompt.options[m.permPrompt.cursor]
+		if opt.addRule {
+			m.permPrompt.ruleMode = true
+			m.permPrompt.ruleBuf = ""
+			return m, nil
+		}
 		m.permPrompt.Confirm()
 		return m, listenCmd
 	case tea.KeyTab:
+		opt := m.permPrompt.options[m.permPrompt.cursor]
+		if opt.addRule {
+			m.permPrompt.ruleMode = true
+			m.permPrompt.ruleBuf = ""
+			return m, nil
+		}
 		m.permPrompt.amending = true
 		m.permPrompt.amendBuf = ""
 		return m, nil
@@ -1213,11 +1258,17 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.agent.Abort()
 		return m, listenCmd
 	case tea.KeyRunes:
-		// Number keys for quick selection
 		s := msg.String()
 		if len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
-			idx := int(s[0]-'1')
+			idx := int(s[0] - '1')
 			if idx < len(m.permPrompt.options) {
+				opt := m.permPrompt.options[idx]
+				if opt.addRule {
+					m.permPrompt.cursor = idx
+					m.permPrompt.ruleMode = true
+					m.permPrompt.ruleBuf = ""
+					return m, nil
+				}
 				m.permPrompt.cursor = idx
 				m.permPrompt.Confirm()
 				return m, listenCmd
