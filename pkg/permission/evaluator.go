@@ -96,9 +96,9 @@ DEFAULT POLICY (apply when no user rules say otherwise):
 
 	sb.WriteString(`
 Respond with exactly one word: APPROVE, DENY, or ASK.
-- APPROVE: clearly safe, or explicitly allowed by a user rule.
-- DENY: clearly dangerous, sensitive, or explicitly forbidden by a user rule.
-- ASK: uncertain — let the user decide.
+- APPROVE: read-only operation that does not expose sensitive data, or a user rule explicitly allows it.
+- DENY: only when a user rule explicitly forbids this action. Never deny on your own.
+- ASK: anything that modifies state (writes, deletes, installs, commands with side effects), or you're unsure. When in doubt, ASK.
 `)
 
 	return sb.String()
