@@ -218,7 +218,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if len(m.s.blocks) > 0 {
-				content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
+				content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, false)
 				m.s.flushedCount = len(m.s.blocks)
 				m.s.flushScheduledCount = len(m.s.blocks)
 				return m, tea.Println(content)
@@ -448,7 +448,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.s.blocks) == 0 {
 			return m, nil
 		}
-		content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking)
+		content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, true)
 		return m, tea.Sequence(clearScreen(), tea.Println(content))
 
 	case tea.KeyEnter:

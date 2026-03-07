@@ -749,7 +749,7 @@ func TestSummarizeToolBlock_Bash(t *testing.T) {
 		ToolArgs:   map[string]any{"command": "ls -la"},
 		ToolResult: "file1.go\nfile2.go", ToolDone: true,
 	}
-	action, target, body, footer := summarizeToolBlock(block)
+	action, target, body, footer := summarizeToolBlock(block, maxToolPreviewLines)
 	if action != "bash" {
 		t.Errorf("action = %q, want bash", action)
 	}
@@ -770,7 +770,7 @@ func TestSummarizeToolBlock_Write(t *testing.T) {
 		ToolArgs:   map[string]any{"path": "/tmp/test.go", "content": "package main\n"},
 		ToolResult: "Successfully wrote 13 bytes", ToolDone: true,
 	}
-	action, target, body, _ := summarizeToolBlock(block)
+	action, target, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if action != "write" {
 		t.Errorf("action = %q", action)
 	}
@@ -789,7 +789,7 @@ func TestSummarizeToolBlock_WriteError(t *testing.T) {
 		ToolArgs:   map[string]any{"path": "/etc/test", "content": "x"},
 		ToolResult: "permission denied", ToolDone: true, IsError: true,
 	}
-	_, _, body, _ := summarizeToolBlock(block)
+	_, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if body != "permission denied" {
 		t.Errorf("on error, body should be result, got %q", body)
 	}
@@ -800,7 +800,7 @@ func TestSummarizeToolBlock_BashRunning(t *testing.T) {
 		Type: "tool", ToolName: "bash",
 		ToolArgs: map[string]any{"command": "sleep 10"},
 	}
-	_, _, body, _ := summarizeToolBlock(block)
+	_, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
 	if body != "" {
 		t.Errorf("running bash should have no body, got %q", body)
 	}
@@ -823,8 +823,38 @@ func TestTruncateBlockText(t *testing.T) {
 	if !strings.Contains(footer, "20 total") {
 		t.Errorf("footer = %q, want '20 total'", footer)
 	}
-	if strings.Contains(footer, "ctrl+o") {
-		t.Errorf("footer should not mention ctrl+o, got %q", footer)
+	if !strings.Contains(footer, "ctrl+o to expand") {
+		t.Errorf("footer should mention ctrl+o, got %q", footer)
+	}
+}
+
+func TestSummarizeToolBlock_ExpandedNoTruncation(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	block := messageBlock{
+		Type: "tool", ToolName: "bash",
+		ToolArgs:   map[string]any{"command": "cat big.txt"},
+		ToolResult: strings.Join(lines, "\n"), ToolDone: true,
+	}
+
+	// Normal mode: truncated
+	_, _, body, footer := summarizeToolBlock(block, maxToolPreviewLines)
+	if !strings.Contains(footer, "20 more lines") {
+		t.Errorf("normal footer = %q, want truncation info", footer)
+	}
+	if strings.Contains(body, "line 30") {
+		t.Error("normal body should not contain last line")
+	}
+
+	// Expanded mode: full content
+	_, _, bodyExp, footerExp := summarizeToolBlock(block, 0)
+	if footerExp != "" {
+		t.Errorf("expanded footer = %q, want empty", footerExp)
+	}
+	if !strings.Contains(bodyExp, "line 30") {
+		t.Error("expanded body should contain all lines")
 	}
 }
 
@@ -834,7 +864,7 @@ func TestRenderToolBlock_FullWidth(t *testing.T) {
 		ToolArgs:   map[string]any{"path": "/tmp/x.go", "content": "package main"},
 		ToolResult: "wrote ok", ToolDone: true,
 	}
-	rendered := renderToolBlock(block, 80)
+	rendered := renderToolBlock(block, 80, false)
 	if rendered == "" {
 		t.Fatal("empty render")
 	}
@@ -855,7 +885,7 @@ func TestRenderToolBlock_Structure(t *testing.T) {
 		ToolArgs:   map[string]any{"command": "ls"},
 		ToolResult: "file1\nfile2\nfile3", ToolDone: true,
 	}
-	rendered := renderToolBlock(block, 60)
+	rendered := renderToolBlock(block, 60, false)
 	lines := strings.Split(rendered, "\n")
 
 	// title + blank + 3 body = 5 lines minimum
