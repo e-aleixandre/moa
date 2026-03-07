@@ -422,16 +422,16 @@ func (m appModel) View() string {
 			chrome = append(chrome, pv)
 		}
 	} else {
-		// Command palette (above input)
-		if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
-			chrome = append(chrome, pv)
-		}
 		if iv := m.input.View(); iv != "" {
 			chrome = append(chrome, iv)
 		}
 	}
 	if bv := m.bottomBar.View(m.width); bv != "" {
 		chrome = append(chrome, bv)
+	}
+	// Command palette below everything (fixed height, no layout shift)
+	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
+		chrome = append(chrome, pv)
 	}
 
 	// Assemble: content (with blank-line gaps) + chrome (tight)
