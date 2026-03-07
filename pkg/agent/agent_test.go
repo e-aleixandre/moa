@@ -1059,12 +1059,12 @@ func TestLoop_CompactionDisabled(t *testing.T) {
 	reg := core.NewRegistry()
 	disabled := core.CompactionSettings{Enabled: false}
 	ag, err := New(AgentConfig{
-		Provider:            prov,
-		Model:               core.Model{ID: "test", MaxInput: 200_000},
-		Compaction:          &disabled,
-		Tools:               reg,
-		MaxTurns:            10,
-		MaxRunDuration:      30 * time.Second,
+		Provider:       prov,
+		Model:          core.Model{ID: "test", MaxInput: 200_000},
+		Compaction:     &disabled,
+		Tools:          reg,
+		MaxTurns:       10,
+		MaxRunDuration: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1279,6 +1279,57 @@ func TestLoadState(t *testing.T) {
 	loaded := ag.Messages()
 	if len(loaded) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(loaded))
+	}
+}
+
+func TestAppendMessage(t *testing.T) {
+	prov := NewMockProvider(simpleTextResponse("ok"))
+	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test", Provider: "anthropic"}})
+
+	event := core.AgentMessage{
+		Message: core.Message{
+			Role:    "session_event",
+			Content: []core.Content{core.TextContent("✓ Switched to o3 (openai)")},
+		},
+		Custom: map[string]any{"event": "model_switch"},
+	}
+	if err := ag.AppendMessage(event); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	msgs := ag.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want 1", len(msgs))
+	}
+	if msgs[0].Role != "session_event" {
+		t.Fatalf("messages[0].Role = %q, want session_event", msgs[0].Role)
+	}
+
+	msgs, err := ag.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) < 3 {
+		t.Fatalf("messages = %d, want at least 3", len(msgs))
+	}
+	if msgs[0].Role != "session_event" || msgs[1].Role != "user" {
+		t.Fatalf("expected session event before new user message, got roles %q then %q", msgs[0].Role, msgs[1].Role)
+	}
+}
+
+func TestDefaultConvertToLLM_IgnoresSessionEvent(t *testing.T) {
+	msgs := []core.AgentMessage{
+		{
+			Message: core.Message{Role: "session_event", Content: []core.Content{core.TextContent("✓ Switched to o3 (openai)")}},
+			Custom:  map[string]any{"event": "model_switch"},
+		},
+		core.WrapMessage(core.NewUserMessage("hello")),
+	}
+	llm := defaultConvertToLLM(msgs)
+	if len(llm) != 1 {
+		t.Fatalf("expected 1 LLM message, got %d", len(llm))
+	}
+	if llm[0].Role != "user" || llm[0].Content[0].Text != "hello" {
+		t.Fatalf("unexpected LLM messages: %+v", llm)
 	}
 }
 

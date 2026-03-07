@@ -36,17 +36,18 @@ type state struct {
 	flushedCount        int            // blocks confirmed in scrollback (hidden from View)
 	flushScheduledCount int            // blocks scheduled for tea.Println (not yet confirmed)
 	flushEpoch          int            // incremented on /clear to invalidate stale flushDoneMsg
-	streamText   string         // current streaming assistant text
-	thinkingText string         // current thinking text
-	streamCache  string         // cached glamour render of streamText (updated by renderTick)
-	dirty        bool           // streamText changed since last render tick
-	running      bool           // agent is running (tick should continue)
-	streamState  streamState
-	showThinking  bool      // toggle thinking visibility (Ctrl+T)
-	initialized   bool      // first WindowSizeMsg processed (one-shot bottom push done)
-	runGen        uint64    // incremented on each run; events from old runs are ignored
-	cleanupOnce   sync.Once // idempotent cleanup
-	pendingStatus string    // transient status shown in View(), flushed to scrollback on next send
+	streamText          string         // current streaming assistant text
+	thinkingText        string         // current thinking text
+	streamCache         string         // cached glamour render of streamText (updated by renderTick)
+	dirty               bool           // streamText changed since last render tick
+	running             bool           // agent is running (tick should continue)
+	streamState         streamState
+	showThinking        bool                  // toggle thinking visibility (Ctrl+T)
+	initialized         bool                  // first WindowSizeMsg processed (one-shot bottom push done)
+	runGen              uint64                // incremented on each run; events from old runs are ignored
+	cleanupOnce         sync.Once             // idempotent cleanup
+	pendingStatus       string                // transient generic status shown in View(), never persisted
+	pendingTimeline     *pendingTimelineEvent // live timeline event shown in View() until next send
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -55,6 +56,11 @@ type state struct {
 type taggedEvent struct {
 	event core.AgentEvent
 	gen   uint64
+}
+
+type pendingTimelineEvent struct {
+	Text    string
+	Message core.AgentMessage
 }
 
 // appModel is the root Bubble Tea model. It composes all components,
@@ -73,11 +79,11 @@ type appModel struct {
 	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
 
 	// Components
-	input      inputModel
-	status     statusModel
-	picker     pickerModel
-	topBar     *StatusLine
-	bottomBar  *StatusLine
+	input     inputModel
+	status    statusModel
+	picker    pickerModel
+	topBar    *StatusLine
+	bottomBar *StatusLine
 
 	// Session persistence
 	sessionStore *session.Store   // nil if persistence is disabled
@@ -96,7 +102,8 @@ type appModel struct {
 }
 
 // ProviderFactory creates a provider for a given model.
-// Returns the provider or an error (e.g. missing API key).
+// It must not write directly to stdout/stderr because the TUI may call it
+// while Bubble Tea owns the terminal.
 type ProviderFactory func(model core.Model) (core.Provider, error)
 
 // Config configures the TUI. All fields are optional.
@@ -137,24 +144,24 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 	})
 
 	m := appModel{
-		s:              &state{showThinking: true},
-		agent:          ag,
-		renderer:       newRenderer(80),
-		eventCh:        eventCh,
-		quit:           quit,
-		unsub:          unsub,
-		baseCtx:        ctx,
-		runGenAddr:     runGenAddr,
-		input:          newInput(),
-		status:         newStatus(),
-		picker:         newPicker(),
-		topBar:         NewStatusLine(statusLineStyle),
-		bottomBar:      NewStatusLine(statusLineStyle),
-		sessionStore:   cfg.SessionStore,
-		session:        cfg.Session,
-		modelName:      cfg.ModelName,
+		s:               &state{showThinking: true},
+		agent:           ag,
+		renderer:        newRenderer(80),
+		eventCh:         eventCh,
+		quit:            quit,
+		unsub:           unsub,
+		baseCtx:         ctx,
+		runGenAddr:      runGenAddr,
+		input:           newInput(),
+		status:          newStatus(),
+		picker:          newPicker(),
+		topBar:          NewStatusLine(statusLineStyle),
+		bottomBar:       NewStatusLine(statusLineStyle),
+		sessionStore:    cfg.SessionStore,
+		session:         cfg.Session,
+		modelName:       cfg.ModelName,
 		providerFactory: cfg.ProviderFactory,
-		scopedModels:   make(map[string]bool),
+		scopedModels:    make(map[string]bool),
 	}
 
 	// Initialize status line segments.
@@ -332,9 +339,12 @@ func (m appModel) View() string {
 		sections = append(sections, sv)
 	}
 
-	// Pending status (transient — shown until next message send)
+	// Pending status (transient generic feedback — shown until next message send)
 	if m.s.pendingStatus != "" {
-		sections = append(sections, statusStyle.Render(m.s.pendingStatus))
+		sections = append(sections, renderLiveNotice(m.s.pendingStatus, m.width))
+	}
+	if m.s.pendingTimeline != nil {
+		sections = append(sections, renderLiveNotice(m.s.pendingTimeline.Text, m.width))
 	}
 
 	// Top status bar (above input)
@@ -509,7 +519,12 @@ func (m *appModel) flushBlocks(to int) tea.Cmd {
 
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
-	// Clear transient status — it's live-only, never persisted to scrollback.
+	if err := m.commitPendingTimelineEvent(); err != nil {
+		m.s.pendingStatus = "✗ " + err.Error()
+		return m, nil
+	}
+
+	// Clear transient status — it's live-only and never persisted.
 	m.s.pendingStatus = ""
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
 
@@ -518,7 +533,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		m.session.SetTitle(text, 80)
 	}
 
-	// Flush user message to scrollback
+	// Flush committed timeline events (if any) plus the user message.
 	userFlush := m.flushBlocks(len(m.s.blocks))
 
 	m.s.running = true
@@ -535,8 +550,8 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	gen := m.s.runGen
 	baseCtx := m.baseCtx
 
-	// tea.Sequence guarantees: user message prints BEFORE agent starts.
-	// renderTick and spinner can batch concurrently (no ordering need).
+	// tea.Sequence guarantees: committed switch event + user message print
+	// before the agent starts. renderTick and spinner can batch concurrently.
 	return m, tea.Sequence(
 		userFlush,
 		tea.Batch(
@@ -782,6 +797,12 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "status", Raw: "✂ (conversation compacted)",
 			})
+		case "session_event":
+			if eventType(msg.Custom) == "model_switch" {
+				if text := firstTextContent(msg.Content); text != "" {
+					m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: text})
+				}
+			}
 		}
 	}
 }
@@ -824,6 +845,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
+		m.s.pendingStatus = ""
+		m.s.pendingTimeline = nil
 		// Delete old session, create fresh one
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
@@ -893,16 +916,21 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // switchToModel performs the actual model switch (shared by picker and /model <spec>).
 func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	oldModel := m.agent.Model()
+	if newModel.Provider == "" {
+		newModel.Provider = oldModel.Provider
+	}
 
 	var newProvider core.Provider
 	if newModel.Provider != oldModel.Provider {
 		if m.providerFactory == nil {
 			m.s.pendingStatus = fmt.Sprintf("✗ Cannot switch from %s to %s: no provider factory", oldModel.Provider, newModel.Provider)
+			m.s.pendingTimeline = nil
 			return m, nil
 		}
 		prov, err := m.providerFactory(newModel)
 		if err != nil {
 			m.s.pendingStatus = "✗ " + err.Error()
+			m.s.pendingTimeline = nil
 			return m, nil
 		}
 		newProvider = prov
@@ -911,6 +939,7 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	thinkingLevel := m.agent.ThinkingLevel()
 	if err := m.agent.Reconfigure(newProvider, newModel, thinkingLevel); err != nil {
 		m.s.pendingStatus = "✗ " + err.Error()
+		m.s.pendingTimeline = nil
 		return m, nil
 	}
 
@@ -921,7 +950,8 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	m.modelName = name
 	m.topBar.UpdateModelSegment(name)
 	m.refreshContextSegment()
-	m.s.pendingStatus = fmt.Sprintf("✓ Switched to %s (%s)", name, newModel.Provider)
+	m.s.pendingStatus = ""
+	m.s.pendingTimeline = newModelSwitchEvent(newModel)
 	return m, nil
 }
 
@@ -1020,6 +1050,66 @@ func (m *appModel) saveSession(msgs []core.AgentMessage) tea.Cmd {
 		err := store.Save(&snapshot)
 		return sessionSavedMsg{err: err}
 	}
+}
+
+func (m *appModel) commitPendingTimelineEvent() error {
+	if m.s.pendingTimeline == nil {
+		return nil
+	}
+	if err := m.agent.AppendMessage(m.s.pendingTimeline.Message); err != nil {
+		return err
+	}
+	m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: m.s.pendingTimeline.Text})
+	m.s.pendingTimeline = nil
+	return nil
+}
+
+func newModelSwitchEvent(model core.Model) *pendingTimelineEvent {
+	name := model.Name
+	if name == "" {
+		name = model.ID
+	}
+	text := fmt.Sprintf("✓ Switched to %s (%s)", name, model.Provider)
+	return &pendingTimelineEvent{
+		Text: text,
+		Message: core.AgentMessage{
+			Message: core.Message{
+				Role:      "session_event",
+				Content:   []core.Content{core.TextContent(text)},
+				Timestamp: time.Now().Unix(),
+			},
+			Custom: map[string]any{
+				"event":    "model_switch",
+				"model_id": model.ID,
+				"provider": model.Provider,
+			},
+		},
+	}
+}
+
+func eventType(custom map[string]any) string {
+	if custom == nil {
+		return ""
+	}
+	event, _ := custom["event"].(string)
+	return event
+}
+
+func firstTextContent(content []core.Content) string {
+	for _, c := range content {
+		if c.Type == "text" && c.Text != "" {
+			return c.Text
+		}
+	}
+	return ""
+}
+
+func renderLiveNotice(text string, width int) string {
+	text = strings.ReplaceAll(text, "\n", " ")
+	if width > 0 {
+		text = truncateVisible(text, width)
+	}
+	return statusStyle.Render(text)
 }
 
 // --- Helpers ---
