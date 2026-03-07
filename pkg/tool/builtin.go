@@ -177,7 +177,8 @@ const (
 //
 // When truncation occurs, the full output is also spilled to a temp file so
 // the model can explore it with read (offset/limit), grep, etc. without
-// re-executing the command.
+// re-executing the command. Set SpillDir before first Write to control where
+// the file is created (defaults to os.TempDir).
 type headTailBuffer struct {
 	head       bytes.Buffer
 	tail       []byte // circular buffer
@@ -188,6 +189,7 @@ type headTailBuffer struct {
 	totalBytes int    // total bytes written (for truncation notice)
 	truncated  bool   // head is full, overflow goes to tail
 	spillFile  *os.File // temp file for full output (created lazily on truncation)
+	SpillDir   string   // directory for spill files (empty = os.TempDir)
 	SpillPath  string   // path to temp file (empty if no truncation)
 }
 
@@ -244,7 +246,11 @@ func (b *headTailBuffer) Write(p []byte) (int, error) {
 
 // initSpillFile creates a temp file and writes the head content to it.
 func (b *headTailBuffer) initSpillFile() {
-	f, err := os.CreateTemp("", "moa-output-*.txt")
+	dir := b.SpillDir
+	if dir != "" {
+		os.MkdirAll(dir, 0o755)
+	}
+	f, err := os.CreateTemp(dir, "moa-output-*.txt")
 	if err != nil {
 		return // best effort — truncation still works without spill
 	}

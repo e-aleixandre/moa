@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -58,11 +59,14 @@ func NewGrep(cfg ToolConfig) core.Tool {
 			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 			cmd.Dir = cfg.WorkspaceRoot
 
+			spillDir := filepath.Join(cfg.WorkspaceRoot, ".moa", "tmp")
 			var stdout, stderr headTailBuffer
 			stdout.headMax = maxOutputBytes / 2
 			stdout.tailMax = maxOutputBytes / 2
+			stdout.SpillDir = spillDir
 			stderr.headMax = maxOutputBytes / 2
 			stderr.tailMax = maxOutputBytes / 2
+			stderr.SpillDir = spillDir
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 
