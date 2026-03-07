@@ -132,7 +132,11 @@ func convertAssistantMessage(msg core.Message) []map[string]any {
 			})
 
 		case "tool_call":
-			argsJSON, _ := json.Marshal(c.Arguments)
+			args := c.Arguments
+			if args == nil {
+				args = map[string]any{}
+			}
+			argsJSON, _ := json.Marshal(args)
 			items = append(items, map[string]any{
 				"type":      "function_call",
 				"call_id":   c.ToolCallID,

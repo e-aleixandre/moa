@@ -145,6 +145,24 @@ func TestConvertMessage_AssistantWithToolCalls(t *testing.T) {
 	}
 }
 
+func TestConvertAssistantMessage_NilArguments(t *testing.T) {
+	// nil arguments should serialize as "{}", not "null".
+	msg := core.Message{
+		Role: "assistant",
+		Content: []core.Content{
+			core.ToolCallContent("tc-1", "pwd", nil),
+		},
+	}
+	items := convertAssistantMessage(msg)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	args, _ := items[0]["arguments"].(string)
+	if args != "{}" {
+		t.Fatalf("arguments = %q, want %q", args, "{}")
+	}
+}
+
 func TestMapReasoningEffort(t *testing.T) {
 	tests := []struct {
 		in, want string

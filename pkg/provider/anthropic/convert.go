@@ -237,11 +237,15 @@ func convertAssistantContent(blocks []core.Content, isOAuth bool) []any {
 			if isOAuth {
 				name = toClaudeCodeName(name)
 			}
+			input := any(b.Arguments)
+			if b.Arguments == nil {
+				input = map[string]any{}
+			}
 			result = append(result, map[string]any{
 				"type":  "tool_use",
 				"id":    b.ToolCallID,
 				"name":  name,
-				"input": b.Arguments,
+				"input": input,
 			})
 		}
 	}
