@@ -84,8 +84,13 @@ func FormatUserMessage(text string) string {
 
 // renderToolBlock renders a full-width panel with Surface0 background.
 // Each line is independently styled so the background is continuous.
-func renderToolBlock(block messageBlock, width int) string {
-	action, target, body, footer := summarizeToolBlock(block)
+// When expanded is true, body content is shown in full (no truncation).
+func renderToolBlock(block messageBlock, width int, expanded bool) string {
+	maxLines := maxToolPreviewLines
+	if expanded {
+		maxLines = 0
+	}
+	action, target, body, footer := summarizeToolBlock(block, maxLines)
 	bg := ActiveTheme.Surface0
 	bgS := lipgloss.NewStyle().Background(bg)
 	pad := bgS.Render(strings.Repeat(" ", toolPadLeft))
@@ -142,6 +147,10 @@ func bgEmptyLine(width int, bg lipgloss.Color) string {
 // --- Block rendering ---
 
 func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) string {
+	return renderSingleBlockEx(block, r, showThinking, false)
+}
+
+func renderSingleBlockEx(block messageBlock, r *renderer, showThinking bool, expanded bool) string {
 	switch block.Type {
 	case "user":
 		return FormatUserMessage(block.Raw) + "\n"
@@ -155,7 +164,7 @@ func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) strin
 	case "tool":
 		// Trailing newline creates a blank-line gap between consecutive tool
 		// blocks (and before the next assistant text) when joined by "\n".
-		return renderToolBlock(block, r.width) + "\n"
+		return renderToolBlock(block, r.width, expanded) + "\n"
 	case "error":
 		return errorStyle.Render(block.Raw)
 	case "status":
@@ -165,11 +174,12 @@ func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) strin
 	}
 }
 
-// renderBlocks renders all blocks as a single string. Used by expand mode (Ctrl+O pager).
-func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool) string {
+// renderBlocks renders all blocks. Used by session restore (expanded=false)
+// and Ctrl+O reprint (expanded=true).
+func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool, expanded bool) string {
 	var b strings.Builder
 	for _, block := range blocks {
-		if s := renderSingleBlock(block, r, showThinking); s != "" {
+		if s := renderSingleBlockEx(block, r, showThinking, expanded); s != "" {
 			b.WriteString(s)
 			b.WriteByte('\n')
 		}
@@ -194,7 +204,8 @@ func toolResultText(result *core.Result) string {
 
 // --- Tool block content summarization ---
 
-func summarizeToolBlock(block messageBlock) (action, target, body, footer string) {
+// summarizeToolBlock extracts display components. maxLines=0 means no truncation.
+func summarizeToolBlock(block messageBlock, maxLines int) (action, target, body, footer string) {
 	switch block.ToolName {
 	case "bash":
 		action = "bash"
@@ -258,8 +269,10 @@ func summarizeToolBlock(block messageBlock) (action, target, body, footer string
 		}
 	}
 
-	if body != "" {
-		body, footer = truncateBlockText(body, maxToolPreviewLines)
+	if body != "" && maxLines > 0 {
+		body, footer = truncateBlockText(body, maxLines)
+	} else if body != "" {
+		body = strings.TrimSpace(body)
 	}
 	return action, target, body, footer
 }
@@ -281,7 +294,7 @@ func truncateBlockText(text string, maxLines int) (body, footer string) {
 	total := len(lines)
 	remaining := total - maxLines
 	return strings.Join(lines[:maxLines], "\n"),
-		fmt.Sprintf("… (%d more lines, %d total)", remaining, total)
+		fmt.Sprintf("… (%d more lines, %d total, ctrl+o to expand)", remaining, total)
 }
 
 func stringArg(args map[string]any, key string) (string, bool) {
