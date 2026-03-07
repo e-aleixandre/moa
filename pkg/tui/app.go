@@ -680,7 +680,13 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 				if e.Result != nil {
 					for _, c := range e.Result.Content {
 						if c.Type == "text" {
-							b.ToolResult += c.Text
+							if b.ToolName == "edit" {
+								// Edit emits a diff via onUpdate — store separately
+								// so ToolExecEnd doesn't overwrite it.
+								b.ToolDiff = c.Text
+							} else {
+								b.ToolResult += c.Text
+							}
 						}
 					}
 				}

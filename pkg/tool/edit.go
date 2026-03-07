@@ -71,6 +71,14 @@ func NewEdit(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
 			}
 
+			// Emit diff for TUI display via onUpdate
+			if onUpdate != nil {
+				diff := unifiedDiff(content, newContent, 3)
+				if diff != "" {
+					onUpdate(core.TextResult(diff))
+				}
+			}
+
 			return core.TextResult(fmt.Sprintf("Edited %s", path)), nil
 		},
 	}
