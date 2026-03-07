@@ -217,7 +217,10 @@ type headTailBuffer struct {
 	SpillPath  string   // path to temp file (empty if no truncation)
 }
 
-func (b *headTailBuffer) Write(p []byte) (int, error) {
+// Write appends data to the buffer. Returns the number of bytes accepted into
+// the head buffer (for streaming display) via the first return value. Once
+// truncation kicks in, accepted is 0 — callers should stop sending live updates.
+func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
 	n := len(p)
 	b.totalBytes += n
 
@@ -228,6 +231,7 @@ func (b *headTailBuffer) Write(p []byte) (int, error) {
 			return n, nil
 		}
 		// Partially fill head, overflow to tail
+		accepted = remaining
 		if remaining > 0 {
 			b.head.Write(p[:remaining])
 			p = p[remaining:]
@@ -247,7 +251,7 @@ func (b *headTailBuffer) Write(p []byte) (int, error) {
 
 	// Write overflow to circular tail buffer
 	if b.tailMax <= 0 {
-		return n, nil
+		return accepted, nil
 	}
 	for len(p) > 0 {
 		space := b.tailMax - b.tailPos
@@ -265,7 +269,7 @@ func (b *headTailBuffer) Write(p []byte) (int, error) {
 		b.tailPos = 0
 		b.tailFull = true
 	}
-	return n, nil
+	return accepted, nil
 }
 
 // initSpillFile creates a temp file and writes the head content to it.

@@ -115,10 +115,9 @@ func NewBash(cfg ToolConfig) core.Tool {
 				for {
 					n, err := r.Read(tmp)
 					if n > 0 {
-						chunk := string(tmp[:n])
-						buf.Write(tmp[:n])
-						if onUpdate != nil {
-							onUpdate(core.TextResult(chunk))
+						accepted, _ := buf.Write(tmp[:n])
+						if onUpdate != nil && accepted > 0 {
+							onUpdate(core.TextResult(string(tmp[:accepted])))
 						}
 					}
 					if err != nil {
