@@ -24,12 +24,15 @@ var allCommands = []commandDef{
 	{Name: "exit", Desc: "Quit moa"},
 }
 
+const paletteMaxVisible = 6 // fixed visible height
+
 // cmdPalette shows a filterable command list when the user types "/".
 type cmdPalette struct {
 	active   bool
 	filter   string // text after "/" used to filter
 	matches  []commandDef
 	cursor   int
+	scroll   int // first visible index
 }
 
 func (p *cmdPalette) Update(text string) {
@@ -49,6 +52,7 @@ func (p *cmdPalette) Update(text string) {
 	p.active = true
 	p.filter = filter
 	p.matches = filterCommands(filter)
+	p.scroll = 0
 
 	// Clamp cursor
 	if p.cursor >= len(p.matches) {
@@ -59,12 +63,18 @@ func (p *cmdPalette) Update(text string) {
 func (p *cmdPalette) MoveUp() {
 	if p.cursor > 0 {
 		p.cursor--
+		if p.cursor < p.scroll {
+			p.scroll = p.cursor
+		}
 	}
 }
 
 func (p *cmdPalette) MoveDown() {
 	if p.cursor < len(p.matches)-1 {
 		p.cursor++
+		if p.cursor >= p.scroll+paletteMaxVisible {
+			p.scroll = p.cursor - paletteMaxVisible + 1
+		}
 	}
 }
 
@@ -101,8 +111,16 @@ func (p *cmdPalette) View(width int, theme Theme) string {
 	desc := lipgloss.NewStyle().Foreground(theme.Subtext1)
 	sel := lipgloss.NewStyle().Foreground(theme.Text).Bold(true)
 
+	// Windowed view: only show paletteMaxVisible items
+	end := p.scroll + paletteMaxVisible
+	if end > len(p.matches) {
+		end = len(p.matches)
+	}
+	visible := p.matches[p.scroll:end]
+
 	var lines []string
-	for i, cmd := range p.matches {
+	for vi, cmd := range visible {
+		i := p.scroll + vi
 		cursor := "  "
 		if i == p.cursor {
 			cursor = "▸ "
