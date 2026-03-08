@@ -23,6 +23,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/provider/anthropic"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
 )
@@ -148,9 +149,6 @@ func main() {
 		BashTimeout:    5 * time.Minute,
 	})
 
-	// Build system prompt
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs())
-
 	// Build permission gate.
 	// Priority: --yolo flag > --permissions flag > config > default (yolo)
 	permMode := permission.Mode(moaCfg.Permissions.Mode)
@@ -192,6 +190,45 @@ func main() {
 		permGate = permission.New(permMode, permCfg)
 	}
 
+	var agHolder atomic.Pointer[agent.Agent]
+	subagent.RegisterAll(toolReg, subagent.Config{
+		DefaultModel: resolvedModel,
+		CurrentModel: func() core.Model {
+			if a := agHolder.Load(); a != nil {
+				return a.Model()
+			}
+			return resolvedModel
+		},
+		CurrentThinkingLevel: func() string {
+			if a := agHolder.Load(); a != nil {
+				return a.ThinkingLevel()
+			}
+			return *thinking
+		},
+		CurrentPermissionCheck: func() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+			if a := agHolder.Load(); a != nil {
+				return a.PermissionCheck()
+			}
+			if permGate != nil {
+				return permGate.Check
+			}
+			return nil
+		},
+		ProviderFactory: func(model core.Model) (core.Provider, error) {
+			build, err := buildProvider(model, authStore)
+			if err != nil {
+				return nil, err
+			}
+			return build.Provider, nil
+		},
+		AgentsMD:    agentsMD,
+		ParentTools: toolReg,
+		AppCtx:      ctx,
+	})
+
+	// Build system prompt after all tools are registered.
+	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs())
+
 	// Build agent
 	agentCfg := agent.AgentConfig{
 		Provider:            providerBuild.Provider,
@@ -207,11 +244,12 @@ func main() {
 	if permGate != nil {
 		agentCfg.PermissionCheck = permGate.Check
 	}
-	ag, agErr := agent.New(agentCfg)
-	if agErr != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", agErr)
+	ag, err := agent.New(agentCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	agHolder.Store(ag)
 
 	// --- Mode selection ---
 

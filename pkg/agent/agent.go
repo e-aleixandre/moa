@@ -248,6 +248,13 @@ func (a *Agent) ThinkingLevel() string {
 	return a.config.ThinkingLevel
 }
 
+// PermissionCheck returns the current permission callback.
+func (a *Agent) PermissionCheck() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.PermissionCheck
+}
+
 // stripThinkingFromHistory removes thinking content blocks from assistant
 // messages. Thinking signatures are model-specific — sending stale signatures
 // to a different model causes errors.

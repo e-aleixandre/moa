@@ -12,13 +12,16 @@ import (
 // toolSnippets provides concise one-line descriptions for built-in tools.
 // These are used in the system prompt instead of the full JSON schema descriptions.
 var toolSnippets = map[string]string{
-	"read":  "Read the contents of a file. Supports text files and images.",
-	"bash":  "Execute a bash command. Returns stdout, stderr, and exit code.",
-	"edit":  "Make surgical edits to files (find exact text and replace).",
-	"write": "Create or overwrite files. Automatically creates parent directories.",
-	"grep":  "Search file contents for patterns (respects .gitignore).",
-	"find":  "Find files by glob pattern (respects .gitignore).",
-	"ls":    "List directory contents with file sizes and types.",
+	"read":            "Read the contents of a file. Supports text files and images.",
+	"bash":            "Execute a bash command. Returns stdout, stderr, and exit code.",
+	"edit":            "Make surgical edits to files (find exact text and replace).",
+	"write":           "Create or overwrite files. Automatically creates parent directories.",
+	"grep":            "Search file contents for patterns (respects .gitignore).",
+	"find":            "Find files by glob pattern (respects .gitignore).",
+	"ls":              "List directory contents with file sizes and types.",
+	"subagent":        "Spawn a child agent with its own context for parallel investigation or focused subtasks.",
+	"subagent_status": "Check the status of an async subagent job.",
+	"subagent_cancel": "Cancel a running async subagent job.",
 }
 
 // BuildSystemPrompt constructs the system prompt from components.
