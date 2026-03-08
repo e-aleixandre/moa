@@ -33,6 +33,9 @@ type clearThinkingStatusMsg struct{}
 // sessionSavedMsg signals an async session save completed.
 type sessionSavedMsg struct{ err error }
 
+// pinnedModelsSavedMsg signals an async pinned-models save completed.
+type pinnedModelsSavedMsg struct{ err error }
+
 // flushDoneMsg signals that tea.Println has been processed and it's safe
 // to advance flushedCount. Prevents the visual flash where View() renders
 // empty because flushedCount was advanced before println executed.

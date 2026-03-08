@@ -259,6 +259,12 @@ func main() {
 			StartInSessionBrowser: startInSessionBrowser,
 			ModelName:             modelDisplayName(resolvedModel),
 			PermissionGate:        permGate,
+			PinnedModels:          moaCfg.PinnedModels,
+			OnPinnedModelsChange: func(ids []string) error {
+				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
+					cfg.PinnedModels = ids
+				})
+			},
 			ProviderFactory: func(model core.Model) (core.Provider, error) {
 				build, err := buildProvider(model, authStore)
 				if err != nil {

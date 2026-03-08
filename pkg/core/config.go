@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -13,6 +14,7 @@ type MoaConfig struct {
 	DisableSandbox bool              `json:"disable_sandbox"` // YOLO mode: allow any file path
 	AllowedPaths   []string          `json:"allowed_paths"`   // Additional directories accessible outside workspace
 	Permissions    PermissionsConfig `json:"permissions"`     // Tool execution permission policy
+	PinnedModels   []string          `json:"pinned_models"`   // Model IDs pinned for Ctrl+P cycling
 }
 
 // PermissionsConfig controls tool execution approval.
@@ -58,6 +60,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged := MoaConfig{
 		DisableSandbox: base.DisableSandbox || override.DisableSandbox,
 		AllowedPaths:   append(base.AllowedPaths, override.AllowedPaths...),
+		PinnedModels:   base.PinnedModels, // global-only preference; project level ignored
 		Permissions: PermissionsConfig{
 			Mode:  base.Permissions.Mode,
 			Model: base.Permissions.Model,
@@ -74,4 +77,35 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.Permissions.Model = override.Permissions.Model
 	}
 	return merged
+}
+
+// SaveGlobalConfig reads the current global config, applies update, and writes
+// it back atomically. Creates ~/.moa/ if it doesn't exist.
+func SaveGlobalConfig(update func(*MoaConfig)) error {
+	path := globalConfigPath()
+	if path == "" {
+		return fmt.Errorf("cannot determine home directory")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("creating config dir: %w", err)
+	}
+
+	cfg := loadConfigFile(path)
+	update(&cfg)
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding config: %w", err)
+	}
+
+	// Atomic write: temp file in same dir → rename.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("saving config: %w", err)
+	}
+	return nil
 }
