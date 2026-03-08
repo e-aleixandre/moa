@@ -1390,3 +1390,108 @@ func TestFormatUserMessage_CompatShim(t *testing.T) {
 		t.Error("FormatUserMessage should contain the message text")
 	}
 }
+
+// --- Pinned models ---
+
+func TestPinnedModelsToSet(t *testing.T) {
+	set := pinnedModelsToSet([]string{"claude-sonnet-4-5", "gpt-4o"})
+	if !set["claude-sonnet-4-5"] || !set["gpt-4o"] {
+		t.Fatalf("pinnedModelsToSet = %v, want both IDs present", set)
+	}
+	if len(set) != 2 {
+		t.Fatalf("unexpected extra entries: %v", set)
+	}
+}
+
+func TestNew_PinnedModelsLoadedFromConfig(t *testing.T) {
+	ag, err := agent.New(agent.AgentConfig{
+		Provider: staticProvider{text: "ok"},
+		Model:    core.Model{ID: "claude-sonnet-4-6", Provider: "anthropic", Name: "Claude Sonnet 4.6", MaxInput: 200_000},
+	})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	m := New(ag, context.Background(), Config{
+		PinnedModels: []string{"claude-sonnet-4-5", "gpt-4o"},
+	})
+	if !m.scopedModels["claude-sonnet-4-5"] || !m.scopedModels["gpt-4o"] {
+		t.Fatalf("scopedModels = %v, want both pinned IDs loaded", m.scopedModels)
+	}
+}
+
+func TestSavePinnedModels_CallbackFired(t *testing.T) {
+	m := newTestModel()
+	var got []string
+	m.onPinnedModelsChange = func(ids []string) error { got = ids; return nil }
+	m.scopedModels = map[string]bool{"claude-sonnet-4-5": true}
+
+	cmd := m.savePinnedModels(m.scopedModels)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd when callback is set")
+	}
+	msg := cmd()
+	if pmsg, ok := msg.(pinnedModelsSavedMsg); !ok {
+		t.Fatalf("expected pinnedModelsSavedMsg, got %T", msg)
+	} else if pmsg.err != nil {
+		t.Fatalf("unexpected error: %v", pmsg.err)
+	}
+	if len(got) != 1 || got[0] != "claude-sonnet-4-5" {
+		t.Fatalf("callback called with %v, want [claude-sonnet-4-5]", got)
+	}
+}
+
+func TestSavePinnedModels_NilWhenNoCallback(t *testing.T) {
+	m := newTestModel()
+	m.onPinnedModelsChange = nil
+	cmd := m.savePinnedModels(map[string]bool{"claude-sonnet-4-5": true})
+	if cmd != nil {
+		t.Fatal("expected nil Cmd when no callback is configured")
+	}
+}
+
+func TestSavePinnedIfChanged_SkipsWhenEqual(t *testing.T) {
+	m := newTestModel()
+	m.onPinnedModelsChange = func(ids []string) error {
+		t.Fatal("callback should not be called when sets are equal")
+		return nil
+	}
+	set := map[string]bool{"claude-sonnet-4-5": true}
+	cmd := m.savePinnedIfChanged(set, set)
+	if cmd != nil {
+		t.Fatal("expected nil Cmd when sets are equal")
+	}
+}
+
+func TestSavePinnedIfChanged_FiresWhenDifferent(t *testing.T) {
+	m := newTestModel()
+	var called bool
+	m.onPinnedModelsChange = func(ids []string) error { called = true; return nil }
+	prev := map[string]bool{"a": true}
+	curr := map[string]bool{"a": true, "b": true}
+	cmd := m.savePinnedIfChanged(prev, curr)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd when sets differ")
+	}
+	cmd()
+	if !called {
+		t.Fatal("callback was not called")
+	}
+}
+
+func TestPinnedSetsEqual(t *testing.T) {
+	tests := []struct {
+		a, b map[string]bool
+		want bool
+	}{
+		{nil, nil, true},
+		{map[string]bool{}, map[string]bool{}, true},
+		{map[string]bool{"a": true}, map[string]bool{"a": true}, true},
+		{map[string]bool{"a": true}, map[string]bool{"b": true}, false},
+		{map[string]bool{"a": true}, map[string]bool{"a": true, "b": true}, false},
+	}
+	for _, tt := range tests {
+		if got := pinnedSetsEqual(tt.a, tt.b); got != tt.want {
+			t.Errorf("pinnedSetsEqual(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -101,8 +102,9 @@ type appModel struct {
 	modelName string
 
 	// Provider switching
-	providerFactory ProviderFactory
-	scopedModels    map[string]bool // model IDs pinned for Ctrl+P cycling
+	providerFactory      ProviderFactory
+	scopedModels         map[string]bool // model IDs pinned for Ctrl+P cycling
+	onPinnedModelsChange func([]string) error // persists pinned model changes (nil = disabled)
 
 	// Permissions
 	permGate *permission.Gate
@@ -124,7 +126,9 @@ type Config struct {
 	StartInSessionBrowser bool             // open the session browser before entering chat
 	ModelName             string           // display name for the active model (shown on startup)
 	ProviderFactory       ProviderFactory  // creates providers for /model switching (nil = switching disabled)
-	PermissionGate        *permission.Gate // permission gate (nil = yolo, no prompts)
+	PermissionGate        *permission.Gate    // permission gate (nil = yolo, no prompts)
+	PinnedModels          []string            // model IDs pre-pinned for Ctrl+P cycling (loaded from global config)
+	OnPinnedModelsChange  func([]string) error // called when the user changes pinned models (nil = no persistence)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -171,12 +175,13 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		sessionBrowser:  newSessionBrowser(),
 		topBar:          NewStatusLine(statusLineStyle),
 		bottomBar:       NewStatusLine(statusLineStyle),
-		sessionStore:    cfg.SessionStore,
-		session:         cfg.Session,
-		modelName:       cfg.ModelName,
-		providerFactory: cfg.ProviderFactory,
-		scopedModels:    make(map[string]bool),
-		permGate:        cfg.PermissionGate,
+		sessionStore:         cfg.SessionStore,
+		session:              cfg.Session,
+		modelName:            cfg.ModelName,
+		providerFactory:      cfg.ProviderFactory,
+		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
+		onPinnedModelsChange: cfg.OnPinnedModelsChange,
+		permGate:             cfg.PermissionGate,
 	}
 
 	// Initialize status line segments.
@@ -401,6 +406,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			// TODO: consider a subtle status indicator for save failures
 		}
+		return m, nil
+
+	case pinnedModelsSavedMsg:
+		// Pinned models saved asynchronously. Errors are silent — not worth interrupting.
 		return m, nil
 
 	case spinner.TickMsg:
@@ -1375,11 +1384,11 @@ func (m appModel) handleSessionBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
-		// Close without switching.
+		prev := m.scopedModels
 		m.scopedModels = m.picker.ScopedIDs()
 		m.picker.Close()
 		m.input.SetEnabled(true)
-		return m, nil
+		return m, m.savePinnedIfChanged(prev, m.scopedModels)
 
 	case tea.KeyUp:
 		m.picker.MoveUp()
@@ -1393,12 +1402,13 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
-		// Select and switch to highlighted model.
+		prev := m.scopedModels
 		selected := m.picker.Selected()
 		m.scopedModels = m.picker.ScopedIDs()
 		m.picker.Close()
 		m.input.SetEnabled(true)
-		return m.switchToModel(selected)
+		m2, switchCmd := m.switchToModel(selected)
+		return m2, tea.Batch(switchCmd, m.savePinnedIfChanged(prev, m.scopedModels))
 
 	case tea.KeyRunes:
 		switch string(msg.Runes) {
@@ -1672,6 +1682,54 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.flushedCount = len(m.s.blocks)
 	m.s.flushScheduledCount = len(m.s.blocks)
 	return m, tea.Sequence(clearScreen(), tea.Println(content), m.forceRepaint())
+}
+
+// --- Pinned models ---
+
+// savePinnedIfChanged only persists if the set actually changed.
+func (m appModel) savePinnedIfChanged(prev, curr map[string]bool) tea.Cmd {
+	if pinnedSetsEqual(prev, curr) {
+		return nil
+	}
+	return m.savePinnedModels(curr)
+}
+
+// savePinnedModels runs the OnPinnedModelsChange callback in the background.
+// Only fires if a callback is configured. Returns nil otherwise.
+func (m appModel) savePinnedModels(ids map[string]bool) tea.Cmd {
+	fn := m.onPinnedModelsChange
+	if fn == nil {
+		return nil
+	}
+	list := make([]string, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	slices.Sort(list)
+	return func() tea.Msg {
+		return pinnedModelsSavedMsg{err: fn(list)}
+	}
+}
+
+// pinnedModelsToSet converts a slice of model IDs to the map used internally.
+func pinnedModelsToSet(ids []string) map[string]bool {
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
+}
+
+func pinnedSetsEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id := range a {
+		if !b[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // --- Session persistence ---
