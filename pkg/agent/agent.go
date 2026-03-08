@@ -470,6 +470,19 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
 		}
 	}
+
+	// On abort: if the last message is a user message with no assistant reply,
+	// insert a synthetic assistant "(interrupted)" to maintain role alternation.
+	// Without this, the next Send appends another user message, creating
+	// consecutive user messages that providers merge into one — the model
+	// sees "2+2=" instead of four separate turns.
+	if err != nil && len(a.state.Messages) > 0 && a.state.Messages[len(a.state.Messages)-1].Role == "user" {
+		a.state.Messages = append(a.state.Messages, core.WrapMessage(core.Message{
+			Role:    "assistant",
+			Content: []core.Content{core.TextContent("(interrupted by user)")},
+		}))
+	}
+
 	// Return a copy — the internal slice is reused across turns (Send appends).
 	// Without this, callers could mutate returned messages and corrupt state.
 	msgs := make([]core.AgentMessage, len(a.state.Messages))
