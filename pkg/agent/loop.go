@@ -43,6 +43,9 @@ type loopConfig struct {
 
 	// Compaction
 	compaction *core.CompactionSettings
+
+	// Steering messages injected between steps
+	steerCh <-chan string
 }
 
 // emitLifecycle emits a lifecycle event to both the emitter (subscribers)
@@ -52,7 +55,23 @@ func emitLifecycle(cfg *loopConfig, evt core.AgentEvent) {
 	cfg.hooks.FireObserver(evt)
 }
 
-// agentLoop is the core loop. NO steering/follow-up in V0.
+// drainSteer non-blocking drains all pending steer messages.
+func drainSteer(ch <-chan string) []string {
+	if ch == nil {
+		return nil
+	}
+	var msgs []string
+	for {
+		select {
+		case msg := <-ch:
+			msgs = append(msgs, msg)
+		default:
+			return msgs
+		}
+	}
+}
+
+// agentLoop is the core loop.
 //
 // 1. Fire before_agent_start hooks
 // 2. For each turn:
@@ -203,6 +222,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		// Execute tool calls concurrently.
 		executeTools(ctx, cfg, toolCalls)
+
+		// Inject steering messages between steps.
+		if steered := drainSteer(cfg.steerCh); len(steered) > 0 {
+			for _, msg := range steered {
+				cfg.state.Messages = append(cfg.state.Messages,
+					core.WrapMessage(core.NewUserMessage(msg)))
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
+			}
+		}
 
 		inTurn = false
 		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})

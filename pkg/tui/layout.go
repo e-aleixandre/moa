@@ -118,6 +118,44 @@ func buildToolBlockData(block messageBlock, expanded bool) ToolBlockData {
 	}
 }
 
+// buildSubagentBlockData extracts a ToolBlockData from a subagent completion block.
+// Reuses the tool block visual format — same truncation, same expand behavior.
+func buildSubagentBlockData(block messageBlock, expanded bool) ToolBlockData {
+	maxLines := maxToolPreviewLines
+	if expanded {
+		maxLines = 0
+	}
+
+	icon := "✓"
+	if block.SubagentStatus == "failed" {
+		icon = "✗"
+	} else if block.SubagentStatus == "cancelled" {
+		icon = "⊘"
+	}
+
+	action := "subagent " + icon
+	target := block.SubagentTask
+	body := block.SubagentResult
+
+	var header, footer string
+	if body != "" && maxLines > 0 {
+		header, body = truncateBlockTextTail(body, maxLines)
+	} else if body != "" {
+		body = strings.TrimSpace(body)
+	}
+
+	return ToolBlockData{
+		ToolName: "subagent",
+		Action:   action,
+		Target:   target,
+		Header:   header,
+		Body:     body,
+		Footer:   footer,
+		Done:     true,
+		IsError:  block.SubagentStatus == "failed",
+	}
+}
+
 // summarizeToolBlock extracts display components. maxLines=0 means no truncation.
 // header appears above body (tail-truncated tools), footer appears below (head-truncated).
 func summarizeToolBlock(block messageBlock, maxLines int) (action, target, header, body, footer string) {

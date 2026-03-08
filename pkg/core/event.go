@@ -7,6 +7,7 @@ type AgentEvent struct {
 	// Populated per type:
 	Message        AgentMessage      // message_start, message_end
 	AssistantEvent *AssistantEvent   // message_update (streaming deltas)
+	Text           string            // steer
 	ToolCallID     string            // tool_execution_*
 	ToolName       string            // tool_execution_*
 	Args           map[string]any    // tool_execution_start
@@ -30,6 +31,8 @@ const (
 	AgentEventToolExecStart  = "tool_execution_start"
 	AgentEventToolExecUpdate = "tool_execution_update"
 	AgentEventToolExecEnd    = "tool_execution_end"
+
+	AgentEventSteer = "steer" // a steering message was injected mid-run
 
 	AgentEventCompactionStart = "compaction_start"
 	AgentEventCompactionEnd   = "compaction_end"

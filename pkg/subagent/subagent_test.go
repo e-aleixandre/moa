@@ -723,6 +723,139 @@ func TestJobStoreCleanupKeepsRecentJobs(t *testing.T) {
 	}
 }
 
+func TestTailLines(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{"fewer than n", "a\nb\nc", 5, "a\nb\nc"},
+		{"exactly n", "a\nb\nc", 3, "a\nb\nc"},
+		{"more than n", "a\nb\nc\nd\ne", 3, "c\nd\ne"},
+		{"empty string", "", 3, ""},
+		{"single line", "hello", 1, "hello"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tailLines(tt.s, tt.n)
+			if got != tt.want {
+				t.Fatalf("tailLines(%q, %d) = %q, want %q", tt.s, tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAsyncSubagentOnCompleteOnSuccess(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "child result"))
+
+	var (
+		mu         sync.Mutex
+		gotID      string
+		gotTask    string
+		gotStatus  string
+		gotResult  string
+		callCount  int
+	)
+
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string) {
+			mu.Lock()
+			gotID = jobID
+			gotTask = task
+			gotStatus = status
+			gotResult = resultTail
+			callCount++
+			mu.Unlock()
+		},
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "my task", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+	close(release)
+
+	// Wait for completion.
+	waitFor(t, 2*time.Second, func() bool {
+		res, _ := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+		return strings.Contains(textOf(res), "Status: completed")
+	})
+
+	// Verify OnAsyncComplete was called.
+	waitFor(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return callCount == 1
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotID != jobID {
+		t.Fatalf("expected jobID %q, got %q", jobID, gotID)
+	}
+	if gotTask != "my task" {
+		t.Fatalf("expected task 'my task', got %q", gotTask)
+	}
+	if gotStatus != "completed" {
+		t.Fatalf("expected status 'completed', got %q", gotStatus)
+	}
+	if gotResult != "child result" {
+		t.Fatalf("expected result 'child result', got %q", gotResult)
+	}
+}
+
+func TestAsyncSubagentOnCompleteOnCancel(t *testing.T) {
+	started := make(chan struct{})
+	provider := newMockProvider(cancellableResponse(started))
+
+	var (
+		mu        sync.Mutex
+		gotStatus string
+		called    bool
+	)
+
+	sub, _, cancelTool := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string) {
+			mu.Lock()
+			gotStatus = status
+			called = true
+			mu.Unlock()
+		},
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "cancel me", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+
+	cancelTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil) //nolint:errcheck
+
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return called
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotStatus != "cancelled" {
+		t.Fatalf("expected status 'cancelled', got %q", gotStatus)
+	}
+}
+
 func TestConcurrentStatusPolling(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})

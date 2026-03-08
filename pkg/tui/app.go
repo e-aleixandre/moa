@@ -54,6 +54,7 @@ type state struct {
 	pendingTimeline     *pendingTimelineEvent // live timeline event shown in View() until next send
 	sessionCost         float64               // accumulated USD cost this session
 	runStartMsgCount    int                   // message count at start of current run (for delta cost)
+	asyncSubagents      int                   // running async subagent count (for status display)
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -109,6 +110,10 @@ type appModel struct {
 	// Permissions
 	permGate *permission.Gate
 
+	// Subagent status
+	subagentCountCh  <-chan int
+	subagentNotifyCh <-chan SubagentNotification
+
 	// Layout
 	width  int
 	height int
@@ -129,6 +134,8 @@ type Config struct {
 	PermissionGate        *permission.Gate    // permission gate (nil = yolo, no prompts)
 	PinnedModels          []string            // model IDs pre-pinned for Ctrl+P cycling (loaded from global config)
 	OnPinnedModelsChange  func([]string) error // called when the user changes pinned models (nil = no persistence)
+	SubagentCountCh       <-chan int            // receives running async subagent count updates (nil = disabled)
+	SubagentNotifyCh      <-chan SubagentNotification // receives async subagent completion notifications (nil = disabled)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -182,6 +189,8 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		permGate:             cfg.PermissionGate,
+		subagentCountCh:      cfg.SubagentCountCh,
+		subagentNotifyCh:     cfg.SubagentNotifyCh,
 	}
 
 	// Initialize status line segments.
@@ -227,7 +236,45 @@ func (m appModel) Init() tea.Cmd {
 	if m.sessionBrowser.active {
 		cmds = append(cmds, m.loadSessionBrowser())
 	}
+	if m.subagentCountCh != nil {
+		cmds = append(cmds, m.waitForSubagentCount())
+	}
+	if m.subagentNotifyCh != nil {
+		cmds = append(cmds, m.waitForSubagentNotify())
+	}
 	return tea.Batch(cmds...)
+}
+
+func (m appModel) waitForSubagentNotify() tea.Cmd {
+	ch := m.subagentNotifyCh
+	quit := m.quit
+	return func() tea.Msg {
+		select {
+		case n, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			return subagentNotifyMsg{notification: n}
+		case <-quit:
+			return nil
+		}
+	}
+}
+
+func (m appModel) waitForSubagentCount() tea.Cmd {
+	ch := m.subagentCountCh
+	quit := m.quit
+	return func() tea.Msg {
+		select {
+		case count, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			return asyncSubagentCountMsg{count: count}
+		case <-quit:
+			return nil
+		}
+	}
 }
 
 // waitForPermission listens for the next permission request from the gate.
@@ -342,6 +389,22 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status.SetText("")
 		}
 		return m, nil
+
+	case asyncSubagentCountMsg:
+		m.s.asyncSubagents = msg.count
+		return m, m.waitForSubagentCount()
+
+	case subagentNotifyMsg:
+		relistenCmd := m.waitForSubagentNotify()
+		if m.s.running {
+			// Agent is mid-run — inject as steer. The AgentEventSteer handler
+			// will add the subagent block to the chat when it arrives.
+			m.agent.Steer(msg.notification.AgentText)
+			return m, relistenCmd
+		}
+		// Agent is idle — start a notification run.
+		model, cmd := m.startNotificationRun(msg.notification)
+		return model, tea.Batch(cmd, relistenCmd)
 
 	case compactResultMsg:
 		m.s.running = false
@@ -470,6 +533,13 @@ func (m appModel) View() string {
 	}
 	if m.s.pendingTimeline != nil {
 		content = append(content, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
+	}
+	if m.s.asyncSubagents > 0 {
+		label := fmt.Sprintf("⟳ %d subagent running", m.s.asyncSubagents)
+		if m.s.asyncSubagents > 1 {
+			label = fmt.Sprintf("⟳ %d subagents running", m.s.asyncSubagents)
+		}
+		content = append(content, l.RenderLiveNotice(label, m.width, ActiveTheme))
 	}
 
 	// UI chrome — joined with "\n" (no extra blank lines).
@@ -637,6 +707,11 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.s.running {
+			text := m.input.Submit()
+			if text == "" {
+				return m, nil
+			}
+			m.agent.Steer(text)
 			return m, nil
 		}
 
@@ -754,6 +829,37 @@ func (m *appModel) flushBlocks(to int) tea.Cmd {
 
 // --- Agent interaction ---
 
+// prepareRun sets up the common run state (running flag, gen counter, stream state, status).
+// Returns the run generation for tagging the result.
+func (m *appModel) prepareRun() uint64 {
+	m.s.running = true
+	m.s.runGen++
+	m.s.runStartMsgCount = len(m.agent.Messages())
+	m.runGenAddr.Store(m.s.runGen)
+	m.s.streamState = stateStreaming
+	m.s.streamText = ""
+	m.s.thinkingText = ""
+	m.s.streamCache = ""
+	m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
+	m.status.SetText("thinking...")
+	return m.s.runGen
+}
+
+// launchAgentSend returns a tea.Batch that runs agent.Send and starts
+// the render tick and spinner.
+func (m appModel) launchAgentSend(text string, gen uint64) tea.Cmd {
+	agentRef := m.agent
+	baseCtx := m.baseCtx
+	return tea.Batch(
+		func() tea.Msg {
+			msgs, err := agentRef.Send(baseCtx, text)
+			return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
+		},
+		renderTick(),
+		m.status.spinner.Tick,
+	)
+}
+
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	if err := m.commitPendingTimelineEvent(); err != nil {
@@ -773,37 +879,34 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	// Flush committed timeline events (if any) plus the user message.
 	userFlush := m.flushBlocks(len(m.s.blocks))
 
-	m.s.running = true
-	m.s.runGen++
-	m.s.runStartMsgCount = len(m.agent.Messages())
-	m.runGenAddr.Store(m.s.runGen) // sync with subscriber for production-time tagging
-	m.s.streamState = stateStreaming
-	m.s.streamText = ""
-	m.s.thinkingText = ""
-	m.s.streamCache = ""
-	m.input.SetEnabled(false)
-	m.status.SetText("thinking...")
-
-	agentRef := m.agent
-	gen := m.s.runGen
-	baseCtx := m.baseCtx
+	gen := m.prepareRun()
 
 	// tea.Sequence guarantees: committed switch event + user message print
 	// before the agent starts. renderTick and spinner can batch concurrently.
-	return m, tea.Sequence(
-		userFlush,
-		tea.Batch(
-			// Cmd 1: run agent (blocks until complete)
-			func() tea.Msg {
-				msgs, err := agentRef.Send(baseCtx, text)
-				return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
-			},
-			// Cmd 2: start render tick
-			renderTick(),
-			// Cmd 3: spinner
-			m.status.spinner.Tick,
-		),
-	)
+	return m, tea.Sequence(userFlush, m.launchAgentSend(text, gen))
+}
+
+// startNotificationRun starts an agent run triggered by a subagent completion
+// notification. Shows a subagent block (not a user block) and starts agent.Send
+// so the LLM can react to the notification.
+func (m appModel) startNotificationRun(n SubagentNotification) (tea.Model, tea.Cmd) {
+	if err := m.commitPendingTimelineEvent(); err != nil {
+		m.s.pendingStatus = "✗ " + err.Error()
+		return m, nil
+	}
+
+	m.s.pendingStatus = ""
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type:           "subagent",
+		SubagentTask:   n.Task,
+		SubagentStatus: n.Status,
+		SubagentResult: n.ResultTail,
+	})
+
+	blockFlush := m.flushBlocks(len(m.s.blocks))
+	gen := m.prepareRun()
+
+	return m, tea.Sequence(blockFlush, m.launchAgentSend(n.AgentText, gen))
 }
 
 // handleAgentEvent processes a single agent event, updating TUI state.
@@ -916,6 +1019,19 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		}
 		return nil
 
+	case core.AgentEventSteer:
+		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type:           "subagent",
+				SubagentTask:   task,
+				SubagentStatus: status,
+				SubagentResult: result,
+			})
+		} else {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
+		}
+		return m.flushBlocks(len(m.s.blocks))
+
 	case core.AgentEventCompactionStart:
 		m.status.SetText("compacting context...")
 		return nil
@@ -964,6 +1080,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
 	m.status.SetText("")
+	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 	m.input.SetEnabled(true)
 	m.refreshContextSegment()
 	m.accumulateCost(msg.Messages)
@@ -1063,9 +1180,19 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 		switch msg.Role {
 		case "user":
 			if len(msg.Content) > 0 {
-				m.s.blocks = append(m.s.blocks, messageBlock{
-					Type: "user", Raw: msg.Content[0].Text,
-				})
+				text := msg.Content[0].Text
+				if task, status, result, ok := parseSubagentNotification(text); ok {
+					m.s.blocks = append(m.s.blocks, messageBlock{
+						Type:           "subagent",
+						SubagentTask:   task,
+						SubagentStatus: status,
+						SubagentResult: result,
+					})
+				} else {
+					m.s.blocks = append(m.s.blocks, messageBlock{
+						Type: "user", Raw: text,
+					})
+				}
 			}
 		case "assistant":
 			for _, c := range msg.Content {
@@ -1906,4 +2033,42 @@ func cycleThinkingLevel(current string) string {
 		}
 	}
 	return "medium" // fallback
+}
+
+// parseSubagentNotification detects steer messages formatted as subagent
+// completion notifications and extracts the components. Returns false for
+// user-typed steer messages.
+func parseSubagentNotification(text string) (task, status, result string, ok bool) {
+	prefixes := map[string]string{
+		"[subagent completed] ": "completed",
+		"[subagent failed] ":    "failed",
+		"[subagent cancelled] ": "cancelled",
+	}
+	for prefix, s := range prefixes {
+		if strings.HasPrefix(text, prefix) {
+			status = s
+			rest := text[len(prefix):]
+			// Extract task from "Job <id> finished.\nTask: <task>\n..."
+			lines := strings.SplitN(rest, "\n", 3)
+			if len(lines) >= 2 {
+				taskLine := lines[1]
+				if strings.HasPrefix(taskLine, "Task: ") {
+					task = strings.TrimPrefix(taskLine, "Task: ")
+				}
+			}
+			// Everything after the task line is the result
+			if len(lines) >= 3 {
+				result = strings.TrimSpace(lines[2])
+				// Strip known prefixes
+				for _, p := range []string{"Result (last 50 lines):\n", "Error: "} {
+					if strings.HasPrefix(result, p) {
+						result = strings.TrimSpace(result[len(p):])
+						break
+					}
+				}
+			}
+			return task, status, result, true
+		}
+	}
+	return "", "", "", false
 }

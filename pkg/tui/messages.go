@@ -73,3 +73,19 @@ type sessionOpenLoadedMsg struct {
 	Session *session.Session
 	Err     error
 }
+
+// asyncSubagentCountMsg carries the current number of running async subagents.
+type asyncSubagentCountMsg struct{ count int }
+
+// SubagentNotification is the structured payload for an async subagent completion.
+// Sent from main.go to the TUI via a channel, avoiding fragile text parsing.
+type SubagentNotification struct {
+	JobID      string // job identifier
+	Task       string // original task description
+	Status     string // "completed", "failed", or "cancelled"
+	AgentText  string // full text for the agent (up to 50 lines of result)
+	ResultTail string // result tail for TUI preview
+}
+
+// subagentNotifyMsg wraps a SubagentNotification for the Bubble Tea event loop.
+type subagentNotifyMsg struct{ notification SubagentNotification }
