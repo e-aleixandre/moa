@@ -352,7 +352,7 @@ func main() {
 				return build.Provider, nil
 			},
 		})
-		prog := tea.NewProgram(app, tea.WithContext(ctx))
+		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

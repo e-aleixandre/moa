@@ -36,14 +36,6 @@ type sessionSavedMsg struct{ err error }
 // pinnedModelsSavedMsg signals an async pinned-models save completed.
 type pinnedModelsSavedMsg struct{ err error }
 
-// flushDoneMsg signals that tea.Println has been processed and it's safe
-// to advance flushedCount. Prevents the visual flash where View() renders
-// empty because flushedCount was advanced before println executed.
-type flushDoneMsg struct {
-	upTo  int // advance flushedCount to this value
-	epoch int // must match current flushEpoch (stale after /clear)
-}
-
 // compactResultMsg carries the result of a manual /compact command.
 type compactResultMsg struct {
 	Payload *core.CompactionPayload

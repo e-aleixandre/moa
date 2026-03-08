@@ -8,20 +8,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
 // newTestModel creates a minimal appModel for state-level tests.
 // No agent, no event channel — only state, renderer, and components are initialized.
 func newTestModel() appModel {
+	vp := viewport.New(80, 20)
+	vp.MouseWheelEnabled = true
+	vp.KeyMap = viewport.KeyMap{}
 	return appModel{
 		s:        &state{showThinking: true},
 		renderer: newRenderer(80),
 		input:    newInput(),
 		status:   newStatus(),
+		viewport: vp,
 		width:    80,
 		height:   24,
 	}
@@ -139,96 +145,209 @@ func TestSessionBrowser_FilterSelectsMatchingSession(t *testing.T) {
 	}
 }
 
-// --- Test 1: flushBlocks ordering and flushedCount ---
+// --- Viewport / transcript mode tests ---
 
-func TestFlushBlocks_SchedulesButDoesNotAdvanceFlushedCount(t *testing.T) {
+func TestVisibleBlocks_ReturnsAllBlocks(t *testing.T) {
 	m := newTestModel()
-	m.s.blocks = []messageBlock{
-		{Type: "user", Raw: "hello"},
-		{Type: "tool", ToolName: "bash", ToolArgs: map[string]any{"command": "ls"}, ToolDone: true},
-		{Type: "assistant", Raw: "world"},
+	// Build 15 turns (user + assistant each)
+	for i := 0; i < 15; i++ {
+		m.s.blocks = append(m.s.blocks,
+			messageBlock{Type: "user", Raw: fmt.Sprintf("q%d", i)},
+			messageBlock{Type: "assistant", Raw: fmt.Sprintf("a%d", i)},
+		)
 	}
-
-	// Schedule flush of all 3 blocks
-	cmd := m.flushBlocks(3)
-	// flushedCount stays at 0 (deferred until flushDoneMsg)
-	if m.s.flushedCount != 0 {
-		t.Errorf("flushedCount = %d, want 0 (deferred)", m.s.flushedCount)
-	}
-	// flushScheduledCount advances immediately
-	if m.s.flushScheduledCount != 3 {
-		t.Errorf("flushScheduledCount = %d, want 3", m.s.flushScheduledCount)
-	}
-	if cmd == nil {
-		t.Error("expected non-nil Cmd for flush, got nil")
-	}
-
-	// No-op flush (already scheduled)
-	cmd = m.flushBlocks(3)
-	if cmd != nil {
-		t.Error("expected nil Cmd for no-op flush, got non-nil")
+	vis := m.visibleBlocks()
+	// Viewport shows all blocks (scrollable)
+	if len(vis) != 30 {
+		t.Fatalf("visibleBlocks = %d, want 30", len(vis))
 	}
 }
 
-func TestFlushDoneMsg_AdvancesFlushedCount(t *testing.T) {
+func TestVisibleBlocks_EmptyBlocks(t *testing.T) {
+	m := newTestModel()
+	vis := m.visibleBlocks()
+	if len(vis) != 0 {
+		t.Errorf("visibleBlocks = %d, want 0", len(vis))
+	}
+}
+
+func TestVisibleBlocks_FewerThanLimit(t *testing.T) {
 	m := newTestModel()
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "hello"},
 		{Type: "assistant", Raw: "world"},
 	}
-	m.s.flushScheduledCount = 2
-
-	// Simulate flushDoneMsg
-	result, _ := m.Update(flushDoneMsg{upTo: 2, epoch: 0})
-	rm := result.(appModel)
-	if rm.s.flushedCount != 2 {
-		t.Errorf("flushedCount = %d, want 2", rm.s.flushedCount)
+	vis := m.visibleBlocks()
+	if len(vis) != 2 {
+		t.Fatalf("visibleBlocks = %d, want 2", len(vis))
 	}
 }
 
-func TestFlushDoneMsg_IgnoresStaleEpoch(t *testing.T) {
+func TestUpdateViewport_AutoScrollsWhenAtBottom(t *testing.T) {
 	m := newTestModel()
 	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
-	m.s.flushScheduledCount = 1
-	m.s.flushEpoch = 2 // current epoch is 2
-
-	// flushDoneMsg from epoch 1 (stale — before /clear)
-	result, _ := m.Update(flushDoneMsg{upTo: 1, epoch: 1})
-	rm := result.(appModel)
-	if rm.s.flushedCount != 0 {
-		t.Errorf("flushedCount = %d, want 0 (stale epoch ignored)", rm.s.flushedCount)
+	m.updateViewport()
+	// After initial update, viewport should be at bottom
+	if !m.viewport.AtBottom() {
+		t.Error("viewport should be at bottom after initial update")
 	}
 }
 
-func TestFlushBlocks_SkipsEmptyBlocks(t *testing.T) {
+func TestCtrlO_EntersTranscriptMode(t *testing.T) {
 	m := newTestModel()
-	m.s.showThinking = false
 	m.s.blocks = []messageBlock{
-		{Type: "thinking", Raw: "hmm"}, // hidden when showThinking=false
+		{Type: "user", Raw: "hello"},
+		{Type: "assistant", Raw: "world"},
 	}
 
-	cmd := m.flushBlocks(1)
-	if m.s.flushScheduledCount != 1 {
-		t.Errorf("flushScheduledCount = %d, want 1", m.s.flushScheduledCount)
+	result, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	rm := result.(appModel)
+
+	if !rm.s.transcript {
+		t.Error("expected transcript mode to be active")
 	}
-	// All rendered parts are empty → returns a done func (not nil, to confirm the advance)
+	if rm.s.fullHistory {
+		t.Error("fullHistory should be false initially")
+	}
+	if rm.input.enabled {
+		t.Error("input should be disabled in transcript mode")
+	}
 	if cmd == nil {
-		t.Error("expected non-nil Cmd (done func for empty flush)")
+		t.Error("expected non-nil cmd for ExitAltScreen + print")
+	}
+}
+
+func TestCtrlO_ExitsTranscriptMode(t *testing.T) {
+	m := newTestModel()
+	m.s.transcript = true
+	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
+
+	result, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	rm := result.(appModel)
+
+	if rm.s.transcript {
+		t.Error("expected transcript mode to be inactive")
+	}
+	if cmd == nil {
+		t.Error("expected non-nil cmd for EnterAltScreen")
+	}
+}
+
+func TestCtrlO_InTranscript_RecomputesInputEnabled(t *testing.T) {
+	m := newTestModel()
+	m.s.transcript = true
+	m.s.running = true // agent is running
+	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
+
+	result, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	rm := result.(appModel)
+
+	if rm.input.enabled {
+		t.Error("input should remain disabled when agent is running")
+	}
+}
+
+func TestCtrlO_NilWhenEmpty(t *testing.T) {
+	m := newTestModel()
+	m.s.blocks = nil
+
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if cmd != nil {
+		t.Error("expected nil Cmd for Ctrl+O with no blocks")
+	}
+}
+
+func TestCtrlE_InAltScreen_TogglesExpanded(t *testing.T) {
+	m := newTestModel()
+	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
+	m.s.expanded = false
+
+	result, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlE})
+	rm := result.(appModel)
+
+	if !rm.s.expanded {
+		t.Error("expected expanded=true after Ctrl+E")
+	}
+}
+
+func TestCtrlE_InTranscript_TogglesFullHistory(t *testing.T) {
+	m := newTestModel()
+	m.s.transcript = true
+	m.s.fullHistory = false
+	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
+
+	result, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlE})
+	rm := result.(appModel)
+
+	if !rm.s.fullHistory {
+		t.Error("expected fullHistory=true after Ctrl+E in transcript")
+	}
+	if cmd == nil {
+		t.Error("expected non-nil cmd for clearScreen + Println")
+	}
+}
+
+func TestTranscriptMode_IgnoresInputKeys(t *testing.T) {
+	m := newTestModel()
+	m.s.transcript = true
+
+	result, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	rm := result.(appModel)
+
+	if !rm.s.transcript {
+		t.Error("should remain in transcript mode")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd for ignored key")
+	}
+}
+
+func TestTranscriptMode_AllowsCtrlC(t *testing.T) {
+	m := newSwitchTestApp(t)
+	m.s.transcript = true
+
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Error("expected quit cmd from Ctrl+C in transcript")
+	}
+}
+
+func TestPermissionRequest_ExitsTranscript(t *testing.T) {
+	m := newTestModel()
+	m.s.transcript = true
+	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
+	m.permGate = permission.New(permission.ModeAsk, permission.Config{})
+
+	result, cmd := m.Update(permissionRequestMsg{
+		Request: permission.Request{
+			ToolName: "bash",
+			Args:     map[string]any{"command": "rm -rf /"},
+		},
+	})
+	rm := result.(appModel)
+
+	if rm.s.transcript {
+		t.Error("transcript should be exited on permission request")
+	}
+	if !rm.permPrompt.active {
+		t.Error("permission prompt should be active")
+	}
+	if cmd == nil {
+		t.Error("expected non-nil cmd for EnterAltScreen")
 	}
 }
 
 // --- Test 2: handleAgentEvent message_end flushes blocks ---
 
-func TestHandleAgentEvent_MessageEnd_AppendsButDoesNotFlush(t *testing.T) {
+func TestHandleAgentEvent_MessageEnd_AppendsBlocks(t *testing.T) {
 	m := newTestModel()
 	m.s.streamText = "hello world"
 	m.s.thinkingText = "let me think"
 
-	cmd := m.handleAgentEvent(core.AgentEvent{
+	m.handleAgentEvent(core.AgentEvent{
 		Type: core.AgentEventMessageEnd,
 	})
 
-	// Should have appended thinking + assistant blocks
 	if len(m.s.blocks) != 2 {
 		t.Fatalf("blocks = %d, want 2", len(m.s.blocks))
 	}
@@ -238,8 +357,6 @@ func TestHandleAgentEvent_MessageEnd_AppendsButDoesNotFlush(t *testing.T) {
 	if m.s.blocks[1].Type != "assistant" || m.s.blocks[1].Raw != "hello world" {
 		t.Errorf("blocks[1] = %+v, want assistant block", m.s.blocks[1])
 	}
-
-	// Stream state should be cleared
 	if m.s.streamText != "" {
 		t.Errorf("streamText = %q, want empty", m.s.streamText)
 	}
@@ -249,18 +366,6 @@ func TestHandleAgentEvent_MessageEnd_AppendsButDoesNotFlush(t *testing.T) {
 	if m.s.streamCache != "" {
 		t.Errorf("streamCache = %q, want empty", m.s.streamCache)
 	}
-
-	// NOT flushed — blocks stay visible in View().
-	// They get flushed by the next tool event or agentRunResultMsg.
-	if m.s.flushedCount != 0 {
-		t.Errorf("flushedCount = %d, want 0 (deferred)", m.s.flushedCount)
-	}
-	if m.s.flushScheduledCount != 0 {
-		t.Errorf("flushScheduledCount = %d, want 0 (deferred)", m.s.flushScheduledCount)
-	}
-	if cmd != nil {
-		t.Error("expected nil Cmd (deferred flush)")
-	}
 }
 
 func TestHandleAgentEvent_MessageEnd_NoContent(t *testing.T) {
@@ -268,15 +373,12 @@ func TestHandleAgentEvent_MessageEnd_NoContent(t *testing.T) {
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 
-	cmd := m.handleAgentEvent(core.AgentEvent{
+	m.handleAgentEvent(core.AgentEvent{
 		Type: core.AgentEventMessageEnd,
 	})
 
 	if len(m.s.blocks) != 0 {
 		t.Errorf("blocks = %d, want 0 (no content)", len(m.s.blocks))
-	}
-	if cmd != nil {
-		t.Error("expected nil Cmd when no content to flush")
 	}
 }
 
@@ -325,20 +427,19 @@ func TestPatchFromMessages_PreservesToolBlocks(t *testing.T) {
 }
 
 // Regression test: multi-turn scenario where MessageEnd is missed.
-// Without the fix, patchFromMessages would find the flushed turn-1 assistant
-// block, patch it, and flushBlocks would be a no-op → message disappears.
-func TestPatchFromMessages_DoesNotPatchFlushedBlocks(t *testing.T) {
+// Without runStartBlockIdx, patchFromMessages would find the turn-1 assistant
+// block and patch it, leaving turn-2's content missing.
+func TestPatchFromMessages_DoesNotPatchPreviousTurnBlocks(t *testing.T) {
 	m := newTestModel()
 
-	// Turn 1: user + assistant blocks, already flushed to scrollback
+	// Turn 1: user + assistant blocks from previous run
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "turn 1 question"},
 		{Type: "assistant", Raw: "turn 1 answer"},
-		// Turn 2: user block flushed, but MessageEnd not yet processed
+		// Turn 2: user block added, but MessageEnd not yet processed
 		{Type: "user", Raw: "turn 2 question"},
 	}
-	m.s.flushedCount = 3 // all 3 blocks are flushed
-	m.s.flushScheduledCount = 3
+	m.s.runStartBlockIdx = 2 // run started at the turn-2 user block
 
 	// agent.Send returns with turn-2 assistant text, but MessageEnd was missed
 	m.patchFromMessages([]core.AgentMessage{
@@ -362,31 +463,21 @@ func TestPatchFromMessages_DoesNotPatchFlushedBlocks(t *testing.T) {
 	if m.s.blocks[3].Type != "assistant" || m.s.blocks[3].Raw != "turn 2 answer" {
 		t.Errorf("blocks[3] = %+v, want assistant 'turn 2 answer'", m.s.blocks[3])
 	}
-
-	// flushBlocks should now have something to flush (block index 3)
-	cmd := m.flushBlocks(len(m.s.blocks))
-	if cmd == nil {
-		t.Error("expected non-nil flush Cmd for the new appended block")
-	}
-	if m.s.flushScheduledCount != 4 {
-		t.Errorf("flushScheduledCount = %d, want 4", m.s.flushScheduledCount)
-	}
 }
 
 // Same scenario but with thinking blocks too.
-func TestPatchFromMessages_DoesNotPatchFlushedThinking(t *testing.T) {
+func TestPatchFromMessages_DoesNotPatchPreviousTurnThinking(t *testing.T) {
 	m := newTestModel()
 
-	// Turn 1 fully flushed with thinking
+	// Turn 1 complete with thinking
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "q1"},
 		{Type: "thinking", Raw: "think1"},
 		{Type: "assistant", Raw: "a1"},
-		// Turn 2 user flushed, MessageEnd missed
+		// Turn 2 user block, MessageEnd missed
 		{Type: "user", Raw: "q2"},
 	}
-	m.s.flushedCount = 4
-	m.s.flushScheduledCount = 4
+	m.s.runStartBlockIdx = 3 // run started at turn-2 user block
 
 	m.patchFromMessages([]core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "q1"}}}},
@@ -489,50 +580,40 @@ func TestPatchFromMessages_CreatesMissingAssistantOnly(t *testing.T) {
 	}
 }
 
-// --- Test 4: handleRunResult flushes unflushed blocks ---
+// --- Test 4: handleRunResult resets state ---
 
-func TestHandleRunResult_FlushesUnflushedBlocks(t *testing.T) {
+func TestHandleRunResult_ResetsState(t *testing.T) {
 	m := newTestModel()
 	m.s.runGen = 5
 	m.runGenAddr = &atomic.Uint64{}
 	m.runGenAddr.Store(5)
 
-	// Simulate: 3 blocks, only first was flushed
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "hello"},
 		{Type: "thinking", Raw: "hmm"},
 		{Type: "assistant", Raw: "world"},
 	}
-	m.s.flushedCount = 1
 	m.s.running = true
 	m.s.streamState = stateStreaming
 	m.input.SetEnabled(false)
 
-	result, cmd := m.handleRunResult(agentRunResultMsg{
+	result, _ := m.handleRunResult(agentRunResultMsg{
 		RunGen: 5,
 		Messages: []core.AgentMessage{
 			{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "hello"}}}},
 			{Message: core.Message{Role: "assistant", Content: []core.Content{{Type: "text", Text: "world"}}}},
 		},
 	})
-	_ = cmd
 
 	rm := result.(appModel)
-	// Blocks should be scheduled for flush (not yet confirmed)
-	if rm.s.flushScheduledCount != 3 {
-		t.Errorf("flushScheduledCount = %d, want 3", rm.s.flushScheduledCount)
-	}
-	// flushedCount stays at 1 until flushDoneMsg confirms
-	if rm.s.flushedCount != 1 {
-		t.Errorf("flushedCount = %d, want 1 (deferred)", rm.s.flushedCount)
-	}
-
-	// State should be reset
 	if rm.s.running {
 		t.Error("running should be false")
 	}
 	if rm.s.streamState != stateIdle {
 		t.Errorf("streamState = %d, want stateIdle", rm.s.streamState)
+	}
+	if len(rm.s.blocks) != 3 {
+		t.Fatalf("blocks = %d, want 3", len(rm.s.blocks))
 	}
 }
 
@@ -589,7 +670,7 @@ func TestWindowResize_NoDirtyWhenNotStreaming(t *testing.T) {
 	}
 }
 
-func TestWindowResize_RepaintsFlushedScrollback(t *testing.T) {
+func TestWindowResize_UpdatesViewportOnResize(t *testing.T) {
 	m := newTestModel()
 	m.s.initialized = true
 	m.width = 80
@@ -598,66 +679,15 @@ func TestWindowResize_RepaintsFlushedScrollback(t *testing.T) {
 		{Type: "user", Raw: "hello"},
 		{Type: "assistant", Raw: "world"},
 	}
-	m.s.flushedCount = 2
-	m.s.flushScheduledCount = 2
 
-	_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	if cmd == nil {
-		t.Fatal("expected repaint command when scrollback exists")
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	rm := result.(appModel)
+
+	if rm.width != 120 {
+		t.Errorf("width = %d, want 120", rm.width)
 	}
-}
-
-func TestWindowResize_DoesNotRepaintWhenOnlyLiveAreaExists(t *testing.T) {
-	m := newTestModel()
-	m.s.initialized = true
-	m.width = 80
-	m.height = 24
-	m.s.blocks = []messageBlock{{Type: "assistant", Raw: "live"}}
-	m.s.flushedCount = 0
-
-	_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	if cmd != nil {
-		t.Fatal("expected no repaint command when nothing is in scrollback")
-	}
-}
-
-func TestWindowResize_SameSizeDoesNotRepaint(t *testing.T) {
-	m := newTestModel()
-	m.s.initialized = true
-	m.width = 120
-	m.height = 40
-	m.s.blocks = []messageBlock{
-		{Type: "user", Raw: "hello"},
-		{Type: "assistant", Raw: "world"},
-	}
-	m.s.flushedCount = 2
-	m.s.flushScheduledCount = 2
-
-	_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	if cmd != nil {
-		t.Fatal("expected no repaint when size did not change (prevents loop from tea.Exec)")
-	}
-}
-
-// --- Test 6: Ctrl+O reprint ---
-
-func TestCtrlO_ReturnsCmdWithBlocks(t *testing.T) {
-	m := newTestModel()
-	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
-
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
-	if cmd == nil {
-		t.Error("expected non-nil Cmd for Ctrl+O with blocks")
-	}
-}
-
-func TestCtrlO_NilWhenEmpty(t *testing.T) {
-	m := newTestModel()
-	m.s.blocks = nil
-
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
-	if cmd != nil {
-		t.Error("expected nil Cmd for Ctrl+O with no blocks")
+	if rm.height != 40 {
+		t.Errorf("height = %d, want 40", rm.height)
 	}
 }
 
@@ -665,41 +695,23 @@ func TestCtrlO_NilWhenEmpty(t *testing.T) {
 
 func TestClear_ResetsState(t *testing.T) {
 	m := newTestModel()
-	// Mock agent with Reset() that succeeds
-	m.agent = nil // handleCommand("clear") calls m.agent.Reset()
-	// We can't call Reset() without an agent, so test the state logic directly
 
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "hello"},
 		{Type: "assistant", Raw: "world"},
 	}
-	m.s.flushedCount = 2
-	m.s.flushScheduledCount = 2
-	m.s.flushEpoch = 0
 	m.s.streamText = "streaming..."
 	m.s.thinkingText = "thinking..."
 	m.s.streamCache = "cached"
 
 	// Simulate what /clear does (minus agent.Reset which needs a real agent)
 	m.s.blocks = m.s.blocks[:0]
-	m.s.flushedCount = 0
-	m.s.flushScheduledCount = 0
-	m.s.flushEpoch++
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
 
 	if len(m.s.blocks) != 0 {
 		t.Errorf("blocks = %d, want 0", len(m.s.blocks))
-	}
-	if m.s.flushedCount != 0 {
-		t.Errorf("flushedCount = %d, want 0", m.s.flushedCount)
-	}
-	if m.s.flushScheduledCount != 0 {
-		t.Errorf("flushScheduledCount = %d, want 0", m.s.flushScheduledCount)
-	}
-	if m.s.flushEpoch != 1 {
-		t.Errorf("flushEpoch = %d, want 1", m.s.flushEpoch)
 	}
 	if m.s.streamText != "" {
 		t.Errorf("streamText = %q, want empty", m.s.streamText)
@@ -714,10 +726,10 @@ func TestClear_ResetsState(t *testing.T) {
 
 // --- Test: handleAgentEvent tool events ---
 
-func TestHandleAgentEvent_ToolStart_StaysInLiveArea(t *testing.T) {
+func TestHandleAgentEvent_ToolStart_AppendsBlock(t *testing.T) {
 	m := newTestModel()
 
-	cmd := m.handleAgentEvent(core.AgentEvent{
+	m.handleAgentEvent(core.AgentEvent{
 		Type:       core.AgentEventToolExecStart,
 		ToolCallID: "tc-1",
 		ToolName:   "bash",
@@ -733,13 +745,6 @@ func TestHandleAgentEvent_ToolStart_StaysInLiveArea(t *testing.T) {
 	if m.s.blocks[0].ToolDone {
 		t.Error("block should not be done yet")
 	}
-	// Tool blocks stay in the live area (not flushed) until all tools complete.
-	if m.s.flushScheduledCount != 0 {
-		t.Errorf("flushScheduledCount = %d, want 0", m.s.flushScheduledCount)
-	}
-	if cmd != nil {
-		t.Error("expected nil cmd (no flush)")
-	}
 	if m.s.streamState != stateToolRunning {
 		t.Errorf("streamState = %d, want stateToolRunning", m.s.streamState)
 	}
@@ -748,9 +753,8 @@ func TestHandleAgentEvent_ToolStart_StaysInLiveArea(t *testing.T) {
 	}
 }
 
-func TestHandleAgentEvent_ToolEnd_UpdatesBlockAndFlushes(t *testing.T) {
+func TestHandleAgentEvent_ToolEnd_UpdatesBlock(t *testing.T) {
 	m := newTestModel()
-	// Simulate a running tool block in the live area.
 	m.s.blocks = []messageBlock{
 		{Type: "tool", ToolCallID: "tc-1", ToolName: "bash"},
 	}
@@ -758,7 +762,7 @@ func TestHandleAgentEvent_ToolEnd_UpdatesBlockAndFlushes(t *testing.T) {
 	m.s.streamState = stateToolRunning
 
 	result := core.TextResult("file1.go\nfile2.go")
-	cmd := m.handleAgentEvent(core.AgentEvent{
+	m.handleAgentEvent(core.AgentEvent{
 		Type:       core.AgentEventToolExecEnd,
 		ToolCallID: "tc-1",
 		ToolName:   "bash",
@@ -766,7 +770,6 @@ func TestHandleAgentEvent_ToolEnd_UpdatesBlockAndFlushes(t *testing.T) {
 		Result:     &result,
 	})
 
-	// Block should be updated in-place.
 	if len(m.s.blocks) != 1 {
 		t.Fatalf("blocks = %d, want 1 (updated in-place)", len(m.s.blocks))
 	}
@@ -775,13 +778,6 @@ func TestHandleAgentEvent_ToolEnd_UpdatesBlockAndFlushes(t *testing.T) {
 	}
 	if m.s.blocks[0].ToolResult != "file1.go\nfile2.go" {
 		t.Errorf("ToolResult = %q, want file content", m.s.blocks[0].ToolResult)
-	}
-	// All tools done → flush.
-	if m.s.flushScheduledCount != 1 {
-		t.Errorf("flushScheduledCount = %d, want 1", m.s.flushScheduledCount)
-	}
-	if cmd == nil {
-		t.Error("expected non-nil flush Cmd")
 	}
 	if m.s.streamState != stateStreaming {
 		t.Errorf("streamState = %d, want stateStreaming", m.s.streamState)
@@ -833,10 +829,9 @@ func TestHandleAgentEvent_ToolUpdate_StreamsOutput(t *testing.T) {
 	}
 }
 
-func TestHandleAgentEvent_ParallelTools_FlushOnlyWhenAllDone(t *testing.T) {
+func TestHandleAgentEvent_ParallelTools_CountsCorrectly(t *testing.T) {
 	m := newTestModel()
 
-	// Two tools start.
 	m.handleAgentEvent(core.AgentEvent{
 		Type: core.AgentEventToolExecStart, ToolCallID: "tc-1", ToolName: "bash",
 	})
@@ -851,28 +846,25 @@ func TestHandleAgentEvent_ParallelTools_FlushOnlyWhenAllDone(t *testing.T) {
 		t.Fatalf("blocks = %d, want 2", len(m.s.blocks))
 	}
 
-	// First tool finishes — should NOT flush.
+	// First tool finishes
 	r1 := core.TextResult("done")
-	cmd := m.handleAgentEvent(core.AgentEvent{
+	m.handleAgentEvent(core.AgentEvent{
 		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-1", ToolName: "bash", Result: &r1,
 	})
-	if cmd != nil {
-		t.Error("should not flush while tools still running")
-	}
 	if m.s.activeTools != 1 {
 		t.Errorf("activeTools = %d, want 1", m.s.activeTools)
 	}
 
-	// Second tool finishes — should flush all.
+	// Second tool finishes
 	r2 := core.TextResult("content")
-	cmd = m.handleAgentEvent(core.AgentEvent{
+	m.handleAgentEvent(core.AgentEvent{
 		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-2", ToolName: "read", Result: &r2,
 	})
-	if cmd == nil {
-		t.Error("should flush when all tools done")
-	}
 	if m.s.activeTools != 0 {
 		t.Errorf("activeTools = %d, want 0", m.s.activeTools)
+	}
+	if m.s.streamState != stateStreaming {
+		t.Errorf("streamState = %d, want stateStreaming after all tools done", m.s.streamState)
 	}
 }
 
@@ -997,8 +989,8 @@ func TestTruncateBlockText(t *testing.T) {
 	if !strings.Contains(footer, "20 total") {
 		t.Errorf("footer = %q, want '20 total'", footer)
 	}
-	if !strings.Contains(footer, "ctrl+o to expand") {
-		t.Errorf("footer should mention ctrl+o, got %q", footer)
+	if !strings.Contains(footer, "ctrl+e to expand") {
+		t.Errorf("footer should mention ctrl+e, got %q", footer)
 	}
 }
 
@@ -1022,8 +1014,8 @@ func TestTruncateBlockTextTail(t *testing.T) {
 	if !strings.Contains(header, "20 total") {
 		t.Errorf("header = %q, want '20 total'", header)
 	}
-	if !strings.Contains(header, "ctrl+o to expand") {
-		t.Errorf("header should mention ctrl+o, got %q", header)
+	if !strings.Contains(header, "ctrl+e to expand") {
+		t.Errorf("header should mention ctrl+e, got %q", header)
 	}
 }
 

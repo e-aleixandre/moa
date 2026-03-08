@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -34,27 +36,28 @@ const (
 // All mutable conversational state lives here behind a pointer.
 // Accessed only from the Bubble Tea goroutine (single-threaded).
 type state struct {
-	blocks              []messageBlock // conversation history, raw content
-	flushedCount        int            // blocks confirmed in scrollback (hidden from View)
-	flushScheduledCount int            // blocks scheduled for tea.Println (not yet confirmed)
-	flushEpoch          int            // incremented on /clear to invalidate stale flushDoneMsg
-	streamText          string         // current streaming assistant text
-	thinkingText        string         // current thinking text
-	streamCache         string         // cached glamour render of streamText (updated by renderTick)
-	dirty               bool           // streamText changed since last render tick
-	running             bool           // agent is running (tick should continue)
-	streamState         streamState
-	activeTools         int                   // number of tool calls currently executing
-	showThinking        bool                  // toggle thinking visibility (Ctrl+T)
-	expanded            bool                  // toggle expanded tool results (Ctrl+O)
-	initialized         bool                  // first WindowSizeMsg processed (one-shot bottom push done)
-	runGen              uint64                // incremented on each run; events from old runs are ignored
-	cleanupOnce         sync.Once             // idempotent cleanup
-	pendingStatus       string                // transient generic status shown in View(), never persisted
-	pendingTimeline     *pendingTimelineEvent // live timeline event shown in View() until next send
-	sessionCost         float64               // accumulated USD cost this session
-	runStartMsgCount    int                   // message count at start of current run (for delta cost)
-	asyncSubagents      int                   // running async subagent count (for status display)
+	blocks           []messageBlock // conversation history, raw content
+	streamText       string         // current streaming assistant text
+	thinkingText     string         // current thinking text
+	streamCache      string         // cached glamour render of streamText (updated by renderTick)
+	dirty            bool           // streamText changed since last render tick
+	viewportDirty    bool           // blocks changed, viewport needs refresh on next tick
+	running          bool           // agent is running (tick should continue)
+	streamState      streamState
+	activeTools      int                   // number of tool calls currently executing
+	showThinking     bool                  // toggle thinking visibility (Ctrl+T)
+	expanded         bool                  // toggle expanded tool results (Ctrl+E)
+	initialized      bool                  // first WindowSizeMsg processed
+	runGen           uint64                // incremented on each run; events from old runs are ignored
+	cleanupOnce      sync.Once             // idempotent cleanup
+	pendingStatus    string                // transient generic status shown in View(), never persisted
+	pendingTimeline  *pendingTimelineEvent // live timeline event shown in View() until next send
+	sessionCost      float64               // accumulated USD cost this session
+	runStartMsgCount int                   // message count at start of current run (for delta cost)
+	asyncSubagents   int                   // running async subagent count (for status display)
+	transcript       bool                  // true when in transcript mode (Ctrl+O)
+	fullHistory      bool                  // true when Ctrl+E in transcript mode shows everything
+	runStartBlockIdx int                   // block index at start of current run (patch boundary)
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -86,6 +89,7 @@ type appModel struct {
 	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
 
 	// Components
+	viewport       viewport.Model // scrollable conversation area (alt screen mode)
 	input          inputModel
 	status         statusModel
 	picker         pickerModel
@@ -167,6 +171,11 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		}
 	})
 
+	vp := viewport.New(0, 0)
+	vp.MouseWheelEnabled = true
+	vp.MouseWheelDelta = 3
+	vp.KeyMap = viewport.KeyMap{} // disable built-in keys; we route manually
+
 	m := appModel{
 		s:               &state{showThinking: true},
 		agent:           ag,
@@ -176,6 +185,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		unsub:           unsub,
 		baseCtx:         ctx,
 		runGenAddr:      runGenAddr,
+		viewport:        vp,
 		input:           newInput(),
 		status:          newStatus(),
 		picker:          newPicker(),
@@ -305,45 +315,41 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetWidth(msg.Width)
 		m.status.SetWidth(msg.Width)
 		// Invalidate stream cache so next tick re-renders with new width.
-		// The live area is still owned by View(); only scrollback needs explicit repaint.
 		if m.s.streamText != "" && sizeChanged {
 			m.s.dirty = true
 		}
 		// One-shot initialization on first WindowSizeMsg (renderer width is now set).
 		if !m.s.initialized {
 			m.s.initialized = true
-
 			if m.session != nil && len(m.session.Messages) > 0 {
 				m.rebuildFromMessages(m.session.Messages)
 				m.refreshContextSegment()
 			}
+			m.updateViewport()
+			return m, nil
+		}
+		// Resize: re-render viewport content (blocks may reflow)
+		if sizeChanged && !m.s.transcript {
+			m.updateViewport()
+		}
+		return m, nil
 
-			if len(m.s.blocks) > 0 {
-				content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, false)
-				m.s.flushedCount = len(m.s.blocks)
-				m.s.flushScheduledCount = len(m.s.blocks)
-				return m, tea.Println(content)
-			}
-			return m, nil
+	case tea.MouseMsg:
+		if !m.s.transcript && !m.sessionBrowser.active {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
 		}
-		// Repaint scrollback only on actual terminal resize, not on synthetic
-		// WindowSizeMsg from tea.Exec/forceRepaint (which would cause a loop).
-		if !sizeChanged || m.sessionBrowser.active || m.s.flushedCount == 0 {
-			return m, nil
-		}
-		content := renderBlocks(m.s.blocks[:m.s.flushedCount], m.renderer, m.s.showThinking, m.s.expanded)
-		return m, tea.Sequence(clearScreen(), tea.Println(content))
+		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
 	case agentEventMsg:
-		// Ignore late events from previous runs
-		var flushCmd tea.Cmd
 		if msg.RunGen == m.s.runGen {
-			flushCmd = m.handleAgentEvent(msg.Event)
+			m.handleAgentEvent(msg.Event)
 		}
-		return m, tea.Batch(flushCmd, m.waitForEvent())
+		return m, m.waitForEvent()
 
 	case agentDoneMsg:
 		// Channel closed or quit signaled. Don't re-subscribe.
@@ -353,6 +359,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleRunResult(msg)
 
 	case renderTickMsg:
+		needsRefresh := false
 		if m.s.dirty {
 			if m.s.streamText != "" {
 				m.s.streamCache = m.renderer.RenderMarkdown(m.s.streamText)
@@ -360,22 +367,19 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.s.streamCache = ""
 			}
 			m.s.dirty = false
+			needsRefresh = true
+		}
+		if m.s.viewportDirty {
+			m.s.viewportDirty = false
+			needsRefresh = true
+		}
+		if needsRefresh && !m.s.transcript {
+			m.updateViewport()
 		}
 		// Tick runs while agent is running (not just stateStreaming),
 		// so it survives tool_exec transitions.
 		if m.s.running {
 			return m, renderTick()
-		}
-		return m, nil
-
-	case flushDoneMsg:
-		// Confirm blocks are in scrollback — safe to hide from View().
-		// Ignore stale messages from before /clear.
-		if msg.epoch == m.s.flushEpoch && msg.upTo > m.s.flushedCount {
-			if msg.upTo > len(m.s.blocks) {
-				msg.upTo = len(m.s.blocks)
-			}
-			m.s.flushedCount = msg.upTo
 		}
 		return m, nil
 
@@ -425,18 +429,30 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 		m.refreshContextSegment()
-		cmds := []tea.Cmd{m.flushBlocks(len(m.s.blocks))}
+		m.updateViewport()
+		var cmds []tea.Cmd
 		if m.agent != nil {
 			cmds = append(cmds, m.saveSession(m.agent.Messages()))
 		}
 		return m, tea.Batch(cmds...)
 
 	case permissionRequestMsg:
+		// Auto-exit transcript mode so the prompt is visible and actionable
+		var cmds []tea.Cmd
+		if m.s.transcript {
+			m.s.transcript = false
+			m.s.fullHistory = false
+			m.updateViewport()
+			cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
+		}
 		mode := permission.ModeAsk
 		if m.permGate != nil {
 			mode = m.permGate.Mode()
 		}
 		m.permPrompt.Show(msg.Request, mode)
+		if len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
+		}
 		return m, nil
 
 	case sessionBrowserLoadedMsg:
@@ -491,102 +507,88 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the active zone only. Completed blocks are in terminal scrollback
-// (flushed via tea.Println). View() shows only unflushed blocks + streaming + status + input.
-// In expand mode, delegates to the full-screen pager.
+// View renders the full alt-screen layout. The viewport holds durable conversation
+// blocks; ephemeral content (spinner, notices) is rendered outside the viewport.
 func (m appModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
 	}
+
+	// Transcript mode: minimal footer only
+	if m.s.transcript {
+		hint := "Ctrl+O: back to chat"
+		if m.s.fullHistory {
+			hint += " · Ctrl+E: last messages"
+		} else {
+			hint += " · Ctrl+E: full history"
+		}
+		return lipgloss.NewStyle().Foreground(ActiveTheme.Overlay1).Render(hint)
+	}
+
 	if m.sessionBrowser.active {
 		return m.sessionBrowser.View(m.width, m.height)
 	}
 
-	// Content blocks — joined with "\n\n" (one blank line between blocks).
-	var content []string
+	// Build bottom chrome (everything below the viewport).
+	// Order matches the original inline layout: notices → topBar → input → bottomBar → palette
+	var bottomChrome []string
 
-	for _, block := range m.s.blocks[m.s.flushedCount:] {
-		if rendered := renderSingleBlock(block, m.renderer, m.s.showThinking); rendered != "" {
-			content = append(content, rendered)
-		}
-	}
-
-	// Streaming thinking (if visible and active)
-	if m.s.thinkingText != "" && m.s.showThinking {
-		content = append(content, GetActiveLayout().RenderThinking(m.s.thinkingText, m.width, ActiveTheme))
-	}
-
-	// Streaming assistant text (from cache, updated by renderTick)
-	if m.s.streamCache != "" {
-		content = append(content, GetActiveLayout().RenderAssistantText(m.s.streamCache, m.width))
-	}
-
-	// Status bar (spinner)
-	if sv := m.status.View(); sv != "" {
-		content = append(content, sv)
-	}
-
-	// Pending status (transient generic feedback — shown until next message send)
 	l := GetActiveLayout()
+	if sv := m.status.View(); sv != "" {
+		bottomChrome = append(bottomChrome, sv)
+	}
 	if m.s.pendingStatus != "" {
-		content = append(content, l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
+		bottomChrome = append(bottomChrome, l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
 	}
 	if m.s.pendingTimeline != nil {
-		content = append(content, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
+		bottomChrome = append(bottomChrome, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
 	}
 	if m.s.asyncSubagents > 0 {
 		label := fmt.Sprintf("⟳ %d subagent running", m.s.asyncSubagents)
 		if m.s.asyncSubagents > 1 {
 			label = fmt.Sprintf("⟳ %d subagents running", m.s.asyncSubagents)
 		}
-		content = append(content, l.RenderLiveNotice(label, m.width, ActiveTheme))
+		bottomChrome = append(bottomChrome, l.RenderLiveNotice(label, m.width, ActiveTheme))
 	}
-
-	// UI chrome — joined with "\n" (no extra blank lines).
-	var chrome []string
-
-	if tv := m.topBar.View(m.width); tv != "" {
-		chrome = append(chrome, tv)
-	}
+	// Input / modal area
 	if m.permPrompt.active {
-		// Permission prompt replaces the input area entirely
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
-			chrome = append(chrome, pv)
+			bottomChrome = append(bottomChrome, pv)
 		}
 	} else if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
-			chrome = append(chrome, pv)
+			bottomChrome = append(bottomChrome, pv)
 		}
 	} else {
 		if iv := m.input.View(); iv != "" {
-			chrome = append(chrome, iv)
+			bottomChrome = append(bottomChrome, iv)
 		}
 	}
-	if bv := m.bottomBar.View(m.width); bv != "" {
-		chrome = append(chrome, bv)
+	if m.topBar != nil {
+		if tv := m.topBar.View(m.width); tv != "" {
+			bottomChrome = append(bottomChrome, tv)
+		}
 	}
-	// Command palette below everything (fixed height, no layout shift)
+	if m.bottomBar != nil {
+		if bv := m.bottomBar.View(m.width); bv != "" {
+			bottomChrome = append(bottomChrome, bv)
+		}
+	}
 	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
-		chrome = append(chrome, pv)
+		bottomChrome = append(bottomChrome, pv)
 	}
 
-	// Assemble: content (with blank-line gaps) + chrome (tight)
-	var final []string
-	if len(content) > 0 {
-		contentStr := strings.Join(content, "\n\n")
-		if m.s.flushedCount > 0 {
-			contentStr = "\n" + contentStr // blank line gap from scrollback
-		}
-		final = append(final, contentStr)
-	}
-	if len(chrome) > 0 {
-		final = append(final, strings.Join(chrome, "\n"))
-	}
+	// Viewport dimensions are set by updateViewport() (pointer receiver).
+	// View() (value receiver) just reads the current size.
+	botStr := strings.Join(bottomChrome, "\n")
 
-	if len(final) == 0 {
-		return m.input.View()
+	// Assemble: viewport + bottom chrome
+	var sections []string
+	sections = append(sections, m.viewport.View())
+	if botStr != "" {
+		sections = append(sections, botStr)
 	}
-	return strings.Join(final, "\n\n")
+	return strings.Join(sections, "\n")
 }
 
 // --- Key handling ---
@@ -608,12 +610,42 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePickerKey(msg)
 	}
 
+	// Transcript mode: only allow mode-switch keys.
+	if m.s.transcript {
+		switch msg.Type {
+		case tea.KeyCtrlO, tea.KeyCtrlE:
+			// fall through to main switch below
+		case tea.KeyCtrlT:
+			m.s.showThinking = !m.s.showThinking
+			// Reprint transcript with updated thinking visibility
+			content := m.renderTranscriptBlocks(m.s.fullHistory)
+			return m, tea.Sequence(clearScreen(), tea.Println(content))
+		case tea.KeyCtrlC:
+			if m.s.running {
+				m.agent.Abort()
+				return m, nil
+			}
+			m.cleanup()
+			return m, tea.Quit
+		case tea.KeyCtrlD:
+			m.cleanup()
+			return m, tea.Quit
+		default:
+			return m, nil
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
 		if m.cmdPalette.active {
 			m.cmdPalette.Close()
 			m.input.textarea.Reset()
 			return m, m.forceRepaint()
+		}
+		// Ctrl+C escalation: clear input → abort agent → quit
+		if strings.TrimSpace(m.input.textarea.Value()) != "" {
+			m.input.textarea.Reset()
+			return m, nil
 		}
 		if m.s.running {
 			m.agent.Abort()
@@ -634,9 +666,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlT:
 		m.s.showThinking = !m.s.showThinking
-		// Only affects: (1) unflushed blocks in View(), (2) streaming thinking, (3) Ctrl+O expand
-		// Already-flushed scrollback is not modified (would require clear+reprint).
-		// Show brief feedback so user knows the toggle state.
+		m.updateViewport()
 		if m.s.showThinking {
 			m.status.SetText("thinking visible")
 		} else {
@@ -691,15 +721,47 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.handlePermissionsSwitch(string(next))
 
-	case tea.KeyCtrlO:
-		// Toggle expanded view: clear screen+scrollback, reprint all blocks.
-		// First press expands tool results in full; second press collapses back.
+	case tea.KeyCtrlE:
+		if m.s.transcript {
+			// Toggle full history in transcript mode
+			m.s.fullHistory = !m.s.fullHistory
+			content := m.renderTranscriptBlocks(m.s.fullHistory)
+			return m, tea.Sequence(clearScreen(), tea.Println(content))
+		}
+		// In alt screen: toggle expanded tool blocks
 		if len(m.s.blocks) == 0 {
 			return m, nil
 		}
 		m.s.expanded = !m.s.expanded
-		content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, m.s.expanded)
-		return m, tea.Sequence(clearScreen(), tea.Println(content))
+		m.updateViewport()
+		return m, nil
+
+	case tea.KeyCtrlO:
+		if m.s.transcript {
+			// Return to alt screen
+			m.s.transcript = false
+			m.s.fullHistory = false
+			m.recomputeInputEnabled()
+			m.updateViewport()
+			return m, tea.Batch(
+				tea.EnterAltScreen,
+				tea.EnableMouseCellMotion,
+			)
+		}
+		// Enter transcript mode
+		if len(m.s.blocks) == 0 {
+			return m, nil
+		}
+		m.s.transcript = true
+		m.s.fullHistory = false
+		m.input.SetEnabled(false)
+		content := m.renderTranscriptBlocks(false)
+		return m, tea.Sequence(
+			tea.ExitAltScreen,
+			tea.DisableMouse,
+			clearScreen(),
+			tea.Println(content),
+		)
 
 	case tea.KeyEnter:
 		if msg.Alt {
@@ -748,6 +810,17 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.startAgentRun(text)
 
+	case tea.KeyPgUp:
+		if !m.s.transcript {
+			m.viewport.HalfViewUp()
+		}
+		return m, nil
+	case tea.KeyPgDown:
+		if !m.s.transcript {
+			m.viewport.HalfViewDown()
+		}
+		return m, nil
+
 	case tea.KeyTab:
 		// Tab also accepts palette selection
 		if m.cmdPalette.active {
@@ -787,46 +860,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// --- Flush logic ---
-
-// flushBlocks schedules blocks up to index `to` for printing to scrollback.
-// Uses two counters to prevent the visual flash:
-//   - flushScheduledCount: advanced immediately (prevents double-scheduling)
-//   - flushedCount: advanced only after tea.Println executes (via flushDoneMsg)
-//
-// View() uses flushedCount, so blocks stay visible until the print is confirmed.
-func (m *appModel) flushBlocks(to int) tea.Cmd {
-	from := m.s.flushScheduledCount
-	if from < m.s.flushedCount {
-		from = m.s.flushedCount
-	}
-	if to <= from {
-		return nil
-	}
-
-	var parts []string
-	for i := from; i < to; i++ {
-		rendered := renderSingleBlock(m.s.blocks[i], m.renderer, m.s.showThinking)
-		if rendered != "" {
-			parts = append(parts, rendered)
-		}
-	}
-	m.s.flushScheduledCount = to
-	epoch := m.s.flushEpoch
-
-	done := func() tea.Msg { return flushDoneMsg{upTo: to, epoch: epoch} }
-
-	if len(parts) == 0 {
-		// Nothing to print, but still confirm the advance
-		return done
-	}
-	body := strings.TrimRight(strings.Join(parts, "\n\n"), "\n")
-	if from > 0 {
-		body = "\n" + body // blank line gap from previous flush batch
-	}
-	return tea.Sequence(tea.Println(body), done)
-}
-
 // --- Agent interaction ---
 
 // prepareRun sets up the common run state (running flag, gen counter, stream state, status).
@@ -835,6 +868,7 @@ func (m *appModel) prepareRun() uint64 {
 	m.s.running = true
 	m.s.runGen++
 	m.s.runStartMsgCount = len(m.agent.Messages())
+	m.s.runStartBlockIdx = len(m.s.blocks)
 	m.runGenAddr.Store(m.s.runGen)
 	m.s.streamState = stateStreaming
 	m.s.streamText = ""
@@ -876,14 +910,9 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		m.session.SetTitle(text, 80)
 	}
 
-	// Flush committed timeline events (if any) plus the user message.
-	userFlush := m.flushBlocks(len(m.s.blocks))
-
 	gen := m.prepareRun()
-
-	// tea.Sequence guarantees: committed switch event + user message print
-	// before the agent starts. renderTick and spinner can batch concurrently.
-	return m, tea.Sequence(userFlush, m.launchAgentSend(text, gen))
+	m.updateViewport()
+	return m, m.launchAgentSend(text, gen)
 }
 
 // startNotificationRun starts an agent run triggered by a subagent completion
@@ -903,19 +932,18 @@ func (m appModel) startNotificationRun(n SubagentNotification) (tea.Model, tea.C
 		SubagentResult: n.ResultTail,
 	})
 
-	blockFlush := m.flushBlocks(len(m.s.blocks))
 	gen := m.prepareRun()
-
-	return m, tea.Sequence(blockFlush, m.launchAgentSend(n.AgentText, gen))
+	m.updateViewport()
+	return m, m.launchAgentSend(n.AgentText, gen)
 }
 
 // handleAgentEvent processes a single agent event, updating TUI state.
-// Returns a tea.Cmd to flush blocks to scrollback (or nil).
-func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
+// Viewport refreshes happen via renderTick, not per-event.
+func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 	switch e.Type {
 	case core.AgentEventMessageUpdate:
 		if e.AssistantEvent == nil {
-			return nil
+			return
 		}
 		switch e.AssistantEvent.Type {
 		case core.ProviderEventTextDelta:
@@ -925,7 +953,6 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 			m.s.thinkingText += e.AssistantEvent.Delta
 			m.s.dirty = true
 		}
-		return nil
 
 	case core.AgentEventMessageStart:
 		m.s.streamText = ""
@@ -933,13 +960,8 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		m.s.streamCache = ""
 		m.s.streamState = stateStreaming
 		m.status.SetText("thinking...")
-		return nil
 
 	case core.AgentEventMessageEnd:
-		// Append blocks but DON'T flush to scrollback yet.
-		// Keep them as unflushed so View() renders them directly — this avoids
-		// a visual flash where streamCache is cleared but tea.Println hasn't
-		// printed yet. Blocks get flushed by the next tool event or agentRunResultMsg.
 		if m.s.thinkingText != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "thinking", Raw: m.s.thinkingText,
@@ -953,7 +975,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
-		return nil
+		m.s.viewportDirty = true
 
 	case core.AgentEventToolExecStart:
 		m.s.activeTools++
@@ -966,13 +988,9 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "tool", ToolCallID: e.ToolCallID, ToolName: e.ToolName, ToolArgs: e.Args,
 		})
-		// Don't flush — tool blocks stay in the live View() area until all
-		// tools complete, so we can update them in-place with results.
-		return nil
+		m.s.viewportDirty = true
 
 	case core.AgentEventToolExecUpdate:
-		// Streaming output from a running tool (e.g. bash stdout chunks).
-		// Append to the matching block's result so it renders live in View().
 		for i := len(m.s.blocks) - 1; i >= 0; i-- {
 			b := &m.s.blocks[i]
 			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
@@ -980,23 +998,20 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 					for _, c := range e.Result.Content {
 						if c.Type == "text" {
 							if b.ToolName == "edit" {
-								// Edit emits a diff via onUpdate — store separately
-								// so ToolExecEnd doesn't overwrite it.
 								b.ToolDiff = c.Text
 							} else {
 								b.ToolResult += c.Text
 							}
 						}
 					}
+					m.s.viewportDirty = true
 				}
 				break
 			}
 		}
-		return nil
 
 	case core.AgentEventToolExecEnd:
 		m.s.activeTools--
-		// Find the matching block and update it with the result.
 		for i := len(m.s.blocks) - 1; i >= 0; i-- {
 			b := &m.s.blocks[i]
 			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
@@ -1006,18 +1021,16 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 				break
 			}
 		}
+		m.s.viewportDirty = true
 		if m.s.activeTools <= 0 {
 			m.s.activeTools = 0
 			m.s.streamState = stateStreaming
 			m.status.SetText("thinking...")
-			return m.flushBlocks(len(m.s.blocks))
-		}
-		if m.s.activeTools == 1 {
+		} else if m.s.activeTools == 1 {
 			m.status.SetText("running tool...")
 		} else {
 			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
 		}
-		return nil
 
 	case core.AgentEventSteer:
 		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
@@ -1030,11 +1043,10 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 		} else {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
 		}
-		return m.flushBlocks(len(m.s.blocks))
+		m.s.viewportDirty = true
 
 	case core.AgentEventCompactionStart:
 		m.status.SetText("compacting context...")
-		return nil
 
 	case core.AgentEventCompactionEnd:
 		if e.Error != nil {
@@ -1049,10 +1061,8 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) tea.Cmd {
 			})
 		}
 		m.status.SetText("thinking...")
-		return m.flushBlocks(len(m.s.blocks))
+		m.s.viewportDirty = true
 	}
-
-	return nil
 }
 
 // --- Reconciliation ---
@@ -1071,9 +1081,6 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	// Does NOT rebuild blocks — preserves event-derived blocks (tool with args, etc.).
 	m.patchFromMessages(msg.Messages)
 
-	// Flush any blocks that weren't flushed by events (edge case: dropped events)
-	flushCmd := m.flushBlocks(len(m.s.blocks))
-
 	m.s.running = false
 	m.s.streamState = stateIdle
 	m.s.streamText = ""
@@ -1089,33 +1096,41 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "error", Raw: "Error: " + msg.Err.Error(),
 		})
-		errorFlush := m.flushBlocks(len(m.s.blocks))
-		return m, tea.Batch(flushCmd, errorFlush, m.saveSession(msg.Messages))
 	}
-	return m, tea.Batch(flushCmd, m.saveSession(msg.Messages))
+	m.updateViewport()
+	return m, m.saveSession(msg.Messages)
 }
 
 // patchFromMessages corrects the last assistant/thinking block content from
 // the source-of-truth messages. Does NOT rebuild — preserves event-derived blocks
 // (tool blocks with args and results, etc.) that messages don't contain.
 //
-// Only searches unflushed blocks (from flushedCount onwards). This prevents
-// patching an already-flushed block from a previous turn, which would cause
-// flushBlocks to be a no-op (to <= from) and the current turn's content to vanish.
+// Only searches blocks from runStartBlockIdx onwards (current run). This prevents
+// patching a block from a previous turn, which would leave the current turn's
+// content missing from the viewport.
 //
 // Also creates missing blocks: if agentRunResultMsg arrives before the
 // AgentEventMessageEnd event is processed (async emitter race), the assistant/thinking
-// blocks won't exist yet. In that case, append them so flushBlocks can print them.
+// blocks won't exist yet. In that case, append them.
 func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	if msgs == nil {
 		return
 	}
-	// Extract the final assistant text from source-of-truth messages.
+	// Only look at messages produced during this run (after runStartMsgCount).
+	// This prevents re-creating assistant blocks from a previous turn on abort.
+	newMsgs := msgs
+	if m.s.runStartMsgCount < len(msgs) {
+		newMsgs = msgs[m.s.runStartMsgCount:]
+	} else {
+		newMsgs = nil
+	}
+
+	// Extract the final assistant text from new messages only.
 	var lastAssistantText string
 	var lastThinkingText string
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" {
-			for _, c := range msgs[i].Content {
+	for i := len(newMsgs) - 1; i >= 0; i-- {
+		if newMsgs[i].Role == "assistant" {
+			for _, c := range newMsgs[i].Content {
 				if c.Type == "text" && c.Text != "" {
 					lastAssistantText = c.Text
 				}
@@ -1127,11 +1142,8 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 		}
 	}
 
-	// Search boundary: only patch unflushed blocks (current turn).
-	// flushedCount may lag behind flushScheduledCount, but scheduled blocks
-	// are already queued for tea.Println — patching them is harmless (content
-	// is already rendered). Use flushedCount as the safe lower bound.
-	searchFrom := m.s.flushedCount
+	// Search boundary: only patch blocks from the current run.
+	searchFrom := m.s.runStartBlockIdx
 
 	// Patch or create thinking block
 	if lastThinkingText != "" {
@@ -1268,7 +1280,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "thinking":
 		thinking := m.agent.ThinkingLevel()
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "thinking: " + thinking})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.updateViewport()
+		return m, nil
 
 	case "permissions":
 		mode := "yolo"
@@ -1285,7 +1298,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: info})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.updateViewport()
+		return m, nil
 
 	case "clear":
 		if err := m.agent.Reset(); err != nil {
@@ -1295,29 +1309,21 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.s.blocks = m.s.blocks[:0]
-		m.s.flushedCount = 0
-		m.s.flushScheduledCount = 0
-		m.s.flushEpoch++
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
 		m.s.pendingStatus = ""
 		m.s.pendingTimeline = nil
 		m.s.sessionCost = 0
+		m.s.expanded = false
 		m.topBar.UpdateCostSegment(0)
 		// Delete old session, create fresh one
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
 			m.session = m.sessionStore.Create()
 		}
-		// Clear screen + scrollback via the system clear command, then
-		// tell BT to repaint. ExecProcess bypasses BT's renderer entirely
-		// so escape sequences don't interfere with its internal state.
-		// Falls back to ClearScreen if clear(1) isn't available.
-		return m, tea.Sequence(
-			clearScreen(),
-			func() tea.Msg { return tea.ClearScreen() },
-		)
+		m.updateViewport()
+		return m, nil
 	case "compact":
 		if m.s.running {
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -1655,7 +1661,8 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "error", Raw: "Invalid permission mode. Options: yolo, ask, auto",
 		})
-		return m, m.flushBlocks(len(m.s.blocks))
+		m.updateViewport()
+		return m, nil
 	}
 
 	cmds := []tea.Cmd{}
@@ -1696,7 +1703,7 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
 		})
 	}
-	cmds = append(cmds, m.flushBlocks(len(m.s.blocks)))
+	m.updateViewport()
 	return m, tea.Batch(cmds...)
 }
 
@@ -1786,8 +1793,6 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.sessionBrowser.Close()
 	m.input.SetEnabled(true)
 	m.s.blocks = m.s.blocks[:0]
-	m.s.flushedCount = 0
-	m.s.flushScheduledCount = 0
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
@@ -1800,15 +1805,8 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 		m.rebuildFromMessages(sess.Messages)
 	}
 	m.refreshContextSegment()
-
-	if len(m.s.blocks) == 0 {
-		return m, tea.Sequence(clearScreen(), m.forceRepaint())
-	}
-
-	content := renderBlocks(m.s.blocks, m.renderer, m.s.showThinking, false)
-	m.s.flushedCount = len(m.s.blocks)
-	m.s.flushScheduledCount = len(m.s.blocks)
-	return m, tea.Sequence(clearScreen(), tea.Println(content), m.forceRepaint())
+	m.updateViewport()
+	return m, m.forceRepaint()
 }
 
 // --- Pinned models ---
@@ -1932,6 +1930,149 @@ func firstTextContent(content []core.Content) string {
 		}
 	}
 	return ""
+}
+
+// --- Viewport ---
+
+// updateViewport re-renders conversation blocks into the viewport.
+// Only durable content (blocks + streaming text). Ephemeral content
+// (spinner, notices) is rendered outside the viewport in View().
+// Also recalculates viewport dimensions from current terminal size.
+func (m *appModel) updateViewport() {
+	// Check scroll position BEFORE resizing — resizing can change maxYOffset
+	// and make AtBottom() return false even though the user was at the bottom.
+	wasAtBottom := m.viewport.AtBottom() || m.viewport.TotalLineCount() == 0
+	m.resizeViewport()
+	content := m.renderViewportContent()
+	m.viewport.SetContent(content)
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+	}
+}
+
+// resizeViewport recalculates viewport dimensions from terminal size and chrome heights.
+func (m *appModel) resizeViewport() {
+	if m.width == 0 || m.height == 0 {
+		return
+	}
+	chromeH := m.computeChromeHeight()
+	vpH := m.height - chromeH
+	if vpH < 1 {
+		vpH = 1
+	}
+	m.viewport.Width = m.width
+	m.viewport.Height = vpH
+	if m.viewport.PastBottom() {
+		m.viewport.GotoBottom()
+	}
+}
+
+// computeChromeHeight returns the total lines used by non-viewport chrome.
+// Must match View()'s bottom chrome components exactly.
+func (m *appModel) computeChromeHeight() int {
+	h := 0
+
+	l := GetActiveLayout()
+	if sv := m.status.View(); sv != "" {
+		h += lipgloss.Height(sv)
+	}
+	if m.s.pendingStatus != "" {
+		h += lipgloss.Height(l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
+	}
+	if m.s.pendingTimeline != nil {
+		h += lipgloss.Height(l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
+	}
+	if m.s.asyncSubagents > 0 {
+		h++
+	}
+	if m.permPrompt.active {
+		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
+			h += lipgloss.Height(pv)
+		}
+	} else if m.picker.active {
+		if pv := m.picker.View(m.width); pv != "" {
+			h += lipgloss.Height(pv)
+		}
+	} else {
+		if iv := m.input.View(); iv != "" {
+			h += lipgloss.Height(iv)
+		}
+	}
+	if m.topBar != nil {
+		if tv := m.topBar.View(m.width); tv != "" {
+			h += lipgloss.Height(tv)
+		}
+	}
+	if m.bottomBar != nil {
+		if bv := m.bottomBar.View(m.width); bv != "" {
+			h += lipgloss.Height(bv)
+		}
+	}
+	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
+		h += lipgloss.Height(pv)
+	}
+
+	h++ // gap between viewport and bottom chrome
+	return h
+}
+
+// renderViewportContent renders blocks for the viewport (last N turns + streaming).
+func (m *appModel) renderViewportContent() string {
+	blocks := m.visibleBlocks()
+
+	var parts []string
+	for _, block := range blocks {
+		if s := renderSingleBlockEx(block, m.renderer, m.s.showThinking, m.s.expanded); s != "" {
+			parts = append(parts, s)
+		}
+	}
+
+	// Append streaming content
+	if m.s.thinkingText != "" && m.s.showThinking {
+		parts = append(parts, GetActiveLayout().RenderThinking(m.s.thinkingText, m.width, ActiveTheme))
+	}
+	if m.s.streamCache != "" {
+		parts = append(parts, GetActiveLayout().RenderAssistantText(m.s.streamCache, m.width))
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+// visibleBlocks returns all blocks for the viewport. The viewport scrolls,
+// so no turn-based limiting is needed.
+func (m *appModel) visibleBlocks() []messageBlock {
+	return m.s.blocks
+}
+
+const transcriptTurnLimit = 10
+
+// renderTranscriptBlocks renders blocks for transcript mode.
+// fullHistory=false shows last N turns, fullHistory=true shows everything.
+// Always rendered expanded.
+func (m *appModel) renderTranscriptBlocks(fullHistory bool) string {
+	blocks := m.s.blocks
+	if !fullHistory && len(blocks) > 0 {
+		turns := 0
+		start := 0
+		for i := len(blocks) - 1; i >= 0; i-- {
+			if blocks[i].Type == "user" || blocks[i].Type == "subagent" {
+				turns++
+				if turns > transcriptTurnLimit {
+					break
+				}
+				start = i
+			}
+		}
+		blocks = blocks[start:]
+	}
+	return renderBlocks(blocks, m.renderer, m.s.showThinking, true)
+}
+
+// recomputeInputEnabled sets input enabled/disabled based on current state.
+// Used when exiting transcript mode to avoid unconditionally enabling input.
+func (m *appModel) recomputeInputEnabled() {
+	enabled := !m.s.running && !m.permPrompt.active && !m.picker.active && !m.sessionBrowser.active
+	m.input.SetEnabled(enabled)
 }
 
 // --- Helpers ---

@@ -248,7 +248,7 @@ func truncateBlockTextTail(text string, maxLines int) (header, body string) {
 	}
 	total := len(lines)
 	hidden := total - maxLines
-	return fmt.Sprintf("… (%d previous lines, %d total, ctrl+o to expand)", hidden, total),
+	return fmt.Sprintf("… (%d previous lines, %d total, ctrl+e to expand)", hidden, total),
 		strings.Join(lines[total-maxLines:], "\n")
 }
 
@@ -268,7 +268,7 @@ func truncateBlockText(text string, maxLines int) (body, footer string) {
 	total := len(lines)
 	remaining := total - maxLines
 	return strings.Join(lines[:maxLines], "\n"),
-		fmt.Sprintf("… (%d more lines, %d total, ctrl+o to expand)", remaining, total)
+		fmt.Sprintf("… (%d more lines, %d total, ctrl+e to expand)", remaining, total)
 }
 
 // --- ANSI-aware background painting ---
