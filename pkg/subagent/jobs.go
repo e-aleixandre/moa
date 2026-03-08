@@ -211,6 +211,21 @@ func (s *jobStore) cleanup(olderThan time.Duration) {
 	}
 }
 
+func (s *jobStore) runningCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, j := range s.jobs {
+		j.mu.Lock()
+		running := j.status == statusRunning || j.status == statusCancelling
+		j.mu.Unlock()
+		if running {
+			count++
+		}
+	}
+	return count
+}
+
 func randomJobID() string {
 	var b [6]byte
 	if _, err := rand.Read(b[:]); err != nil {

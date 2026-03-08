@@ -39,6 +39,13 @@ type Config struct {
 	PromptBuilder          func(agentsMD string, toolSpecs []core.ToolSpec) string
 	ParentTools            *core.Registry
 	AppCtx                 context.Context
+
+	// OnAsyncComplete is called when an async subagent finishes (completed, failed, or cancelled).
+	OnAsyncComplete func(jobID, task, status, resultTail string)
+
+	// OnAsyncJobChange is called when an async job starts or finishes.
+	// count is the current number of running jobs.
+	OnAsyncJobChange func(count int)
 }
 
 func RegisterAll(reg *core.Registry, cfg Config) {
@@ -127,6 +134,9 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				}
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 				job := jobs.create(task, model.ID, jobCancel)
+				if cfg.OnAsyncJobChange != nil {
+					cfg.OnAsyncJobChange(jobs.runningCount())
+				}
 				go runAsyncJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, systemPrompt, childReg, task)
 				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_status to check progress, subagent_cancel to stop."), nil
 			}
@@ -236,6 +246,18 @@ func runSync(ctx context.Context, cfg Config, provider core.Provider, model core
 func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string) {
 	defer j.cancel()
 	defer close(j.done)
+	defer func() {
+		if cfg.OnAsyncComplete != nil {
+			snap, ok := jobs.snapshot(j.id)
+			if !ok {
+				return
+			}
+			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tailLines(snap.Result, 50))
+		}
+		if cfg.OnAsyncJobChange != nil {
+			cfg.OnAsyncJobChange(jobs.runningCount())
+		}
+	}()
 
 	child, err := newChildAgent(cfg, provider, model, thinkingLevel, systemPrompt, childReg)
 	if err != nil {
@@ -470,6 +492,15 @@ func currentPermissionCheck(cfg Config) func(context.Context, string, map[string
 		return cfg.CurrentPermissionCheck()
 	}
 	return nil
+}
+
+// tailLines returns the last n lines of s.
+func tailLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 func getBool(params map[string]any, key string) bool {

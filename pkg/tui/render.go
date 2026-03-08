@@ -15,7 +15,7 @@ const assistantPadChars = 2
 // Blocks are rendered on demand (flush to scrollback or View()) using current
 // terminal width, so resize reflows correctly.
 type messageBlock struct {
-	Type string // "user", "assistant", "tool", "error", "status", "thinking"
+	Type string // "user", "assistant", "tool", "error", "status", "thinking", "subagent"
 	Raw  string // raw content: markdown for assistant, plain text for others
 
 	// Tool blocks (Type == "tool")
@@ -26,6 +26,11 @@ type messageBlock struct {
 	ToolDiff   string         // diff output for edit tool (from onUpdate, preserved across ToolExecEnd)
 	ToolDone   bool           // true after tool_execution_end
 	IsError    bool           // true if the tool returned an error
+
+	// Subagent blocks (Type == "subagent")
+	SubagentStatus string // "completed", "failed", "cancelled"
+	SubagentTask   string // original task description
+	SubagentResult string // full result text (for expand)
 }
 
 // renderer caches the glamour TermRenderer. Recreated only on width change.
@@ -100,6 +105,9 @@ func renderSingleBlockEx(block messageBlock, r *renderer, showThinking bool, exp
 		return l.RenderAssistantText(r.RenderMarkdown(block.Raw), w)
 	case "tool":
 		data := buildToolBlockData(block, expanded)
+		return l.RenderToolBlock(data, w, t)
+	case "subagent":
+		data := buildSubagentBlockData(block, expanded)
 		return l.RenderToolBlock(data, w, t)
 	case "error":
 		return l.RenderError(block.Raw, w, t)

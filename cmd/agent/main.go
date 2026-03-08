@@ -191,6 +191,9 @@ func main() {
 	}
 
 	var agHolder atomic.Pointer[agent.Agent]
+	subagentCountCh := make(chan int, 16)
+	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
+	useTUI := promptContent == ""
 	subagent.RegisterAll(toolReg, subagent.Config{
 		DefaultModel: resolvedModel,
 		CurrentModel: func() core.Model {
@@ -224,6 +227,42 @@ func main() {
 		AgentsMD:    agentsMD,
 		ParentTools: toolReg,
 		AppCtx:      ctx,
+		OnAsyncJobChange: func(count int) {
+			select {
+			case subagentCountCh <- count:
+			default:
+			}
+		},
+		OnAsyncComplete: func(jobID, task, status, resultTail string) {
+			var agentText string
+			switch status {
+			case "completed":
+				agentText = fmt.Sprintf("[subagent completed] Job %s finished.\nTask: %s\n\nResult (last 50 lines):\n%s", jobID, task, resultTail)
+			case "failed":
+				agentText = fmt.Sprintf("[subagent failed] Job %s failed.\nTask: %s\nError: %s", jobID, task, resultTail)
+			case "cancelled":
+				agentText = fmt.Sprintf("[subagent cancelled] Job %s was cancelled.\nTask: %s", jobID, task)
+			default:
+				return
+			}
+			if useTUI {
+				select {
+				case subagentNotifyCh <- tui.SubagentNotification{
+					JobID:      jobID,
+					Task:       task,
+					Status:     status,
+					AgentText:  agentText,
+					ResultTail: resultTail,
+				}:
+				default:
+				}
+			} else {
+				// Headless: steer directly.
+				if a := agHolder.Load(); a != nil {
+					a.Steer(agentText)
+				}
+			}
+		},
 	})
 
 	// Build system prompt after all tools are registered.
@@ -298,6 +337,8 @@ func main() {
 			ModelName:             modelDisplayName(resolvedModel),
 			PermissionGate:        permGate,
 			PinnedModels:          moaCfg.PinnedModels,
+			SubagentCountCh:       subagentCountCh,
+			SubagentNotifyCh:      subagentNotifyCh,
 			OnPinnedModelsChange: func(ids []string) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 					cfg.PinnedModels = ids

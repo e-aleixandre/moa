@@ -1495,3 +1495,63 @@ func TestPinnedSetsEqual(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSubagentNotification(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		wantOK     bool
+		wantTask   string
+		wantStatus string
+		wantResult string
+	}{
+		{
+			name:       "completed",
+			text:       "[subagent completed] Job abc123 finished.\nTask: fix the tests\n\nResult (last 50 lines):\nall tests pass",
+			wantOK:     true,
+			wantTask:   "fix the tests",
+			wantStatus: "completed",
+			wantResult: "all tests pass",
+		},
+		{
+			name:       "failed",
+			text:       "[subagent failed] Job abc123 failed.\nTask: deploy\nError: connection refused",
+			wantOK:     true,
+			wantTask:   "deploy",
+			wantStatus: "failed",
+			wantResult: "connection refused",
+		},
+		{
+			name:       "cancelled",
+			text:       "[subagent cancelled] Job abc123 was cancelled.\nTask: long task",
+			wantOK:     true,
+			wantTask:   "long task",
+			wantStatus: "cancelled",
+		},
+		{
+			name:   "user message",
+			text:   "hey agent, change direction",
+			wantOK: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task, status, result, ok := parseSubagentNotification(tt.text)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if task != tt.wantTask {
+				t.Errorf("task = %q, want %q", task, tt.wantTask)
+			}
+			if status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", status, tt.wantStatus)
+			}
+			if result != tt.wantResult {
+				t.Errorf("result = %q, want %q", result, tt.wantResult)
+			}
+		})
+	}
+}

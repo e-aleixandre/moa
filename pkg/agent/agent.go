@@ -22,6 +22,10 @@ type Agent struct {
 	emitter *Emitter
 	cancel  context.CancelFunc
 	mu      sync.Mutex
+
+	steerCh    chan string // buffered, drained by agentLoop between steps
+	followUpMu sync.Mutex
+	followUps  []string // consumed after agentLoop returns in execute()
 }
 
 // AgentConfig configures an Agent.
@@ -95,6 +99,7 @@ func New(cfg AgentConfig) (*Agent, error) {
 		tools:   cfg.Tools,
 		hooks:   ext,
 		emitter: NewEmitter(cfg.Logger),
+		steerCh: make(chan string, 32),
 	}, nil
 }
 
@@ -357,6 +362,36 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 	}, nil
 }
 
+// Steer queues a message for inter-step delivery. The agent sees it
+// at the next gap between tool executions. Safe to call while running.
+// No-op if the buffer is full (non-blocking send).
+func (a *Agent) Steer(msg string) {
+	select {
+	case a.steerCh <- msg:
+	default:
+	}
+}
+
+// Enqueue queues a message for post-turn delivery. It will be processed
+// after the current agent turn completes, triggering a new turn.
+// Safe to call at any time.
+func (a *Agent) Enqueue(msg string) {
+	a.followUpMu.Lock()
+	defer a.followUpMu.Unlock()
+	a.followUps = append(a.followUps, msg)
+}
+
+func (a *Agent) drainFollowUps() []string {
+	a.followUpMu.Lock()
+	defer a.followUpMu.Unlock()
+	if len(a.followUps) == 0 {
+		return nil
+	}
+	msgs := a.followUps
+	a.followUps = nil
+	return msgs
+}
+
 // Abort cancels the current run.
 func (a *Agent) Abort() {
 	a.mu.Lock()
@@ -414,9 +449,27 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		convertToLLM:        a.config.ConvertToLLM,
 		permissionCheck:     a.config.PermissionCheck,
 		compaction:          a.config.Compaction,
+		steerCh:             a.steerCh,
 	}
 
-	err := agentLoop(ctx, cfg)
+	var err error
+	for {
+		err = agentLoop(ctx, cfg)
+		if err != nil {
+			break
+		}
+		followUps := a.drainFollowUps()
+		steered := drainSteer(a.steerCh)
+		if len(followUps) == 0 && len(steered) == 0 {
+			break
+		}
+		// Deterministic order: follow-ups first, then steered.
+		for _, msg := range append(followUps, steered...) {
+			a.state.Messages = append(a.state.Messages,
+				core.WrapMessage(core.NewUserMessage(msg)))
+			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
+		}
+	}
 	// Return a copy — the internal slice is reused across turns (Send appends).
 	// Without this, callers could mutate returned messages and corrupt state.
 	msgs := make([]core.AgentMessage, len(a.state.Messages))
