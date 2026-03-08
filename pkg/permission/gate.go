@@ -5,6 +5,7 @@ package permission
 
 import (
 	"context"
+	"sync"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -40,6 +41,7 @@ var readOnly = map[string]bool{
 
 // Gate mediates tool permissions. Created once, shared between agent and TUI.
 type Gate struct {
+	mu        sync.RWMutex
 	mode      Mode
 	reqCh     chan Request
 	allow     []string   // glob patterns auto-approved in ask mode
@@ -69,31 +71,59 @@ func New(mode Mode, cfg Config) *Gate {
 }
 
 // Mode returns the active permission mode.
-func (g *Gate) Mode() Mode { return g.mode }
+func (g *Gate) Mode() Mode {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.mode
+}
 
 // SetMode changes the permission mode at runtime.
-func (g *Gate) SetMode(mode Mode) { g.mode = mode }
+func (g *Gate) SetMode(mode Mode) {
+	g.mu.Lock()
+	g.mode = mode
+	g.mu.Unlock()
+}
 
 // Requests returns the channel the UI listens on for approval requests.
 func (g *Gate) Requests() <-chan Request { return g.reqCh }
 
 // Rules returns the current rule set (for AI evaluator).
-func (g *Gate) Rules() []string { return g.rules }
+func (g *Gate) Rules() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	cp := make([]string, len(g.rules))
+	copy(cp, g.rules)
+	return cp
+}
 
 // Allow returns the current allow patterns.
-func (g *Gate) AllowPatterns() []string { return g.allow }
+func (g *Gate) AllowPatterns() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	cp := make([]string, len(g.allow))
+	copy(cp, g.allow)
+	return cp
+}
 
 // AddAllow appends a glob allow pattern (for ask mode "always allow").
 func (g *Gate) AddAllow(pattern string) {
+	g.mu.Lock()
 	g.allow = append(g.allow, pattern)
+	g.mu.Unlock()
 }
 
 // SetEvaluator replaces the AI evaluator (for runtime mode switches).
-func (g *Gate) SetEvaluator(e *Evaluator) { g.evaluator = e }
+func (g *Gate) SetEvaluator(e *Evaluator) {
+	g.mu.Lock()
+	g.evaluator = e
+	g.mu.Unlock()
+}
 
 // AddRule appends a natural language rule (for auto mode).
 func (g *Gate) AddRule(rule string) {
+	g.mu.Lock()
 	g.rules = append(g.rules, rule)
+	g.mu.Unlock()
 }
 
 // Check decides whether a tool call may proceed. May block waiting for user
@@ -103,7 +133,15 @@ func (g *Gate) AddRule(rule string) {
 // ask mode: readOnly → deny globs → allow globs → ask user
 // auto mode: readOnly → AI evaluator (rules) → ask user (fallback)
 func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-	if g.mode == ModeYolo {
+	g.mu.RLock()
+	mode := g.mode
+	allow := append([]string(nil), g.allow...)
+	deny := append([]string(nil), g.deny...)
+	rules := append([]string(nil), g.rules...)
+	evaluator := g.evaluator
+	g.mu.RUnlock()
+
+	if mode == ModeYolo {
 		return nil
 	}
 
@@ -111,18 +149,18 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 		return nil
 	}
 
-	switch g.mode {
+	switch mode {
 	case ModeAsk:
-		if matchPolicy(g.deny, name, args) {
+		if matchPolicy(deny, name, args) {
 			return &core.ToolCallDecision{Block: true, Reason: "denied by policy"}
 		}
-		if matchPolicy(g.allow, name, args) {
+		if matchPolicy(allow, name, args) {
 			return nil
 		}
 
 	case ModeAuto:
-		if g.evaluator != nil {
-			switch g.evaluator.Evaluate(ctx, name, args, g.rules) {
+		if evaluator != nil {
+			switch evaluator.Evaluate(ctx, name, args, rules) {
 			case DecisionApprove:
 				return nil
 			case DecisionDeny:
