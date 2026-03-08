@@ -15,6 +15,7 @@ type MoaConfig struct {
 	AllowedPaths   []string          `json:"allowed_paths"`   // Additional directories accessible outside workspace
 	Permissions    PermissionsConfig `json:"permissions"`     // Tool execution permission policy
 	PinnedModels   []string          `json:"pinned_models"`   // Model IDs pinned for Ctrl+P cycling
+	BraveAPIKey    string            `json:"brave_api_key"`   // Brave Search API key for web_search tool
 }
 
 // PermissionsConfig controls tool execution approval.
@@ -70,6 +71,11 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		},
 	}
 	// Override wins for scalar fields
+	if override.BraveAPIKey != "" {
+		merged.BraveAPIKey = override.BraveAPIKey
+	} else {
+		merged.BraveAPIKey = base.BraveAPIKey
+	}
 	if override.Permissions.Mode != "" {
 		merged.Permissions.Mode = override.Permissions.Mode
 	}

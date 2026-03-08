@@ -113,7 +113,7 @@ func TestRegisterBuiltins(t *testing.T) {
 	tmp := t.TempDir()
 	RegisterBuiltins(reg, ToolConfig{WorkspaceRoot: tmp})
 
-	expected := []string{"bash", "read", "write", "edit", "grep", "find", "ls"}
+	expected := []string{"bash", "read", "write", "edit", "grep", "find", "ls", "fetch_content"}
 	for _, name := range expected {
 		if _, ok := reg.Get(name); !ok {
 			t.Errorf("missing tool: %s", name)

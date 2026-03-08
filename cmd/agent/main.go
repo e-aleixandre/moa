@@ -147,6 +147,7 @@ func main() {
 		DisableSandbox: *yolo || moaCfg.DisableSandbox,
 		AllowedPaths:   allowedPaths,
 		BashTimeout:    5 * time.Minute,
+		BraveAPIKey:    moaCfg.BraveAPIKey,
 	})
 
 	// Build permission gate.

@@ -18,6 +18,7 @@ type ToolConfig struct {
 	DisableSandbox bool     // When true, safePath allows any absolute path (YOLO mode).
 	AllowedPaths   []string // Additional directories allowed outside WorkspaceRoot.
 	BashTimeout   time.Duration // Default: 5 minutes.
+	BraveAPIKey   string        // Brave Search API key (empty = web_search not registered).
 }
 
 // Defaults fills in zero-value fields with defaults.
@@ -37,6 +38,10 @@ func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) {
 	reg.Register(NewGrep(cfg))
 	reg.Register(NewFind(cfg))
 	reg.Register(NewLs(cfg))
+	reg.Register(NewFetch(cfg))
+	if cfg.BraveAPIKey != "" {
+		reg.Register(NewWebSearch(cfg))
+	}
 }
 
 // safePath resolves a path relative to WorkspaceRoot.
