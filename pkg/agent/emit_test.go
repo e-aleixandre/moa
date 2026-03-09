@@ -63,6 +63,63 @@ func TestEmitter_DoubleUnsubscribe(t *testing.T) {
 	unsub() // Should not panic
 }
 
+func TestEmitter_DrainDeliversAllEvents(t *testing.T) {
+	e := NewEmitter(nil)
+	const n = 50
+	var received atomic.Int32
+
+	e.Subscribe(func(evt core.AgentEvent) {
+		received.Add(1)
+	})
+
+	for i := 0; i < n; i++ {
+		e.Emit(core.AgentEvent{Type: core.AgentEventStart})
+	}
+
+	e.Drain(time.Second)
+
+	if got := received.Load(); got != int32(n) {
+		t.Fatalf("expected %d events after drain, got %d", n, got)
+	}
+}
+
+func TestEmitter_DrainEmptyImmediate(t *testing.T) {
+	e := NewEmitter(nil)
+	e.Subscribe(func(evt core.AgentEvent) {})
+
+	start := time.Now()
+	e.Drain(5 * time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("drain with empty buffer took %v, expected near-instant", elapsed)
+	}
+}
+
+func TestEmitter_DrainTimeout(t *testing.T) {
+	e := NewEmitter(nil)
+	// Subscriber that blocks forever
+	e.Subscribe(func(evt core.AgentEvent) {
+		select {} // block
+	})
+
+	// Fill with more events than buffer to ensure channel stays non-empty
+	for i := 0; i < 300; i++ {
+		e.Emit(core.AgentEvent{Type: core.AgentEventStart})
+	}
+
+	start := time.Now()
+	e.Drain(50 * time.Millisecond)
+	elapsed := time.Since(start)
+
+	if elapsed < 40*time.Millisecond {
+		t.Fatalf("drain returned too early: %v", elapsed)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("drain took too long: %v", elapsed)
+	}
+}
+
 func TestEmitter_ConcurrentEmitUnsubscribe(t *testing.T) {
 	e := NewEmitter(nil)
 	var wg sync.WaitGroup

@@ -308,6 +308,13 @@ func (a *Agent) Subscribe(fn func(core.AgentEvent)) func() {
 	return a.emitter.Subscribe(fn)
 }
 
+// Drain waits until all pending events have been delivered to subscribers,
+// or timeout expires. Call after Run() in headless mode to ensure terminal
+// events (agent_end) are delivered before process exit.
+func (a *Agent) Drain(timeout time.Duration) {
+	a.emitter.Drain(timeout)
+}
+
 // Compact forces context compaction regardless of the auto-compaction threshold.
 // Returns the compaction payload on success, nil if there was nothing to compact,
 // or an error if the agent is running or compaction fails.

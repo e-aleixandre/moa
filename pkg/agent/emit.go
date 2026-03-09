@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -86,6 +87,36 @@ func (e *Emitter) Emit(event core.AgentEvent) {
 			e.logger.Warn("subscriber buffer full, dropping event", "type", event.Type)
 		}
 	}
+}
+
+// Drain waits until all subscriber channels are empty or timeout expires.
+// Used in headless mode to ensure terminal events are delivered before exit.
+func (e *Emitter) Drain(timeout time.Duration) {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-ticker.C:
+			if e.allDrained() {
+				return
+			}
+		}
+	}
+}
+
+func (e *Emitter) allDrained() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, sub := range e.subs {
+		if len(sub.ch) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *subscriber) loop(logger *slog.Logger) {

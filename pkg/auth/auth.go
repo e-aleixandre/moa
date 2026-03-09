@@ -44,7 +44,11 @@ type Store struct {
 }
 
 // configDir returns the directory for storing credentials.
+// Honors MOA_CONFIG_DIR env var for container/custom deployments.
 func configDir() string {
+	if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
+		return dir
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."

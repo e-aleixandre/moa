@@ -20,8 +20,7 @@ import (
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/provider/anthropic"
-	"github.com/ealeixandre/moa/pkg/provider/openai"
+	"github.com/ealeixandre/moa/pkg/provider"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
@@ -71,12 +70,18 @@ func main() {
 	continueFlag := flag.Bool("continue", false, "Resume the most recent session")
 	var resume resumeFlag
 	flag.Var(&resume, "resume", "Open the session browser, or resume a specific session with --resume <id>")
+	output := flag.String("output", "text", "Output format: text (default) or json (JSON-lines to stdout)")
 	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
 	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
 	permsModel := flag.String("permissions-model", "", "Model for auto-mode AI evaluator (e.g. haiku)")
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	flag.Parse()
+
+	if *output != "text" && *output != "json" {
+		fmt.Fprintf(os.Stderr, "error: --output must be 'text' or 'json'\n")
+		os.Exit(1)
+	}
 
 	if *continueFlag && resume.Enabled {
 		fmt.Fprintln(os.Stderr, "error: use either --continue or --resume, not both")
@@ -135,7 +140,7 @@ func main() {
 	agentHome := os.Getenv("AGENT_HOME")
 	agentsMD, _ := agentcontext.LoadAgentsMD(cwd, agentHome)
 
-	// Load config: global (~/.moa/config.json) + project (<cwd>/.moa/config.json)
+	// Load config: global (~/.config/moa/config.json) + project (<cwd>/.moa/config.json)
 	moaCfg := core.LoadMoaConfig(cwd)
 
 	// Build tool registry.
@@ -295,9 +300,11 @@ func main() {
 
 	if promptContent == "" {
 		// Interactive mode — launch TUI with session persistence
-		sessionStore, err := session.NewStore("")
-		if err != nil {
+		var sessionStore session.SessionStore
+		if fs, err := session.NewFileStore(""); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: session persistence disabled: %v\n", err)
+		} else {
+			sessionStore = fs
 		}
 
 		var sess *session.Session
@@ -363,38 +370,50 @@ func main() {
 
 	// --- Headless mode ---
 
+	jsonOutput := *output == "json"
+
 	printAuthNotice(os.Stderr, providerBuild.AuthNotice)
 
 	var streamedChars atomic.Int64
-	ag.Subscribe(func(e core.AgentEvent) {
-		switch e.Type {
-		case core.AgentEventMessageUpdate:
-			if e.AssistantEvent != nil {
-				switch e.AssistantEvent.Type {
-				case core.ProviderEventTextDelta:
-					fmt.Print(e.AssistantEvent.Delta)
-					streamedChars.Add(int64(len(e.AssistantEvent.Delta)))
-				case core.ProviderEventThinkingDelta:
-					fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.AssistantEvent.Delta)
+	if jsonOutput {
+		jw := newJSONLineWriter()
+		ag.Subscribe(jw.handle)
+	} else {
+		ag.Subscribe(func(e core.AgentEvent) {
+			switch e.Type {
+			case core.AgentEventMessageUpdate:
+				if e.AssistantEvent != nil {
+					switch e.AssistantEvent.Type {
+					case core.ProviderEventTextDelta:
+						fmt.Print(e.AssistantEvent.Delta)
+						streamedChars.Add(int64(len(e.AssistantEvent.Delta)))
+					case core.ProviderEventThinkingDelta:
+						fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.AssistantEvent.Delta)
+					}
 				}
+			case core.AgentEventToolExecStart:
+				fmt.Fprintf(os.Stderr, "\n\033[36m[%s]\033[0m %s\n", e.ToolName, tool.SummarizeArgs(e.Args))
+			case core.AgentEventToolExecEnd:
+				icon := "\033[32m✓\033[0m"
+				if e.IsError {
+					icon = "\033[31m✗\033[0m"
+				}
+				fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m %s\n", e.ToolName, icon)
 			}
-		case core.AgentEventToolExecStart:
-			fmt.Fprintf(os.Stderr, "\n\033[36m[%s]\033[0m %s\n", e.ToolName, tool.SummarizeArgs(e.Args))
-		case core.AgentEventToolExecEnd:
-			icon := "\033[32m✓\033[0m"
-			if e.IsError {
-				icon = "\033[31m✗\033[0m"
-			}
-			fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m %s\n", e.ToolName, icon)
-		}
-	})
+		})
+	}
 
 	msgs, err := ag.Run(ctx, promptContent)
 
-	if finalText := extractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
-		fmt.Print(finalText)
+	// Drain emitter: ensure all async events are delivered before exit.
+	ag.Drain(2 * time.Second)
+
+	if !jsonOutput {
+		if finalText := extractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
+			fmt.Print(finalText)
+		}
+		fmt.Println()
 	}
-	fmt.Println()
 
 	if err != nil {
 		if ctx.Err() != nil {
@@ -526,35 +545,43 @@ func handleLogin(provider string, authStore *auth.Store) {
 // It must stay side-effect free because the TUI reuses it while Bubble Tea owns
 // the terminal. Callers decide whether any auth notice should be rendered.
 func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult, error) {
-	switch model.Provider {
-	case "openai":
-		apiKey, isOAuth, err := authStore.GetAPIKey("openai")
-		if err != nil {
-			return ProviderBuildResult{}, err
-		}
-		if isOAuth {
-			accountID := authStore.GetAccountID("openai")
-			return ProviderBuildResult{
-				Provider:   openai.NewOAuth(apiKey, accountID),
-				AuthNotice: "ChatGPT subscription OAuth",
-			}, nil
-		}
-		return ProviderBuildResult{Provider: openai.New(apiKey)}, nil
-
-	case "anthropic", "":
-		apiKey, isOAuth, err := authStore.GetAPIKey("anthropic")
-		if err != nil {
-			return ProviderBuildResult{}, err
-		}
-		build := ProviderBuildResult{Provider: anthropic.New(apiKey)}
-		if isOAuth {
-			build.AuthNotice = "Claude Max OAuth"
-		}
-		return build, nil
-
-	default:
-		return ProviderBuildResult{}, fmt.Errorf("unsupported provider: %q (model %s)", model.Provider, model.ID)
+	// CLI default: empty provider means anthropic.
+	providerName := model.Provider
+	if providerName == "" {
+		providerName = "anthropic"
 	}
+
+	apiKey, isOAuth, err := authStore.GetAPIKey(providerName)
+	if err != nil {
+		return ProviderBuildResult{}, err
+	}
+
+	cfg := provider.Config{
+		APIKey:  apiKey,
+		IsOAuth: isOAuth,
+	}
+
+	var authNotice string
+	switch providerName {
+	case "openai":
+		if isOAuth {
+			cfg.AccountID = authStore.GetAccountID("openai")
+			authNotice = "ChatGPT subscription OAuth"
+		}
+	case "anthropic":
+		if isOAuth {
+			authNotice = "Claude Max OAuth"
+		}
+	}
+
+	m := model
+	m.Provider = providerName
+	p, err := provider.New(m, cfg)
+	if err != nil {
+		return ProviderBuildResult{}, err
+	}
+
+	return ProviderBuildResult{Provider: p, AuthNotice: authNotice}, nil
 }
 
 func printAuthNotice(w io.Writer, notice string) {
