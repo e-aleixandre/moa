@@ -770,4 +770,27 @@ func TestHeadTailBuffer_AcceptedBytes(t *testing.T) {
 	b.Close()
 }
 
+func TestRegisterSubset(t *testing.T) {
+	reg := core.NewRegistry()
+	cfg := ToolConfig{WorkspaceRoot: t.TempDir()}
+	RegisterRead(reg, cfg)
+	RegisterGrep(reg, cfg)
+	RegisterFind(reg, cfg)
+	RegisterLs(reg, cfg)
+
+	if reg.Count() != 4 {
+		t.Fatalf("expected 4 tools, got %d", reg.Count())
+	}
+	for _, name := range []string{"read", "grep", "find", "ls"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("missing tool: %s", name)
+		}
+	}
+	for _, name := range []string{"bash", "write", "edit", "fetch_content", "web_search"} {
+		if _, ok := reg.Get(name); ok {
+			t.Errorf("unexpected tool present: %s", name)
+		}
+	}
+}
+
 

@@ -100,7 +100,7 @@ type appModel struct {
 	bottomBar      *StatusLine
 
 	// Session persistence
-	sessionStore *session.Store   // nil if persistence is disabled
+	sessionStore session.SessionStore // nil if persistence is disabled
 	session      *session.Session // current session (nil if no persistence)
 
 	// Display
@@ -130,7 +130,7 @@ type ProviderFactory func(model core.Model) (core.Provider, error)
 
 // Config configures the TUI. All fields are optional.
 type Config struct {
-	SessionStore          *session.Store   // persistence backend (nil = no persistence)
+	SessionStore          session.SessionStore // persistence backend (nil = no persistence)
 	Session               *session.Session // session to resume (nil = fresh start)
 	StartInSessionBrowser bool             // open the session browser before entering chat
 	ModelName             string           // display name for the active model (shown on startup)

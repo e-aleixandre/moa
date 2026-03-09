@@ -56,7 +56,7 @@ func TestSaveGlobalConfig_CreatesDir(t *testing.T) {
 		t.Fatalf("SaveGlobalConfig: %v", err)
 	}
 
-	cfgPath := filepath.Join(home, ".moa", "config.json")
+	cfgPath := filepath.Join(home, ".config", "moa", "config.json")
 	got := loadConfigFile(cfgPath)
 	if len(got.PinnedModels) != 1 || got.PinnedModels[0] != "claude-haiku-4-5" {
 		t.Fatalf("PinnedModels = %v, want [claude-haiku-4-5]", got.PinnedModels)
@@ -71,7 +71,7 @@ func TestSaveGlobalConfig_PreservesOtherFields(t *testing.T) {
 	initial := MoaConfig{
 		Permissions: PermissionsConfig{Mode: "ask", Allow: []string{"Bash(npm:*)"}},
 	}
-	cfgDir := filepath.Join(home, ".moa")
+	cfgDir := filepath.Join(home, ".config", "moa")
 	os.MkdirAll(cfgDir, 0o700)
 	data, _ := json.MarshalIndent(initial, "", "  ")
 	os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0o600)
@@ -83,7 +83,7 @@ func TestSaveGlobalConfig_PreservesOtherFields(t *testing.T) {
 		t.Fatalf("SaveGlobalConfig: %v", err)
 	}
 
-	cfgPath := filepath.Join(home, ".moa", "config.json")
+	cfgPath := filepath.Join(home, ".config", "moa", "config.json")
 	got := loadConfigFile(cfgPath)
 	if got.Permissions.Mode != "ask" {
 		t.Fatalf("Permissions.Mode = %q, want ask", got.Permissions.Mode)

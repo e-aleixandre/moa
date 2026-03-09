@@ -8,7 +8,7 @@ import (
 )
 
 // MoaConfig holds sandbox, path, and permission settings. Loaded from config
-// files at three levels: global (~/.moa/config.json), project (<cwd>/.moa/config.json),
+// files at three levels: global (~/.config/moa/config.json), project (<cwd>/.moa/config.json),
 // and session (flags). Merged with OR for booleans, concatenation for slices.
 type MoaConfig struct {
 	DisableSandbox bool              `json:"disable_sandbox"` // YOLO mode: allow any file path
@@ -28,7 +28,7 @@ type PermissionsConfig struct {
 }
 
 // LoadMoaConfig reads and merges config from global and project levels.
-// Global: ~/.moa/config.json. Project: <cwd>/.moa/config.json.
+// Global: ~/.config/moa/config.json. Project: <cwd>/.moa/config.json.
 // Project values override/extend global values.
 func LoadMoaConfig(cwd string) MoaConfig {
 	global := loadConfigFile(globalConfigPath())
@@ -41,7 +41,7 @@ func globalConfigPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".moa", "config.json")
+	return filepath.Join(home, ".config", "moa", "config.json")
 }
 
 func loadConfigFile(path string) MoaConfig {
@@ -86,7 +86,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 }
 
 // SaveGlobalConfig reads the current global config, applies update, and writes
-// it back atomically. Creates ~/.moa/ if it doesn't exist.
+// it back atomically. Creates ~/.config/moa/ if it doesn't exist.
 func SaveGlobalConfig(update func(*MoaConfig)) error {
 	path := globalConfigPath()
 	if path == "" {

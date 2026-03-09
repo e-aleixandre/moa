@@ -7,10 +7,34 @@
 package session
 
 import (
+	"errors"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
+
+// ErrNotFound is returned by Load when the session ID does not exist.
+var ErrNotFound = errors.New("session: not found")
+
+// SessionStore abstracts session persistence.
+// FileStore implements this for disk-based storage.
+// External consumers (e.g., HTTP servers) implement it for database storage.
+//
+// Contract:
+//   - Create returns a new Session with a unique ID and timestamps set. It does NOT persist — call Save.
+//   - Save persists the session. It MUST set Updated to the current time before writing.
+//   - Load returns the session or ErrNotFound (wrapped or direct — use errors.Is).
+//   - Latest returns the most recently updated session, or (nil, nil) if the store is empty.
+//   - List returns summaries sorted by Updated descending. Empty store returns (nil, nil).
+//   - Delete is idempotent — deleting a non-existent session returns nil.
+type SessionStore interface {
+	Create() *Session
+	Save(sess *Session) error
+	Load(id string) (*Session, error)
+	Latest() (*Session, error)
+	List() ([]Summary, error)
+	Delete(id string) error
+}
 
 // Session represents a persistent conversation.
 type Session struct {

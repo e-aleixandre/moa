@@ -12,17 +12,20 @@ import (
 	"time"
 )
 
-// Store manages session persistence on disk.
+// Compile-time check: FileStore implements SessionStore.
+var _ SessionStore = (*FileStore)(nil)
+
+// FileStore manages session persistence on disk.
 // Sessions are stored as individual JSON files in a directory.
 // Writes are atomic (temp file + rename) to prevent corruption.
-type Store struct {
+type FileStore struct {
 	dir string
 }
 
-// NewStore creates a Store at the given directory.
+// NewFileStore creates a FileStore at the given directory.
 // If dir is empty, defaults to ~/.config/moa/sessions/.
 // Creates the directory if it doesn't exist.
-func NewStore(dir string) (*Store, error) {
+func NewFileStore(dir string) (*FileStore, error) {
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -33,16 +36,16 @@ func NewStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("session: cannot create directory %s: %w", dir, err)
 	}
-	return &Store{dir: dir}, nil
+	return &FileStore{dir: dir}, nil
 }
 
 // Dir returns the session storage directory.
-func (s *Store) Dir() string {
+func (s *FileStore) Dir() string {
 	return s.dir
 }
 
 // Create creates a new empty session with a unique ID.
-func (s *Store) Create() *Session {
+func (s *FileStore) Create() *Session {
 	return &Session{
 		ID:       newID(),
 		Created:  time.Now(),
@@ -53,7 +56,7 @@ func (s *Store) Create() *Session {
 
 // Save writes a session to disk atomically.
 // Updates the session's Updated timestamp before writing.
-func (s *Store) Save(sess *Session) error {
+func (s *FileStore) Save(sess *Session) error {
 	sess.Updated = time.Now()
 
 	data, err := json.MarshalIndent(sess, "", "  ")
@@ -77,9 +80,13 @@ func (s *Store) Save(sess *Session) error {
 }
 
 // Load reads a session by ID.
-func (s *Store) Load(id string) (*Session, error) {
+// Returns ErrNotFound (wrapped) if the session does not exist.
+func (s *FileStore) Load(id string) (*Session, error) {
 	data, err := os.ReadFile(s.path(id))
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+		}
 		return nil, fmt.Errorf("session: read error: %w", err)
 	}
 	var sess Session
@@ -91,7 +98,7 @@ func (s *Store) Load(id string) (*Session, error) {
 
 // Latest returns the most recently updated session.
 // Returns nil, nil if no sessions exist.
-func (s *Store) Latest() (*Session, error) {
+func (s *FileStore) Latest() (*Session, error) {
 	summaries, err := s.List()
 	if err != nil {
 		return nil, err
@@ -105,7 +112,7 @@ func (s *Store) Latest() (*Session, error) {
 
 // List returns summaries of all sessions, sorted by Updated descending (newest first).
 // Does not load message content — only reads enough to populate Summary fields.
-func (s *Store) List() ([]Summary, error) {
+func (s *FileStore) List() ([]Summary, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, fmt.Errorf("session: list error: %w", err)
@@ -141,7 +148,7 @@ func (s *Store) List() ([]Summary, error) {
 }
 
 // Delete removes a session by ID.
-func (s *Store) Delete(id string) error {
+func (s *FileStore) Delete(id string) error {
 	path := s.path(id)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("session: delete error: %w", err)
@@ -150,7 +157,7 @@ func (s *Store) Delete(id string) error {
 }
 
 // path returns the filesystem path for a session ID.
-func (s *Store) path(id string) string {
+func (s *FileStore) path(id string) string {
 	return filepath.Join(s.dir, id+".json")
 }
 
@@ -164,3 +171,9 @@ func newID() string {
 	}
 	return hex.EncodeToString(b)
 }
+
+// Deprecated: Use FileStore directly.
+type Store = FileStore
+
+// Deprecated: Use NewFileStore.
+func NewStore(dir string) (*FileStore, error) { return NewFileStore(dir) }

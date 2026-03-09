@@ -28,20 +28,36 @@ func (c *ToolConfig) Defaults() {
 	}
 }
 
-// RegisterBuiltins adds all built-in tools to the registry.
-func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) {
+// Individual tool registration functions.
+// Each calls cfg.Defaults() so they're safe to use standalone.
+
+func RegisterBash(reg *core.Registry, cfg ToolConfig)  { cfg.Defaults(); reg.Register(NewBash(cfg)) }
+func RegisterRead(reg *core.Registry, cfg ToolConfig)  { cfg.Defaults(); reg.Register(NewRead(cfg)) }
+func RegisterWrite(reg *core.Registry, cfg ToolConfig) { cfg.Defaults(); reg.Register(NewWrite(cfg)) }
+func RegisterEdit(reg *core.Registry, cfg ToolConfig)  { cfg.Defaults(); reg.Register(NewEdit(cfg)) }
+func RegisterGrep(reg *core.Registry, cfg ToolConfig)  { cfg.Defaults(); reg.Register(NewGrep(cfg)) }
+func RegisterFind(reg *core.Registry, cfg ToolConfig)  { cfg.Defaults(); reg.Register(NewFind(cfg)) }
+func RegisterLs(reg *core.Registry, cfg ToolConfig)    { cfg.Defaults(); reg.Register(NewLs(cfg)) }
+func RegisterFetch(reg *core.Registry, cfg ToolConfig) { cfg.Defaults(); reg.Register(NewFetch(cfg)) }
+
+func RegisterWebSearch(reg *core.Registry, cfg ToolConfig) {
 	cfg.Defaults()
-	reg.Register(NewBash(cfg))
-	reg.Register(NewRead(cfg))
-	reg.Register(NewWrite(cfg))
-	reg.Register(NewEdit(cfg))
-	reg.Register(NewGrep(cfg))
-	reg.Register(NewFind(cfg))
-	reg.Register(NewLs(cfg))
-	reg.Register(NewFetch(cfg))
 	if cfg.BraveAPIKey != "" {
 		reg.Register(NewWebSearch(cfg))
 	}
+}
+
+// RegisterBuiltins adds all built-in tools to the registry.
+func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) {
+	RegisterBash(reg, cfg)
+	RegisterRead(reg, cfg)
+	RegisterWrite(reg, cfg)
+	RegisterEdit(reg, cfg)
+	RegisterGrep(reg, cfg)
+	RegisterFind(reg, cfg)
+	RegisterLs(reg, cfg)
+	RegisterFetch(reg, cfg)
+	RegisterWebSearch(reg, cfg)
 }
 
 // safePath resolves a path relative to WorkspaceRoot.

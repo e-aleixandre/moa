@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,12 +10,12 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
-func tempStore(t *testing.T) *Store {
+func tempStore(t *testing.T) *FileStore {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "sessions")
-	store, err := NewStore(dir)
+	store, err := NewFileStore(dir)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("NewFileStore: %v", err)
 	}
 	return store
 }
@@ -246,5 +247,25 @@ func TestSetTitle_Short(t *testing.T) {
 	sess.SetTitle("Hi", 20)
 	if sess.Title != "Hi" {
 		t.Errorf("Title = %q, want 'Hi'", sess.Title)
+	}
+}
+
+func TestFileStore_Load_NotFound(t *testing.T) {
+	store := tempStore(t)
+	_, err := store.Load("nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestFileStore_Delete_ThenLoad_NotFound(t *testing.T) {
+	store := tempStore(t)
+	sess := store.Create()
+	store.Save(sess)
+	store.Delete(sess.ID)
+
+	_, err := store.Load(sess.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
 	}
 }
