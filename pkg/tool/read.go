@@ -2,6 +2,7 @@ package tool
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -24,12 +26,17 @@ var imageExtensions = map[string]string{
 	".webp": "image/webp",
 }
 
+// pdfToTextBinary is the binary name for pdftotext. Overridable in tests.
+var pdfToTextBinary = "pdftotext"
+
+const maxPDFBytes = 50 * 1024 * 1024 // 50 MB
+
 // NewRead creates the read tool.
 func NewRead(cfg ToolConfig) core.Tool {
 	return core.Tool{
 		Name:        "read",
 		Label:       "Read",
-		Description: "Read a file. Supports text and images (jpg, png, gif, webp). Text files truncated to 2000 lines or 50KB. Use offset/limit for large files.",
+		Description: "Read a file. Supports text, images (jpg, png, gif, webp), and PDF (requires pdftotext). Text/PDF truncated to 2000 lines or 50KB. Use offset/limit for large files.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -67,13 +74,9 @@ func NewRead(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(fmt.Sprintf("%s is a directory, use ls instead", path)), nil
 			}
 
-			// Check if image
 			ext := strings.ToLower(filepath.Ext(resolved))
-			if mimeType, ok := imageExtensions[ext]; ok {
-				return readImage(resolved, mimeType)
-			}
 
-			// Text file
+			// Parse pagination params early — used by text and PDF paths.
 			offset := getInt(params, "offset", 1)
 			limit := getInt(params, "limit", maxOutputLines)
 			if offset < 1 {
@@ -83,6 +86,17 @@ func NewRead(cfg ToolConfig) core.Tool {
 				limit = maxOutputLines
 			}
 
+			// Image — no pagination
+			if mimeType, ok := imageExtensions[ext]; ok {
+				return readImage(resolved, mimeType)
+			}
+
+			// PDF
+			if ext == ".pdf" {
+				return readPDF(ctx, resolved, path, info.Size(), offset, limit)
+			}
+
+			// Text file
 			return readTextFile(resolved, path, offset, limit)
 		},
 	}
@@ -115,6 +129,52 @@ func readImage(path, mimeType string) (core.Result, error) {
 	}, nil
 }
 
+func readPDF(ctx context.Context, resolved, displayPath string, fileSize int64, offset, limit int) (core.Result, error) {
+	if fileSize > maxPDFBytes {
+		return core.ErrorResult(fmt.Sprintf("PDF too large (%d MB, max %d MB)", fileSize/(1024*1024), maxPDFBytes/(1024*1024))), nil
+	}
+
+	binPath, err := exec.LookPath(pdfToTextBinary)
+	if err != nil {
+		return core.ErrorResult("pdftotext not found. Install poppler:\n  macOS:  brew install poppler\n  Ubuntu: sudo apt install poppler-utils\n  Fedora: sudo dnf install poppler-utils"), nil
+	}
+
+	cmd := exec.CommandContext(ctx, binPath, "-layout", resolved, "-")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
+	}
+
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Start(); err != nil {
+		return core.ErrorResult(fmt.Sprintf("pdftotext failed to start: %v", err)), nil
+	}
+
+	result, paginateErr := paginateReader(stdout, displayPath, offset, limit)
+
+	// Drain remaining stdout to prevent pipe deadlock — paginateReader may stop
+	// early on limit/byte truncation, leaving the child blocked on a full pipe buffer.
+	io.Copy(io.Discard, stdout) //nolint:errcheck
+
+	// Must wait for command to finish after draining stdout.
+	waitErr := cmd.Wait()
+	if paginateErr != nil {
+		return core.Result{}, paginateErr
+	}
+	if waitErr != nil {
+		errText := strings.TrimSpace(stderrBuf.String())
+		if errText == "" {
+			errText = waitErr.Error()
+		}
+		return core.ErrorResult(fmt.Sprintf("pdftotext failed: %s", errText)), nil
+	}
+
+	return result, nil
+}
+
 func readTextFile(resolved, displayPath string, offset, limit int) (core.Result, error) {
 	f, err := os.Open(resolved)
 	if err != nil {
@@ -122,7 +182,13 @@ func readTextFile(resolved, displayPath string, offset, limit int) (core.Result,
 	}
 	defer f.Close()
 
-	reader := bufio.NewReader(f)
+	return paginateReader(f, displayPath, offset, limit)
+}
+
+// paginateReader reads from r with offset/limit pagination and byte limits.
+// Shared by readTextFile and readPDF.
+func paginateReader(r io.Reader, displayPath string, offset, limit int) (core.Result, error) {
+	reader := bufio.NewReader(r)
 	lineNum := 0
 	collected := 0
 	var b strings.Builder

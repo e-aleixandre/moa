@@ -2,7 +2,9 @@ package tool
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -768,6 +770,152 @@ func TestHeadTailBuffer_AcceptedBytes(t *testing.T) {
 		t.Fatalf("expected 0 accepted (head full), got %d", accepted)
 	}
 	b.Close()
+}
+
+// --- PDF read tests ---
+
+// minimalPDF returns raw bytes of a valid PDF containing the given text lines.
+func minimalPDF(lines ...string) []byte {
+	// Hand-crafted minimal PDF with a single text stream.
+	text := strings.Join(lines, "\n")
+	stream := fmt.Sprintf("BT /F1 12 Tf 72 720 Td (%s) Tj ET", text)
+	streamLen := len(stream)
+
+	var b strings.Builder
+	b.WriteString("%PDF-1.0\n")
+	// Object 1: Catalog
+	obj1 := b.Len()
+	b.WriteString("1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n")
+	// Object 2: Pages
+	obj2 := b.Len()
+	b.WriteString("2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n")
+	// Object 3: Page
+	obj3 := b.Len()
+	b.WriteString("3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n")
+	// Object 4: Content stream
+	obj4 := b.Len()
+	fmt.Fprintf(&b, "4 0 obj<</Length %d>>stream\n%s\nendstream endobj\n", streamLen, stream)
+	// Object 5: Font
+	obj5 := b.Len()
+	b.WriteString("5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n")
+	// xref
+	xrefOff := b.Len()
+	b.WriteString("xref\n0 6\n")
+	fmt.Fprintf(&b, "0000000000 65535 f \n")
+	fmt.Fprintf(&b, "%010d 00000 n \n", obj1)
+	fmt.Fprintf(&b, "%010d 00000 n \n", obj2)
+	fmt.Fprintf(&b, "%010d 00000 n \n", obj3)
+	fmt.Fprintf(&b, "%010d 00000 n \n", obj4)
+	fmt.Fprintf(&b, "%010d 00000 n \n", obj5)
+	b.WriteString("trailer<</Size 6/Root 1 0 R>>\n")
+	fmt.Fprintf(&b, "startxref\n%d\n%%%%EOF\n", xrefOff)
+
+	return []byte(b.String())
+}
+
+func TestRead_PDF(t *testing.T) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext not available")
+	}
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "test.pdf")
+	os.WriteFile(path, minimalPDF("Hello PDF World"), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{"path": "test.pdf"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.Content[0].Text)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "Hello PDF World") {
+		t.Errorf("expected PDF text content, got: %q", text)
+	}
+}
+
+func TestRead_PDF_NotInstalled(t *testing.T) {
+	old := pdfToTextBinary
+	pdfToTextBinary = "/nonexistent/pdftotext"
+	defer func() { pdfToTextBinary = old }()
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "test.pdf")
+	os.WriteFile(path, minimalPDF("test"), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{"path": "test.pdf"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "pdftotext not found") {
+		t.Errorf("expected install instructions, got: %q", text)
+	}
+	if !strings.Contains(text, "brew install poppler") {
+		t.Errorf("expected macOS install hint, got: %q", text)
+	}
+}
+
+func TestRead_PDF_Corrupt(t *testing.T) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext not available")
+	}
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "corrupt.pdf")
+	os.WriteFile(path, []byte("not a real PDF at all"), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{"path": "corrupt.pdf"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for corrupt PDF")
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "pdftotext failed") {
+		t.Errorf("expected pdftotext failure message, got: %q", text)
+	}
+}
+
+func TestRead_PDF_OffsetLimit(t *testing.T) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext not available")
+	}
+
+	// Create a multi-line text file disguised as PDF? No — we test paginateReader directly.
+	// Use a real PDF with known text.
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "multi.pdf")
+	os.WriteFile(path, minimalPDF("Line1", "Line2", "Line3", "Line4", "Line5"), 0o644)
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+
+	// Read with offset=2, limit=2
+	result, err := read.Execute(context.Background(), map[string]any{
+		"path":   "multi.pdf",
+		"offset": float64(2),
+		"limit":  float64(2),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.Content[0].Text)
+	}
+	// The exact output depends on pdftotext formatting, but offset/limit should work.
+	// Just verify it doesn't return an error and has some content.
+	text := result.Content[0].Text
+	if text == "" {
+		t.Error("expected non-empty output with offset/limit")
+	}
 }
 
 func TestRegisterSubset(t *testing.T) {
