@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -19,6 +20,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/auth"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/provider"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -143,6 +145,9 @@ func main() {
 	// Load config: global (~/.config/moa/config.json) + project (<cwd>/.moa/config.json)
 	moaCfg := core.LoadMoaConfig(cwd)
 
+	// Project .mcp.json — requires explicit trust (interactive prompt first time).
+	loadProjectMCPServers(&moaCfg, cwd, promptContent)
+
 	// Build tool registry.
 	// Always allow the spill output dir so the model can read truncated output files.
 	allowedPaths := append(moaCfg.AllowedPaths, tool.SpillOutputDir())
@@ -154,6 +159,17 @@ func main() {
 		BashTimeout:    5 * time.Minute,
 		BraveAPIKey:    moaCfg.BraveAPIKey,
 	})
+
+	// MCP servers — zero cost when none configured.
+	var mcpManager *mcp.Manager
+	if len(moaCfg.MCPServers) > 0 {
+		mcpManager = mcp.NewManager(nil)
+		mcpManager.Start(ctx, moaCfg.MCPServers)
+		for _, t := range mcpManager.Tools() {
+			toolReg.Register(t)
+		}
+		defer mcpManager.Close()
+	}
 
 	// Build permission gate.
 	// Priority: --yolo flag > --permissions flag > config > default (yolo)
@@ -670,4 +686,57 @@ func extractFinalAssistantText(msgs []core.AgentMessage) string {
 		}
 	}
 	return ""
+}
+
+// loadProjectMCPServers loads .mcp.json from the project root if trusted.
+// On first encounter in interactive mode, prompts the user and persists trust.
+func loadProjectMCPServers(cfg *core.MoaConfig, cwd, promptContent string) {
+	path := filepath.Join(cwd, ".mcp.json")
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+
+	if isMCPPathTrusted(*cfg, cwd) {
+		servers, err := core.LoadMCPFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: invalid .mcp.json: %v\n", err)
+			return
+		}
+		cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
+		return
+	}
+
+	// Interactive prompt only when no -p flag and stdin is a terminal.
+	if promptContent != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "Project .mcp.json found. Trust MCP servers in %s? [y/N] ", cwd)
+	var answer string
+	fmt.Scanln(&answer)
+	if !strings.HasPrefix(strings.ToLower(answer), "y") {
+		return
+	}
+
+	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
+		c.TrustedMCPPaths = append(c.TrustedMCPPaths, cwd)
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not persist MCP trust: %v\n", err)
+	}
+
+	servers, err := core.LoadMCPFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid .mcp.json: %v\n", err)
+		return
+	}
+	cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
+}
+
+func isMCPPathTrusted(cfg core.MoaConfig, path string) bool {
+	for _, p := range cfg.TrustedMCPPaths {
+		if p == path {
+			return true
+		}
+	}
+	return false
 }

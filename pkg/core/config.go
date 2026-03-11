@@ -11,11 +11,20 @@ import (
 // files at three levels: global (~/.config/moa/config.json), project (<cwd>/.moa/config.json),
 // and session (flags). Merged with OR for booleans, concatenation for slices.
 type MoaConfig struct {
-	DisableSandbox bool              `json:"disable_sandbox"` // YOLO mode: allow any file path
-	AllowedPaths   []string          `json:"allowed_paths"`   // Additional directories accessible outside workspace
-	Permissions    PermissionsConfig `json:"permissions"`     // Tool execution permission policy
-	PinnedModels   []string          `json:"pinned_models"`   // Model IDs pinned for Ctrl+P cycling
-	BraveAPIKey    string            `json:"brave_api_key"`   // Brave Search API key for web_search tool
+	DisableSandbox  bool              `json:"disable_sandbox"`  // YOLO mode: allow any file path
+	AllowedPaths    []string          `json:"allowed_paths"`    // Additional directories accessible outside workspace
+	Permissions     PermissionsConfig `json:"permissions"`      // Tool execution permission policy
+	PinnedModels    []string          `json:"pinned_models"`    // Model IDs pinned for Ctrl+P cycling
+	BraveAPIKey     string            `json:"brave_api_key"`    // Brave Search API key for web_search tool
+	MCPServers      map[string]MCPServer `json:"mcp_servers"`   // MCP tool server connections
+	TrustedMCPPaths []string          `json:"trusted_mcp_paths"` // Project paths trusted for .mcp.json auto-load
+}
+
+// MCPServer defines an MCP tool server connection (stdio transport).
+type MCPServer struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
 }
 
 // PermissionsConfig controls tool execution approval.
@@ -30,10 +39,25 @@ type PermissionsConfig struct {
 // LoadMoaConfig reads and merges config from global and project levels.
 // Global: ~/.config/moa/config.json. Project: <cwd>/.moa/config.json.
 // Project values override/extend global values.
+// Also loads global .mcp.json (always). Project .mcp.json is handled
+// separately in main.go behind a trust gate.
 func LoadMoaConfig(cwd string) MoaConfig {
 	global := loadConfigFile(globalConfigPath())
 	project := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
-	return mergeConfigs(global, project)
+	merged := mergeConfigs(global, project)
+
+	// Load global .mcp.json (always trusted).
+	globalDir := filepath.Dir(globalConfigPath())
+	if globalDir != "" && globalDir != "." {
+		globalMCP, err := LoadMCPFile(filepath.Join(globalDir, ".mcp.json"))
+		if err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "warning: invalid %s: %v\n",
+				filepath.Join(globalDir, ".mcp.json"), err)
+		}
+		merged.MCPServers = MergeMCPServers(merged.MCPServers, globalMCP)
+	}
+
+	return merged
 }
 
 func globalConfigPath() string {
@@ -59,9 +83,11 @@ func loadConfigFile(path string) MoaConfig {
 
 func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged := MoaConfig{
-		DisableSandbox: base.DisableSandbox || override.DisableSandbox,
-		AllowedPaths:   append(base.AllowedPaths, override.AllowedPaths...),
-		PinnedModels:   base.PinnedModels, // global-only preference; project level ignored
+		DisableSandbox:  base.DisableSandbox || override.DisableSandbox,
+		AllowedPaths:    append(base.AllowedPaths, override.AllowedPaths...),
+		PinnedModels:    base.PinnedModels, // global-only preference; project level ignored
+		MCPServers:      MergeMCPServers(base.MCPServers, override.MCPServers),
+		TrustedMCPPaths: base.TrustedMCPPaths, // global-only; persisted via SaveGlobalConfig
 		Permissions: PermissionsConfig{
 			Mode:  base.Permissions.Mode,
 			Model: base.Permissions.Model,
@@ -114,4 +140,38 @@ func SaveGlobalConfig(update func(*MoaConfig)) error {
 		return fmt.Errorf("saving config: %w", err)
 	}
 	return nil
+}
+
+// mcpFileFormat matches Claude Code's .mcp.json structure.
+type mcpFileFormat struct {
+	MCPServers map[string]MCPServer `json:"mcpServers"`
+}
+
+// LoadMCPFile reads a .mcp.json file. Returns nil map if file doesn't exist.
+// Returns error for parse failures so callers can warn the user.
+func LoadMCPFile(path string) (map[string]MCPServer, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var f mcpFileFormat
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
+	}
+	return f.MCPServers, nil
+}
+
+// MergeMCPServers merges server maps. Later maps override earlier ones by name
+// (full replacement, not field-level merge).
+func MergeMCPServers(maps ...map[string]MCPServer) map[string]MCPServer {
+	result := make(map[string]MCPServer)
+	for _, m := range maps {
+		for k, v := range m {
+			result[k] = v
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

@@ -104,3 +104,123 @@ func TestMergeConfigs_PinnedModelsFromGlobalOnly(t *testing.T) {
 		t.Fatalf("PinnedModels = %v, want [claude-sonnet-4-5] (project level should be ignored)", merged.PinnedModels)
 	}
 }
+
+func TestLoadMCPFile_Valid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".mcp.json")
+	os.WriteFile(path, []byte(`{
+		"mcpServers": {
+			"db": {
+				"command": "mcp-sqlite",
+				"args": ["/path/to.db"],
+				"env": {"DEBUG": "1"}
+			},
+			"fs": {
+				"command": "mcp-filesystem",
+				"args": ["/home"]
+			}
+		}
+	}`), 0o600)
+
+	servers, err := LoadMCPFile(path)
+	if err != nil {
+		t.Fatalf("LoadMCPFile: %v", err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("got %d servers, want 2", len(servers))
+	}
+	db := servers["db"]
+	if db.Command != "mcp-sqlite" {
+		t.Fatalf("db.Command = %q, want mcp-sqlite", db.Command)
+	}
+	if !slices.Equal(db.Args, []string{"/path/to.db"}) {
+		t.Fatalf("db.Args = %v", db.Args)
+	}
+	if db.Env["DEBUG"] != "1" {
+		t.Fatalf("db.Env = %v", db.Env)
+	}
+	fs := servers["fs"]
+	if fs.Command != "mcp-filesystem" {
+		t.Fatalf("fs.Command = %q", fs.Command)
+	}
+}
+
+func TestLoadMCPFile_Invalid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".mcp.json")
+	os.WriteFile(path, []byte(`not json`), 0o600)
+
+	_, err := LoadMCPFile(path)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
+	}
+}
+
+func TestLoadMCPFile_NotExist(t *testing.T) {
+	_, err := LoadMCPFile("/nonexistent/.mcp.json")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("expected not-exist error, got: %v", err)
+	}
+}
+
+func TestMergeMCPServers_Override(t *testing.T) {
+	global := map[string]MCPServer{
+		"db": {Command: "global-db", Args: []string{"--global"}, Env: map[string]string{"X": "1"}},
+		"fs": {Command: "global-fs"},
+	}
+	project := map[string]MCPServer{
+		"db": {Command: "project-db", Args: []string{"--project"}},
+	}
+
+	merged := MergeMCPServers(global, project)
+	if len(merged) != 2 {
+		t.Fatalf("got %d servers, want 2", len(merged))
+	}
+	// "db" fully replaced by project — no field-level merge
+	db := merged["db"]
+	if db.Command != "project-db" {
+		t.Fatalf("db.Command = %q, want project-db", db.Command)
+	}
+	if !slices.Equal(db.Args, []string{"--project"}) {
+		t.Fatalf("db.Args = %v, want [--project]", db.Args)
+	}
+	if db.Env != nil {
+		t.Fatalf("db.Env = %v, want nil (full replacement, not field merge)", db.Env)
+	}
+	// "fs" untouched
+	if merged["fs"].Command != "global-fs" {
+		t.Fatalf("fs.Command = %q, want global-fs", merged["fs"].Command)
+	}
+}
+
+func TestMergeMCPServers_Empty(t *testing.T) {
+	if got := MergeMCPServers(nil, nil); got != nil {
+		t.Fatalf("expected nil, got %v", got)
+	}
+	if got := MergeMCPServers(nil, map[string]MCPServer{}); got != nil {
+		t.Fatalf("expected nil, got %v", got)
+	}
+}
+
+func TestMergeConfigs_MCPServers(t *testing.T) {
+	global := MoaConfig{
+		MCPServers: map[string]MCPServer{"db": {Command: "global-db"}},
+		TrustedMCPPaths: []string{"/trusted/project"},
+	}
+	project := MoaConfig{
+		MCPServers: map[string]MCPServer{"db": {Command: "project-db"}},
+		TrustedMCPPaths: []string{"/other"}, // should be ignored (global only)
+	}
+	merged := mergeConfigs(global, project)
+
+	if merged.MCPServers["db"].Command != "project-db" {
+		t.Fatalf("MCPServers[db].Command = %q, want project-db", merged.MCPServers["db"].Command)
+	}
+	// TrustedMCPPaths from global only
+	if !slices.Equal(merged.TrustedMCPPaths, []string{"/trusted/project"}) {
+		t.Fatalf("TrustedMCPPaths = %v, want [/trusted/project]", merged.TrustedMCPPaths)
+	}
+}
