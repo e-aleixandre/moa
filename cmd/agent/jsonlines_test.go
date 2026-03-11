@@ -49,14 +49,18 @@ func TestJSONLineWriter_AgentStartEnd(t *testing.T) {
 		jw.handle(core.AgentEvent{Type: core.AgentEventEnd})
 	})
 
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d", len(lines))
+	// agent_start, summary, agent_end
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(lines))
 	}
 	if lines[0]["type"] != "agent_start" {
 		t.Errorf("expected agent_start, got %v", lines[0]["type"])
 	}
-	if lines[1]["type"] != "agent_end" {
-		t.Errorf("expected agent_end, got %v", lines[1]["type"])
+	if lines[1]["type"] != "summary" {
+		t.Errorf("expected summary, got %v", lines[1]["type"])
+	}
+	if lines[2]["type"] != "agent_end" {
+		t.Errorf("expected agent_end, got %v", lines[2]["type"])
 	}
 }
 
@@ -133,8 +137,9 @@ func TestJSONLineWriter_ToolExecution(t *testing.T) {
 		})
 	})
 
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 lines, got %d", len(lines))
+	// start, update1, update2, end, progress
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d", len(lines))
 	}
 
 	// Start
@@ -166,6 +171,11 @@ func TestJSONLineWriter_ToolExecution(t *testing.T) {
 	if lines[3]["is_error"] != false {
 		t.Errorf("expected is_error=false, got %v", lines[3]["is_error"])
 	}
+
+	// Progress after tool_execution_end
+	if lines[4]["type"] != "progress" {
+		t.Errorf("expected progress, got %v", lines[4]["type"])
+	}
 }
 
 func TestJSONLineWriter_ToolExecEnd_Error(t *testing.T) {
@@ -179,11 +189,15 @@ func TestJSONLineWriter_ToolExecEnd_Error(t *testing.T) {
 		})
 	})
 
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %d", len(lines))
+	// tool_execution_end + progress
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
 	}
 	if lines[0]["is_error"] != true {
 		t.Errorf("expected is_error=true, got %v", lines[0]["is_error"])
+	}
+	if lines[1]["type"] != "progress" {
+		t.Errorf("expected progress, got %v", lines[1]["type"])
 	}
 }
 
@@ -228,7 +242,8 @@ func TestJSONLineWriter_Compaction(t *testing.T) {
 func TestJSONLineWriter_IgnoredEvents(t *testing.T) {
 	lines := captureJSONLines(t, func() {
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
+		// TurnStart is no longer ignored (increments turn counter), but
+		// TurnEnd, Steer, MessageStart, MessageEnd still produce no output.
 		jw.handle(core.AgentEvent{Type: core.AgentEventTurnEnd})
 		jw.handle(core.AgentEvent{Type: core.AgentEventSteer, Text: "hello"})
 		jw.handle(core.AgentEvent{Type: core.AgentEventMessageStart})
@@ -264,5 +279,122 @@ func TestJSONLineWriter_NilResult(t *testing.T) {
 	// nil result → no delta → no output
 	if len(lines) != 0 {
 		t.Fatalf("expected 0 lines for nil result, got %d", len(lines))
+	}
+}
+
+func TestJSONLineWriter_Progress(t *testing.T) {
+	lines := captureJSONLines(t, func() {
+		jw := newJSONLineWriter()
+		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
+		jw.handle(core.AgentEvent{
+			Type:     core.AgentEventToolExecStart,
+			ToolName: "edit",
+			Args:     map[string]any{"path": "foo.go"},
+		})
+		jw.handle(core.AgentEvent{
+			Type:     core.AgentEventToolExecEnd,
+			ToolName: "edit",
+			IsError:  false,
+		})
+		jw.handle(core.AgentEvent{Type: core.AgentEventEnd})
+	})
+
+	// tool_execution_start, tool_execution_end, progress, summary, agent_end
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d", len(lines))
+	}
+
+	// Progress after tool_execution_end
+	progress := lines[2]
+	if progress["type"] != "progress" {
+		t.Errorf("expected progress, got %v", progress["type"])
+	}
+	if progress["turns"] != float64(1) {
+		t.Errorf("expected turns=1, got %v", progress["turns"])
+	}
+	if progress["tools_completed"] != float64(1) {
+		t.Errorf("expected tools_completed=1, got %v", progress["tools_completed"])
+	}
+	files := progress["files_touched"].([]any)
+	if len(files) != 1 || files[0] != "foo.go" {
+		t.Errorf("expected files_touched=[foo.go], got %v", files)
+	}
+	elapsed, ok := progress["elapsed_seconds"].(float64)
+	if !ok || elapsed < 0 {
+		t.Errorf("expected elapsed_seconds >= 0, got %v", progress["elapsed_seconds"])
+	}
+
+	// Summary before agent_end
+	summary := lines[3]
+	if summary["type"] != "summary" {
+		t.Errorf("expected summary, got %v", summary["type"])
+	}
+	if summary["turns"] != float64(1) {
+		t.Errorf("expected turns=1, got %v", summary["turns"])
+	}
+
+	if lines[4]["type"] != "agent_end" {
+		t.Errorf("expected agent_end, got %v", lines[4]["type"])
+	}
+}
+
+func TestJSONLineWriter_ProgressSkipsErrorTools(t *testing.T) {
+	lines := captureJSONLines(t, func() {
+		jw := newJSONLineWriter()
+		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
+		jw.handle(core.AgentEvent{
+			Type:     core.AgentEventToolExecEnd,
+			ToolName: "bash",
+			IsError:  true,
+		})
+		jw.handle(core.AgentEvent{
+			Type:     core.AgentEventToolExecEnd,
+			ToolName: "edit",
+			IsError:  false,
+		})
+		jw.handle(core.AgentEvent{Type: core.AgentEventEnd})
+	})
+
+	// Find the summary line
+	var summary map[string]any
+	for _, l := range lines {
+		if l["type"] == "summary" {
+			summary = l
+			break
+		}
+	}
+	if summary == nil {
+		t.Fatal("no summary line found")
+	}
+	if summary["tools_completed"] != float64(1) {
+		t.Errorf("expected tools_completed=1 (error tool excluded), got %v", summary["tools_completed"])
+	}
+}
+
+func TestJSONLineWriter_TurnStartCountsInProgress(t *testing.T) {
+	lines := captureJSONLines(t, func() {
+		jw := newJSONLineWriter()
+		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
+		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
+		jw.handle(core.AgentEvent{
+			Type:     core.AgentEventToolExecEnd,
+			ToolName: "bash",
+			IsError:  false,
+		})
+	})
+
+	// Find the progress line
+	var progress map[string]any
+	for _, l := range lines {
+		if l["type"] == "progress" {
+			progress = l
+			break
+		}
+	}
+	if progress == nil {
+		t.Fatal("no progress line found")
+	}
+	if progress["turns"] != float64(2) {
+		t.Errorf("expected turns=2, got %v", progress["turns"])
 	}
 }

@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -16,12 +18,20 @@ type jsonLineWriter struct {
 	// tool_execution_update sends accumulated result, not deltas.
 	// Track last length per toolCallId to compute delta.
 	toolOutputLens map[string]int
+
+	// Progress tracking
+	turnCount      int
+	toolsCompleted int             // successful tool_execution_end count
+	filesTouched   map[string]bool // paths from edit/write tool args
+	startTime      time.Time
 }
 
 func newJSONLineWriter() *jsonLineWriter {
 	return &jsonLineWriter{
 		enc:            json.NewEncoder(os.Stdout),
 		toolOutputLens: make(map[string]int),
+		filesTouched:   make(map[string]bool),
+		startTime:      time.Now(),
 	}
 }
 
@@ -33,7 +43,11 @@ func (w *jsonLineWriter) handle(e core.AgentEvent) {
 	case core.AgentEventStart:
 		w.emit(map[string]any{"type": "agent_start"})
 
+	case core.AgentEventTurnStart:
+		w.turnCount++
+
 	case core.AgentEventEnd:
+		w.emitSummary()
 		w.emit(map[string]any{"type": "agent_end"})
 
 	case core.AgentEventError:
@@ -63,6 +77,11 @@ func (w *jsonLineWriter) handle(e core.AgentEvent) {
 		}
 
 	case core.AgentEventToolExecStart:
+		if e.ToolName == "edit" || e.ToolName == "write" {
+			if path, ok := e.Args["path"].(string); ok && path != "" {
+				w.filesTouched[path] = true
+			}
+		}
 		w.emit(map[string]any{
 			"type":         "tool_execution_start",
 			"tool_call_id": e.ToolCallID,
@@ -91,6 +110,10 @@ func (w *jsonLineWriter) handle(e core.AgentEvent) {
 			"tool_name":    e.ToolName,
 			"is_error":     e.IsError,
 		})
+		if !e.IsError {
+			w.toolsCompleted++
+		}
+		w.emitProgress()
 
 	case core.AgentEventCompactionStart:
 		w.emit(map[string]any{"type": "compaction_start"})
@@ -98,8 +121,37 @@ func (w *jsonLineWriter) handle(e core.AgentEvent) {
 	case core.AgentEventCompactionEnd:
 		w.emit(map[string]any{"type": "compaction_end"})
 
-		// Ignored: turn_start, turn_end, message_start, message_end, steer
+		// Ignored: turn_end, message_start, message_end, steer
 	}
+}
+
+func (w *jsonLineWriter) emitProgress() {
+	w.emit(map[string]any{
+		"type":            "progress",
+		"turns":           w.turnCount,
+		"tools_completed": w.toolsCompleted,
+		"files_touched":   w.sortedFiles(),
+		"elapsed_seconds": int(time.Since(w.startTime).Seconds()),
+	})
+}
+
+func (w *jsonLineWriter) emitSummary() {
+	w.emit(map[string]any{
+		"type":            "summary",
+		"turns":           w.turnCount,
+		"tools_completed": w.toolsCompleted,
+		"files_touched":   w.sortedFiles(),
+		"elapsed_seconds": int(time.Since(w.startTime).Seconds()),
+	})
+}
+
+func (w *jsonLineWriter) sortedFiles() []string {
+	files := make([]string, 0, len(w.filesTouched))
+	for f := range w.filesTouched {
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	return files
 }
 
 func (w *jsonLineWriter) emit(v map[string]any) {
