@@ -7,6 +7,30 @@ import (
 	"path/filepath"
 )
 
+// IsMCPPathTrusted reports whether path is in the config's trusted MCP paths.
+func IsMCPPathTrusted(cfg MoaConfig, path string) bool {
+	for _, p := range cfg.TrustedMCPPaths {
+		if p == path {
+			return true
+		}
+	}
+	return false
+}
+
+// CanonicalizePath returns a clean, absolute, symlink-resolved path.
+// Falls back to Abs+Clean if EvalSymlinks fails (e.g., broken symlinks).
+func CanonicalizePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	clean := filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return resolved, nil
+	}
+	return clean, nil
+}
+
 // MoaConfig holds sandbox, path, and permission settings. Loaded from config
 // files at three levels: global (~/.config/moa/config.json), project (<cwd>/.moa/config.json),
 // and session (flags). Merged with OR for booleans, concatenation for slices.

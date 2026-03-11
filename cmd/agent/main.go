@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/provider"
+	"github.com/ealeixandre/moa/pkg/serve"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
@@ -63,6 +65,12 @@ func (r *resumeFlag) Set(value string) error {
 func (r *resumeFlag) IsBoolFlag() bool { return true }
 
 func main() {
+	// Dispatch subcommands before flag.Parse() (which owns the default flagset).
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		runServe(os.Args[2:])
+		return
+	}
+
 	os.Args = normalizeArgs(os.Args)
 
 	p := flag.String("p", "", "Prompt text or @file to read prompt from file")
@@ -246,9 +254,10 @@ func main() {
 			}
 			return build.Provider, nil
 		},
-		AgentsMD:    agentsMD,
-		ParentTools: toolReg,
-		AppCtx:      ctx,
+		AgentsMD:      agentsMD,
+		ParentTools:   toolReg,
+		AppCtx:        ctx,
+		WorkspaceRoot: cwd,
 		OnAsyncJobChange: func(count int) {
 			select {
 			case subagentCountCh <- count:
@@ -288,7 +297,7 @@ func main() {
 	})
 
 	// Build system prompt after all tools are registered.
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs())
+	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd)
 
 	// Build agent
 	agentCfg := agent.AgentConfig{
@@ -317,7 +326,7 @@ func main() {
 	if promptContent == "" {
 		// Interactive mode — launch TUI with session persistence
 		var sessionStore session.SessionStore
-		if fs, err := session.NewFileStore(""); err != nil {
+		if fs, err := session.NewFileStore("", cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: session persistence disabled: %v\n", err)
 		} else {
 			sessionStore = fs
@@ -348,10 +357,23 @@ func main() {
 			if err := ag.LoadState(sess.Messages, sess.CompactionEpoch); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
 				sess = nil
+			} else {
+				// Backfill metadata for sessions saved before CWD-scoped persistence.
+				if sess.Metadata == nil {
+					sess.Metadata = make(map[string]any)
+				}
+				if sess.Metadata["cwd"] == nil {
+					sess.Metadata["cwd"] = cwd
+				}
+				if sess.Metadata["model"] == nil {
+					sess.Metadata["model"] = modelSpec(resolvedModel)
+				}
 			}
 		}
 		if sess == nil && sessionStore != nil && !startInSessionBrowser {
 			sess = sessionStore.Create()
+			sess.Metadata["cwd"] = cwd
+			sess.Metadata["model"] = modelSpec(resolvedModel)
 		}
 
 		app := tui.New(ag, ctx, tui.Config{
@@ -359,6 +381,7 @@ func main() {
 			Session:               sess,
 			StartInSessionBrowser: startInSessionBrowser,
 			ModelName:             modelDisplayName(resolvedModel),
+			CWD:                   cwd,
 			PermissionGate:        permGate,
 			PinnedModels:          moaCfg.PinnedModels,
 			SubagentCountCh:       subagentCountCh,
@@ -437,6 +460,64 @@ func main() {
 			os.Exit(130)
 		}
 		fmt.Fprintf(os.Stderr, "\nerror: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	port := fs.Int("port", 8080, "HTTP port")
+	host := fs.String("host", "127.0.0.1", "Bind address (use 0.0.0.0 for remote access)")
+	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
+	fs.Parse(args)
+
+	if *host != "127.0.0.1" && *host != "localhost" && *host != "::1" {
+		fmt.Fprintf(os.Stderr, "⚠️  WARNING: Binding to %s with NO authentication.\n", *host)
+		fmt.Fprintf(os.Stderr, "   Anyone with network access can control agents.\n")
+		fmt.Fprintf(os.Stderr, "   Use a reverse proxy + auth, or Tailscale, for remote access.\n\n")
+	}
+
+	defaultModel, _ := core.ResolveModel(*modelFlag)
+	authStore := auth.NewStore("")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot get working directory: %v\n", err)
+		os.Exit(1)
+	}
+	moaCfg := core.LoadMoaConfig(cwd)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	mgr := serve.NewManager(ctx, serve.ManagerConfig{
+		ProviderFactory: func(model core.Model) (core.Provider, error) {
+			build, err := buildProvider(model, authStore)
+			if err != nil {
+				return nil, err
+			}
+			return build.Provider, nil
+		},
+		DefaultModel:  defaultModel,
+		WorkspaceRoot: cwd,
+		MoaCfg:        moaCfg,
+	})
+
+	srv := serve.NewServer(mgr)
+
+	addr := fmt.Sprintf("%s:%d", *host, *port)
+	fmt.Printf("moa serve listening on http://%s\n", addr)
+
+	httpServer := &http.Server{Addr: addr, Handler: srv}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		httpServer.Shutdown(shutdownCtx)
+	}()
+
+	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -615,6 +696,13 @@ func modelDisplayName(m core.Model) string {
 	return m.ID
 }
 
+func modelSpec(m core.Model) string {
+	if m.Provider != "" {
+		return m.Provider + "/" + m.ID
+	}
+	return m.ID
+}
+
 // resolvePrompt resolves the prompt from flag, @file, or stdin pipe.
 func resolvePrompt(p string) (string, error) {
 	if p != "" {
@@ -696,7 +784,7 @@ func loadProjectMCPServers(cfg *core.MoaConfig, cwd, promptContent string) {
 		return
 	}
 
-	if isMCPPathTrusted(*cfg, cwd) {
+	if core.IsMCPPathTrusted(*cfg, cwd) {
 		servers, err := core.LoadMCPFile(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: invalid .mcp.json: %v\n", err)
@@ -732,11 +820,4 @@ func loadProjectMCPServers(cfg *core.MoaConfig, cwd, promptContent string) {
 	cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
 }
 
-func isMCPPathTrusted(cfg core.MoaConfig, path string) bool {
-	for _, p := range cfg.TrustedMCPPaths {
-		if p == path {
-			return true
-		}
-	}
-	return false
-}
+

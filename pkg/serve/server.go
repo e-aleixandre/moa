@@ -1,0 +1,333 @@
+package serve
+
+import (
+	"context"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"path/filepath"
+
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
+
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
+)
+
+//go:embed static
+var staticFS embed.FS
+
+// NewServer returns an http.Handler wired to the given manager. It serves
+// the API endpoints, WebSocket connections, and embedded static files.
+func NewServer(manager *Manager) http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
+	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
+	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
+	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
+
+	sub, _ := fs.Sub(staticFS, "static")
+	mux.Handle("GET /", http.FileServer(http.FS(sub)))
+
+	return csrfMiddleware(mux)
+}
+
+// csrfMiddleware requires a custom header on mutating requests.
+// Browsers don't send custom headers on cross-origin form POSTs,
+// so this blocks CSRF attacks without tokens.
+func csrfMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" && r.Method != "HEAD" {
+			if r.Header.Get("X-Moa-Request") == "" {
+				http.Error(w, "missing X-Moa-Request header", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func handleListSessions(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, mgr.List())
+	}
+}
+
+func handleCreateSession(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var opts CreateOpts
+		if err := json.NewDecoder(r.Body).Decode(&opts); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		sess, err := mgr.CreateSession(opts)
+		if err != nil {
+			if errors.Is(err, ErrInvalidCWD) {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		sess.mu.Lock()
+		info := sess.info()
+		sess.mu.Unlock()
+		writeJSON(w, http.StatusCreated, info)
+	}
+}
+
+func handleGetSession(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		sess.mu.Lock()
+		info := sess.info()
+		sess.mu.Unlock()
+		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+func handleDeleteSession(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := mgr.Delete(r.PathValue("id"))
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleSend(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Text == "" {
+			http.Error(w, "text required", http.StatusBadRequest)
+			return
+		}
+		err := mgr.Send(r.PathValue("id"), body.Text)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, ErrBusy):
+			http.Error(w, "session is busy", http.StatusConflict)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusAccepted)
+		}
+	}
+}
+
+func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		var body struct {
+			ID       string `json:"id"`
+			Approved bool   `json:"approved"`
+			Feedback string `json:"feedback"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.ID == "" {
+			http.Error(w, "permission request ID is required", http.StatusBadRequest)
+			return
+		}
+		if err := sess.ResolvePermission(body.ID, body.Approved, body.Feedback); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func handleWebSocket(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+
+		// Origin validation: nhooyr.io/websocket validates by default that
+		// the Origin header matches the Host header (same-origin check).
+		// This prevents cross-site WebSocket hijacking.
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := conn.CloseRead(r.Context())
+
+		// Send current state on connect.
+		sess.mu.Lock()
+		history := make([]core.AgentMessage, len(sess.messages))
+		copy(history, sess.messages)
+		state := sess.State
+		var pendingPerm map[string]any
+		if sess.pending != nil && !sess.pending.resolved {
+			pendingPerm = map[string]any{
+				"id":        sess.pending.ID,
+				"tool_name": sess.pending.ToolName,
+				"args":      sess.pending.Args,
+			}
+		}
+		sess.mu.Unlock()
+
+		initData := map[string]any{
+			"messages": history,
+			"state":    string(state),
+		}
+		if pendingPerm != nil {
+			initData["pending_permission"] = pendingPerm
+		}
+		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData}); err != nil {
+			return
+		}
+
+		ch, unsub := sess.Subscribe()
+		defer unsub()
+
+		for {
+			select {
+			case evt, ok := <-ch:
+				if !ok {
+					// Closed by broadcast (slow consumer).
+					conn.Close(websocket.StatusGoingAway, "too slow")
+					return
+				}
+				if err := wsWriteJSON(ctx, conn, evt); err != nil {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func handleTrustMCP(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+
+		cwd := sess.CWD
+
+		// Validate .mcp.json FIRST (before persisting trust).
+		mcpPath := filepath.Join(cwd, ".mcp.json")
+		if _, err := core.LoadMCPFile(mcpPath); err != nil {
+			http.Error(w, fmt.Sprintf("invalid .mcp.json: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Persist trust (idempotent — skip if already trusted).
+		if err := core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
+			if core.IsMCPPathTrusted(*cfg, cwd) {
+				return
+			}
+			cfg.TrustedMCPPaths = append(cfg.TrustedMCPPaths, cwd)
+		}); err != nil {
+			http.Error(w, "failed to save trust", http.StatusInternalServerError)
+			return
+		}
+
+		// Reload MCP into session (idempotent — closes old, starts new).
+		sessionCfg := core.LoadMoaConfig(cwd)
+		if err := sess.reloadMCP(sessionCfg); err != nil {
+			if errors.Is(err, ErrBusy) {
+				http.Error(w, "session is busy; try again when idle", http.StatusConflict)
+				return
+			}
+			http.Error(w, fmt.Sprintf("MCP reload failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		sess.mu.Lock()
+		info := sess.info()
+		sess.mu.Unlock()
+		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+func handleResumeSession(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, err := mgr.ResumeSession(r.PathValue("id"))
+		if err != nil {
+			if errors.Is(err, session.ErrNotFound) {
+				http.Error(w, "saved session not found", http.StatusNotFound)
+				return
+			}
+			if errors.Is(err, ErrBusy) {
+				http.Error(w, "session already active", http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		sess.mu.Lock()
+		info := sess.info()
+		sess.mu.Unlock()
+		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+func handleCancel(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := mgr.Cancel(r.PathValue("id"))
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+}
+
+// writeJSON writes a JSON HTTP response.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+// wsWriteJSON writes a JSON message to a WebSocket connection.
+func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error {
+	return wsjson.Write(ctx, conn, v)
+}
+
+

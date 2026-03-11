@@ -205,6 +205,60 @@ func TestMergeMCPServers_Empty(t *testing.T) {
 	}
 }
 
+func TestIsMCPPathTrusted(t *testing.T) {
+	cfg := MoaConfig{TrustedMCPPaths: []string{"/a/b", "/c/d"}}
+	if !IsMCPPathTrusted(cfg, "/a/b") {
+		t.Fatal("expected /a/b to be trusted")
+	}
+	if !IsMCPPathTrusted(cfg, "/c/d") {
+		t.Fatal("expected /c/d to be trusted")
+	}
+	if IsMCPPathTrusted(cfg, "/x/y") {
+		t.Fatal("expected /x/y to not be trusted")
+	}
+	if IsMCPPathTrusted(MoaConfig{}, "/a/b") {
+		t.Fatal("expected empty config to trust nothing")
+	}
+}
+
+func TestCanonicalizePath(t *testing.T) {
+	dir := t.TempDir()
+	// Resolve the temp dir itself (macOS: /var -> /private/var).
+	canonDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+
+	// Absolute path stable after canonicalization.
+	got, err := CanonicalizePath(dir)
+	if err != nil {
+		t.Fatalf("CanonicalizePath(%q): %v", dir, err)
+	}
+	if got != canonDir {
+		t.Fatalf("got %q, want %q", got, canonDir)
+	}
+
+	// Double slashes cleaned (sub doesn't exist, so symlinks can't be
+	// resolved — but path is still cleaned).
+	got, err = CanonicalizePath(dir + "//sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Clean(dir), "sub")
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	// Trailing slash stripped.
+	got, err = CanonicalizePath(dir + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != canonDir {
+		t.Fatalf("got %q, want %q", got, canonDir)
+	}
+}
+
 func TestMergeConfigs_MCPServers(t *testing.T) {
 	global := MoaConfig{
 		MCPServers: map[string]MCPServer{"db": {Command: "global-db"}},

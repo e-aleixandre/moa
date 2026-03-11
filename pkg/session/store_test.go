@@ -13,7 +13,7 @@ import (
 func tempStore(t *testing.T) *FileStore {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "sessions")
-	store, err := NewFileStore(dir)
+	store, err := NewFileStore(dir, "")
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
@@ -267,5 +267,176 @@ func TestFileStore_Delete_ThenLoad_NotFound(t *testing.T) {
 	_, err := store.Load(sess.ID)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+// --- New: CWD scoping tests ---
+
+func TestScopeKey_Uniqueness(t *testing.T) {
+	// Paths that would collide with naive slash-to-dash replacement.
+	k1 := scopeKey("/a/b")
+	k2 := scopeKey("/a-b")
+	if k1 == k2 {
+		t.Errorf("scopeKey collision: %q and %q both produce %q", "/a/b", "/a-b", k1)
+	}
+}
+
+func TestScopeKey_RootPath(t *testing.T) {
+	key := scopeKey("/")
+	if key == "" {
+		t.Fatal("empty key for root path")
+	}
+	// Should not start with a separator.
+	if key[0] == '/' {
+		t.Errorf("key starts with separator: %q", key)
+	}
+	if len(key) < 5 {
+		t.Errorf("key too short: %q", key)
+	}
+}
+
+func TestScopeKey_Readability(t *testing.T) {
+	key := scopeKey("/Users/foo/project")
+	if len(key) < len("project_") {
+		t.Fatalf("key too short: %q", key)
+	}
+	if key[:8] != "project_" {
+		t.Errorf("key = %q, expected prefix 'project_'", key)
+	}
+}
+
+func TestNewFileStore_ScopedDir(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "/test/myproject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Dir should be under base with the scope key.
+	expected := filepath.Join(base, scopeKey("/test/myproject"))
+	if store.Dir() != expected {
+		t.Errorf("Dir() = %q, want %q", store.Dir(), expected)
+	}
+	// Directory should exist.
+	if _, err := os.Stat(store.Dir()); err != nil {
+		t.Errorf("scoped dir not created: %v", err)
+	}
+}
+
+func TestSummary_IncludesMetadata(t *testing.T) {
+	store := tempStore(t)
+
+	sess := store.Create()
+	sess.Title = "meta test"
+	sess.Metadata["model"] = "claude-sonnet-4"
+	sess.Metadata["cwd"] = "/test/project"
+	store.Save(sess)
+
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("got %d summaries, want 1", len(summaries))
+	}
+	if summaries[0].Metadata["model"] != "claude-sonnet-4" {
+		t.Errorf("metadata[model] = %v, want 'claude-sonnet-4'", summaries[0].Metadata["model"])
+	}
+	if summaries[0].Metadata["cwd"] != "/test/project" {
+		t.Errorf("metadata[cwd] = %v, want '/test/project'", summaries[0].Metadata["cwd"])
+	}
+}
+
+func TestListAll(t *testing.T) {
+	base := t.TempDir()
+
+	// Create sessions in two different project stores.
+	s1, err := NewFileStore(base, "/project/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess1 := s1.Create()
+	sess1.Title = "alpha session"
+	s1.Save(sess1)
+
+	s2, err := NewFileStore(base, "/project/beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess2 := s2.Create()
+	sess2.Title = "beta session"
+	s2.Save(sess2)
+
+	all, err := ListAll(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListAll = %d, want 2", len(all))
+	}
+
+	titles := map[string]bool{all[0].Title: true, all[1].Title: true}
+	if !titles["alpha session"] || !titles["beta session"] {
+		t.Errorf("expected both sessions, got %v", titles)
+	}
+}
+
+func TestFindSession(t *testing.T) {
+	base := t.TempDir()
+
+	store, err := NewFileStore(base, "/project/gamma")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := store.Create()
+	sess.Title = "findme"
+	store.Save(sess)
+
+	found, foundStore, err := FindSession(base, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Title != "findme" {
+		t.Errorf("found title = %q, want 'findme'", found.Title)
+	}
+	if foundStore.Dir() != store.Dir() {
+		t.Errorf("found store dir = %q, want %q", foundStore.Dir(), store.Dir())
+	}
+}
+
+func TestFindSession_NotFound(t *testing.T) {
+	base := t.TempDir()
+	_, _, err := FindSession(base, "nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestDeleteByID(t *testing.T) {
+	base := t.TempDir()
+
+	store, err := NewFileStore(base, "/project/delta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := store.Create()
+	sess.Title = "deleteme"
+	store.Save(sess)
+
+	if err := DeleteByID(base, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be gone.
+	_, err = store.Load(sess.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after DeleteByID, got %v", err)
+	}
+}
+
+func TestDeleteByID_NotFound(t *testing.T) {
+	base := t.TempDir()
+	err := DeleteByID(base, "nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }

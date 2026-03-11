@@ -25,7 +25,8 @@ var toolSnippets = map[string]string{
 }
 
 // BuildSystemPrompt constructs the system prompt from components.
-func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec) string {
+// cwd is the working directory shown to the agent; if empty, os.Getwd() is used.
+func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string) string {
 	var sb strings.Builder
 
 	// Identity and role
@@ -100,7 +101,9 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec) string {
 	}
 
 	// Current date/time and working directory
-	cwd, _ := os.Getwd()
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
 	sb.WriteString(fmt.Sprintf("Current date and time: %s\n", time.Now().Format("Monday, January 2, 2006 at 3:04:05 PM MST")))
 	sb.WriteString(fmt.Sprintf("Current working directory: %s\n", cwd))
 

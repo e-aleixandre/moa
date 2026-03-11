@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>moa serve</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --blue: #58a6ff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100dvh; display: flex; flex-direction: column;
+}
+button { cursor: pointer; font-family: inherit; }
+
+/* Header */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  background: var(--surface); min-height: 48px;
+}
+.header h1 { font-size: 16px; font-weight: 600; }
+.header-back { display: none; background: none; border: none; color: var(--accent);
+  font-size: 14px; padding: 6px 10px; border-radius: 6px; }
+.header-back:hover { background: rgba(88,166,255,0.1); }
+
+/* Dashboard */
+#dashboard { flex: 1; overflow-y: auto; padding: 16px; }
+.session-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.session-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer; transition: border-color 0.15s;
+}
+.session-item:hover { border-color: var(--accent); }
+.session-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.session-dot.idle { background: var(--green); }
+.session-dot.running { background: var(--blue); animation: pulse 1.5s infinite; }
+.session-dot.permission { background: var(--yellow); animation: pulse 1s infinite; }
+.session-dot.error { background: var(--red); }
+.session-dot.saved { background: var(--text-muted); opacity: 0.5; }
+.session-item.saved { opacity: 0.7; }
+.session-item.saved:hover { opacity: 1; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.session-info { flex: 1; min-width: 0; }
+.session-title { font-size: 14px; font-weight: 500; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.session-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.session-delete { background: none; border: none; color: var(--text-muted);
+  padding: 4px 8px; border-radius: 4px; font-size: 16px; }
+.session-delete:hover { color: var(--red); background: rgba(248,81,73,0.1); }
+
+.session-group { margin-bottom: 16px; }
+.session-group-header {
+  font-size: 12px; color: var(--text-muted); padding: 8px 0 4px;
+  border-bottom: 1px solid var(--border); margin-bottom: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.session-group-header .cwd-path { font-family: monospace; }
+.search-wrapper { position: relative; margin-bottom: 12px; }
+.search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); font-size: 14px; pointer-events: none; }
+.session-search {
+  width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 14px 10px 36px; font-size: 14px; font-family: inherit;
+}
+.session-search:focus { outline: none; border-color: var(--accent); }
+
+.new-session-btn {
+  display: block; width: 100%; padding: 14px; margin-top: 12px;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 8px; font-size: 14px; font-weight: 600;
+}
+.new-session-btn:hover { opacity: 0.9; }
+
+.empty-state { text-align: center; color: var(--text-muted); padding: 48px 16px; }
+.empty-state p { margin-bottom: 16px; }
+
+/* Chat view */
+#chat { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+#chat.active { display: flex; }
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 16px; display: flex;
+  flex-direction: column; gap: 16px;
+}
+.msg { max-width: 100%; }
+.msg-user {
+  background: rgba(88,166,255,0.15); border-radius: 12px;
+  padding: 10px 14px; align-self: flex-end; max-width: 85%;
+}
+.msg-assistant {
+  padding: 4px 0; line-height: 1.6;
+}
+.msg-assistant p { margin-bottom: 8px; }
+.msg-assistant pre { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px; overflow-x: auto; margin-bottom: 8px; }
+.msg-assistant code { font-size: 13px; }
+.msg-assistant p code { background: var(--surface); padding: 2px 6px;
+  border-radius: 4px; font-size: 13px; }
+.msg-assistant ul, .msg-assistant ol { padding-left: 24px; margin-bottom: 8px; }
+
+.tool-call {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; margin: 4px 0; font-size: 13px;
+}
+.tool-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; cursor: pointer; user-select: none;
+}
+.tool-header:hover { background: rgba(255,255,255,0.03); }
+.tool-icon { font-size: 14px; }
+.tool-name { font-weight: 600; color: var(--accent); }
+.tool-status { margin-left: auto; font-size: 12px; }
+.tool-body { display: none; padding: 8px 12px; border-top: 1px solid var(--border);
+  font-family: monospace; white-space: pre-wrap; word-break: break-all;
+  max-height: 300px; overflow-y: auto; color: var(--text-muted); font-size: 12px; }
+.tool-body.open { display: block; }
+
+/* Permission prompt */
+.permission-prompt {
+  background: rgba(210,153,34,0.1); border: 1px solid var(--yellow);
+  border-radius: 8px; padding: 12px 16px;
+}
+.permission-prompt h3 { font-size: 14px; color: var(--yellow); margin-bottom: 8px; }
+.permission-prompt .tool-info { font-size: 13px; margin-bottom: 10px;
+  font-family: monospace; color: var(--text-muted); }
+.permission-actions { display: flex; gap: 8px; }
+.btn-approve { background: var(--green); color: #fff; border: none;
+  padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+.btn-deny { background: var(--red); color: #fff; border: none;
+  padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+
+/* Streaming indicator */
+.streaming-cursor::after {
+  content: '▌'; animation: blink 0.8s infinite; color: var(--accent);
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Input bar */
+.input-bar {
+  display: flex; gap: 8px; padding: 12px 16px;
+  border-top: 1px solid var(--border); background: var(--surface);
+}
+.input-bar textarea {
+  flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: inherit;
+  resize: none; min-height: 44px; max-height: 120px; line-height: 1.4;
+}
+.input-bar textarea:focus { outline: none; border-color: var(--accent); }
+.input-bar button {
+  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  padding: 0 20px; font-size: 14px; font-weight: 600; min-height: 44px;
+}
+.input-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+#stopBtn {
+  background: var(--red); color: #fff; border: none; border-radius: 8px;
+  padding: 0 16px; font-size: 14px; font-weight: 600; min-height: 44px;
+}
+#stopBtn:hover { opacity: 0.9; }
+
+/* New session dialog */
+.dialog-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  z-index: 100; align-items: center; justify-content: center;
+}
+.dialog-overlay.open { display: flex; }
+.dialog {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 24px; width: 90%; max-width: 400px;
+}
+.dialog h2 { font-size: 18px; margin-bottom: 16px; }
+.dialog label { display: block; font-size: 13px; color: var(--text-muted);
+  margin-bottom: 4px; margin-top: 12px; }
+.dialog input, .dialog select {
+  width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit;
+}
+.dialog input:focus, .dialog select:focus { outline: none; border-color: var(--accent); }
+.dialog-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+.dialog-actions button {
+  padding: 8px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; border: none;
+}
+.btn-cancel { background: var(--border); color: var(--text); }
+.btn-create { background: var(--accent); color: #fff; }
+
+/* MCP trust banner */
+.mcp-banner {
+  background: rgba(210,153,34,0.1); border: 1px solid var(--yellow);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 10px; font-size: 13px;
+}
+.mcp-banner button {
+  padding: 4px 12px; border-radius: 4px; border: none; font-size: 12px;
+  font-weight: 600; cursor: pointer;
+}
+.mcp-banner .btn-trust { background: var(--green); color: #fff; }
+.mcp-banner .btn-dismiss { background: var(--border); color: var(--text); }
+
+/* Thinking blocks */
+.thinking-block { margin: 8px 0; }
+.thinking-block summary { cursor: pointer; color: var(--text-muted); font-style: italic; font-size: 13px; }
+.thinking-content { color: var(--text-muted); font-style: italic; padding: 8px; font-size: 13px;
+  white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <button class="header-back" id="backBtn" onclick="showDashboard()">← Back</button>
+  <h1 id="headerTitle">moa serve</h1>
+  <div id="headerRight">
+    <button onclick="toggleThinking()" title="Toggle thinking" style="background:none;border:none;font-size:16px;cursor:pointer;padding:4px 8px;">💭</button>
+  </div>
+</div>
+
+<div id="dashboard">
+  <div class="search-wrapper">
+    <span class="search-icon">🔍</span>
+    <input class="session-search" id="sessionSearch" placeholder="Filter sessions…"
+      oninput="filterSessions()">
+  </div>
+  <div id="sessionList"></div>
+  <button class="new-session-btn" onclick="openNewDialog()">+ New Session</button>
+</div>
+
+<div id="chat">
+  <div id="mcpBanner" class="mcp-banner" style="display:none">
+    <span>⚠️ This project has MCP servers that haven't been trusted yet.</span>
+    <button class="btn-trust" onclick="trustMCP()">Trust &amp; Load</button>
+    <button class="btn-dismiss" onclick="dismissMCPBanner()">Dismiss</button>
+  </div>
+  <div class="chat-messages" id="chatMessages"></div>
+  <div class="input-bar">
+    <textarea id="chatInput" placeholder="Send a message…" rows="1"
+      onkeydown="handleInputKey(event)"></textarea>
+    <button id="stopBtn" onclick="cancelRun()" style="display:none">⏹ Stop</button>
+    <button id="sendBtn" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<div class="dialog-overlay" id="newDialog">
+  <div class="dialog">
+    <h2>New Session</h2>
+    <label for="newTitle">Title (optional)</label>
+    <input id="newTitle" placeholder="e.g. refactor auth">
+    <label for="newModel">Model</label>
+    <input id="newModel" placeholder="sonnet" value="sonnet">
+    <label for="newCwd">Working Directory (optional)</label>
+    <input id="newCwd" placeholder="/path/to/project">
+    <div class="dialog-actions">
+      <button class="btn-cancel" onclick="closeNewDialog()">Cancel</button>
+      <button class="btn-create" onclick="createSession()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+const headers = {'Content-Type': 'application/json', 'X-Moa-Request': '1'};
+
+let currentSession = null;
+let ws = null;
+let sessions = [];
+let streamBuf = '';
+let streamEl = null;
+let pollTimer = null;
+let thinkingBuf = '';
+let thinkingEl = null;
+let showThinking = false;
+
+// Notifications
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+function notify(title, body) {
+  if (!document.hidden) return;
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, {body, icon: '🤖'});
+  }
+}
+
+// Markdown config — disable raw HTML to prevent XSS from model/tool output.
+marked.setOptions({
+  highlight: (code, lang) => {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, {language: lang}).value;
+    }
+    return hljs.highlightAuto(code).value;
+  },
+  breaks: true,
+});
+
+// Safe markdown render: parse then sanitize with DOMPurify.
+function renderMarkdown(text) {
+  const raw = marked.parse(text);
+  return DOMPurify.sanitize(raw);
+}
+
+// --- API helpers ---
+async function api(method, path, body) {
+  const opts = {method, headers};
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`${r.status}: ${text}`);
+  }
+  if (r.status === 204 || r.status === 202) return null;
+  return r.json();
+}
+
+// --- Dashboard ---
+async function loadSessions() {
+  sessions = await api('GET', '/api/sessions');
+  renderSessionList();
+}
+
+function renderSessionList() {
+  const list = document.getElementById('sessionList');
+  const filter = (document.getElementById('sessionSearch').value || '').toLowerCase();
+
+  const filtered = sessions.filter(s => {
+    if (!filter) return true;
+    const title = (s.title || '').toLowerCase();
+    const cwd = (s.cwd || '').toLowerCase();
+    const model = (s.model || '').toLowerCase();
+    return title.includes(filter) || cwd.includes(filter) || model.includes(filter);
+  });
+
+  if (filtered.length === 0) {
+    list.innerHTML = filter
+      ? '<div class="empty-state"><p>No matching sessions.</p></div>'
+      : '<div class="empty-state"><p>No sessions yet.</p><p>Create one to get started.</p></div>';
+    return;
+  }
+
+  // Group by CWD.
+  const groups = {};
+  for (const s of filtered) {
+    const key = s.cwd || 'Unknown';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(s);
+  }
+
+  let html = '';
+  for (const [cwd, items] of Object.entries(groups)) {
+    const label = cwd.split('/').pop() || cwd;
+    html += `<div class="session-group">
+      <div class="session-group-header">
+        <span class="cwd-path" title="${esc(cwd)}">${esc(label)}</span>
+        <span>(${items.length})</span>
+      </div>
+      <ul class="session-list">`;
+    for (const s of items) {
+      const isSaved = s.state === 'saved';
+      const onclick = isSaved ? `resumeSession('${s.id}')` : `openSession('${s.id}')`;
+      html += `
+      <li class="session-item ${isSaved ? 'saved' : ''}" onclick="${onclick}">
+        <span class="session-dot ${s.state}"></span>
+        <div class="session-info">
+          <div class="session-title">${esc(s.title || 'Untitled')}</div>
+          <div class="session-meta">${esc(s.model || '?')} · ${esc(s.state)}${s.error ? ' · ' + esc(s.error) : ''}</div>
+        </div>
+        <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.id}')" title="Delete">×</button>
+      </li>`;
+    }
+    html += '</ul></div>';
+  }
+  list.innerHTML = html;
+}
+
+function filterSessions() { renderSessionList(); }
+
+async function resumeSession(id) {
+  try {
+    const sess = await api('POST', `/api/sessions/${id}/resume`);
+    await loadSessions();
+    openSession(sess.id);
+  } catch (e) {
+    alert('Resume failed: ' + e.message);
+  }
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function openNewDialog() { document.getElementById('newDialog').classList.add('open'); document.getElementById('newTitle').focus(); }
+function closeNewDialog() { document.getElementById('newDialog').classList.remove('open'); }
+
+async function createSession() {
+  const title = document.getElementById('newTitle').value.trim();
+  const model = document.getElementById('newModel').value.trim() || 'sonnet';
+  const cwd = document.getElementById('newCwd').value.trim();
+  closeNewDialog();
+  const body = {title, model};
+  if (cwd) body.cwd = cwd;
+  const sess = await api('POST', '/api/sessions', body);
+  document.getElementById('newTitle').value = '';
+  document.getElementById('newCwd').value = '';
+  await loadSessions();
+  openSession(sess.id);
+  if (sess.untrusted_mcp) showMCPTrustBanner();
+}
+
+function showMCPTrustBanner() {
+  document.getElementById('mcpBanner').style.display = 'flex';
+}
+function dismissMCPBanner() {
+  document.getElementById('mcpBanner').style.display = 'none';
+}
+async function trustMCP() {
+  if (!currentSession) return;
+  try {
+    await api('POST', `/api/sessions/${currentSession}/trust-mcp`);
+    dismissMCPBanner();
+    // Update local state so re-opening doesn't show banner again.
+    const s = sessions.find(x => x.id === currentSession);
+    if (s) s.untrusted_mcp = false;
+  } catch (e) {
+    alert('Trust failed: ' + e.message);
+  }
+}
+
+async function deleteSession(id) {
+  await api('DELETE', '/api/sessions/' + id);
+  if (currentSession === id) showDashboard();
+  await loadSessions();
+}
+
+// --- Chat ---
+function openSession(id) {
+  currentSession = id;
+  const sess = sessions.find(s => s.id === id);
+  document.getElementById('headerTitle').textContent = sess ? (sess.title || 'Untitled') : 'Session';
+  document.getElementById('backBtn').style.display = 'block';
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('chat').classList.add('active');
+  document.getElementById('chatMessages').innerHTML = '';
+  streamBuf = '';
+  streamEl = null;
+  thinkingBuf = '';
+  thinkingEl = null;
+  // Show MCP trust banner if session has untrusted MCP servers.
+  const sessData = sessions.find(s => s.id === id);
+  if (sessData && sessData.untrusted_mcp) {
+    showMCPTrustBanner();
+  } else {
+    document.getElementById('mcpBanner').style.display = 'none';
+  }
+  connectWS(id);
+  document.getElementById('chatInput').focus();
+  stopPolling();
+}
+
+function showDashboard() {
+  currentSession = null;
+  disconnectWS();
+  document.getElementById('headerTitle').textContent = 'moa serve';
+  document.getElementById('backBtn').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('chat').classList.remove('active');
+  loadSessions();
+  startPolling();
+}
+
+function startPolling() { stopPolling(); pollTimer = setInterval(loadSessions, 3000); }
+function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+function connectWS(id) {
+  disconnectWS();
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/api/sessions/${id}/ws`);
+  ws.onmessage = (e) => handleWSEvent(JSON.parse(e.data));
+  ws.onclose = () => { ws = null; };
+}
+
+function disconnectWS() {
+  if (ws) { ws.close(); ws = null; }
+}
+
+function handleWSEvent(evt) {
+  const msgs = document.getElementById('chatMessages');
+  switch (evt.type) {
+    case 'init':
+      renderHistory(evt.data.messages || [], evt.data.state);
+      if (evt.data.pending_permission) {
+        renderPermission(evt.data.pending_permission);
+      }
+      updateSendButton(evt.data.state);
+      break;
+    case 'state_change':
+      updateSendButton(evt.data.state);
+      if (evt.data.state === 'idle') {
+        finishStream();
+        notify('Agent finished', document.getElementById('headerTitle').textContent);
+      }
+      if (evt.data.state === 'error') {
+        finishStream();
+        notify('Agent error', evt.data.error || 'Unknown error');
+      }
+      // Update dashboard state too
+      const s = sessions.find(x => x.id === currentSession);
+      if (s) { s.state = evt.data.state; if (evt.data.error) s.error = evt.data.error; }
+      break;
+    case 'text_delta':
+      appendStreamDelta(evt.data.delta);
+      break;
+    case 'thinking_delta':
+      appendThinkingDelta(evt.data.delta);
+      break;
+    case 'message_end':
+      finishStream();
+      if (evt.data.text) {
+        // Replace streamed text with the full final text for recovery.
+        if (streamEl) {
+          streamEl.innerHTML = renderMarkdown(evt.data.text);
+          streamEl.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+          streamEl = null;
+        }
+      }
+      break;
+    case 'run_end':
+      finishStream();
+      break;
+    case 'tool_start':
+      renderToolStart(evt.data);
+      break;
+    case 'tool_end':
+      renderToolEnd(evt.data);
+      break;
+    case 'permission_request':
+      renderPermission(evt.data);
+      notify('Permission needed', `${evt.data.tool_name} needs approval`);
+      break;
+    case 'subagent_count':
+      updateSubagentBadge(evt.data.count);
+      break;
+    case 'subagent_complete':
+      appendSystemMessage(evt.data.text);
+      notify('Subagent ' + evt.data.status, (evt.data.task || '').substring(0, 80));
+      break;
+  }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderHistory(messages, state) {
+  const container = document.getElementById('chatMessages');
+  container.innerHTML = '';
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      let text = '';
+      for (const c of (msg.content || [])) {
+        if (c.type === 'text') text += c.text;
+      }
+      if (text) {
+        const el = document.createElement('div');
+        el.className = 'msg msg-user';
+        el.textContent = text;
+        container.appendChild(el);
+      }
+    } else if (msg.role === 'assistant') {
+      let text = '';
+      let thinking = '';
+      for (const c of (msg.content || [])) {
+        if (c.type === 'text') text += c.text;
+        if (c.type === 'thinking') thinking += (c.thinking || '');
+        if (c.type === 'tool_call') {
+          renderToolStart({tool_call_id: c.tool_call_id, tool_name: c.tool_name, args: c.arguments});
+        }
+      }
+      if (thinking) {
+        const details = document.createElement('details');
+        details.className = 'thinking-block';
+        if (showThinking) details.open = true;
+        details.innerHTML = `<summary>Thinking…</summary><div class="thinking-content">${esc(thinking)}</div>`;
+        container.appendChild(details);
+      }
+      if (text) {
+        const el = document.createElement('div');
+        el.className = 'msg msg-assistant';
+        el.innerHTML = renderMarkdown(text);
+        el.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+        container.appendChild(el);
+      }
+    } else if (msg.role === 'tool_result') {
+      // Find matching tool call div and update it
+      for (const c of (msg.content || [])) {
+        if (c.tool_call_id) {
+          const toolDiv = document.querySelector(`[data-tool-id="${c.tool_call_id}"]`);
+          if (toolDiv) {
+            const body = toolDiv.querySelector('.tool-body');
+            if (body && c.type === 'text') body.textContent = truncateResult(c.text);
+            const status = toolDiv.querySelector('.tool-status');
+            if (status) {
+              const isErr = c.is_error || msg.content.some(x => x.is_error);
+              status.textContent = isErr ? '✗' : '✓';
+              status.style.color = isErr ? 'var(--red)' : 'var(--green)';
+            }
+          }
+        }
+      }
+    }
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendStreamDelta(delta) {
+  if (!streamEl) {
+    streamEl = document.createElement('div');
+    streamEl.className = 'msg msg-assistant streaming-cursor';
+    document.getElementById('chatMessages').appendChild(streamEl);
+  }
+  streamBuf += delta;
+  streamEl.innerHTML = renderMarkdown(streamBuf);
+  streamEl.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+}
+
+function finishStream() {
+  if (streamEl) {
+    streamEl.classList.remove('streaming-cursor');
+    // Final parse with complete buffer
+    if (streamBuf) {
+      streamEl.innerHTML = renderMarkdown(streamBuf);
+      streamEl.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+    }
+  }
+  streamBuf = '';
+  streamEl = null;
+  thinkingBuf = '';
+  thinkingEl = null;
+}
+
+function renderToolStart(data) {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'tool-call';
+  div.dataset.toolId = data.tool_call_id || '';
+  let argsStr = '';
+  if (data.args) {
+    try { argsStr = typeof data.args === 'string' ? data.args : JSON.stringify(data.args, null, 2); }
+    catch { argsStr = String(data.args); }
+  }
+  div.innerHTML = `
+    <div class="tool-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <span class="tool-icon">⚡</span>
+      <span class="tool-name">${esc(data.tool_name || '?')}</span>
+      <span class="tool-status" style="color:var(--blue)">⋯</span>
+    </div>
+    <div class="tool-body">${esc(argsStr)}</div>
+  `;
+  container.appendChild(div);
+}
+
+function renderToolEnd(data) {
+  const toolDiv = document.querySelector(`[data-tool-id="${data.tool_call_id}"]`);
+  if (!toolDiv) return;
+  const status = toolDiv.querySelector('.tool-status');
+  if (status) {
+    status.textContent = data.is_error ? '✗' : '✓';
+    status.style.color = data.is_error ? 'var(--red)' : 'var(--green)';
+  }
+  if (data.result) {
+    const body = toolDiv.querySelector('.tool-body');
+    if (body) body.textContent = truncateResult(data.result);
+  }
+}
+
+function truncateResult(text) {
+  if (!text) return '';
+  if (text.length > 2000) return text.substring(0, 2000) + '\n… (truncated)';
+  return text;
+}
+
+function renderPermission(data) {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'permission-prompt';
+  div.id = 'perm-' + data.id;
+  let argsStr = '';
+  if (data.args) {
+    try { argsStr = typeof data.args === 'string' ? data.args : JSON.stringify(data.args, null, 2); }
+    catch { argsStr = String(data.args); }
+  }
+  div.innerHTML = `
+    <h3>🔒 Permission Required</h3>
+    <div class="tool-info">${esc(data.tool_name)}\n${esc(argsStr)}</div>
+    <div class="permission-actions">
+      <button class="btn-approve" onclick="resolvePermission('${data.id}', true)">Approve</button>
+      <button class="btn-deny" onclick="resolvePermission('${data.id}', false)">Deny</button>
+    </div>
+  `;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function resolvePermission(permId, approved) {
+  if (!currentSession) return;
+  try {
+    await api('POST', `/api/sessions/${currentSession}/permission`, {
+      id: permId, approved, feedback: ''
+    });
+  } catch (e) {
+    console.error('Permission resolve failed:', e);
+  }
+  const el = document.getElementById('perm-' + permId);
+  if (el) {
+    el.innerHTML = `<p style="color:var(--text-muted)">${approved ? '✓ Approved' : '✗ Denied'}</p>`;
+  }
+}
+
+function updateSendButton(state) {
+  const btn = document.getElementById('sendBtn');
+  const stop = document.getElementById('stopBtn');
+  const input = document.getElementById('chatInput');
+  const busy = state === 'running' || state === 'permission';
+  btn.disabled = busy;
+  input.disabled = busy;
+  stop.style.display = busy ? 'inline-block' : 'none';
+}
+
+async function cancelRun() {
+  if (!currentSession) return;
+  try {
+    await api('POST', `/api/sessions/${currentSession}/cancel`);
+  } catch (e) {
+    console.error('Cancel failed:', e);
+  }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text || !currentSession) return;
+  input.value = '';
+  autoResize(input);
+
+  // Render user message immediately
+  const container = document.getElementById('chatMessages');
+  const el = document.createElement('div');
+  el.className = 'msg msg-user';
+  el.textContent = text;
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+
+  try {
+    await api('POST', `/api/sessions/${currentSession}/send`, {text});
+    updateSendButton('running');
+  } catch (e) {
+    const err = document.createElement('div');
+    err.className = 'msg';
+    err.style.color = 'var(--red)';
+    err.textContent = 'Error: ' + e.message;
+    container.appendChild(err);
+  }
+}
+
+function handleInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+// Auto-resize textarea
+const chatInput = document.getElementById('chatInput');
+chatInput.addEventListener('input', () => autoResize(chatInput));
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// --- Thinking ---
+function appendThinkingDelta(delta) {
+  if (!thinkingEl) {
+    const details = document.createElement('details');
+    details.className = 'thinking-block';
+    if (showThinking) details.open = true;
+    const summary = document.createElement('summary');
+    summary.textContent = 'Thinking…';
+    details.appendChild(summary);
+    const content = document.createElement('div');
+    content.className = 'thinking-content';
+    details.appendChild(content);
+    document.getElementById('chatMessages').appendChild(details);
+    thinkingEl = content;
+  }
+  thinkingBuf += delta;
+  thinkingEl.textContent = thinkingBuf;
+}
+function toggleThinking() {
+  showThinking = !showThinking;
+  document.querySelectorAll('.thinking-block').forEach(d => d.open = showThinking);
+}
+
+// --- Subagent badge ---
+function updateSubagentBadge(count) {
+  let badge = document.getElementById('subagentBadge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.id = 'subagentBadge';
+    badge.style.cssText = 'font-size:12px;color:var(--accent);margin-left:8px;';
+    document.getElementById('headerTitle').after(badge);
+  }
+  badge.textContent = count > 0 ? `🔄 ${count} subagent${count > 1 ? 's' : ''}` : '';
+}
+
+function appendSystemMessage(text) {
+  const container = document.getElementById('chatMessages');
+  const el = document.createElement('div');
+  el.className = 'msg';
+  el.style.cssText = 'color:var(--text-muted);font-style:italic;font-size:13px;white-space:pre-wrap;';
+  el.textContent = text;
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}
+
+// Init
+loadSessions();
+startPolling();
+</script>
+</body>
+</html>

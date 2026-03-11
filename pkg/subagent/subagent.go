@@ -36,9 +36,10 @@ type Config struct {
 	CurrentPermissionCheck func() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
 	ProviderFactory        func(core.Model) (core.Provider, error)
 	AgentsMD               string
-	PromptBuilder          func(agentsMD string, toolSpecs []core.ToolSpec) string
+	PromptBuilder          func(agentsMD string, toolSpecs []core.ToolSpec, cwd string) string
 	ParentTools            *core.Registry
 	AppCtx                 context.Context
+	WorkspaceRoot          string // CWD passed to system prompt builder
 
 	// OnAsyncComplete is called when an async subagent finishes (completed, failed, or cancelled).
 	OnAsyncComplete func(jobID, task, status, resultTail string)
@@ -126,7 +127,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if promptBuilder == nil {
 				promptBuilder = agentcontext.BuildSystemPrompt
 			}
-			systemPrompt := buildSystemPrompt(promptBuilder, cfg.AgentsMD, childReg.Specs())
+			systemPrompt := buildSystemPrompt(promptBuilder, cfg.AgentsMD, childReg.Specs(), cfg.WorkspaceRoot)
 
 			if getBool(params, "async") {
 				if err := ctx.Err(); err != nil {
@@ -387,9 +388,9 @@ func resolveThinking(defaultThinking string, params map[string]any) (string, *co
 	}
 }
 
-func buildSystemPrompt(promptBuilder func(string, []core.ToolSpec) string, agentsMD string, specs []core.ToolSpec) string {
+func buildSystemPrompt(promptBuilder func(string, []core.ToolSpec, string) string, agentsMD string, specs []core.ToolSpec, cwd string) string {
 	const preamble = "You are a focused subagent. Complete the delegated task thoroughly and report your findings concisely. Do not ask clarifying questions — work with what you have.\n\n"
-	return preamble + promptBuilder(agentsMD, specs)
+	return preamble + promptBuilder(agentsMD, specs, cwd)
 }
 
 func forwardSyncEvent(e core.AgentEvent, onUpdate func(core.Result)) {

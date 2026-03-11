@@ -106,6 +106,7 @@ type appModel struct {
 	// Session persistence
 	sessionStore session.SessionStore // nil if persistence is disabled
 	session      *session.Session // current session (nil if no persistence)
+	cwd          string           // working directory for session metadata
 
 	// Display
 	modelName string
@@ -138,6 +139,7 @@ type Config struct {
 	Session               *session.Session // session to resume (nil = fresh start)
 	StartInSessionBrowser bool             // open the session browser before entering chat
 	ModelName             string           // display name for the active model (shown on startup)
+	CWD                   string           // working directory for session metadata
 	ProviderFactory       ProviderFactory  // creates providers for /model switching (nil = switching disabled)
 	PermissionGate        *permission.Gate    // permission gate (nil = yolo, no prompts)
 	PinnedModels          []string            // model IDs pre-pinned for Ctrl+P cycling (loaded from global config)
@@ -198,6 +200,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		bottomBar:       NewStatusLine(statusLineStyle),
 		sessionStore:         cfg.SessionStore,
 		session:              cfg.Session,
+		cwd:                  cfg.CWD,
 		modelName:            cfg.ModelName,
 		providerFactory:      cfg.ProviderFactory,
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
@@ -1411,7 +1414,7 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		// Delete old session, create fresh one
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
-			m.session = m.sessionStore.Create()
+			m.session = m.newSession()
 		}
 		m.updateViewport()
 		return m, nil
@@ -1686,6 +1689,13 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	m.refreshContextSegment()
 	m.s.pendingStatus = ""
 	m.s.pendingTimeline = newModelSwitchEvent(newModel)
+
+	if m.session != nil {
+		if m.session.Metadata == nil {
+			m.session.Metadata = make(map[string]any)
+		}
+		m.session.Metadata["model"] = fullModelSpec(newModel)
+	}
 	return m, nil
 }
 
@@ -1865,7 +1875,17 @@ func (m appModel) newSession() *session.Session {
 	if m.sessionStore == nil {
 		return nil
 	}
-	return m.sessionStore.Create()
+	sess := m.sessionStore.Create()
+	sess.Metadata["cwd"] = m.cwd
+	sess.Metadata["model"] = fullModelSpec(m.agent.Model())
+	return sess
+}
+
+func fullModelSpec(model core.Model) string {
+	if model.Provider != "" {
+		return model.Provider + "/" + model.ID
+	}
+	return model.ID
 }
 
 func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
@@ -1894,12 +1914,52 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.sessionCost = 0
 	m.topBar.UpdateCostSegment(0)
 
+	// Restore model from session metadata when resuming.
+	if sess != nil && sess.Metadata != nil {
+		m.restoreModelFromMetadata(sess)
+	}
+
 	if sess != nil && len(sess.Messages) > 0 {
 		m.rebuildFromMessages(sess.Messages)
 	}
 	m.refreshContextSegment()
 	m.updateViewport()
 	return m, m.forceRepaint()
+}
+
+func (m *appModel) restoreModelFromMetadata(sess *session.Session) {
+	spec, ok := sess.Metadata["model"].(string)
+	if !ok || spec == "" {
+		return
+	}
+	model, _ := core.ResolveModel(spec)
+	if model.ID == "" {
+		return
+	}
+	current := m.agent.Model()
+	if model.ID == current.ID {
+		return
+	}
+	var prov core.Provider
+	if model.Provider != current.Provider {
+		if m.providerFactory == nil {
+			return
+		}
+		p, err := m.providerFactory(model)
+		if err != nil {
+			return
+		}
+		prov = p
+	}
+	if err := m.agent.Reconfigure(prov, model, m.agent.ThinkingLevel()); err != nil {
+		return
+	}
+	name := model.Name
+	if name == "" {
+		name = model.ID
+	}
+	m.modelName = name
+	m.topBar.UpdateModelSegment(m.modelName)
 }
 
 // --- Pinned models ---
@@ -1965,6 +2025,14 @@ func (m *appModel) saveSession(msgs []core.AgentMessage) tea.Cmd {
 	snapshot.Messages = make([]core.AgentMessage, len(msgs))
 	copy(snapshot.Messages, msgs)
 	snapshot.CompactionEpoch = m.agent.CompactionEpoch()
+	// Deep-copy metadata map to avoid races with model switches.
+	if snapshot.Metadata != nil {
+		meta := make(map[string]any, len(snapshot.Metadata))
+		for k, v := range snapshot.Metadata {
+			meta[k] = v
+		}
+		snapshot.Metadata = meta
+	}
 
 	store := m.sessionStore
 	return func() tea.Msg {

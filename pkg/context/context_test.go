@@ -93,7 +93,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		{Name: "read", Description: "Read files"},
 	}
 
-	prompt := BuildSystemPrompt("# Project: test", tools)
+	prompt := BuildSystemPrompt("# Project: test", tools, "/test/cwd")
 
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role description")
@@ -107,10 +107,13 @@ func TestBuildSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "Current date") {
 		t.Error("expected date")
 	}
+	if !strings.Contains(prompt, "/test/cwd") {
+		t.Error("expected CWD in prompt")
+	}
 }
 
 func TestBuildSystemPrompt_Empty(t *testing.T) {
-	prompt := BuildSystemPrompt("", nil)
+	prompt := BuildSystemPrompt("", nil, "")
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role even with no AGENTS.md")
 	}

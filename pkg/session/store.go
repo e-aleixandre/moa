@@ -2,8 +2,10 @@ package session
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,16 +24,20 @@ type FileStore struct {
 	dir string
 }
 
-// NewFileStore creates a FileStore at the given directory.
-// If dir is empty, defaults to ~/.config/moa/sessions/.
-// Creates the directory if it doesn't exist.
-func NewFileStore(dir string) (*FileStore, error) {
-	if dir == "" {
-		home, err := os.UserHomeDir()
+// NewFileStore creates a FileStore for sessions scoped to the given CWD.
+// baseDir is the root sessions directory (empty = ~/.config/moa/sessions/).
+// cwd determines the project subdirectory. Empty cwd uses baseDir directly (legacy/tests).
+func NewFileStore(baseDir, cwd string) (*FileStore, error) {
+	if baseDir == "" {
+		var err error
+		baseDir, err = defaultBaseDir()
 		if err != nil {
 			return nil, fmt.Errorf("session: cannot resolve home directory: %w", err)
 		}
-		dir = filepath.Join(home, ".config", "moa", "sessions")
+	}
+	dir := baseDir
+	if cwd != "" {
+		dir = filepath.Join(baseDir, scopeKey(cwd))
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("session: cannot create directory %s: %w", dir, err)
@@ -127,9 +133,6 @@ func (s *FileStore) List() ([]Summary, error) {
 		if err != nil {
 			continue // skip unreadable files
 		}
-		// Parse into Summary struct. json.Unmarshal still reads the full file
-		// including messages (discards unknown fields). Acceptable for now.
-		// TODO: sidecar .meta.json for O(1) listing when session count grows.
 		var sum Summary
 		if err := json.Unmarshal(data, &sum); err != nil {
 			continue // skip corrupt files
@@ -172,8 +175,124 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
-// Deprecated: Use FileStore directly.
-type Store = FileStore
+// scopeKey returns a directory name for a CWD: <basename>_<hash12>.
+// Uses SHA-256 of the cleaned path for uniqueness and the last path
+// component for human readability.
+func scopeKey(cwd string) string {
+	clean := filepath.Clean(cwd)
+	base := filepath.Base(clean)
+	// Sanitize: strip separators, fall back for root/empty paths.
+	base = strings.ReplaceAll(base, string(filepath.Separator), "")
+	base = strings.ReplaceAll(base, ":", "") // Windows drive letters
+	if base == "" || base == "." {
+		base = "root"
+	}
+	h := sha256.Sum256([]byte(clean))
+	return base + "_" + hex.EncodeToString(h[:6]) // 12 hex chars
+}
 
-// Deprecated: Use NewFileStore.
-func NewStore(dir string) (*FileStore, error) { return NewFileStore(dir) }
+// defaultBaseDir returns the default sessions root directory.
+func defaultBaseDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "moa", "sessions"), nil
+}
+
+// ListAll returns summaries from all project-scoped stores under baseDir.
+// If baseDir is empty, uses the default. Returns partial results on errors.
+func ListAll(baseDir string) ([]Summary, error) {
+	if baseDir == "" {
+		var err error
+		baseDir, err = defaultBaseDir()
+		if err != nil {
+			return nil, err
+		}
+	}
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var all []Summary
+	var errs []error
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
+		sums, err := store.List()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", e.Name(), err))
+			continue
+		}
+		all = append(all, sums...)
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Updated.After(all[j].Updated)
+	})
+	return all, errors.Join(errs...)
+}
+
+// FindSession searches all project stores under baseDir for a session by ID.
+// Returns the session, the store it was found in, and any error.
+func FindSession(baseDir, id string) (*Session, *FileStore, error) {
+	if baseDir == "" {
+		var err error
+		baseDir, err = defaultBaseDir()
+		if err != nil {
+			return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+		}
+	}
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(baseDir, e.Name())
+		path := filepath.Join(dir, id+".json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var sess Session
+		if err := json.Unmarshal(data, &sess); err != nil {
+			continue
+		}
+		return &sess, &FileStore{dir: dir}, nil
+	}
+	return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+}
+
+// DeleteByID searches all project stores under baseDir and deletes the session.
+func DeleteByID(baseDir, id string) error {
+	if baseDir == "" {
+		var err error
+		baseDir, err = defaultBaseDir()
+		if err != nil {
+			return fmt.Errorf("session %s: %w", id, ErrNotFound)
+		}
+	}
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		path := filepath.Join(baseDir, e.Name(), id+".json")
+		if err := os.Remove(path); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("session %s: %w", id, ErrNotFound)
+}

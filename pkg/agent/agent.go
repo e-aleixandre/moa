@@ -119,6 +119,13 @@ func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, er
 	})
 }
 
+// IsRunning returns true if the agent is currently executing a Send/Run.
+func (a *Agent) IsRunning() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cancel != nil
+}
+
 // Send appends a user message and runs the agent loop, continuing the conversation.
 // If no previous state exists (e.g., first call without Run), state is auto-initialized.
 // State mutation is atomic with the "not running" check — concurrent Send calls

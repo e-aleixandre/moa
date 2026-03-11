@@ -50,10 +50,11 @@ type Session struct {
 // Summary is a lightweight session descriptor without messages.
 // Used for listing sessions without loading full conversation data.
 type Summary struct {
-	ID      string    `json:"id"`
-	Created time.Time `json:"created"`
-	Updated time.Time `json:"updated"`
-	Title   string    `json:"title"`
+	ID       string         `json:"id"`
+	Created  time.Time      `json:"created"`
+	Updated  time.Time      `json:"updated"`
+	Title    string         `json:"title"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // SetTitle sets the session title from a user message.
