@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -58,6 +60,8 @@ type state struct {
 	transcript       bool                  // true when in transcript mode (Ctrl+O)
 	fullHistory      bool                  // true when Ctrl+E in transcript mode shows everything
 	runStartBlockIdx int                   // block index at start of current run (patch boundary)
+	pendingImage     []byte                // raw image bytes waiting to be sent with next message
+	pendingImageMime string                // mime type of pending image
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -491,6 +495,26 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Pinned models saved asynchronously. Errors are silent — not worth interrupting.
 		return m, nil
 
+	case clipboardImageMsg:
+		if msg.Err != nil {
+			switch {
+			case errors.Is(msg.Err, clipboard.ErrUnsupported):
+				m.status.SetText("clipboard images not supported on this platform")
+			case errors.Is(msg.Err, clipboard.ErrNoImage):
+				m.status.SetText("no image in clipboard")
+			default:
+				m.status.SetText("clipboard: " + msg.Err.Error())
+			}
+			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+				return clearThinkingStatusMsg{}
+			})
+		}
+		m.s.pendingImage = msg.Data
+		m.s.pendingImageMime = msg.MimeType
+		kb := len(msg.Data) / 1024
+		m.status.SetText(fmt.Sprintf("📎 Image attached (%d KB) — will send with next message", kb))
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.status, cmd = m.status.Update(msg)
@@ -736,6 +760,12 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case tea.KeyCtrlV:
+		if m.s.running {
+			return m, nil
+		}
+		return m, m.checkClipboardImage()
+
 	case tea.KeyCtrlO:
 		if m.s.transcript {
 			// Return to alt screen
@@ -894,6 +924,30 @@ func (m appModel) launchAgentSend(text string, gen uint64) tea.Cmd {
 	)
 }
 
+// launchAgentSendWithContent returns a tea.Batch that runs agent.SendWithContent
+// and starts the render tick and spinner.
+func (m appModel) launchAgentSendWithContent(content []core.Content, gen uint64) tea.Cmd {
+	agentRef := m.agent
+	baseCtx := m.baseCtx
+	return tea.Batch(
+		func() tea.Msg {
+			msgs, err := agentRef.SendWithContent(baseCtx, content)
+			return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
+		},
+		renderTick(),
+		m.status.spinner.Tick,
+	)
+}
+
+// checkClipboardImage reads image data from the system clipboard.
+// Calls ReadImage directly — no separate HasImage probe (avoids TOCTOU + extra subprocess).
+func (m appModel) checkClipboardImage() tea.Cmd {
+	return func() tea.Msg {
+		data, mime, err := clipboard.ReadImage()
+		return clipboardImageMsg{Data: data, MimeType: mime, Err: err}
+	}
+}
+
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	if err := m.commitPendingTimelineEvent(); err != nil {
@@ -905,6 +959,22 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	m.s.pendingStatus = ""
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
 
+	// Consume pending image if any.
+	hasImage := m.s.pendingImage != nil
+	var imageData []byte
+	var imageMime string
+	if hasImage {
+		imageData = m.s.pendingImage
+		imageMime = m.s.pendingImageMime
+		m.s.pendingImage = nil
+		m.s.pendingImageMime = ""
+		kb := len(imageData) / 1024
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status",
+			Raw:  fmt.Sprintf("📎 Image attached (%d KB, %s)", kb, imageMime),
+		})
+	}
+
 	// Set session title from the first user message
 	if m.session != nil {
 		m.session.SetTitle(text, 80)
@@ -912,6 +982,15 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 
 	gen := m.prepareRun()
 	m.updateViewport()
+
+	if hasImage {
+		encoded := base64.StdEncoding.EncodeToString(imageData)
+		content := []core.Content{
+			core.TextContent(text),
+			core.ImageContent(encoded, imageMime),
+		}
+		return m, m.launchAgentSendWithContent(content, gen)
+	}
 	return m, m.launchAgentSend(text, gen)
 }
 
@@ -1205,6 +1284,16 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 						Type: "user", Raw: text,
 					})
 				}
+				// Show image indicators for user messages with images
+				for _, c := range msg.Content {
+					if c.Type == "image" {
+						kb := len(c.Data) * 3 / 4 / 1024 // base64 → raw size estimate
+						m.s.blocks = append(m.s.blocks, messageBlock{
+							Type: "status",
+							Raw:  fmt.Sprintf("📎 Image attached (%d KB, %s)", kb, c.MimeType),
+						})
+					}
+				}
 			}
 		case "assistant":
 			for _, c := range msg.Content {
@@ -1314,6 +1403,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.streamCache = ""
 		m.s.pendingStatus = ""
 		m.s.pendingTimeline = nil
+		m.s.pendingImage = nil
+		m.s.pendingImageMime = ""
 		m.s.sessionCost = 0
 		m.s.expanded = false
 		m.topBar.UpdateCostSegment(0)
@@ -1798,6 +1889,8 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.streamCache = ""
 	m.s.pendingStatus = ""
 	m.s.pendingTimeline = nil
+	m.s.pendingImage = nil
+	m.s.pendingImageMime = ""
 	m.s.sessionCost = 0
 	m.topBar.UpdateCostSegment(0)
 

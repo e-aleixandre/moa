@@ -72,6 +72,15 @@ func NewUserMessage(text string) Message {
 	}
 }
 
+// NewUserMessageWithContent creates a user message with arbitrary content blocks.
+func NewUserMessageWithContent(content []Content) Message {
+	return Message{
+		Role:      "user",
+		Content:   content,
+		Timestamp: time.Now().Unix(),
+	}
+}
+
 // NewToolResultMessage creates a tool_result message.
 func NewToolResultMessage(toolCallID, toolName string, content []Content, isError bool) Message {
 	return Message{

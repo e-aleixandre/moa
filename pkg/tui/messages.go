@@ -81,3 +81,10 @@ type SubagentNotification struct {
 
 // subagentNotifyMsg wraps a SubagentNotification for the Bubble Tea event loop.
 type subagentNotifyMsg struct{ notification SubagentNotification }
+
+// clipboardImageMsg carries an image read from the clipboard.
+type clipboardImageMsg struct {
+	Data     []byte // raw PNG bytes
+	MimeType string
+	Err      error // non-nil if clipboard read failed
+}

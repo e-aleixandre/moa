@@ -133,6 +133,22 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 	})
 }
 
+// SendWithContent appends a user message with mixed content blocks (text + images)
+// and runs the agent loop, continuing the conversation.
+// The content slice is shallow-copied to prevent caller aliasing. This is sufficient
+// for text and image content blocks which only contain immutable string fields.
+func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error) {
+	cc := make([]core.Content, len(content))
+	copy(cc, content)
+	return a.execute(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+		a.state.Messages = append(a.state.Messages,
+			core.WrapMessage(core.NewUserMessageWithContent(cc)))
+	})
+}
+
 // Reset clears conversation state. Returns error if the agent is currently running.
 func (a *Agent) Reset() error {
 	a.mu.Lock()
