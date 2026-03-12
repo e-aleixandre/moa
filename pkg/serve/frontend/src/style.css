@@ -1804,14 +1804,32 @@ kbd.shortcut-hint {
 .chat-hamburger:hover { color: var(--text); background: var(--surface0); }
 .chat-hamburger .lucide { width: 20px; height: 20px; }
 
-.chat-header-title {
+.chat-header-title-btn {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  -webkit-tap-highlight-color: transparent;
+}
+.chat-header-title-btn:active { background: var(--surface0); }
+
+.chat-header-title {
   font-size: 15px;
   font-weight: 500;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.chat-header-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--overlay1);
+  flex-shrink: 0;
 }
 
 .chat-header-model {

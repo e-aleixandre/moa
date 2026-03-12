@@ -6,7 +6,6 @@ import {
   toggleDialog, focusTileByIndex, toggleDrawer,
 } from './state.js';
 import { requestNotificationPermission } from './notifications.js';
-import { usePinchOverview } from './hooks/usePinchOverview.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
 import { Sidebar } from './components/Sidebar.jsx';
 import { Drawer } from './components/Drawer.jsx';
@@ -51,13 +50,9 @@ function App() {
     }
   }, [state.isMobile, Object.keys(state.sessions).length]);
 
-  const handlePinch = useCallback((dir) => {
-    if (!state.isMobile) return;
-    if (dir === 'in' && !overview) setOverview(true);
-    if (dir === 'out' && overview) setOverview(false);
-  }, [state.isMobile, overview]);
-
-  const pinchRef = usePinchOverview(handlePinch);
+  const toggleOverview = useCallback(() => {
+    setOverview(v => !v);
+  }, []);
 
   const hotkeys = useMemo(() => [
     { key: 'b', ctrl: true, handler: () => toggleSidebar() },
@@ -81,13 +76,13 @@ function App() {
 
   if (state.isMobile) {
     return (
-      <div class="app mobile" ref={pinchRef}>
+      <div class="app mobile">
         <Drawer state={state} />
         {overview ? (
           <SessionOverview state={state} onSelect={() => setOverview(false)} />
         ) : (
           <>
-            <ChatView state={state} />
+            <ChatView state={state} onToggleOverview={toggleOverview} />
             <TabBar state={state} />
           </>
         )}
