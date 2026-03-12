@@ -1,5 +1,6 @@
-import { useCallback } from 'preact/hooks';
+import { useCallback, useMemo } from 'preact/hooks';
 import { resizeSplit } from '../state.js';
+import { allTileIds } from '../tileTree.js';
 import { Tile } from './Tile.jsx';
 
 // Snap points for resize handle: percentage → fr ratio
@@ -60,12 +61,13 @@ function ResizeHandle({ path, direction }) {
   );
 }
 
-function TileNode({ node, state, path }) {
+function TileNode({ node, state, path, tileIndexMap }) {
   if (node.type === 'tile') {
     const session = node.sessionId ? state.sessions[node.sessionId] : null;
     return (
       <Tile
         tileId={node.id}
+        tileIndex={tileIndexMap.get(node.id) ?? 0}
         sessionId={node.sessionId}
         session={session}
         isFocused={state.focusedTile === node.id}
@@ -81,20 +83,28 @@ function TileNode({ node, state, path }) {
   return (
     <div class={`split ${isH ? 'split-h' : 'split-v'}`}>
       <div class="split-pane" style={{ flex: ra }}>
-        <TileNode node={a} state={state} path={[...path, 0]} />
+        <TileNode node={a} state={state} path={[...path, 0]} tileIndexMap={tileIndexMap} />
       </div>
       <ResizeHandle path={path} direction={node.direction} />
       <div class="split-pane" style={{ flex: rb }}>
-        <TileNode node={b} state={state} path={[...path, 1]} />
+        <TileNode node={b} state={state} path={[...path, 1]} tileIndexMap={tileIndexMap} />
       </div>
     </div>
   );
 }
 
 export function TileTree({ state }) {
+  // Build tileId → DFS index map for numbering
+  const tileIndexMap = useMemo(() => {
+    const ids = allTileIds(state.tileTree);
+    const m = new Map();
+    ids.forEach((id, i) => m.set(id, i));
+    return m;
+  }, [state.tileTree]);
+
   return (
     <div class="tile-tree">
-      <TileNode node={state.tileTree} state={state} path={[]} />
+      <TileNode node={state.tileTree} state={state} path={[]} tileIndexMap={tileIndexMap} />
     </div>
   );
 }

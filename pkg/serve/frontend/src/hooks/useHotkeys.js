@@ -1,34 +1,40 @@
 import { useEffect } from 'preact/hooks';
 
+/** Detect mac for shortcut labels and modifier key */
+export const isMac = typeof navigator !== 'undefined' &&
+  /Mac|iPhone|iPad/.test(navigator.userAgent);
+
 /**
  * Global keyboard shortcut handler.
- * Bindings: array of { key, ctrl?, shift?, handler, when? }
+ * Bindings: array of { key, mod?, shift?, handler, when? }
  *   key: e.key value (case-insensitive match)
- *   ctrl: requires Cmd (mac) or Ctrl
+ *   mod: requires the platform modifier (⌘ on Mac, Alt on Linux/Windows)
  *   shift: requires Shift
  *   handler: () => void
  *   when: optional () => bool guard
+ *
+ * We use Alt on non-Mac to avoid Ctrl+<key> conflicts with browser shortcuts
+ * (Ctrl+N = new window, Ctrl+T = new tab, etc.)
  */
 export function useHotkeys(bindings) {
   useEffect(() => {
     function onKeyDown(e) {
-      // Don't intercept when typing in inputs (unless it's a modifier combo)
       const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' ||
                       e.target.isContentEditable;
-      const hasMod = e.metaKey || e.ctrlKey;
+
+      // Platform modifier: Cmd on Mac, Alt on everything else
+      const modPressed = isMac ? e.metaKey : e.altKey;
 
       for (const b of bindings) {
-        // Key match (case-insensitive)
         if (e.key.toLowerCase() !== b.key.toLowerCase()) continue;
 
-        // Modifier match
-        const wantCtrl = !!b.ctrl;
+        const wantMod = !!b.mod;
         const wantShift = !!b.shift;
-        if (wantCtrl !== hasMod) continue;
+        if (wantMod !== modPressed) continue;
         if (wantShift !== e.shiftKey) continue;
 
-        // Skip plain keys when focused on an input
-        if (inInput && !hasMod) continue;
+        // Skip plain keys (no modifier) when focused on an input
+        if (inInput && !wantMod) continue;
 
         // Guard
         if (b.when && !b.when()) continue;
@@ -45,14 +51,10 @@ export function useHotkeys(bindings) {
   }, [bindings]);
 }
 
-/** Detect mac for shortcut labels */
-export const isMac = typeof navigator !== 'undefined' &&
-  /Mac|iPhone|iPad/.test(navigator.userAgent);
-
-/** Format a shortcut for display: ⌘B or Ctrl+B */
-export function formatShortcut(key, { ctrl, shift } = {}) {
+/** Format a shortcut for display: ⌘B or Alt+B */
+export function formatShortcut(key, { mod, shift } = {}) {
   const parts = [];
-  if (ctrl) parts.push(isMac ? '⌘' : 'Ctrl+');
+  if (mod) parts.push(isMac ? '⌘' : 'Alt+');
   if (shift) parts.push(isMac ? '⇧' : 'Shift+');
   parts.push(key.toUpperCase());
   return parts.join('');

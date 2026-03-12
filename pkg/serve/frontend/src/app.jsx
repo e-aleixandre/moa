@@ -5,6 +5,7 @@ import {
   autoFillTiles, autoSelectMobile, toggleSidebar,
   toggleDialog, focusTileByIndex, toggleDrawer,
 } from './state.js';
+import { inputBarRegistry } from './components/InputBar.jsx';
 import { requestNotificationPermission } from './notifications.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
 import { Sidebar } from './components/Sidebar.jsx';
@@ -55,8 +56,8 @@ function App() {
   }, []);
 
   const hotkeys = useMemo(() => [
-    { key: 'b', ctrl: true, handler: () => toggleSidebar() },
-    { key: 'n', ctrl: true, handler: () => toggleDialog() },
+    { key: 'b', mod: true, handler: () => toggleSidebar() },
+    { key: 'n', mod: true, handler: () => toggleDialog() },
     { key: 'Escape', handler: () => {
       if (state.dialogOpen) toggleDialog();
       else if (state.drawerOpen) toggleDrawer();
@@ -64,11 +65,16 @@ function App() {
     }},
     // Focus tile 1–9 by position in tree
     ...Array.from({ length: 9 }, (_, i) => ({
-      key: String(i + 1), ctrl: true,
+      key: String(i + 1), mod: true,
       handler: () => { if (!state.isMobile) focusTileByIndex(i); },
     })),
-    { key: 'o', ctrl: true, handler: () => {
+    { key: 'o', mod: true, handler: () => {
       if (state.isMobile) setOverview(v => !v);
+    }},
+    // Toggle voice recording on focused tile
+    { key: 'v', mod: true, shift: true, handler: () => {
+      const entry = inputBarRegistry.get(state.focusedTile);
+      if (entry) entry.toggleVoice();
     }},
   ], [state.dialogOpen, state.drawerOpen, state.isMobile, overview]);
 

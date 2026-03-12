@@ -91,6 +91,24 @@
 }
 .tile-header:hover .drag-handle { opacity: 1; }
 
+/* Tile number badge */
+.tile-number {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--overlay0);
+  background: var(--surface0);
+  min-width: 17px;
+  height: 17px;
+  line-height: 17px;
+  text-align: center;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.tile.focused .tile-number {
+  color: var(--peach);
+  background: var(--peach-dim);
+}
+
 .tile-title {
   font-size: 13px;
   font-weight: 500;
@@ -102,19 +120,19 @@
   min-width: 0;
 }
 
-/* Split/close action buttons — visible on header hover */
+/* Split/close action buttons — always visible but subtle */
 .tile-action-btn {
   padding: 4px;
   border-radius: var(--radius-sm);
-  color: var(--overlay0);
-  opacity: 0;
+  color: var(--surface2);
   transition: all 0.15s;
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 .tile-action-btn .lucide { width: 13px; height: 13px; }
-.tile-header:hover .tile-action-btn { opacity: 0.6; }
-.tile-action-btn:hover { opacity: 1 !important; background: var(--surface0); color: var(--subtext1); }
+.tile-header:hover .tile-action-btn { color: var(--overlay0); }
+.tile-action-btn:hover { background: var(--surface0); color: var(--subtext1); }
 .tile-close-btn:hover  { color: var(--red); background: var(--red-dim); }
 
 /* Empty tile */
@@ -150,3 +168,9 @@
 .tile-empty-close .lucide { width: 12px; height: 12px; }
 .tile-empty-close { margin-top: 2px; color: var(--overlay0); background: transparent; }
 .tile-empty-close:hover { color: var(--red); background: var(--red-dim); }
+
+/* Touch drag ghost (appended to body by useTouchDrag) */
+.touch-drag-ghost {
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+}

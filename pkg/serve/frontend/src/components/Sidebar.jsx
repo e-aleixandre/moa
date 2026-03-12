@@ -7,6 +7,50 @@ import {
 } from '../state.js';
 import { allTileIds, findTile } from '../tileTree.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
+import { useTouchDrag } from '../hooks/useTouchDrag.js';
+
+function SidebarItem({ sess, isActive, isConfirming, onConfirm, onCancelConfirm, onClick, onDeleteClick }) {
+  const touchProps = useTouchDrag({
+    data: { 'text/x-session-id': sess.id },
+  });
+
+  return (
+    <div
+      class={`sidebar-item ${isActive ? 'active' : ''} ${sess.state === 'saved' ? 'saved' : ''} ${isConfirming ? 'confirming' : ''}`}
+      onClick={onClick}
+      draggable={sess.state !== 'saved'}
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/x-session-id', sess.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      {...(sess.state !== 'saved' ? touchProps : {})}
+    >
+      {isConfirming ? (
+        <div class="delete-confirm">
+          <span class="delete-confirm-text">Delete?</span>
+          <button class="delete-confirm-yes" onClick={onConfirm}><Check /></button>
+          <button class="delete-confirm-no" onClick={onCancelConfirm}><X /></button>
+        </div>
+      ) : (
+        <>
+          <span class={`state-dot ${sess.state}`} />
+          <span class="sidebar-item-title">{sess.title || 'Untitled'}</span>
+          {(sess.state === 'permission' || sess.state === 'error') && (
+            <span class="sidebar-attention" />
+          )}
+          {sess.subagentCount > 0 && (
+            <span class="subagent-badge">{sess.subagentCount}</span>
+          )}
+          <button
+            class="sidebar-item-delete"
+            onClick={onDeleteClick}
+            title="Delete"
+          ><X /></button>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function Sidebar({ state }) {
   const [filter, setFilter] = useState('');
@@ -65,9 +109,9 @@ export function Sidebar({ state }) {
     <div class={`sidebar ${state.sidebarOpen ? '' : 'collapsed'}`}>
       <div class="sidebar-header">
         <span class="sidebar-logo">moa</span>
-        <button class="sidebar-toggle" onClick={toggleSidebar} title={`Toggle sidebar (${formatShortcut('B', { ctrl: true })})`}>
+        <button class="sidebar-toggle" onClick={toggleSidebar} title={`Toggle sidebar (${formatShortcut('B', { mod: true })})`}>
           {state.sidebarOpen ? <PanelLeftClose /> : <PanelLeft />}
-          {state.sidebarOpen && <kbd class="shortcut-hint">{formatShortcut('B', { ctrl: true })}</kbd>}
+          {state.sidebarOpen && <kbd class="shortcut-hint">{formatShortcut('B', { mod: true })}</kbd>}
         </button>
       </div>
 
@@ -95,40 +139,16 @@ export function Sidebar({ state }) {
                 <div key={cwd}>
                   <div class="sidebar-group-label" title={cwd}>{label}</div>
                   {filtered.map(sess => (
-                    <div
+                    <SidebarItem
                       key={sess.id}
-                      class={`sidebar-item ${isInTile(sess.id) ? 'active' : ''} ${sess.state === 'saved' ? 'saved' : ''} ${confirmId === sess.id ? 'confirming' : ''}`}
+                      sess={sess}
+                      isActive={isInTile(sess.id)}
+                      isConfirming={confirmId === sess.id}
                       onClick={(e) => handleClick(e, sess)}
-                      draggable={sess.state !== 'saved'}
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/x-session-id', sess.id);
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                    >
-                      {confirmId === sess.id ? (
-                        <div class="delete-confirm">
-                          <span class="delete-confirm-text">Delete?</span>
-                          <button class="delete-confirm-yes" onClick={(e) => handleConfirm(e, sess.id)}><Check /></button>
-                          <button class="delete-confirm-no" onClick={handleCancel}><X /></button>
-                        </div>
-                      ) : (
-                        <>
-                          <span class={`state-dot ${sess.state}`} />
-                          <span class="sidebar-item-title">{sess.title || 'Untitled'}</span>
-                          {(sess.state === 'permission' || sess.state === 'error') && (
-                            <span class="sidebar-attention" />
-                          )}
-                          {sess.subagentCount > 0 && (
-                            <span class="subagent-badge">{sess.subagentCount}</span>
-                          )}
-                          <button
-                            class="sidebar-item-delete"
-                            onClick={(e) => handleDeleteClick(e, sess.id)}
-                            title="Delete"
-                          ><X /></button>
-                        </>
-                      )}
-                    </div>
+                      onDeleteClick={(e) => handleDeleteClick(e, sess.id)}
+                      onConfirm={(e) => handleConfirm(e, sess.id)}
+                      onCancelConfirm={handleCancel}
+                    />
                   ))}
                 </div>
               );
@@ -145,7 +165,7 @@ export function Sidebar({ state }) {
           <div class="sidebar-footer">
             <button class="sidebar-new-btn" onClick={toggleDialog}>
               <Plus /> New Session
-              <kbd class="shortcut-hint">{formatShortcut('N', { ctrl: true })}</kbd>
+              <kbd class="shortcut-hint">{formatShortcut('N', { mod: true })}</kbd>
             </button>
           </div>
         </>

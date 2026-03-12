@@ -3,7 +3,10 @@ import { SendHorizonal, Square, Zap, Mic, MicOff, Loader2 } from 'lucide-preact'
 import { sendMessage, cancelRun } from '../state.js';
 import { useVoice } from '../hooks/useVoice.js';
 
-export function InputBar({ sessionId, sessionState }) {
+// Global registry: tileId → { toggleVoice }. Used by keyboard shortcuts.
+export const inputBarRegistry = new Map();
+
+export function InputBar({ sessionId, sessionState, tileId }) {
   const textareaRef = useRef(null);
   const busy = sessionState === 'running' || sessionState === 'permission';
   const [canTranscribe, setCanTranscribe] = useState(false);
@@ -35,6 +38,14 @@ export function InputBar({ sessionId, sessionState }) {
 
   const { recording, transcribing, toggle: toggleVoice, supported: voiceSupported } = useVoice(insertAtCursor);
   const showMic = canTranscribe && voiceSupported;
+
+  // Register in global map so keyboard shortcuts can trigger voice toggle
+  useEffect(() => {
+    if (tileId != null && showMic) {
+      inputBarRegistry.set(tileId, { toggleVoice });
+      return () => inputBarRegistry.delete(tileId);
+    }
+  }, [tileId, showMic, toggleVoice]);
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
