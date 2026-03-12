@@ -186,6 +186,22 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 			"args":         e.Args,
 		}})
 
+	case core.AgentEventToolExecUpdate:
+		var delta string
+		if e.Result != nil {
+			for _, c := range e.Result.Content {
+				if c.Type == "text" {
+					delta += c.Text
+				}
+			}
+		}
+		if delta != "" {
+			s.broadcast(Event{Type: "tool_update", Data: map[string]any{
+				"tool_call_id": e.ToolCallID,
+				"delta":        delta,
+			}})
+		}
+
 	case core.AgentEventToolExecEnd:
 		var text string
 		if e.Result != nil {

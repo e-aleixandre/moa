@@ -93,3 +93,99 @@
   transition: color var(--duration) var(--ease);
 }
 .tool-call-footer:hover { color: var(--subtext0); }
+
+/* Expand button in header */
+.tool-call-expand {
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay0);
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: all 0.15s;
+}
+.tool-call-expand .lucide { width: 12px; height: 12px; }
+.tool-call:hover .tool-call-expand { opacity: 0.6; }
+.tool-call-expand:hover { opacity: 1 !important; color: var(--subtext1); background: var(--surface1); }
+.tool-call-head { cursor: pointer; }
+
+/* Streaming preview: right border accent */
+.tool-call-preview.streaming {
+  border-left: 2px solid var(--blue);
+  animation: stream-pulse 2s ease-in-out infinite;
+}
+@keyframes stream-pulse {
+  0%, 100% { border-left-color: var(--blue); }
+  50% { border-left-color: var(--surface1); }
+}
+
+/* ─── Full-screen tool output modal ────────────────────────── */
+
+.tool-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17,17,27,0.8);
+  backdrop-filter: blur(8px);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fade-in 0.15s var(--ease);
+}
+
+.tool-modal {
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 900px;
+  max-height: 90vh;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+  animation: dialog-in 0.2s var(--ease);
+  overflow: hidden;
+}
+
+.tool-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--surface0);
+  border-bottom: 1px solid rgba(69,71,90,0.5);
+}
+.tool-modal-header .tool-call-path {
+  flex: 1;
+}
+
+.tool-modal-close {
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay1);
+  display: flex;
+  align-items: center;
+}
+.tool-modal-close:hover { color: var(--text); background: var(--surface1); }
+.tool-modal-close .lucide { width: 14px; height: 14px; }
+
+.tool-modal-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--subtext1);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+.tool-modal-content.error-body { color: var(--red); }
+
+@media (max-width: 768px) {
+  .tool-modal-overlay { padding: 8px; }
+  .tool-modal { max-width: 100%; max-height: 95vh; border-radius: var(--radius-md); }
+  .tool-call-expand { opacity: 0.6; }
+}

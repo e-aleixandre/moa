@@ -2,7 +2,7 @@
 
 import {
   handleWsInit, handleWsTextDelta, handleWsThinkingDelta,
-  handleWsMessageEnd, handleWsToolStart, handleWsToolEnd,
+  handleWsMessageEnd, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd,
   handleWsStateChange, handleWsPermissionRequest,
   handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
@@ -81,6 +81,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'tool_start':
       handleWsToolStart(sessionId, evt.data);
+      break;
+    case 'tool_update':
+      handleWsToolUpdate(sessionId, evt.data);
       break;
     case 'tool_end':
       handleWsToolEnd(sessionId, evt.data);

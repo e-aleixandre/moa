@@ -283,12 +283,24 @@ export function handleWsToolStart(id, data) {
   updateSession(id, { messages: [...sess.messages, toolMsg] });
 }
 
+export function handleWsToolUpdate(id, data) {
+  const sess = state.sessions[id];
+  if (!sess) return;
+  const messages = sess.messages.map(m => {
+    if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
+      return { ...m, streamingResult: (m.streamingResult || '') + data.delta };
+    }
+    return m;
+  });
+  updateSession(id, { messages });
+}
+
 export function handleWsToolEnd(id, data) {
   const sess = state.sessions[id];
   if (!sess) return;
   const messages = sess.messages.map(m => {
     if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
-      return { ...m, status: data.is_error ? 'error' : 'done', result: data.result };
+      return { ...m, status: data.is_error ? 'error' : 'done', result: data.result, streamingResult: null };
     }
     return m;
   });

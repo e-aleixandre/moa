@@ -1,52 +1,140 @@
-import { useState } from 'preact/hooks';
-import { Check, X, Loader2 } from 'lucide-preact';
-import { toolVerb, toolPath, toolPreview, splitPreview } from '../util/format.js';
+import { useState, useRef, useEffect } from 'preact/hooks';
+import { Check, X, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
+import { toolVerb, toolPath, toolPreview, splitPreview, splitPreviewTail } from '../util/format.js';
 
 export function ToolCall({ tool }) {
   const [expanded, setExpanded] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const { verb, cls: verbCls } = toolVerb(tool.tool_name);
   const path = toolPath(tool.tool_name, tool.args);
-  const preview = toolPreview(tool.tool_name, tool.args, tool.result);
 
-  const statusCls = tool.status === 'running' ? 'running'
-    : tool.status === 'error' ? 'error' : 'done';
+  const isRunning = tool.status === 'running';
+  const statusCls = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
+  const StatusIcon = isRunning ? Loader2 : tool.status === 'error' ? X : Check;
+  const statusLabel = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
 
-  const StatusIcon = tool.status === 'running' ? Loader2
-    : tool.status === 'error' ? X : Check;
+  // For running tools with streaming, show the live output
+  const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
+  // Final result (from toolPreview) — only used when not streaming
+  const preview = !liveText ? toolPreview(tool.tool_name, tool.args, tool.result) : null;
 
-  const statusLabel = tool.status === 'running' ? 'running'
-    : tool.status === 'error' ? 'error' : 'done';
+  // Streaming: show tail. Finished: show head.
+  const previewData = liveText
+    ? splitPreviewTail(liveText)
+    : preview ? splitPreview(preview.text) : null;
 
-  // Split preview into visible + hidden
-  const previewData = preview ? splitPreview(preview.text) : null;
   const hasOverflow = previewData && previewData.hidden > 0;
+  const fullText = liveText || (preview ? preview.text : '');
+  const isErrorBody = !liveText && tool.status === 'error';
 
   return (
-    <div class={`tool-call status-${statusCls}`}>
-      <div class="tool-call-head">
-        <span class={`tool-call-verb ${verbCls}`}>{verb}</span>
-        <span class="tool-call-path">{path}</span>
-        <span class={`tool-call-tag ${statusCls}`}>
-          <StatusIcon />
-          {statusLabel}
-        </span>
+    <>
+      <div class={`tool-call status-${statusCls}`}>
+        <div class="tool-call-head" onClick={() => fullText && setModalOpen(true)} style={{ cursor: fullText ? 'pointer' : 'default' }}>
+          <span class={`tool-call-verb ${verbCls}`}>{verb}</span>
+          <span class="tool-call-path">{path}</span>
+          {fullText && (
+            <button class="tool-call-expand" title="Expand" onClick={(e) => { e.stopPropagation(); setModalOpen(true); }}>
+              <Maximize2 />
+            </button>
+          )}
+          <span class={`tool-call-tag ${statusCls}`}>
+            <StatusIcon />
+            {statusLabel}
+          </span>
+        </div>
+
+        {previewData && previewData.visible && (
+          <pre class={`tool-call-preview${isErrorBody ? ' error-body' : ''}${liveText ? ' streaming' : ''}`}>
+            {expanded && !liveText ? fullText : previewData.visible}
+          </pre>
+        )}
+
+        {!liveText && hasOverflow && (
+          <div class="tool-call-footer" onClick={() => setExpanded(!expanded)}>
+            {expanded
+              ? 'collapse'
+              : `… ${previewData.hidden} more lines, ${previewData.total} total`
+            }
+          </div>
+        )}
+
+        {liveText && hasOverflow && (
+          <div class="tool-call-footer">
+            ↑ {previewData.hidden} lines above · {previewData.total} total
+          </div>
+        )}
       </div>
 
-      {previewData && previewData.visible && (
-        <pre class={`tool-call-preview ${preview.kind === 'input' ? 'input' : ''} ${tool.status === 'error' ? 'error-body' : ''}`}>
-          {expanded ? preview.text : previewData.visible}
-        </pre>
+      {modalOpen && (
+        <ToolCallModal
+          tool={tool}
+          verb={verb}
+          verbCls={verbCls}
+          path={path}
+          fullText={fullText}
+          isRunning={isRunning}
+          onClose={() => setModalOpen(false)}
+        />
       )}
+    </>
+  );
+}
 
-      {hasOverflow && (
-        <div class="tool-call-footer" onClick={() => setExpanded(!expanded)}>
-          {expanded
-            ? 'collapse'
-            : `… ${previewData.hidden} more lines, ${previewData.total} total`
-          }
+function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, onClose }) {
+  const contentRef = useRef(null);
+  const wasAtBottom = useRef(true);
+
+  // Auto-scroll to bottom when streaming
+  useEffect(() => {
+    if (contentRef.current && wasAtBottom.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    }
+  }, [fullText]);
+
+  // Track whether user is at the bottom
+  const handleScroll = () => {
+    const el = contentRef.current;
+    if (!el) return;
+    wasAtBottom.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+  };
+
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const statusCls = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
+  const StatusIcon = isRunning ? Loader2 : tool.status === 'error' ? X : Check;
+  const statusLabel = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
+
+  return (
+    <div class="tool-modal-overlay" onClick={onClose}>
+      <div class="tool-modal" onClick={(e) => e.stopPropagation()}>
+        <div class="tool-modal-header">
+          <span class={`tool-call-verb ${verbCls}`}>{verb}</span>
+          <span class="tool-call-path">{path}</span>
+          <span class={`tool-call-tag ${statusCls}`}>
+            <StatusIcon />
+            {statusLabel}
+          </span>
+          <button class="tool-modal-close" onClick={onClose}>
+            <Minimize2 />
+          </button>
         </div>
-      )}
+        <pre
+          ref={contentRef}
+          class={`tool-modal-content${tool.status === 'error' ? ' error-body' : ''}`}
+          onScroll={handleScroll}
+        >
+          {fullText || '(no output)'}
+        </pre>
+      </div>
     </div>
   );
 }

@@ -78,7 +78,7 @@ export function toolPreview(name, args, result) {
 
 const PREVIEW_LINES = 12;
 
-/** Split preview text into visible portion + overflow info. */
+/** Split preview text showing the first N lines, hiding the rest. */
 export function splitPreview(text, maxLines = PREVIEW_LINES) {
   if (!text) return { visible: '', hidden: 0, total: 0 };
   const lines = text.split('\n');
@@ -86,6 +86,19 @@ export function splitPreview(text, maxLines = PREVIEW_LINES) {
   if (total <= maxLines) return { visible: text, hidden: 0, total };
   return {
     visible: lines.slice(0, maxLines).join('\n'),
+    hidden: total - maxLines,
+    total,
+  };
+}
+
+/** Split preview text showing the last N lines (tail mode for streaming). */
+export function splitPreviewTail(text, maxLines = PREVIEW_LINES) {
+  if (!text) return { visible: '', hidden: 0, total: 0 };
+  const lines = text.split('\n');
+  const total = lines.length;
+  if (total <= maxLines) return { visible: text, hidden: 0, total };
+  return {
+    visible: lines.slice(-maxLines).join('\n'),
     hidden: total - maxLines,
     total,
   };
