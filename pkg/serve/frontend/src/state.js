@@ -55,7 +55,6 @@ let state = {
 
   isMobile: false,
   drawerOpen: false,
-  dialogOpen: false,
   activeSession: null,
 };
 
@@ -523,7 +522,6 @@ export function setActiveSession(id) {
 }
 
 export function toggleDrawer() { setState({ drawerOpen: !state.drawerOpen }); }
-export function toggleDialog() { setState({ dialogOpen: !state.dialogOpen }); }
 export function toggleSound() { setState({ soundEnabled: !state.soundEnabled }); }
 export function setMobile(isMobile) { setState({ isMobile }); }
 

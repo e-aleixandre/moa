@@ -139,6 +139,57 @@
   flex-shrink: 0;
 }
 
+/* Back button in create mode */
+.palette-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay1);
+  flex-shrink: 0;
+}
+.palette-back:hover { color: var(--text); background: var(--surface0); }
+.palette-back .lucide { width: 15px; height: 15px; }
+
+.palette-mode-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--peach);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-right: 4px;
+  border-right: 1px solid var(--surface0);
+  margin-right: 4px;
+}
+
+/* Project items in create mode */
+.palette-project .palette-item-icon { color: var(--blue); }
+.palette-item.creating { opacity: 0.5; pointer-events: none; }
+
+.palette-item-cwd-full {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.palette-default-tag,
+.palette-custom-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.palette-default-tag {
+  color: var(--green);
+  background: rgba(166, 227, 161, 0.1);
+}
+.palette-custom-tag {
+  color: var(--mauve);
+  background: rgba(203, 166, 247, 0.1);
+}
+
 .palette-empty {
   padding: 24px;
   text-align: center;

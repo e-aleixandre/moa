@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-preact';
-import { setActiveSession, toggleDialog } from '../state.js';
+import { setActiveSession } from '../state.js';
 
-export function TabBar({ state }) {
+export function TabBar({ state, onOpenPalette }) {
   const sessions = Object.values(state.sessions)
     .filter(s => s.state !== 'saved')
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
@@ -28,7 +28,7 @@ export function TabBar({ state }) {
           </button>
         );
       })}
-      <button class="tab-add" onClick={toggleDialog} title="New session">
+      <button class="tab-add" onClick={onOpenPalette} title="New session">
         <Plus />
       </button>
     </div>

@@ -2,10 +2,10 @@ import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { X, Plus, Check } from 'lucide-preact';
 import {
   toggleDrawer, setActiveSession, deleteSession,
-  resumeSession, toggleDialog, sessionsByGroup,
+  resumeSession, sessionsByGroup,
 } from '../state.js';
 
-export function Drawer({ state }) {
+export function Drawer({ state, onOpenPalette }) {
   const [filter, setFilter] = useState('');
   const [confirmId, setConfirmId] = useState(null);
   const timerRef = useRef(null);
@@ -115,7 +115,7 @@ export function Drawer({ state }) {
         </div>
 
         <div class="drawer-footer">
-          <button class="drawer-new-btn" onClick={() => { toggleDialog(); toggleDrawer(); }}>
+          <button class="drawer-new-btn" onClick={() => { toggleDrawer(); onOpenPalette?.(); }}>
             <Plus /> New Session
           </button>
         </div>

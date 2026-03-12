@@ -382,8 +382,10 @@ func handleCancel(mgr *Manager) http.HandlerFunc {
 
 func handleCapabilities(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		caps := map[string]bool{
-			"transcribe": mgr.transcriber != nil,
+		caps := map[string]any{
+			"transcribe":    mgr.transcriber != nil,
+			"workspaceRoot": mgr.workspaceRoot,
+			"defaultModel":  mgr.defaultModel.Name,
 		}
 		writeJSON(w, http.StatusOK, caps)
 	}

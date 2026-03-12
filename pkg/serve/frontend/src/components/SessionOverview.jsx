@@ -1,9 +1,9 @@
 import { useCallback, useRef } from 'preact/hooks';
 import { Plus, Sparkles } from 'lucide-preact';
-import { setActiveSession, toggleDialog } from '../state.js';
+import { setActiveSession } from '../state.js';
 import { shortModel } from '../util/format.js';
 
-export function SessionOverview({ state, onSelect }) {
+export function SessionOverview({ state, onSelect, onOpenPalette }) {
   const touchStart = useRef(null);
 
   const onTouchStart = useCallback((e) => {
@@ -27,9 +27,9 @@ export function SessionOverview({ state, onSelect }) {
   }, [onSelect]);
 
   const handleNew = useCallback(() => {
-    toggleDialog();
     onSelect();
-  }, [onSelect]);
+    onOpenPalette?.();
+  }, [onSelect, onOpenPalette]);
 
   return (
     <div class="session-overview" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>

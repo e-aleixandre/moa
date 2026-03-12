@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import {
   store, loadSessions, startPolling, setMobile,
   autoFillTiles, autoSelectMobile,
-  toggleDialog, focusTileByIndex, toggleDrawer,
+  focusTileByIndex, toggleDrawer,
 } from './state.js';
 import { inputBarRegistry } from './components/InputBar.jsx';
 import { requestNotificationPermission } from './notifications.js';
@@ -14,7 +14,6 @@ import { TileTree } from './components/TileTree.jsx';
 import { ChatView } from './components/ChatView.jsx';
 import { SessionOverview } from './components/SessionOverview.jsx';
 import { ToastContainer } from './components/Toast.jsx';
-import { NewSessionDialog } from './components/NewSessionDialog.jsx';
 import { CommandPalette } from './components/CommandPalette.jsx';
 import { LayoutBar } from './components/LayoutBar.jsx';
 import './styles/index.css';
@@ -62,10 +61,9 @@ function App() {
   const hotkeys = useMemo(() => [
     // Command palette
     { key: 'k', mod: true, handler: () => setPaletteOpen(v => !v) },
-    // Escape cascades: palette → dialog → drawer → overview
+    // Escape cascades: palette → drawer → overview
     { key: 'Escape', handler: () => {
       if (paletteOpen) setPaletteOpen(false);
-      else if (state.dialogOpen) toggleDialog();
       else if (state.drawerOpen) toggleDrawer();
       else if (overview) setOverview(false);
     }},
@@ -83,25 +81,24 @@ function App() {
       const entry = inputBarRegistry.get(state.focusedTile);
       if (entry) entry.toggleVoice();
     }},
-  ], [state.dialogOpen, state.drawerOpen, state.isMobile, state.focusedTile, overview, paletteOpen]);
+  ], [state.drawerOpen, state.isMobile, state.focusedTile, overview, paletteOpen]);
 
   useHotkeys(hotkeys);
 
   if (state.isMobile) {
     return (
       <div class="app mobile">
-        <Drawer state={state} />
+        <Drawer state={state} onOpenPalette={openPalette} />
         {overview ? (
-          <SessionOverview state={state} onSelect={() => setOverview(false)} />
+          <SessionOverview state={state} onSelect={() => setOverview(false)} onOpenPalette={openPalette} />
         ) : (
           <>
             <ChatView state={state} onToggleOverview={toggleOverview} />
-            <TabBar state={state} />
+            <TabBar state={state} onOpenPalette={openPalette} />
           </>
         )}
         <ToastContainer />
-        <NewSessionDialog open={state.dialogOpen} />
-        <CommandPalette open={paletteOpen} onClose={closePalette} onNewSession={toggleDialog} state={state} />
+        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} />
       </div>
     );
   }
@@ -113,8 +110,7 @@ function App() {
         <TileTree state={state} />
       </div>
       <ToastContainer />
-      <NewSessionDialog open={state.dialogOpen} />
-      <CommandPalette open={paletteOpen} onClose={closePalette} onNewSession={toggleDialog} state={state} />
+      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} />
     </div>
   );
 }
