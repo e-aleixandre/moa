@@ -501,8 +501,19 @@ kbd.shortcut-hint {
   gap: 8px;
   padding: 8px 14px;
   background: var(--mantle);
-  min-height: 38px;
+  cursor: grab;
 }
+.tile-header:active { cursor: grabbing; }
+
+.tile-header .drag-handle {
+  width: 14px;
+  height: 14px;
+  color: var(--surface2);
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.tile-header:hover .drag-handle { opacity: 1; }
 
 .tile-title {
   font-size: 13px;

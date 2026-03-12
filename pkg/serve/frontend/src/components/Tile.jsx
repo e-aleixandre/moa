@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'preact/hooks';
-import { MessageSquarePlus, GitFork } from 'lucide-preact';
+import { useState, useCallback, useRef } from 'preact/hooks';
+import { MessageSquarePlus, GripHorizontal, GitFork } from 'lucide-preact';
 import { focusTile, assignTile, swapTiles } from '../state.js';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
@@ -9,6 +9,7 @@ import { ModelPill } from './ModelPill.jsx';
 
 export function Tile({ tileIndex, sessionId, session, isFocused }) {
   const [dragOver, setDragOver] = useState(false);
+  const tileRef = useRef(null);
   const needsAttention = session && (session.state === 'permission' || session.state === 'error');
   const classes = ['tile'];
   if (isFocused) classes.push('focused');
@@ -16,14 +17,31 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
   if (session?.flash) classes.push('flash');
   if (dragOver) classes.push('drag-over');
 
-  // Drag source: drag this tile's session
+  // Drag from the header — use the whole tile as ghost image
   const handleDragStart = useCallback((e) => {
     e.dataTransfer.setData('text/x-tile-index', String(tileIndex));
     if (sessionId) e.dataTransfer.setData('text/x-session-id', sessionId);
     e.dataTransfer.effectAllowed = 'move';
+
+    // Custom drag image: clone the tile so the ghost is clean
+    const tile = tileRef.current;
+    if (tile) {
+      const rect = tile.getBoundingClientRect();
+      const ghost = tile.cloneNode(true);
+      ghost.style.width = rect.width + 'px';
+      ghost.style.height = rect.height + 'px';
+      ghost.style.position = 'fixed';
+      ghost.style.top = '-9999px';
+      ghost.style.opacity = '0.85';
+      ghost.style.borderRadius = '8px';
+      ghost.style.overflow = 'hidden';
+      document.body.appendChild(ghost);
+      e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
+      requestAnimationFrame(() => ghost.remove());
+    }
   }, [tileIndex, sessionId]);
 
-  // Drop target
+  // Drop target (on the whole tile)
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
@@ -35,13 +53,11 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setDragOver(false);
-    // From another tile → swap
     const fromTile = e.dataTransfer.getData('text/x-tile-index');
     if (fromTile !== '') {
       swapTiles(parseInt(fromTile, 10), tileIndex);
       return;
     }
-    // From sidebar → assign
     const sid = e.dataTransfer.getData('text/x-session-id');
     if (sid) {
       assignTile(tileIndex, sid);
@@ -51,6 +67,7 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
   if (!session) {
     return (
       <div
+        ref={tileRef}
         class={classes.join(' ')}
         onClick={() => focusTile(tileIndex)}
         onDragOver={handleDragOver}
@@ -67,15 +84,19 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
 
   return (
     <div
+      ref={tileRef}
       class={classes.join(' ')}
       onClick={() => focusTile(tileIndex)}
-      draggable
-      onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div class="tile-header">
+      <div
+        class="tile-header"
+        draggable
+        onDragStart={handleDragStart}
+      >
+        <GripHorizontal class="drag-handle" />
         <span class={`state-dot ${session.state}`} />
         <span class="tile-title">{session.title || 'Untitled'}</span>
         {session.subagentCount > 0 && (
