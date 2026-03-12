@@ -18,6 +18,14 @@
 
 - `web_search` — enabled only when `brave_api_key` is configured
 
+## Choosing the right tool
+
+- use `grep`, `find`, and `ls` for exploration
+- use `read` before editing files
+- use `edit` for surgical changes
+- use `write` for new files or full-file rewrites
+- use `bash` when shell behavior is actually needed
+
 ## Sandbox behavior
 
 Path-based tools use workspace sandboxing unless disabled by:

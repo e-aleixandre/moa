@@ -12,10 +12,10 @@
 
 ```bash
 make build
-# binary: ./bin/agent
+# binary: ./bin/moa
 ```
 
-> The examples below use `moa` as the command name. If you build locally, use `./bin/agent` unless you rename or install it.
+> The examples below use `moa` as the command name. If you build locally and have not installed it, use `./bin/moa`.
 
 ## Authenticate
 
@@ -34,11 +34,20 @@ moa --login anthropic
 moa --login openai
 ```
 
+Optional, for voice input in the web UI:
+
+```bash
+moa --login openai-transcribe
+```
+
+Browser microphone access usually requires HTTPS, so voice input works best on localhost, Tailscale, or behind your own HTTPS setup.
+
 Remove stored credentials:
 
 ```bash
 moa --logout anthropic
 moa --logout openai
+moa --logout openai-transcribe
 ```
 
 ## Use Moa
@@ -74,6 +83,8 @@ For remote access, bind explicitly:
 ```bash
 moa serve --host 0.0.0.0 --port 8080
 ```
+
+> `moa serve` has no built-in authentication. Only expose it on localhost, a private network, or behind your own auth layer.
 
 ## Resume sessions
 

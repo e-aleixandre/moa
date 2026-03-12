@@ -1,9 +1,11 @@
 # TUI Usage
 
+The TUI is the default interactive interface for Moa in the terminal.
+
 ## Slash commands
 
 - `/model <spec>` — switch model
-- `/models` — open model picker
+- `/models` — open model picker and manage pinned models
 - `/thinking <level>` — set thinking level
 - `/permissions <mode>` — set permission mode (`yolo|ask|auto`)
 - `/compact` — force compaction

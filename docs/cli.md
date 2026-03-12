@@ -12,7 +12,7 @@
 -permissions-model  Model used by auto permission evaluator
 -continue           Resume latest saved session
 -resume             Open session browser (or --resume <id>)
--login              Login to provider: anthropic | openai
+-login              Login to provider: anthropic | openai | openai-transcribe
 -logout             Remove stored credentials for provider
 -output             text|json (default: text)
 ```
@@ -32,6 +32,8 @@ moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet]
 ```
 
 If you bind to anything other than localhost, Moa prints a warning because `moa serve` does not include built-in authentication.
+
+`openai-transcribe` enables voice input in the web UI.
 
 ## Model selection
 
@@ -63,6 +65,9 @@ moa -permissions auto -permissions-model haiku
 
 # start web UI locally
 moa serve
+
+# enable voice input for the web UI
+moa --login openai-transcribe
 
 # expose web UI on the network
 moa serve --host 0.0.0.0 --port 8080

@@ -37,6 +37,56 @@ moa serve --host 0.0.0.0 --port 8080
 - subagents
 - MCP loading per session
 - model and thinking reconfiguration
+- command palette for session switching and creation
+- multi-pane tiled layouts
+- keyboard navigation between panes
+- voice input in the focused pane
+
+## Voice input
+
+Voice input is available in the web UI when transcription is configured:
+
+```bash
+moa --login openai-transcribe
+```
+
+It inserts transcribed text into the currently focused input.
+
+Browser microphone access usually requires HTTPS, so voice input works best on localhost, Tailscale, or behind your own HTTPS setup.
+
+## Keyboard-first workflow
+
+`moa serve` is designed to work well from the keyboard:
+
+- `⌘K` on Mac / `Alt+K` elsewhere — open the session palette
+- `⌘1..9` / `Alt+1..9` — focus panes by number
+- `⌘.` / `Alt+.` — toggle voice input for the focused pane
+- `Esc` — close the palette or go back
+
+On non-Mac platforms, Moa uses `Alt` instead of `Ctrl` to avoid common browser shortcut conflicts.
+
+## Session palette
+
+The session palette is the main navigation surface in `moa serve`.
+
+It lets you:
+
+- search sessions
+- jump to open sessions
+- resume saved sessions
+- create a new session
+- choose a recent project or type a custom path
+
+## Panes and layouts
+
+On desktop, `moa serve` supports multi-pane layouts for working on several sessions at once.
+
+You can:
+
+- split panes horizontally or vertically
+- switch focus by keyboard
+- move sessions between panes
+- apply layout presets from the top bar
 
 ## Security note
 
@@ -58,6 +108,10 @@ For frontend development, you can override the static directory:
 MOA_SERVE_STATIC_DIR=/path/to/static moa serve
 ```
 
-> Insertar imagen de la vista web con lista de sesiones
->
-> Insertar imagen de la misma sesión abierta en móvil
+## Desktop
+
+![Moa web UI on desktop](./assets/serve-desktop-overview.png)
+
+## Mobile
+
+<img src="./assets/serve-mobile-session.png" alt="Moa web UI on mobile" width="320" />

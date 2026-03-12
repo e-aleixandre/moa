@@ -7,6 +7,8 @@ Moa merges config from:
 
 CLI flags override config at runtime.
 
+In general, project config extends global config, while some preferences remain global-only (`pinned_models`, `trusted_mcp_paths`).
+
 ## Example
 
 ```json
