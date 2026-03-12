@@ -1,4 +1,6 @@
+import { Sparkles, MessageSquarePlus, GitFork } from 'lucide-preact';
 import { focusTile } from '../state.js';
+import { shortModel } from '../util/format.js';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
@@ -13,7 +15,8 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
     return (
       <div class={classes.join(' ')} onClick={() => focusTile(tileIndex)}>
         <div class="tile-empty">
-          Click a session from the sidebar to open it here.
+          <MessageSquarePlus />
+          <span>Click a session to open it here</span>
         </div>
       </div>
     );
@@ -25,9 +28,9 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
         <span class={`state-dot ${session.state}`} />
         <span class="tile-title">{session.title || 'Untitled'}</span>
         {session.subagentCount > 0 && (
-          <span class="subagent-badge">🔄{session.subagentCount}</span>
+          <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
-        <span class="tile-model">{session.model}</span>
+        <span class="model-pill"><Sparkles />{shortModel(session.model)}</span>
         <span class="tile-number">#{tileIndex + 1}</span>
       </div>
 

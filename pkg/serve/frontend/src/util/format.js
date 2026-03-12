@@ -33,3 +33,11 @@ export function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+/** Strip provider prefix from model string for display. */
+export function shortModel(model) {
+  if (!model) return '';
+  // "anthropic/claude-sonnet-4-6" → "claude-sonnet-4-6"
+  const parts = model.split('/');
+  return parts.length > 1 ? parts.slice(1).join('/') : model;
+}

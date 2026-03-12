@@ -17,7 +17,8 @@ const renderer = {
       highlighted = hljs.highlightAuto(text).value;
     }
     const langLabel = lang || '';
-    return `<div class="code-block" data-lang="${langLabel}">
+    const langClass = langLabel ? ` lang-${langLabel}` : '';
+    return `<div class="code-block${langClass}" data-lang="${langLabel}">
       <div class="code-block-header">
         <span class="code-block-lang">${langLabel}</span>
         <button class="code-block-copy" onclick="window.__copyCode(this)">Copy</button>

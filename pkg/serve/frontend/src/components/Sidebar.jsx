@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'preact/hooks';
+import { PanelLeftClose, PanelLeft, X, Plus } from 'lucide-preact';
 import {
   assignTile, deleteSession, resumeSession,
   toggleDialog, toggleSidebar, sessionsByGroup,
@@ -15,7 +16,6 @@ export function Sidebar({ state }) {
       resumeSession(sess.id).catch(e => console.error('Resume failed:', e));
       return;
     }
-    // If already in a tile, focus that tile
     const idx = state.tileAssignments.indexOf(sess.id);
     if (idx >= 0) {
       import('../state.js').then(m => m.focusTile(idx));
@@ -36,7 +36,7 @@ export function Sidebar({ state }) {
       <div class="sidebar-header">
         <span class="sidebar-logo">moa</span>
         <button class="sidebar-toggle" onClick={toggleSidebar} title="Toggle sidebar">
-          {state.sidebarOpen ? '◀' : '▶'}
+          {state.sidebarOpen ? <PanelLeftClose /> : <PanelLeft />}
         </button>
       </div>
 
@@ -75,13 +75,13 @@ export function Sidebar({ state }) {
                         <span class="sidebar-attention" />
                       )}
                       {sess.subagentCount > 0 && (
-                        <span class="subagent-badge">🔄{sess.subagentCount}</span>
+                        <span class="subagent-badge">{sess.subagentCount}</span>
                       )}
                       <button
                         class="sidebar-item-delete"
                         onClick={(e) => handleDelete(e, sess.id)}
                         title="Delete"
-                      >×</button>
+                      ><X /></button>
                     </div>
                   ))}
                 </div>
@@ -98,7 +98,7 @@ export function Sidebar({ state }) {
 
           <div class="sidebar-footer">
             <button class="sidebar-new-btn" onClick={toggleDialog}>
-              + New Session
+              <Plus /> New Session
             </button>
           </div>
         </>

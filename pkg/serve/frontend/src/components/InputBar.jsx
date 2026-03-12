@@ -1,4 +1,5 @@
 import { useRef, useCallback } from 'preact/hooks';
+import { SendHorizonal, Square } from 'lucide-preact';
 import { sendMessage, cancelRun } from '../state.js';
 
 export function InputBar({ sessionId, sessionState }) {
@@ -53,9 +54,11 @@ export function InputBar({ sessionId, sessionState }) {
         disabled={busy}
       />
       {busy ? (
-        <button class="input-stop" onClick={handleStop}>⏹ Stop</button>
+        <button class="input-stop" onClick={handleStop}><Square /> Stop</button>
       ) : (
-        <button class="input-send" onClick={handleSend} disabled={!sessionId}>Send</button>
+        <button class="input-send" onClick={handleSend} disabled={!sessionId}>
+          <SendHorizonal /> Send
+        </button>
       )}
     </div>
   );

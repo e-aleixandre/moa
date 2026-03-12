@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import { AlertTriangle } from 'lucide-preact';
 import { trustMcp } from '../state.js';
 
 export function McpBanner({ sessionId }) {
@@ -19,7 +20,8 @@ export function McpBanner({ sessionId }) {
 
   return (
     <div class="mcp-banner">
-      <span class="mcp-banner-text">⚠️ This project has MCP servers that haven't been trusted yet.</span>
+      <span class="mcp-banner-icon"><AlertTriangle /></span>
+      <span class="mcp-banner-text">This project has MCP servers that haven't been trusted yet.</span>
       <button class="btn-trust" onClick={handleTrust} disabled={loading}>
         {loading ? '…' : 'Trust & Load'}
       </button>

@@ -165,12 +165,73 @@ function updateSession(id, patch) {
 
 export function handleWsInit(id, data) {
   updateSession(id, {
-    messages: data.messages || [],
+    messages: normalizeHistory(data.messages || []),
     state: data.state || 'idle',
     pendingPerm: data.pending_permission || null,
     streamingText: null,
     thinkingText: null,
   });
+}
+
+/**
+ * Normalize raw LLM message history into our flat render list.
+ *
+ * The backend sends the raw conversation: assistant messages may contain
+ * tool_call content blocks, and tool_result messages carry the output.
+ * We flatten these into the same shape used by real-time WS events so
+ * that MessageList renders them uniformly.
+ */
+function normalizeHistory(raw) {
+  const result = [];
+  // Index tool_result messages by tool_call_id for quick lookup
+  const resultMap = {};
+  for (const msg of raw) {
+    if (msg.role === 'tool_result') {
+      resultMap[msg.tool_call_id] = msg;
+    }
+  }
+
+  for (const msg of raw) {
+    if (msg.role === 'assistant') {
+      const textParts = [];
+      for (const c of (msg.content || [])) {
+        if (c.type === 'text' && c.text) {
+          textParts.push(c.text);
+        } else if (c.type === 'tool_call') {
+          // Flush accumulated text as a message first
+          if (textParts.length > 0) {
+            result.push({ role: 'assistant', content: [{ type: 'text', text: textParts.join('') }] });
+            textParts.length = 0;
+          }
+          // Emit synthetic tool entry
+          const tr = resultMap[c.tool_call_id];
+          let resultText = null;
+          let status = 'done';
+          if (tr) {
+            resultText = (tr.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+            if (tr.is_error) status = 'error';
+          }
+          result.push({
+            _type: 'tool_start',
+            tool_call_id: c.tool_call_id,
+            tool_name: c.tool_name,
+            args: c.arguments || {},
+            status,
+            result: resultText,
+          });
+        }
+        // thinking blocks are skipped (shown in real-time only)
+      }
+      // Flush any trailing text
+      if (textParts.length > 0) {
+        result.push({ role: 'assistant', content: [{ type: 'text', text: textParts.join('') }] });
+      }
+    } else if (msg.role === 'user') {
+      result.push(msg);
+    }
+    // tool_result messages are consumed above via resultMap, skip here
+  }
+  return result;
 }
 
 export function handleWsTextDelta(id, delta) {
@@ -307,6 +368,16 @@ export async function deleteSession(id) {
 }
 
 export async function sendMessage(id, text) {
+  // Optimistically add user message to local state
+  const sess = state.sessions[id];
+  if (sess) {
+    const userMsg = { role: 'user', content: [{ type: 'text', text }] };
+    updateSession(id, {
+      messages: [...sess.messages, userMsg],
+      streamingText: null,
+      thinkingText: null,
+    });
+  }
   await api('POST', `/api/sessions/${id}/send`, { text });
 }
 

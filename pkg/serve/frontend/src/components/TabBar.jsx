@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-preact';
 import { setActiveSession, toggleDialog } from '../state.js';
 
 export function TabBar({ state }) {
@@ -25,7 +26,9 @@ export function TabBar({ state }) {
           </button>
         );
       })}
-      <button class="tab-add" onClick={toggleDialog} title="New session">+</button>
+      <button class="tab-add" onClick={toggleDialog} title="New session">
+        <Plus />
+      </button>
     </div>
   );
 }

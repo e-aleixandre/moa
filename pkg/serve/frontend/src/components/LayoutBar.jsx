@@ -1,18 +1,24 @@
+import { Square, Columns2, Grid2x2, LayoutGrid, Bell, BellOff } from 'lucide-preact';
 import { setLayout, toggleSound } from '../state.js';
 
-const LAYOUTS = [1, 2, 4, 6];
+const LAYOUTS = [
+  { n: 1, icon: Square, label: '1 tile' },
+  { n: 2, icon: Columns2, label: '2 tiles' },
+  { n: 4, icon: Grid2x2, label: '4 tiles' },
+  { n: 6, icon: LayoutGrid, label: '6 tiles' },
+];
 
 export function LayoutBar({ state }) {
   return (
     <div class="layout-bar">
-      {LAYOUTS.map(n => (
+      {LAYOUTS.map(({ n, icon: Icon, label }) => (
         <button
           key={n}
           class={`layout-btn ${state.layout === n ? 'active' : ''}`}
           onClick={() => setLayout(n)}
-          title={`${n} tile${n > 1 ? 's' : ''}`}
+          title={label}
         >
-          {n === 1 ? '□' : n === 2 ? '⬜⬜' : n === 4 ? '⊞' : '⊞⊞'}
+          <Icon />
         </button>
       ))}
       <div class="layout-bar-spacer" />
@@ -21,7 +27,7 @@ export function LayoutBar({ state }) {
         onClick={toggleSound}
         title={state.soundEnabled ? 'Sound on' : 'Sound off'}
       >
-        {state.soundEnabled ? '🔔' : '🔕'}
+        {state.soundEnabled ? <Bell /> : <BellOff />}
       </button>
     </div>
   );

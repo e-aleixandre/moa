@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'preact/hooks';
+import { X, Plus } from 'lucide-preact';
 import {
   toggleDrawer, setActiveSession, deleteSession,
   resumeSession, toggleDialog, sessionsByGroup,
@@ -32,7 +33,7 @@ export function Drawer({ state }) {
       <div class={`drawer ${state.drawerOpen ? 'open' : ''}`}>
         <div class="drawer-header">
           <span class="drawer-title">Sessions</span>
-          <button class="drawer-close" onClick={toggleDrawer}>×</button>
+          <button class="drawer-close" onClick={toggleDrawer}><X /></button>
         </div>
 
         <input
@@ -72,7 +73,7 @@ export function Drawer({ state }) {
                     <button
                       class="drawer-item-delete"
                       onClick={(e) => handleDelete(e, sess.id)}
-                    >×</button>
+                    ><X /></button>
                   </div>
                 ))}
               </div>
@@ -82,7 +83,7 @@ export function Drawer({ state }) {
 
         <div class="drawer-footer">
           <button class="drawer-new-btn" onClick={() => { toggleDialog(); toggleDrawer(); }}>
-            + New Session
+            <Plus /> New Session
           </button>
         </div>
       </div>
