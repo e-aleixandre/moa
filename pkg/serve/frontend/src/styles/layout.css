@@ -6,7 +6,7 @@
   overflow: hidden;
 }
 .app.desktop { flex-direction: row; }
-.app.mobile  { flex-direction: column; position: relative; }
+.app.mobile  { flex-direction: column; position: relative; overflow-x: hidden; }
 
 .main {
   flex: 1;

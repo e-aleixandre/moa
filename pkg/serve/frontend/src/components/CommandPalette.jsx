@@ -16,10 +16,10 @@ function getCaps() {
     .catch(() => ({}));
 }
 
-export function CommandPalette({ open, onClose, state }) {
+export function CommandPalette({ open, onClose, state, initialMode = 'search' }) {
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [mode, setMode] = useState('search'); // 'search' | 'create'
+  const [mode, setMode] = useState(initialMode);
   const [serverCwd, setServerCwd] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [creating, setCreating] = useState(false);
@@ -41,11 +41,11 @@ export function CommandPalette({ open, onClose, state }) {
     if (open) {
       setQuery('');
       setSelectedIdx(0);
-      setMode('search');
+      setMode(initialMode);
       setCreating(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [open]);
+  }, [open, initialMode]);
 
   // Re-focus input on mode change
   useEffect(() => {

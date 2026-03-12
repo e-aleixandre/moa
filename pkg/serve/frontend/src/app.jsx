@@ -3,12 +3,11 @@ import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import {
   store, loadSessions, startPolling, setMobile,
   autoFillTiles, autoSelectMobile,
-  focusTileByIndex, toggleDrawer,
+  focusTileByIndex,
 } from './state.js';
 import { inputBarRegistry } from './components/InputBar.jsx';
 import { requestNotificationPermission } from './notifications.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
-import { Drawer } from './components/Drawer.jsx';
 import { TabBar } from './components/TabBar.jsx';
 import { TileTree } from './components/TileTree.jsx';
 import { ChatView } from './components/ChatView.jsx';
@@ -22,6 +21,7 @@ function App() {
   const [state, setState] = useState(store.get());
   const [overview, setOverview] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteMode, setPaletteMode] = useState('search');
 
   useEffect(() => store.subscribe(setState), []);
 
@@ -55,50 +55,50 @@ function App() {
     setOverview(v => !v);
   }, []);
 
-  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  const openPalette = useCallback((mode = 'search') => {
+    setPaletteMode(mode);
+    setPaletteOpen(true);
+  }, []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
 
   const hotkeys = useMemo(() => [
-    // Command palette
     { key: 'k', mod: true, handler: () => setPaletteOpen(v => !v) },
-    // Escape cascades: palette → drawer → overview
     { key: 'Escape', handler: () => {
       if (paletteOpen) setPaletteOpen(false);
-      else if (state.drawerOpen) toggleDrawer();
       else if (overview) setOverview(false);
     }},
-    // Focus tile 1–9 by position in tree
     ...Array.from({ length: 9 }, (_, i) => ({
       key: String(i + 1), mod: true,
       handler: () => { if (!state.isMobile) focusTileByIndex(i); },
     })),
-    // Mobile overview
     { key: 'o', mod: true, handler: () => {
       if (state.isMobile) setOverview(v => !v);
     }},
-    // Voice toggle on focused tile
     { key: '.', mod: true, handler: () => {
       const entry = inputBarRegistry.get(state.focusedTile);
       if (entry) entry.toggleVoice();
     }},
-  ], [state.drawerOpen, state.isMobile, state.focusedTile, overview, paletteOpen]);
+  ], [state.isMobile, state.focusedTile, overview, paletteOpen]);
 
   useHotkeys(hotkeys);
 
   if (state.isMobile) {
     return (
       <div class="app mobile">
-        <Drawer state={state} onOpenPalette={openPalette} />
         {overview ? (
-          <SessionOverview state={state} onSelect={() => setOverview(false)} onOpenPalette={openPalette} />
+          <SessionOverview
+            state={state}
+            onSelect={() => setOverview(false)}
+            onNewSession={() => { setOverview(false); openPalette('create'); }}
+          />
         ) : (
           <>
-            <ChatView state={state} onToggleOverview={toggleOverview} />
-            <TabBar state={state} onOpenPalette={openPalette} />
+            <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} />
+            <TabBar state={state} onOpenPalette={() => openPalette('create')} />
           </>
         )}
         <ToastContainer />
-        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} />
+        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} />
       </div>
     );
   }
@@ -106,11 +106,11 @@ function App() {
   return (
     <div class="app desktop">
       <div class="main">
-        <LayoutBar state={state} onOpenPalette={openPalette} />
+        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} />
         <TileTree state={state} />
       </div>
       <ToastContainer />
-      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} />
+      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} />
     </div>
   );
 }

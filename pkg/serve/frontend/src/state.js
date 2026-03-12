@@ -54,7 +54,7 @@ let state = {
   soundEnabled: persisted.soundEnabled || false,
 
   isMobile: false,
-  drawerOpen: false,
+
   activeSession: null,
 };
 
@@ -521,7 +521,7 @@ export function setActiveSession(id) {
   afterVisibilityChange();
 }
 
-export function toggleDrawer() { setState({ drawerOpen: !state.drawerOpen }); }
+
 export function toggleSound() { setState({ soundEnabled: !state.soundEnabled }); }
 export function setMobile(isMobile) { setState({ isMobile }); }
 

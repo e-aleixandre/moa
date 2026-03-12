@@ -1,9 +1,9 @@
-import { useCallback, useRef } from 'preact/hooks';
-import { Plus, Sparkles } from 'lucide-preact';
-import { setActiveSession } from '../state.js';
+import { useCallback, useRef, useMemo } from 'preact/hooks';
+import { Plus, Sparkles, Archive } from 'lucide-preact';
+import { setActiveSession, resumeSession } from '../state.js';
 import { shortModel } from '../util/format.js';
 
-export function SessionOverview({ state, onSelect, onOpenPalette }) {
+export function SessionOverview({ state, onSelect, onNewSession }) {
   const touchStart = useRef(null);
 
   const onTouchStart = useCallback((e) => {
@@ -17,28 +17,41 @@ export function SessionOverview({ state, onSelect, onOpenPalette }) {
     touchStart.current = null;
     if (dy > 50 && dt < 400) onSelect();
   }, [onSelect]);
-  const sessions = Object.values(state.sessions)
-    .filter(s => s.state !== 'saved')
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+
+  const activeSessions = useMemo(() =>
+    Object.values(state.sessions)
+      .filter(s => s.state !== 'saved')
+      .sort((a, b) => (b.updated || 0) - (a.updated || 0)),
+    [state.sessions]
+  );
+
+  const savedSessions = useMemo(() =>
+    Object.values(state.sessions)
+      .filter(s => s.state === 'saved')
+      .sort((a, b) => (b.updated || 0) - (a.updated || 0)),
+    [state.sessions]
+  );
 
   const handleSelect = useCallback((id) => {
     setActiveSession(id);
     onSelect();
   }, [onSelect]);
 
-  const handleNew = useCallback(() => {
+  const handleResume = useCallback((id) => {
+    resumeSession(id).catch(e => console.error('Resume failed:', e));
     onSelect();
-    onOpenPalette?.();
-  }, [onSelect, onOpenPalette]);
+  }, [onSelect]);
 
   return (
     <div class="session-overview" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div class="overview-header">
         <span class="overview-title">Sessions</span>
-        <span class="overview-hint">Tap to open · Swipe up to go back</span>
+        <span class="overview-hint">Swipe up to go back</span>
       </div>
+
+      {/* Active sessions */}
       <div class="overview-grid">
-        {sessions.map(sess => {
+        {activeSessions.map(sess => {
           const isActive = state.activeSession === sess.id;
           const needsAttention = sess.state === 'permission' || sess.state === 'error';
           const lastMsg = getLastMessage(sess);
@@ -65,19 +78,37 @@ export function SessionOverview({ state, onSelect, onOpenPalette }) {
           );
         })}
 
-        <div class="overview-card new-card" onClick={handleNew}>
+        <div class="overview-card new-card" onClick={onNewSession}>
           <Plus />
           <span>New Session</span>
         </div>
       </div>
+
+      {/* Saved sessions */}
+      {savedSessions.length > 0 && (
+        <div class="overview-saved">
+          <div class="overview-saved-header">
+            <Archive class="overview-saved-icon" />
+            <span>Saved</span>
+          </div>
+          {savedSessions.map(sess => (
+            <div
+              key={sess.id}
+              class="overview-saved-item"
+              onClick={() => handleResume(sess.id)}
+            >
+              <span class="overview-saved-title">{sess.title || 'Untitled'}</span>
+              <span class="overview-saved-model">{shortModel(sess.model)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-/** Extract last visible message text for preview. */
 function getLastMessage(session) {
   if (!session.messages || session.messages.length === 0) return null;
-  // Walk backwards to find last text
   for (let i = session.messages.length - 1; i >= 0; i--) {
     const msg = session.messages[i];
     if (msg.role === 'assistant' || msg.role === 'user') {

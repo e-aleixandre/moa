@@ -1,15 +1,13 @@
 import { useRef, useCallback } from 'preact/hooks';
-import { Menu, GitFork, ChevronDown } from 'lucide-preact';
-import { toggleDrawer } from '../state.js';
+import { GitFork, ChevronDown, Plus } from 'lucide-preact';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { ModelPill } from './ModelPill.jsx';
 
-export function ChatView({ state, onToggleOverview }) {
+export function ChatView({ state, onToggleOverview, onOpenPalette }) {
   const session = state.activeSession ? state.sessions[state.activeSession] : null;
-  const headerRef = useRef(null);
   const touchStart = useRef(null);
 
   // Swipe-down on header → overview
@@ -28,13 +26,17 @@ export function ChatView({ state, onToggleOverview }) {
   if (!session) {
     return (
       <div class="chat-view">
-        <div class="chat-header" ref={headerRef}>
-          <button class="chat-hamburger" onClick={toggleDrawer}><Menu /></button>
-          <span class="chat-header-title" onClick={onToggleOverview}>moa</span>
+        <div class="chat-header">
+          <button class="chat-header-title-btn" onClick={onToggleOverview}>
+            <span class="chat-header-title">moa</span>
+            <ChevronDown class="chat-header-chevron" />
+          </button>
         </div>
         <div class="empty-state">
-          <p>No active session.</p>
-          <p>Create one or select from the drawer.</p>
+          <p>No active session</p>
+          <button class="empty-new-btn" onClick={onOpenPalette}>
+            <Plus /> New Session
+          </button>
         </div>
       </div>
     );
@@ -44,11 +46,9 @@ export function ChatView({ state, onToggleOverview }) {
     <div class="chat-view">
       <div
         class="chat-header"
-        ref={headerRef}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        <button class="chat-hamburger" onClick={toggleDrawer}><Menu /></button>
         <span class={`state-dot ${session.state}`} />
         <button class="chat-header-title-btn" onClick={onToggleOverview}>
           <span class="chat-header-title">{session.title || 'Untitled'}</span>
