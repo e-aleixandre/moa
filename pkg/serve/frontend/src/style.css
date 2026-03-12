@@ -418,7 +418,7 @@ a:hover { text-decoration: underline; }
 .model-pill {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   padding: 2px 8px;
   background: var(--surface0);
   border-radius: var(--radius-full);
@@ -427,7 +427,25 @@ a:hover { text-decoration: underline; }
   font-family: var(--mono);
   white-space: nowrap;
 }
-.model-pill .lucide { width: 11px; height: 11px; color: var(--mauve); }
+
+.model-pill-name { color: var(--subtext0); }
+
+.thinking-meter {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 0;
+}
+
+.thinking-block {
+  width: 5px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--surface1);
+  transition: background var(--duration) var(--ease);
+}
+.thinking-block.on { background: var(--mauve); }
+.thinking-meter.level-3 .thinking-block.on { background: var(--peach); }
 
 .tile-number {
   font-size: 10px;

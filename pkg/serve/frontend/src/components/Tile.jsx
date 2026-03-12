@@ -1,10 +1,10 @@
-import { Sparkles, MessageSquarePlus, GitFork } from 'lucide-preact';
+import { MessageSquarePlus, GitFork } from 'lucide-preact';
 import { focusTile } from '../state.js';
-import { shortModel } from '../util/format.js';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
+import { ModelPill } from './ModelPill.jsx';
 
 export function Tile({ tileIndex, sessionId, session, isFocused }) {
   const needsAttention = session && (session.state === 'permission' || session.state === 'error');
@@ -31,7 +31,7 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
         {session.subagentCount > 0 && (
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
-        <span class="model-pill"><Sparkles />{shortModel(session.model)}</span>
+        <ModelPill model={session.model} thinking={session.thinking} />
         <SettingsDropdown sessionId={sessionId} session={session} />
         <span class="tile-number">#{tileIndex + 1}</span>
       </div>

@@ -1,10 +1,10 @@
-import { Menu, GitFork, Sparkles } from 'lucide-preact';
+import { Menu, GitFork } from 'lucide-preact';
 import { toggleDrawer } from '../state.js';
-import { shortModel } from '../util/format.js';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
+import { ModelPill } from './ModelPill.jsx';
 
 export function ChatView({ state }) {
   const session = state.activeSession ? state.sessions[state.activeSession] : null;
@@ -33,7 +33,7 @@ export function ChatView({ state }) {
         {session.subagentCount > 0 && (
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
-        <span class="model-pill"><Sparkles />{shortModel(session.model)}</span>
+        <ModelPill model={session.model} thinking={session.thinking} />
         <SettingsDropdown sessionId={state.activeSession} session={session} />
       </div>
 
