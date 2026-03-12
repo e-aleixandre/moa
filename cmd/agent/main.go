@@ -24,6 +24,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/provider"
+	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/serve"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
@@ -490,6 +491,12 @@ func runServe(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// Build transcriber if OpenAI API key is available.
+	var transcriber core.Transcriber
+	if apiKey, _, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" {
+		transcriber = openai.New(apiKey)
+	}
+
 	mgr := serve.NewManager(ctx, serve.ManagerConfig{
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
 			build, err := buildProvider(model, authStore)
@@ -498,6 +505,7 @@ func runServe(args []string) {
 			}
 			return build.Provider, nil
 		},
+		Transcriber:   transcriber,
 		DefaultModel:  defaultModel,
 		WorkspaceRoot: cwd,
 		MoaCfg:        moaCfg,

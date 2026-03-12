@@ -1,4 +1,4 @@
-/* Input bar: textarea + send/stop buttons */
+/* Input bar: textarea + mic + send/stop buttons */
 
 .input-bar {
   display: flex;
@@ -9,6 +9,14 @@
   box-shadow: 0 -2px 8px rgba(0,0,0,0.12);
 }
 
+/* Wrapper: positions mic inside the textarea area */
+.input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
 .input-bar textarea {
   flex: 1;
   background: var(--base);
@@ -16,6 +24,7 @@
   border: 1px solid var(--surface0);
   border-radius: var(--radius-md);
   padding: 10px 14px;
+  padding-right: 38px; /* space for mic button */
   font-size: 14px;
   resize: none;
   min-height: 42px;
@@ -31,6 +40,37 @@
   box-shadow: 0 0 0 2px var(--peach-dim);
 }
 .input-bar textarea::placeholder { color: var(--overlay0); }
+
+/* Mic button — sits inside textarea, bottom right */
+.input-mic {
+  position: absolute;
+  right: 6px;
+  bottom: 8px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.input-mic .lucide { width: 16px; height: 16px; }
+.input-mic:hover { color: var(--subtext1); background: var(--surface0); }
+
+/* Recording state: red pulsing */
+.input-mic.recording {
+  color: var(--red);
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Transcribing state: spinner */
+.input-mic.transcribing { color: var(--mauve); }
+.input-mic.transcribing .lucide { animation: spin 1.2s linear infinite; }
+.input-mic:disabled { cursor: wait; }
 
 .input-send {
   background: linear-gradient(135deg, var(--peach), var(--flamingo));

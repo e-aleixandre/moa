@@ -270,6 +270,7 @@ type Manager struct {
 	baseCtx  context.Context
 
 	providerFactory func(model core.Model) (core.Provider, error)
+	transcriber     core.Transcriber // nil when no speech-to-text is available
 	defaultModel    core.Model
 	workspaceRoot   string
 	moaCfg          core.MoaConfig
@@ -279,6 +280,7 @@ type Manager struct {
 // ManagerConfig configures a Manager.
 type ManagerConfig struct {
 	ProviderFactory func(model core.Model) (core.Provider, error)
+	Transcriber     core.Transcriber // optional; enables POST /api/transcribe
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
@@ -292,6 +294,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		sessions:        make(map[string]*ManagedSession),
 		baseCtx:         ctx,
 		providerFactory: cfg.ProviderFactory,
+		transcriber:     cfg.Transcriber,
 		defaultModel:    cfg.DefaultModel,
 		workspaceRoot:   cfg.WorkspaceRoot,
 		moaCfg:          cfg.MoaCfg,

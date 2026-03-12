@@ -38,6 +38,8 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
+	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
+	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
 
 	// Dev mode: serve from disk for live reload without recompiling Go.
 	// Production: serve from embedded files.
@@ -375,6 +377,47 @@ func handleCancel(mgr *Manager) http.HandlerFunc {
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
+	}
+}
+
+func handleCapabilities(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		caps := map[string]bool{
+			"transcribe": mgr.transcriber != nil,
+		}
+		writeJSON(w, http.StatusOK, caps)
+	}
+}
+
+func handleTranscribe(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if mgr.transcriber == nil {
+			http.Error(w, "transcription not available (no OpenAI API key configured)", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Limit upload to 25 MB (Whisper's max).
+		r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
+
+		if err := r.ParseMultipartForm(25 << 20); err != nil {
+			http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		file, header, err := r.FormFile("audio")
+		if err != nil {
+			http.Error(w, "missing audio file: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		text, err := mgr.transcriber.Transcribe(r.Context(), file, header.Filename)
+		if err != nil {
+			http.Error(w, "transcription failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"text": text})
 	}
 }
 
