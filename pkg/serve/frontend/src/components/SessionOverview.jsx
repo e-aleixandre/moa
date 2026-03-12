@@ -1,13 +1,22 @@
-import { useCallback } from 'preact/hooks';
+import { useCallback, useRef } from 'preact/hooks';
 import { Plus, Sparkles } from 'lucide-preact';
 import { setActiveSession, toggleDialog } from '../state.js';
 import { shortModel } from '../util/format.js';
 
-/**
- * Mobile app-switcher view: grid of session cards shown after pinch-in.
- * Tapping a card zooms back into that session.
- */
 export function SessionOverview({ state, onSelect }) {
+  const touchStart = useRef(null);
+
+  const onTouchStart = useCallback((e) => {
+    touchStart.current = { y: e.touches[0].clientY, t: Date.now() };
+  }, []);
+
+  const onTouchEnd = useCallback((e) => {
+    if (!touchStart.current) return;
+    const dy = touchStart.current.y - e.changedTouches[0].clientY;
+    const dt = Date.now() - touchStart.current.t;
+    touchStart.current = null;
+    if (dy > 50 && dt < 400) onSelect();
+  }, [onSelect]);
   const sessions = Object.values(state.sessions)
     .filter(s => s.state !== 'saved')
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
@@ -23,10 +32,10 @@ export function SessionOverview({ state, onSelect }) {
   }, [onSelect]);
 
   return (
-    <div class="session-overview">
+    <div class="session-overview" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div class="overview-header">
         <span class="overview-title">Sessions</span>
-        <span class="overview-hint">Tap to open · Pinch out to go back</span>
+        <span class="overview-hint">Tap to open · Swipe up to go back</span>
       </div>
       <div class="overview-grid">
         {sessions.map(sess => {
