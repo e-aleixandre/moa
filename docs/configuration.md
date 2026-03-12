@@ -15,6 +15,16 @@ CLI flags override config at runtime.
   "allowed_paths": ["/tmp"],
   "brave_api_key": "...",
   "pinned_models": ["claude-sonnet-4-6", "gpt-5.3-codex"],
+  "trusted_mcp_paths": ["/Users/alice/work/project-a"],
+  "mcp_servers": {
+    "docs": {
+      "command": "uvx",
+      "args": ["my-mcp-server"],
+      "env": {
+        "API_KEY": "..."
+      }
+    }
+  },
   "permissions": {
     "mode": "ask",
     "allow": ["Bash(git:*)", "read"],
@@ -32,21 +42,21 @@ CLI flags override config at runtime.
 
 ### `disable_sandbox` (bool)
 
-If `true`, path sandboxing is disabled (YOLO filesystem access).
+If `true`, path sandboxing is disabled.
 
 ### `allowed_paths` ([]string)
 
-Extra absolute paths allowed outside workspace when sandboxing is enabled.
+Extra absolute paths allowed outside the workspace when sandboxing is enabled.
 
 ### `brave_api_key` (string)
 
-Brave Search key used to register `web_search` tool.
+Registers the `web_search` tool when present.
 
 ### `pinned_models` ([]string)
 
 Models used by TUI `Ctrl+P` cycling.
 
-> This is treated as a global preference; project-level `pinned_models` is ignored.
+> Global-only preference. Project-level `pinned_models` is ignored.
 
 ### `permissions`
 
@@ -54,11 +64,48 @@ Models used by TUI `Ctrl+P` cycling.
 - `allow`: glob policies auto-approved in `ask`
 - `deny`: glob policies always denied
 - `model`: evaluator model for `auto`
-- `rules`: natural language rules for evaluator
+- `rules`: natural-language rules for the evaluator
+
+### `mcp_servers`
+
+Map of MCP server definitions loaded from config.
+
+Each server supports:
+
+- `command`
+- `args`
+- `env`
+
+### `trusted_mcp_paths`
+
+List of project directories whose `.mcp.json` files are trusted and may be auto-loaded.
+
+> Global-only preference. Project-level `trusted_mcp_paths` is ignored.
+
+## `.mcp.json`
+
+Moa can also load MCP servers from `.mcp.json` using the Claude Code-compatible format:
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "command": "uvx",
+      "args": ["my-mcp-server"]
+    }
+  }
+}
+```
+
+Behavior:
+
+- global `~/.config/moa/.mcp.json` is always loaded
+- project `<cwd>/.mcp.json` is loaded only when the path is trusted
+- in `moa serve`, trusted project MCP servers are loaded per session
 
 ## Policy pattern format
 
-Patterns use `Tool(argPattern)` style:
+Permission patterns use `Tool(argPattern)` style, for example:
 
 - `bash`
 - `Bash(npm:*)`

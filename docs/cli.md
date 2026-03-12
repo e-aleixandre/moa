@@ -1,6 +1,6 @@
 # CLI Reference
 
-## Flags
+## Main command
 
 ```text
 -p                  Prompt text or @file
@@ -14,7 +14,24 @@
 -resume             Open session browser (or --resume <id>)
 -login              Login to provider: anthropic | openai
 -logout             Remove stored credentials for provider
+-output             text|json (default: text)
 ```
+
+## Serve subcommand
+
+```bash
+moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet]
+```
+
+### Serve flags
+
+```text
+--host   Bind address (default: 127.0.0.1)
+--port   HTTP port (default: 8080)
+--model  Default model for new web sessions
+```
+
+If you bind to anything other than localhost, Moa prints a warning because `moa serve` does not include built-in authentication.
 
 ## Model selection
 
@@ -24,7 +41,7 @@ Accepted formats:
 - canonical id: `claude-sonnet-4-6`
 - provider/id: `anthropic/claude-sonnet-4-6`, `openai/gpt-5.3-codex`
 
-Unknown model IDs are accepted, but context-window-based management is disabled for those models.
+Unknown model IDs are accepted, but context-window-based management is disabled for them.
 
 ## Examples
 
@@ -43,4 +60,10 @@ moa -permissions ask
 
 # auto-mode permissions with evaluator model override
 moa -permissions auto -permissions-model haiku
+
+# start web UI locally
+moa serve
+
+# expose web UI on the network
+moa serve --host 0.0.0.0 --port 8080
 ```

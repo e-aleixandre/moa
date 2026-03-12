@@ -1,33 +1,40 @@
 # Overview
 
-Moa is a coding agent focused on running locally with a small, composable Go codebase.
+Moa is a coding agent runtime in Go designed to stay lightweight while being useful for real daily work.
+
+## Interfaces
+
+Moa currently has three ways to use the same agent core:
+
+- **Headless CLI** — one-shot prompts and scripts
+- **Interactive TUI** — terminal-first chat interface
+- **Web UI** via `moa serve` — browser sessions, useful across devices
 
 ## Core capabilities
 
-- **Interactive TUI** built with Bubble Tea
-- **Headless mode** (`-p`, `@file`, stdin)
-- **Tool calling** with sandboxed filesystem + command execution
-- **Permission gate** (`yolo`, `ask`, `auto`)
-- **Session persistence** with resume browser
-- **Subagents** (sync and async background jobs)
-- **Automatic context compaction** for long chats
-- **Multi-provider support** (Anthropic + OpenAI)
+- Tool calling with filesystem sandboxing
+- Permission modes: `yolo`, `ask`, `auto`
+- Session persistence and resume
+- Subagents, including async background jobs
+- Automatic context compaction
+- MCP tool servers
+- Multi-provider support (Anthropic + OpenAI)
 
 ## Runtime model
 
 At a high level:
 
-1. User prompt enters the agent loop.
-2. Provider streams assistant deltas.
+1. The user sends a prompt.
+2. The provider streams assistant output.
 3. Tool calls are validated and executed.
-4. Tool results return to the model.
-5. Loop continues until assistant stops without tool calls.
+4. Tool results go back to the model.
+5. The loop continues until the assistant stops without new tool calls.
 
-The same core loop powers both TUI and headless modes.
+That same loop powers CLI, TUI, and `moa serve`.
 
 ## Storage paths
 
-Current defaults in code:
+Default paths in code:
 
 - credentials: `~/.config/moa/auth.json`
 - sessions: `~/.config/moa/sessions/`
@@ -36,5 +43,7 @@ Current defaults in code:
 ## Related docs
 
 - [Quickstart](./quickstart.md)
+- [CLI Reference](./cli.md)
+- [Serve / Web UI](./serve.md)
 - [Configuration](./configuration.md)
 - [Architecture](./architecture.md)
