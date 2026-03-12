@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'preact/hooks';
-import { PanelLeftClose, PanelLeft, X, Plus } from 'lucide-preact';
+import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
+import { PanelLeftClose, PanelLeft, X, Plus, Check } from 'lucide-preact';
 import {
   assignTile, deleteSession, resumeSession,
   toggleDialog, toggleSidebar, sessionsByGroup,
@@ -7,11 +7,24 @@ import {
 
 export function Sidebar({ state }) {
   const [filter, setFilter] = useState('');
+  const [confirmId, setConfirmId] = useState(null);
+  const timerRef = useRef(null);
   const groups = useMemo(() => sessionsByGroup(state), [state.sessions]);
+
+  // Auto-cancel confirmation after 3s
+  useEffect(() => {
+    if (confirmId) {
+      timerRef.current = setTimeout(() => setConfirmId(null), 3000);
+      return () => clearTimeout(timerRef.current);
+    }
+  }, [confirmId]);
 
   const isInTile = (id) => state.tileAssignments.includes(id);
 
-  const handleClick = (sess) => {
+  const handleClick = (e, sess) => {
+    // Ignore clicks on delete/confirm buttons (already handled)
+    if (e.target.closest('.sidebar-item-delete, .delete-confirm')) return;
+    if (confirmId) { setConfirmId(null); return; }
     if (sess.state === 'saved') {
       resumeSession(sess.id).catch(e => console.error('Resume failed:', e));
       return;
@@ -24,9 +37,20 @@ export function Sidebar({ state }) {
     assignTile(state.focusedTile, sess.id);
   };
 
-  const handleDelete = (e, id) => {
+  const handleDeleteClick = (e, id) => {
     e.stopPropagation();
+    setConfirmId(id);
+  };
+
+  const handleConfirm = (e, id) => {
+    e.stopPropagation();
+    setConfirmId(null);
     deleteSession(id).catch(err => console.error('Delete failed:', err));
+  };
+
+  const handleCancel = (e) => {
+    e.stopPropagation();
+    setConfirmId(null);
   };
 
   const filterLower = filter.toLowerCase();
@@ -66,22 +90,32 @@ export function Sidebar({ state }) {
                   {filtered.map(sess => (
                     <div
                       key={sess.id}
-                      class={`sidebar-item ${isInTile(sess.id) ? 'active' : ''} ${sess.state === 'saved' ? 'saved' : ''}`}
-                      onClick={() => handleClick(sess)}
+                      class={`sidebar-item ${isInTile(sess.id) ? 'active' : ''} ${sess.state === 'saved' ? 'saved' : ''} ${confirmId === sess.id ? 'confirming' : ''}`}
+                      onClick={(e) => handleClick(e, sess)}
                     >
-                      <span class={`state-dot ${sess.state}`} />
-                      <span class="sidebar-item-title">{sess.title || 'Untitled'}</span>
-                      {(sess.state === 'permission' || sess.state === 'error') && (
-                        <span class="sidebar-attention" />
+                      {confirmId === sess.id ? (
+                        <div class="delete-confirm">
+                          <span class="delete-confirm-text">Delete?</span>
+                          <button class="delete-confirm-yes" onClick={(e) => handleConfirm(e, sess.id)}><Check /></button>
+                          <button class="delete-confirm-no" onClick={handleCancel}><X /></button>
+                        </div>
+                      ) : (
+                        <>
+                          <span class={`state-dot ${sess.state}`} />
+                          <span class="sidebar-item-title">{sess.title || 'Untitled'}</span>
+                          {(sess.state === 'permission' || sess.state === 'error') && (
+                            <span class="sidebar-attention" />
+                          )}
+                          {sess.subagentCount > 0 && (
+                            <span class="subagent-badge">{sess.subagentCount}</span>
+                          )}
+                          <button
+                            class="sidebar-item-delete"
+                            onClick={(e) => handleDeleteClick(e, sess.id)}
+                            title="Delete"
+                          ><X /></button>
+                        </>
                       )}
-                      {sess.subagentCount > 0 && (
-                        <span class="subagent-badge">{sess.subagentCount}</span>
-                      )}
-                      <button
-                        class="sidebar-item-delete"
-                        onClick={(e) => handleDelete(e, sess.id)}
-                        title="Delete"
-                      ><X /></button>
                     </div>
                   ))}
                 </div>

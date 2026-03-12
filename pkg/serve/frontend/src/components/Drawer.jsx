@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'preact/hooks';
-import { X, Plus } from 'lucide-preact';
+import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
+import { X, Plus, Check } from 'lucide-preact';
 import {
   toggleDrawer, setActiveSession, deleteSession,
   resumeSession, toggleDialog, sessionsByGroup,
@@ -7,10 +7,22 @@ import {
 
 export function Drawer({ state }) {
   const [filter, setFilter] = useState('');
+  const [confirmId, setConfirmId] = useState(null);
+  const timerRef = useRef(null);
   const groups = useMemo(() => sessionsByGroup(state), [state.sessions]);
   const filterLower = filter.toLowerCase();
 
-  const handleClick = (sess) => {
+  // Auto-cancel after 3s
+  useEffect(() => {
+    if (confirmId) {
+      timerRef.current = setTimeout(() => setConfirmId(null), 3000);
+      return () => clearTimeout(timerRef.current);
+    }
+  }, [confirmId]);
+
+  const handleClick = (e, sess) => {
+    if (e.target.closest('.drawer-item-delete, .delete-confirm')) return;
+    if (confirmId) { setConfirmId(null); return; }
     if (sess.state === 'saved') {
       resumeSession(sess.id).catch(e => console.error('Resume failed:', e));
     } else {
@@ -19,9 +31,20 @@ export function Drawer({ state }) {
     toggleDrawer();
   };
 
-  const handleDelete = (e, id) => {
+  const handleDeleteClick = (e, id) => {
     e.stopPropagation();
+    setConfirmId(id);
+  };
+
+  const handleConfirm = (e, id) => {
+    e.stopPropagation();
+    setConfirmId(null);
     deleteSession(id).catch(err => console.error('Delete failed:', err));
+  };
+
+  const handleCancel = (e) => {
+    e.stopPropagation();
+    setConfirmId(null);
   };
 
   return (
@@ -61,19 +84,29 @@ export function Drawer({ state }) {
                 {filtered.map(sess => (
                   <div
                     key={sess.id}
-                    class={`drawer-item ${state.activeSession === sess.id ? 'active' : ''}`}
-                    onClick={() => handleClick(sess)}
+                    class={`drawer-item ${state.activeSession === sess.id ? 'active' : ''} ${confirmId === sess.id ? 'confirming' : ''}`}
+                    onClick={(e) => handleClick(e, sess)}
                   >
-                    <span class={`state-dot ${sess.state}`} />
-                    <span class="drawer-item-title">{sess.title || 'Untitled'}</span>
-                    {(sess.state === 'permission' || sess.state === 'error') && (
-                      <span class="sidebar-attention" />
+                    {confirmId === sess.id ? (
+                      <div class="delete-confirm">
+                        <span class="delete-confirm-text">Delete?</span>
+                        <button class="delete-confirm-yes" onClick={(e) => handleConfirm(e, sess.id)}><Check /></button>
+                        <button class="delete-confirm-no" onClick={handleCancel}><X /></button>
+                      </div>
+                    ) : (
+                      <>
+                        <span class={`state-dot ${sess.state}`} />
+                        <span class="drawer-item-title">{sess.title || 'Untitled'}</span>
+                        {(sess.state === 'permission' || sess.state === 'error') && (
+                          <span class="sidebar-attention" />
+                        )}
+                        <span class="drawer-item-meta">{sess.model}</span>
+                        <button
+                          class="drawer-item-delete"
+                          onClick={(e) => handleDeleteClick(e, sess.id)}
+                        ><X /></button>
+                      </>
                     )}
-                    <span class="drawer-item-meta">{sess.model}</span>
-                    <button
-                      class="drawer-item-delete"
-                      onClick={(e) => handleDelete(e, sess.id)}
-                    ><X /></button>
                   </div>
                 ))}
               </div>

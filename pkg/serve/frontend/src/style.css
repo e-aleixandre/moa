@@ -251,6 +251,44 @@ a:hover { text-decoration: underline; }
 .sidebar-item-delete:hover { color: var(--red); background: var(--red-dim); }
 .sidebar-item-delete .lucide { width: 14px; height: 14px; }
 
+/* Inline delete confirmation (shared by sidebar + drawer) */
+.delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.delete-confirm-text {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red);
+}
+.delete-confirm-yes,
+.delete-confirm-no {
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+}
+.delete-confirm-yes .lucide,
+.delete-confirm-no .lucide { width: 14px; height: 14px; }
+.delete-confirm-yes {
+  background: var(--red-dim);
+  color: var(--red);
+}
+.delete-confirm-yes:hover { background: rgba(243,139,168,0.25); }
+.delete-confirm-no {
+  background: var(--surface0);
+  color: var(--subtext0);
+}
+.delete-confirm-no:hover { background: var(--surface1); }
+
+.sidebar-item.confirming,
+.drawer-item.confirming {
+  background: rgba(243,139,168,0.06);
+}
+
 .sidebar-attention {
   width: 6px;
   height: 6px;
