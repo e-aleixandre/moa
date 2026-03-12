@@ -3,8 +3,11 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -500,5 +503,63 @@ func TestDeleteEndpoint_SavedSession(t *testing.T) {
 	_, _, findErr := session.FindSession(sessionBase, saved.ID)
 	if findErr == nil {
 		t.Fatal("expected session to be deleted from disk")
+	}
+}
+
+func TestStaticAssets(t *testing.T) {
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	tests := []struct {
+		path        string
+		contentType string
+		contains    string
+	}{
+		{"/", "text/html", "<div id=\"root\">"},
+		{"/app.js", "", ""},
+		{"/app.css", "", ""},
+	}
+
+	for _, tt := range tests {
+		resp, err := http.Get(srv.URL + tt.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tt.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Errorf("GET %s: expected 200, got %d", tt.path, resp.StatusCode)
+		}
+		if len(body) == 0 {
+			t.Errorf("GET %s: empty body", tt.path)
+		}
+		if tt.contains != "" && !strings.Contains(string(body), tt.contains) {
+			t.Errorf("GET %s: expected body to contain %q", tt.path, tt.contains)
+		}
+	}
+}
+
+func TestStaticDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	testContent := "test-static-content"
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte(testContent), 0644)
+
+	t.Setenv("MOA_SERVE_STATIC_DIR", dir)
+
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	resp, err := http.Get(srv.URL + "/test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if string(body) != testContent {
+		t.Fatalf("expected %q, got %q", testContent, string(body))
 	}
 }

@@ -7,4 +7,4 @@ bin/
 moa
 plan.md
 MOA_SERVE_PLAN.md
-moa
+pkg/serve/frontend/node_modules/

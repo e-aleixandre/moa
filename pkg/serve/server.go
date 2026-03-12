@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"nhooyr.io/websocket"
@@ -36,8 +37,16 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 
-	sub, _ := fs.Sub(staticFS, "static")
-	mux.Handle("GET /", http.FileServer(http.FS(sub)))
+	// Dev mode: serve from disk for live reload without recompiling Go.
+	// Production: serve from embedded files.
+	var staticHandler http.Handler
+	if dir := os.Getenv("MOA_SERVE_STATIC_DIR"); dir != "" {
+		staticHandler = http.FileServer(http.Dir(dir))
+	} else {
+		sub, _ := fs.Sub(staticFS, "static")
+		staticHandler = http.FileServer(http.FS(sub))
+	}
+	mux.Handle("GET /", staticHandler)
 
 	return csrfMiddleware(mux)
 }

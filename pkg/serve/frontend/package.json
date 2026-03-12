@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch"
+  },
+  "dependencies": {
+    "preact": "^10.25.0",
+    "marked": "^15.0.0",
+    "dompurify": "^3.2.0",
+    "highlight.js": "^11.11.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
