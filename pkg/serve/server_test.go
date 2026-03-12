@@ -144,11 +144,11 @@ func TestSend_WhileBusy_409(t *testing.T) {
 		return sess.State == StateRunning
 	})
 
-	// Second send should be 409.
+	// Second send should be 202 (steer).
 	resp2 := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", `{"text":"second"}`)
 	resp2.Body.Close()
-	if resp2.StatusCode != 409 {
-		t.Fatalf("expected 409, got %d", resp2.StatusCode)
+	if resp2.StatusCode != 202 {
+		t.Fatalf("expected 202 (steer), got %d", resp2.StatusCode)
 	}
 }
 

@@ -4,6 +4,7 @@ import { shortModel } from '../util/format.js';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
+import { SettingsDropdown } from './SettingsDropdown.jsx';
 
 export function ChatView({ state }) {
   const session = state.activeSession ? state.sessions[state.activeSession] : null;
@@ -33,6 +34,7 @@ export function ChatView({ state }) {
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
         <span class="model-pill"><Sparkles />{shortModel(session.model)}</span>
+        <SettingsDropdown sessionId={state.activeSession} session={session} />
       </div>
 
       {session.untrustedMcp && <McpBanner sessionId={state.activeSession} />}

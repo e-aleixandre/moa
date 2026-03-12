@@ -4,6 +4,7 @@ import {
   handleWsInit, handleWsTextDelta, handleWsThinkingDelta,
   handleWsMessageEnd, handleWsToolStart, handleWsToolEnd,
   handleWsStateChange, handleWsPermissionRequest,
+  handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
 } from './state.js';
 
@@ -89,6 +90,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'permission_request':
       handleWsPermissionRequest(sessionId, evt.data);
+      break;
+    case 'config_change':
+      handleWsConfigChange(sessionId, evt.data);
       break;
     case 'subagent_count':
       handleWsSubagentCount(sessionId, evt.data.count);

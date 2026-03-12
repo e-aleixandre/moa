@@ -152,7 +152,7 @@ func TestSend_StateTransitions(t *testing.T) {
 	ch, unsub := sess.Subscribe()
 	defer unsub()
 
-	err = mgr.Send(sess.ID, "hello")
+	_, err = mgr.Send(sess.ID, "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestSend_Error(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = mgr.Send(sess.ID, "hello")
+	_, err = mgr.Send(sess.ID, "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestSend_Error(t *testing.T) {
 
 	// Session should still be usable — can send again.
 	// Provider will auto-reply with "done" on next call.
-	err = mgr.Send(sess.ID, "retry")
+	_, err = mgr.Send(sess.ID, "retry")
 	if err != nil {
 		t.Fatalf("expected session to accept new message after error, got: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestSend_WhileBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = mgr.Send(sess.ID, "first")
+	_, err = mgr.Send(sess.ID, "first")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,18 +288,21 @@ func TestSend_WhileBusy(t *testing.T) {
 		return sess.State == StateRunning
 	})
 
-	// Second send should return ErrBusy.
-	err = mgr.Send(sess.ID, "second")
-	if err != ErrBusy {
-		t.Fatalf("expected ErrBusy, got: %v", err)
+	// Second send should steer (not error).
+	action, err := mgr.Send(sess.ID, "second")
+	if err != nil {
+		t.Fatalf("expected steer, got error: %v", err)
+	}
+	if action != "steer" {
+		t.Fatalf("expected action=steer, got %q", action)
 	}
 
-	// State should not be corrupted — still running.
+	// State should still be running.
 	sess.mu.Lock()
 	state := sess.State
 	sess.mu.Unlock()
 	if state != StateRunning {
-		t.Fatalf("expected running after busy rejection, got %s", state)
+		t.Fatalf("expected running after steer, got %s", state)
 	}
 }
 
@@ -327,7 +330,7 @@ func TestDelete_WhileRunning(t *testing.T) {
 	}
 	id := sess.ID
 
-	err = mgr.Send(id, "hello")
+	_, err = mgr.Send(id, "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +437,7 @@ func TestSend_AutoTitle(t *testing.T) {
 		t.Fatalf("expected empty title, got %q", sess.Title)
 	}
 
-	err := mgr.Send(sess.ID, "Refactoriza el módulo de auth")
+	_, err := mgr.Send(sess.ID, "Refactoriza el módulo de auth")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -539,7 +542,7 @@ func TestDelete_CancelsSessionContext(t *testing.T) {
 	// Capture session context before delete.
 	sessCtx := sess.sessionCtx
 
-	err = mgr.Send(id, "hello")
+	_, err = mgr.Send(id, "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +636,7 @@ func TestAutoSave_AfterRun(t *testing.T) {
 		t.Fatal("expected persisted session")
 	}
 
-	err = mgr.Send(sess.ID, "hello")
+	_, err = mgr.Send(sess.ID, "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -923,7 +926,7 @@ func TestCancel_WhileRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := mgr.Send(sess.ID, "block"); err != nil {
+	if _, err := mgr.Send(sess.ID, "block"); err != nil {
 		t.Fatal(err)
 	}
 

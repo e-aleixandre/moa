@@ -108,6 +108,7 @@ export async function loadSessions() {
         title: info.title,
         state: info.state,
         model: info.model,
+        thinking: info.thinking || '',
         cwd: info.cwd,
         error: info.error || null,
         untrustedMcp: info.untrusted_mcp || false,
@@ -318,6 +319,13 @@ export function handleWsPermissionRequest(id, data) {
   }
 }
 
+export function handleWsConfigChange(id, data) {
+  updateSession(id, {
+    model: data.model || state.sessions[id]?.model,
+    thinking: data.thinking || state.sessions[id]?.thinking,
+  });
+}
+
 export function handleWsSubagentCount(id, count) {
   updateSession(id, { subagentCount: count });
 }
@@ -378,7 +386,8 @@ export async function sendMessage(id, text) {
       thinkingText: null,
     });
   }
-  await api('POST', `/api/sessions/${id}/send`, { text });
+  const res = await api('POST', `/api/sessions/${id}/send`, { text });
+  return res?.action || 'send';
 }
 
 export async function cancelRun(id) {
@@ -401,6 +410,17 @@ export async function resumeSession(id) {
     assignTile(state.focusedTile, sess.id);
   }
   return sess;
+}
+
+export async function configureSession(id, { model, thinking }) {
+  const res = await api('PATCH', `/api/sessions/${id}/config`, { model, thinking });
+  if (res) {
+    updateSession(id, {
+      model: res.model || state.sessions[id]?.model,
+      thinking: res.thinking || state.sessions[id]?.thinking,
+    });
+  }
+  return res;
 }
 
 export async function trustMcp(id) {

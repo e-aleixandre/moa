@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'preact/hooks';
-import { SendHorizonal, Square } from 'lucide-preact';
+import { SendHorizonal, Square, Zap } from 'lucide-preact';
 import { sendMessage, cancelRun } from '../state.js';
 
 export function InputBar({ sessionId, sessionState }) {
@@ -47,19 +47,22 @@ export function InputBar({ sessionId, sessionState }) {
     <div class="input-bar">
       <textarea
         ref={textareaRef}
-        placeholder="Send a message…"
+        placeholder={busy ? 'Steer the agent…' : 'Send a message…'}
         rows="1"
         onInput={autoResize}
         onKeyDown={handleKey}
-        disabled={busy}
       />
-      {busy ? (
-        <button class="input-stop" onClick={handleStop}><Square /> Stop</button>
-      ) : (
-        <button class="input-send" onClick={handleSend} disabled={!sessionId}>
-          <SendHorizonal /> Send
-        </button>
+      {busy && (
+        <button class="input-stop" onClick={handleStop} title="Stop"><Square /></button>
       )}
+      <button
+        class={`input-send ${busy ? 'steer' : ''}`}
+        onClick={handleSend}
+        disabled={!sessionId}
+        title={busy ? 'Steer' : 'Send'}
+      >
+        {busy ? <Zap /> : <SendHorizonal />}
+      </button>
     </div>
   );
 }

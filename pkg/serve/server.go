@@ -26,6 +26,7 @@ var staticFS embed.FS
 func NewServer(manager *Manager) http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /api/models", handleListModels())
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
@@ -35,6 +36,7 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
+	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 
 	// Dev mode: serve from disk for live reload without recompiling Go.
@@ -64,6 +66,29 @@ func csrfMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func handleListModels() http.HandlerFunc {
+	// Cache the result — model list is static for the lifetime of the process.
+	type modelInfo struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Alias    string `json:"alias,omitempty"`
+	}
+	entries := core.ListModels()
+	models := make([]modelInfo, len(entries))
+	for i, e := range entries {
+		models[i] = modelInfo{
+			ID:       e.Model.ID,
+			Name:     e.Model.Name,
+			Provider: e.Model.Provider,
+			Alias:    e.Alias,
+		}
+	}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, models)
+	}
 }
 
 func handleListSessions(mgr *Manager) http.HandlerFunc {
@@ -137,16 +162,14 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "text required", http.StatusBadRequest)
 			return
 		}
-		err := mgr.Send(r.PathValue("id"), body.Text)
+		action, err := mgr.Send(r.PathValue("id"), body.Text)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
-		case errors.Is(err, ErrBusy):
-			http.Error(w, "session is busy", http.StatusConflict)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
-			w.WriteHeader(http.StatusAccepted)
+			writeJSON(w, http.StatusAccepted, map[string]string{"action": action})
 		}
 	}
 }
@@ -176,6 +199,34 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func handleConfig(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Model    string `json:"model"`
+			Thinking string `json:"thinking"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		result, err := mgr.ReconfigureSession(sess.ID, body.Model, body.Thinking)
+		if err != nil {
+			if errors.Is(err, ErrBusy) {
+				http.Error(w, "session is busy", http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 	}
 }
 

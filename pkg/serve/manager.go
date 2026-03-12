@@ -88,6 +88,7 @@ type SessionInfo struct {
 	Title        string       `json:"title"`
 	State        SessionState `json:"state"`
 	Model        string       `json:"model"`
+	Thinking     string       `json:"thinking"`
 	CWD          string       `json:"cwd"`
 	Created      time.Time    `json:"created"`
 	Updated      time.Time    `json:"updated"`
@@ -207,11 +208,16 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 }
 
 func (s *ManagedSession) info() SessionInfo {
+	thinking := ""
+	if s.agent != nil {
+		thinking = s.agent.ThinkingLevel()
+	}
 	return SessionInfo{
 		ID:           s.ID,
 		Title:        s.Title,
 		State:        s.State,
 		Model:        s.Model,
+		Thinking:     thinking,
 		CWD:          s.CWD,
 		Created:      s.Created,
 		Updated:      s.Updated,
@@ -561,16 +567,23 @@ var (
 // Send delivers a user message to a session and starts the agent run.
 // Returns ErrBusy if the session is already running/waiting for permission.
 // The run executes in a background goroutine; results stream via WebSocket.
-func (m *Manager) Send(sessionID, text string) error {
+// Send sends a message to the session. If the session is idle, it starts a
+// new agent turn. If the session is running, it steers the agent (injects the
+// message between steps). Returns the action taken: "send", "steer".
+func (m *Manager) Send(sessionID, text string) (string, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
-		return ErrNotFound
+		return "", ErrNotFound
 	}
 
 	sess.mu.Lock()
 	if sess.State == StateRunning || sess.State == StatePermission {
+		ag := sess.agent
 		sess.mu.Unlock()
-		return ErrBusy
+		// Steer the running agent — injected between tool calls.
+		ag.Steer(text)
+		sess.broadcast(Event{Type: "steer", Data: map[string]any{"text": text}})
+		return "steer", nil
 	}
 	sess.State = StateRunning
 	sess.Updated = time.Now()
@@ -630,7 +643,7 @@ func (m *Manager) Send(sessionID, text string) error {
 			}})
 		}
 	}()
-	return nil
+	return "send", nil
 }
 
 // List returns info for all sessions, sorted by updated time descending.
@@ -772,6 +785,57 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	sess.mu.Unlock()
 
 	return sess, nil
+}
+
+// ReconfigureSession changes the model and/or thinking level of a session.
+// Only allowed when the session is idle (not running).
+func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map[string]string, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return nil, ErrNotFound
+	}
+
+	sess.mu.Lock()
+	if sess.State == StateRunning || sess.State == StatePermission {
+		sess.mu.Unlock()
+		return nil, ErrBusy
+	}
+
+	// Resolve model (keep current if empty).
+	model := sess.resolvedModel
+	if modelSpec != "" {
+		model, _ = core.ResolveModel(modelSpec)
+	}
+
+	// Resolve thinking (keep current if empty).
+	thinkingLevel := sess.agent.ThinkingLevel()
+	if thinking != "" {
+		thinkingLevel = thinking
+	}
+	sess.mu.Unlock()
+
+	// Create provider for the (possibly new) model.
+	prov, err := m.providerFactory(model)
+	if err != nil {
+		return nil, fmt.Errorf("provider: %w", err)
+	}
+
+	// Reconfigure the agent (strips thinking blocks on model change).
+	if err := sess.agent.Reconfigure(prov, model, thinkingLevel); err != nil {
+		return nil, err
+	}
+
+	sess.mu.Lock()
+	sess.resolvedModel = model
+	sess.Model = modelDisplayName(model)
+	result := map[string]string{
+		"model":    sess.Model,
+		"thinking": thinkingLevel,
+	}
+	sess.mu.Unlock()
+
+	sess.broadcast(Event{Type: "config_change", Data: result})
+	return result, nil
 }
 
 // Cancel aborts the running agent in a session.
