@@ -45,7 +45,7 @@ func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename strin
 		pw.CloseWithError(mw.Close())
 	}()
 
-	url := apiBaseURL + transcribeEndpoint
+	url := o.baseURL + transcribeEndpoint
 	req, err := http.NewRequestWithContext(ctx, "POST", url, pr)
 	if err != nil {
 		return "", fmt.Errorf("openai transcribe: creating request: %w", err)

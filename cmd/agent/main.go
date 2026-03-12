@@ -491,9 +491,13 @@ func runServe(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Build transcriber if OpenAI API key is available.
+	// Build transcriber from OpenAI API key.
+	// Priority: 1) "openai-transcribe" credential in auth store
+	//           2) OpenAI credential if it's an API key (not OAuth)
 	var transcriber core.Transcriber
-	if apiKey, _, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" {
+	if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Key != "" {
+		transcriber = openai.New(cred.Key)
+	} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
 		transcriber = openai.New(apiKey)
 	}
 
@@ -640,8 +644,38 @@ func handleLogin(provider string, authStore *auth.Store) {
 			os.Exit(1)
 		}
 
+	case "openai-transcribe":
+		fmt.Println("Store an OpenAI API key for Whisper speech-to-text.")
+		fmt.Println("This is separate from the main OpenAI credential (OAuth/API key).")
+		fmt.Print("Enter your OpenAI API key: ")
+		var key string
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			keyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to read key: %v\n", err)
+				os.Exit(1)
+			}
+			key = strings.TrimSpace(string(keyBytes))
+		} else {
+			fmt.Scanln(&key)
+			key = strings.TrimSpace(key)
+		}
+		if key == "" {
+			fmt.Fprintf(os.Stderr, "No key provided.\n")
+			os.Exit(1)
+		}
+		if err := authStore.Set("openai-transcribe", auth.Credential{
+			Type: "api_key",
+			Key:  key,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✓ OpenAI transcription key saved. Voice input is now available in the web UI.")
+
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai\n", provider)
+		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, openai-transcribe\n", provider)
 		os.Exit(1)
 	}
 }
