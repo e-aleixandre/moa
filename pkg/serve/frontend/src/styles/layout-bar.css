@@ -1,4 +1,4 @@
-/* Top bar with layout preset buttons + sound toggle */
+/* Top bar with palette trigger, layout presets, sound toggle */
 
 .layout-bar {
   display: flex;
@@ -6,6 +6,28 @@
   gap: 2px;
   padding: 6px 12px;
   background: var(--mantle);
+}
+
+/* Session palette trigger */
+.palette-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay1);
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.palette-trigger:hover { color: var(--text); background: var(--surface0); }
+.palette-trigger .lucide { width: 13px; height: 13px; }
+.palette-trigger .shortcut-hint { margin-left: 2px; }
+
+.layout-bar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--surface0);
+  margin: 0 6px;
 }
 
 .layout-btn {

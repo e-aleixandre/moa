@@ -1,5 +1,6 @@
-import { Bell, BellOff } from 'lucide-preact';
+import { Bell, BellOff, Search } from 'lucide-preact';
 import { applyPreset, toggleSound } from '../state.js';
+import { formatShortcut } from '../hooks/useHotkeys.js';
 import { PRESETS } from '../layoutPresets.js';
 
 function LayoutPreview({ preset }) {
@@ -12,9 +13,19 @@ function LayoutPreview({ preset }) {
   );
 }
 
-export function LayoutBar({ state }) {
+export function LayoutBar({ state, onOpenPalette }) {
   return (
     <div class="layout-bar">
+      <button
+        class="palette-trigger"
+        onClick={onOpenPalette}
+        title={`Sessions (${formatShortcut('K', { mod: true })})`}
+      >
+        <Search />
+        <span>Sessions</span>
+        <kbd class="shortcut-hint">{formatShortcut('K', { mod: true })}</kbd>
+      </button>
+      <div class="layout-bar-divider" />
       {PRESETS.map((p) => (
         <button
           key={p.id}

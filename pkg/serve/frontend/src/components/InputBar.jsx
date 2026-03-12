@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
 import { SendHorizonal, Square, Zap, Mic, MicOff, Loader2 } from 'lucide-preact';
 import { sendMessage, cancelRun } from '../state.js';
 import { useVoice } from '../hooks/useVoice.js';
+import { formatShortcut } from '../hooks/useHotkeys.js';
 
 // Global registry: tileId → { toggleVoice }. Used by keyboard shortcuts.
 export const inputBarRegistry = new Map();
@@ -99,7 +100,7 @@ export function InputBar({ sessionId, sessionState, tileId }) {
             class={`input-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''}`}
             onClick={toggleVoice}
             disabled={transcribing}
-            title={recording ? 'Stop recording' : transcribing ? 'Transcribing…' : 'Voice input'}
+            title={recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
           >
             {transcribing ? <Loader2 /> : recording ? <MicOff /> : <Mic />}
           </button>

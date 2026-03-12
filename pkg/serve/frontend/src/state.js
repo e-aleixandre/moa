@@ -23,7 +23,6 @@ function persistState(s) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       tileTree: s.tileTree,
       focusedTile: s.focusedTile,
-      sidebarOpen: s.sidebarOpen,
       soundEnabled: s.soundEnabled,
     }));
   } catch (_) { /* ignore */ }
@@ -52,7 +51,6 @@ let state = {
 
   tileTree: initialTree,
   focusedTile: initialFocused,
-  sidebarOpen: persisted.sidebarOpen !== undefined ? persisted.sidebarOpen : true,
   soundEnabled: persisted.soundEnabled || false,
 
   isMobile: false,
@@ -527,7 +525,6 @@ export function setActiveSession(id) {
 export function toggleDrawer() { setState({ drawerOpen: !state.drawerOpen }); }
 export function toggleDialog() { setState({ dialogOpen: !state.dialogOpen }); }
 export function toggleSound() { setState({ soundEnabled: !state.soundEnabled }); }
-export function toggleSidebar() { setState({ sidebarOpen: !state.sidebarOpen }); }
 export function setMobile(isMobile) { setState({ isMobile }); }
 
 // --- Auto-fill tiles with active sessions ---
