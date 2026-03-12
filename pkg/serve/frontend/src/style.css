@@ -1544,6 +1544,7 @@ kbd.shortcut-hint {
 
 .drawer-item-title {
   flex: 1;
+  min-width: 0;
   font-size: 14px;
   color: var(--subtext1);
   white-space: nowrap;
@@ -1553,9 +1554,15 @@ kbd.shortcut-hint {
 .drawer-item.active .drawer-item-title { color: var(--text); }
 
 .drawer-item-meta {
+  flex-shrink: 10;
+  min-width: 0;
   font-size: 11px;
   color: var(--overlay0);
   font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 30%;
 }
 
 .drawer-item-delete {
