@@ -296,6 +296,8 @@ export function handleWsToolEnd(id, data) {
 }
 
 export function handleWsStateChange(id, data) {
+  const prev = state.sessions[id];
+  const wasRunning = prev && (prev.state === 'running' || prev.state === 'permission');
   updateSession(id, {
     state: data.state,
     error: data.error || null,
@@ -305,6 +307,10 @@ export function handleWsStateChange(id, data) {
     if (sess) {
       updateSession(id, { streamingText: null, thinkingText: null });
     }
+    // Flash visible tiles on turn end / error
+    if (wasRunning) {
+      flashSession(id, data.state === 'error' ? 'error' : 'done');
+    }
   }
 }
 
@@ -313,10 +319,21 @@ export function handleWsPermissionRequest(id, data) {
     state: 'permission',
     pendingPerm: { id: data.id, tool_name: data.tool_name, args: data.args },
   });
+  flashSession(id, 'attention');
   const sess = state.sessions[id];
   if (sess) {
     triggerAttention(sess, data.tool_name, state.soundEnabled);
   }
+}
+
+/** Set a flash type on a session. Auto-clears after 800ms. */
+function flashSession(id, type) {
+  updateSession(id, { flash: type });
+  setTimeout(() => {
+    if (state.sessions[id]?.flash === type) {
+      updateSession(id, { flash: null });
+    }
+  }, 900);
 }
 
 export function handleWsConfigChange(id, data) {
