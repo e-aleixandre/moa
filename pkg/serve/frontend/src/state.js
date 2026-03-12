@@ -2,6 +2,7 @@
 
 import { api, syncConnections } from './api.js';
 import { triggerAttention } from './notifications.js';
+import { getLayout, layoutCount } from './layouts.js';
 
 const STORAGE_KEY = 'moa-ui-state';
 
@@ -30,7 +31,7 @@ const persisted = loadPersistedState();
 let state = {
   sessions: {},
 
-  layout: persisted.layout || 1,
+  layout: persisted.layout || '1',
   tileAssignments: persisted.tileAssignments || [null],
   focusedTile: persisted.focusedTile || 0,
   sidebarOpen: persisted.sidebarOpen !== undefined ? persisted.sidebarOpen : true,
@@ -43,8 +44,9 @@ let state = {
 };
 
 // Ensure tileAssignments length matches layout
-while (state.tileAssignments.length < state.layout) state.tileAssignments.push(null);
-state.tileAssignments = state.tileAssignments.slice(0, state.layout);
+const _count = layoutCount(state.layout);
+while (state.tileAssignments.length < _count) state.tileAssignments.push(null);
+state.tileAssignments = state.tileAssignments.slice(0, _count);
 
 let listeners = new Set();
 
@@ -447,18 +449,19 @@ export async function trustMcp(id) {
 
 // --- UI actions ---
 
-export function setLayout(n) {
+export function setLayout(id) {
+  const n = layoutCount(id);
   const assignments = [...state.tileAssignments];
   while (assignments.length < n) assignments.push(null);
   const tileAssignments = assignments.slice(0, n);
   const focusedTile = Math.min(state.focusedTile, n - 1);
-  setState({ layout: n, tileAssignments, focusedTile });
+  setState({ layout: id, tileAssignments, focusedTile });
   autoFillTiles();
   afterVisibilityChange();
 }
 
 export function assignTile(tileIdx, sessionId) {
-  if (tileIdx < 0 || tileIdx >= state.layout) return;
+  if (tileIdx < 0 || tileIdx >= layoutCount(state.layout)) return;
   // Remove from any other tile first (unique assignment)
   const assignments = state.tileAssignments.map(id => id === sessionId ? null : id);
   assignments[tileIdx] = sessionId;
@@ -467,15 +470,25 @@ export function assignTile(tileIdx, sessionId) {
 }
 
 export function focusTile(idx) {
-  if (idx >= 0 && idx < state.layout) {
+  if (idx >= 0 && idx < layoutCount(state.layout)) {
     setState({ focusedTile: idx });
+    // Focus the textarea inside the tile so the user can type immediately
+    requestAnimationFrame(() => {
+      const tiles = document.querySelectorAll('.tile');
+      const tile = tiles[idx];
+      if (tile) {
+        const ta = tile.querySelector('textarea');
+        if (ta) ta.focus();
+      }
+    });
   }
 }
 
 export function swapTiles(fromIdx, toIdx) {
   if (fromIdx === toIdx) return;
-  if (fromIdx < 0 || fromIdx >= state.layout) return;
-  if (toIdx < 0 || toIdx >= state.layout) return;
+  const count = layoutCount(state.layout);
+  if (fromIdx < 0 || fromIdx >= count) return;
+  if (toIdx < 0 || toIdx >= count) return;
   const assignments = [...state.tileAssignments];
   const tmp = assignments[fromIdx];
   assignments[fromIdx] = assignments[toIdx];

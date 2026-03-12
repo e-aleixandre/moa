@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>moa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/*
+  Design direction: "Surgical precision"
+  Inspired by: Linear's restraint, Warp's code-native feel, Vercel's negative space.
+  Typography: Outfit (geometric, warm, modern) + IBM Plex Mono (serious, readable).
+  Palette: True black canvas. Single warm accent (amber) — everything else is
+  grayscale. The amber acts like a status LED: small, intentional, alive.
+  Philosophy: If an element doesn't earn its pixels, it's gone.
+*/
+
+:root {
+  --black:       #09090b;
+  --surface:     #0f0f12;
+  --raised:      #16161a;
+  --overlay:     #1c1c22;
+  --border:      #27272a;
+  --border-sub:  #1f1f23;
+  --text:        #a1a1aa;
+  --text-2:      #71717a;
+  --text-bright: #fafafa;
+  --accent:      #f59e0b;
+  --accent-dim:  rgba(245,158,11,0.08);
+  --accent-med:  rgba(245,158,11,0.15);
+  --green:       #34d399;
+  --green-dim:   rgba(52,211,153,0.10);
+  --blue:        #60a5fa;
+  --blue-dim:    rgba(96,165,250,0.10);
+  --red:         #f87171;
+  --red-dim:     rgba(248,113,113,0.10);
+  --font:        'Outfit', sans-serif;
+  --mono:        'IBM Plex Mono', monospace;
+  --sidebar-w:   240px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--accent-med); color: var(--text-bright); }
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+body {
+  font-family: var(--font);
+  background: var(--black);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ═══════════════════════════════════════
+   SIDEBAR — slim, quiet, information-dense
+   ═══════════════════════════════════════ */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border-sub);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sb-header {
+  padding: 20px 16px 14px;
+}
+.sb-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.sb-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent) 0%, #d97706 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--black);
+  font-family: var(--mono);
+}
+.sb-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-bright);
+  letter-spacing: -0.03em;
+}
+
+.sb-search {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.2s;
+}
+.sb-search:focus { border-color: var(--accent); }
+.sb-search::placeholder { color: var(--text-2); }
+
+.sb-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.sb-group {
+  margin-top: 8px;
+}
+.sb-group-label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-2);
+  padding: 6px 8px 4px;
+}
+
+.sb-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s;
+  position: relative;
+}
+.sb-item:hover { background: var(--raised); }
+.sb-item.active { background: var(--accent-dim); }
+
+.sb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sb-dot.idle      { background: var(--green); }
+.sb-dot.running   { background: var(--blue); box-shadow: 0 0 6px var(--blue); animation: glow 2s ease infinite; }
+.sb-dot.waiting   { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: glow 1.2s ease infinite; }
+.sb-dot.error     { background: var(--red); }
+.sb-dot.saved     { background: var(--text-2); opacity: 0.3; }
+
+@keyframes glow {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.sb-name {
+  font-size: 12.5px;
+  font-weight: 450;
+  color: var(--text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.12s;
+}
+.sb-item:hover .sb-name { color: var(--text-bright); }
+.sb-item.active .sb-name { color: var(--accent); }
+
+.sb-model {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.sb-badge {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--black);
+  font-size: 9px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sb-footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-sub);
+}
+.btn-new {
+  width: 100%;
+  padding: 7px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: -0.01em;
+}
+.btn-new:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ═══════════════════════════════════════
+   MAIN
+   ═══════════════════════════════════════ */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--black);
+}
+
+/* Layout bar — minimal, not distracting */
+.layout-bar {
+  height: 36px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-sub);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 2px;
+}
+.lb-btn {
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: all 0.12s;
+  line-height: 1;
+}
+.lb-btn:hover { background: var(--raised); color: var(--text); }
+.lb-btn.active { background: var(--accent-dim); color: var(--accent); }
+.lb-sep { width: 1px; height: 14px; background: var(--border); margin: 0 6px; }
+.lb-hint {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-2);
+}
+.lb-hint kbd {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 9px;
+}
+
+/* Tile grid */
+.tiles {
+  flex: 1;
+  display: grid;
+  gap: 1px;
+  background: var(--border-sub);
+  overflow: hidden;
+}
+.tiles.l-1 { grid-template: 1fr / 1fr; }
+.tiles.l-2 { grid-template: 1fr / 1fr 1fr; }
+.tiles.l-4 { grid-template: 1fr 1fr / 1fr 1fr; }
+.tiles.l-6 { grid-template: 1fr 1fr / 1fr 1fr 1fr; }
+
+/* ═══════════════════════════════════════
+   TILE — each is a self-contained chat
+   ═══════════════════════════════════════ */
+.tile {
+  background: var(--black);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  transition: box-shadow 0.2s;
+}
+.tile.focused::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--accent);
+  border-radius: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.tile.attention::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--accent);
+  pointer-events: none;
+  z-index: 5;
+  animation: borderPulse 2s ease infinite;
+}
+@keyframes borderPulse {
+  0%, 100% { border-color: var(--accent); }
+  50%      { border-color: transparent; }
+}
+
+/* Tile header */
+.th {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-sub);
+  min-height: 32px;
+  user-select: none;
+}
+.th-dot { width: 5px; height: 5px; border-radius: 50%; }
+.th-dot.idle    { background: var(--green); }
+.th-dot.running { background: var(--blue); box-shadow: 0 0 4px var(--blue); animation: glow 2s ease infinite; }
+.th-dot.waiting { background: var(--accent); box-shadow: 0 0 4px var(--accent); animation: glow 1.2s ease infinite; }
+
+.th-name {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-bright);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.th-model {
+  font-size: 9.5px;
+  font-family: var(--mono);
+  color: var(--text-2);
+}
+.th-num {
+  font-size: 9px;
+  font-weight: 600;
+  font-family: var(--mono);
+  color: var(--text-2);
+  background: var(--raised);
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Messages */
+.msgs {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* User message — right-aligned, subtle */
+.mu {
+  align-self: flex-end;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 10px 10px 2px 10px;
+  padding: 7px 11px;
+  font-size: 12.5px;
+  max-width: 82%;
+  color: var(--text-bright);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* Assistant message */
+.ma {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text);
+}
+.ma p { margin-bottom: 5px; }
+.ma p:last-child { margin-bottom: 0; }
+.ma strong { color: var(--text-bright); font-weight: 500; }
+.ma code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--raised);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--accent);
+}
+
+/* Code blocks */
+.ma pre {
+  background: var(--surface);
+  border: 1px solid var(--border-sub);
+  border-radius: 6px;
+  margin: 6px 0;
+  overflow: hidden;
+  position: relative;
+}
+.pre-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--border-sub);
+}
+.pre-lang {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pre-copy {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 10px;
+  font-family: var(--mono);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: all 0.12s;
+}
+.pre-copy:hover { background: var(--overlay); color: var(--text); }
+.pre-code {
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text);
+}
+/* Syntax hints */
+.pre-code .kw { color: #c084fc; }
+.pre-code .fn { color: #60a5fa; }
+.pre-code .st { color: #34d399; }
+.pre-code .cm { color: var(--text-2); font-style: italic; }
+.pre-code .tp { color: #f59e0b; }
+
+/* Tool calls — compact, single line unless expanded */
+.tc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.tc:hover { color: var(--text); }
+.tc-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  flex-shrink: 0;
+}
+.tc-icon.done { background: var(--green-dim); color: var(--green); }
+.tc-icon.spin { background: var(--blue-dim); color: var(--blue); animation: glow 1.5s ease infinite; }
+
+.tc-name { font-weight: 500; }
+.tc-arg { color: var(--text-2); font-weight: 400; }
+.tc-arrow { margin-left: auto; font-size: 10px; transition: transform 0.15s; }
+.tc.open .tc-arrow { transform: rotate(90deg); }
+.tc-body {
+  display: none;
+  padding: 6px 10px;
+  margin: 2px 0 4px 20px;
+  background: var(--surface);
+  border-left: 2px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
+  border-radius: 0 4px 4px 0;
+}
+.tc-body.open { display: block; }
+
+/* Permission card */
+.perm {
+  background: var(--accent-dim);
+  border: 1px solid rgba(245,158,11,0.2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 4px 0;
+}
+.perm-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.perm-cmd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.perm-btns { display: flex; gap: 6px; }
+.perm-btns button {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: opacity 0.12s;
+  letter-spacing: -0.01em;
+}
+.perm-btns button:hover { opacity: 0.8; }
+.btn-y { background: var(--accent); color: var(--black); }
+.btn-n { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+/* Thinking */
+.think {
+  padding: 2px 0;
+}
+.think summary {
+  font-size: 11px;
+  color: var(--text-2);
+  font-style: italic;
+  cursor: pointer;
+  font-family: var(--mono);
+}
+.think-body {
+  font-size: 11px;
+  color: var(--text-2);
+  font-style: italic;
+  padding: 4px 0;
+  line-height: 1.5;
+}
+
+/* Streaming cursor */
+.streaming::after {
+  content: '▎';
+  color: var(--accent);
+  font-weight: 300;
+  animation: blink 0.8s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Tile input */
+.ti {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-sub);
+  background: var(--surface);
+}
+.ti textarea {
+  flex: 1;
+  background: transparent;
+  color: var(--text-bright);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  font-family: var(--font);
+  resize: none;
+  min-height: 30px;
+  max-height: 60px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.ti textarea:focus { border-color: var(--text-2); }
+.ti textarea::placeholder { color: var(--text-2); }
+
+.ti-send {
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: all 0.12s;
+  min-height: 30px;
+}
+.ti-send:hover { border-color: var(--accent); color: var(--accent); }
+
+.ti-stop {
+  padding: 0 10px;
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(248,113,113,0.2);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--mono);
+  cursor: pointer;
+  min-height: 30px;
+  transition: opacity 0.12s;
+}
+.ti-stop:hover { opacity: 0.7; }
+
+/* ═══════════════════════════════════════
+   TOAST — top-right, minimal
+   ═══════════════════════════════════════ */
+.toasts {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  pointer-events: auto;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: toastIn 0.25s ease;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  max-width: 300px;
+}
+.toast-info { flex: 1; }
+.toast-name { font-weight: 500; color: var(--text-bright); font-size: 11.5px; }
+.toast-detail { font-size: 10.5px; color: var(--text-2); margin-top: 1px; font-family: var(--mono); }
+
+@keyframes toastIn {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sb-header">
+    <div class="sb-brand">
+      <div class="sb-logo">m</div>
+      <span class="sb-title">moa</span>
+    </div>
+    <input class="sb-search" placeholder="Filter…">
+  </div>
+
+  <div class="sb-list">
+    <div class="sb-group">
+      <div class="sb-group-label">moa</div>
+      <div class="sb-item active" onclick="focusTile(0)">
+        <span class="sb-dot running"></span>
+        <span class="sb-name">Refactor auth module</span>
+      </div>
+      <div class="sb-item" onclick="focusTile(1)">
+        <span class="sb-dot waiting"></span>
+        <span class="sb-name">Add WebSocket tests</span>
+        <span class="sb-badge">!</span>
+      </div>
+      <div class="sb-item" onclick="focusTile(2)">
+        <span class="sb-dot idle"></span>
+        <span class="sb-name">Fix store scoping</span>
+      </div>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">api-gateway</div>
+      <div class="sb-item" onclick="focusTile(3)">
+        <span class="sb-dot running"></span>
+        <span class="sb-name">Rate limiter</span>
+      </div>
+      <div class="sb-item">
+        <span class="sb-dot saved"></span>
+        <span class="sb-name">Migrate to chi</span>
+        <span class="sb-model">2h</span>
+      </div>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">infra</div>
+      <div class="sb-item">
+        <span class="sb-dot error"></span>
+        <span class="sb-name">Terraform refactor</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sb-footer">
+    <button class="btn-new">New session</button>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="layout-bar">
+    <button class="lb-btn" onclick="setLayout(1)">1</button>
+    <button class="lb-btn" onclick="setLayout(2)">2</button>
+    <button class="lb-btn active" onclick="setLayout(4)">4</button>
+    <button class="lb-btn" onclick="setLayout(6)">6</button>
+    <div class="lb-sep"></div>
+    <div class="lb-hint"><kbd>⌘1-4</kbd> focus · <kbd>⌘B</kbd> sidebar</div>
+  </div>
+
+  <div class="tiles l-4" id="tiles">
+
+    <!-- TILE 1: Running, streaming with code -->
+    <div class="tile focused" onclick="focusTile(0)">
+      <div class="th">
+        <span class="th-dot running"></span>
+        <span class="th-name">Refactor auth module</span>
+        <span class="th-model">sonnet-4</span>
+        <span class="th-num">1</span>
+      </div>
+      <div class="msgs">
+        <div class="mu">Refactor the auth middleware to use the new JWT library. Keep backwards compat with old tokens for 30 days.</div>
+
+        <details class="think">
+          <summary>thinking…</summary>
+          <div class="think-body">I need to look at the current auth middleware, understand the token format, then create a dual-validation path that tries the new parser first and falls back to legacy.</div>
+        </details>
+
+        <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+          <span class="tc-icon done">✓</span>
+          <span class="tc-name">read</span>
+          <span class="tc-arg">pkg/auth/middleware.go</span>
+          <span class="tc-arrow">›</span>
+        </div>
+        <div class="tc-body">func validateToken(raw string) (*Claims, error) {
+    token, err := jwt.Parse(raw, keyFunc)
+    ...</div>
+
+        <div class="tc">
+          <span class="tc-icon spin">⋯</span>
+          <span class="tc-name">edit</span>
+          <span class="tc-arg">pkg/auth/middleware.go</span>
+        </div>
+
+        <div class="ma">
+          <p>I'm extracting the validation into a <code>TokenValidator</code> interface. The middleware will chain validators — new JWT first, legacy fallback:</p>
+          <pre>
+            <div class="pre-header">
+              <span class="pre-lang">go</span>
+              <button class="pre-copy">copy</button>
+            </div>
+            <div class="pre-code"><span class="kw">type</span> <span class="tp">TokenValidator</span> <span class="kw">interface</span> {
+    <span class="fn">Validate</span>(raw <span class="tp">string</span>) (*Claims, <span class="tp">error</span>)
+}
+
+<span class="kw">type</span> <span class="tp">ChainValidator</span> <span class="kw">struct</span> {
+    validators []<span class="tp">TokenValidator</span>
+}
+
+<span class="kw">func</span> (c *<span class="tp">ChainValidator</span>) <span class="fn">Validate</span>(raw <span class="tp">string</span>) (*Claims, <span class="tp">error</span>) {
+    <span class="kw">for</span> _, v := <span class="kw">range</span> c.validators {
+        claims, err := v.<span class="fn">Validate</span>(raw)
+        <span class="kw">if</span> err == <span class="kw">nil</span> {
+            <span class="kw">return</span> claims, <span class="kw">nil</span>
+        }
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>, ErrInvalidToken
+}</div>
+          </pre>
+          <p>Next I'll implement the v2 validator and wire it up<span class="streaming"></span></p>
+        </div>
+      </div>
+      <div class="ti">
+        <textarea placeholder="Message…" rows="1" disabled></textarea>
+        <button class="ti-stop">stop</button>
+      </div>
+    </div>
+
+    <!-- TILE 2: Permission needed -->
+    <div class="tile attention" onclick="focusTile(1)">
+      <div class="th">
+        <span class="th-dot waiting"></span>
+        <span class="th-name">Add WebSocket tests</span>
+        <span class="th-model">sonnet-4</span>
+        <span class="th-num">2</span>
+      </div>
+      <div class="msgs">
+        <div class="mu">Write tests for the WebSocket handler. Cover connect, message, disconnect, error.</div>
+
+        <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+          <span class="tc-icon done">✓</span>
+          <span class="tc-name">read</span>
+          <span class="tc-arg">pkg/serve/server.go</span>
+          <span class="tc-arrow">›</span>
+        </div>
+        <div class="tc-body">func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+    ...</div>
+
+        <div class="ma">
+          <p>I've read the handler. I'll write 4 test cases covering the full lifecycle. Let me run them first.</p>
+        </div>
+
+        <div class="perm">
+          <div class="perm-label">permission</div>
+          <div class="perm-cmd">$ go test -race ./pkg/serve/ -run TestWebSocket -v</div>
+          <div class="perm-btns">
+            <button class="btn-y">Allow</button>
+            <button class="btn-n">Deny</button>
+          </div>
+        </div>
+      </div>
+      <div class="ti">
+        <textarea placeholder="Message…" rows="1" disabled></textarea>
+        <button class="ti-send" disabled>send</button>
+      </div>
+    </div>
+
+    <!-- TILE 3: Idle, completed conversation -->
+    <div class="tile" onclick="focusTile(2)">
+      <div class="th">
+        <span class="th-dot idle"></span>
+        <span class="th-name">Fix store scoping</span>
+        <span class="th-model">opus-4</span>
+        <span class="th-num">3</span>
+      </div>
+      <div class="msgs">
+        <div class="mu">The FileStore isn't scoping sessions by CWD. Fix it.</div>
+
+        <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+          <span class="tc-icon done">✓</span>
+          <span class="tc-name">edit</span>
+          <span class="tc-arg">pkg/session/store.go</span>
+          <span class="tc-arrow">›</span>
+        </div>
+        <div class="tc-body">Added scopeKey(cwd) using SHA-256 hash of cleaned path</div>
+
+        <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+          <span class="tc-icon done">✓</span>
+          <span class="tc-name">bash</span>
+          <span class="tc-arg">go test -race ./pkg/session/</span>
+          <span class="tc-arrow">›</span>
+        </div>
+        <div class="tc-body">ok  github.com/ealeixandre/moa/pkg/session  0.340s</div>
+
+        <div class="ma">
+          <p>Done. <code>NewFileStore</code> now takes <code>(baseDir, cwd)</code> and scopes sessions under <code>basename_hash12</code>. All tests pass.</p>
+        </div>
+      </div>
+      <div class="ti">
+        <textarea placeholder="Message…" rows="1"></textarea>
+        <button class="ti-send">send</button>
+      </div>
+    </div>
+
+    <!-- TILE 4: Running, different project -->
+    <div class="tile" onclick="focusTile(3)">
+      <div class="th">
+        <span class="th-dot running"></span>
+        <span class="th-name">Rate limiter</span>
+        <span class="th-model">sonnet-4</span>
+        <span class="th-num">4</span>
+      </div>
+      <div class="msgs">
+        <div class="mu">Implement token bucket rate limiter middleware. 100 req/s per IP, burst 20.</div>
+
+        <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+          <span class="tc-icon done">✓</span>
+          <span class="tc-name">read</span>
+          <span class="tc-arg">pkg/middleware/rate.go</span>
+          <span class="tc-arrow">›</span>
+        </div>
+        <div class="tc-body">// Package middleware provides HTTP middleware components.</div>
+
+        <div class="tc">
+          <span class="tc-icon spin">⋯</span>
+          <span class="tc-name">write</span>
+          <span class="tc-arg">pkg/middleware/ratelimit.go</span>
+        </div>
+
+        <div class="ma">
+          <p>Writing the rate limiter using <code>sync.Map</code> keyed by IP with <code>*rate.Limiter</code> from <code>golang.org/x/time/rate</code><span class="streaming"></span></p>
+        </div>
+      </div>
+      <div class="ti">
+        <textarea placeholder="Message…" rows="1" disabled></textarea>
+        <button class="ti-stop">stop</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOASTS -->
+<div class="toasts">
+  <div class="toast">
+    <div class="toast-info">
+      <div class="toast-name">Add WebSocket tests</div>
+      <div class="toast-detail">bash — needs permission</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function setLayout(n) {
+  const g = document.getElementById('tiles');
+  g.className = 'tiles l-' + n;
+  document.querySelectorAll('.lb-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === [1,2,4,6].indexOf(n));
+  });
+}
+function focusTile(i) {
+  document.querySelectorAll('.tile').forEach((t, j) => {
+    t.classList.toggle('focused', j === i);
+    if (j === i) t.classList.remove('attention');
+  });
+  document.querySelectorAll('.sb-item').forEach((s, j) => {
+    s.classList.toggle('active', j === i);
+  });
+}
+</script>
+</body>
+</html>

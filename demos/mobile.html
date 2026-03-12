@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<title>moa — Mobile Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep:    #0a0c10;
+  --bg:         #0d1117;
+  --bg-raised:  #151b23;
+  --bg-overlay: #1c2333;
+  --border:     #252d38;
+  --border-focus: #3b82f6;
+  --text:       #d1d5db;
+  --text-bright:#f0f4f8;
+  --text-muted: #6b7280;
+  --accent:     #3b82f6;
+  --accent-dim: rgba(59,130,246,0.12);
+  --green:      #22c55e;
+  --green-dim:  rgba(34,197,94,0.12);
+  --yellow:     #eab308;
+  --yellow-dim: rgba(234,179,8,0.12);
+  --red:        #ef4444;
+  --red-dim:    rgba(239,68,68,0.12);
+  --orange:     #f97316;
+  --radius:     8px;
+  --font:       'DM Sans', -apple-system, sans-serif;
+  --mono:       'JetBrains Mono', 'SF Mono', monospace;
+  --tab-h:      52px;
+  --header-h:   48px;
+  --input-h:    54px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  font-family: var(--font);
+  background: var(--bg-deep);
+  color: var(--text);
+  height: 100dvh;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ═══════════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════════ */
+.header {
+  height: var(--header-h);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 10px;
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.header-hamburger {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  padding: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+}
+.header-hamburger:active { color: var(--text-bright); }
+
+.header-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.header-dot.running { background: var(--accent); animation: pulse 1.4s ease infinite; }
+.header-dot.idle { background: var(--green); }
+.header-dot.permission { background: var(--yellow); animation: pulse 0.8s ease infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.85); }
+}
+
+.header-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-model {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.header-bell {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  padding: 6px;
+  position: relative;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.header-bell .notif-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yellow);
+  border: 2px solid var(--bg);
+  animation: pulse 0.8s ease infinite;
+}
+
+/* ═══════════════════════════════════════════════
+   CHAT MESSAGES
+   ═══════════════════════════════════════════════ */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.msg-user {
+  align-self: flex-end;
+  background: var(--accent-dim);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+  font-size: 15px;
+  max-width: 85%;
+  color: var(--text-bright);
+  line-height: 1.5;
+}
+
+.msg-assistant {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text);
+}
+.msg-assistant p { margin-bottom: 8px; }
+.msg-assistant code {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--bg-raised);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.msg-assistant pre {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+  -webkit-overflow-scrolling: touch;
+}
+.msg-assistant pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Tool calls */
+.tool-call {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  overflow: hidden;
+}
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  -webkit-tap-highlight-color: transparent;
+}
+.tool-icon { font-size: 12px; }
+.tool-name { font-weight: 600; color: var(--accent); font-family: var(--mono); font-size: 12px; }
+.tool-status { margin-left: auto; font-size: 12px; }
+.tool-body {
+  display: none;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.tool-body.open { display: block; }
+
+/* Permission */
+.perm-card {
+  background: var(--yellow-dim);
+  border: 1px solid rgba(234,179,8,0.3);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.perm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--yellow);
+  margin-bottom: 8px;
+}
+.perm-tool {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+}
+.perm-actions {
+  display: flex;
+  gap: 8px;
+}
+.perm-actions button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-approve { background: var(--green); color: #fff; }
+.btn-deny { background: rgba(239,68,68,0.15); color: var(--red); }
+
+/* Streaming */
+.streaming::after {
+  content: '▌';
+  color: var(--accent);
+  animation: blink 0.7s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Thinking */
+.thinking-block { margin: 4px 0; }
+.thinking-block summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+  -webkit-tap-highlight-color: transparent;
+}
+.thinking-content {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 0;
+  line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════
+   INPUT BAR
+   ═══════════════════════════════════════════════ */
+.input-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+  /* safe area for notched phones */
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+.input-bar textarea {
+  flex: 1;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 9px 16px;
+  font-size: 16px; /* prevent iOS zoom */
+  font-family: var(--font);
+  resize: none;
+  min-height: 40px;
+  max-height: 100px;
+  line-height: 1.4;
+  outline: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s;
+}
+.input-bar textarea:focus { border-color: var(--accent); }
+.input-bar textarea::placeholder { color: var(--text-muted); }
+
+.input-bar .btn-send {
+  width: 40px;
+  height: 40px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-end;
+  -webkit-tap-highlight-color: transparent;
+}
+.input-bar .btn-send:active { opacity: 0.7; }
+
+.input-bar .btn-stop {
+  width: 40px;
+  height: 40px;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-end;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ═══════════════════════════════════════════════
+   BOTTOM TAB BAR
+   ═══════════════════════════════════════════════ */
+.tab-bar {
+  height: var(--tab-h);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  gap: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+  /* safe area */
+  padding-bottom: env(safe-area-inset-bottom);
+  scrollbar-width: none;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+
+.tab-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.15s;
+}
+.tab-pill:active { transform: scale(0.96); }
+.tab-pill.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text-bright);
+}
+.tab-pill.attention {
+  border-color: var(--yellow);
+  background: var(--yellow-dim);
+  animation: attentionPulse 2s ease infinite;
+}
+
+@keyframes attentionPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234,179,8,0); }
+  50%      { box-shadow: 0 0 0 3px rgba(234,179,8,0.2); }
+}
+
+.tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tab-dot.running   { background: var(--accent); animation: pulse 1.4s ease infinite; }
+.tab-dot.idle      { background: var(--green); }
+.tab-dot.permission{ background: var(--yellow); animation: pulse 0.8s ease infinite; }
+.tab-dot.error     { background: var(--red); }
+
+.tab-pill .tab-badge {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: #000;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-add {
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab-add:active { background: var(--bg-raised); }
+
+/* ═══════════════════════════════════════════════
+   DRAWER (slide from left)
+   ═══════════════════════════════════════════════ */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+.drawer-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  max-width: 85vw;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  z-index: 101;
+  transform: translateX(-100%);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+.drawer-overlay.open .drawer {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.drawer-brand svg { width: 22px; height: 22px; }
+.drawer-brand span {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-bright);
+  letter-spacing: -0.02em;
+}
+.drawer-search {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-family: var(--font);
+  outline: none;
+  -webkit-appearance: none;
+}
+.drawer-search:focus { border-color: var(--accent); }
+
+.drawer-sessions {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.drawer-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 12px 8px 4px;
+}
+
+.drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.drawer-item:active { background: var(--bg-raised); }
+.drawer-item.active { background: var(--accent-dim); }
+
+.di-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.di-dot.running   { background: var(--accent); animation: pulse 1.4s ease infinite; }
+.di-dot.idle      { background: var(--green); }
+.di-dot.permission{ background: var(--yellow); animation: pulse 0.8s ease infinite; }
+.di-dot.saved     { background: var(--text-muted); opacity: 0.4; }
+
+.di-content { flex: 1; min-width: 0; }
+.di-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.di-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.di-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 0.8s ease infinite;
+}
+
+.drawer-footer {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.drawer-footer button {
+  width: 100%;
+  padding: 12px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ═══════════════════════════════════════════════
+   "NEW MESSAGES" INDICATOR
+   ═══════════════════════════════════════════════ */
+.new-msgs-btn {
+  position: absolute;
+  bottom: calc(var(--input-h) + var(--tab-h) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  z-index: 10;
+  animation: fadeUp 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@keyframes fadeUp {
+  from { transform: translateX(-50%) translateY(10px); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════ HEADER ═══════ -->
+<div class="header">
+  <button class="header-hamburger" onclick="toggleDrawer()">☰</button>
+  <span class="header-dot running"></span>
+  <span class="header-title">Refactor auth module</span>
+  <span class="header-model">sonnet-4</span>
+  <button class="header-bell" onclick="toggleDrawer()">
+    🔔
+    <span class="notif-dot"></span>
+  </button>
+</div>
+
+<!-- ═══════ MESSAGES ═══════ -->
+<div class="messages" id="messages">
+  <div class="msg-user">Refactor the auth middleware to use the new JWT library. Keep backwards compat with old tokens for 30 days.</div>
+
+  <details class="thinking-block">
+    <summary>Thinking…</summary>
+    <div class="thinking-content">I need to look at the current auth middleware to understand the token validation flow. Then I'll create an interface that both the old and new JWT libraries can implement, allowing a graceful migration period.</div>
+  </details>
+
+  <div class="tool-call">
+    <div class="tool-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <span class="tool-icon">⚡</span>
+      <span class="tool-name">read_file</span>
+      <span class="tool-status" style="color:var(--green)">✓</span>
+    </div>
+    <div class="tool-body">pkg/auth/middleware.go</div>
+  </div>
+
+  <div class="tool-call">
+    <div class="tool-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <span class="tool-icon">⚡</span>
+      <span class="tool-name">read_file</span>
+      <span class="tool-status" style="color:var(--green)">✓</span>
+    </div>
+    <div class="tool-body">pkg/auth/jwt.go</div>
+  </div>
+
+  <div class="msg-assistant">
+    <p>I've analyzed the auth package. The current <code>validateToken()</code> is tightly coupled to the old JWT library. Here's my plan:</p>
+    <p>1. Create a <code>TokenValidator</code> interface<br>
+    2. Implement it for both old and new JWT libs<br>
+    3. Chain them: try new first, fallback to old</p>
+  </div>
+
+  <div class="tool-call">
+    <div class="tool-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <span class="tool-icon">⚡</span>
+      <span class="tool-name">edit_file</span>
+      <span class="tool-status" style="color:var(--green)">✓</span>
+    </div>
+    <div class="tool-body open">pkg/auth/middleware.go — added TokenValidator interface and ChainValidator</div>
+  </div>
+
+  <div class="tool-call">
+    <div class="tool-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <span class="tool-icon">⚡</span>
+      <span class="tool-name">write_file</span>
+      <span class="tool-status" style="color:var(--green)">✓</span>
+    </div>
+    <div class="tool-body">pkg/auth/jwt_v2.go</div>
+  </div>
+
+  <div class="tool-call">
+    <div class="tool-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <span class="tool-icon">⚡</span>
+      <span class="tool-name">bash</span>
+      <span class="tool-status" style="color:var(--accent)">⋯</span>
+    </div>
+    <div class="tool-body">$ go test -race ./pkg/auth/ -v</div>
+  </div>
+
+  <div class="msg-assistant">
+    <p>Running the test suite to verify the migration works. The <code>ChainValidator</code> tries the new JWT parser first, and if it returns <code>ErrInvalidToken</code>, falls back to the legacy parser<span class="streaming"></span></p>
+  </div>
+</div>
+
+<!-- "New messages" button (shown when scrolled up) -->
+<!-- <button class="new-msgs-btn">↓ New messages</button> -->
+
+<!-- ═══════ INPUT BAR ═══════ -->
+<div class="input-bar">
+  <textarea placeholder="Message…" rows="1" disabled></textarea>
+  <button class="btn-stop">⏹</button>
+</div>
+
+<!-- ═══════ TAB BAR ═══════ -->
+<div class="tab-bar">
+  <div class="tab-pill active">
+    <span class="tab-dot running"></span>
+    Auth refactor
+  </div>
+  <div class="tab-pill attention">
+    <span class="tab-dot permission"></span>
+    WS tests
+    <span class="tab-badge">!</span>
+  </div>
+  <div class="tab-pill">
+    <span class="tab-dot idle"></span>
+    Store scoping
+  </div>
+  <div class="tab-pill">
+    <span class="tab-dot running"></span>
+    Rate limiter
+  </div>
+  <div class="tab-pill">
+    <span class="tab-dot error"></span>
+    Terraform
+  </div>
+  <button class="tab-add">+</button>
+</div>
+
+<!-- ═══════ DRAWER ═══════ -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="toggleDrawer()">
+  <div class="drawer" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <div class="drawer-brand">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="var(--accent)"/>
+          <path d="M2 17l10 5 10-5" stroke="var(--accent)" opacity="0.5"/>
+          <path d="M2 12l10 5 10-5" stroke="var(--accent)" opacity="0.75"/>
+        </svg>
+        <span>moa</span>
+      </div>
+      <input class="drawer-search" placeholder="Filter sessions…">
+    </div>
+
+    <div class="drawer-sessions">
+      <div class="drawer-group-label">moa · 3 sessions</div>
+
+      <div class="drawer-item active">
+        <span class="di-dot running"></span>
+        <div class="di-content">
+          <div class="di-title">Refactor auth module</div>
+          <div class="di-meta">Sonnet 4 · running</div>
+        </div>
+      </div>
+      <div class="drawer-item">
+        <span class="di-dot permission"></span>
+        <div class="di-content">
+          <div class="di-title">Add WebSocket tests</div>
+          <div class="di-meta">Sonnet 4 · needs permission</div>
+        </div>
+        <span class="di-badge">!</span>
+      </div>
+      <div class="drawer-item">
+        <span class="di-dot idle"></span>
+        <div class="di-content">
+          <div class="di-title">Fix store scoping</div>
+          <div class="di-meta">Opus 4 · idle</div>
+        </div>
+      </div>
+
+      <div class="drawer-group-label">api-gateway · 2 sessions</div>
+
+      <div class="drawer-item">
+        <span class="di-dot running"></span>
+        <div class="di-content">
+          <div class="di-title">Rate limiter middleware</div>
+          <div class="di-meta">Sonnet 4 · running</div>
+        </div>
+      </div>
+      <div class="drawer-item">
+        <span class="di-dot saved"></span>
+        <div class="di-content">
+          <div class="di-title">Migrate to chi router</div>
+          <div class="di-meta">Sonnet 4 · saved · 2h ago</div>
+        </div>
+      </div>
+
+      <div class="drawer-group-label">infra · 1 session</div>
+      <div class="drawer-item">
+        <span class="di-dot" style="background:var(--red)"></span>
+        <div class="di-content">
+          <div class="di-title">Terraform refactor</div>
+          <div class="di-meta">Sonnet 4 · error</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="drawer-footer">
+      <button>+ New Session</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleDrawer() {
+  document.getElementById('drawerOverlay').classList.toggle('open');
+}
+
+// Toggle tool bodies
+document.querySelectorAll('.tool-header').forEach(h => {
+  h.addEventListener('click', () => {
+    const body = h.nextElementSibling;
+    if (body) body.classList.toggle('open');
+  });
+});
+
+// Scroll to bottom on load
+const msgs = document.getElementById('messages');
+msgs.scrollTop = msgs.scrollHeight;
+</script>
+</body>
+</html>

@@ -391,6 +391,20 @@ kbd.shortcut-hint {
 }
 .layout-btn .lucide { width: 15px; height: 15px; }
 
+/* Mini layout previews */
+.layout-mini-cell {
+  background: var(--overlay0);
+  border-radius: 1.5px;
+  min-width: 0;
+  min-height: 0;
+}
+.layout-btn.active .layout-mini-cell {
+  background: var(--peach);
+}
+.layout-btn:hover:not(.active) .layout-mini-cell {
+  background: var(--subtext0);
+}
+
 .layout-bar-spacer { flex: 1; }
 
 .layout-bar .sound-toggle {
@@ -415,11 +429,7 @@ kbd.shortcut-hint {
   overflow: hidden;
 }
 
-.tile-grid.l-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
-.tile-grid.l-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
-.tile-grid.l-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.tile-grid.l-6 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.tile-grid.l-8 { grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+/* Grid template is set inline from layout presets (layouts.js) */
 
 /* ─── Tile ─────────────────────────────────────────────────── */
 

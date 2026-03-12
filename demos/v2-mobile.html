@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>moa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/*
+  Same design system as desktop — "Surgical precision"
+  Adapted for touch: larger tap targets, dvh, safe areas, no hover states.
+*/
+
+:root {
+  --black:       #09090b;
+  --surface:     #0f0f12;
+  --raised:      #16161a;
+  --overlay:     #1c1c22;
+  --border:      #27272a;
+  --border-sub:  #1f1f23;
+  --text:        #a1a1aa;
+  --text-2:      #71717a;
+  --text-bright: #fafafa;
+  --accent:      #f59e0b;
+  --accent-dim:  rgba(245,158,11,0.08);
+  --accent-med:  rgba(245,158,11,0.15);
+  --green:       #34d399;
+  --green-dim:   rgba(52,211,153,0.10);
+  --blue:        #60a5fa;
+  --blue-dim:    rgba(96,165,250,0.10);
+  --red:         #f87171;
+  --red-dim:     rgba(248,113,113,0.10);
+  --font:        'Outfit', sans-serif;
+  --mono:        'IBM Plex Mono', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--accent-med); color: var(--text-bright); }
+
+html, body {
+  font-family: var(--font);
+  background: var(--black);
+  color: var(--text);
+  height: 100dvh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ═══════════════════════════════════════
+   HEADER — compact, informative
+   ═══════════════════════════════════════ */
+.hdr {
+  height: 48px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-sub);
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  gap: 8px;
+  flex-shrink: 0;
+  z-index: 20;
+  /* status bar safe area */
+  padding-top: env(safe-area-inset-top);
+}
+
+.hdr-menu {
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 6px;
+}
+.hdr-menu:active { background: var(--raised); }
+
+.hdr-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.hdr-dot.running { background: var(--blue); box-shadow: 0 0 6px var(--blue); animation: glow 2s ease infinite; }
+.hdr-dot.idle { background: var(--green); }
+.hdr-dot.waiting { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: glow 1.2s ease infinite; }
+
+@keyframes glow {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.hdr-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.02em;
+}
+.hdr-model {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.hdr-bell {
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 6px;
+}
+.hdr-bell:active { background: var(--raised); }
+.hdr-bell .notif {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  animation: glow 1.2s ease infinite;
+}
+
+/* ═══════════════════════════════════════
+   MESSAGES
+   ═══════════════════════════════════════ */
+.msgs {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.msgs::-webkit-scrollbar { display: none; }
+
+/* User */
+.mu {
+  align-self: flex-end;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 14px 14px 3px 14px;
+  padding: 10px 14px;
+  font-size: 15px;
+  max-width: 85%;
+  color: var(--text-bright);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* Assistant */
+.ma {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text);
+}
+.ma p { margin-bottom: 6px; }
+.ma p:last-child { margin-bottom: 0; }
+.ma strong { color: var(--text-bright); font-weight: 500; }
+.ma code {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--raised);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--accent);
+}
+
+/* Code blocks */
+.ma pre {
+  background: var(--surface);
+  border: 1px solid var(--border-sub);
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+.pre-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--border-sub);
+}
+.pre-lang {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pre-copy {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 11px;
+  font-family: var(--mono);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  -webkit-tap-highlight-color: transparent;
+}
+.pre-copy:active { background: var(--overlay); }
+.pre-code {
+  padding: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+}
+.pre-code .kw { color: #c084fc; }
+.pre-code .fn { color: #60a5fa; }
+.pre-code .st { color: #34d399; }
+.pre-code .cm { color: var(--text-2); font-style: italic; }
+.pre-code .tp { color: #f59e0b; }
+
+/* Tool calls — compact inline */
+.tc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  font-size: 13px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tc-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+.tc-icon.done { background: var(--green-dim); color: var(--green); }
+.tc-icon.spin { background: var(--blue-dim); color: var(--blue); animation: glow 1.5s ease infinite; }
+
+.tc-name { font-weight: 500; }
+.tc-arg { color: var(--text-2); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-arrow { margin-left: auto; font-size: 11px; transition: transform 0.15s; flex-shrink: 0; }
+.tc.open .tc-arrow { transform: rotate(90deg); }
+
+.tc-body {
+  display: none;
+  padding: 8px 12px;
+  margin: 0 0 4px 22px;
+  background: var(--surface);
+  border-left: 2px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+  border-radius: 0 6px 6px 0;
+  -webkit-overflow-scrolling: touch;
+}
+.tc-body.open { display: block; }
+
+/* Permission */
+.perm {
+  background: var(--accent-dim);
+  border: 1px solid rgba(245,158,11,0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 4px 0;
+}
+.perm-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.perm-cmd {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.perm-btns { display: flex; gap: 8px; }
+.perm-btns button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-y { background: var(--accent); color: var(--black); }
+.btn-y:active { opacity: 0.7; }
+.btn-n { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-n:active { background: var(--raised); }
+
+/* Thinking */
+.think { padding: 2px 0; }
+.think summary {
+  font-size: 12px;
+  color: var(--text-2);
+  font-style: italic;
+  cursor: pointer;
+  font-family: var(--mono);
+  -webkit-tap-highlight-color: transparent;
+}
+.think-body {
+  font-size: 12px;
+  color: var(--text-2);
+  font-style: italic;
+  padding: 4px 0;
+  line-height: 1.5;
+}
+
+/* Streaming */
+.streaming::after {
+  content: '▎';
+  color: var(--accent);
+  font-weight: 300;
+  animation: blink 0.8s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ═══════════════════════════════════════
+   INPUT BAR
+   ═══════════════════════════════════════ */
+.input-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-sub);
+  background: var(--surface);
+  flex-shrink: 0;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+.input-bar textarea {
+  flex: 1;
+  background: var(--raised);
+  color: var(--text-bright);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 9px 16px;
+  font-size: 16px; /* prevents iOS zoom */
+  font-family: var(--font);
+  resize: none;
+  min-height: 38px;
+  max-height: 120px;
+  line-height: 1.4;
+  outline: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s;
+}
+.input-bar textarea:focus { border-color: var(--text-2); }
+.input-bar textarea::placeholder { color: var(--text-2); }
+
+.ib-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s;
+}
+.ib-btn:active { transform: scale(0.9); }
+
+.ib-send {
+  background: var(--accent);
+  color: var(--black);
+  font-size: 16px;
+  font-weight: 700;
+}
+.ib-stop {
+  background: var(--red-dim);
+  border: 1px solid rgba(248,113,113,0.25);
+  color: var(--red);
+  font-size: 14px;
+}
+
+/* ═══════════════════════════════════════
+   TAB BAR — bottom session switcher
+   ═══════════════════════════════════════ */
+.tabs {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  gap: 5px;
+  background: var(--black);
+  border-top: 1px solid var(--border-sub);
+  overflow-x: auto;
+  flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border-sub);
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.15s;
+}
+.tab:active { transform: scale(0.96); }
+.tab.active {
+  background: var(--accent-dim);
+  border-color: rgba(245,158,11,0.2);
+  color: var(--text-bright);
+}
+.tab.attention {
+  border-color: rgba(245,158,11,0.3);
+  background: var(--accent-dim);
+}
+
+.tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tab-dot.running { background: var(--blue); animation: glow 2s ease infinite; }
+.tab-dot.idle    { background: var(--green); }
+.tab-dot.waiting { background: var(--accent); animation: glow 1.2s ease infinite; }
+.tab-dot.error   { background: var(--red); }
+
+.tab-badge {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--black);
+  font-size: 8px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-add {
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 50%;
+  color: var(--text-2);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab-add:active { background: var(--raised); }
+
+/* ═══════════════════════════════════════
+   DRAWER — slides from left
+   ═══════════════════════════════════════ */
+.drawer-bg {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.drawer-bg.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  max-width: 82vw;
+  background: var(--surface);
+  border-right: 1px solid var(--border-sub);
+  z-index: 101;
+  transform: translateX(-100%);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+.drawer-bg.open .drawer { transform: translateX(0); }
+
+.dw-header {
+  padding: 16px 14px 12px;
+  border-bottom: 1px solid var(--border-sub);
+  padding-top: max(16px, env(safe-area-inset-top));
+}
+.dw-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.dw-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent) 0%, #d97706 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--black);
+  font-family: var(--mono);
+}
+.dw-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-bright);
+  letter-spacing: -0.03em;
+}
+.dw-search {
+  width: 100%;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-family: var(--font);
+  outline: none;
+  -webkit-appearance: none;
+}
+.dw-search:focus { border-color: var(--text-2); }
+.dw-search::placeholder { color: var(--text-2); }
+
+.dw-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dw-group {
+  margin-top: 6px;
+}
+.dw-group-label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-2);
+  padding: 8px 8px 4px;
+}
+
+.dw-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.dw-item:active { background: var(--raised); }
+.dw-item.active { background: var(--accent-dim); }
+
+.dw-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dw-dot.running { background: var(--blue); animation: glow 2s ease infinite; }
+.dw-dot.idle    { background: var(--green); }
+.dw-dot.waiting { background: var(--accent); animation: glow 1.2s ease infinite; }
+.dw-dot.saved   { background: var(--text-2); opacity: 0.3; }
+.dw-dot.error   { background: var(--red); }
+
+.dw-content { flex: 1; min-width: 0; }
+.dw-title {
+  font-size: 14px;
+  font-weight: 450;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dw-meta {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 2px;
+  font-family: var(--mono);
+}
+
+.dw-badge {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--black);
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dw-footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-sub);
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+.dw-footer button {
+  width: 100%;
+  padding: 11px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.15s;
+}
+.dw-footer button:active { border-color: var(--accent); color: var(--accent); }
+
+/* ═══════════════════════════════════════
+   NEW MESSAGES INDICATOR
+   ═══════════════════════════════════════ */
+.scroll-hint {
+  position: absolute;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 16px;
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  z-index: 10;
+  cursor: pointer;
+  animation: fadeUp 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  display: none; /* toggle via JS */
+}
+@keyframes fadeUp {
+  from { transform: translateX(-50%) translateY(8px); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <button class="hdr-menu" onclick="toggleDrawer()">☰</button>
+  <span class="hdr-dot running"></span>
+  <span class="hdr-title">Refactor auth module</span>
+  <span class="hdr-model">sonnet-4</span>
+  <button class="hdr-bell" onclick="toggleDrawer()">
+    🔔<span class="notif"></span>
+  </button>
+</div>
+
+<!-- MESSAGES -->
+<div class="msgs" id="msgs">
+  <div class="mu">Refactor the auth middleware to use the new JWT library. Keep backwards compat with old tokens for 30 days.</div>
+
+  <details class="think">
+    <summary>thinking…</summary>
+    <div class="think-body">I need to examine the current auth middleware, understand the token format, then create a dual-validation path that tries the new parser first and falls back to legacy.</div>
+  </details>
+
+  <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+    <span class="tc-icon done">✓</span>
+    <span class="tc-name">read</span>
+    <span class="tc-arg">pkg/auth/middleware.go</span>
+    <span class="tc-arrow">›</span>
+  </div>
+  <div class="tc-body">func validateToken(raw string) (*Claims, error) {
+    token, err := jwt.Parse(raw, keyFunc)
+    if err != nil {
+        return nil, ErrInvalidToken
+    }
+    ...</div>
+
+  <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+    <span class="tc-icon done">✓</span>
+    <span class="tc-name">read</span>
+    <span class="tc-arg">pkg/auth/jwt.go</span>
+    <span class="tc-arrow">›</span>
+  </div>
+  <div class="tc-body">package auth
+
+import "github.com/golang-jwt/jwt/v5"</div>
+
+  <div class="ma">
+    <p>I've analyzed the auth package. The current <code>validateToken()</code> is tightly coupled to the old library. Here's the plan:</p>
+    <p><strong>1.</strong> Create a <code>TokenValidator</code> interface<br>
+    <strong>2.</strong> Implement for both old and new JWT<br>
+    <strong>3.</strong> Chain them: try new first, fallback to old</p>
+  </div>
+
+  <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+    <span class="tc-icon done">✓</span>
+    <span class="tc-name">edit</span>
+    <span class="tc-arg">pkg/auth/middleware.go</span>
+    <span class="tc-arrow">›</span>
+  </div>
+  <div class="tc-body">Added TokenValidator interface and ChainValidator</div>
+
+  <div class="tc" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+    <span class="tc-icon done">✓</span>
+    <span class="tc-name">write</span>
+    <span class="tc-arg">pkg/auth/jwt_v2.go</span>
+    <span class="tc-arrow">›</span>
+  </div>
+  <div class="tc-body">Created v2 validator using new JWT library</div>
+
+  <div class="ma">
+    <p>The <code>ChainValidator</code> is wired up. Here's the key piece:</p>
+    <pre>
+      <div class="pre-header">
+        <span class="pre-lang">go</span>
+        <button class="pre-copy">copy</button>
+      </div>
+      <div class="pre-code"><span class="kw">func</span> (c *<span class="tp">ChainValidator</span>) <span class="fn">Validate</span>(raw <span class="tp">string</span>) (*Claims, <span class="tp">error</span>) {
+    <span class="kw">for</span> _, v := <span class="kw">range</span> c.validators {
+        claims, err := v.<span class="fn">Validate</span>(raw)
+        <span class="kw">if</span> err == <span class="kw">nil</span> {
+            <span class="kw">return</span> claims, <span class="kw">nil</span>
+        }
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>, ErrInvalidToken
+}</div>
+    </pre>
+  </div>
+
+  <div class="tc">
+    <span class="tc-icon spin">⋯</span>
+    <span class="tc-name">bash</span>
+    <span class="tc-arg">go test -race ./pkg/auth/</span>
+  </div>
+
+  <div class="ma">
+    <p>Running the test suite to verify backwards compatibility. The new validator takes priority, legacy is the safety net<span class="streaming"></span></p>
+  </div>
+</div>
+
+<!-- INPUT -->
+<div class="input-bar">
+  <textarea placeholder="Message…" rows="1" disabled></textarea>
+  <button class="ib-btn ib-stop">⏹</button>
+</div>
+
+<!-- TAB BAR -->
+<div class="tabs">
+  <div class="tab active">
+    <span class="tab-dot running"></span>
+    Auth refactor
+  </div>
+  <div class="tab attention">
+    <span class="tab-dot waiting"></span>
+    WS tests
+    <span class="tab-badge">!</span>
+  </div>
+  <div class="tab">
+    <span class="tab-dot idle"></span>
+    Store fix
+  </div>
+  <div class="tab">
+    <span class="tab-dot running"></span>
+    Rate limiter
+  </div>
+  <div class="tab">
+    <span class="tab-dot error"></span>
+    Terraform
+  </div>
+  <button class="tab-add">+</button>
+</div>
+
+<!-- DRAWER -->
+<div class="drawer-bg" id="drawerBg" onclick="toggleDrawer()">
+  <div class="drawer" onclick="event.stopPropagation()">
+    <div class="dw-header">
+      <div class="dw-brand">
+        <div class="dw-logo">m</div>
+        <span class="dw-name">moa</span>
+      </div>
+      <input class="dw-search" placeholder="Filter…">
+    </div>
+    <div class="dw-list">
+      <div class="dw-group">
+        <div class="dw-group-label">moa</div>
+        <div class="dw-item active">
+          <span class="dw-dot running"></span>
+          <div class="dw-content">
+            <div class="dw-title">Refactor auth module</div>
+            <div class="dw-meta">sonnet-4 · running</div>
+          </div>
+        </div>
+        <div class="dw-item">
+          <span class="dw-dot waiting"></span>
+          <div class="dw-content">
+            <div class="dw-title">Add WebSocket tests</div>
+            <div class="dw-meta">sonnet-4 · permission</div>
+          </div>
+          <span class="dw-badge">!</span>
+        </div>
+        <div class="dw-item">
+          <span class="dw-dot idle"></span>
+          <div class="dw-content">
+            <div class="dw-title">Fix store scoping</div>
+            <div class="dw-meta">opus-4 · idle</div>
+          </div>
+        </div>
+      </div>
+      <div class="dw-group">
+        <div class="dw-group-label">api-gateway</div>
+        <div class="dw-item">
+          <span class="dw-dot running"></span>
+          <div class="dw-content">
+            <div class="dw-title">Rate limiter middleware</div>
+            <div class="dw-meta">sonnet-4 · running</div>
+          </div>
+        </div>
+        <div class="dw-item">
+          <span class="dw-dot saved"></span>
+          <div class="dw-content">
+            <div class="dw-title">Migrate to chi router</div>
+            <div class="dw-meta">sonnet-4 · saved · 2h ago</div>
+          </div>
+        </div>
+      </div>
+      <div class="dw-group">
+        <div class="dw-group-label">infra</div>
+        <div class="dw-item">
+          <span class="dw-dot error"></span>
+          <div class="dw-content">
+            <div class="dw-title">Terraform refactor</div>
+            <div class="dw-meta">sonnet-4 · error</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="dw-footer">
+      <button>New session</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleDrawer() {
+  document.getElementById('drawerBg').classList.toggle('open');
+}
+
+// Scroll to bottom
+const msgs = document.getElementById('msgs');
+msgs.scrollTop = msgs.scrollHeight;
+</script>
+</body>
+</html>

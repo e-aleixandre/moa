@@ -1,26 +1,42 @@
-import { Square, Columns2, Grid2x2, LayoutGrid, Grid3x3, Bell, BellOff } from 'lucide-preact';
+import { Bell, BellOff } from 'lucide-preact';
 import { setLayout, toggleSound } from '../state.js';
-import { formatShortcut } from '../hooks/useHotkeys.js';
+import { LAYOUTS, getLayout } from '../layouts.js';
 
-const LAYOUTS = [
-  { n: 1, icon: Square, label: '1 tile' },
-  { n: 2, icon: Columns2, label: '2 tiles' },
-  { n: 4, icon: Grid2x2, label: '4 tiles' },
-  { n: 6, icon: LayoutGrid, label: '6 tiles' },
-  { n: 8, icon: Grid3x3, label: '8 tiles' },
-];
+function LayoutPreview({ layout }) {
+  const style = {
+    display: 'grid',
+    gridTemplateColumns: layout.grid.columns,
+    gridTemplateRows: layout.grid.rows,
+    gridTemplateAreas: layout.grid.areas || undefined,
+    gap: '1.5px',
+    width: '22px',
+    height: '15px',
+  };
+
+  return (
+    <div class="layout-mini" style={style}>
+      {Array.from({ length: layout.count }, (_, i) => (
+        <div
+          key={i}
+          class="layout-mini-cell"
+          style={layout.tileAreas ? { gridArea: layout.tileAreas[i] } : undefined}
+        />
+      ))}
+    </div>
+  );
+}
 
 export function LayoutBar({ state }) {
   return (
     <div class="layout-bar">
-      {LAYOUTS.map(({ n, icon: Icon, label }) => (
+      {LAYOUTS.map((l) => (
         <button
-          key={n}
-          class={`layout-btn ${state.layout === n ? 'active' : ''}`}
-          onClick={() => setLayout(n)}
-          title={`${label} (${formatShortcut(String(n), { ctrl: true })})`}
+          key={l.id}
+          class={`layout-btn ${state.layout === l.id ? 'active' : ''}`}
+          onClick={() => setLayout(l.id)}
+          title={`${l.id} (${l.count} tile${l.count > 1 ? 's' : ''})`}
         >
-          <Icon />
+          <LayoutPreview layout={l} />
         </button>
       ))}
       <div class="layout-bar-spacer" />

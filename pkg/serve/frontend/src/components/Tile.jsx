@@ -7,7 +7,7 @@ import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { ModelPill } from './ModelPill.jsx';
 
-export function Tile({ tileIndex, sessionId, session, isFocused }) {
+export function Tile({ tileIndex, sessionId, session, isFocused, gridArea }) {
   const [dragOver, setDragOver] = useState(false);
   const tileRef = useRef(null);
   const needsAttention = session && (session.state === 'permission' || session.state === 'error');
@@ -64,11 +64,14 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
     }
   }, [tileIndex]);
 
+  const tileStyle = gridArea ? { gridArea } : undefined;
+
   if (!session) {
     return (
       <div
         ref={tileRef}
         class={classes.join(' ')}
+        style={tileStyle}
         onClick={() => focusTile(tileIndex)}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -86,6 +89,7 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
     <div
       ref={tileRef}
       class={classes.join(' ')}
+      style={tileStyle}
       onClick={() => focusTile(tileIndex)}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

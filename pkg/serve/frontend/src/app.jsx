@@ -5,6 +5,7 @@ import {
   autoFillTiles, autoSelectMobile, toggleSidebar,
   toggleDialog, focusTile, setLayout, toggleDrawer,
 } from './state.js';
+import { layoutCount } from './layouts.js';
 import { requestNotificationPermission } from './notifications.js';
 import { usePinchOverview } from './hooks/usePinchOverview.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
@@ -75,14 +76,12 @@ function App() {
       else if (state.drawerOpen) toggleDrawer();
       else if (overview) setOverview(false);
     }},
-    // Focus tile 1–9
+    // Focus tile 1–9 (within current layout's tile count)
     ...Array.from({ length: 9 }, (_, i) => ({
       key: String(i + 1), ctrl: true,
       handler: () => {
         if (state.isMobile) return;
-        // If layout < requested tile, expand first
-        if (i + 1 > state.layout) setLayout(i + 1 <= 2 ? 2 : i + 1 <= 4 ? 4 : i + 1 <= 6 ? 6 : 8);
-        focusTile(i);
+        if (i < layoutCount(state.layout)) focusTile(i);
       },
     })),
     // Overview toggle (for mobile DevTools testing + desktop)
