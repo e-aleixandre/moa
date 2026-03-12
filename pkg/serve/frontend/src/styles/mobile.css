@@ -28,7 +28,7 @@
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 10px;
   padding: 12px 12px 16px;
 }
@@ -41,9 +41,11 @@
   flex-direction: column;
   gap: 8px;
   min-height: 120px;
+  min-width: 0;
   cursor: pointer;
   border: 1px solid var(--surface0);
   transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  overflow: hidden;
 }
 .overview-card:active { transform: scale(0.96); }
 .overview-card.active {
@@ -296,7 +298,7 @@
 
 @media (max-width: 768px) {
   .input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
-  .input-bar textarea { font-size: 16px; padding: 10px 16px; }
+  .input-bar textarea { font-size: 16px; padding: 10px 38px 10px 16px; }
   .code-block-copy { opacity: 1; }
   .toast-container {
     top: auto;
