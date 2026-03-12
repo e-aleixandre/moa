@@ -1,9 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { PanelLeftClose, PanelLeft, X, Plus, Check } from 'lucide-preact';
 import {
-  assignTile, deleteSession, resumeSession,
-  toggleDialog, toggleSidebar, sessionsByGroup,
+  assignToTile, deleteSession, resumeSession,
+  toggleDialog, toggleSidebar, sessionsByGroup, isSessionInTile,
+  focusTile,
 } from '../state.js';
+import { allTileIds, findTile } from '../tileTree.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 
 export function Sidebar({ state }) {
@@ -20,22 +22,25 @@ export function Sidebar({ state }) {
     }
   }, [confirmId]);
 
-  const isInTile = (id) => state.tileAssignments.includes(id);
+  const isInTile = (id) => isSessionInTile(state, id);
 
   const handleClick = (e, sess) => {
-    // Ignore clicks on delete/confirm buttons (already handled)
     if (e.target.closest('.sidebar-item-delete, .delete-confirm')) return;
     if (confirmId) { setConfirmId(null); return; }
     if (sess.state === 'saved') {
       resumeSession(sess.id).catch(e => console.error('Resume failed:', e));
       return;
     }
-    const idx = state.tileAssignments.indexOf(sess.id);
-    if (idx >= 0) {
-      import('../state.js').then(m => m.focusTile(idx));
-      return;
+    // If already in a tile, focus that tile
+    const ids = allTileIds(state.tileTree);
+    for (const tid of ids) {
+      const t = findTile(state.tileTree, tid);
+      if (t && t.sessionId === sess.id) {
+        focusTile(tid);
+        return;
+      }
     }
-    assignTile(state.focusedTile, sess.id);
+    assignToTile(state.focusedTile, sess.id);
   };
 
   const handleDeleteClick = (e, id) => {

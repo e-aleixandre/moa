@@ -419,23 +419,57 @@ kbd.shortcut-hint {
 .layout-bar .sound-toggle.on { color: var(--peach); }
 .layout-bar .sound-toggle .lucide { width: 15px; height: 15px; }
 
-/* ─── Tile Grid ────────────────────────────────────────────── */
+/* ─── Tile Tree (split layout) ─────────────────────────────── */
 
-.tile-grid {
+.tile-tree {
   flex: 1;
-  display: grid;
-  gap: 2px;
-  background: var(--crust);
+  display: flex;
   overflow: hidden;
 }
 
-/* Grid template is set inline from layout presets (layouts.js) */
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.split-h { flex-direction: row; }
+.split-v { flex-direction: column; }
+
+.split-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Resize handle */
+.resize-handle {
+  flex-shrink: 0;
+  background: var(--surface0);
+  transition: background 0.15s;
+  z-index: 5;
+  position: relative;
+}
+.resize-h { width: 3px; cursor: col-resize; }
+.resize-v { height: 3px; cursor: row-resize; }
+.resize-handle::after {
+  content: '';
+  position: absolute;
+}
+.resize-h::after { top: 0; bottom: 0; left: -4px; right: -4px; }
+.resize-v::after { left: 0; right: 0; top: -4px; bottom: -4px; }
+.resize-handle:hover,
+.resize-handle.active { background: var(--mauve); }
 
 /* ─── Tile ─────────────────────────────────────────────────── */
 
 .tile {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   background: var(--base);
   overflow: hidden;
   position: relative;
@@ -568,7 +602,8 @@ kbd.shortcut-hint {
 .thinking-block.on { background: var(--mauve); }
 .thinking-meter.level-3 .thinking-block.on { background: var(--peach); }
 
-.tile-number {
+/* (tile-number removed — free-form tree doesn't have fixed indices) */
+.tile-number-legacy {
   font-size: 10px;
   color: var(--overlay0);
   font-family: var(--mono);
@@ -597,6 +632,51 @@ kbd.shortcut-hint {
   color: var(--overlay0);
   font-size: 13px;
 }
+.tile-empty-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.tile-empty-actions button,
+.tile-empty-close {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--overlay1);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  transition: all 0.15s;
+}
+.tile-empty-actions button:hover,
+.tile-empty-close:hover {
+  background: var(--surface1);
+  color: var(--text);
+}
+.tile-empty-actions .lucide,
+.tile-empty-close .lucide { width: 12px; height: 12px; }
+.tile-empty-close {
+  margin-top: 2px;
+  color: var(--overlay0);
+  background: transparent;
+}
+.tile-empty-close:hover { color: var(--red); background: var(--red-dim); }
+
+/* Tile header action buttons (split/close) — visible on hover */
+.tile-action-btn {
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay0);
+  opacity: 0;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+}
+.tile-action-btn .lucide { width: 13px; height: 13px; }
+.tile-header:hover .tile-action-btn { opacity: 0.6; }
+.tile-action-btn:hover { opacity: 1 !important; background: var(--surface0); color: var(--subtext1); }
+.tile-close-btn:hover { color: var(--red); background: var(--red-dim); }
 
 /* ─── Messages ─────────────────────────────────────────────── */
 

@@ -2,7 +2,11 @@
 
 import { api, syncConnections } from './api.js';
 import { triggerAttention } from './notifications.js';
-import { getLayout, layoutCount } from './layouts.js';
+import {
+  createTile, initIds, allTileIds, allSessionIds, findTile, tileCount,
+  splitTileNode, removeTileNode, setTileSession, swapSessions,
+  clearSession, setRatioAtPath, presetTree,
+} from './tileTree.js';
 
 const STORAGE_KEY = 'moa-ui-state';
 
@@ -17,8 +21,7 @@ function loadPersistedState() {
 function persistState(s) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      layout: s.layout,
-      tileAssignments: s.tileAssignments,
+      tileTree: s.tileTree,
       focusedTile: s.focusedTile,
       sidebarOpen: s.sidebarOpen,
       soundEnabled: s.soundEnabled,
@@ -28,12 +31,27 @@ function persistState(s) {
 
 const persisted = loadPersistedState();
 
+// Migrate from old format or restore tree
+let initialTree;
+if (persisted.tileTree) {
+  initialTree = persisted.tileTree;
+  initIds(initialTree);
+} else {
+  // Old format or fresh start
+  initialTree = createTile();
+}
+
+// Validate focusedTile: must be a tile ID in the tree
+const initialIds = allTileIds(initialTree);
+const initialFocused = initialIds.includes(persisted.focusedTile)
+  ? persisted.focusedTile
+  : initialIds[0] || 1;
+
 let state = {
   sessions: {},
 
-  layout: persisted.layout || '1',
-  tileAssignments: persisted.tileAssignments || [null],
-  focusedTile: persisted.focusedTile || 0,
+  tileTree: initialTree,
+  focusedTile: initialFocused,
   sidebarOpen: persisted.sidebarOpen !== undefined ? persisted.sidebarOpen : true,
   soundEnabled: persisted.soundEnabled || false,
 
@@ -42,11 +60,6 @@ let state = {
   dialogOpen: false,
   activeSession: null,
 };
-
-// Ensure tileAssignments length matches layout
-const _count = layoutCount(state.layout);
-while (state.tileAssignments.length < _count) state.tileAssignments.push(null);
-state.tileAssignments = state.tileAssignments.slice(0, _count);
 
 let listeners = new Set();
 
@@ -71,7 +84,11 @@ export function visibleSessionIds(s) {
   if (s.isMobile) {
     return s.activeSession ? [s.activeSession] : [];
   }
-  return s.tileAssignments.filter(id => id !== null);
+  return allSessionIds(s.tileTree);
+}
+
+export function isSessionInTile(s, sessionId) {
+  return allSessionIds(s.tileTree).includes(sessionId);
 }
 
 export function sessionsByGroup(s) {
@@ -81,7 +98,6 @@ export function sessionsByGroup(s) {
     if (!groups[key]) groups[key] = [];
     groups[key].push(sess);
   }
-  // Sort each group by updated descending
   for (const arr of Object.values(groups)) {
     arr.sort((a, b) => (b.updated || 0) - (a.updated || 0));
   }
@@ -92,6 +108,10 @@ export function attentionCount(s) {
   return Object.values(s.sessions).filter(
     sess => sess.state === 'permission' || sess.state === 'error'
   ).length;
+}
+
+export function getTileCount() {
+  return tileCount(state.tileTree);
 }
 
 // --- Session data actions ---
@@ -114,7 +134,6 @@ export async function loadSessions() {
         cwd: info.cwd,
         error: info.error || null,
         untrustedMcp: info.untrusted_mcp || false,
-        // Preserve existing WS-populated data if available
         messages: existing ? existing.messages : [],
         pendingPerm: existing ? existing.pendingPerm : null,
         streamingText: existing ? existing.streamingText : null,
@@ -122,7 +141,7 @@ export async function loadSessions() {
         subagentCount: existing ? existing.subagentCount : 0,
       };
     }
-    // Detect attention transitions (poll path — hidden sessions)
+    // Detect attention transitions (hidden sessions only)
     for (const [id, sess] of Object.entries(sessions)) {
       const prevSess = prev[id];
       if (prevSess && prevSess.state !== sess.state) {
@@ -135,12 +154,17 @@ export async function loadSessions() {
       }
     }
     setState({ sessions });
-    // Clean tile assignments — remove deleted sessions
+    // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
-    const cleaned = state.tileAssignments.map(id => id && validIds.has(id) ? id : null);
-    if (JSON.stringify(cleaned) !== JSON.stringify(state.tileAssignments)) {
-      setState({ tileAssignments: cleaned });
+    let tree = state.tileTree;
+    let changed = false;
+    for (const sid of allSessionIds(tree)) {
+      if (!validIds.has(sid)) {
+        tree = clearSession(tree, sid);
+        changed = true;
+      }
     }
+    if (changed) setState({ tileTree: tree });
     afterVisibilityChange();
   } catch (e) {
     console.error('loadSessions failed:', e);
@@ -176,24 +200,14 @@ export function handleWsInit(id, data) {
   });
 }
 
-/**
- * Normalize raw LLM message history into our flat render list.
- *
- * The backend sends the raw conversation: assistant messages may contain
- * tool_call content blocks, and tool_result messages carry the output.
- * We flatten these into the same shape used by real-time WS events so
- * that MessageList renders them uniformly.
- */
 function normalizeHistory(raw) {
   const result = [];
-  // Index tool_result messages by tool_call_id for quick lookup
   const resultMap = {};
   for (const msg of raw) {
     if (msg.role === 'tool_result') {
       resultMap[msg.tool_call_id] = msg;
     }
   }
-
   for (const msg of raw) {
     if (msg.role === 'assistant') {
       const textParts = [];
@@ -201,12 +215,10 @@ function normalizeHistory(raw) {
         if (c.type === 'text' && c.text) {
           textParts.push(c.text);
         } else if (c.type === 'tool_call') {
-          // Flush accumulated text as a message first
           if (textParts.length > 0) {
             result.push({ role: 'assistant', content: [{ type: 'text', text: textParts.join('') }] });
             textParts.length = 0;
           }
-          // Emit synthetic tool entry
           const tr = resultMap[c.tool_call_id];
           let resultText = null;
           let status = 'done';
@@ -223,16 +235,13 @@ function normalizeHistory(raw) {
             result: resultText,
           });
         }
-        // thinking blocks are skipped (shown in real-time only)
       }
-      // Flush any trailing text
       if (textParts.length > 0) {
         result.push({ role: 'assistant', content: [{ type: 'text', text: textParts.join('') }] });
       }
     } else if (msg.role === 'user') {
       result.push(msg);
     }
-    // tool_result messages are consumed above via resultMap, skip here
   }
   return result;
 }
@@ -240,27 +249,19 @@ function normalizeHistory(raw) {
 export function handleWsTextDelta(id, delta) {
   const sess = state.sessions[id];
   if (!sess) return;
-  updateSession(id, {
-    streamingText: (sess.streamingText || '') + delta,
-  });
+  updateSession(id, { streamingText: (sess.streamingText || '') + delta });
 }
 
 export function handleWsThinkingDelta(id, delta) {
   const sess = state.sessions[id];
   if (!sess) return;
-  updateSession(id, {
-    thinkingText: (sess.thinkingText || '') + delta,
-  });
+  updateSession(id, { thinkingText: (sess.thinkingText || '') + delta });
 }
 
 export function handleWsMessageEnd(id, fullText) {
   const sess = state.sessions[id];
   if (!sess) return;
-  // Append the finished assistant message to history and clear streaming
-  const msg = {
-    role: 'assistant',
-    content: [{ type: 'text', text: fullText }],
-  };
+  const msg = { role: 'assistant', content: [{ type: 'text', text: fullText }] };
   updateSession(id, {
     messages: [...sess.messages, msg],
     streamingText: null,
@@ -271,7 +272,6 @@ export function handleWsMessageEnd(id, fullText) {
 export function handleWsToolStart(id, data) {
   const sess = state.sessions[id];
   if (!sess) return;
-  // Track active tool calls in messages as a synthetic entry
   const toolMsg = {
     _type: 'tool_start',
     tool_call_id: data.tool_call_id,
@@ -280,9 +280,7 @@ export function handleWsToolStart(id, data) {
     status: 'running',
     result: null,
   };
-  updateSession(id, {
-    messages: [...sess.messages, toolMsg],
-  });
+  updateSession(id, { messages: [...sess.messages, toolMsg] });
 }
 
 export function handleWsToolEnd(id, data) {
@@ -300,19 +298,11 @@ export function handleWsToolEnd(id, data) {
 export function handleWsStateChange(id, data) {
   const prev = state.sessions[id];
   const wasRunning = prev && (prev.state === 'running' || prev.state === 'permission');
-  updateSession(id, {
-    state: data.state,
-    error: data.error || null,
-  });
+  updateSession(id, { state: data.state, error: data.error || null });
   if (data.state === 'idle' || data.state === 'error') {
     const sess = state.sessions[id];
-    if (sess) {
-      updateSession(id, { streamingText: null, thinkingText: null });
-    }
-    // Flash visible tiles on turn end / error
-    if (wasRunning) {
-      flashSession(id, data.state === 'error' ? 'error' : 'done');
-    }
+    if (sess) updateSession(id, { streamingText: null, thinkingText: null });
+    if (wasRunning) flashSession(id, data.state === 'error' ? 'error' : 'done');
   }
 }
 
@@ -323,18 +313,13 @@ export function handleWsPermissionRequest(id, data) {
   });
   flashSession(id, 'attention');
   const sess = state.sessions[id];
-  if (sess) {
-    triggerAttention(sess, data.tool_name, state.soundEnabled);
-  }
+  if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
 }
 
-/** Flash the tile's top bar. Auto-clears after the animation (1.2s). */
 function flashSession(id, type) {
   updateSession(id, { flash: type });
   setTimeout(() => {
-    if (state.sessions[id]?.flash === type) {
-      updateSession(id, { flash: null });
-    }
+    if (state.sessions[id]?.flash === type) updateSession(id, { flash: null });
   }, 1300);
 }
 
@@ -352,20 +337,11 @@ export function handleWsSubagentCount(id, count) {
 export function handleWsSubagentComplete(id, data) {
   const sess = state.sessions[id];
   if (!sess) return;
-  const msg = {
-    _type: 'system',
-    text: data.text,
-  };
-  updateSession(id, {
-    messages: [...sess.messages, msg],
-  });
+  updateSession(id, { messages: [...sess.messages, { _type: 'system', text: data.text }] });
 }
 
 export function handleWsRunEnd(id) {
-  updateSession(id, {
-    streamingText: null,
-    thinkingText: null,
-  });
+  updateSession(id, { streamingText: null, thinkingText: null });
 }
 
 // --- API actions ---
@@ -377,25 +353,22 @@ export async function createSession(opts) {
   if (state.isMobile) {
     setActiveSession(id);
   } else {
-    // Assign to focused tile
-    assignTile(state.focusedTile, id);
+    assignToTile(state.focusedTile, id);
   }
   return sess;
 }
 
 export async function deleteSession(id) {
   await api('DELETE', `/api/sessions/${id}`);
-  // Clean from state
   const sessions = { ...state.sessions };
   delete sessions[id];
-  const tileAssignments = state.tileAssignments.map(tid => tid === id ? null : tid);
+  const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;
-  setState({ sessions, tileAssignments, activeSession });
+  setState({ sessions, tileTree, activeSession });
   afterVisibilityChange();
 }
 
 export async function sendMessage(id, text) {
-  // Optimistically add user message to local state
   const sess = state.sessions[id];
   if (sess) {
     const userMsg = { role: 'user', content: [{ type: 'text', text }] };
@@ -426,7 +399,7 @@ export async function resumeSession(id) {
   if (state.isMobile) {
     setActiveSession(sess.id);
   } else {
-    assignTile(state.focusedTile, sess.id);
+    assignToTile(state.focusedTile, sess.id);
   }
   return sess;
 }
@@ -447,54 +420,84 @@ export async function trustMcp(id) {
   updateSession(id, { untrustedMcp: false });
 }
 
-// --- UI actions ---
+// --- Tile tree actions ---
 
-export function setLayout(id) {
-  const n = layoutCount(id);
-  const assignments = [...state.tileAssignments];
-  while (assignments.length < n) assignments.push(null);
-  const tileAssignments = assignments.slice(0, n);
-  const focusedTile = Math.min(state.focusedTile, n - 1);
-  setState({ layout: id, tileAssignments, focusedTile });
+export function applyPreset(presetId) {
+  // Collect current sessions to re-assign
+  const currentSessions = allSessionIds(state.tileTree);
+  const tree = presetTree(presetId);
+  const newTileIds = allTileIds(tree);
+  // Re-assign existing sessions to new tiles
+  let result = tree;
+  for (let i = 0; i < Math.min(currentSessions.length, newTileIds.length); i++) {
+    if (currentSessions[i]) {
+      result = setTileSession(result, newTileIds[i], currentSessions[i]);
+    }
+  }
+  const focused = newTileIds[0] || 1;
+  setState({ tileTree: result, focusedTile: focused });
   autoFillTiles();
   afterVisibilityChange();
 }
 
-export function assignTile(tileIdx, sessionId) {
-  if (tileIdx < 0 || tileIdx >= layoutCount(state.layout)) return;
+export function splitTile(tileId, direction) {
+  const tree = splitTileNode(state.tileTree, tileId, direction);
+  setState({ tileTree: tree });
+  // Focus the new empty tile (it's the second child of the new split)
+  const ids = allTileIds(tree);
+  const oldIds = allTileIds(state.tileTree);
+  const newId = ids.find(id => !oldIds.includes(id));
+  if (newId) setState({ focusedTile: newId });
+  autoFillTiles();
+  afterVisibilityChange();
+}
+
+export function closeTile(tileId) {
+  if (tileCount(state.tileTree) <= 1) return;
+  const tree = removeTileNode(state.tileTree, tileId);
+  // If focused tile was removed, focus first remaining tile
+  const ids = allTileIds(tree);
+  const focused = ids.includes(state.focusedTile) ? state.focusedTile : ids[0];
+  setState({ tileTree: tree, focusedTile: focused });
+  afterVisibilityChange();
+}
+
+export function assignToTile(tileId, sessionId) {
   // Remove from any other tile first (unique assignment)
-  const assignments = state.tileAssignments.map(id => id === sessionId ? null : id);
-  assignments[tileIdx] = sessionId;
-  setState({ tileAssignments: assignments, focusedTile: tileIdx });
+  let tree = clearSession(state.tileTree, sessionId);
+  tree = setTileSession(tree, tileId, sessionId);
+  setState({ tileTree: tree, focusedTile: tileId });
   afterVisibilityChange();
 }
 
-export function focusTile(idx) {
-  if (idx >= 0 && idx < layoutCount(state.layout)) {
-    setState({ focusedTile: idx });
-    // Focus the textarea inside the tile so the user can type immediately
-    requestAnimationFrame(() => {
-      const tiles = document.querySelectorAll('.tile');
-      const tile = tiles[idx];
-      if (tile) {
-        const ta = tile.querySelector('textarea');
-        if (ta) ta.focus();
-      }
-    });
-  }
+export function focusTile(tileId) {
+  const ids = allTileIds(state.tileTree);
+  if (!ids.includes(tileId)) return;
+  setState({ focusedTile: tileId });
+  requestAnimationFrame(() => {
+    const tile = document.querySelector(`[data-tile-id="${tileId}"]`);
+    if (tile) {
+      const ta = tile.querySelector('textarea');
+      if (ta) ta.focus();
+    }
+  });
 }
 
-export function swapTiles(fromIdx, toIdx) {
-  if (fromIdx === toIdx) return;
-  const count = layoutCount(state.layout);
-  if (fromIdx < 0 || fromIdx >= count) return;
-  if (toIdx < 0 || toIdx >= count) return;
-  const assignments = [...state.tileAssignments];
-  const tmp = assignments[fromIdx];
-  assignments[fromIdx] = assignments[toIdx];
-  assignments[toIdx] = tmp;
-  setState({ tileAssignments: assignments, focusedTile: toIdx });
+export function focusTileByIndex(idx) {
+  const ids = allTileIds(state.tileTree);
+  if (idx >= 0 && idx < ids.length) focusTile(ids[idx]);
+}
+
+export function swapTiles(id1, id2) {
+  if (id1 === id2) return;
+  const tree = swapSessions(state.tileTree, id1, id2);
+  setState({ tileTree: tree, focusedTile: id2 });
   afterVisibilityChange();
+}
+
+export function resizeSplit(path, ratio) {
+  const tree = setRatioAtPath(state.tileTree, path, ratio);
+  setState({ tileTree: tree });
 }
 
 export function setActiveSession(id) {
@@ -502,49 +505,38 @@ export function setActiveSession(id) {
   afterVisibilityChange();
 }
 
-export function toggleDrawer() {
-  setState({ drawerOpen: !state.drawerOpen });
-}
-
-export function toggleDialog() {
-  setState({ dialogOpen: !state.dialogOpen });
-}
-
-export function toggleSound() {
-  setState({ soundEnabled: !state.soundEnabled });
-}
-
-export function toggleSidebar() {
-  setState({ sidebarOpen: !state.sidebarOpen });
-}
-
-export function setMobile(isMobile) {
-  setState({ isMobile });
-}
+export function toggleDrawer() { setState({ drawerOpen: !state.drawerOpen }); }
+export function toggleDialog() { setState({ dialogOpen: !state.dialogOpen }); }
+export function toggleSound() { setState({ soundEnabled: !state.soundEnabled }); }
+export function toggleSidebar() { setState({ sidebarOpen: !state.sidebarOpen }); }
+export function setMobile(isMobile) { setState({ isMobile }); }
 
 // --- Auto-fill tiles with active sessions ---
 
 export function autoFillTiles() {
-  const assigned = new Set(state.tileAssignments.filter(id => id !== null));
+  const assigned = new Set(allSessionIds(state.tileTree));
   const available = Object.values(state.sessions)
     .filter(s => s.state !== 'saved' && !assigned.has(s.id))
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
 
+  if (available.length === 0) return;
+
+  let tree = state.tileTree;
   let changed = false;
-  const assignments = [...state.tileAssignments];
-  for (let i = 0; i < assignments.length; i++) {
-    if (assignments[i] === null && available.length > 0) {
-      assignments[i] = available.shift().id;
+  for (const tileId of allTileIds(tree)) {
+    if (available.length === 0) break;
+    const tile = findTile(tree, tileId);
+    if (tile && !tile.sessionId) {
+      tree = setTileSession(tree, tileId, available.shift().id);
       changed = true;
     }
   }
   if (changed) {
-    setState({ tileAssignments: assignments });
+    setState({ tileTree: tree });
     afterVisibilityChange();
   }
 }
 
-// Auto-select mobile active session
 export function autoSelectMobile() {
   if (state.activeSession && state.sessions[state.activeSession]) return;
   const active = Object.values(state.sessions)
@@ -556,8 +548,6 @@ export function autoSelectMobile() {
   }
 }
 
-// Called after any change that affects which sessions are visible.
-// Syncs WS connections.
 function afterVisibilityChange() {
   const visible = visibleSessionIds(state);
   syncConnections(visible);

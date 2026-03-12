@@ -1,26 +1,12 @@
 import { Bell, BellOff } from 'lucide-preact';
-import { setLayout, toggleSound } from '../state.js';
-import { LAYOUTS, getLayout } from '../layouts.js';
+import { applyPreset, toggleSound } from '../state.js';
+import { PRESETS } from '../layoutPresets.js';
 
-function LayoutPreview({ layout }) {
-  const style = {
-    display: 'grid',
-    gridTemplateColumns: layout.grid.columns,
-    gridTemplateRows: layout.grid.rows,
-    gridTemplateAreas: layout.grid.areas || undefined,
-    gap: '1.5px',
-    width: '22px',
-    height: '15px',
-  };
-
+function LayoutPreview({ preset }) {
   return (
-    <div class="layout-mini" style={style}>
-      {Array.from({ length: layout.count }, (_, i) => (
-        <div
-          key={i}
-          class="layout-mini-cell"
-          style={layout.tileAreas ? { gridArea: layout.tileAreas[i] } : undefined}
-        />
+    <div class="layout-mini" style={preset.miniStyle}>
+      {preset.cells.map((cell, i) => (
+        <div key={i} class="layout-mini-cell" style={cell} />
       ))}
     </div>
   );
@@ -29,14 +15,14 @@ function LayoutPreview({ layout }) {
 export function LayoutBar({ state }) {
   return (
     <div class="layout-bar">
-      {LAYOUTS.map((l) => (
+      {PRESETS.map((p) => (
         <button
-          key={l.id}
-          class={`layout-btn ${state.layout === l.id ? 'active' : ''}`}
-          onClick={() => setLayout(l.id)}
-          title={`${l.id} (${l.count} tile${l.count > 1 ? 's' : ''})`}
+          key={p.id}
+          class="layout-btn"
+          onClick={() => applyPreset(p.id)}
+          title={p.label}
         >
-          <LayoutPreview layout={l} />
+          <LayoutPreview preset={p} />
         </button>
       ))}
       <div class="layout-bar-spacer" />
