@@ -472,6 +472,18 @@ export function focusTile(idx) {
   }
 }
 
+export function swapTiles(fromIdx, toIdx) {
+  if (fromIdx === toIdx) return;
+  if (fromIdx < 0 || fromIdx >= state.layout) return;
+  if (toIdx < 0 || toIdx >= state.layout) return;
+  const assignments = [...state.tileAssignments];
+  const tmp = assignments[fromIdx];
+  assignments[fromIdx] = assignments[toIdx];
+  assignments[toIdx] = tmp;
+  setState({ tileAssignments: assignments, focusedTile: toIdx });
+  afterVisibilityChange();
+}
+
 export function setActiveSession(id) {
   setState({ activeSession: id });
   afterVisibilityChange();

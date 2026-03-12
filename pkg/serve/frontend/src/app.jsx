@@ -1,11 +1,13 @@
 import { render } from 'preact';
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import {
   store, loadSessions, startPolling, setMobile,
-  autoFillTiles, autoSelectMobile,
+  autoFillTiles, autoSelectMobile, toggleSidebar,
+  toggleDialog, focusTile, setLayout, toggleDrawer,
 } from './state.js';
 import { requestNotificationPermission } from './notifications.js';
 import { usePinchOverview } from './hooks/usePinchOverview.js';
+import { useHotkeys } from './hooks/useHotkeys.js';
 import { Sidebar } from './components/Sidebar.jsx';
 import { Drawer } from './components/Drawer.jsx';
 import { TabBar } from './components/TabBar.jsx';
@@ -49,7 +51,7 @@ function App() {
   useEffect(() => {
     if (!state.isMobile) {
       autoFillTiles();
-      setOverview(false); // exit overview when switching to desktop
+      setOverview(false);
     } else {
       autoSelectMobile();
     }
@@ -63,6 +65,33 @@ function App() {
   }, [state.isMobile, overview]);
 
   const pinchRef = usePinchOverview(handlePinch);
+
+  // Global keyboard shortcuts
+  const hotkeys = useMemo(() => [
+    { key: 'b', ctrl: true, handler: () => toggleSidebar() },
+    { key: 'n', ctrl: true, handler: () => toggleDialog() },
+    { key: 'Escape', handler: () => {
+      if (state.dialogOpen) toggleDialog();
+      else if (state.drawerOpen) toggleDrawer();
+      else if (overview) setOverview(false);
+    }},
+    // Focus tile 1–9
+    ...Array.from({ length: 9 }, (_, i) => ({
+      key: String(i + 1), ctrl: true,
+      handler: () => {
+        if (state.isMobile) return;
+        // If layout < requested tile, expand first
+        if (i + 1 > state.layout) setLayout(i + 1 <= 2 ? 2 : i + 1 <= 4 ? 4 : i + 1 <= 6 ? 6 : 8);
+        focusTile(i);
+      },
+    })),
+    // Overview toggle (for mobile DevTools testing + desktop)
+    { key: 'o', ctrl: true, handler: () => {
+      if (state.isMobile) setOverview(v => !v);
+    }},
+  ], [state.dialogOpen, state.drawerOpen, state.isMobile, state.layout, overview]);
+
+  useHotkeys(hotkeys);
 
   if (state.isMobile) {
     return (

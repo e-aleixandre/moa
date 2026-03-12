@@ -1,11 +1,13 @@
-import { Square, Columns2, Grid2x2, LayoutGrid, Bell, BellOff } from 'lucide-preact';
+import { Square, Columns2, Grid2x2, LayoutGrid, Grid3x3, Bell, BellOff } from 'lucide-preact';
 import { setLayout, toggleSound } from '../state.js';
+import { formatShortcut } from '../hooks/useHotkeys.js';
 
 const LAYOUTS = [
   { n: 1, icon: Square, label: '1 tile' },
   { n: 2, icon: Columns2, label: '2 tiles' },
   { n: 4, icon: Grid2x2, label: '4 tiles' },
   { n: 6, icon: LayoutGrid, label: '6 tiles' },
+  { n: 8, icon: Grid3x3, label: '8 tiles' },
 ];
 
 export function LayoutBar({ state }) {
@@ -16,7 +18,7 @@ export function LayoutBar({ state }) {
           key={n}
           class={`layout-btn ${state.layout === n ? 'active' : ''}`}
           onClick={() => setLayout(n)}
-          title={label}
+          title={`${label} (${formatShortcut(String(n), { ctrl: true })})`}
         >
           <Icon />
         </button>

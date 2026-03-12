@@ -4,6 +4,7 @@ import {
   assignTile, deleteSession, resumeSession,
   toggleDialog, toggleSidebar, sessionsByGroup,
 } from '../state.js';
+import { formatShortcut } from '../hooks/useHotkeys.js';
 
 export function Sidebar({ state }) {
   const [filter, setFilter] = useState('');
@@ -59,8 +60,9 @@ export function Sidebar({ state }) {
     <div class={`sidebar ${state.sidebarOpen ? '' : 'collapsed'}`}>
       <div class="sidebar-header">
         <span class="sidebar-logo">moa</span>
-        <button class="sidebar-toggle" onClick={toggleSidebar} title="Toggle sidebar">
+        <button class="sidebar-toggle" onClick={toggleSidebar} title={`Toggle sidebar (${formatShortcut('B', { ctrl: true })})`}>
           {state.sidebarOpen ? <PanelLeftClose /> : <PanelLeft />}
+          {state.sidebarOpen && <kbd class="shortcut-hint">{formatShortcut('B', { ctrl: true })}</kbd>}
         </button>
       </div>
 
@@ -92,6 +94,11 @@ export function Sidebar({ state }) {
                       key={sess.id}
                       class={`sidebar-item ${isInTile(sess.id) ? 'active' : ''} ${sess.state === 'saved' ? 'saved' : ''} ${confirmId === sess.id ? 'confirming' : ''}`}
                       onClick={(e) => handleClick(e, sess)}
+                      draggable={sess.state !== 'saved'}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/x-session-id', sess.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
                     >
                       {confirmId === sess.id ? (
                         <div class="delete-confirm">
@@ -133,6 +140,7 @@ export function Sidebar({ state }) {
           <div class="sidebar-footer">
             <button class="sidebar-new-btn" onClick={toggleDialog}>
               <Plus /> New Session
+              <kbd class="shortcut-hint">{formatShortcut('N', { ctrl: true })}</kbd>
             </button>
           </div>
         </>

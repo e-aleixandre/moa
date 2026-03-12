@@ -159,9 +159,25 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
 }
 .sidebar-toggle:hover { color: var(--text); background: var(--surface0); }
+
+/* Keyboard shortcut hints (Linear-style) */
+kbd.shortcut-hint {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--overlay1);
+  background: var(--surface0);
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--surface1);
+  margin-left: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 
 .sidebar-search {
   margin: 4px 12px 8px;
@@ -319,6 +335,12 @@ a:hover { text-decoration: underline; }
 }
 .sidebar-new-btn:hover { opacity: 0.92; }
 .sidebar-new-btn .lucide { width: 15px; height: 15px; }
+.sidebar-new-btn .shortcut-hint {
+  margin-left: auto;
+  background: rgba(0,0,0,0.15);
+  border-color: rgba(0,0,0,0.2);
+  color: var(--crust);
+}
 
 /* ─── State Dots ───────────────────────────────────────────── */
 
@@ -397,6 +419,7 @@ a:hover { text-decoration: underline; }
 .tile-grid.l-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
 .tile-grid.l-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .tile-grid.l-6 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.tile-grid.l-8 { grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
 
 /* ─── Tile ─────────────────────────────────────────────────── */
 
@@ -431,6 +454,16 @@ a:hover { text-decoration: underline; }
 @keyframes tile-attention-bar {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+/* Drag-over indicator */
+.tile.drag-over {
+  outline: 2px dashed var(--mauve);
+  outline-offset: -2px;
+}
+.tile.drag-over::before {
+  background: linear-gradient(90deg, var(--mauve), var(--peach));
+  opacity: 1;
 }
 
 /* Flash: top bar blinks 3 times then fades out */
