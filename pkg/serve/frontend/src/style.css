@@ -1369,6 +1369,136 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 2px 8px var(--peach-glow);
 }
 
+/* ─── Session Overview (mobile pinch) ──────────────────────── */
+
+.session-overview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--crust);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  animation: overview-in 0.25s var(--ease);
+}
+
+@keyframes overview-in {
+  from { opacity: 0; transform: scale(1.05); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.overview-header {
+  padding: 20px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.overview-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.overview-hint {
+  font-size: 11px;
+  color: var(--overlay0);
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding: 12px 12px 24px;
+}
+
+.overview-card {
+  background: var(--base);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  cursor: pointer;
+  border: 1px solid var(--surface0);
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.overview-card:active { transform: scale(0.96); }
+.overview-card.active {
+  border-color: var(--peach);
+  box-shadow: 0 0 0 1px var(--peach), 0 4px 12px rgba(250,179,135,0.15);
+}
+.overview-card.attention {
+  border-color: var(--red);
+  box-shadow: 0 0 0 1px var(--red), 0 4px 12px rgba(243,139,168,0.15);
+}
+
+.overview-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.overview-card-preview {
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--overlay1);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.overview-card-empty {
+  color: var(--surface2);
+  font-style: italic;
+}
+
+.overview-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.overview-card-model {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--overlay0);
+  background: var(--surface0);
+  padding: 2px 6px;
+  border-radius: 9999px;
+}
+.overview-card-model .lucide { width: 9px; height: 9px; }
+
+.overview-card.new-card {
+  border: 1px dashed var(--surface1);
+  background: transparent;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--overlay0);
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 120px;
+}
+.overview-card.new-card .lucide { width: 20px; height: 20px; }
+.overview-card.new-card:active { color: var(--peach); }
+
 /* ─── Tab Bar (mobile) ─────────────────────────────────────── */
 
 .tab-bar {

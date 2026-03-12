@@ -1,15 +1,17 @@
 import { render } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useCallback } from 'preact/hooks';
 import {
   store, loadSessions, startPolling, setMobile,
   autoFillTiles, autoSelectMobile,
 } from './state.js';
 import { requestNotificationPermission } from './notifications.js';
+import { usePinchOverview } from './hooks/usePinchOverview.js';
 import { Sidebar } from './components/Sidebar.jsx';
 import { Drawer } from './components/Drawer.jsx';
 import { TabBar } from './components/TabBar.jsx';
 import { TileGrid } from './components/TileGrid.jsx';
 import { ChatView } from './components/ChatView.jsx';
+import { SessionOverview } from './components/SessionOverview.jsx';
 import { ToastContainer } from './components/Toast.jsx';
 import { NewSessionDialog } from './components/NewSessionDialog.jsx';
 import { LayoutBar } from './components/LayoutBar.jsx';
@@ -17,6 +19,8 @@ import './style.css';
 
 function App() {
   const [state, setState] = useState(store.get());
+  const [overview, setOverview] = useState(false);
+
   useEffect(() => store.subscribe(setState), []);
 
   // Breakpoint detection
@@ -45,17 +49,36 @@ function App() {
   useEffect(() => {
     if (!state.isMobile) {
       autoFillTiles();
+      setOverview(false); // exit overview when switching to desktop
     } else {
       autoSelectMobile();
     }
   }, [state.isMobile, Object.keys(state.sessions).length]);
 
+  // Pinch gesture: in → overview, out → back to session
+  const handlePinch = useCallback((dir) => {
+    if (!state.isMobile) return;
+    if (dir === 'in' && !overview) setOverview(true);
+    if (dir === 'out' && overview) setOverview(false);
+  }, [state.isMobile, overview]);
+
+  const pinchRef = usePinchOverview(handlePinch);
+
   if (state.isMobile) {
     return (
-      <div class="app mobile">
+      <div class="app mobile" ref={pinchRef}>
         <Drawer state={state} />
-        <ChatView state={state} />
-        <TabBar state={state} />
+        {overview ? (
+          <SessionOverview
+            state={state}
+            onSelect={() => setOverview(false)}
+          />
+        ) : (
+          <>
+            <ChatView state={state} />
+            <TabBar state={state} />
+          </>
+        )}
         <ToastContainer />
         <NewSessionDialog open={state.dialogOpen} />
       </div>
