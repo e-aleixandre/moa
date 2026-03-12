@@ -326,14 +326,14 @@ export function handleWsPermissionRequest(id, data) {
   }
 }
 
-/** Set a flash type on a session. Auto-clears after 800ms. */
+/** Flash the tile's top bar. Auto-clears after the animation (1.2s). */
 function flashSession(id, type) {
   updateSession(id, { flash: type });
   setTimeout(() => {
     if (state.sessions[id]?.flash === type) {
       updateSession(id, { flash: null });
     }
-  }, 900);
+  }, 1300);
 }
 
 export function handleWsConfigChange(id, data) {

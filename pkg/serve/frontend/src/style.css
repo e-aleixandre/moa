@@ -433,28 +433,33 @@ a:hover { text-decoration: underline; }
   50% { opacity: 0.4; }
 }
 
-/* Flash: one-shot glow pulse on events */
-.tile.flash::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: inset 0 0 20px var(--peach-glow), 0 0 12px var(--peach-glow);
-  opacity: 0;
-  animation: tile-flash 0.8s ease-out forwards;
-  pointer-events: none;
-  z-index: 3;
+/* Flash: top bar blinks 3 times then fades out */
+.tile.flash::before {
+  background: linear-gradient(90deg, var(--peach), var(--mauve));
+  animation: tile-flash-out 1.2s ease-out forwards;
 }
-.tile.flash.flash-error::after {
-  box-shadow: inset 0 0 20px rgba(243,139,168,0.3), 0 0 12px rgba(243,139,168,0.2);
-}
-.tile.flash.flash-done::after {
-  box-shadow: inset 0 0 20px rgba(166,227,161,0.25), 0 0 12px rgba(166,227,161,0.15);
+/* Focused: blinks then stays on */
+.tile.focused.flash::before {
+  animation: tile-flash-stay 1.2s ease-out forwards;
 }
 
-@keyframes tile-flash {
+@keyframes tile-flash-out {
   0%   { opacity: 1; }
+  16%  { opacity: 0.1; }
+  32%  { opacity: 1; }
+  48%  { opacity: 0.1; }
+  64%  { opacity: 1; }
+  80%  { opacity: 0.1; }
   100% { opacity: 0; }
+}
+@keyframes tile-flash-stay {
+  0%   { opacity: 1; }
+  16%  { opacity: 0.1; }
+  32%  { opacity: 1; }
+  48%  { opacity: 0.1; }
+  64%  { opacity: 1; }
+  80%  { opacity: 0.1; }
+  100% { opacity: 1; }
 }
 
 .tile-header {

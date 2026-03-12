@@ -11,7 +11,7 @@ export function Tile({ tileIndex, sessionId, session, isFocused }) {
   const classes = ['tile'];
   if (isFocused) classes.push('focused');
   if (needsAttention) classes.push('attention');
-  if (session?.flash) classes.push('flash', `flash-${session.flash}`);
+  if (session?.flash) classes.push('flash');
 
   if (!session) {
     return (
