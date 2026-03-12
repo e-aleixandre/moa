@@ -3,6 +3,7 @@ import { SendHorizonal, Square, Zap, Mic, MicOff, Loader2 } from 'lucide-preact'
 import { sendMessage, cancelRun } from '../state.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
+import { addToast } from '../notifications.js';
 
 // Global registry: tileId → { toggleVoice }. Used by keyboard shortcuts.
 export const inputBarRegistry = new Map();
@@ -27,26 +28,35 @@ export function InputBar({ sessionId, sessionState, tileId }) {
     const end = el.selectionEnd;
     const before = el.value.substring(0, start);
     const after = el.value.substring(end);
-    // Add a space before if there's already text and it doesn't end with whitespace.
     const sep = before.length > 0 && !/\s$/.test(before) ? ' ' : '';
     el.value = before + sep + text + after;
     const newPos = start + sep.length + text.length;
     el.selectionStart = el.selectionEnd = newPos;
     el.focus();
-    // Trigger resize.
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }, []);
 
   const { recording, transcribing, toggle: toggleVoice, supported: voiceSupported } = useVoice(insertAtCursor);
-  const showMic = canTranscribe && voiceSupported;
+
+  const handleMicClick = useCallback(() => {
+    if (voiceSupported) {
+      toggleVoice();
+    } else {
+      addToast({
+        title: 'Voice input requires HTTPS',
+        detail: 'Serve moa behind HTTPS (e.g. Tailscale, Caddy, or mkcert) to enable microphone access.',
+        type: 'attention',
+      });
+    }
+  }, [voiceSupported, toggleVoice]);
 
   // Register in global map so keyboard shortcuts can trigger voice toggle
   useEffect(() => {
-    if (tileId != null && showMic) {
-      inputBarRegistry.set(tileId, { toggleVoice });
+    if (tileId != null && canTranscribe) {
+      inputBarRegistry.set(tileId, { toggleVoice: handleMicClick });
       return () => inputBarRegistry.delete(tileId);
     }
-  }, [tileId, showMic, toggleVoice]);
+  }, [tileId, canTranscribe, handleMicClick]);
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -95,12 +105,12 @@ export function InputBar({ sessionId, sessionState, tileId }) {
           onInput={autoResize}
           onKeyDown={handleKey}
         />
-        {showMic && (
+        {canTranscribe && (
           <button
-            class={`input-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''}`}
-            onClick={toggleVoice}
+            class={`input-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''} ${!voiceSupported ? 'unavailable' : ''}`}
+            onClick={handleMicClick}
             disabled={transcribing}
-            title={recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
+            title={!voiceSupported ? 'Voice input (requires HTTPS)' : recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
           >
             {transcribing ? <Loader2 /> : recording ? <MicOff /> : <Mic />}
           </button>

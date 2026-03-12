@@ -72,6 +72,10 @@
 .input-mic.transcribing .lucide { animation: spin 1.2s linear infinite; }
 .input-mic:disabled { cursor: wait; }
 
+/* Unavailable (no HTTPS): dimmed with subtle indicator */
+.input-mic.unavailable { opacity: 0.35; }
+.input-mic.unavailable:hover { opacity: 0.6; }
+
 .input-send {
   background: linear-gradient(135deg, var(--peach), var(--flamingo));
   color: var(--crust);
