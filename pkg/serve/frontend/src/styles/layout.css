@@ -1,0 +1,17 @@
+/* App shell: desktop row / mobile column */
+
+.app {
+  height: 100dvh;
+  display: flex;
+  overflow: hidden;
+}
+.app.desktop { flex-direction: row; }
+.app.mobile  { flex-direction: column; position: relative; }
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}

@@ -1,0 +1,99 @@
+/* Permission card + MCP trust banner */
+
+.permission-card {
+  background: var(--yellow-dim);
+  border: 1px solid rgba(249,226,175,0.15);
+  border-left: 3px solid var(--yellow);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+.permission-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--yellow);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.permission-card-title .lucide { width: 16px; height: 16px; }
+
+.permission-card-tool {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--overlay1);
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.permission-card-actions { display: flex; gap: 8px; }
+
+.btn-approve {
+  background: linear-gradient(135deg, var(--green), var(--teal));
+  color: var(--crust);
+  padding: 7px 18px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(166,227,161,0.25);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-approve:hover { opacity: 0.9; }
+.btn-approve .lucide { width: 14px; height: 14px; }
+
+.btn-deny {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(243,139,168,0.2);
+  padding: 7px 18px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-deny:hover { background: rgba(243,139,168,0.18); }
+.btn-deny .lucide { width: 14px; height: 14px; }
+
+.permission-resolved {
+  font-size: 13px;
+  color: var(--overlay1);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+/* MCP trust banner */
+.mcp-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--yellow-dim);
+  font-size: 12px;
+  color: var(--subtext1);
+}
+.mcp-banner-icon { color: var(--yellow); display: flex; }
+.mcp-banner-icon .lucide { width: 15px; height: 15px; }
+.mcp-banner-text { flex: 1; }
+
+.mcp-banner .btn-trust {
+  background: linear-gradient(135deg, var(--green), var(--teal));
+  color: var(--crust);
+  padding: 4px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+}
+.mcp-banner .btn-dismiss {
+  color: var(--overlay1);
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+}
+.mcp-banner .btn-dismiss:hover { background: var(--surface0); }

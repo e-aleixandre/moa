@@ -1,0 +1,43 @@
+/* Reset + base element styles */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font);
+  background: var(--crust);
+  color: var(--subtext1);
+  min-height: 100dvh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: none;
+  color: inherit;
+  transition: all var(--duration) var(--ease);
+}
+button:active { transform: scale(0.97); }
+
+input, textarea {
+  font-family: inherit;
+  transition: border-color var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+}
+
+a { color: var(--peach); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+::selection { background: var(--mauve-dim); color: var(--text); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background: var(--surface2); }
+
+/* Lucide base sizing */
+.lucide { width: 16px; height: 16px; stroke-width: 1.75; flex-shrink: 0; }

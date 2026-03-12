@@ -1,0 +1,45 @@
+/* Top bar with layout preset buttons + sound toggle */
+
+.layout-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  background: var(--mantle);
+}
+
+.layout-btn {
+  padding: 6px 10px;
+  color: var(--overlay1);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.layout-btn:hover { color: var(--subtext1); background: var(--surface0); }
+.layout-btn.active { color: var(--peach); background: var(--peach-dim); }
+.layout-btn .lucide { width: 15px; height: 15px; }
+
+/* Mini layout preview grids */
+.layout-mini-cell {
+  background: var(--overlay0);
+  border-radius: 1.5px;
+  min-width: 0;
+  min-height: 0;
+}
+.layout-btn.active .layout-mini-cell { background: var(--peach); }
+.layout-btn:hover:not(.active) .layout-mini-cell { background: var(--subtext0); }
+
+.layout-bar-spacer { flex: 1; }
+
+.layout-bar .sound-toggle {
+  padding: 6px;
+  color: var(--overlay1);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.layout-bar .sound-toggle:hover { color: var(--subtext1); background: var(--surface0); }
+.layout-bar .sound-toggle.on { color: var(--peach); }
+.layout-bar .sound-toggle .lucide { width: 15px; height: 15px; }

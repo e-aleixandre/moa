@@ -16,7 +16,7 @@ import { SessionOverview } from './components/SessionOverview.jsx';
 import { ToastContainer } from './components/Toast.jsx';
 import { NewSessionDialog } from './components/NewSessionDialog.jsx';
 import { LayoutBar } from './components/LayoutBar.jsx';
-import './style.css';
+import './styles/index.css';
 
 function App() {
   const [state, setState] = useState(store.get());

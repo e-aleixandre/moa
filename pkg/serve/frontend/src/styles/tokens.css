@@ -1,0 +1,54 @@
+/* Design tokens — Catppuccin Mocha palette + spacing + typography */
+
+:root {
+  /* Surfaces (warm blue-purple darks) */
+  --crust:       #11111b;
+  --mantle:      #181825;
+  --base:        #1e1e2e;
+  --surface0:    #313244;
+  --surface1:    #45475a;
+  --surface2:    #585b70;
+
+  /* Text */
+  --overlay0:    #6c7086;
+  --overlay1:    #7f849c;
+  --subtext0:    #a6adc8;
+  --subtext1:    #bac2de;
+  --text:        #cdd6f4;
+
+  /* Accents */
+  --peach:       #fab387;
+  --peach-dim:   rgba(250,179,135,0.10);
+  --peach-med:   rgba(250,179,135,0.20);
+  --peach-glow:  rgba(250,179,135,0.30);
+  --mauve:       #cba6f7;
+  --mauve-dim:   rgba(203,166,247,0.10);
+  --green:       #a6e3a1;
+  --green-dim:   rgba(166,227,161,0.10);
+  --blue:        #89b4fa;
+  --blue-dim:    rgba(137,180,250,0.10);
+  --red:         #f38ba8;
+  --red-dim:     rgba(243,139,168,0.10);
+  --yellow:      #f9e2af;
+  --yellow-dim:  rgba(249,226,175,0.10);
+  --sky:         #89dceb;
+  --flamingo:    #f2cdcd;
+  --rosewater:   #f5e0dc;
+  --lavender:    #b4befe;
+  --teal:        #94e2d5;
+
+  /* Fonts */
+  --font:        'Outfit', system-ui, sans-serif;
+  --mono:        'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Sizes */
+  --sidebar-w:   252px;
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --ease:        cubic-bezier(0.4, 0, 0.2, 1);
+  --duration:    150ms;
+}

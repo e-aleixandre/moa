@@ -1,0 +1,42 @@
+/* Binary split tree container + resize handles */
+
+.tile-tree {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.split-h { flex-direction: row; }
+.split-v { flex-direction: column; }
+
+.split-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Resize handle */
+.resize-handle {
+  flex-shrink: 0;
+  background: var(--surface0);
+  transition: background 0.15s;
+  z-index: 5;
+  position: relative;
+}
+.resize-h { width: 3px; cursor: col-resize; }
+.resize-v { height: 3px; cursor: row-resize; }
+
+/* Wider hit area */
+.resize-handle::after { content: ''; position: absolute; }
+.resize-h::after { top: 0; bottom: 0; left: -4px; right: -4px; }
+.resize-v::after { left: 0; right: 0; top: -4px; bottom: -4px; }
+
+.resize-handle:hover,
+.resize-handle.active { background: var(--mauve); }

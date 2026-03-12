@@ -1,0 +1,152 @@
+/* Individual tile: header, empty state, focus/flash/attention effects */
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--base);
+  overflow: hidden;
+  position: relative;
+  border-radius: 2px;
+}
+
+/* Top accent bar (hidden by default, shown on focus/attention/flash) */
+.tile::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: transparent;
+  z-index: 2;
+  transition: background var(--duration) var(--ease);
+}
+.tile.focused::before {
+  background: linear-gradient(90deg, var(--peach), var(--mauve));
+}
+.tile.attention::before {
+  background: linear-gradient(90deg, var(--peach), var(--yellow));
+  animation: tile-attention-bar 2s ease-in-out infinite;
+}
+@keyframes tile-attention-bar {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Drag-over */
+.tile.drag-over {
+  outline: 2px dashed var(--mauve);
+  outline-offset: -2px;
+}
+.tile.drag-over::before {
+  background: linear-gradient(90deg, var(--mauve), var(--peach));
+  opacity: 1;
+}
+
+/* Flash: blinks 3× then fades */
+.tile.flash::before {
+  background: linear-gradient(90deg, var(--peach), var(--mauve));
+  animation: tile-flash-out 1.2s ease-out forwards;
+}
+.tile.focused.flash::before {
+  animation: tile-flash-stay 1.2s ease-out forwards;
+}
+@keyframes tile-flash-out {
+  0%   { opacity: 1; }
+  16%  { opacity: 0.1; }
+  32%  { opacity: 1; }
+  48%  { opacity: 0.1; }
+  64%  { opacity: 1; }
+  80%  { opacity: 0.1; }
+  100% { opacity: 0; }
+}
+@keyframes tile-flash-stay {
+  0%   { opacity: 1; }
+  16%  { opacity: 0.1; }
+  32%  { opacity: 1; }
+  48%  { opacity: 0.1; }
+  64%  { opacity: 1; }
+  80%  { opacity: 0.1; }
+  100% { opacity: 1; }
+}
+
+/* Header (drag handle lives here) */
+.tile-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--mantle);
+  cursor: grab;
+}
+.tile-header:active { cursor: grabbing; }
+
+.tile-header .drag-handle {
+  width: 14px; height: 14px;
+  color: var(--surface2);
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.tile-header:hover .drag-handle { opacity: 1; }
+
+.tile-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Split/close action buttons — visible on header hover */
+.tile-action-btn {
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay0);
+  opacity: 0;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+}
+.tile-action-btn .lucide { width: 13px; height: 13px; }
+.tile-header:hover .tile-action-btn { opacity: 0.6; }
+.tile-action-btn:hover { opacity: 1 !important; background: var(--surface0); color: var(--subtext1); }
+.tile-close-btn:hover  { color: var(--red); background: var(--red-dim); }
+
+/* Empty tile */
+.tile-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 10px;
+  padding: 20px;
+  text-align: center;
+}
+.tile-empty .lucide { width: 36px; height: 36px; color: var(--surface2); stroke-width: 1.25; }
+.tile-empty span    { color: var(--overlay0); font-size: 13px; }
+
+.tile-empty-actions { display: flex; gap: 8px; margin-top: 4px; }
+.tile-empty-actions button,
+.tile-empty-close {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--overlay1);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  transition: all 0.15s;
+}
+.tile-empty-actions button:hover,
+.tile-empty-close:hover { background: var(--surface1); color: var(--text); }
+.tile-empty-actions .lucide,
+.tile-empty-close .lucide { width: 12px; height: 12px; }
+.tile-empty-close { margin-top: 2px; color: var(--overlay0); background: transparent; }
+.tile-empty-close:hover { color: var(--red); background: var(--red-dim); }

@@ -1,0 +1,95 @@
+/* Tool call cards: head, preview, footer */
+
+.tool-call {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.tool-call-head {
+  background: var(--surface0);
+  padding: 5px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tool-call-verb {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.tool-call-verb.read   { color: var(--teal); }
+.tool-call-verb.write  { color: var(--yellow); }
+.tool-call-verb.edit   { color: var(--green); }
+.tool-call-verb.bash   { color: var(--peach); }
+.tool-call-verb.search { color: var(--mauve); }
+.tool-call-verb.fetch  { color: var(--flamingo); }
+
+.tool-call-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--subtext1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.tool-call-tag {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tool-call-tag .lucide { width: 11px; height: 11px; }
+.tool-call-tag.done    { color: var(--green);  background: var(--green-dim); }
+.tool-call-tag.error   { color: var(--red);    background: var(--red-dim); }
+.tool-call-tag.running { color: var(--yellow); background: var(--yellow-dim); }
+.tool-call-tag.running .lucide { animation: spin 1.2s linear infinite; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.tool-call-preview {
+  background: var(--mantle);
+  padding: 10px 14px;
+  color: var(--overlay1);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  border-top: 1px solid rgba(69,71,90,0.5);
+  margin: 0;
+  scrollbar-width: none;
+}
+.tool-call-preview::-webkit-scrollbar { display: none; }
+.tool-call-preview.error-body { color: var(--red); }
+
+.tool-call-footer {
+  background: var(--mantle);
+  padding: 4px 14px 6px;
+  color: var(--overlay0);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: italic;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--duration) var(--ease);
+}
+.tool-call-footer:hover { color: var(--subtext0); }
