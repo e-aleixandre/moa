@@ -67,14 +67,14 @@ function browserNotify(title, body) {
   }
 }
 
-// Main attention trigger — called from state.js on permission/error transitions
+// Permission/error — called from state.js for non-visible sessions
 export function triggerAttention(session, toolName, soundEnabled) {
   const title = session.title || 'Untitled';
   const detail = toolName
     ? `${toolName} — needs permission`
     : 'needs attention';
 
-  addToast({ sessionId: session.id, title, detail });
+  addToast({ sessionId: session.id, title, detail, type: 'attention' });
 
   if (soundEnabled) {
     initAudio().then(playBeep);
@@ -82,8 +82,21 @@ export function triggerAttention(session, toolName, soundEnabled) {
 
   browserNotify(title, detail);
 
-  // Vibration (mobile)
   if (navigator.vibrate) {
     navigator.vibrate(200);
+  }
+}
+
+// Turn done — called from state.js when a non-visible session finishes
+export function triggerDone(session, soundEnabled) {
+  const title = session.title || 'Untitled';
+
+  addToast({ sessionId: session.id, title, detail: 'finished', type: 'done' });
+
+  // Background notifications (tab hidden / phone locked)
+  if (document.hidden) {
+    if (soundEnabled) initAudio().then(playBeep);
+    browserNotify(title, 'Turn finished');
+    if (navigator.vibrate) navigator.vibrate(100);
   }
 }

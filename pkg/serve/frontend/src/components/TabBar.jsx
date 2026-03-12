@@ -11,9 +11,11 @@ export function TabBar({ state }) {
       {sessions.map(sess => {
         const isActive = state.activeSession === sess.id;
         const needsAttention = sess.state === 'permission' || sess.state === 'error';
+        const hasFlash = sess.flash && !isActive;
         const classes = ['tab-pill'];
         if (isActive) classes.push('active');
         if (needsAttention && !isActive) classes.push('attention');
+        if (hasFlash) classes.push('flash');
 
         return (
           <button

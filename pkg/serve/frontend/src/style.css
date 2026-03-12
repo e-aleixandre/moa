@@ -1765,6 +1765,17 @@ kbd.shortcut-hint {
   border-color: var(--peach);
   animation: attention-pulse 2s ease-in-out infinite;
 }
+.tab-pill.flash {
+  animation: tab-flash 1.2s ease-out;
+}
+@keyframes tab-flash {
+  0%   { border-color: var(--peach); background: var(--peach-dim); }
+  16%  { border-color: transparent; background: transparent; }
+  32%  { border-color: var(--peach); background: var(--peach-dim); }
+  48%  { border-color: transparent; background: transparent; }
+  64%  { border-color: var(--peach); background: var(--peach-dim); }
+  100% { border-color: transparent; background: transparent; }
+}
 
 .tab-pill .state-dot { width: 6px; height: 6px; }
 

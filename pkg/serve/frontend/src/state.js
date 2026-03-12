@@ -1,7 +1,7 @@
 // state.js — immutable snapshot store with pub/sub
 
 import { api, syncConnections } from './api.js';
-import { triggerAttention } from './notifications.js';
+import { triggerAttention, triggerDone } from './notifications.js';
 import {
   createTile, initIds, allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -302,7 +302,14 @@ export function handleWsStateChange(id, data) {
   if (data.state === 'idle' || data.state === 'error') {
     const sess = state.sessions[id];
     if (sess) updateSession(id, { streamingText: null, thinkingText: null });
-    if (wasRunning) flashSession(id, data.state === 'error' ? 'error' : 'done');
+    if (wasRunning) {
+      flashSession(id, data.state === 'error' ? 'error' : 'done');
+      // Notify non-visible sessions that finished
+      const visible = visibleSessionIds(state);
+      if (!visible.includes(id) && data.state === 'idle' && sess) {
+        triggerDone(sess, state.soundEnabled);
+      }
+    }
   }
 }
 
