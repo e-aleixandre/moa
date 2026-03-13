@@ -17,21 +17,15 @@ import (
 	"sync"
 	"time"
 
-	"sync/atomic"
-
 	"github.com/ealeixandre/moa/pkg/agent"
-	agentcontext "github.com/ealeixandre/moa/pkg/context"
+	"github.com/ealeixandre/moa/pkg/askuser"
+	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/askuser"
-	"github.com/ealeixandre/moa/pkg/skill"
-	"github.com/ealeixandre/moa/pkg/tool"
-	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // SessionState describes the current state of a managed session.
@@ -442,7 +436,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 // (tools, MCP, permissions, subagents, agent). Does NOT touch persistence.
 // Used by both CreateSession (new sessions) and ResumeSession (restoring saved).
 func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*ManagedSession, error) {
-	// 1. Resolve + canonicalize CWD.
+	// Resolve + canonicalize CWD.
 	canonical, err := core.CanonicalizePath(cwd)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidCWD, err)
@@ -452,135 +446,33 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	}
 	cwd = canonical
 
-	// 2. Load config for session CWD (global + project, like CLI).
-	sessionCfg := core.LoadMoaConfig(cwd)
-
-	// 3. Model.
+	// Resolve model.
 	model := m.defaultModel
 	if modelSpec != "" {
 		model, _ = core.ResolveModel(modelSpec)
 	}
 
-	// 4. Provider.
+	// Create provider.
 	prov, err := m.providerFactory(model)
 	if err != nil {
 		return nil, fmt.Errorf("provider: %w", err)
 	}
 
-	// 5. Tool registry scoped to session CWD.
-	toolReg := core.NewRegistry()
-	tool.RegisterBuiltins(toolReg, tool.ToolConfig{
-		WorkspaceRoot:  cwd,
-		DisableSandbox: sessionCfg.DisableSandbox,
-		AllowedPaths:   append(sessionCfg.AllowedPaths, tool.SpillOutputDir()),
-		BashTimeout:    5 * time.Minute,
-		BraveAPIKey:    sessionCfg.BraveAPIKey,
-	})
-
-	// 6. Task store — always available.
-	taskStore := tasks.NewStore()
-	toolReg.Register(tasks.NewTool(taskStore))
-
-	// 6b. Verify tool — register only if .moa/verify.json exists and is valid.
-	verifyCfg, verifyErr := verify.LoadConfig(cwd)
-	if verifyErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: invalid .moa/verify.json in %s: %v\n", cwd, verifyErr)
-	}
-	if verifyCfg != nil {
-		toolReg.Register(verify.NewTool(cwd))
-	}
-
-	// 7. AGENTS.md from session CWD.
-	agentsMD, _ := agentcontext.LoadAgentsMD(cwd, os.Getenv("AGENT_HOME"))
-
-	// 8. Permission gate from session config (mirrors CLI logic).
-	permMode := permission.Mode(sessionCfg.Permissions.Mode)
-	if permMode == "" {
-		permMode = permission.ModeYolo
-	}
-	var gate *permission.Gate
-	if permMode != permission.ModeYolo {
-		permCfg := permission.Config{
-			Allow: sessionCfg.Permissions.Allow,
-			Deny:  sessionCfg.Permissions.Deny,
-			Rules: sessionCfg.Permissions.Rules,
-		}
-		if permMode == permission.ModeAuto {
-			evalModelSpec := sessionCfg.Permissions.Model
-			if evalModelSpec == "" {
-				evalModelSpec = "haiku"
-			}
-			evalModel, _ := core.ResolveModel(evalModelSpec)
-			evalProv, evalErr := m.providerFactory(evalModel)
-			if evalErr == nil {
-				permCfg.Evaluator = permission.NewEvaluator(evalProv, evalModel)
-			}
-		}
-		gate = permission.New(permMode, permCfg)
-	}
-
-	// 9. MCP servers.
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
-	untrustedMCP := false
-	mcpPath := filepath.Join(cwd, ".mcp.json")
-	if _, statErr := os.Stat(mcpPath); statErr == nil {
-		if core.IsMCPPathTrusted(sessionCfg, cwd) {
-			projectServers, loadErr := core.LoadMCPFile(mcpPath)
-			if loadErr == nil {
-				sessionCfg.MCPServers = core.MergeMCPServers(sessionCfg.MCPServers, projectServers)
-			}
-		} else {
-			untrustedMCP = true
-		}
-	}
 
-	var mcpMgr *mcp.Manager
-	if len(sessionCfg.MCPServers) > 0 {
-		mcpMgr = mcp.NewManager(nil)
-		mcpMgr.Start(sessionCtx, sessionCfg.MCPServers)
-		for _, t := range mcpMgr.Tools() {
-			toolReg.Register(t)
-		}
-	}
-
-	// 10. Skills — discover early (needed by subagent config and system prompt).
-	skills := skill.Discover(cwd)
-	skillsIndex := skill.FormatIndex(skills)
-
-	// 11. Subagents. Declare sess and agHolder before closures; both are
-	// populated before the session is exposed to callers.
+	// Forward-declare for closures (populated before the session is exposed).
 	var sess *ManagedSession
-	var agHolder atomic.Pointer[agent.Agent]
+	var bs *bootstrap.Session
 
-	if err := subagent.RegisterAll(toolReg, subagent.Config{
-		DefaultModel: model,
-		CurrentModel: func() core.Model {
-			if a := agHolder.Load(); a != nil {
-				return a.Model()
-			}
-			return model
-		},
-		CurrentThinkingLevel: func() string {
-			if a := agHolder.Load(); a != nil {
-				return a.ThinkingLevel()
-			}
-			return "medium"
-		},
-		CurrentPermissionCheck: func() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-			if a := agHolder.Load(); a != nil {
-				return a.PermissionCheck()
-			}
-			if gate != nil {
-				return gate.Check
-			}
-			return nil
-		},
+	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
+	// plan mode, skills, verify, and agent.
+	bs, err = bootstrap.BuildSession(bootstrap.SessionConfig{
+		CWD:             cwd,
+		Model:           model,
+		Provider:        prov,
 		ProviderFactory: m.providerFactory,
-		AgentsMD:        agentsMD,
-		ParentTools:     toolReg,
-		AppCtx:          sessionCtx,
-		WorkspaceRoot:   cwd,
-		SkillsIndex:     skillsIndex,
+		Ctx:             sessionCtx,
+		EnableAskUser:   true,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
 				s.broadcast(Event{Type: "subagent_count", Data: map[string]any{
@@ -593,26 +485,17 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 			if s == nil {
 				return
 			}
-			var agentText string
-			switch status {
-			case "completed":
-				agentText = fmt.Sprintf("[subagent completed] Job %s finished.\nTask: %s\n\nResult (last 50 lines):\n%s", jobID, task, resultTail)
-			case "failed":
-				agentText = fmt.Sprintf("[subagent failed] Job %s failed.\nTask: %s\nError: %s", jobID, task, resultTail)
-			case "cancelled":
-				agentText = fmt.Sprintf("[subagent cancelled] Job %s was cancelled.\nTask: %s", jobID, task)
-			default:
+			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail)
+			if agentText == "" {
 				return
 			}
-
-			if a := agHolder.Load(); a != nil {
+			if a := bs.Agent; a != nil {
 				if a.IsRunning() {
 					a.Steer(agentText)
 				} else {
 					a.Enqueue(agentText)
 				}
 			}
-
 			s.broadcast(Event{Type: "subagent_complete", Data: map[string]any{
 				"job_id": jobID,
 				"task":   task,
@@ -620,79 +503,18 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 				"text":   agentText,
 			}})
 		},
-	}); err != nil {
-		sessionCancel()
-		return nil, fmt.Errorf("subagent registration: %w", err)
-	}
-
-	// 11. Plan mode.
-	reviewModel := model
-	if sessionCfg.PlanReviewModel != "" {
-		if rm, ok := core.ResolveModel(sessionCfg.PlanReviewModel); ok {
-			reviewModel = rm
-		}
-	}
-	reviewThinking := "medium"
-	if sessionCfg.PlanReviewThinking != "" {
-		reviewThinking = sessionCfg.PlanReviewThinking
-	}
-	codeReviewModel := reviewModel
-	if sessionCfg.CodeReviewModel != "" {
-		if crm, ok := core.ResolveModel(sessionCfg.CodeReviewModel); ok {
-			codeReviewModel = crm
-		}
-	}
-	codeReviewThinking := reviewThinking
-	if sessionCfg.CodeReviewThinking != "" {
-		codeReviewThinking = sessionCfg.CodeReviewThinking
-	}
-
-	pm := planmode.New(planmode.Config{
-		Registry:   toolReg,
-		SessionDir: cwd,
-		TaskStore:  taskStore,
-		ReviewCfg: planmode.ReviewConfig{
-			ProviderFactory: m.providerFactory,
-			Model:           reviewModel,
-			ThinkingLevel:   reviewThinking,
-			ParentTools:     toolReg,
-		},
-		CodeReviewCfg: planmode.ReviewConfig{
-			ProviderFactory: m.providerFactory,
-			Model:           codeReviewModel,
-			ThinkingLevel:   codeReviewThinking,
-			ParentTools:     toolReg,
-		},
 	})
-
-	// Register skill tool (skills already discovered above).
-	if len(skills) > 0 {
-		toolReg.Register(skill.NewTool(skills))
+	if err != nil {
+		sessionCancel()
+		return nil, err
 	}
 
-	// Register ask_user tool.
-	askBridge := askuser.NewBridge()
-	toolReg.Register(askuser.NewTool(askBridge))
+	ag := bs.Agent
+	pm := bs.PlanMode
 
-	// System prompt (after ALL tools registered: builtins + MCP + subagents + skills).
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil, skillsIndex)
-
-	// 14. Agent.
-	agentCfg := agent.AgentConfig{
-		Provider:            prov,
-		Model:               model,
-		SystemPrompt:        systemPrompt,
-		ThinkingLevel:       "medium",
-		Tools:               toolReg,
-		WorkspaceRoot:       cwd,
-		MaxTurns:            50,
-		MaxToolCallsPerTurn: 20,
-		MaxRunDuration:      30 * time.Minute,
-		MaxBudget:           sessionCfg.MaxBudget,
-	}
 	// Compose permission check: plan mode filter + permission gate.
 	// Reads sess.gate under lock so SetPermissionMode changes take effect immediately.
-	agentCfg.PermissionCheck = func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+	if err := ag.SetPermissionCheck(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 		if allowed, reason := pm.FilterToolCall(name, args); !allowed {
 			return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPolicy}
 		}
@@ -703,16 +525,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 			return g.Check(ctx, name, args)
 		}
 		return nil
-	}
-
-	ag, err := agent.New(agentCfg)
-	if err != nil {
+	}); err != nil {
 		sessionCancel()
+		if bs.MCPManager != nil {
+			bs.MCPManager.Close()
+		}
 		return nil, err
 	}
-	agHolder.Store(ag)
 
-	// 14. Build session.
+	// Build managed session.
 	sess = &ManagedSession{
 		ID:            id,
 		Title:         title,
@@ -722,16 +543,16 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		Created:       time.Now(),
 		Updated:       time.Now(),
 		agent:         ag,
-		gate:          gate,
-		askBridge:     askBridge,
+		gate:          bs.Gate,
+		askBridge:     bs.AskBridge,
 		sessionCtx:    sessionCtx,
 		sessionCancel: sessionCancel,
-		toolReg:       toolReg,
-		agentsMD:      agentsMD,
+		toolReg:       bs.ToolReg,
+		agentsMD:      bs.AgentsMD,
 		resolvedModel: model,
-		mcpMgr:        mcpMgr,
-		UntrustedMCP:  untrustedMCP,
-		taskStore:     taskStore,
+		mcpMgr:        bs.MCPManager,
+		UntrustedMCP:  bs.UntrustedMCP,
+		taskStore:     bs.TaskStore,
 		planMode:      pm,
 	}
 
@@ -749,10 +570,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		sess.broadcastAgentEvent(e)
 	})
 
-	if gate != nil {
+	if bs.Gate != nil {
 		go sess.permissionBridge(sessionCtx)
 	}
-	if askBridge != nil {
+	if bs.AskBridge != nil {
 		go sess.askUserBridge(sessionCtx)
 	}
 
