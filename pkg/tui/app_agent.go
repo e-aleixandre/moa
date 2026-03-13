@@ -321,7 +321,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 
 	// Plan mode: check if plan was submitted → show action menu.
 	if m.planMode != nil && m.planMode.OnPlanSubmitted() {
-		m.topBar.UpdatePlanSegment("ready")
+		m.statusBar.UpdatePlanSegment("ready")
 		m.planMenu.OpenPostSubmit()
 		m.lastMenuVariant = menuPostSubmit
 		m.input.SetEnabled(false)
@@ -332,8 +332,8 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 		m.planMode.Exit()
 		m.syncPermissionCheck()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("")
-		m.topBar.UpdateTasksSegment(0, 0)
+		m.statusBar.UpdatePlanSegment("")
+		m.statusBar.UpdateTasksSegment(0, 0)
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "✅ All tasks complete — plan mode finished",
 		})

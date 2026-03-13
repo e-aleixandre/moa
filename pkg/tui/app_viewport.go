@@ -23,12 +23,12 @@ func (m *appModel) refreshTaskDisplay() {
 		return
 	}
 	done, total := m.taskStore.Progress()
-	m.topBar.UpdateTasksSegment(done, total)
+	m.statusBar.UpdateTasksSegment(done, total)
 	if m.planMode != nil && m.planMode.Mode() == planmode.ModeExecuting {
 		if total > 0 {
-			m.topBar.UpdatePlanSegment(fmt.Sprintf("executing 📋 %d/%d", done, total))
+			m.statusBar.UpdatePlanSegment(fmt.Sprintf("executing 📋 %d/%d", done, total))
 		} else {
-			m.topBar.UpdatePlanSegment("executing")
+			m.statusBar.UpdatePlanSegment("executing")
 		}
 	}
 	m.s.viewportDirty = true
@@ -110,14 +110,9 @@ func (m *appModel) computeChromeHeight() int {
 			h += lipgloss.Height(iv)
 		}
 	}
-	if m.topBar != nil {
-		if tv := m.topBar.View(m.width); tv != "" {
+	if m.statusBar != nil {
+		if tv := m.statusBar.View(m.width); tv != "" {
 			h += lipgloss.Height(tv)
-		}
-	}
-	if m.bottomBar != nil {
-		if bv := m.bottomBar.View(m.width); bv != "" {
-			h += lipgloss.Height(bv)
 		}
 	}
 	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
@@ -255,7 +250,7 @@ func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
 			m.s.sessionCost += model.Pricing.Cost(*msg.Usage)
 		}
 	}
-	m.topBar.UpdateCostSegment(m.s.sessionCost)
+	m.statusBar.UpdateCostSegment(m.s.sessionCost)
 }
 
 // refreshContextSegment recalculates the context usage percentage and updates
@@ -266,13 +261,13 @@ func (m *appModel) refreshContextSegment() {
 	}
 	model := m.agent.Model()
 	if model.MaxInput <= 0 {
-		m.topBar.Remove(SegmentContext)
+		m.statusBar.Remove(SegmentContext)
 		return
 	}
 	msgs := m.agent.Messages()
 	estimate := core.EstimateContextTokens(msgs, "", nil, m.agent.CompactionEpoch())
 	pct := (estimate.Tokens * 100) / model.MaxInput
-	m.topBar.UpdateContextSegment(pct)
+	m.statusBar.UpdateContextSegment(pct)
 }
 
 // thinkingLevels defines the cycle order for Shift+Tab.

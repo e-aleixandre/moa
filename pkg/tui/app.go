@@ -113,8 +113,7 @@ type appModel struct {
 	permPrompt     permissionPrompt
 	askPrompt      askPrompt
 	sessionBrowser sessionBrowser
-	topBar         *StatusLine
-	bottomBar      *StatusLine
+	statusBar *StatusLine
 
 	// Session persistence
 	sessionStore session.SessionStore // nil if persistence is disabled
@@ -237,8 +236,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		status:               newStatus(),
 		picker:               newPicker(),
 		sessionBrowser:       newSessionBrowser(),
-		topBar:               NewStatusLine(statusLineStyle),
-		bottomBar:            NewStatusLine(statusLineStyle),
+		statusBar:            NewStatusLine(statusLineStyle),
 		sessionStore:         cfg.SessionStore,
 		session:              cfg.Session,
 		cwd:                  cfg.CWD,
@@ -258,15 +256,15 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 
 	// Initialize status line segments.
 	if cfg.ModelName != "" {
-		m.topBar.UpdateModelSegment(cfg.ModelName)
+		m.statusBar.UpdateModelSegment(cfg.ModelName)
 	}
-	m.topBar.UpdateThinkingSegment(ag.ThinkingLevel())
+	m.statusBar.UpdateThinkingSegment(ag.ThinkingLevel())
 	if m.permGate != nil {
-		m.topBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
+		m.statusBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
 	} else {
-		m.topBar.UpdatePermissionsSegment("yolo")
+		m.statusBar.UpdatePermissionsSegment("yolo")
 	}
-	m.topBar.UpdateContextSegment(0)
+	m.statusBar.UpdateContextSegment(0)
 	if cfg.StartInSessionBrowser {
 		m.sessionBrowser.Open()
 		m.input.SetEnabled(false)
@@ -314,7 +312,7 @@ func (m appModel) Init() tea.Cmd {
 		m.rebuildSystemPrompt()
 		mode := m.planMode.Mode()
 		if mode != planmode.ModeOff {
-			m.topBar.UpdatePlanSegment(string(mode))
+			m.statusBar.UpdatePlanSegment(string(mode))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -696,7 +694,7 @@ func (m appModel) View() string {
 	}
 
 	// Build bottom chrome (everything below the viewport).
-	// Order matches the original inline layout: notices → topBar → input → bottomBar → palette
+	// Bottom chrome order: notices → input → statusBar → palette
 	var bottomChrome []string
 
 	l := GetActiveLayout()
@@ -754,14 +752,9 @@ func (m appModel) View() string {
 			bottomChrome = append(bottomChrome, iv)
 		}
 	}
-	if m.topBar != nil {
-		if tv := m.topBar.View(m.width); tv != "" {
+	if m.statusBar != nil {
+		if tv := m.statusBar.View(m.width); tv != "" {
 			bottomChrome = append(bottomChrome, tv)
-		}
-	}
-	if m.bottomBar != nil {
-		if bv := m.bottomBar.View(m.width); bv != "" {
-			bottomChrome = append(bottomChrome, bv)
 		}
 	}
 	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
@@ -915,7 +908,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.agent.Reconfigure(nil, model, level); err != nil {
 			return m, nil
 		}
-		m.topBar.UpdateThinkingSegment(level)
+		m.statusBar.UpdateThinkingSegment(level)
 		m.status.SetText("thinking: " + level)
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return clearThinkingStatusMsg{}

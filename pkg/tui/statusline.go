@@ -97,7 +97,8 @@ func (sl *StatusLine) View(width int) string {
 	// with tea.Println-based scrollback in non-alt-screen mode.
 	content = strings.ReplaceAll(content, "\n", " ")
 	if width > 0 {
-		content = truncateVisible(content, width-2) // account for style padding
+		pl := sl.style.GetPaddingLeft() + sl.style.GetPaddingRight()
+		content = truncateVisible(content, width-pl)
 	}
 	return sl.style.Width(width).Render(content)
 }
@@ -165,7 +166,7 @@ const (
 // statusLineSep is rebuilt by RebuildUI via rebuildStatusLineVars.
 var statusLineSep string
 
-// Context usage level styles — rebuilt by RebuildUI.
+// Segment styles — no background, blends with the terminal.
 var (
 	statusLineStyle            lipgloss.Style
 	statusLineContextLowStyle  lipgloss.Style
@@ -177,7 +178,7 @@ var (
 func rebuildStatusLineVars() {
 	t := ActiveTheme
 	statusLineSep = statusLineSepStyle.Render("  ·  ")
-	statusLineStyle = lipgloss.NewStyle().Foreground(t.Text).Background(t.Surface0)
+	statusLineStyle = lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(1)
 	statusLineContextLowStyle = lipgloss.NewStyle().Foreground(t.Green)
 	statusLineContextMedStyle = lipgloss.NewStyle().Foreground(t.Yellow)
 	statusLineContextHighStyle = lipgloss.NewStyle().Foreground(t.Red)
@@ -200,7 +201,8 @@ func (sl *StatusLine) UpdatePermissionsSegment(mode string) {
 	if mode == "" {
 		mode = "yolo"
 	}
-	sl.Set(SegmentPermissions, mode, PriorityPermissions)
+	text := statusLineKeyStyle.Render("perms ") + statusLineValueStyle.Render(mode)
+	sl.Set(SegmentPermissions, text, PriorityPermissions)
 }
 
 // UpdatePlanSegment sets the plan mode segment. Pass "" to remove.

@@ -137,9 +137,6 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
         <span class="tile-number" title={formatShortcut(String(tileIndex + 1), { mod: true })}>{tileIndex + 1}</span>
         <span class={`state-dot ${session.state}`} />
         <span class="tile-title">{session.title || 'Untitled'}</span>
-        {session.planMode && session.planMode !== 'off' && (
-          <span class={`plan-badge plan-${session.planMode}`}>📋 {session.planMode}</span>
-        )}
         {session.subagentCount > 0 && (
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}

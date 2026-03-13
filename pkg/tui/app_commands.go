@@ -83,7 +83,7 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.pendingImageMime = ""
 		m.s.sessionCost = 0
 		m.s.expanded = false
-		m.topBar.UpdateCostSegment(0)
+		m.statusBar.UpdateCostSegment(0)
 		// Delete old session, create fresh one
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
@@ -498,7 +498,7 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 		name = newModel.ID
 	}
 	m.modelName = name
-	m.topBar.UpdateModelSegment(name)
+	m.statusBar.UpdateModelSegment(name)
 	m.refreshContextSegment()
 	m.s.pendingStatus = ""
 	m.s.pendingTimeline = newModelSwitchEvent(newModel)
@@ -583,7 +583,7 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 	if newMode == permission.ModeYolo {
 		m.permGate = nil
 		m.syncPermissionCheck()
-		m.topBar.UpdatePermissionsSegment("")
+		m.statusBar.UpdatePermissionsSegment("")
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "permissions: yolo (all tools auto-approved)",
 		})
@@ -611,7 +611,7 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 		}
 
 		m.syncPermissionCheck()
-		m.topBar.UpdatePermissionsSegment(string(newMode))
+		m.statusBar.UpdatePermissionsSegment(string(newMode))
 		cmds = append(cmds, m.waitForPermission())
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
@@ -640,7 +640,7 @@ func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.topBar.UpdateThinkingSegment(level)
+	m.statusBar.UpdateThinkingSegment(level)
 	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", level)
 	return m, nil
 }
@@ -725,7 +725,7 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.pendingImage = nil
 	m.s.pendingImageMime = ""
 	m.s.sessionCost = 0
-	m.topBar.UpdateCostSegment(0)
+	m.statusBar.UpdateCostSegment(0)
 
 	// Restore model from session metadata when resuming.
 	if sess != nil && sess.Metadata != nil {
@@ -745,10 +745,10 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 		m.rebuildSystemPrompt()
 		mode := m.planMode.Mode()
 		if mode != planmode.ModeOff {
-			m.topBar.UpdatePlanSegment(string(mode))
+			m.statusBar.UpdatePlanSegment(string(mode))
 		} else {
-			m.topBar.UpdatePlanSegment("")
-			m.topBar.UpdateTasksSegment(0, 0)
+			m.statusBar.UpdatePlanSegment("")
+			m.statusBar.UpdateTasksSegment(0, 0)
 		}
 		// Restore task progress display if in executing mode.
 		if mode == planmode.ModeExecuting {
@@ -802,7 +802,7 @@ func (m *appModel) restoreModelFromMetadata(sess *session.Session) {
 		name = model.ID
 	}
 	m.modelName = name
-	m.topBar.UpdateModelSegment(m.modelName)
+	m.statusBar.UpdateModelSegment(m.modelName)
 }
 
 // handlePromptTemplate processes `/prompt` and `/prompt <name>`.

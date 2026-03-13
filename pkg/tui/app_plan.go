@@ -135,8 +135,8 @@ func (m appModel) handlePlanCommand() (tea.Model, tea.Cmd) {
 		m.planMode.Exit()
 		m.syncPermissionCheck()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("")
-		m.topBar.UpdateTasksSegment(0, 0)
+		m.statusBar.UpdatePlanSegment("")
+		m.statusBar.UpdateTasksSegment(0, 0)
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "Plan mode disabled"})
 		m.updateViewport()
 		return m, nil
@@ -161,7 +161,7 @@ func (m appModel) handlePlanCommand() (tea.Model, tea.Cmd) {
 	}
 	m.syncPermissionCheck()
 	m.rebuildSystemPrompt()
-	m.topBar.UpdatePlanSegment("planning")
+	m.statusBar.UpdatePlanSegment("planning")
 	m.s.blocks = append(m.s.blocks, messageBlock{
 		Type: "status",
 		Raw:  "📋 Plan mode enabled — plan file: " + planPath,
@@ -242,11 +242,11 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		}
 		m.s.blocks = m.s.blocks[:0]
 		m.s.sessionCost = 0
-		m.topBar.UpdateCostSegment(0)
+		m.statusBar.UpdateCostSegment(0)
 		m.planMode.StartExecution()
 		m.syncPermissionCheck()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("executing")
+		m.statusBar.UpdatePlanSegment("executing")
 		planFile := m.planMode.PlanFilePath()
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "▶ Executing plan (clean context)",
@@ -258,7 +258,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		m.planMode.StartExecution()
 		m.syncPermissionCheck()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("executing")
+		m.statusBar.UpdatePlanSegment("executing")
 		planFile := m.planMode.PlanFilePath()
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "▶ Executing plan (keeping context)",
@@ -268,7 +268,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 
 	case planActionReview:
 		m.planMode.StartReview()
-		m.topBar.UpdatePlanSegment("reviewing")
+		m.statusBar.UpdatePlanSegment("reviewing")
 		m.input.SetEnabled(false)
 		m.status.SetText("reviewing plan...")
 		// Build review args for the tool block display.
@@ -297,7 +297,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 	case planActionRefine:
 		m.planMode.ContinueRefining()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("planning")
+		m.statusBar.UpdatePlanSegment("planning")
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "✏️ Continuing to refine plan",
 		})
@@ -312,7 +312,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		// Send reviewer feedback to model for auto-refinement.
 		m.planMode.ContinueRefining()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("planning")
+		m.statusBar.UpdatePlanSegment("planning")
 		feedback := ""
 		if m.lastReviewResult != nil {
 			feedback = m.lastReviewResult.Feedback
@@ -324,7 +324,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		// Let user add instructions, then combine with reviewer feedback.
 		m.planMode.ContinueRefining()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("planning")
+		m.statusBar.UpdatePlanSegment("planning")
 		m.input.SetEnabled(true)
 		feedback := ""
 		if m.lastReviewResult != nil {
@@ -350,7 +350,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 	case planActionStayInPlanMode:
 		m.planMode.ContinueRefining()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("planning")
+		m.statusBar.UpdatePlanSegment("planning")
 		m.input.SetEnabled(true)
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "⏸ Staying in plan mode — edit the plan manually or keep refining",
@@ -443,7 +443,7 @@ func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, te
 		return m, nil
 	}
 	m.planMode.ReviewDone()
-	m.topBar.UpdatePlanSegment("ready")
+	m.statusBar.UpdatePlanSegment("ready")
 	m.status.SetText("")
 	m.reviewStreamCh = nil
 
