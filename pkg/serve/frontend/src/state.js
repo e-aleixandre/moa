@@ -428,10 +428,14 @@ export function handleWsStateChange(id, data) {
     if (sess) updateSession(id, { streamingText: null, thinkingText: null });
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
-      // Notify non-visible sessions that finished
+      // Notify non-visible sessions that finished or errored
       const visible = visibleSessionIds(state);
-      if (!visible.includes(id) && data.state === 'idle' && sess) {
-        triggerDone(sess, state.soundEnabled);
+      if (!visible.includes(id) && sess) {
+        if (data.state === 'error') {
+          triggerAttention(sess, null, state.soundEnabled);
+        } else {
+          triggerDone(sess, state.soundEnabled);
+        }
       }
     }
   }
@@ -455,9 +459,14 @@ export function handleWsPermissionRequest(id, data) {
     state: 'permission',
     pendingPerm: { id: data.id, tool_name: data.tool_name, args: data.args },
   });
+  // Always flash the tile bar (visible feedback even if the tile is on screen).
   flashSession(id, 'attention');
-  const sess = state.sessions[id];
-  if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
+  // Toast + sound + browser notification only for non-visible sessions.
+  const visible = visibleSessionIds(state);
+  if (!visible.includes(id)) {
+    const sess = state.sessions[id];
+    if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
+  }
 }
 
 function flashSession(id, type) {
@@ -672,9 +681,26 @@ export function closeTile(tileId) {
 }
 
 export function assignToTile(tileId, sessionId) {
-  // Remove from any other tile first (unique assignment)
-  let tree = clearSession(state.tileTree, sessionId);
-  tree = setTileSession(tree, tileId, sessionId);
+  // Find what's currently in the target tile and where the session is coming from.
+  const targetTile = findTile(state.tileTree, tileId);
+  const targetSession = targetTile ? targetTile.sessionId : null;
+
+  // Find the source tile (where the session currently lives).
+  let sourceTileId = null;
+  for (const tid of allTileIds(state.tileTree)) {
+    const t = findTile(state.tileTree, tid);
+    if (t && t.sessionId === sessionId) { sourceTileId = tid; break; }
+  }
+
+  let tree = state.tileTree;
+  if (sourceTileId && targetSession && sourceTileId !== tileId) {
+    // Both tiles have sessions — swap them.
+    tree = swapSessions(tree, sourceTileId, tileId);
+  } else {
+    // One-way move: clear from old tile, set in new.
+    tree = clearSession(tree, sessionId);
+    tree = setTileSession(tree, tileId, sessionId);
+  }
   setState({ tileTree: tree, focusedTile: tileId });
   afterVisibilityChange();
 }

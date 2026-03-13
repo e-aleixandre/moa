@@ -101,22 +101,20 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        <div class="tile-header" draggable onDragStart={handleDragStart} {...touchDragProps}>
+          <GripHorizontal class="drag-handle" />
+          <span class="tile-number" title={formatShortcut(String(tileIndex + 1), { mod: true })}>{tileIndex + 1}</span>
+          <span class="tile-title empty-title">Empty</span>
+          <button class="tile-action-btn" onClick={(e) => stop(e, () => splitTile(tileId, 'horizontal'))} title="Split right"><Columns2 /></button>
+          <button class="tile-action-btn" onClick={(e) => stop(e, () => splitTile(tileId, 'vertical'))} title="Split down"><Rows2 /></button>
+          {canClose && (
+            <button class="tile-action-btn tile-close-btn" onClick={(e) => stop(e, () => closeTile(tileId))} title="Close pane"><X /></button>
+          )}
+        </div>
         <div class="tile-empty">
           <MessageSquarePlus />
           <span>Drag a session here</span>
-          <div class="tile-empty-actions">
-            <button onClick={() => splitTile(tileId, 'horizontal')}>
-              <Columns2 /> Split right
-            </button>
-            <button onClick={() => splitTile(tileId, 'vertical')}>
-              <Rows2 /> Split down
-            </button>
-          </div>
-          {canClose && (
-            <button class="tile-empty-close" onClick={() => closeTile(tileId)}>
-              <X /> Close pane
-            </button>
-          )}
+          <span class="tile-empty-hint">{formatShortcut('K', { mod: true })} to pick a session</span>
         </div>
       </div>
     );
