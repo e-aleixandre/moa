@@ -315,6 +315,15 @@ type Manager struct {
 	workspaceRoot   string
 	moaCfg          core.MoaConfig
 	sessionBaseDir  string // root for session stores; empty = default (~/.config/moa/sessions/)
+
+	// savedCache caches the result of session.ListAll to avoid
+	// re-scanning disk on every poll (frontend polls every 3s).
+	// TTL-based: re-scans when older than savedCacheTTL.
+	// Invalidated immediately on create/delete/resume.
+	savedCacheMu  sync.Mutex
+	savedCache    []session.Summary
+	savedCacheAt  time.Time
+	savedCacheTTL time.Duration // default 30s, configurable for tests
 }
 
 // ManagerConfig configures a Manager.
@@ -339,6 +348,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		workspaceRoot:   cfg.WorkspaceRoot,
 		moaCfg:          cfg.MoaCfg,
 		sessionBaseDir:  cfg.SessionBaseDir,
+		savedCacheTTL:   30 * time.Second,
 	}
 }
 
@@ -388,6 +398,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		sess.store = store
 	}
 
+	m.invalidateSavedCache()
 	return sess, nil
 }
 
@@ -787,8 +798,8 @@ func (m *Manager) List() []SessionInfo {
 		s.mu.Unlock()
 	}
 
-	// Merge saved sessions from all project directories.
-	saved, _ := session.ListAll(m.sessionBaseDir)
+	// Merge saved sessions from all project directories (cached).
+	saved := m.cachedSavedSessions()
 	for _, sum := range saved {
 		if _, isActive := active[sum.ID]; isActive {
 			continue
@@ -810,6 +821,27 @@ func (m *Manager) List() []SessionInfo {
 		return list[i].Updated.After(list[j].Updated)
 	})
 	return list
+}
+
+// cachedSavedSessions returns saved sessions from disk, using a TTL cache
+// to avoid re-scanning on every poll (frontend polls every 3s).
+func (m *Manager) cachedSavedSessions() []session.Summary {
+	m.savedCacheMu.Lock()
+	defer m.savedCacheMu.Unlock()
+	if m.savedCache != nil && time.Since(m.savedCacheAt) < m.savedCacheTTL {
+		return m.savedCache
+	}
+	saved, _ := session.ListAll(m.sessionBaseDir)
+	m.savedCache = saved
+	m.savedCacheAt = time.Now()
+	return saved
+}
+
+// invalidateSavedCache forces the next List() call to re-scan disk.
+func (m *Manager) invalidateSavedCache() {
+	m.savedCacheMu.Lock()
+	m.savedCache = nil
+	m.savedCacheMu.Unlock()
 }
 
 // Get returns a managed session by ID.
@@ -836,6 +868,7 @@ func (m *Manager) Delete(id string) error {
 			}
 			return err
 		}
+		m.invalidateSavedCache()
 		return nil
 	}
 	delete(m.sessions, id)
@@ -864,6 +897,7 @@ func (m *Manager) Delete(id string) error {
 	if store != nil {
 		store.Delete(id)
 	}
+	m.invalidateSavedCache()
 	return nil
 }
 
