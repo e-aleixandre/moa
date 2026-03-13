@@ -30,6 +30,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	if strings.HasPrefix(cmd, "tasks ") {
 		return m.handleTasksCommand(strings.TrimSpace(cmd[6:]))
 	}
+	if cmd == "prompt" || strings.HasPrefix(cmd, "prompt ") {
+		return m.handlePromptTemplate(strings.TrimSpace(strings.TrimPrefix(cmd, "prompt")))
+	}
 
 	switch cmd {
 	case "model", "models":
@@ -756,4 +759,40 @@ func (m *appModel) restoreModelFromMetadata(sess *session.Session) {
 	}
 	m.modelName = name
 	m.topBar.UpdateModelSegment(m.modelName)
+}
+
+// handlePromptTemplate processes `/prompt` and `/prompt <name>`.
+func (m appModel) handlePromptTemplate(name string) (tea.Model, tea.Cmd) {
+	if len(m.promptTemplates) == 0 {
+		m.status.SetText("no prompt templates found in .moa/prompts/ or ~/.config/moa/prompts/")
+		return m, nil
+	}
+
+	if name == "" {
+		// List available templates.
+		var lines []string
+		for _, t := range m.promptTemplates {
+			entry := t.Name
+			if len(t.Placeholders) > 0 {
+				entry += " ({{" + strings.Join(t.Placeholders, "}}, {{") + "}})"
+			}
+			lines = append(lines, "  "+entry)
+		}
+		msg := "available templates:\n" + strings.Join(lines, "\n")
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: msg})
+		m.updateViewport()
+		return m, nil
+	}
+
+	// Find the template by name.
+	for _, t := range m.promptTemplates {
+		if t.Name == name {
+			m.input.textarea.SetValue(t.Content)
+			m.input.textarea.CursorEnd()
+			return m, nil
+		}
+	}
+
+	m.status.SetText("unknown template: " + name)
+	return m, nil
 }

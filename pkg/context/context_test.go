@@ -143,4 +143,25 @@ func TestBuildSystemPrompt_Empty(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_WithSkills(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "load_skill", Description: "Load a skill pack"},
+	}
+	skillsIndex := "Available skills (use the load_skill tool to load when relevant):\n- go-testing: Go Testing — Best practices for Go tests\n"
+	prompt := BuildSystemPrompt("", tools, "/test", false, skillsIndex)
+	if !strings.Contains(prompt, "go-testing: Go Testing") {
+		t.Error("expected skills index in prompt")
+	}
+	if !strings.Contains(prompt, "load_skill") {
+		t.Error("expected load_skill tool in prompt")
+	}
+}
+
+func TestBuildSystemPrompt_EmptySkills(t *testing.T) {
+	prompt := BuildSystemPrompt("", nil, "/test", false, "")
+	if strings.Contains(prompt, "Available skills") {
+		t.Error("empty skills index should not appear")
+	}
+}
+
 

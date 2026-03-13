@@ -28,6 +28,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/skill"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
@@ -509,7 +510,11 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		}
 	}
 
-	// 10. Subagents. Declare sess and agHolder before closures; both are
+	// 10. Skills — discover early (needed by subagent config and system prompt).
+	skills := skill.Discover(cwd)
+	skillsIndex := skill.FormatIndex(skills)
+
+	// 11. Subagents. Declare sess and agHolder before closures; both are
 	// populated before the session is exposed to callers.
 	var sess *ManagedSession
 	var agHolder atomic.Pointer[agent.Agent]
@@ -542,6 +547,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		ParentTools:     toolReg,
 		AppCtx:          sessionCtx,
 		WorkspaceRoot:   cwd,
+		SkillsIndex:     skillsIndex,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
 				s.broadcast(Event{Type: "subagent_count", Data: map[string]any{
@@ -626,10 +632,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		},
 	})
 
-	// 12. System prompt (after ALL tools registered: builtins + MCP + subagents).
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil)
+	// Register skill tool (skills already discovered above).
+	if len(skills) > 0 {
+		toolReg.Register(skill.NewTool(skills))
+	}
 
-	// 13. Agent.
+	// System prompt (after ALL tools registered: builtins + MCP + subagents + skills).
+	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil, skillsIndex)
+
+	// 14. Agent.
 	agentCfg := agent.AgentConfig{
 		Provider:            prov,
 		Model:               model,

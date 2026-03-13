@@ -29,7 +29,8 @@ var toolSnippets = map[string]string{
 // cwd is the working directory shown to the agent; if empty, os.Getwd() is used.
 // hasVerify indicates a valid .moa/verify.json was loaded — adds a guideline
 // instructing the agent to verify after coding tasks.
-func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVerify bool) string {
+// skillsIndex is an optional pre-formatted index of available skills (empty = no skills).
+func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVerify bool, skillsIndex ...string) string {
 	var sb strings.Builder
 
 	// Identity and role
@@ -105,6 +106,12 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 		sb.WriteString("# Project Context\n\n")
 		sb.WriteString("Project-specific instructions and guidelines:\n\n")
 		sb.WriteString(agentsMD)
+		sb.WriteString("\n\n")
+	}
+
+	// Skills index (if provided)
+	if len(skillsIndex) > 0 && skillsIndex[0] != "" {
+		sb.WriteString(skillsIndex[0])
 		sb.WriteString("\n\n")
 	}
 

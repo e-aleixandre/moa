@@ -23,6 +23,7 @@ var allCommands = []commandDef{
 	{Name: "permissions", Args: "<mode>", Desc: "View or set permission mode (yolo/ask/auto)"},
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
 	{Name: "verify", Desc: "Run project verification checks"},
+	{Name: "prompt", Args: "<name>", Desc: "Insert a prompt template"},
 	{Name: "clear", Desc: "Clear conversation and start fresh"},
 	{Name: "exit", Desc: "Quit moa"},
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/verify"
@@ -144,6 +145,9 @@ type appModel struct {
 	taskStore             *tasks.Store
 	taskWidget            taskWidget
 
+	// Prompt templates
+	promptTemplates []promptpkg.Template
+
 	// Subagent status
 	subagentCountCh  <-chan int
 	subagentNotifyCh <-chan SubagentNotification
@@ -173,6 +177,7 @@ type Config struct {
 	SubagentNotifyCh      <-chan SubagentNotification // receives async subagent completion notifications (nil = disabled)
 	PlanMode              *planmode.PlanMode          // plan mode instance (nil = disabled)
 	TaskStore             *tasks.Store                // task store (nil = no task tracking)
+	PromptTemplates       []promptpkg.Template        // available prompt templates (nil = none)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -237,6 +242,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		subagentNotifyCh:     cfg.SubagentNotifyCh,
 		planMode:             cfg.PlanMode,
 		taskStore:            cfg.TaskStore,
+		promptTemplates:      cfg.PromptTemplates,
 		baseSystemPrompt:     ag.SystemPrompt(),
 	}
 
