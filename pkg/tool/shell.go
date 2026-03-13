@@ -80,7 +80,7 @@ func RunShell(ctx context.Context, cfg ShellConfig) ShellResult {
 		for {
 			n, err := r.Read(tmp)
 			if n > 0 {
-				buf.Write(tmp[:n])
+				_, _ = buf.Write(tmp[:n])
 			}
 			if err != nil {
 				return

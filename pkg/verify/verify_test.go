@@ -144,8 +144,12 @@ func TestLoadConfig_Missing(t *testing.T) {
 func TestLoadConfig_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	moaDir := filepath.Join(dir, ".moa")
-	os.MkdirAll(moaDir, 0o755)
-	os.WriteFile(filepath.Join(moaDir, "verify.json"), []byte("{bad json}"), 0o644)
+	if err := os.MkdirAll(moaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moaDir, "verify.json"), []byte("{bad json}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := LoadConfig(dir)
 	if err == nil {
