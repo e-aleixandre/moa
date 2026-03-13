@@ -132,6 +132,8 @@ export async function loadSessions() {
         error: info.error || null,
         untrustedMcp: info.untrusted_mcp || false,
         messages: existing ? existing.messages : [],
+        contextPercent: info.context_percent ?? (existing ? existing.contextPercent : -1),
+        permissionMode: info.permission_mode || (existing ? existing.permissionMode : 'yolo'),
         pendingPerm: existing ? existing.pendingPerm : null,
         pendingAsk: existing ? existing.pendingAsk : null,
         streamingText: existing ? existing.streamingText : null,
@@ -198,6 +200,8 @@ export function handleWsInit(id, data) {
   updateSession(id, {
     messages: normalizeHistory(data.messages || []),
     state: data.state || 'idle',
+    contextPercent: data.context_percent ?? -1,
+    permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission || null,
     pendingAsk: data.pending_ask || (state.sessions[id]?.pendingAsk || null),
     streamingText: null,
@@ -464,10 +468,20 @@ function flashSession(id, type) {
 }
 
 export function handleWsConfigChange(id, data) {
-  updateSession(id, {
+  const patch = {
     model: data.model || state.sessions[id]?.model,
     thinking: data.thinking || state.sessions[id]?.thinking,
-  });
+  };
+  if (data.permission_mode) {
+    patch.permissionMode = data.permission_mode;
+  }
+  updateSession(id, patch);
+}
+
+export function handleWsContextUpdate(id, data) {
+  if (data.context_percent != null) {
+    updateSession(id, { contextPercent: data.context_percent });
+  }
 }
 
 export function handleWsSubagentCount(id, count) {
@@ -554,13 +568,18 @@ export async function resumeSession(id) {
   return sess;
 }
 
-export async function configureSession(id, { model, thinking }) {
-  const res = await api('PATCH', `/api/sessions/${id}/config`, { model, thinking });
+export async function configureSession(id, { model, thinking, permissionMode }) {
+  const body = {};
+  if (model) body.model = model;
+  if (thinking) body.thinking = thinking;
+  if (permissionMode) body.permission_mode = permissionMode;
+  const res = await api('PATCH', `/api/sessions/${id}/config`, body);
   if (res) {
-    updateSession(id, {
-      model: res.model || state.sessions[id]?.model,
-      thinking: res.thinking || state.sessions[id]?.thinking,
-    });
+    const patch = {};
+    if (res.model) patch.model = res.model;
+    if (res.thinking) patch.thinking = res.thinking;
+    if (res.permission_mode) patch.permissionMode = res.permission_mode;
+    updateSession(id, patch);
   }
   return res;
 }

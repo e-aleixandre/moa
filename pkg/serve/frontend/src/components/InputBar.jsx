@@ -22,6 +22,7 @@ const COMMANDS = [
   { name: 'compact', desc: 'Compact conversation context' },
   { name: 'model', desc: 'Switch model', args: '<model>' },
   { name: 'thinking', desc: 'Set thinking level', args: '<off|low|medium|high>' },
+  { name: 'permissions', desc: 'Set permission mode', args: '<yolo|ask|auto>' },
   { name: 'plan', desc: 'Enter/exit plan mode', args: '[exit]' },
   { name: 'tasks', desc: 'View/manage tasks', args: '[done <id> | reset]' },
 ];

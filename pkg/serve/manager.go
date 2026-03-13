@@ -95,18 +95,20 @@ type ManagedSession struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID           string       `json:"id"`
-	Title        string       `json:"title"`
-	State        SessionState `json:"state"`
-	Model        string       `json:"model"`
-	Thinking     string       `json:"thinking"`
-	CWD          string       `json:"cwd"`
-	Created      time.Time    `json:"created"`
-	Updated      time.Time    `json:"updated"`
-	Error        string       `json:"error,omitempty"`
-	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
-	PlanMode     string       `json:"plan_mode,omitempty"`
-	PlanFile     string       `json:"plan_file,omitempty"`
+	ID             string       `json:"id"`
+	Title          string       `json:"title"`
+	State          SessionState `json:"state"`
+	Model          string       `json:"model"`
+	Thinking       string       `json:"thinking"`
+	CWD            string       `json:"cwd"`
+	Created        time.Time    `json:"created"`
+	Updated        time.Time    `json:"updated"`
+	Error          string       `json:"error,omitempty"`
+	UntrustedMCP   bool         `json:"untrusted_mcp,omitempty"`
+	PlanMode       string       `json:"plan_mode,omitempty"`
+	PlanFile       string       `json:"plan_file,omitempty"`
+	ContextPercent int          `json:"context_percent"` // 0-100, -1 if unknown
+	PermissionMode string       `json:"permission_mode"` // "yolo", "ask", "auto"
 }
 
 // Subscribe registers a channel to receive session events. Returns the channel
@@ -249,16 +251,18 @@ func (s *ManagedSession) info() SessionInfo {
 		thinking = s.agent.ThinkingLevel()
 	}
 	info := SessionInfo{
-		ID:           s.ID,
-		Title:        s.Title,
-		State:        s.State,
-		Model:        s.Model,
-		Thinking:     thinking,
-		CWD:          s.CWD,
-		Created:      s.Created,
-		Updated:      s.Updated,
-		Error:        s.Error,
-		UntrustedMCP: s.UntrustedMCP,
+		ID:             s.ID,
+		Title:          s.Title,
+		State:          s.State,
+		Model:          s.Model,
+		Thinking:       thinking,
+		CWD:            s.CWD,
+		Created:        s.Created,
+		Updated:        s.Updated,
+		Error:          s.Error,
+		UntrustedMCP:   s.UntrustedMCP,
+		ContextPercent: s.contextPercent(),
+		PermissionMode: s.permissionMode(),
 	}
 	if s.planMode != nil {
 		mode := s.planMode.Mode()
@@ -268,6 +272,32 @@ func (s *ManagedSession) info() SessionInfo {
 		}
 	}
 	return info
+}
+
+// contextPercent returns the context usage as 0-100, or -1 if unavailable.
+func (s *ManagedSession) contextPercent() int {
+	if s.agent == nil {
+		return -1
+	}
+	model := s.agent.Model()
+	if model.MaxInput <= 0 {
+		return -1
+	}
+	msgs := s.agent.Messages()
+	est := core.EstimateContextTokens(msgs, "", nil, s.agent.CompactionEpoch())
+	pct := (est.Tokens * 100) / model.MaxInput
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
+}
+
+// permissionMode returns the active permission mode string.
+func (s *ManagedSession) permissionMode() string {
+	if s.gate == nil {
+		return string(permission.ModeYolo)
+	}
+	return string(s.gate.Mode())
 }
 
 // save persists the session to disk. No-op if persistence is unavailable
@@ -661,12 +691,16 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		MaxBudget:           sessionCfg.MaxBudget,
 	}
 	// Compose permission check: plan mode filter + permission gate.
+	// Reads sess.gate under lock so SetPermissionMode changes take effect immediately.
 	agentCfg.PermissionCheck = func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 		if allowed, reason := pm.FilterToolCall(name, args); !allowed {
 			return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPolicy}
 		}
-		if gate != nil {
-			return gate.Check(ctx, name, args)
+		sess.mu.Lock()
+		g := sess.gate
+		sess.mu.Unlock()
+		if g != nil {
+			return g.Check(ctx, name, args)
 		}
 		return nil
 	}
@@ -802,6 +836,7 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 			data["error"] = errText
 		}
 		sess.broadcast(Event{Type: "state_change", Data: data})
+		sess.broadcastContextUpdate()
 
 		if finalText := extractFinalText(msgs); finalText != "" {
 			sess.broadcast(Event{Type: "run_end", Data: map[string]any{
@@ -810,6 +845,17 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 		}
 	}()
 	return "send", nil
+}
+
+// broadcastContextUpdate sends the current context usage percentage to WS clients.
+func (s *ManagedSession) broadcastContextUpdate() {
+	pct := s.contextPercent()
+	if pct < 0 {
+		return
+	}
+	s.broadcast(Event{Type: "context_update", Data: map[string]any{
+		"context_percent": pct,
+	}})
 }
 
 // List returns info for all sessions, sorted by updated time descending.
@@ -1050,6 +1096,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	sess.mu.Unlock()
 
 	sess.broadcast(Event{Type: "config_change", Data: result})
+	sess.broadcastContextUpdate()
 	return result, nil
 }
 
@@ -1129,6 +1176,7 @@ func (m *Manager) ExecCommand(sessionID, rawCommand string) (*CommandResult, err
 			"command":  "compact",
 			"messages": sess.agent.Messages(),
 		}})
+		sess.broadcastContextUpdate()
 		return &CommandResult{OK: true, Message: "conversation compacted"}, nil
 
 	case "model":
@@ -1244,9 +1292,55 @@ func (m *Manager) ExecCommand(sessionID, rawCommand string) (*CommandResult, err
 			return &CommandResult{OK: false, Message: "usage: /tasks [done <id> | reset]"}, nil
 		}
 
+	case "permissions":
+		if len(args) == 0 {
+			mode := sess.permissionMode()
+			return &CommandResult{OK: true, Message: "permissions: " + mode}, nil
+		}
+		newMode, err := m.SetPermissionMode(sessionID, args[0])
+		if err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		return &CommandResult{OK: true, Message: "permissions: " + newMode}, nil
+
 	default:
 		return &CommandResult{OK: false, Message: "unknown command: /" + cmd}, nil
 	}
+}
+
+// SetPermissionMode changes the permission mode for a session.
+func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
+	valid := map[string]permission.Mode{
+		"yolo": permission.ModeYolo,
+		"ask":  permission.ModeAsk,
+		"auto": permission.ModeAuto,
+	}
+	newMode, ok := valid[strings.ToLower(modeStr)]
+	if !ok {
+		return "", fmt.Errorf("invalid permission mode %q (options: yolo, ask, auto)", modeStr)
+	}
+
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return "", ErrNotFound
+	}
+
+	sess.mu.Lock()
+	if newMode == permission.ModeYolo {
+		sess.gate = nil
+	} else if sess.gate == nil {
+		sess.gate = permission.New(newMode, permission.Config{})
+		go sess.permissionBridge(sess.sessionCtx)
+	} else {
+		sess.gate.SetMode(newMode)
+	}
+	result := sess.permissionMode()
+	sess.mu.Unlock()
+
+	sess.broadcast(Event{Type: "config_change", Data: map[string]any{
+		"permission_mode": result,
+	}})
+	return result, nil
 }
 
 // Cancel aborts the running agent in a session.

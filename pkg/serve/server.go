@@ -244,22 +244,43 @@ func handleConfig(mgr *Manager) http.HandlerFunc {
 		}
 		limitBody(w, r, maxJSONBodySize)
 		var body struct {
-			Model    string `json:"model"`
-			Thinking string `json:"thinking"`
+			Model          string `json:"model"`
+			Thinking       string `json:"thinking"`
+			PermissionMode string `json:"permission_mode"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		result, err := mgr.ReconfigureSession(sess.ID, body.Model, body.Thinking)
-		if err != nil {
-			if errors.Is(err, ErrBusy) {
-				http.Error(w, "session is busy", http.StatusConflict)
+
+		result := map[string]string{}
+
+		// Handle permission mode change.
+		if body.PermissionMode != "" {
+			mode, err := mgr.SetPermissionMode(sess.ID, body.PermissionMode)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			result["permission_mode"] = mode
 		}
+
+		// Handle model/thinking change.
+		if body.Model != "" || body.Thinking != "" {
+			reconf, err := mgr.ReconfigureSession(sess.ID, body.Model, body.Thinking)
+			if err != nil {
+				if errors.Is(err, ErrBusy) {
+					http.Error(w, "session is busy", http.StatusConflict)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for k, v := range reconf {
+				result[k] = v
+			}
+		}
+
 		writeJSON(w, http.StatusOK, result)
 	}
 }
@@ -311,8 +332,10 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		}
 
 		initData := map[string]any{
-			"messages": history,
-			"state":    string(state),
+			"messages":        history,
+			"state":           string(state),
+			"context_percent": sess.contextPercent(),
+			"permission_mode": sess.permissionMode(),
 		}
 		if pendingPerm != nil {
 			initData["pending_permission"] = pendingPerm

@@ -32,6 +32,16 @@
 .task-bar-pill.plan-reviewing { color: var(--mauve); background: rgba(203, 166, 247, 0.1); }
 .task-bar-pill.plan-executing { color: var(--peach); background: rgba(250, 179, 135, 0.1); }
 
+/* Permission mode badges */
+.task-bar-pill.perm-yolo { color: var(--green); background: rgba(166, 227, 161, 0.1); }
+.task-bar-pill.perm-ask { color: var(--yellow); background: rgba(249, 226, 175, 0.1); }
+.task-bar-pill.perm-auto { color: var(--blue); background: rgba(137, 180, 250, 0.1); }
+
+/* Context usage badges */
+.task-bar-pill.ctx-low { color: var(--green); background: rgba(166, 227, 161, 0.1); }
+.task-bar-pill.ctx-med { color: var(--yellow); background: rgba(249, 226, 175, 0.1); }
+.task-bar-pill.ctx-high { color: var(--red); background: rgba(243, 139, 168, 0.1); }
+
 .task-bar-pill.tasks {
   color: var(--subtext1);
   background: var(--surface0);

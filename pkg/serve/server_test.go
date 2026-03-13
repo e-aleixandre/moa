@@ -101,6 +101,8 @@ func TestCreateAndSend(t *testing.T) {
 		defer sess.mu.Unlock()
 		return sess.State == StateIdle
 	})
+	// Small wait for async session save to flush.
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestSend_WhileBusy_409(t *testing.T) {

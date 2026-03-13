@@ -138,6 +138,9 @@ type appModel struct {
 	// Verify
 	verifyCancel context.CancelFunc // non-nil while /verify is running
 
+	// Settings menu
+	settingsMenu settingsMenu
+
 	// Plan mode
 	planMode              *planmode.PlanMode
 	planMenu              planMenu
@@ -742,6 +745,10 @@ func (m appModel) View() string {
 		if pv := m.planMenu.View(m.width, ActiveTheme); pv != "" {
 			bottomChrome = append(bottomChrome, pv)
 		}
+	} else if m.settingsMenu.active {
+		if sv := m.settingsMenu.View(m.width, ActiveTheme); sv != "" {
+			bottomChrome = append(bottomChrome, sv)
+		}
 	} else {
 		if iv := m.input.View(); iv != "" {
 			bottomChrome = append(bottomChrome, iv)
@@ -801,6 +808,11 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Thinking picker: intercept all keys.
 	if m.thinkingPicker.active {
 		return m.handleThinkingPickerKey(msg)
+	}
+
+	// Settings menu: intercept all keys.
+	if m.settingsMenu.active {
+		return m.handleSettingsKey(msg.String())
 	}
 
 	// Plan action menu: intercept most keys, but let Ctrl+E/Ctrl+O through.

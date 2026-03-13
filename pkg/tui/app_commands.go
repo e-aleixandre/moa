@@ -136,6 +136,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			return verifyResultMsg{Result: &result}
 		}
 
+	case "settings":
+		return m.openSettingsMenu()
+
 	case "exit", "quit":
 		m.cleanup()
 		return m, tea.Quit
@@ -835,5 +838,83 @@ func (m appModel) handlePromptTemplate(name string) (tea.Model, tea.Cmd) {
 	}
 
 	m.status.SetText("unknown template: " + name)
+	return m, nil
+}
+
+// openSettingsMenu builds entries from current state and opens the menu.
+func (m appModel) openSettingsMenu() (tea.Model, tea.Cmd) {
+	permMode := "yolo"
+	if m.permGate != nil {
+		permMode = string(m.permGate.Mode())
+	}
+	thinking := m.agent.ThinkingLevel()
+	model := m.agent.Model()
+
+	entries := []settingsEntry{
+		{key: "Model", value: model.Name, options: nil}, // display-only; use /model or Ctrl+P
+		{key: "Thinking", value: thinking, options: []string{"off", "minimal", "low", "medium", "high"}},
+		{key: "Permissions", value: permMode, options: []string{"yolo", "ask", "auto"}},
+	}
+
+	m.settingsMenu.Open(entries)
+	m.input.SetEnabled(false)
+	return m, nil
+}
+
+// handleSettingsKey routes key events to the settings menu.
+func (m appModel) handleSettingsKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		m.settingsMenu.MoveUp()
+	case "down", "j":
+		m.settingsMenu.MoveDown()
+	case "enter", "right", "l", "tab":
+		return m.applySettingsCycle()
+	case "left", "h":
+		return m.applySettingsCycleReverse()
+	case "esc", "q":
+		m.settingsMenu.Close()
+		m.input.SetEnabled(true)
+	}
+	return m, nil
+}
+
+// applySettingsCycle cycles the current setting forward and applies it.
+func (m appModel) applySettingsCycle() (tea.Model, tea.Cmd) {
+	key, val := m.settingsMenu.CycleValue()
+	return m.applySettingsChange(key, val)
+}
+
+// applySettingsCycleReverse cycles the current setting backward and applies it.
+func (m appModel) applySettingsCycleReverse() (tea.Model, tea.Cmd) {
+	if !m.settingsMenu.active || m.settingsMenu.cursor >= len(m.settingsMenu.entries) {
+		return m, nil
+	}
+	e := &m.settingsMenu.entries[m.settingsMenu.cursor]
+	if len(e.options) == 0 {
+		return m, nil
+	}
+	idx := len(e.options) - 1
+	for i, opt := range e.options {
+		if opt == e.value {
+			idx = (i - 1 + len(e.options)) % len(e.options)
+			break
+		}
+	}
+	e.value = e.options[idx]
+	return m.applySettingsChange(e.key, e.value)
+}
+
+// applySettingsChange applies a setting change immediately.
+func (m appModel) applySettingsChange(key, val string) (tea.Model, tea.Cmd) {
+	if key == "" {
+		return m, nil
+	}
+	switch key {
+	case "Thinking":
+		return m.handleThinkingSwitch(val)
+	case "Permissions":
+		return m.handlePermissionsSwitch(val)
+	}
 	return m, nil
 }
