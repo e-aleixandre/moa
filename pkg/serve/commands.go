@@ -59,7 +59,7 @@ func cmdClear(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, err
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if err := sess.agent.Reset(); err != nil {
+	if err := sess.runtime.agent.Reset(); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	sess.mu.Lock()
@@ -67,9 +67,7 @@ func cmdClear(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, err
 	sess.mu.Unlock()
 
 	sess.save()
-	sess.broadcast(Event{Type: "command", Data: map[string]any{
-		"command": "clear",
-	}})
+	sess.broadcast(Event{Type: "command", Data: CommandData{Command: "clear"}})
 	return &CommandResult{OK: true, Message: "conversation cleared"}, nil
 }
 
@@ -77,17 +75,17 @@ func cmdCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, e
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if _, err := sess.agent.Compact(sess.sessionCtx); err != nil {
+	if _, err := sess.runtime.agent.Compact(sess.runtime.sessionCtx); err != nil {
 		return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
 	}
 	sess.mu.Lock()
-	sess.messages = sess.agent.Messages()
+	sess.messages = sess.runtime.agent.Messages()
 	sess.mu.Unlock()
 
 	sess.save()
-	sess.broadcast(Event{Type: "command", Data: map[string]any{
-		"command":  "compact",
-		"messages": sess.agent.Messages(),
+	sess.broadcast(Event{Type: "command", Data: CommandData{
+		Command:  "compact",
+		Messages: sess.runtime.agent.Messages(),
 	}})
 	sess.broadcastContextUpdate()
 	return &CommandResult{OK: true, Message: "conversation compacted"}, nil
@@ -122,34 +120,34 @@ func cmdThinking(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 }
 
 func cmdPlan(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	if sess.planMode == nil {
+	if sess.runtime.planMode == nil {
 		return &CommandResult{OK: false, Message: "plan mode not available"}, nil
 	}
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
 
-	mode := sess.planMode.Mode()
+	mode := sess.runtime.planMode.Mode()
 
 	if len(args) > 0 && args[0] == "exit" {
 		if mode == planmode.ModeOff {
 			return &CommandResult{OK: false, Message: "not in plan mode"}, nil
 		}
-		sess.planMode.Exit()
-		sess.broadcast(Event{Type: "plan_mode", Data: map[string]any{
-			"mode": string(planmode.ModeOff),
+		sess.runtime.planMode.Exit()
+		sess.broadcast(Event{Type: "plan_mode", Data: PlanModeData{
+			Mode: string(planmode.ModeOff),
 		}})
 		return &CommandResult{OK: true, Message: "exited plan mode"}, nil
 	}
 
 	if mode == planmode.ModeOff {
-		planPath, err := sess.planMode.Enter()
+		planPath, err := sess.runtime.planMode.Enter()
 		if err != nil {
 			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sess.broadcast(Event{Type: "plan_mode", Data: map[string]any{
-			"mode":      string(planmode.ModePlanning),
-			"plan_file": planPath,
+		sess.broadcast(Event{Type: "plan_mode", Data: PlanModeData{
+			Mode:     string(planmode.ModePlanning),
+			PlanFile: planPath,
 		}})
 		return &CommandResult{OK: true, Message: "entered plan mode → " + planPath}, nil
 	}
@@ -158,7 +156,7 @@ func cmdPlan(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 }
 
 func cmdTasks(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	if sess.taskStore == nil {
+	if sess.runtime.taskStore == nil {
 		return &CommandResult{OK: false, Message: "task tracking not available"}, nil
 	}
 	if len(args) == 0 {
@@ -175,7 +173,7 @@ func cmdTasks(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, 
 }
 
 func cmdTasksList(sess *ManagedSession) (*CommandResult, error) {
-	taskList := sess.taskStore.Tasks()
+	taskList := sess.runtime.taskStore.Tasks()
 	if len(taskList) == 0 {
 		return &CommandResult{OK: true, Message: "No tasks"}, nil
 	}
@@ -201,20 +199,16 @@ func cmdTasksDone(sess *ManagedSession, args []string) (*CommandResult, error) {
 	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
 		return &CommandResult{OK: false, Message: "invalid task ID: " + args[0]}, nil
 	}
-	if !sess.taskStore.MarkDone(id) {
+	if !sess.runtime.taskStore.MarkDone(id) {
 		return &CommandResult{OK: false, Message: fmt.Sprintf("task #%d not found", id)}, nil
 	}
-	sess.broadcast(Event{Type: "tasks_update", Data: map[string]any{
-		"tasks": sess.taskStore.Tasks(),
-	}})
+	sess.broadcast(Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: sess.runtime.taskStore.Tasks()}})
 	return &CommandResult{OK: true, Message: fmt.Sprintf("✅ Task #%d marked done", id)}, nil
 }
 
 func cmdTasksReset(sess *ManagedSession) (*CommandResult, error) {
-	sess.taskStore.Reset()
-	sess.broadcast(Event{Type: "tasks_update", Data: map[string]any{
-		"tasks": sess.taskStore.Tasks(),
-	}})
+	sess.runtime.taskStore.Reset()
+	sess.broadcast(Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: sess.runtime.taskStore.Tasks()}})
 	return &CommandResult{OK: true, Message: "Tasks cleared"}, nil
 }
 

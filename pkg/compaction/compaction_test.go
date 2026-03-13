@@ -103,7 +103,7 @@ func TestSerializeForSummary_Format(t *testing.T) {
 		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("hi there")}}},
 		{Message: core.Message{Role: "tool_result", ToolName: "bash", Content: []core.Content{core.TextContent("output")}}},
 	}
-	s := SerializeForSummary(msgs)
+	s := SerializeForSummary(msgs, 0)
 	if !strings.Contains(s, "[User]: hello") {
 		t.Fatal("missing user line")
 	}
@@ -116,19 +116,46 @@ func TestSerializeForSummary_Format(t *testing.T) {
 }
 
 func TestSerializeForSummary_Truncation(t *testing.T) {
-	// Create a message that exceeds the cap.
-	huge := strings.Repeat("x", maxSerializationChars+1000)
+	// Create a message that exceeds the default cap.
+	huge := strings.Repeat("x", defaultMaxSerializationChars+1000)
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent(huge)}}},
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("second")}}},
 	}
-	s := SerializeForSummary(msgs)
+	s := SerializeForSummary(msgs, 0)
 	if !strings.Contains(s, "[...truncated]") {
 		t.Fatal("expected truncation marker")
 	}
-	// The second message should not appear.
 	if strings.Contains(s, "second") {
 		t.Fatal("second message should be truncated")
+	}
+}
+
+func TestSerializeForSummary_ModelDerivedLimit(t *testing.T) {
+	// A 128k-token model should derive a 256k char limit.
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{
+			core.TextContent(strings.Repeat("x", 300_000)),
+		}}},
+		{Message: core.Message{Role: "user", Content: []core.Content{
+			core.TextContent("tail"),
+		}}},
+	}
+	s := SerializeForSummary(msgs, 128_000) // limit = 256k chars
+	if !strings.Contains(s, "[...truncated]") {
+		t.Fatal("expected truncation for 128k model")
+	}
+	if strings.Contains(s, "tail") {
+		t.Fatal("tail message should be truncated")
+	}
+
+	// Same messages with a 400k model should NOT truncate.
+	s2 := SerializeForSummary(msgs, 400_000) // limit = 800k chars
+	if strings.Contains(s2, "[...truncated]") {
+		t.Fatal("should not truncate for 400k model")
+	}
+	if !strings.Contains(s2, "tail") {
+		t.Fatal("tail message should be present for large model")
 	}
 }
 
@@ -139,7 +166,7 @@ func TestSerializeForSummary_ToolCallInAssistant(t *testing.T) {
 			core.ToolCallContent("c1", "read", map[string]any{"path": "main.go"}),
 		}}},
 	}
-	s := SerializeForSummary(msgs)
+	s := SerializeForSummary(msgs, 0)
 	if !strings.Contains(s, "[Tool call: read]") {
 		t.Fatal("missing tool call annotation")
 	}

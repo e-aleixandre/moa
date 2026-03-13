@@ -309,48 +309,39 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		history := make([]core.AgentMessage, len(sess.messages))
 		copy(history, sess.messages)
 		state := sess.State
-		var pendingPerm map[string]any
-		if sess.pending != nil && !sess.pending.resolved {
-			pendingPerm = map[string]any{
-				"id":        sess.pending.ID,
-				"tool_name": sess.pending.ToolName,
-				"args":      sess.pending.Args,
+		var pendingPerm *PermissionData
+		if sess.approvals.pending != nil && !sess.approvals.pending.resolved {
+			pendingPerm = &PermissionData{
+				ID:       sess.approvals.pending.ID,
+				ToolName: sess.approvals.pending.ToolName,
+				Args:     sess.approvals.pending.Args,
 			}
 		}
-		var pendingAsk map[string]any
-		if sess.pendingAsk != nil && !sess.pendingAsk.resolved {
-			pendingAsk = map[string]any{
-				"id":        sess.pendingAsk.ID,
-				"questions": sess.pendingAsk.Questions,
+		var pendingAsk *AskData
+		if sess.approvals.pendingAsk != nil && !sess.approvals.pendingAsk.resolved {
+			pendingAsk = &AskData{
+				ID:        sess.approvals.pendingAsk.ID,
+				Questions: sess.approvals.pendingAsk.Questions,
 			}
 		}
 		sess.mu.Unlock()
 
-		var taskList any
-		if sess.taskStore != nil {
-			taskList = sess.taskStore.Tasks()
+		initData := InitData{
+			Messages:          history,
+			State:             string(state),
+			ContextPercent:    sess.contextPercent(),
+			PermissionMode:    sess.permissionMode(),
+			PendingPermission: pendingPerm,
+			PendingAsk:        pendingAsk,
 		}
-
-		initData := map[string]any{
-			"messages":        history,
-			"state":           string(state),
-			"context_percent": sess.contextPercent(),
-			"permission_mode": sess.permissionMode(),
+		if sess.runtime.taskStore != nil {
+			initData.Tasks = sess.runtime.taskStore.Tasks()
 		}
-		if pendingPerm != nil {
-			initData["pending_permission"] = pendingPerm
-		}
-		if pendingAsk != nil {
-			initData["pending_ask"] = pendingAsk
-		}
-		if taskList != nil {
-			initData["tasks"] = taskList
-		}
-		if sess.planMode != nil {
-			mode := sess.planMode.Mode()
+		if sess.runtime.planMode != nil {
+			mode := sess.runtime.planMode.Mode()
 			if mode != planmode.ModeOff {
-				initData["plan_mode"] = string(mode)
-				initData["plan_file"] = sess.planMode.PlanFilePath()
+				initData.PlanMode = string(mode)
+				initData.PlanFile = sess.runtime.planMode.PlanFilePath()
 			}
 		}
 		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData}); err != nil {

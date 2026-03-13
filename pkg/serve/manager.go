@@ -39,14 +39,9 @@ const (
 	StateSaved      SessionState = "saved"      // on disk but not loaded into memory
 )
 
-// Event is a JSON-serializable event sent to WebSocket clients.
-type Event struct {
-	Type string `json:"type"`
-	Data any    `json:"data,omitempty"`
-}
-
 // ManagedSession wraps an agent with metadata for the web dashboard.
 type ManagedSession struct {
+	// Public identity (read after creation, mutated under mu for Title/State/Error).
 	ID      string       `json:"id"`
 	Title   string       `json:"title"`
 	State   SessionState `json:"state"`
@@ -56,32 +51,52 @@ type ManagedSession struct {
 	Updated time.Time    `json:"updated"`
 	Error   string       `json:"error,omitempty"`
 
-	agent              *agent.Agent
-	gate               *permission.Gate
-	unsub              func()
-	sessionCtx         context.Context    // per-session lifetime; cancelled on Delete
-	sessionCancel      context.CancelFunc // cancels sessionCtx (bridge, subagents, MCP, runs)
-	subscribers        []chan Event
-	mu                 sync.Mutex
-	messages           []core.AgentMessage
-	runCancel          context.CancelFunc
+	mu sync.Mutex // protects mutable fields below and Title/State/Error above
+
+	// --- Runtime: agent lifecycle and context ---
+	runtime sessionRuntime
+
+	// --- Subscribers: WebSocket event fan-out ---
+	subscribers []chan Event
+
+	// --- Conversation state (mutated under mu) ---
+	messages  []core.AgentMessage
+	runCancel context.CancelFunc
+
+	// --- Approval bridges (permission + ask_user) ---
+	approvals sessionApprovals
+
+	// --- Persistence ---
+	persistence sessionPersistence
+}
+
+// sessionRuntime holds the agent, tools, MCP, and session lifetime context.
+// Immutable after construction (except mcpMgr on reload).
+type sessionRuntime struct {
+	agent         *agent.Agent
+	gate          *permission.Gate
+	unsub         func()                 // unsubscribe from agent events
+	sessionCtx    context.Context        // per-session lifetime; cancelled on Delete
+	sessionCancel context.CancelFunc     // cancels sessionCtx
+	toolReg       *core.Registry
+	agentsMD      string
+	resolvedModel core.Model
+	mcpMgr        *mcp.Manager           // nil when no MCP; closed on Delete
+	UntrustedMCP  bool                   // true when .mcp.json exists but not trusted
+	taskStore     *tasks.Store
+	planMode      *planmode.PlanMode
+}
+
+// sessionApprovals tracks pending permission and ask_user prompts.
+type sessionApprovals struct {
 	pending            *pendingPermission
 	lastResolvedPermID string
 	askBridge          *askuser.Bridge
 	pendingAsk         *pendingAskUser
+}
 
-	// Task tracking and plan mode.
-	taskStore *tasks.Store
-	planMode  *planmode.PlanMode
-
-	// Per-session internals for MCP trust reload and subagent config.
-	toolReg       *core.Registry
-	agentsMD      string
-	resolvedModel core.Model
-	mcpMgr        *mcp.Manager // nil when no MCP; closed on Delete
-	UntrustedMCP  bool         // true when .mcp.json exists but not trusted
-
-	// Persistence.
+// sessionPersistence handles disk storage.
+type sessionPersistence struct {
 	persisted *session.Session   // backing session on disk; nil if no store
 	store     *session.FileStore // scoped store for this session's CWD; nil if no store
 	deleted   bool               // set on Delete to prevent save() from resurrecting
@@ -181,8 +196,8 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 		if e.AssistantEvent == nil {
 			return
 		}
-		s.broadcast(Event{Type: e.AssistantEvent.Type, Data: map[string]any{
-			"delta": e.AssistantEvent.Delta,
+		s.broadcast(Event{Type: e.AssistantEvent.Type, Data: DeltaData{
+			Delta: e.AssistantEvent.Delta,
 		}})
 
 	case core.AgentEventMessageEnd:
@@ -192,15 +207,13 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 				fullText += c.Text
 			}
 		}
-		s.broadcast(Event{Type: "message_end", Data: map[string]any{
-			"text": fullText,
-		}})
+		s.broadcast(Event{Type: "message_end", Data: MessageEndData{Text: fullText}})
 
 	case core.AgentEventToolExecStart:
-		s.broadcast(Event{Type: "tool_start", Data: map[string]any{
-			"tool_call_id": e.ToolCallID,
-			"tool_name":    e.ToolName,
-			"args":         e.Args,
+		s.broadcast(Event{Type: "tool_start", Data: ToolStartData{
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			Args:       e.Args,
 		}})
 
 	case core.AgentEventToolExecUpdate:
@@ -213,9 +226,9 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 			}
 		}
 		if delta != "" {
-			s.broadcast(Event{Type: "tool_update", Data: map[string]any{
-				"tool_call_id": e.ToolCallID,
-				"delta":        delta,
+			s.broadcast(Event{Type: "tool_update", Data: ToolUpdateData{
+				ToolCallID: e.ToolCallID,
+				Delta:      delta,
 			}})
 		}
 
@@ -228,17 +241,16 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 				}
 			}
 		}
-		s.broadcast(Event{Type: "tool_end", Data: map[string]any{
-			"tool_call_id": e.ToolCallID,
-			"tool_name":    e.ToolName,
-			"is_error":     e.IsError,
-			"rejected":     e.Rejected,
-			"result":       text,
+		s.broadcast(Event{Type: "tool_end", Data: ToolEndData{
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			IsError:    e.IsError,
+			Rejected:   e.Rejected,
+			Result:     text,
 		}})
-		// Broadcast updated task list after tasks tool changes.
-		if e.ToolName == "tasks" && s.taskStore != nil {
-			s.broadcast(Event{Type: "tasks_update", Data: map[string]any{
-				"tasks": s.taskStore.Tasks(),
+		if e.ToolName == "tasks" && s.runtime.taskStore != nil {
+			s.broadcast(Event{Type: "tasks_update", Data: TasksUpdateData{
+				Tasks: s.runtime.taskStore.Tasks(),
 			}})
 		}
 
@@ -249,8 +261,8 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 
 func (s *ManagedSession) info() SessionInfo {
 	thinking := ""
-	if s.agent != nil {
-		thinking = s.agent.ThinkingLevel()
+	if s.runtime.agent != nil {
+		thinking = s.runtime.agent.ThinkingLevel()
 	}
 	info := SessionInfo{
 		ID:             s.ID,
@@ -262,15 +274,15 @@ func (s *ManagedSession) info() SessionInfo {
 		Created:        s.Created,
 		Updated:        s.Updated,
 		Error:          s.Error,
-		UntrustedMCP:   s.UntrustedMCP,
+		UntrustedMCP:   s.runtime.UntrustedMCP,
 		ContextPercent: s.contextPercent(),
 		PermissionMode: s.permissionMode(),
 	}
-	if s.planMode != nil {
-		mode := s.planMode.Mode()
+	if s.runtime.planMode != nil {
+		mode := s.runtime.planMode.Mode()
 		if mode != planmode.ModeOff {
 			info.PlanMode = string(mode)
-			info.PlanFile = s.planMode.PlanFilePath()
+			info.PlanFile = s.runtime.planMode.PlanFilePath()
 		}
 	}
 	return info
@@ -278,15 +290,15 @@ func (s *ManagedSession) info() SessionInfo {
 
 // contextPercent returns the context usage as 0-100, or -1 if unavailable.
 func (s *ManagedSession) contextPercent() int {
-	if s.agent == nil {
+	if s.runtime.agent == nil {
 		return -1
 	}
-	model := s.agent.Model()
+	model := s.runtime.agent.Model()
 	if model.MaxInput <= 0 {
 		return -1
 	}
-	msgs := s.agent.Messages()
-	est := core.EstimateContextTokens(msgs, "", nil, s.agent.CompactionEpoch())
+	msgs := s.runtime.agent.Messages()
+	est := core.EstimateContextTokens(msgs, "", nil, s.runtime.agent.CompactionEpoch())
 	pct := (est.Tokens * 100) / model.MaxInput
 	if pct > 100 {
 		pct = 100
@@ -296,44 +308,44 @@ func (s *ManagedSession) contextPercent() int {
 
 // permissionMode returns the active permission mode string.
 func (s *ManagedSession) permissionMode() string {
-	if s.gate == nil {
+	if s.runtime.gate == nil {
 		return string(permission.ModeYolo)
 	}
-	return string(s.gate.Mode())
+	return string(s.runtime.gate.Mode())
 }
 
 // save persists the session to disk. No-op if persistence is unavailable
 // or the session has been deleted.
 func (s *ManagedSession) save() {
 	s.mu.Lock()
-	if s.deleted || s.persisted == nil || s.store == nil {
+	if s.persistence.deleted || s.persistence.persisted == nil || s.persistence.store == nil {
 		s.mu.Unlock()
 		return
 	}
-	s.persisted.Title = s.Title
-	s.persisted.Messages = make([]core.AgentMessage, len(s.messages))
-	copy(s.persisted.Messages, s.messages)
-	s.persisted.CompactionEpoch = s.agent.CompactionEpoch()
+	s.persistence.persisted.Title = s.Title
+	s.persistence.persisted.Messages = make([]core.AgentMessage, len(s.messages))
+	copy(s.persistence.persisted.Messages, s.messages)
+	s.persistence.persisted.CompactionEpoch = s.runtime.agent.CompactionEpoch()
 	// Persist task store state.
-	if s.taskStore != nil {
-		if s.persisted.Metadata == nil {
-			s.persisted.Metadata = make(map[string]any)
+	if s.runtime.taskStore != nil {
+		if s.persistence.persisted.Metadata == nil {
+			s.persistence.persisted.Metadata = make(map[string]any)
 		}
-		for k, v := range s.taskStore.SaveToMetadata() {
-			s.persisted.Metadata[k] = v
+		for k, v := range s.runtime.taskStore.SaveToMetadata() {
+			s.persistence.persisted.Metadata[k] = v
 		}
 	}
 	// Persist plan mode state.
-	if s.planMode != nil {
-		if s.persisted.Metadata == nil {
-			s.persisted.Metadata = make(map[string]any)
+	if s.runtime.planMode != nil {
+		if s.persistence.persisted.Metadata == nil {
+			s.persistence.persisted.Metadata = make(map[string]any)
 		}
-		for k, v := range s.planMode.SaveState() {
-			s.persisted.Metadata[k] = v
+		for k, v := range s.runtime.planMode.SaveState() {
+			s.persistence.persisted.Metadata[k] = v
 		}
 	}
-	snapshot := *s.persisted
-	store := s.store
+	snapshot := *s.persistence.persisted
+	store := s.persistence.store
 	s.mu.Unlock()
 
 	if err := store.Save(&snapshot); err != nil {
@@ -428,12 +440,12 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	// Finalize persistence.
 	if persisted != nil {
 		persisted.Metadata = map[string]any{
-			"model": fullModelSpec(sess.resolvedModel),
+			"model": fullModelSpec(sess.runtime.resolvedModel),
 			"cwd":   sess.CWD,
 		}
 		_ = store.Save(persisted)
-		sess.persisted = persisted
-		sess.store = store
+		sess.persistence.persisted = persisted
+		sess.persistence.store = store
 	}
 
 	m.invalidateSavedCache()
@@ -483,9 +495,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		EnableAskUser:   true,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
-				s.broadcast(Event{Type: "subagent_count", Data: map[string]any{
-					"count": count,
-				}})
+				s.broadcast(Event{Type: "subagent_count", Data: SubagentCountData{Count: count}})
 			}
 		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string) {
@@ -504,11 +514,11 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 					a.Enqueue(agentText)
 				}
 			}
-			s.broadcast(Event{Type: "subagent_complete", Data: map[string]any{
-				"job_id": jobID,
-				"task":   task,
-				"status": status,
-				"text":   agentText,
+			s.broadcast(Event{Type: "subagent_complete", Data: SubagentCompleteData{
+				JobID:  jobID,
+				Task:   task,
+				Status: status,
+				Text:   agentText,
 			}})
 		},
 	})
@@ -521,13 +531,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	pm := bs.PlanMode
 
 	// Compose permission check: plan mode filter + permission gate.
-	// Reads sess.gate under lock so SetPermissionMode changes take effect immediately.
+	// Reads sess.runtime.gate under lock so SetPermissionMode changes take effect immediately.
 	if err := ag.SetPermissionCheck(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 		if allowed, reason := pm.FilterToolCall(name, args); !allowed {
 			return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPolicy}
 		}
 		sess.mu.Lock()
-		g := sess.gate
+		g := sess.runtime.gate
 		sess.mu.Unlock()
 		if g != nil {
 			return g.Check(ctx, name, args)
@@ -543,38 +553,41 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 
 	// Build managed session.
 	sess = &ManagedSession{
-		ID:            id,
-		Title:         title,
-		State:         StateIdle,
-		Model:         modelDisplayName(model),
-		CWD:           cwd,
-		Created:       time.Now(),
-		Updated:       time.Now(),
-		agent:         ag,
-		gate:          bs.Gate,
-		askBridge:     bs.AskBridge,
-		sessionCtx:    sessionCtx,
-		sessionCancel: sessionCancel,
-		toolReg:       bs.ToolReg,
-		agentsMD:      bs.AgentsMD,
-		resolvedModel: model,
-		mcpMgr:        bs.MCPManager,
-		UntrustedMCP:  bs.UntrustedMCP,
-		taskStore:     bs.TaskStore,
-		planMode:      pm,
+		ID:      id,
+		Title:   title,
+		State:   StateIdle,
+		Model:   modelDisplayName(model),
+		CWD:     cwd,
+		Created: time.Now(),
+		Updated: time.Now(),
+		runtime: sessionRuntime{
+			agent:         ag,
+			gate:          bs.Gate,
+			unsub:         func() {}, // set below
+			sessionCtx:    sessionCtx,
+			sessionCancel: sessionCancel,
+			toolReg:       bs.ToolReg,
+			agentsMD:      bs.AgentsMD,
+			resolvedModel: model,
+			mcpMgr:        bs.MCPManager,
+			UntrustedMCP:  bs.UntrustedMCP,
+			taskStore:     bs.TaskStore,
+			planMode:      pm,
+		},
+		approvals: sessionApprovals{
+			askBridge: bs.AskBridge,
+		},
 	}
 
 	pm.SetOnChange(func(mode planmode.Mode) {
-		data := map[string]any{
-			"mode": string(mode),
-		}
+		d := PlanModeData{Mode: string(mode)}
 		if mode != planmode.ModeOff {
-			data["plan_file"] = pm.PlanFilePath()
+			d.PlanFile = pm.PlanFilePath()
 		}
-		sess.broadcast(Event{Type: "plan_mode", Data: data})
+		sess.broadcast(Event{Type: "plan_mode", Data: d})
 	})
 
-	sess.unsub = ag.Subscribe(func(e core.AgentEvent) {
+	sess.runtime.unsub = ag.Subscribe(func(e core.AgentEvent) {
 		sess.broadcastAgentEvent(e)
 	})
 
@@ -611,17 +624,17 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 
 	sess.mu.Lock()
 	if sess.State == StateRunning || sess.State == StatePermission {
-		ag := sess.agent
+		ag := sess.runtime.agent
 		sess.mu.Unlock()
 		// Steer the running agent — injected between tool calls.
 		ag.Steer(text)
-		sess.broadcast(Event{Type: "steer", Data: map[string]any{"text": text}})
+		sess.broadcast(Event{Type: "steer", Data: SteerData{Text: text}})
 		return "steer", nil
 	}
 	sess.State = StateRunning
 	sess.Updated = time.Now()
 
-	runCtx, cancel := context.WithCancel(sess.sessionCtx)
+	runCtx, cancel := context.WithCancel(sess.runtime.sessionCtx)
 	sess.runCancel = cancel
 
 	if sess.Title == "" {
@@ -633,19 +646,19 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 	}
 	sess.mu.Unlock()
 
-	sess.broadcast(Event{Type: "state_change", Data: map[string]any{
-		"state": string(StateRunning),
+	sess.broadcast(Event{Type: "state_change", Data: StateChangeData{
+		State: string(StateRunning),
 	}})
 
 	go func() {
 		defer cancel()
-		msgs, err := sess.agent.Send(runCtx, text)
+		msgs, err := sess.runtime.agent.Send(runCtx, text)
 
 		sess.mu.Lock()
 		sess.messages = msgs
 		sess.runCancel = nil
 		// Clear any stale pending permission (run ended while waiting).
-		sess.pending = nil
+		sess.approvals.pending = nil
 		if err != nil && runCtx.Err() == nil {
 			sess.State = StateError
 			sess.Error = err.Error()
@@ -660,17 +673,14 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 
 		sess.save()
 
-		data := map[string]any{"state": string(newState)}
-		if errText != "" {
-			data["error"] = errText
-		}
-		sess.broadcast(Event{Type: "state_change", Data: data})
+		sess.broadcast(Event{Type: "state_change", Data: StateChangeData{
+			State: string(newState),
+			Error: errText,
+		}})
 		sess.broadcastContextUpdate()
 
 		if finalText := extractFinalText(msgs); finalText != "" {
-			sess.broadcast(Event{Type: "run_end", Data: map[string]any{
-				"text": finalText,
-			}})
+			sess.broadcast(Event{Type: "run_end", Data: RunEndData{Text: finalText}})
 		}
 	}()
 	return "send", nil
@@ -682,9 +692,7 @@ func (s *ManagedSession) broadcastContextUpdate() {
 	if pct < 0 {
 		return
 	}
-	s.broadcast(Event{Type: "context_update", Data: map[string]any{
-		"context_percent": pct,
-	}})
+	s.broadcast(Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: pct}})
 }
 
 // List returns info for all sessions, sorted by updated time descending.
@@ -781,21 +789,21 @@ func (m *Manager) Delete(id string) error {
 
 	// Mark deleted to prevent save() from resurrecting.
 	sess.mu.Lock()
-	sess.deleted = true
-	store := sess.store
-	sess.persisted = nil
-	sess.store = nil
+	sess.persistence.deleted = true
+	store := sess.persistence.store
+	sess.persistence.persisted = nil
+	sess.persistence.store = nil
 	sess.mu.Unlock()
 
 	// Close MCP connections before context cancellation.
-	if sess.mcpMgr != nil {
-		sess.mcpMgr.Close()
+	if sess.runtime.mcpMgr != nil {
+		sess.runtime.mcpMgr.Close()
 	}
 
 	// Cancel session context — stops bridge, subagent jobs, and in-flight runs.
-	sess.sessionCancel()
+	sess.runtime.sessionCancel()
 
-	sess.unsub()
+	sess.runtime.unsub()
 	sess.closeSubscribers()
 
 	// Delete from disk.
@@ -846,11 +854,11 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		return nil, fmt.Errorf("resume: %w", err)
 	}
 
-	if err := sess.agent.LoadState(saved.Messages, saved.CompactionEpoch); err != nil {
-		sess.sessionCancel()
-		sess.unsub()
-		if sess.mcpMgr != nil {
-			sess.mcpMgr.Close()
+	if err := sess.runtime.agent.LoadState(saved.Messages, saved.CompactionEpoch); err != nil {
+		sess.runtime.sessionCancel()
+		sess.runtime.unsub()
+		if sess.runtime.mcpMgr != nil {
+			sess.runtime.mcpMgr.Close()
 		}
 		m.mu.Lock()
 		delete(m.sessions, sess.ID)
@@ -860,17 +868,17 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 
 	sess.mu.Lock()
 	sess.messages = saved.Messages
-	sess.persisted = saved
-	sess.store = store
+	sess.persistence.persisted = saved
+	sess.persistence.store = store
 	sess.Created = saved.Created
 	// Restore task store state.
-	if sess.taskStore != nil && saved.Metadata != nil {
-		sess.taskStore.RestoreFromMetadata(saved.Metadata)
+	if sess.runtime.taskStore != nil && saved.Metadata != nil {
+		sess.runtime.taskStore.RestoreFromMetadata(saved.Metadata)
 	}
 	// Restore plan mode state.
-	if sess.planMode != nil && saved.Metadata != nil {
-		sess.planMode.RestoreState(saved.Metadata)
-		sess.planMode.ApplyRestoredState()
+	if sess.runtime.planMode != nil && saved.Metadata != nil {
+		sess.runtime.planMode.RestoreState(saved.Metadata)
+		sess.runtime.planMode.ApplyRestoredState()
 	}
 	sess.mu.Unlock()
 
@@ -892,13 +900,13 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	}
 
 	// Resolve model (keep current if empty).
-	model := sess.resolvedModel
+	model := sess.runtime.resolvedModel
 	if modelSpec != "" {
 		model, _ = core.ResolveModel(modelSpec)
 	}
 
 	// Resolve thinking (keep current if empty).
-	thinkingLevel := sess.agent.ThinkingLevel()
+	thinkingLevel := sess.runtime.agent.ThinkingLevel()
 	if thinking != "" {
 		thinkingLevel = normalizeThinkingLevel(thinking)
 	}
@@ -911,12 +919,12 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	}
 
 	// Reconfigure the agent (strips thinking blocks on model change).
-	if err := sess.agent.Reconfigure(prov, model, thinkingLevel); err != nil {
+	if err := sess.runtime.agent.Reconfigure(prov, model, thinkingLevel); err != nil {
 		return nil, err
 	}
 
 	sess.mu.Lock()
-	sess.resolvedModel = model
+	sess.runtime.resolvedModel = model
 	sess.Model = modelDisplayName(model)
 	result := map[string]string{
 		"model":    sess.Model,
@@ -924,7 +932,10 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	}
 	sess.mu.Unlock()
 
-	sess.broadcast(Event{Type: "config_change", Data: result})
+	sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
+		Model:    result["model"],
+		Thinking: result["thinking"],
+	}})
 	sess.broadcastContextUpdate()
 	return result, nil
 }
@@ -964,18 +975,18 @@ func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
 
 	sess.mu.Lock()
 	if newMode == permission.ModeYolo {
-		sess.gate = nil
-	} else if sess.gate == nil {
-		sess.gate = permission.New(newMode, permission.Config{})
-		go sess.permissionBridge(sess.sessionCtx)
+		sess.runtime.gate = nil
+	} else if sess.runtime.gate == nil {
+		sess.runtime.gate = permission.New(newMode, permission.Config{})
+		go sess.permissionBridge(sess.runtime.sessionCtx)
 	} else {
-		sess.gate.SetMode(newMode)
+		sess.runtime.gate.SetMode(newMode)
 	}
 	result := sess.permissionMode()
 	sess.mu.Unlock()
 
-	sess.broadcast(Event{Type: "config_change", Data: map[string]any{
-		"permission_mode": result,
+	sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
+		PermissionMode: result,
 	}})
 	return result, nil
 }
@@ -1019,7 +1030,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 	var newTools []core.Tool
 	if len(merged) > 0 {
 		newMgr = mcp.NewManager(nil)
-		newMgr.Start(s.sessionCtx, merged)
+		newMgr.Start(s.runtime.sessionCtx, merged)
 		newTools = newMgr.Tools()
 	}
 
@@ -1040,21 +1051,21 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		return ErrBusy
 	}
 
-	oldMgr := s.mcpMgr
+	oldMgr := s.runtime.mcpMgr
 
 	// Deregister old MCP tools (prefixed "mcp__").
-	for _, spec := range s.toolReg.Specs() {
+	for _, spec := range s.runtime.toolReg.Specs() {
 		if strings.HasPrefix(spec.Name, "mcp__") {
-			s.toolReg.Unregister(spec.Name)
+			s.runtime.toolReg.Unregister(spec.Name)
 		}
 	}
 
 	// Register new tools.
 	for _, t := range newTools {
-		s.toolReg.Register(t)
+		s.runtime.toolReg.Register(t)
 	}
-	s.mcpMgr = newMgr
-	s.UntrustedMCP = false
+	s.runtime.mcpMgr = newMgr
+	s.runtime.UntrustedMCP = false
 	s.mu.Unlock()
 
 	// Phase 3: cleanup old manager (outside lock — Close may block).
@@ -1067,7 +1078,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 
 func newID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	_, _ = rand.Read(b) //nolint:errcheck // crypto/rand.Read never fails on supported platforms
 	return hex.EncodeToString(b)
 }
 

@@ -116,8 +116,16 @@ func (s *FileStore) Latest() (*Session, error) {
 	return s.Load(summaries[0].ID)
 }
 
+// summaryReadLimit caps how many bytes we read from each session file for
+// listing. Summary fields (id, title, created, updated, metadata) appear
+// before the messages array, so a small prefix suffices. Sessions with very
+// large metadata may need more, but the JSON decoder handles partial reads
+// gracefully (fields it finds are populated, the rest are zero).
+const summaryReadLimit = 4096
+
 // List returns summaries of all sessions, sorted by Updated descending (newest first).
-// Does not load message content — only reads enough to populate Summary fields.
+// Only reads the first summaryReadLimit bytes of each file — avoids loading
+// multi-megabyte message arrays just to show a session list.
 func (s *FileStore) List() ([]Summary, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -129,16 +137,9 @@ func (s *FileStore) List() ([]Summary, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
-		if err != nil {
-			continue // skip unreadable files
-		}
-		var sum Summary
-		if err := json.Unmarshal(data, &sum); err != nil {
-			continue // skip corrupt files
-		}
-		if sum.ID == "" {
-			continue // skip invalid
+		sum, err := readSummary(filepath.Join(s.dir, e.Name()))
+		if err != nil || sum.ID == "" {
+			continue
 		}
 		summaries = append(summaries, sum)
 	}
@@ -148,6 +149,43 @@ func (s *FileStore) List() ([]Summary, error) {
 	})
 
 	return summaries, nil
+}
+
+// readSummary reads only the header fields from a session file. It reads at
+// most summaryReadLimit bytes and parses what it can. Because JSON keys appear
+// in order (id, created, updated, title, messages...), the small prefix
+// contains everything we need. Malformed trailing JSON from the truncation is
+// handled by falling back to a full read.
+func readSummary(path string) (Summary, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Summary{}, err
+	}
+	defer f.Close() //nolint:errcheck
+
+	// Try partial read first.
+	buf := make([]byte, summaryReadLimit)
+	n, _ := f.Read(buf)
+	if n == 0 {
+		return Summary{}, fmt.Errorf("empty file")
+	}
+
+	var sum Summary
+	if err := json.Unmarshal(buf[:n], &sum); err == nil {
+		return sum, nil
+	}
+
+	// Partial JSON failed (truncated mid-value). Fall back to full read.
+	// This only happens for files with >4KB of metadata before the messages
+	// array, which is rare.
+	full, err := os.ReadFile(path)
+	if err != nil {
+		return Summary{}, err
+	}
+	if err := json.Unmarshal(full, &sum); err != nil {
+		return Summary{}, err
+	}
+	return sum, nil
 }
 
 // Delete removes a session by ID.

@@ -18,7 +18,7 @@ func TestPermissionBridge_ApproveUnblocks(t *testing.T) {
 	sess := &ManagedSession{
 		ID:    "test",
 		State: StateIdle,
-		gate:  gate,
+		runtime: sessionRuntime{gate: gate},
 	}
 	go sess.permissionBridge(ctx)
 
@@ -46,13 +46,13 @@ func TestPermissionBridge_ApproveUnblocks(t *testing.T) {
 	pollUntil(t, 2*time.Second, "pending permission set", func() bool {
 		sess.mu.Lock()
 		defer sess.mu.Unlock()
-		return sess.pending != nil
+		return sess.approvals.pending != nil
 	})
 
 	// Verify state changed to permission.
 	sess.mu.Lock()
 	state := sess.State
-	permID := sess.pending.ID
+	permID := sess.approvals.pending.ID
 	sess.mu.Unlock()
 	if state != StatePermission {
 		t.Fatalf("expected permission state, got %s", state)
@@ -83,7 +83,7 @@ func TestPermissionBridge_DenyUnblocks(t *testing.T) {
 	sess := &ManagedSession{
 		ID:    "test",
 		State: StateIdle,
-		gate:  gate,
+		runtime: sessionRuntime{gate: gate},
 	}
 	go sess.permissionBridge(ctx)
 
@@ -97,11 +97,11 @@ func TestPermissionBridge_DenyUnblocks(t *testing.T) {
 	pollUntil(t, 2*time.Second, "pending permission set", func() bool {
 		sess.mu.Lock()
 		defer sess.mu.Unlock()
-		return sess.pending != nil
+		return sess.approvals.pending != nil
 	})
 
 	sess.mu.Lock()
-	permID := sess.pending.ID
+	permID := sess.approvals.pending.ID
 	sess.mu.Unlock()
 
 	err := sess.ResolvePermission(permID, false, "too dangerous")
@@ -127,10 +127,12 @@ func TestPermissionBridge_StaleID(t *testing.T) {
 	sess := &ManagedSession{
 		ID:    "test",
 		State: StatePermission,
-		pending: &pendingPermission{
-			ID:       "perm_42",
-			ToolName: "bash",
-			response: make(chan<- permission.Response, 1),
+		approvals: sessionApprovals{
+			pending: &pendingPermission{
+				ID:       "perm_42",
+				ToolName: "bash",
+				response: make(chan<- permission.Response, 1),
+			},
 		},
 	}
 
@@ -138,7 +140,7 @@ func TestPermissionBridge_StaleID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for stale permission ID")
 	}
-	if sess.pending == nil {
+	if sess.approvals.pending == nil {
 		t.Fatal("pending should not be cleared on stale ID")
 	}
 }
@@ -148,10 +150,12 @@ func TestPermissionBridge_DuplicateApprove(t *testing.T) {
 	sess := &ManagedSession{
 		ID:    "test",
 		State: StatePermission,
-		pending: &pendingPermission{
-			ID:       "perm_1",
-			ToolName: "bash",
-			response: respCh,
+		approvals: sessionApprovals{
+			pending: &pendingPermission{
+				ID:       "perm_1",
+				ToolName: "bash",
+				response: respCh,
+			},
 		},
 	}
 
@@ -177,7 +181,7 @@ func TestPermissionBridge_ContextCancel(t *testing.T) {
 	sess := &ManagedSession{
 		ID:    "test",
 		State: StateIdle,
-		gate:  gate,
+		runtime: sessionRuntime{gate: gate},
 	}
 
 	done := make(chan struct{})

@@ -23,12 +23,12 @@ type askQ struct {
 // askUserBridge reads from the ask_user bridge and publishes to WS clients.
 // Only runs when an askBridge is configured.
 func (s *ManagedSession) askUserBridge(ctx context.Context) {
-	if s.askBridge == nil {
+	if s.approvals.askBridge == nil {
 		return
 	}
 	for {
 		select {
-		case p, ok := <-s.askBridge.Prompts():
+		case p, ok := <-s.approvals.askBridge.Prompts():
 			if !ok {
 				return
 			}
@@ -40,7 +40,7 @@ func (s *ManagedSession) askUserBridge(ctx context.Context) {
 			}
 
 			s.mu.Lock()
-			s.pendingAsk = &pendingAskUser{
+			s.approvals.pendingAsk = &pendingAskUser{
 				ID:        id,
 				Questions: questions,
 				response:  p.Response,
@@ -67,26 +67,26 @@ func (s *ManagedSession) ResolveAskUser(id string, answers []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.pendingAsk == nil {
+	if s.approvals.pendingAsk == nil {
 		return fmt.Errorf("no pending ask_user request")
 	}
-	if s.pendingAsk.ID != id {
-		return fmt.Errorf("stale ask request (expected %s, got %s)", s.pendingAsk.ID, id)
+	if s.approvals.pendingAsk.ID != id {
+		return fmt.Errorf("stale ask request (expected %s, got %s)", s.approvals.pendingAsk.ID, id)
 	}
-	if s.pendingAsk.resolved {
+	if s.approvals.pendingAsk.resolved {
 		return nil
 	}
-	if len(answers) != len(s.pendingAsk.Questions) {
-		return fmt.Errorf("expected %d answers, got %d", len(s.pendingAsk.Questions), len(answers))
+	if len(answers) != len(s.approvals.pendingAsk.Questions) {
+		return fmt.Errorf("expected %d answers, got %d", len(s.approvals.pendingAsk.Questions), len(answers))
 	}
 
-	s.pendingAsk.resolved = true
+	s.approvals.pendingAsk.resolved = true
 
 	select {
-	case s.pendingAsk.response <- answers:
+	case s.approvals.pendingAsk.response <- answers:
 	default:
 	}
 
-	s.pendingAsk = nil
+	s.approvals.pendingAsk = nil
 	return nil
 }
