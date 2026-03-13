@@ -8,6 +8,7 @@ import (
 )
 
 // statusModel shows a spinner and status text while the agent is working.
+// Always renders exactly one line to avoid layout shifts.
 type statusModel struct {
 	spinner spinner.Model
 	text    string
@@ -16,11 +17,13 @@ type statusModel struct {
 
 func newStatus() statusModel {
 	s := spinner.New()
+	s.Spinner = spinner.Dot
 	s.Style = spinnerStyle
 	return statusModel{spinner: s}
 }
 
-// SetText sets the status message. Empty string hides the status bar.
+// SetText sets the status message. Empty string clears the text but
+// the view still occupies one line to prevent layout shifts.
 func (m *statusModel) SetText(text string) { m.text = text }
 
 // SetWidth sets the available width.
@@ -36,10 +39,11 @@ func (m statusModel) Update(msg tea.Msg) (statusModel, tea.Cmd) {
 	return m, cmd
 }
 
-// View renders the status bar. Returns empty string when idle.
+// View renders the status line. Always returns exactly one line
+// (empty or with content) to keep viewport height stable.
 func (m statusModel) View() string {
 	if m.text == "" {
-		return ""
+		return " "
 	}
 	return statusStyle.Render(fmt.Sprintf(" %s %s", m.spinner.View(), m.text))
 }

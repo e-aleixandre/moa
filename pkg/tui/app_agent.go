@@ -28,7 +28,7 @@ func (m *appModel) prepareRun() uint64 {
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
 	m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
-	m.status.SetText("thinking...")
+	m.status.SetText("working...")
 	return m.s.runGen
 }
 
@@ -168,7 +168,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
 		m.s.streamState = stateStreaming
-		m.status.SetText("thinking...")
+		m.status.SetText("generating...")
 
 	case core.AgentEventMessageEnd:
 		if m.s.thinkingText != "" {
@@ -242,7 +242,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		if m.s.activeTools <= 0 {
 			m.s.activeTools = 0
 			m.s.streamState = stateStreaming
-			m.status.SetText("thinking...")
+			m.status.SetText("generating...")
 		} else if m.s.activeTools == 1 {
 			m.status.SetText("running tool...")
 		} else {
@@ -281,7 +281,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", e.Compaction.TokensBefore/1000, e.Compaction.TokensAfter/1000),
 			})
 		}
-		m.status.SetText("thinking...")
+		m.status.SetText("generating...")
 		m.s.viewportDirty = true
 	}
 }
