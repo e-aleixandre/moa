@@ -1363,6 +1363,77 @@ func TestBuildToolBlockData_TruncatedBash(t *testing.T) {
 	}
 }
 
+func TestBuildToolBlockData_AskUser_SingleQuestion(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "ask_user",
+		ToolArgs: map[string]any{
+			"questions": []any{
+				map[string]any{
+					"question": "¿Qué tipo de proyecto?",
+					"options":  []any{"API REST", "CLI", "Librería"},
+				},
+			},
+		},
+		ToolResult: "API REST", ToolDone: true,
+	}
+	data := buildToolBlockData(block, false)
+	if data.Action != "❓ questions" {
+		t.Errorf("Action = %q, want '❓ questions'", data.Action)
+	}
+	if data.Target != "¿Qué tipo de proyecto?" {
+		t.Errorf("Target = %q, want question text", data.Target)
+	}
+	if !strings.Contains(data.Body, "Q: ¿Qué tipo de proyecto?") {
+		t.Error("Body should contain question text")
+	}
+	if !strings.Contains(data.Body, "A: API REST") {
+		t.Error("Body should contain answer")
+	}
+	if !strings.Contains(data.Body, "API REST | CLI | Librería") {
+		t.Error("Body should show options")
+	}
+}
+
+func TestBuildToolBlockData_AskUser_MultipleQuestions(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "ask_user",
+		ToolArgs: map[string]any{
+			"questions": []any{
+				map[string]any{"question": "First question?"},
+				map[string]any{"question": "Second question?"},
+			},
+		},
+		ToolResult: "Q: First question?\nA: Answer one\nQ: Second question?\nA: Answer two",
+		ToolDone:   true,
+	}
+	data := buildToolBlockData(block, false)
+	if !strings.Contains(data.Body, "A: Answer one") {
+		t.Error("Body should contain first answer")
+	}
+	if !strings.Contains(data.Body, "A: Answer two") {
+		t.Error("Body should contain second answer")
+	}
+}
+
+func TestBuildToolBlockData_AskUser_Pending(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "ask_user",
+		ToolArgs: map[string]any{
+			"questions": []any{
+				map[string]any{"question": "Pick one", "options": []any{"A", "B"}},
+			},
+		},
+		ToolResult: "", ToolDone: false,
+	}
+	data := buildToolBlockData(block, false)
+	if !strings.Contains(data.Body, "Q: Pick one") {
+		t.Error("Body should show question even without answer")
+	}
+	if strings.Contains(data.Body, "A:") {
+		t.Error("Body should not show answer line when pending")
+	}
+}
+
 func TestGetActiveLayout_NeverNil(t *testing.T) {
 	l := GetActiveLayout()
 	if l == nil {

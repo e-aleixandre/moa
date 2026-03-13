@@ -251,6 +251,10 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 		}
 		body = block.ToolResult
 
+	case "ask_user":
+		action = "❓ questions"
+		target, body = formatAskUserBlock(block)
+
 	default:
 		action = block.ToolName
 		target = sortedArgSummary(block.ToolArgs)
@@ -344,6 +348,73 @@ func stringArg(args map[string]any, key string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// formatAskUserBlock extracts a human-readable target and body from ask_user args/result.
+// Target shows the first question text. Body shows all Q&A pairs.
+func formatAskUserBlock(block messageBlock) (target, body string) {
+	questions, _ := block.ToolArgs["questions"].([]any)
+	if len(questions) == 0 {
+		return "", block.ToolResult
+	}
+
+	// Parse the result to extract individual answers.
+	// Single question: the entire result is the answer.
+	// Multiple questions: result is "Q: ...\nA: ..." pairs.
+	answers := parseAskUserAnswers(block.ToolResult, len(questions))
+
+	var sb strings.Builder
+	for i, raw := range questions {
+		q, _ := raw.(map[string]any)
+		if q == nil {
+			continue
+		}
+		text, _ := q["question"].(string)
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		fmt.Fprintf(&sb, "Q: %s", text)
+		if opts, ok := q["options"].([]any); ok && len(opts) > 0 {
+			strs := make([]string, 0, len(opts))
+			for _, o := range opts {
+				if s, ok := o.(string); ok {
+					strs = append(strs, s)
+				}
+			}
+			fmt.Fprintf(&sb, "  [%s]", strings.Join(strs, " | "))
+		}
+		if i < len(answers) && answers[i] != "" {
+			fmt.Fprintf(&sb, "\nA: %s", answers[i])
+		}
+
+		// Set target to the first question text.
+		if i == 0 {
+			target = text
+			if len(target) > 80 {
+				target = target[:77] + "…"
+			}
+		}
+	}
+	return target, sb.String()
+}
+
+// parseAskUserAnswers extracts individual answers from the tool result.
+func parseAskUserAnswers(result string, count int) []string {
+	if result == "" {
+		return nil
+	}
+	// Single question — entire result is the answer.
+	if count == 1 {
+		return []string{strings.TrimSpace(result)}
+	}
+	// Multiple questions — parse "Q: ...\nA: ..." pairs.
+	answers := make([]string, 0, count)
+	for _, line := range strings.Split(result, "\n") {
+		if strings.HasPrefix(line, "A: ") {
+			answers = append(answers, strings.TrimPrefix(line, "A: "))
+		}
+	}
+	return answers
 }
 
 func sortedArgSummary(args map[string]any) string {

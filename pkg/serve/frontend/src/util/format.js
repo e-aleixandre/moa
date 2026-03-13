@@ -26,6 +26,7 @@ export function toolVerb(name) {
   if (n === 'ls')                            return { verb: 'ls',     cls: 'read' };
   if (n === 'fetch_content')                 return { verb: 'fetch',  cls: 'fetch' };
   if (n === 'web_search')                    return { verb: 'search', cls: 'search' };
+  if (n === 'ask_user')                      return { verb: '❓ questions', cls: 'ask-user' };
   return { verb: name, cls: '' };
 }
 
@@ -46,6 +47,14 @@ export function toolPath(name, args) {
     return a.url || '';
   if (n === 'web_search')
     return a.query || '';
+  if (n === 'ask_user') {
+    const qs = a.questions;
+    if (Array.isArray(qs) && qs.length > 0) {
+      const text = qs[0].question || '';
+      return text.length > 80 ? text.substring(0, 77) + '…' : text;
+    }
+    return '';
+  }
 
   // Fallback: first short string value
   for (const v of Object.values(a)) {
@@ -68,6 +77,13 @@ export function toolPreview(name, args, result) {
     // Show the new text being inserted
     if (a.newText) return { text: a.newText, kind: 'input' };
     if (a.new_text) return { text: a.new_text, kind: 'input' };
+  }
+
+  // ask_user: show questions with options and answers
+  if (n === 'ask_user') {
+    const text = formatAskUser(a.questions, result);
+    if (text) return { text, kind: 'output' };
+    return null;
   }
 
   // For everything else, show the result
@@ -113,6 +129,40 @@ function shortenCmd(cmd) {
 
 function tryParse(s) {
   try { return JSON.parse(s); } catch { return null; }
+}
+
+/** Format ask_user questions and answers into a readable block. */
+function formatAskUser(questions, result) {
+  if (!Array.isArray(questions) || questions.length === 0) return result || '';
+
+  // Parse answers from result.
+  // Single question: entire result is the answer.
+  // Multiple: result is "Q: ...\nA: ..." pairs.
+  let answers = [];
+  if (result) {
+    if (questions.length === 1) {
+      answers = [result.trim()];
+    } else {
+      for (const line of result.split('\n')) {
+        if (line.startsWith('A: ')) answers.push(line.substring(3));
+      }
+    }
+  }
+
+  const lines = [];
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    if (i > 0) lines.push('');
+    let qLine = 'Q: ' + (q.question || '');
+    if (Array.isArray(q.options) && q.options.length > 0) {
+      qLine += '  [' + q.options.join(' | ') + ']';
+    }
+    lines.push(qLine);
+    if (i < answers.length && answers[i]) {
+      lines.push('A: ' + answers[i]);
+    }
+  }
+  return lines.join('\n');
 }
 
 export function escapeHtml(str) {
