@@ -227,7 +227,7 @@ func main() {
 	subagentCountCh := make(chan int, 16)
 	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
 	useTUI := promptContent == ""
-	subagent.RegisterAll(toolReg, subagent.Config{
+	if err := subagent.RegisterAll(toolReg, subagent.Config{
 		DefaultModel: resolvedModel,
 		CurrentModel: func() core.Model {
 			if a := agHolder.Load(); a != nil {
@@ -297,7 +297,10 @@ func main() {
 				}
 			}
 		},
-	})
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "subagent registration: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Build system prompt after all tools are registered.
 	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd)
@@ -513,7 +516,7 @@ func main() {
 	ag.Drain(2 * time.Second)
 
 	if !jsonOutput {
-		if finalText := extractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
+		if finalText := core.ExtractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
 			fmt.Print(finalText)
 		}
 		fmt.Println()
@@ -865,21 +868,6 @@ func normalizeArgs(args []string) []string {
 		out = append(out, arg)
 	}
 	return out
-}
-
-func extractFinalAssistantText(msgs []core.AgentMessage) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" {
-			var parts []string
-			for _, c := range msgs[i].Content {
-				if c.Type == "text" && c.Text != "" {
-					parts = append(parts, c.Text)
-				}
-			}
-			return strings.Join(parts, "")
-		}
-	}
-	return ""
 }
 
 // loadProjectMCPServers loads .mcp.json from the project root if trusted.

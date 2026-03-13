@@ -49,14 +49,15 @@ type Config struct {
 	OnAsyncJobChange func(count int)
 }
 
-func RegisterAll(reg *core.Registry, cfg Config) {
+func RegisterAll(reg *core.Registry, cfg Config) error {
 	if cfg.AppCtx == nil {
-		panic("subagent: AppCtx is required")
+		return errors.New("subagent: AppCtx is required")
 	}
 	jobs := newJobStore()
 	reg.Register(newSubagent(cfg, jobs))
 	reg.Register(newSubagentStatus(jobs))
 	reg.Register(newSubagentCancel(jobs))
+	return nil
 }
 
 func newSubagent(cfg Config, jobs *jobStore) core.Tool {
@@ -241,7 +242,7 @@ func runSync(ctx context.Context, cfg Config, provider core.Provider, model core
 	if err != nil {
 		return core.ErrorResult(err.Error()), nil
 	}
-	return core.TextResult(extractFinalAssistantText(msgs)), nil
+	return core.TextResult(core.ExtractFinalAssistantText(msgs)), nil
 }
 
 func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string) {
@@ -279,7 +280,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 		jobs.setFailed(j.id, err.Error())
 		return
 	}
-	jobs.setCompleted(j.id, extractFinalAssistantText(msgs))
+	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
 }
 
 func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
@@ -456,22 +457,6 @@ func formatStatus(snap jobSnapshot) string {
 	}
 
 	return sb.String()
-}
-
-func extractFinalAssistantText(msgs []core.AgentMessage) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role != "assistant" {
-			continue
-		}
-		var parts []string
-		for _, c := range msgs[i].Content {
-			if c.Type == "text" && c.Text != "" {
-				parts = append(parts, c.Text)
-			}
-		}
-		return strings.Join(parts, "")
-	}
-	return ""
 }
 
 func currentModel(cfg Config) core.Model {

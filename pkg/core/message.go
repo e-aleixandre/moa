@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -221,4 +222,22 @@ func EstimateContextTokens(msgs []AgentMessage, systemPrompt string, toolSpecs [
 		TrailingTokens: trailing,
 		OverheadTokens: overhead,
 	}
+}
+
+// ExtractFinalAssistantText returns the concatenated text content of the last
+// assistant message in the conversation. Returns "" if none found.
+func ExtractFinalAssistantText(msgs []AgentMessage) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "assistant" {
+			continue
+		}
+		var parts []string
+		for _, c := range msgs[i].Content {
+			if c.Type == "text" && c.Text != "" {
+				parts = append(parts, c.Text)
+			}
+		}
+		return strings.Join(parts, "")
+	}
+	return ""
 }

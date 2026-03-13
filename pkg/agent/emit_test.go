@@ -38,19 +38,25 @@ func TestEmitter_UnsubscribeRemoves(t *testing.T) {
 		received.Add(1)
 	})
 
-	// Deliver one event
+	// Deliver one event and poll until received.
 	e.Emit(core.AgentEvent{Type: core.AgentEventStart})
-	time.Sleep(50 * time.Millisecond)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if received.Load() >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if received.Load() != 1 {
 		t.Fatalf("expected 1 event before unsub, got %d", received.Load())
 	}
 
-	// Unsubscribe
+	// Unsubscribe, then emit another event.
 	unsub()
-
-	// This event should NOT be delivered
 	e.Emit(core.AgentEvent{Type: core.AgentEventEnd})
-	time.Sleep(50 * time.Millisecond)
+
+	// Drain to ensure the emitter processed the second event.
+	e.Drain(200 * time.Millisecond)
 	if received.Load() != 1 {
 		t.Fatalf("expected still 1 event after unsub, got %d", received.Load())
 	}
@@ -126,6 +132,7 @@ func TestEmitter_ConcurrentEmitUnsubscribe(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		unsub := e.Subscribe(func(evt core.AgentEvent) {})
+		emitDone := make(chan struct{})
 
 		wg.Add(2)
 		go func() {
@@ -133,10 +140,12 @@ func TestEmitter_ConcurrentEmitUnsubscribe(t *testing.T) {
 			for j := 0; j < 100; j++ {
 				e.Emit(core.AgentEvent{Type: core.AgentEventStart})
 			}
+			close(emitDone)
 		}()
 		go func() {
 			defer wg.Done()
-			time.Sleep(time.Millisecond)
+			// Wait until at least some emits have happened, then unsubscribe.
+			<-emitDone
 			unsub()
 		}()
 	}

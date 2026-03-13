@@ -196,9 +196,14 @@ func TestHost_Observer_Async(t *testing.T) {
 
 	host.FireObserver(core.AgentEvent{Type: core.AgentEventTurnStart})
 
-	// Give goroutine time to run
-	time.Sleep(50 * time.Millisecond)
-
+	// Poll until observer fires (async goroutine).
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if called.Load() >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if called.Load() != 1 {
 		t.Fatalf("expected observer to be called once, got %d", called.Load())
 	}

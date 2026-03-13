@@ -492,7 +492,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	var sess *ManagedSession
 	var agHolder atomic.Pointer[agent.Agent]
 
-	subagent.RegisterAll(toolReg, subagent.Config{
+	if err := subagent.RegisterAll(toolReg, subagent.Config{
 		DefaultModel: model,
 		CurrentModel: func() core.Model {
 			if a := agHolder.Load(); a != nil {
@@ -559,7 +559,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 				"text":   agentText,
 			}})
 		},
-	})
+	}); err != nil {
+		sessionCancel()
+		return nil, fmt.Errorf("subagent registration: %w", err)
+	}
 
 	// 11. Plan mode.
 	reviewModel := model
@@ -814,6 +817,9 @@ func (m *Manager) Get(id string) (*ManagedSession, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	s, ok := m.sessions[id]
+	if s == nil {
+		return nil, false // nil placeholder during resume
+	}
 	return s, ok
 }
 
@@ -864,15 +870,28 @@ func (m *Manager) Delete(id string) error {
 // ResumeSession loads a saved session from disk and creates a full runtime.
 // On failure, only runtime resources are cleaned up — disk state is untouched.
 func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
-	m.mu.RLock()
+	// Use full Lock (not RLock) for check-and-reserve to prevent TOCTOU:
+	// two concurrent ResumeSession calls for the same ID could both pass
+	// an RLock check and create duplicate runtimes.
+	m.mu.Lock()
 	if _, ok := m.sessions[id]; ok {
-		m.mu.RUnlock()
+		m.mu.Unlock()
 		return nil, ErrBusy
 	}
-	m.mu.RUnlock()
+	// Reserve the slot with a nil placeholder to block concurrent resumes.
+	m.sessions[id] = nil
+	m.mu.Unlock()
+
+	// On any error below, release the reserved slot.
+	cleanup := func() {
+		m.mu.Lock()
+		delete(m.sessions, id)
+		m.mu.Unlock()
+	}
 
 	saved, store, err := session.FindSession(m.sessionBaseDir, id)
 	if err != nil {
+		cleanup()
 		return nil, err
 	}
 
@@ -884,6 +903,7 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 
 	sess, err := m.buildManagedSession(saved.ID, saved.Title, modelID, cwd)
 	if err != nil {
+		cleanup()
 		return nil, fmt.Errorf("resume: %w", err)
 	}
 

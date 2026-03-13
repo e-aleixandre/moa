@@ -1305,13 +1305,10 @@ func TestSetLayout_KnownNames(t *testing.T) {
 	}
 }
 
-func TestSetLayoutDirect_NilPanics(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic on nil layout")
-		}
-	}()
-	SetLayoutDirect(nil)
+func TestSetLayoutDirect_NilErrors(t *testing.T) {
+	if err := SetLayoutDirect(nil); err == nil {
+		t.Error("expected error on nil layout")
+	}
 }
 
 func TestRegisterLayout_DuplicateErrors(t *testing.T) {

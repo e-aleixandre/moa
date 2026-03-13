@@ -105,7 +105,10 @@ func loadConfigFile(path string) MoaConfig {
 		return MoaConfig{}
 	}
 	var cfg MoaConfig
-	json.Unmarshal(data, &cfg)
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: corrupt config %s: %v\n", path, err)
+		return MoaConfig{}
+	}
 	return cfg
 }
 

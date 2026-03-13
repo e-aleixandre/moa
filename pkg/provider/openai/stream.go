@@ -282,7 +282,7 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 			state.message.Content = append(state.message.Content,
 				core.Content{
 					Type:              "thinking",
-					Text:              thinkingText,
+					Thinking:          thinkingText,
 					ThinkingSignature: signature,
 				},
 			)

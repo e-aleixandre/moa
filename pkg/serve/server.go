@@ -104,6 +104,7 @@ func handleListSessions(mgr *Manager) http.HandlerFunc {
 
 func handleCreateSession(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		limitBody(w, r, maxJSONBodySize)
 		var opts CreateOpts
 		if err := json.NewDecoder(r.Body).Decode(&opts); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -156,6 +157,7 @@ func handleDeleteSession(mgr *Manager) http.HandlerFunc {
 
 func handleSend(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		limitBody(w, r, maxJSONBodySize)
 		var body struct {
 			Text string `json:"text"`
 		}
@@ -186,6 +188,7 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		limitBody(w, r, maxJSONBodySize)
 		var body struct {
 			ID       string `json:"id"`
 			Approved bool   `json:"approved"`
@@ -214,6 +217,7 @@ func handleConfig(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		limitBody(w, r, maxJSONBodySize)
 		var body struct {
 			Model    string `json:"model"`
 			Thinking string `json:"thinking"`
@@ -467,6 +471,7 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		limitBody(w, r, maxJSONBodySize)
 		var body struct {
 			Command string `json:"command"`
 		}
@@ -493,6 +498,13 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, result)
 	}
+}
+
+const maxJSONBodySize = 1 << 20 // 1 MB for JSON endpoints
+
+// limitBody wraps r.Body with a MaxBytesReader to prevent oversized payloads.
+func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 }
 
 // writeJSON writes a JSON HTTP response.

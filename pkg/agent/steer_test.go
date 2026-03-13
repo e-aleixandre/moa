@@ -153,19 +153,11 @@ func TestFollowUpTriggersNewTurn(t *testing.T) {
 	}
 
 	// Verify agentLoop was called twice (two agent_start events).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	pollUntilAgent(t, 2*time.Second, "2 agent_start events", func() bool {
 		mu.Lock()
-		n := startCount
-		mu.Unlock()
-		if n >= 2 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	mu.Lock()
-	t.Fatalf("expected 2 agent_start events, got %d", startCount)
-	mu.Unlock()
+		defer mu.Unlock()
+		return startCount >= 2
+	})
 }
 
 func TestFollowUpDoesNothingWhenEmpty(t *testing.T) {
@@ -384,6 +376,18 @@ func TestExecuteDrainsBothFollowUpsAndSteer(t *testing.T) {
 }
 
 // helpers
+
+func pollUntilAgent(t *testing.T, timeout time.Duration, desc string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for: %s", desc)
+}
 
 func roles(msgs []core.AgentMessage) []string {
 	r := make([]string, len(msgs))

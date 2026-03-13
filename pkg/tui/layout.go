@@ -75,14 +75,15 @@ func SetLayout(name string) error {
 }
 
 // SetLayoutDirect activates a layout instance directly (for extensions providing custom layouts).
-// Panics on nil.
-func SetLayoutDirect(l Layout) {
+// Returns error if l is nil.
+func SetLayoutDirect(l Layout) error {
 	if l == nil {
-		panic("tui: SetLayoutDirect called with nil layout")
+		return fmt.Errorf("tui: SetLayoutDirect called with nil layout")
 	}
 	layoutMu.Lock()
 	defer layoutMu.Unlock()
 	activeLayout = l
+	return nil
 }
 
 // GetActiveLayout returns the current layout. Never nil after init.
