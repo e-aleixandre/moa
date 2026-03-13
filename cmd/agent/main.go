@@ -548,9 +548,6 @@ func main() {
 
 	msgs, err := ag.Run(ctx, promptContent)
 
-	// Drain emitter: ensure all async events are delivered before exit.
-	ag.Drain(2 * time.Second)
-
 	if !jsonOutput {
 		if finalText := core.ExtractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
 			fmt.Print(finalText)

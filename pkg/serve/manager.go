@@ -756,13 +756,6 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 		defer cancel()
 		msgs, err := sess.agent.Send(runCtx, text)
 
-		// Drain emitter so all async events (text_delta, message_end, turn_end, etc.)
-		// are delivered before terminal run events.
-		// Ordering invariant:
-		//   agent.Send() -> agent.Drain() -> state_change -> run_end
-		// This keeps structural turn events ahead of run_end in the websocket stream.
-		sess.agent.Drain(2 * time.Second)
-
 		sess.mu.Lock()
 		sess.messages = msgs
 		sess.runCancel = nil
