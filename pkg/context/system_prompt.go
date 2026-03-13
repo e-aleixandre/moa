@@ -22,11 +22,14 @@ var toolSnippets = map[string]string{
 	"subagent":        "Spawn a child agent with its own context for parallel investigation or focused subtasks.",
 	"subagent_status": "Check the status of an async subagent job.",
 	"subagent_cancel": "Cancel a running async subagent job.",
+	"verify":          "Run project verification checks (build, test, lint) from .moa/verify.json.",
 }
 
 // BuildSystemPrompt constructs the system prompt from components.
 // cwd is the working directory shown to the agent; if empty, os.Getwd() is used.
-func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string) string {
+// hasVerify indicates a valid .moa/verify.json was loaded — adds a guideline
+// instructing the agent to verify after coding tasks.
+func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVerify bool) string {
 	var sb strings.Builder
 
 	// Identity and role
@@ -84,6 +87,11 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string) strin
 	// Output behavior
 	if toolSet["edit"] || toolSet["write"] {
 		sb.WriteString("- When summarizing your actions, output plain text directly — do NOT use cat or bash to display what you did\n")
+	}
+
+	// Verify
+	if hasVerify && toolSet["verify"] {
+		sb.WriteString("- After completing coding tasks, call the verify tool to validate your changes before reporting done\n")
 	}
 
 	// Always include these

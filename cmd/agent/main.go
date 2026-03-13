@@ -33,6 +33,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // Set by goreleaser ldflags.
@@ -317,8 +318,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Verify tool — register only if .moa/verify.json exists and is valid.
+	verifyCfg, verifyErr := verify.LoadConfig(cwd)
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid .moa/verify.json: %v\n", verifyErr)
+	}
+	if verifyCfg != nil {
+		toolReg.Register(verify.NewTool(cwd))
+	}
+
 	// Build system prompt after all tools are registered.
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd)
+	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil)
 
 	// Resolve budget: flag wins (including explicit 0), else config.
 	resolvedBudget := moaCfg.MaxBudget

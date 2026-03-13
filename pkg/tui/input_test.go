@@ -25,6 +25,7 @@ func TestParseCommand(t *testing.T) {
 		{"/tasks done 3", "tasks done 3", true},
 		{"/tasks show all", "tasks show all", true},
 		{"/tasks reset", "tasks reset", true},
+		{"/verify", "verify", true},
 		{"/unknown", "", false},
 		{"not a command", "", false},
 		{"/etc/passwd", "", false},

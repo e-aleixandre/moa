@@ -15,7 +15,7 @@ type thinkingEntry struct {
 }
 
 var defaultThinkingEntries = []thinkingEntry{
-	{"None", "none"},
+	{"Off", "off"},
 	{"Low", "low"},
 	{"Medium", "medium"},
 	{"High", "high"},
@@ -33,9 +33,17 @@ func (p *thinkingPicker) Open(currentLevel string) {
 	p.active = true
 }
 
-func (p *thinkingPicker) Close()    { p.active = false }
-func (p *thinkingPicker) MoveUp()   { if p.cursor > 0 { p.cursor-- } }
-func (p *thinkingPicker) MoveDown() { if p.cursor < len(p.entries)-1 { p.cursor++ } }
+func (p *thinkingPicker) Close() { p.active = false }
+func (p *thinkingPicker) MoveUp() {
+	if p.cursor > 0 {
+		p.cursor--
+	}
+}
+func (p *thinkingPicker) MoveDown() {
+	if p.cursor < len(p.entries)-1 {
+		p.cursor++
+	}
+}
 
 func (p *thinkingPicker) Selected() thinkingEntry {
 	if p.cursor < len(p.entries) {

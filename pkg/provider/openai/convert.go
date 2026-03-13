@@ -59,8 +59,8 @@ func buildRequestBody(req core.Request) ([]byte, error) {
 
 // mapReasoningEffort maps our thinking levels to OpenAI reasoning effort.
 func mapReasoningEffort(level string) string {
-	switch level {
-	case "off", "":
+	switch strings.ToLower(level) {
+	case "off", "none", "":
 		return ""
 	case "minimal", "low":
 		return "low"

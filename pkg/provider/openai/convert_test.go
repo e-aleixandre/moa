@@ -172,6 +172,7 @@ func TestMapReasoningEffort(t *testing.T) {
 		in, want string
 	}{
 		{"off", ""},
+		{"none", ""},
 		{"", ""},
 		{"minimal", "low"},
 		{"low", "low"},

@@ -333,6 +333,7 @@ func TestLoop_ToolCallBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	events := collectEvents(ag)
 
 	msgs, err := ag.Run(context.Background(), "Delete everything")
 	if err != nil {
@@ -346,6 +347,95 @@ func TestLoop_ToolCallBlocked(t *testing.T) {
 	toolResult := msgs[2]
 	if !toolResult.IsError {
 		t.Fatal("expected tool result to be an error (blocked)")
+	}
+	if toolResult.Custom != nil && toolResult.Custom["rejected"] == true {
+		t.Fatal("non-permission block must not be marked rejected")
+	}
+
+	if !waitForEvent(events, core.AgentEventEnd, 2*time.Second) {
+		t.Fatal("missing agent_end event")
+	}
+	var toolEnd *core.AgentEvent
+	for _, e := range events.snapshot() {
+		if e.Type == core.AgentEventToolExecEnd {
+			evt := e
+			toolEnd = &evt
+		}
+	}
+	if toolEnd == nil {
+		t.Fatal("missing tool_execution_end event")
+	}
+	if toolEnd.Rejected {
+		t.Fatal("non-permission block must emit rejected=false")
+	}
+}
+
+func TestLoop_ToolPermissionDenied_MarksRejected(t *testing.T) {
+	bashTool := core.Tool{
+		Name:       "bash",
+		Parameters: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}}}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			t.Fatal("bash should not be executed — permission denied")
+			return core.Result{}, nil
+		},
+	}
+
+	provider := NewMockProvider(
+		toolCallResponse("tc-bash", "bash", map[string]any{"command": "rm -rf /"}),
+		simpleTextResponse("OK, I won't use bash."),
+	)
+
+	reg := core.NewRegistry()
+	reg.Register(bashTool)
+	ag, err := New(AgentConfig{
+		Provider:            provider,
+		Model:               core.Model{ID: "test"},
+		Tools:               reg,
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+		PermissionCheck: func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+			if name == "bash" {
+				return &core.ToolCallDecision{Block: true, Reason: "not allowed"}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectEvents(ag)
+
+	msgs, err := ag.Run(context.Background(), "Delete everything")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) < 3 {
+		t.Fatalf("expected at least 3 messages, got %d", len(msgs))
+	}
+	toolResult := msgs[2]
+	if !toolResult.IsError {
+		t.Fatal("expected tool result to be an error")
+	}
+	if toolResult.Custom == nil || toolResult.Custom["rejected"] != true {
+		t.Fatalf("expected tool_result custom.rejected=true, got %+v", toolResult.Custom)
+	}
+
+	if !waitForEvent(events, core.AgentEventEnd, 2*time.Second) {
+		t.Fatal("missing agent_end event")
+	}
+	var toolEnd *core.AgentEvent
+	for _, e := range events.snapshot() {
+		if e.Type == core.AgentEventToolExecEnd {
+			evt := e
+			toolEnd = &evt
+		}
+	}
+	if toolEnd == nil {
+		t.Fatal("missing tool_execution_end event")
+	}
+	if !toolEnd.Rejected {
+		t.Fatal("expected tool_execution_end rejected=true for permission denial")
 	}
 }
 

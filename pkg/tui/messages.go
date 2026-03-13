@@ -4,6 +4,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // agentEventMsg wraps an agent event for the TUI event loop.
@@ -87,4 +88,10 @@ type clipboardImageMsg struct {
 	Data     []byte // raw PNG bytes
 	MimeType string
 	Err      error // non-nil if clipboard read failed
+}
+
+// verifyResultMsg carries the result of a /verify command.
+type verifyResultMsg struct {
+	Result *verify.Result
+	Err    error
 }

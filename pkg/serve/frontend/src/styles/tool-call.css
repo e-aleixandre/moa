@@ -55,9 +55,10 @@
   gap: 4px;
 }
 .tool-call-tag .lucide { width: 11px; height: 11px; }
-.tool-call-tag.done    { color: var(--green);  background: var(--green-dim); }
-.tool-call-tag.error   { color: var(--red);    background: var(--red-dim); }
-.tool-call-tag.running { color: var(--yellow); background: var(--yellow-dim); }
+.tool-call-tag.done     { color: var(--green);  background: var(--green-dim); }
+.tool-call-tag.error    { color: var(--red);    background: var(--red-dim); }
+.tool-call-tag.rejected { color: var(--peach);  background: var(--peach-dim); }
+.tool-call-tag.running  { color: var(--yellow); background: var(--yellow-dim); }
 .tool-call-tag.running .lucide { animation: spin 1.2s linear infinite; }
 
 @keyframes spin {

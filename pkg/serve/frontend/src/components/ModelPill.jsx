@@ -3,7 +3,8 @@ import { shortModel } from '../util/format.js';
 const LEVELS = ['low', 'medium', 'high'];
 
 export function ModelPill({ model, thinking }) {
-  const level = (thinking || 'none').toLowerCase();
+  const raw = (thinking || 'off').toLowerCase();
+  const level = raw === 'none' ? 'off' : raw;
   const filled = level === 'high' ? 3 : level === 'medium' ? 2 : level === 'low' ? 1 : 0;
 
   return (

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // --- Commands ---
@@ -108,6 +110,28 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "plan":
 		return m.handlePlanCommand()
+
+	case "verify":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Cannot verify while agent is running",
+			})
+			return m, nil
+		}
+		m.s.running = true
+		m.input.SetEnabled(false)
+		m.status.SetText("running verify checks...")
+		cwd := m.cwd
+		ctx, cancel := context.WithCancel(m.baseCtx)
+		m.verifyCancel = cancel
+		return m, func() tea.Msg {
+			defer cancel()
+			result, err := verify.Execute(ctx, cwd)
+			if err != nil {
+				return verifyResultMsg{Err: err}
+			}
+			return verifyResultMsg{Result: &result}
+		}
 
 	case "exit", "quit":
 		m.cleanup()
@@ -733,4 +757,3 @@ func (m *appModel) restoreModelFromMetadata(sess *session.Session) {
 	m.modelName = name
 	m.topBar.UpdateModelSegment(m.modelName)
 }
-

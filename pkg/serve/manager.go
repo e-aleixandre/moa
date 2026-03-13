@@ -24,11 +24,12 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // SessionState describes the current state of a managed session.
@@ -36,10 +37,10 @@ type SessionState string
 
 const (
 	StateIdle       SessionState = "idle"       // waiting for user input
-	StateRunning    SessionState = "running"     // agent is executing
-	StatePermission SessionState = "permission"  // blocked on permission approval
-	StateError      SessionState = "error"       // last run errored (still usable)
-	StateSaved      SessionState = "saved"       // on disk but not loaded into memory
+	StateRunning    SessionState = "running"    // agent is executing
+	StatePermission SessionState = "permission" // blocked on permission approval
+	StateError      SessionState = "error"      // last run errored (still usable)
+	StateSaved      SessionState = "saved"      // on disk but not loaded into memory
 )
 
 // Event is a JSON-serializable event sent to WebSocket clients.
@@ -59,14 +60,14 @@ type ManagedSession struct {
 	Updated time.Time    `json:"updated"`
 	Error   string       `json:"error,omitempty"`
 
-	agent         *agent.Agent
-	gate          *permission.Gate
-	unsub         func()
-	sessionCtx    context.Context    // per-session lifetime; cancelled on Delete
-	sessionCancel context.CancelFunc // cancels sessionCtx (bridge, subagents, MCP, runs)
-	subscribers   []chan Event
-	mu            sync.Mutex
-	messages      []core.AgentMessage
+	agent              *agent.Agent
+	gate               *permission.Gate
+	unsub              func()
+	sessionCtx         context.Context    // per-session lifetime; cancelled on Delete
+	sessionCancel      context.CancelFunc // cancels sessionCtx (bridge, subagents, MCP, runs)
+	subscribers        []chan Event
+	mu                 sync.Mutex
+	messages           []core.AgentMessage
 	runCancel          context.CancelFunc
 	pending            *pendingPermission
 	lastResolvedPermID string
@@ -76,11 +77,11 @@ type ManagedSession struct {
 	planMode  *planmode.PlanMode
 
 	// Per-session internals for MCP trust reload and subagent config.
-	toolReg      *core.Registry
-	agentsMD     string
+	toolReg       *core.Registry
+	agentsMD      string
 	resolvedModel core.Model
-	mcpMgr       *mcp.Manager // nil when no MCP; closed on Delete
-	UntrustedMCP bool         // true when .mcp.json exists but not trusted
+	mcpMgr        *mcp.Manager // nil when no MCP; closed on Delete
+	UntrustedMCP  bool         // true when .mcp.json exists but not trusted
 
 	// Persistence.
 	persisted *session.Session   // backing session on disk; nil if no store
@@ -223,6 +224,7 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 			"tool_call_id": e.ToolCallID,
 			"tool_name":    e.ToolName,
 			"is_error":     e.IsError,
+			"rejected":     e.Rejected,
 			"result":       text,
 		}})
 		// Broadcast updated task list after tasks tool changes.
@@ -445,6 +447,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	taskStore := tasks.NewStore()
 	toolReg.Register(tasks.NewTool(taskStore))
 
+	// 6b. Verify tool — register only if .moa/verify.json exists and is valid.
+	verifyCfg, verifyErr := verify.LoadConfig(cwd)
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid .moa/verify.json in %s: %v\n", cwd, verifyErr)
+	}
+	if verifyCfg != nil {
+		toolReg.Register(verify.NewTool(cwd))
+	}
+
 	// 7. AGENTS.md from session CWD.
 	agentsMD, _ := agentcontext.LoadAgentsMD(cwd, os.Getenv("AGENT_HOME"))
 
@@ -616,7 +627,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	})
 
 	// 12. System prompt (after ALL tools registered: builtins + MCP + subagents).
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd)
+	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil)
 
 	// 13. Agent.
 	agentCfg := agent.AgentConfig{
@@ -634,7 +645,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	// Compose permission check: plan mode filter + permission gate.
 	agentCfg.PermissionCheck = func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 		if allowed, reason := pm.FilterToolCall(name, args); !allowed {
-			return &core.ToolCallDecision{Block: true, Reason: reason}
+			return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPolicy}
 		}
 		if gate != nil {
 			return gate.Check(ctx, name, args)
@@ -745,8 +756,11 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 		defer cancel()
 		msgs, err := sess.agent.Send(runCtx, text)
 
-		// Drain emitter so all async events (text_delta, message_end, etc.)
-		// are delivered before the final state_change broadcast.
+		// Drain emitter so all async events (text_delta, message_end, turn_end, etc.)
+		// are delivered before terminal run events.
+		// Ordering invariant:
+		//   agent.Send() -> agent.Drain() -> state_change -> run_end
+		// This keeps structural turn events ahead of run_end in the websocket stream.
 		sess.agent.Drain(2 * time.Second)
 
 		sess.mu.Lock()
@@ -996,7 +1010,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	// Resolve thinking (keep current if empty).
 	thinkingLevel := sess.agent.ThinkingLevel()
 	if thinking != "" {
-		thinkingLevel = thinking
+		thinkingLevel = normalizeThinkingLevel(thinking)
 	}
 	sess.mu.Unlock()
 
@@ -1022,6 +1036,16 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 
 	sess.broadcast(Event{Type: "config_change", Data: result})
 	return result, nil
+}
+
+func normalizeThinkingLevel(level string) string {
+	normalized := strings.ToLower(strings.TrimSpace(level))
+	switch normalized {
+	case "none":
+		return "off"
+	default:
+		return normalized
+	}
 }
 
 // CommandResult is the response from executing a slash command.

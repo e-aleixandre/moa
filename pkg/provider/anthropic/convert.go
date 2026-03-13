@@ -9,7 +9,7 @@ import (
 
 // Claude Code identity — required for OAuth tokens (Claude Max).
 const (
-	claudeCodeVersion         = "2.1.62"
+	claudeCodeVersion        = "2.1.62"
 	claudeCodeSystemPreamble = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
@@ -52,18 +52,23 @@ func fromClaudeCodeName(name string, specs []core.ToolSpec) string {
 
 // anthropicRequest is the JSON body for POST /v1/messages.
 type anthropicRequest struct {
-	Model     string           `json:"model"`
-	System    any              `json:"system,omitempty"`
-	Messages  []map[string]any `json:"messages"`
-	Tools     []map[string]any `json:"tools,omitempty"`
-	MaxTokens int              `json:"max_tokens"`
-	Stream    bool             `json:"stream"`
-	Thinking  *thinkingConfig  `json:"thinking,omitempty"`
+	Model        string           `json:"model"`
+	System       any              `json:"system,omitempty"`
+	Messages     []map[string]any `json:"messages"`
+	Tools        []map[string]any `json:"tools,omitempty"`
+	MaxTokens    int              `json:"max_tokens"`
+	Stream       bool             `json:"stream"`
+	Thinking     *thinkingConfig  `json:"thinking,omitempty"`
+	OutputConfig *outputConfig    `json:"output_config,omitempty"`
 }
 
 type thinkingConfig struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
+}
+
+type outputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // buildRequestBody converts a core.Request to Anthropic API JSON bytes.
@@ -102,11 +107,20 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 	}
 
 	// Thinking
-	if t := resolveThinking(req); t != nil {
+	if supportsAdaptiveThinking(req.Model.ID) {
+		if effort := resolveEffort(req.Options.ThinkingLevel, req.Model.ID); effort != "" {
+			ar.Thinking = &thinkingConfig{Type: "adaptive"}
+			ar.OutputConfig = &outputConfig{Effort: effort}
+		}
+	} else if t := resolveThinking(req); t != nil {
 		ar.Thinking = t
-		// With extended thinking, max_tokens must be larger
-		if ar.MaxTokens < 16000 {
-			ar.MaxTokens = 16000
+		// Anthropic manual thinking requires: max_tokens > budget_tokens.
+		minMaxTokens := t.BudgetTokens + 1
+		if minMaxTokens < 16000 {
+			minMaxTokens = 16000
+		}
+		if ar.MaxTokens < minMaxTokens {
+			ar.MaxTokens = minMaxTokens
 		}
 	}
 
@@ -300,9 +314,41 @@ func resolveMaxTokens(req core.Request) int {
 	return 8192
 }
 
-// resolveThinking maps thinking level to Anthropic config.
+// supportsAdaptiveThinking reports whether a model supports Anthropic adaptive
+// thinking (Opus 4.6 and Sonnet 4.6).
+func supportsAdaptiveThinking(modelID string) bool {
+	id := strings.ToLower(modelID)
+	return strings.Contains(id, "opus-4-6") ||
+		strings.Contains(id, "opus-4.6") ||
+		strings.Contains(id, "sonnet-4-6") ||
+		strings.Contains(id, "sonnet-4.6")
+}
+
+// resolveEffort maps our thinking levels to Anthropic adaptive effort.
+func resolveEffort(level, modelID string) string {
+	switch strings.ToLower(level) {
+	case "", "off", "none":
+		return ""
+	case "minimal", "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high":
+		return "high"
+	case "xhigh":
+		id := strings.ToLower(modelID)
+		if strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") {
+			return "max"
+		}
+		return "high"
+	default:
+		return "medium"
+	}
+}
+
+// resolveThinking maps thinking level to Anthropic manual thinking config.
 func resolveThinking(req core.Request) *thinkingConfig {
-	switch req.Options.ThinkingLevel {
+	switch strings.ToLower(req.Options.ThinkingLevel) {
 	case "minimal":
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 1024}
 	case "low":
@@ -312,7 +358,7 @@ func resolveThinking(req core.Request) *thinkingConfig {
 	case "high":
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 32000}
 	default:
-		return nil // "off" or empty
+		return nil // "off", "none", or empty
 	}
 }
 

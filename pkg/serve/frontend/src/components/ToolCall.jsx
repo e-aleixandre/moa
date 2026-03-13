@@ -10,9 +10,11 @@ export function ToolCall({ tool }) {
   const path = toolPath(tool.tool_name, tool.args);
 
   const isRunning = tool.status === 'running';
-  const statusCls = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
-  const StatusIcon = isRunning ? Loader2 : tool.status === 'error' ? X : Check;
-  const statusLabel = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
+  const isRejected = tool.status === 'rejected';
+  const isError = tool.status === 'error';
+  const statusCls = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
+  const StatusIcon = isRunning ? Loader2 : (isRejected || isError) ? X : Check;
+  const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
   // For running tools with streaming, show the live output
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
@@ -26,7 +28,7 @@ export function ToolCall({ tool }) {
 
   const hasOverflow = previewData && previewData.hidden > 0;
   const fullText = liveText || (preview ? preview.text : '');
-  const isErrorBody = !liveText && tool.status === 'error';
+  const isErrorBody = !liveText && (tool.status === 'error' || tool.status === 'rejected');
 
   return (
     <>
@@ -109,9 +111,11 @@ function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, onClose
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const statusCls = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
-  const StatusIcon = isRunning ? Loader2 : tool.status === 'error' ? X : Check;
-  const statusLabel = isRunning ? 'running' : tool.status === 'error' ? 'error' : 'done';
+  const isRejected = tool.status === 'rejected';
+  const isError = tool.status === 'error';
+  const statusCls = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
+  const StatusIcon = isRunning ? Loader2 : (isRejected || isError) ? X : Check;
+  const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
   return (
     <div class="tool-modal-overlay" onClick={onClose}>
@@ -129,7 +133,7 @@ function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, onClose
         </div>
         <pre
           ref={contentRef}
-          class={`tool-modal-content${tool.status === 'error' ? ' error-body' : ''}`}
+          class={`tool-modal-content${(tool.status === 'error' || tool.status === 'rejected') ? ' error-body' : ''}`}
           onScroll={handleScroll}
         >
           {fullText || '(no output)'}

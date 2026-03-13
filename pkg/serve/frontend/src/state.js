@@ -227,10 +227,16 @@ function normalizeHistory(raw) {
           }
           const tr = resultMap[c.tool_call_id];
           let resultText = null;
-          let status = 'done';
+          let status = 'running';
           if (tr) {
             resultText = (tr.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
-            if (tr.is_error) status = 'error';
+            if (tr.custom?.rejected === true) {
+              status = 'rejected';
+            } else if (tr.is_error) {
+              status = 'error';
+            } else {
+              status = 'done';
+            }
           }
           result.push({
             _type: 'tool_start',
@@ -347,6 +353,25 @@ export function handleWsMessageEnd(id, fullText) {
 export function handleWsToolStart(id, data) {
   const sess = state.sessions[id];
   if (!sess) return;
+
+  const existingIdx = (sess.messages || []).findIndex(
+    m => m._type === 'tool_start' && m.tool_call_id === data.tool_call_id,
+  );
+
+  if (existingIdx >= 0) {
+    const messages = sess.messages.map((m, idx) => {
+      if (idx !== existingIdx) return m;
+      return {
+        ...m,
+        tool_name: data.tool_name,
+        args: data.args,
+        status: 'running',
+      };
+    });
+    updateSession(id, { messages });
+    return;
+  }
+
   const toolMsg = {
     _type: 'tool_start',
     tool_call_id: data.tool_call_id,
@@ -374,9 +399,14 @@ export function handleWsToolEnd(id, data) {
   }
   const sess = state.sessions[id];
   if (!sess) return;
+
+  const nextStatus = data.rejected === true
+    ? 'rejected'
+    : (data.is_error ? 'error' : 'done');
+
   const messages = sess.messages.map(m => {
     if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
-      return { ...m, status: data.is_error ? 'error' : 'done', result: data.result, streamingResult: null };
+      return { ...m, status: nextStatus, result: data.result, streamingResult: null };
     }
     return m;
   });
