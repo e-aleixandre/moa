@@ -296,6 +296,13 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 				"args":      sess.pending.Args,
 			}
 		}
+		var pendingAsk map[string]any
+		if sess.pendingAsk != nil && !sess.pendingAsk.resolved {
+			pendingAsk = map[string]any{
+				"id":        sess.pendingAsk.ID,
+				"questions": sess.pendingAsk.Questions,
+			}
+		}
 		sess.mu.Unlock()
 
 		var taskList any
@@ -309,6 +316,9 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		}
 		if pendingPerm != nil {
 			initData["pending_permission"] = pendingPerm
+		}
+		if pendingAsk != nil {
+			initData["pending_ask"] = pendingAsk
 		}
 		if taskList != nil {
 			initData["tasks"] = taskList
