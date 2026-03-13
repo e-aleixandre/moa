@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -70,17 +69,8 @@ func NewBash(cfg ToolConfig) core.Tool {
 
 			cmd := exec.CommandContext(ctx, "bash", "-c", command)
 			cmd.Dir = cwd
-			// Run in its own process group so we can kill the entire tree.
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			// On cancel, send SIGTERM to the process group (not just the shell).
-			// This gives children a chance to clean up before being killed.
-			cmd.Cancel = func() error {
-				if cmd.Process == nil {
-					return nil
-				}
-				return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-			}
-			// If the process doesn't exit within 5s of SIGTERM, Go sends SIGKILL.
+			setProcGroup(cmd)
+			// If the process doesn't exit within 5s of cancel signal, Go force-kills.
 			cmd.WaitDelay = 5 * time.Second
 
 			// Capture stdout and stderr, streaming via onUpdate.
