@@ -700,7 +700,26 @@ export function autoSelectMobile() {
   }
 }
 
+const resumingIds = new Set();
+
 function afterVisibilityChange() {
   const visible = visibleSessionIds(state);
-  syncConnections(visible);
+
+  // Auto-resume saved sessions that are visible in tiles.
+  // Without this, syncConnections would try to open a WebSocket to a session
+  // that only exists on disk, getting 404 → infinite reconnect loop.
+  for (const id of visible) {
+    const sess = state.sessions[id];
+    if (sess?.state === 'saved' && !resumingIds.has(id)) {
+      resumingIds.add(id);
+      resumeSession(id)
+        .catch(e => console.error('Auto-resume failed for', id, e))
+        .finally(() => resumingIds.delete(id));
+    }
+  }
+
+  // Only open WebSockets for non-saved sessions (resumed ones will
+  // trigger another afterVisibilityChange via loadSessions).
+  const connectable = visible.filter(id => state.sessions[id]?.state !== 'saved');
+  syncConnections(connectable);
 }

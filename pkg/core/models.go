@@ -86,6 +86,14 @@ func ResolveModel(spec string) (Model, bool) {
 		return m, true
 	}
 
+	// Fallback: match by display Name (handles legacy session data
+	// that stored "Claude Sonnet 4.6" instead of "claude-sonnet-4-6").
+	for _, m := range knownModels {
+		if m.Name == spec {
+			return m, true
+		}
+	}
+
 	// Try provider/model format.
 	if idx := strings.IndexByte(spec, '/'); idx > 0 {
 		provider := spec[:idx]
