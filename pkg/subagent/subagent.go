@@ -19,6 +19,10 @@ const (
 	defaultMaxTurns            = 50
 	defaultMaxToolCallsPerTurn = 20
 	defaultMaxRunDuration      = 10 * time.Minute
+
+	// asyncResultTailLines is how many trailing lines of a completed async
+	// subagent result are included in the notification to the parent.
+	asyncResultTailLines = 50
 )
 
 // excludedTools prevents recursive subagent spawning.
@@ -255,7 +259,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 			if !ok {
 				return
 			}
-			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tailLines(snap.Result, 50))
+			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tailLines(snap.Result, asyncResultTailLines))
 		}
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())

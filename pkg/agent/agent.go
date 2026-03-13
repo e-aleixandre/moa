@@ -33,6 +33,8 @@ func (e *BudgetExceededError) Is(target error) bool {
 // ErrBudgetExceeded is a sentinel for errors.Is checks.
 var ErrBudgetExceeded = &BudgetExceededError{}
 
+const steerBufferSize = 32 // capacity of the inter-step steering channel
+
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
 // It's a library — no I/O, no TUI, no filesystem opinions.
 type Agent struct {
@@ -135,7 +137,7 @@ func New(cfg AgentConfig) (*Agent, error) {
 		tools:   cfg.Tools,
 		hooks:   ext,
 		emitter: NewEmitter(cfg.Logger),
-		steerCh: make(chan string, 32),
+		steerCh: make(chan string, steerBufferSize),
 	}, nil
 }
 

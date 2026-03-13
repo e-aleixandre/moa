@@ -113,6 +113,15 @@ func loadConfigFile(path string) MoaConfig {
 	return cfg
 }
 
+// mergeScalar returns override if non-zero, otherwise base.
+func mergeScalar[T comparable](base, override T) T {
+	var zero T
+	if override != zero {
+		return override
+	}
+	return base
+}
+
 func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged := MoaConfig{
 		DisableSandbox:  base.DisableSandbox || override.DisableSandbox,
@@ -121,46 +130,19 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		MCPServers:      MergeMCPServers(base.MCPServers, override.MCPServers),
 		TrustedMCPPaths: base.TrustedMCPPaths, // global-only; persisted via SaveGlobalConfig
 		Permissions: PermissionsConfig{
-			Mode:  base.Permissions.Mode,
-			Model: base.Permissions.Model,
+			Mode:  mergeScalar(base.Permissions.Mode, override.Permissions.Mode),
+			Model: mergeScalar(base.Permissions.Model, override.Permissions.Model),
 			Allow: append(base.Permissions.Allow, override.Permissions.Allow...),
 			Deny:  append(base.Permissions.Deny, override.Permissions.Deny...),
 			Rules: append(base.Permissions.Rules, override.Permissions.Rules...),
 		},
+		BraveAPIKey:        mergeScalar(base.BraveAPIKey, override.BraveAPIKey),
+		PlanReviewModel:    mergeScalar(base.PlanReviewModel, override.PlanReviewModel),
+		PlanReviewThinking: mergeScalar(base.PlanReviewThinking, override.PlanReviewThinking),
+		CodeReviewModel:    mergeScalar(base.CodeReviewModel, override.CodeReviewModel),
+		CodeReviewThinking: mergeScalar(base.CodeReviewThinking, override.CodeReviewThinking),
 	}
-	// Override wins for scalar fields
-	if override.BraveAPIKey != "" {
-		merged.BraveAPIKey = override.BraveAPIKey
-	} else {
-		merged.BraveAPIKey = base.BraveAPIKey
-	}
-	if override.Permissions.Mode != "" {
-		merged.Permissions.Mode = override.Permissions.Mode
-	}
-	if override.Permissions.Model != "" {
-		merged.Permissions.Model = override.Permissions.Model
-	}
-	if override.PlanReviewModel != "" {
-		merged.PlanReviewModel = override.PlanReviewModel
-	} else {
-		merged.PlanReviewModel = base.PlanReviewModel
-	}
-	if override.PlanReviewThinking != "" {
-		merged.PlanReviewThinking = override.PlanReviewThinking
-	} else {
-		merged.PlanReviewThinking = base.PlanReviewThinking
-	}
-	if override.CodeReviewModel != "" {
-		merged.CodeReviewModel = override.CodeReviewModel
-	} else {
-		merged.CodeReviewModel = base.CodeReviewModel
-	}
-	if override.CodeReviewThinking != "" {
-		merged.CodeReviewThinking = override.CodeReviewThinking
-	} else {
-		merged.CodeReviewThinking = base.CodeReviewThinking
-	}
-	// Override wins for MaxBudget; project can tighten but not disable a global budget.
+	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {
 		merged.MaxBudget = override.MaxBudget
 	} else {

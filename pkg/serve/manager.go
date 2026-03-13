@@ -105,11 +105,19 @@ type SessionInfo struct {
 	PermissionMode string       `json:"permission_mode"` // "yolo", "ask", "auto"
 }
 
+// wsSubscriberBuffer is the capacity of per-WebSocket event channels.
+// Larger than the agent emitter buffer (256) because WebSocket writes can
+// stall briefly on network backpressure. Slow consumers are disconnected.
+const (
+	wsSubscriberBuffer = 512 // per-WS event channel capacity (larger than agent's 256 for network backpressure)
+	maxTitleLength     = 80  // auto-generated session title cap
+)
+
 // Subscribe registers a channel to receive session events. Returns the channel
 // and an unsubscribe function. The caller must read from the channel; slow
 // consumers are disconnected (channel closed) to prevent stream corruption.
 func (s *ManagedSession) Subscribe() (<-chan Event, func()) {
-	ch := make(chan Event, 512)
+	ch := make(chan Event, wsSubscriberBuffer)
 	s.mu.Lock()
 	s.subscribers = append(s.subscribers, ch)
 	s.mu.Unlock()
@@ -618,8 +626,8 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 
 	if sess.Title == "" {
 		title := text
-		if len(title) > 80 {
-			title = title[:80] + "…"
+		if len(title) > maxTitleLength {
+			title = title[:maxTitleLength] + "…"
 		}
 		sess.Title = title
 	}
@@ -935,198 +943,6 @@ func normalizeThinkingLevel(level string) string {
 type CommandResult struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
-}
-
-// ExecCommand executes a slash command in a session.
-func (m *Manager) ExecCommand(sessionID, rawCommand string) (*CommandResult, error) {
-	sess, ok := m.Get(sessionID)
-	if !ok {
-		return nil, ErrNotFound
-	}
-
-	parts := strings.Fields(rawCommand)
-	if len(parts) == 0 {
-		return &CommandResult{OK: false, Message: "empty command"}, nil
-	}
-
-	// Strip leading "/" if present (frontend may send it either way).
-	cmd := strings.TrimPrefix(parts[0], "/")
-	args := parts[1:]
-
-	switch cmd {
-	case "clear":
-		sess.mu.Lock()
-		if sess.State == StateRunning || sess.State == StatePermission {
-			sess.mu.Unlock()
-			return nil, ErrBusy
-		}
-		sess.mu.Unlock()
-
-		if err := sess.agent.Reset(); err != nil {
-			return &CommandResult{OK: false, Message: err.Error()}, nil
-		}
-
-		sess.mu.Lock()
-		sess.messages = nil
-		sess.mu.Unlock()
-
-		sess.save()
-		sess.broadcast(Event{Type: "command", Data: map[string]any{
-			"command": "clear",
-		}})
-		return &CommandResult{OK: true, Message: "conversation cleared"}, nil
-
-	case "compact":
-		sess.mu.Lock()
-		if sess.State == StateRunning || sess.State == StatePermission {
-			sess.mu.Unlock()
-			return nil, ErrBusy
-		}
-		sess.mu.Unlock()
-
-		if _, err := sess.agent.Compact(sess.sessionCtx); err != nil {
-			return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
-		}
-
-		sess.mu.Lock()
-		sess.messages = sess.agent.Messages()
-		sess.mu.Unlock()
-
-		sess.save()
-		sess.broadcast(Event{Type: "command", Data: map[string]any{
-			"command":  "compact",
-			"messages": sess.agent.Messages(),
-		}})
-		sess.broadcastContextUpdate()
-		return &CommandResult{OK: true, Message: "conversation compacted"}, nil
-
-	case "model":
-		if len(args) == 0 {
-			return &CommandResult{OK: false, Message: "usage: /model <name>"}, nil
-		}
-		result, err := m.ReconfigureSession(sessionID, strings.Join(args, " "), "")
-		if err != nil {
-			if errors.Is(err, ErrBusy) {
-				return nil, ErrBusy
-			}
-			return &CommandResult{OK: false, Message: err.Error()}, nil
-		}
-		return &CommandResult{OK: true, Message: "model: " + result["model"]}, nil
-
-	case "thinking":
-		if len(args) == 0 {
-			return &CommandResult{OK: false, Message: "usage: /thinking <off|low|medium|high>"}, nil
-		}
-		result, err := m.ReconfigureSession(sessionID, "", args[0])
-		if err != nil {
-			if errors.Is(err, ErrBusy) {
-				return nil, ErrBusy
-			}
-			return &CommandResult{OK: false, Message: err.Error()}, nil
-		}
-		return &CommandResult{OK: true, Message: "thinking: " + result["thinking"]}, nil
-
-	case "plan":
-		if sess.planMode == nil {
-			return &CommandResult{OK: false, Message: "plan mode not available"}, nil
-		}
-		sess.mu.Lock()
-		if sess.State == StateRunning || sess.State == StatePermission {
-			sess.mu.Unlock()
-			return nil, ErrBusy
-		}
-		sess.mu.Unlock()
-
-		mode := sess.planMode.Mode()
-
-		if len(args) > 0 && args[0] == "exit" {
-			if mode == planmode.ModeOff {
-				return &CommandResult{OK: false, Message: "not in plan mode"}, nil
-			}
-			sess.planMode.Exit()
-			sess.broadcast(Event{Type: "plan_mode", Data: map[string]any{
-				"mode": string(planmode.ModeOff),
-			}})
-			return &CommandResult{OK: true, Message: "exited plan mode"}, nil
-		}
-
-		if mode == planmode.ModeOff {
-			planPath, err := sess.planMode.Enter()
-			if err != nil {
-				return &CommandResult{OK: false, Message: err.Error()}, nil
-			}
-			sess.broadcast(Event{Type: "plan_mode", Data: map[string]any{
-				"mode":      string(planmode.ModePlanning),
-				"plan_file": planPath,
-			}})
-			return &CommandResult{OK: true, Message: "entered plan mode → " + planPath}, nil
-		}
-
-		return &CommandResult{OK: true, Message: "plan mode: " + string(mode)}, nil
-
-	case "tasks":
-		if sess.taskStore == nil {
-			return &CommandResult{OK: false, Message: "task tracking not available"}, nil
-		}
-		if len(args) == 0 {
-			// List tasks.
-			taskList := sess.taskStore.Tasks()
-			if len(taskList) == 0 {
-				return &CommandResult{OK: true, Message: "No tasks"}, nil
-			}
-			done := 0
-			var lines []string
-			for _, t := range taskList {
-				icon := "☐"
-				if t.Status == "done" {
-					icon = "☑"
-					done++
-				}
-				lines = append(lines, fmt.Sprintf("%s #%d: %s", icon, t.ID, t.Title))
-			}
-			lines = append(lines, fmt.Sprintf("\n%d/%d complete", done, len(taskList)))
-			return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
-		}
-		switch args[0] {
-		case "done":
-			if len(args) < 2 {
-				return &CommandResult{OK: false, Message: "usage: /tasks done <id>"}, nil
-			}
-			var id int
-			if _, err := fmt.Sscanf(args[1], "%d", &id); err != nil {
-				return &CommandResult{OK: false, Message: "invalid task ID: " + args[1]}, nil
-			}
-			if !sess.taskStore.MarkDone(id) {
-				return &CommandResult{OK: false, Message: fmt.Sprintf("task #%d not found", id)}, nil
-			}
-			sess.broadcast(Event{Type: "tasks_update", Data: map[string]any{
-				"tasks": sess.taskStore.Tasks(),
-			}})
-			return &CommandResult{OK: true, Message: fmt.Sprintf("✅ Task #%d marked done", id)}, nil
-		case "reset":
-			sess.taskStore.Reset()
-			sess.broadcast(Event{Type: "tasks_update", Data: map[string]any{
-				"tasks": sess.taskStore.Tasks(),
-			}})
-			return &CommandResult{OK: true, Message: "Tasks cleared"}, nil
-		default:
-			return &CommandResult{OK: false, Message: "usage: /tasks [done <id> | reset]"}, nil
-		}
-
-	case "permissions":
-		if len(args) == 0 {
-			mode := sess.permissionMode()
-			return &CommandResult{OK: true, Message: "permissions: " + mode}, nil
-		}
-		newMode, err := m.SetPermissionMode(sessionID, args[0])
-		if err != nil {
-			return &CommandResult{OK: false, Message: err.Error()}, nil
-		}
-		return &CommandResult{OK: true, Message: "permissions: " + newMode}, nil
-
-	default:
-		return &CommandResult{OK: false, Message: "unknown command: /" + cmd}, nil
-	}
 }
 
 // SetPermissionMode changes the permission mode for a session.
