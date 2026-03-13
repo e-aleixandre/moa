@@ -46,6 +46,7 @@ type MoaConfig struct {
 	PlanReviewThinking string            `json:"plan_review_thinking"` // Thinking level for plan reviewer (default: "low")
 	CodeReviewModel    string            `json:"code_review_model,omitempty"`    // Model for code reviewer (default: plan review model)
 	CodeReviewThinking string            `json:"code_review_thinking,omitempty"` // Thinking level for code reviewer (default: plan review thinking)
+	MaxBudget          float64           `json:"max_budget"`                     // Max USD per agent run. 0 = unlimited.
 }
 
 // MCPServer defines an MCP tool server connection (stdio transport).
@@ -158,6 +159,12 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.CodeReviewThinking = override.CodeReviewThinking
 	} else {
 		merged.CodeReviewThinking = base.CodeReviewThinking
+	}
+	// Override wins for MaxBudget; project can tighten but not disable a global budget.
+	if override.MaxBudget > 0 {
+		merged.MaxBudget = override.MaxBudget
+	} else {
+		merged.MaxBudget = base.MaxBudget
 	}
 	return merged
 }

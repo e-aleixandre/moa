@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -80,6 +81,7 @@ func main() {
 	modelFlag := flag.String("model", "sonnet", "Model: alias (sonnet, opus, codex) or provider/model-id")
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
 	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
+	maxBudget := flag.Float64("max-budget", -1, "Max USD spend per run (0 = unlimited, default: from config)")
 	continueFlag := flag.Bool("continue", false, "Resume the most recent session")
 	var resume resumeFlag
 	flag.Var(&resume, "resume", "Open the session browser, or resume a specific session with --resume <id>")
@@ -305,6 +307,16 @@ func main() {
 	// Build system prompt after all tools are registered.
 	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd)
 
+	// Resolve budget: flag wins (including explicit 0), else config.
+	resolvedBudget := moaCfg.MaxBudget
+	if *maxBudget >= 0 {
+		resolvedBudget = *maxBudget
+	}
+	if math.IsNaN(resolvedBudget) || math.IsInf(resolvedBudget, 0) {
+		fmt.Fprintf(os.Stderr, "error: --max-budget must be a finite number\n")
+		os.Exit(1)
+	}
+
 	// Build agent
 	agentCfg := agent.AgentConfig{
 		Provider:            providerBuild.Provider,
@@ -316,6 +328,7 @@ func main() {
 		MaxTurns:            *maxTurns,
 		MaxToolCallsPerTurn: 20,
 		MaxRunDuration:      30 * time.Minute,
+		MaxBudget:           resolvedBudget,
 	}
 	if permGate != nil {
 		agentCfg.PermissionCheck = permGate.Check

@@ -213,7 +213,7 @@ func TestGenerateSummary_Normal(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	summary, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	summary, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestGenerateSummary_FallbackToFinalMessage(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	summary, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	summary, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestGenerateSummary_EmptyOutput(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	_, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	_, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
 	if err == nil {
 		t.Fatal("expected error for empty output")
 	}
@@ -269,7 +269,7 @@ func TestGenerateSummary_ProviderError(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	_, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	_, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -438,5 +438,36 @@ func TestCompact_MultiCompaction(t *testing.T) {
 	}
 	if !strings.Contains(compacted2[0].Content[0].Text, "second summary") {
 		t.Fatal("should contain second summary")
+	}
+}
+
+func TestGenerateSummary_ReturnsUsage(t *testing.T) {
+	usage := &core.Usage{Input: 100, Output: 50, TotalTokens: 150}
+	ch := make(chan core.AssistantEvent, 3)
+	ch <- core.AssistantEvent{Type: core.ProviderEventStart}
+	ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "summary text"}
+	ch <- core.AssistantEvent{
+		Type: core.ProviderEventDone,
+		Message: &core.Message{
+			Role:    "assistant",
+			Content: []core.Content{core.TextContent("summary text")},
+			Usage:   usage,
+		},
+	}
+	close(ch)
+
+	prov := &channelProvider{ch: ch}
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
+	}
+	_, gotUsage, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotUsage == nil {
+		t.Fatal("expected non-nil usage")
+	}
+	if gotUsage.Input != 100 || gotUsage.Output != 50 {
+		t.Errorf("usage = %+v, want Input:100 Output:50", gotUsage)
 	}
 }

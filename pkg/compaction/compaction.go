@@ -22,6 +22,7 @@ type Result struct {
 	TokensAfter   int
 	ReadFiles     []string
 	ModifiedFiles []string
+	Usage         *core.Usage // LLM usage for the summarization call
 }
 
 // estimatedSummaryTokens is a conservative estimate for the summary message.
@@ -190,8 +191,8 @@ func (f FileOps) Modified() []string {
 }
 
 // GenerateSummary makes an LLM call to summarize conversation messages.
-// Returns the summary text or an error.
-func GenerateSummary(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, previousSummary string) (string, error) {
+// Returns the summary text, provider-reported usage (may be nil), or an error.
+func GenerateSummary(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, previousSummary string) (string, *core.Usage, error) {
 	serialized := SerializeForSummary(msgs)
 	prompt := buildPrompt(serialized, previousSummary)
 
@@ -206,7 +207,7 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 
 	ch, err := provider.Stream(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("summarization request: %w", err)
+		return "", nil, fmt.Errorf("summarization request: %w", err)
 	}
 
 	var text strings.Builder
@@ -218,7 +219,7 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 		case core.ProviderEventDone:
 			finalMsg = event.Message
 		case core.ProviderEventError:
-			return "", fmt.Errorf("summarization: %w", event.Error)
+			return "", nil, fmt.Errorf("summarization: %w", event.Error)
 		}
 	}
 
@@ -233,10 +234,14 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 	}
 
 	if strings.TrimSpace(result) == "" {
-		return "", fmt.Errorf("summarization produced empty output")
+		return "", nil, fmt.Errorf("summarization produced empty output")
 	}
 
-	return result, nil
+	var usage *core.Usage
+	if finalMsg != nil {
+		usage = finalMsg.Usage
+	}
+	return result, usage, nil
 }
 
 // Compact orchestrates context compaction. Returns nil Result if nothing
@@ -260,7 +265,7 @@ func Compact(ctx context.Context, provider core.Provider, model core.Model, opts
 
 	fileOps := ExtractFileOps(toSummarize)
 
-	summary, err := GenerateSummary(ctx, provider, model, opts, toSummarize, previousSummary)
+	summary, usage, err := GenerateSummary(ctx, provider, model, opts, toSummarize, previousSummary)
 	if err != nil {
 		return nil, msgs, fmt.Errorf("compaction: %w", err)
 	}
@@ -290,6 +295,7 @@ func Compact(ctx context.Context, provider core.Provider, model core.Model, opts
 		TokensAfter:   tokensAfter,
 		ReadFiles:     fileOps.ReadOnly(),
 		ModifiedFiles: fileOps.Modified(),
+		Usage:         usage,
 	}, compacted, nil
 }
 

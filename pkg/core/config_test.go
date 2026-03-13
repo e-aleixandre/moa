@@ -278,3 +278,28 @@ func TestMergeConfigs_MCPServers(t *testing.T) {
 		t.Fatalf("TrustedMCPPaths = %v, want [/trusted/project]", merged.TrustedMCPPaths)
 	}
 }
+
+func TestMergeConfigs_MaxBudget(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     float64
+		override float64
+		want     float64
+	}{
+		{"global only", 5, 0, 5},
+		{"project sets budget", 0, 3, 3},
+		{"project tightens", 5, 2, 2},
+		{"both zero", 0, 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			merged := mergeConfigs(
+				MoaConfig{MaxBudget: tc.base},
+				MoaConfig{MaxBudget: tc.override},
+			)
+			if merged.MaxBudget != tc.want {
+				t.Errorf("MaxBudget = %f, want %f", merged.MaxBudget, tc.want)
+			}
+		})
+	}
+}

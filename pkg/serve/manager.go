@@ -629,6 +629,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		MaxTurns:            50,
 		MaxToolCallsPerTurn: 20,
 		MaxRunDuration:      30 * time.Minute,
+		MaxBudget:           sessionCfg.MaxBudget,
 	}
 	// Compose permission check: plan mode filter + permission gate.
 	agentCfg.PermissionCheck = func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {

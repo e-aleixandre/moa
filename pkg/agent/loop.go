@@ -34,6 +34,8 @@ type loopConfig struct {
 	// Guardrails
 	maxTurns            int
 	maxToolCallsPerTurn int
+	maxBudget           float64
+	runCost             float64 // accumulated USD cost this run
 
 	// Custom conversion (nil = default)
 	convertToLLM func([]core.AgentMessage) []core.Message
@@ -116,6 +118,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			return loopErr
 		}
 
+		// Budget pre-check: catches overage added by compaction in the previous iteration
+		// before we make another provider call.
+		if cfg.maxBudget > 0 && cfg.runCost > cfg.maxBudget {
+			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+			return loopErr
+		}
+
 		// Cache tool specs once per iteration (avoids repeated sort+allocate).
 		toolSpecs := cfg.tools.Specs()
 
@@ -141,6 +150,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				} else if result != nil {
 					cfg.state.Messages = compacted
 					cfg.state.CompactionEpoch++
+					// Account for compaction LLM call cost.
+					if result.Usage != nil && cfg.maxBudget > 0 {
+						cfg.runCost += cfg.model.Pricing.Cost(*result.Usage)
+					}
 					emitLifecycle(cfg, core.AgentEvent{
 						Type: core.AgentEventCompactionEnd,
 						Compaction: &core.CompactionPayload{
@@ -215,6 +228,17 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
 		if len(toolCalls) == 0 {
+			// Accumulate cost and check budget even on the final message so
+			// callers know when a run blew through the limit.
+			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
+				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
+				if cfg.runCost > cfg.maxBudget {
+					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+					inTurn = false
+					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+					return loopErr
+				}
+			}
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 			break // No tools → done
@@ -229,6 +253,16 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				cfg.state.Messages = append(cfg.state.Messages,
 					core.WrapMessage(core.NewUserMessage(msg)))
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
+			}
+		}
+
+		// Budget check — after tool execution so conversation state has matching
+		// tool_result messages for every tool_call (no dangling calls).
+		if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
+			cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
+			if cfg.runCost > cfg.maxBudget {
+				loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+				return loopErr
 			}
 		}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 
@@ -11,6 +12,26 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/extension"
 )
+
+// BudgetExceededError is returned when a run's accumulated cost exceeds MaxBudget.
+type BudgetExceededError struct {
+	Spent float64
+	Limit float64
+}
+
+func (e *BudgetExceededError) Error() string {
+	return fmt.Sprintf("budget exceeded: $%.4f spent, limit $%.4f", e.Spent, e.Limit)
+}
+
+// Is reports whether target is a *BudgetExceededError, enabling errors.Is checks
+// against the ErrBudgetExceeded sentinel.
+func (e *BudgetExceededError) Is(target error) bool {
+	_, ok := target.(*BudgetExceededError)
+	return ok
+}
+
+// ErrBudgetExceeded is a sentinel for errors.Is checks.
+var ErrBudgetExceeded = &BudgetExceededError{}
 
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
 // It's a library — no I/O, no TUI, no filesystem opinions.
@@ -42,6 +63,7 @@ type AgentConfig struct {
 	MaxTurns            int           // Default: 50. 0 = unlimited.
 	MaxToolCallsPerTurn int           // Default: 20. 0 = unlimited.
 	MaxRunDuration      time.Duration // Default: 30m. 0 = unlimited.
+	MaxBudget           float64       // Max USD per run. 0 = unlimited. Requires Model.Pricing when > 0.
 
 	// Permission check called before each tool execution. May block waiting
 	// for user approval. Return nil to approve, blocking decision to reject.
@@ -63,6 +85,12 @@ type AgentConfig struct {
 func New(cfg AgentConfig) (*Agent, error) {
 	if cfg.Provider == nil {
 		return nil, fmt.Errorf("agent: Provider is required")
+	}
+	if cfg.MaxBudget < 0 || math.IsNaN(cfg.MaxBudget) || math.IsInf(cfg.MaxBudget, 0) {
+		return nil, fmt.Errorf("agent: MaxBudget must be >= 0 and finite, got %f", cfg.MaxBudget)
+	}
+	if cfg.MaxBudget > 0 && cfg.Model.Pricing == nil {
+		return nil, fmt.Errorf("agent: MaxBudget requires Model.Pricing to be set")
 	}
 
 	// Apply defaults
@@ -494,6 +522,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		streamOpts:          streamOpts,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
+		maxBudget:           a.config.MaxBudget,
 		convertToLLM:        a.config.ConvertToLLM,
 		permissionCheck:     a.config.PermissionCheck,
 		compaction:          a.config.Compaction,
