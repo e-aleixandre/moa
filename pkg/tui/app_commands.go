@@ -149,6 +149,47 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 // handlePickerKey routes keys to the model picker.
 // handlePermissionKey routes keys to the permission prompt.
+func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		m.askPrompt.CursorUp()
+		return m, nil
+	case tea.KeyDown:
+		m.askPrompt.CursorDown()
+		return m, nil
+	case tea.KeyEnter:
+		if m.askPrompt.Submit() {
+			// All questions answered.
+			return m, nil
+		}
+		return m, nil
+	case tea.KeyShiftTab:
+		m.askPrompt.Back()
+		return m, nil
+	case tea.KeyBackspace:
+		m.askPrompt.Backspace()
+		return m, nil
+	case tea.KeyEsc:
+		m.askPrompt.Cancel()
+		return m, nil
+	case tea.KeyRunes, tea.KeySpace:
+		s := msg.String()
+		// Number shortcuts to pick an option directly.
+		if len(s) == 1 && s[0] >= '1' && s[0] <= '9' && !m.askPrompt.isCustom() {
+			idx := int(s[0] - '1')
+			if idx < m.askPrompt.optionCount() {
+				m.askPrompt.cursor = idx
+				return m, nil
+			}
+		}
+		for _, r := range s {
+			m.askPrompt.TypeRune(r)
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var listenCmd tea.Cmd
 	if m.permGate != nil {

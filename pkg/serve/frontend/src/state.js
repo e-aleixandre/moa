@@ -431,6 +431,15 @@ export function handleWsStateChange(id, data) {
   }
 }
 
+export function handleWsAskUser(id, data) {
+  updateSession(id, {
+    pendingAsk: { id: data.id, questions: data.questions },
+  });
+  flashSession(id, 'attention');
+  const sess = state.sessions[id];
+  if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
+}
+
 export function handleWsPermissionRequest(id, data) {
   updateSession(id, {
     state: 'permission',
@@ -519,6 +528,13 @@ export async function resolvePermission(sessionId, permId, approved) {
     id: permId, approved, feedback: '',
   });
   updateSession(sessionId, { pendingPerm: null });
+}
+
+export async function resolveAskUser(sessionId, askId, answers) {
+  await api('POST', `/api/sessions/${sessionId}/ask`, {
+    id: askId, answers,
+  });
+  updateSession(sessionId, { pendingAsk: null });
 }
 
 export async function resumeSession(id) {

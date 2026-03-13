@@ -19,6 +19,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/auth"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -248,6 +249,9 @@ func main() {
 	// Discover prompt templates for TUI.
 	promptTemplates := promptpkg.Discover(cwd)
 
+	// Ask user bridge for interactive questions.
+	askBridge := askuser.NewBridge()
+
 	var agHolder atomic.Pointer[agent.Agent]
 	subagentCountCh := make(chan int, 16)
 	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
@@ -340,6 +344,11 @@ func main() {
 	// Register skill tool (skills already discovered above).
 	if len(skills) > 0 {
 		toolReg.Register(skill.NewTool(skills))
+	}
+
+	// Register ask_user tool.
+	if useTUI {
+		toolReg.Register(askuser.NewTool(askBridge))
 	}
 
 	// Build system prompt after all tools are registered.
@@ -500,6 +509,7 @@ func main() {
 			ModelName:             modelDisplayName(resolvedModel),
 			CWD:                   cwd,
 			PermissionGate:        permGate,
+			AskBridge:             askBridge,
 			PinnedModels:          moaCfg.PinnedModels,
 			SubagentCountCh:       subagentCountCh,
 			SubagentNotifyCh:      subagentNotifyCh,

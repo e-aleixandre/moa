@@ -34,6 +34,7 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
@@ -203,6 +204,30 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		if err := sess.ResolvePermission(body.ID, body.Approved, body.Feedback); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		limitBody(w, r, maxJSONBodySize)
+		var body struct {
+			ID      string   `json:"id"`
+			Answers []string `json:"answers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := sess.ResolveAskUser(body.ID, body.Answers); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

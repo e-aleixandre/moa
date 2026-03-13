@@ -28,6 +28,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/skill"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/verify"
@@ -72,6 +73,8 @@ type ManagedSession struct {
 	runCancel          context.CancelFunc
 	pending            *pendingPermission
 	lastResolvedPermID string
+	askBridge          *askuser.Bridge
+	pendingAsk         *pendingAskUser
 
 	// Task tracking and plan mode.
 	taskStore *tasks.Store
@@ -637,6 +640,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		toolReg.Register(skill.NewTool(skills))
 	}
 
+	// Register ask_user tool.
+	askBridge := askuser.NewBridge()
+	toolReg.Register(askuser.NewTool(askBridge))
+
 	// System prompt (after ALL tools registered: builtins + MCP + subagents + skills).
 	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil, skillsIndex)
 
@@ -682,6 +689,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		Updated:       time.Now(),
 		agent:         ag,
 		gate:          gate,
+		askBridge:     askBridge,
 		sessionCtx:    sessionCtx,
 		sessionCancel: sessionCancel,
 		toolReg:       toolReg,
@@ -709,6 +717,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 
 	if gate != nil {
 		go sess.permissionBridge(sessionCtx)
+	}
+	if askBridge != nil {
+		go sess.askUserBridge(sessionCtx)
 	}
 
 	m.mu.Lock()

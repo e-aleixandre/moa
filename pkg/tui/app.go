@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -110,6 +111,7 @@ type appModel struct {
 	thinkingPicker thinkingPicker
 	cmdPalette     cmdPalette
 	permPrompt     permissionPrompt
+	askPrompt      askPrompt
 	sessionBrowser sessionBrowser
 	topBar         *StatusLine
 	bottomBar      *StatusLine
@@ -129,6 +131,9 @@ type appModel struct {
 
 	// Permissions
 	permGate *permission.Gate
+
+	// Ask user
+	askBridge *askuser.Bridge
 
 	// Verify
 	verifyCancel context.CancelFunc // non-nil while /verify is running
@@ -171,6 +176,7 @@ type Config struct {
 	CWD                   string                      // working directory for session metadata
 	ProviderFactory       ProviderFactory             // creates providers for /model switching (nil = switching disabled)
 	PermissionGate        *permission.Gate            // permission gate (nil = yolo, no prompts)
+	AskBridge             *askuser.Bridge             // bridge for ask_user tool (nil = disabled)
 	PinnedModels          []string                    // model IDs pre-pinned for Ctrl+P cycling (loaded from global config)
 	OnPinnedModelsChange  func([]string) error        // called when the user changes pinned models (nil = no persistence)
 	SubagentCountCh       <-chan int                  // receives running async subagent count updates (nil = disabled)
@@ -238,6 +244,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		permGate:             cfg.PermissionGate,
+		askBridge:            cfg.AskBridge,
 		subagentCountCh:      cfg.SubagentCountCh,
 		subagentNotifyCh:     cfg.SubagentNotifyCh,
 		planMode:             cfg.PlanMode,
@@ -295,6 +302,9 @@ func (m appModel) Init() tea.Cmd {
 	if m.subagentNotifyCh != nil {
 		cmds = append(cmds, m.waitForSubagentNotify())
 	}
+	if m.askBridge != nil {
+		cmds = append(cmds, m.waitForQuestion())
+	}
 	// Sync plan mode on init (handles restored sessions).
 	if m.planMode != nil {
 		m.syncPermissionCheck()
@@ -334,6 +344,23 @@ func (m appModel) waitForSubagentCount() tea.Cmd {
 			}
 			return asyncSubagentCountMsg{count: count}
 		case <-quit:
+			return nil
+		}
+	}
+}
+
+// waitForQuestion listens for the next ask_user question from the bridge.
+func (m appModel) waitForQuestion() tea.Cmd {
+	bridge := m.askBridge
+	ctx := m.baseCtx
+	return func() tea.Msg {
+		select {
+		case p, ok := <-bridge.Prompts():
+			if !ok {
+				return nil
+			}
+			return askUserMsg{Prompt: p}
+		case <-ctx.Done():
 			return nil
 		}
 	}
@@ -542,6 +569,18 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case askUserMsg:
+		var cmds []tea.Cmd
+		if m.s.transcript {
+			m.s.transcript = false
+			m.s.fullHistory = false
+			m.updateViewport()
+			cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
+		}
+		m.askPrompt.Show(msg.Prompt)
+		cmds = append(cmds, m.waitForQuestion())
+		return m, tea.Batch(cmds...)
+
 	case permissionRequestMsg:
 		// Auto-exit transcript mode so the prompt is visible and actionable
 		var cmds []tea.Cmd
@@ -687,6 +726,10 @@ func (m appModel) View() string {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			bottomChrome = append(bottomChrome, pv)
 		}
+	} else if m.askPrompt.active {
+		if av := m.askPrompt.View(m.width, ActiveTheme); av != "" {
+			bottomChrome = append(bottomChrome, av)
+		}
 	} else if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
 			bottomChrome = append(bottomChrome, pv)
@@ -738,6 +781,11 @@ func (m appModel) View() string {
 func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.active {
 		return m.handleSessionBrowserKey(msg)
+	}
+
+	// Ask user prompt: intercept all keys.
+	if m.askPrompt.active {
+		return m.handleAskKey(msg)
 	}
 
 	// Permission prompt: intercept all keys.
