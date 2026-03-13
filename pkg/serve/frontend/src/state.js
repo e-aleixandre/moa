@@ -5,7 +5,7 @@ import { triggerAttention, triggerDone } from './notifications.js';
 import {
   createTile, initIds, allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
-  clearSession, setRatioAtPath, presetTree,
+  clearSession, setRatioAtPath, presetTree, splitRoot,
 } from './tileTree.js';
 
 const STORAGE_KEY = 'moa-ui-state';
@@ -641,6 +641,20 @@ export function splitTile(tileId, direction) {
   // Focus the new empty tile (it's the second child of the new split)
   const ids = allTileIds(tree);
   const oldIds = allTileIds(state.tileTree);
+  const newId = ids.find(id => !oldIds.includes(id));
+  if (newId) setState({ focusedTile: newId });
+  autoFillTiles();
+  afterVisibilityChange();
+}
+
+// Add a new pane at the root level — wraps the entire layout.
+// direction='horizontal' → new column at right edge.
+// direction='vertical'   → new row at bottom edge.
+export function addPane(direction) {
+  const oldIds = allTileIds(state.tileTree);
+  const tree = splitRoot(state.tileTree, direction);
+  setState({ tileTree: tree });
+  const ids = allTileIds(tree);
   const newId = ids.find(id => !oldIds.includes(id));
   if (newId) setState({ focusedTile: newId });
   autoFillTiles();

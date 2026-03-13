@@ -121,6 +121,12 @@ export function setRatioAtPath(tree, path, ratio) {
   return { ...tree, children };
 }
 
+// Wrap the entire tree in a new split, adding a fresh tile at the edge.
+// direction='horizontal' adds a column to the right; 'vertical' adds a row below.
+export function splitRoot(tree, direction) {
+  return createSplit(direction, [tree, createTile()]);
+}
+
 // Generate preset trees (quick-start layouts)
 export function presetTree(id) {
   switch (id) {

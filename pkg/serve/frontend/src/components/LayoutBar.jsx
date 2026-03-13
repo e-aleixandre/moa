@@ -1,5 +1,5 @@
-import { Bell, BellOff, Search } from 'lucide-preact';
-import { applyPreset, toggleSound } from '../state.js';
+import { Bell, BellOff, Search, PanelRight, PanelBottom } from 'lucide-preact';
+import { applyPreset, addPane, toggleSound } from '../state.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { PRESETS } from '../layoutPresets.js';
 
@@ -36,6 +36,13 @@ export function LayoutBar({ state, onOpenPalette }) {
           <LayoutPreview preset={p} />
         </button>
       ))}
+      <div class="layout-bar-divider" />
+      <button class="layout-btn add-pane-btn" onClick={() => addPane('horizontal')} title="Add column">
+        <PanelRight />
+      </button>
+      <button class="layout-btn add-pane-btn" onClick={() => addPane('vertical')} title="Add row">
+        <PanelBottom />
+      </button>
       <div class="layout-bar-spacer" />
       <button
         class={`sound-toggle ${state.soundEnabled ? 'on' : ''}`}

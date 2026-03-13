@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'preact/hooks';
 import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft } from 'lucide-preact';
 import {
-  store, assignToTile, focusTile, resumeSession, createSession,
+  store, assignToTile, resumeSession, createSession,
   sessionsByGroup, isSessionInTile,
 } from '../state.js';
 import { allTileIds, findTile } from '../tileTree.js';
@@ -159,19 +159,16 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
     }
     if (item.type === 'session') {
       if (item.saved) {
+        // Resume puts the session into the focused tile (see state.resumeSession).
         resumeSession(item.id).catch(e => console.error('Resume failed:', e));
-      } else if (item.inTile) {
-        const ids = allTileIds(state.tileTree);
-        for (const tid of ids) {
-          const t = findTile(state.tileTree, tid);
-          if (t && t.sessionId === item.id) { focusTile(tid); break; }
-        }
       } else {
+        // Always assign to the focused tile. If the session was visible
+        // elsewhere, assignToTile clears it from the old tile first.
         assignToTile(state.focusedTile, item.id);
       }
       onClose();
     }
-  }, [state.tileTree, state.focusedTile, onClose]);
+  }, [state.focusedTile, onClose]);
 
   const handleSelectCreate = useCallback(async (item) => {
     if (creating) return;
