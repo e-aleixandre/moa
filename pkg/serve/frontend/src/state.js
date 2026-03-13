@@ -437,9 +437,13 @@ export function handleWsAskUser(id, data) {
   updateSession(id, {
     pendingAsk: { id: data.id, questions: data.questions },
   });
-  flashSession(id, 'attention');
-  const sess = state.sessions[id];
-  if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
+  // Only flash/notify if the session is not currently visible.
+  const visible = visibleSessionIds(state);
+  if (!visible.includes(id)) {
+    flashSession(id, 'attention');
+    const sess = state.sessions[id];
+    if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
+  }
 }
 
 export function handleWsPermissionRequest(id, data) {

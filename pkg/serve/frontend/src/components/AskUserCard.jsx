@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { MessageCircleQuestion, Send, SkipForward } from 'lucide-preact';
 import { resolveAskUser } from '../state.js';
 
@@ -7,10 +7,20 @@ export function AskUserCard({ ask, sessionId }) {
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState(() => questions.map(() => ''));
   const [customBuf, setCustomBuf] = useState('');
-  const [resolved, setResolved] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  if (resolved || questions.length === 0) {
-    return resolved ? <div class="permission-resolved">✓ Answered</div> : null;
+  // Reset internal state when the ask ID changes (new question batch).
+  useEffect(() => {
+    setCurrent(0);
+    setAnswers(questions.map(() => ''));
+    setCustomBuf('');
+    setSubmitting(false);
+  }, [ask.id]);
+
+  if (submitting || questions.length === 0) {
+    return submitting
+      ? <div class="permission-resolved">✓ Answered</div>
+      : null;
   }
 
   const q = questions[current];
@@ -21,58 +31,61 @@ export function AskUserCard({ ask, sessionId }) {
     next[current] = opt;
     setAnswers(next);
     setCustomBuf('');
+    // Auto-advance to next question if not the last.
     if (current < questions.length - 1) {
       setCurrent(current + 1);
     }
   };
 
-  const submitCustom = () => {
+  const commitCustom = () => {
     const text = customBuf.trim();
-    if (!text) return;
+    if (!text) return false;
     const next = [...answers];
     next[current] = text;
     setAnswers(next);
     setCustomBuf('');
-    if (current < questions.length - 1) {
-      setCurrent(current + 1);
-    }
+    return true;
   };
 
   const handleSubmit = async () => {
-    // Ensure current answer is captured.
+    // Capture current custom input if needed.
     const final = [...answers];
     if (!final[current] && customBuf.trim()) {
       final[current] = customBuf.trim();
     }
-    // Check all answered.
+    // Check all questions answered.
     for (let i = 0; i < final.length; i++) {
       if (!final[i]) {
         setCurrent(i);
         return;
       }
     }
-    setResolved(true);
+    setSubmitting(true);
     try {
       await resolveAskUser(sessionId, ask.id, final);
     } catch (e) {
       console.error('Ask user resolve failed:', e);
-      setResolved(false);
+      setSubmitting(false);
     }
   };
 
   const handleSkip = async () => {
     const skipped = questions.map((_, i) => answers[i] || '(skipped)');
-    setResolved(true);
+    setSubmitting(true);
     try {
       await resolveAskUser(sessionId, ask.id, skipped);
     } catch (e) {
       console.error('Ask user skip failed:', e);
-      setResolved(false);
+      setSubmitting(false);
     }
   };
 
-  const isLast = current === questions.length - 1;
-  const allAnswered = answers.every((a) => !!a) || (answers.filter((a) => !!a).length === questions.length - 1 && customBuf.trim());
+  const allAnswered = (() => {
+    for (let i = 0; i < questions.length; i++) {
+      if (!answers[i] && (i !== current || !customBuf.trim())) return false;
+    }
+    return true;
+  })();
 
   return (
     <div class="ask-user-card">
@@ -106,9 +119,20 @@ export function AskUserCard({ ask, sessionId }) {
           onInput={(e) => setCustomBuf(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
+              e.preventDefault();
               if (customBuf.trim()) {
-                submitCustom();
-                if (isLast) handleSubmit();
+                commitCustom();
+                if (current >= questions.length - 1) {
+                  // Last question — submit all.
+                  handleSubmit();
+                } else {
+                  // Advance to next question.
+                  const next = [...answers];
+                  next[current] = customBuf.trim();
+                  setAnswers(next);
+                  setCustomBuf('');
+                  setCurrent(current + 1);
+                }
               } else if (allAnswered) {
                 handleSubmit();
               }
@@ -130,7 +154,9 @@ export function AskUserCard({ ask, sessionId }) {
               />
             ))}
           </div>
-          {!isLast && <button onClick={() => setCurrent(current + 1)}>Next →</button>}
+          {current < questions.length - 1 && (
+            <button onClick={() => setCurrent(current + 1)}>Next →</button>
+          )}
         </div>
       )}
 
