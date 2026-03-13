@@ -22,48 +22,69 @@ export async function api(method, path, body) {
 
 // --- Centralized WS Manager ---
 
-const connections = new Map(); // sessionId → WebSocket
+const connections = new Map();    // sessionId → { ws, backoff, timer }
+const pendingTimers = new Map();  // sessionId → timeoutId (for reconnects awaiting retry)
+const wantedIds = new Set();      // sessions that should have a connection
+const MAX_BACKOFF = 16000;
 
 export function syncConnections(visibleIds) {
-  const wantedSet = new Set(visibleIds);
+  wantedIds.clear();
+  for (const id of visibleIds) wantedIds.add(id);
 
-  // Close connections that are no longer visible
-  for (const [id, ws] of connections) {
-    if (!wantedSet.has(id)) {
-      ws.close();
+  // Close connections and cancel pending reconnects for sessions no longer visible
+  for (const [id, entry] of connections) {
+    if (!wantedIds.has(id)) {
+      entry.ws.close();
       connections.delete(id);
     }
   }
+  for (const [id, timer] of pendingTimers) {
+    if (!wantedIds.has(id)) {
+      clearTimeout(timer);
+      pendingTimers.delete(id);
+    }
+  }
 
-  // Open connections for newly visible sessions
+  // Open connections for newly visible sessions (that aren't already connecting/pending)
   for (const id of visibleIds) {
-    if (!connections.has(id)) {
-      openWs(id);
+    if (!connections.has(id) && !pendingTimers.has(id)) {
+      openWs(id, 1000);
     }
   }
 }
 
-function openWs(sessionId) {
+function openWs(sessionId, initialBackoff) {
+  pendingTimers.delete(sessionId);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws`);
+  const entry = { ws, backoff: initialBackoff };
+  connections.set(sessionId, entry);
 
   ws.onmessage = (e) => {
     const evt = JSON.parse(e.data);
+    if (evt.type === 'init') entry.backoff = 1000; // reset on successful handshake
     routeEvent(sessionId, evt);
   };
 
   ws.onclose = () => {
-    // Only remove if still the current connection for this session
-    if (connections.get(sessionId) === ws) {
-      connections.delete(sessionId);
-    }
+    if (connections.get(sessionId)?.ws !== ws) return; // superseded
+    connections.delete(sessionId);
+    if (!wantedIds.has(sessionId)) return; // intentionally removed
+    // Reconnect with exponential backoff (read from entry — may have been reset by init)
+    const delay = entry.backoff;
+    const nextBackoff = Math.min(delay * 2, MAX_BACKOFF);
+    const timer = setTimeout(() => {
+      pendingTimers.delete(sessionId);
+      if (wantedIds.has(sessionId) && !connections.has(sessionId)) {
+        openWs(sessionId, nextBackoff);
+      }
+    }, delay);
+    pendingTimers.set(sessionId, timer);
   };
 
   ws.onerror = () => {
-    ws.close();
+    ws.close(); // triggers onclose → reconnect
   };
-
-  connections.set(sessionId, ws);
 }
 
 function routeEvent(sessionId, evt) {

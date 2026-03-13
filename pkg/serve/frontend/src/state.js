@@ -191,6 +191,9 @@ function updateSession(id, patch) {
 }
 
 export function handleWsInit(id, data) {
+  delete pendingTextDeltas[id];
+  delete pendingThinkingDeltas[id];
+  delete pendingToolDeltas[id];
   updateSession(id, {
     messages: normalizeHistory(data.messages || []),
     state: data.state || 'idle',
@@ -249,19 +252,88 @@ function normalizeHistory(raw) {
   return result;
 }
 
+// --- Streaming delta batching ---
+// Text/thinking deltas arrive per-token (30-60+/s). Accumulate in buffers
+// and flush once per animation frame to avoid redundant renders + markdown parses.
+const pendingTextDeltas = {};    // sessionId → accumulated text delta
+const pendingThinkingDeltas = {}; // sessionId → accumulated thinking delta
+const pendingToolDeltas = {};    // sessionId → { toolCallId → accumulated delta }
+let flushScheduled = false;
+
+function scheduleFlush() {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  requestAnimationFrame(flushDeltas);
+}
+
+function flushDeltas() {
+  flushScheduled = false;
+
+  // Collect all sessions that need updating
+  const sessionIds = new Set([
+    ...Object.keys(pendingTextDeltas),
+    ...Object.keys(pendingThinkingDeltas),
+    ...Object.keys(pendingToolDeltas),
+  ]);
+
+  for (const id of sessionIds) {
+    const sess = state.sessions[id];
+    if (!sess) {
+      delete pendingTextDeltas[id];
+      delete pendingThinkingDeltas[id];
+      delete pendingToolDeltas[id];
+      continue;
+    }
+    const patch = {};
+
+    if (pendingTextDeltas[id]) {
+      patch.streamingText = (sess.streamingText || '') + pendingTextDeltas[id];
+      delete pendingTextDeltas[id];
+    }
+
+    if (pendingThinkingDeltas[id]) {
+      patch.thinkingText = (sess.thinkingText || '') + pendingThinkingDeltas[id];
+      delete pendingThinkingDeltas[id];
+    }
+
+    if (pendingToolDeltas[id]) {
+      let messages = patch.messages || sess.messages;
+      let changed = false;
+      for (const [toolCallId, delta] of Object.entries(pendingToolDeltas[id])) {
+        messages = messages.map(m => {
+          if (m._type === 'tool_start' && m.tool_call_id === toolCallId) {
+            changed = true;
+            return { ...m, streamingResult: (m.streamingResult || '') + delta };
+          }
+          return m;
+        });
+      }
+      if (changed) patch.messages = messages;
+      delete pendingToolDeltas[id];
+    }
+
+    if (Object.keys(patch).length > 0) {
+      updateSession(id, patch);
+    }
+  }
+}
+
 export function handleWsTextDelta(id, delta) {
-  const sess = state.sessions[id];
-  if (!sess) return;
-  updateSession(id, { streamingText: (sess.streamingText || '') + delta });
+  if (!state.sessions[id]) return;
+  pendingTextDeltas[id] = (pendingTextDeltas[id] || '') + delta;
+  scheduleFlush();
 }
 
 export function handleWsThinkingDelta(id, delta) {
-  const sess = state.sessions[id];
-  if (!sess) return;
-  updateSession(id, { thinkingText: (sess.thinkingText || '') + delta });
+  if (!state.sessions[id]) return;
+  pendingThinkingDeltas[id] = (pendingThinkingDeltas[id] || '') + delta;
+  scheduleFlush();
 }
 
 export function handleWsMessageEnd(id, fullText) {
+  // Discard any pending text/thinking deltas — fullText is authoritative.
+  delete pendingTextDeltas[id];
+  delete pendingThinkingDeltas[id];
   const sess = state.sessions[id];
   if (!sess) return;
   const msg = { role: 'assistant', content: [{ type: 'text', text: fullText }] };
@@ -287,18 +359,19 @@ export function handleWsToolStart(id, data) {
 }
 
 export function handleWsToolUpdate(id, data) {
-  const sess = state.sessions[id];
-  if (!sess) return;
-  const messages = sess.messages.map(m => {
-    if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
-      return { ...m, streamingResult: (m.streamingResult || '') + data.delta };
-    }
-    return m;
-  });
-  updateSession(id, { messages });
+  if (!state.sessions[id]) return;
+  if (!pendingToolDeltas[id]) pendingToolDeltas[id] = {};
+  pendingToolDeltas[id][data.tool_call_id] =
+    (pendingToolDeltas[id][data.tool_call_id] || '') + data.delta;
+  scheduleFlush();
 }
 
 export function handleWsToolEnd(id, data) {
+  // Discard any pending tool deltas for this tool — final result is authoritative.
+  if (pendingToolDeltas[id]) {
+    delete pendingToolDeltas[id][data.tool_call_id];
+    if (Object.keys(pendingToolDeltas[id]).length === 0) delete pendingToolDeltas[id];
+  }
   const sess = state.sessions[id];
   if (!sess) return;
   const messages = sess.messages.map(m => {
@@ -363,6 +436,9 @@ export function handleWsSubagentComplete(id, data) {
 }
 
 export function handleWsRunEnd(id) {
+  delete pendingTextDeltas[id];
+  delete pendingThinkingDeltas[id];
+  delete pendingToolDeltas[id];
   updateSession(id, { streamingText: null, thinkingText: null });
 }
 
