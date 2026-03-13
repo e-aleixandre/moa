@@ -76,12 +76,12 @@ DEFAULT POLICY (apply when no user rules say otherwise):
 	if len(rules) > 0 {
 		sb.WriteString("USER RULES (override the defaults above — may APPROVE or DENY):\n")
 		for _, r := range rules {
-			sb.WriteString(fmt.Sprintf("- %s\n", r))
+			fmt.Fprintf(&sb, "- %s\n", r)
 		}
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("Tool: %s\n", toolName))
+	fmt.Fprintf(&sb, "Tool: %s\n", toolName)
 
 	if len(args) > 0 {
 		sb.WriteString("Arguments:\n")
@@ -90,7 +90,7 @@ DEFAULT POLICY (apply when no user rules say otherwise):
 			if len(val) > 500 {
 				val = val[:500] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, val))
+			fmt.Fprintf(&sb, "  %s: %s\n", k, val)
 		}
 	}
 

@@ -57,7 +57,7 @@ func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename strin
 	if err != nil {
 		return "", fmt.Errorf("openai transcribe: http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

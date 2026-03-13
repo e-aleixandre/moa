@@ -141,14 +141,14 @@ func TestWrapMCPTool_InMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("server connect: %v", err)
 	}
-	defer serverSession.Close()
+	defer func() { _ = serverSession.Close() }()
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "moa-test", Version: "0.1"}, nil)
 	session, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// Discover tools
 	list, err := session.ListTools(ctx, nil)
@@ -204,11 +204,11 @@ func TestWrapMCPTool_ErrorResult(t *testing.T) {
 
 	st, ct := sdkmcp.NewInMemoryTransports()
 	serverSession, _ := server.Connect(ctx, st, nil)
-	defer serverSession.Close()
+	defer func() { _ = serverSession.Close() }()
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "moa-test", Version: "0.1"}, nil)
 	session, _ := client.Connect(ctx, ct, nil)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	list, _ := session.ListTools(ctx, nil)
 	tool, _ := wrapMCPTool("test-server", list.Tools[0], session)

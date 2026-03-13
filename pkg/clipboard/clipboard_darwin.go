@@ -33,8 +33,8 @@ func ReadImage() ([]byte, string, error) {
 		return nil, "", fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	tmp.Close()
-	defer os.Remove(tmpPath)
+	_ = tmp.Close()
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	script := fmt.Sprintf(`set f to open for access POSIX file %q with write permission
 set img to the clipboard as «class PNGf»

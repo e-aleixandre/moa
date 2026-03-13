@@ -641,7 +641,7 @@ func TestHeadTailBuffer_HeadPlusTail(t *testing.T) {
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
-			os.Remove(b.SpillPath)
+			_ = os.Remove(b.SpillPath)
 		}
 	}()
 
@@ -672,7 +672,7 @@ func TestHeadTailBuffer_TailWraps(t *testing.T) {
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
-			os.Remove(b.SpillPath)
+			_ = os.Remove(b.SpillPath)
 		}
 	}()
 
@@ -698,7 +698,7 @@ func TestHeadTailBuffer_MultipleSmallWrites(t *testing.T) {
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
-			os.Remove(b.SpillPath)
+			_ = os.Remove(b.SpillPath)
 		}
 	}()
 
@@ -722,7 +722,7 @@ func TestHeadTailBuffer_ZeroTail(t *testing.T) {
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
-			os.Remove(b.SpillPath)
+			_ = os.Remove(b.SpillPath)
 		}
 	}()
 	out := b.String()
@@ -746,7 +746,7 @@ func TestHeadTailBuffer_SplitWrite(t *testing.T) {
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
-			os.Remove(b.SpillPath)
+			_ = os.Remove(b.SpillPath)
 		}
 	}()
 	out := b.String()
@@ -773,7 +773,7 @@ func TestHeadTailBuffer_SpillFile(t *testing.T) {
 	if b.SpillPath == "" {
 		t.Fatal("expected spill file to be created on truncation")
 	}
-	defer os.Remove(b.SpillPath)
+	defer func() { _ = os.Remove(b.SpillPath) }()
 
 	// Spill file should contain the complete output
 	spillData, err := os.ReadFile(b.SpillPath)
@@ -800,7 +800,7 @@ func TestHeadTailBuffer_NoSpillWhenNotTruncated(t *testing.T) {
 	}
 	b.Close()
 	if b.SpillPath != "" {
-		os.Remove(b.SpillPath)
+		_ = os.Remove(b.SpillPath)
 		t.Error("should not create spill file for small output")
 	}
 }

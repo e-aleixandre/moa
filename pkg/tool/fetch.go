@@ -70,7 +70,7 @@ func NewFetch(cfg ToolConfig) core.Tool {
 				}
 				return core.ErrorResult(fmt.Sprintf("fetch failed: %v", err)), nil
 			}
-			defer resp.Body.Close()
+			defer resp.Body.Close() //nolint:errcheck
 
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 				return core.ErrorResult(fmt.Sprintf("fetch failed: HTTP %d", resp.StatusCode)), nil

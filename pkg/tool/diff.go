@@ -97,7 +97,7 @@ func unifiedDiff(old, new string, contextLines int) string {
 			if sb.Len() > 0 {
 				sb.WriteString("\n")
 			}
-			sb.WriteString(fmt.Sprintf("@@ -%d +%d @@\n", oldLine, newLine))
+			fmt.Fprintf(&sb, "@@ -%d +%d @@\n", oldLine, newLine)
 			inHunk = true
 		}
 

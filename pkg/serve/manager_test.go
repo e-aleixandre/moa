@@ -676,7 +676,7 @@ func TestList_IncludesSavedSessions(t *testing.T) {
 	saved := store.Create()
 	saved.Title = "disk-session"
 	saved.Metadata = map[string]any{"model": "test", "cwd": dir}
-	store.Save(saved)
+	_ = store.Save(saved)
 
 	// Create manager with same base — it should see the disk session.
 	prov := newMockProvider()
@@ -718,7 +718,7 @@ func TestResumeSession(t *testing.T) {
 	saved.Messages = []core.AgentMessage{
 		core.WrapMessage(core.NewUserMessage("prior message")),
 	}
-	store.Save(saved)
+	_ = store.Save(saved)
 
 	prov := newMockProvider(simpleResponseHandler("resumed reply"))
 	mgr := NewManager(ctx, ManagerConfig{
@@ -774,7 +774,7 @@ func TestResumeSession_AlreadyActive(t *testing.T) {
 	saved := store.Create()
 	saved.Title = "active"
 	saved.Metadata = map[string]any{"model": "test-model", "cwd": dir}
-	store.Save(saved)
+	_ = store.Save(saved)
 
 	prov := newMockProvider()
 	mgr := NewManager(ctx, ManagerConfig{
@@ -871,7 +871,7 @@ func TestDelete_SavedOnly(t *testing.T) {
 	saved := store.Create()
 	saved.Title = "disk-only"
 	saved.Metadata = map[string]any{"model": "test", "cwd": dir}
-	store.Save(saved)
+	_ = store.Save(saved)
 
 	prov := newMockProvider()
 	mgr := NewManager(ctx, ManagerConfig{
@@ -980,7 +980,7 @@ func TestExecCommand_Clear(t *testing.T) {
 	}
 
 	// Send a message to create history.
-	mgr.Send(sess.ID, "hi")
+	_, _ = mgr.Send(sess.ID, "hi")
 	pollUntil(t, 5*time.Second, "run complete", func() bool {
 		sess.mu.Lock()
 		defer sess.mu.Unlock()

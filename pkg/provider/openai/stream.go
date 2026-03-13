@@ -234,7 +234,7 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		}
 		var args map[string]any
 		if argsStr != "" {
-			json.Unmarshal([]byte(argsStr), &args)
+			_ = json.Unmarshal([]byte(argsStr), &args)
 		}
 		state.message.Content = append(state.message.Content,
 			core.ToolCallContent(state.currentCallID, state.currentCallName, args),

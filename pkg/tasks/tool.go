@@ -133,7 +133,7 @@ func toolList(s *Store) (core.Result, error) {
 	}
 	var sb strings.Builder
 	done, total := s.Progress()
-	sb.WriteString(fmt.Sprintf("Tasks (%d/%d done):\n", done, total))
+	fmt.Fprintf(&sb, "Tasks (%d/%d done):\n", done, total)
 	for _, t := range tasks {
 		icon := "☐"
 		switch t.Status {
@@ -142,9 +142,9 @@ func toolList(s *Store) (core.Result, error) {
 		case "in_progress":
 			icon = "▶"
 		}
-		sb.WriteString(fmt.Sprintf("\n%s #%d: %s", icon, t.ID, t.Title))
+		fmt.Fprintf(&sb, "\n%s #%d: %s", icon, t.ID, t.Title)
 		if t.Description != "" {
-			sb.WriteString(fmt.Sprintf("\n    %s", t.Description))
+			fmt.Fprintf(&sb, "\n    %s", t.Description)
 		}
 	}
 	return core.TextResult(sb.String()), nil
@@ -160,12 +160,12 @@ func toolGet(s *Store, params map[string]any) (core.Result, error) {
 		return core.ErrorResult(fmt.Sprintf("task #%d not found", id)), nil
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Task #%d: %s\nStatus: %s", task.ID, task.Title, task.Status))
+	fmt.Fprintf(&sb, "Task #%d: %s\nStatus: %s", task.ID, task.Title, task.Status)
 	if task.Description != "" {
-		sb.WriteString(fmt.Sprintf("\nDescription: %s", task.Description))
+		fmt.Fprintf(&sb, "\nDescription: %s", task.Description)
 	}
 	if len(task.DependsOn) > 0 {
-		sb.WriteString(fmt.Sprintf("\nDepends on: %v", task.DependsOn))
+		fmt.Fprintf(&sb, "\nDepends on: %v", task.DependsOn)
 	}
 	return core.TextResult(sb.String()), nil
 }

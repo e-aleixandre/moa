@@ -1248,7 +1248,7 @@ func TestRebuildFromMessages_RendersModelSwitchSessionEvent(t *testing.T) {
 func saveAndRestoreLayout(t *testing.T) {
 	t.Helper()
 	saved := GetActiveLayout()
-	t.Cleanup(func() { SetLayoutDirect(saved) })
+	t.Cleanup(func() { _ = SetLayoutDirect(saved) })
 }
 
 func TestLayoutSwap_DifferentOutput(t *testing.T) {
@@ -1258,14 +1258,14 @@ func TestLayoutSwap_DifferentOutput(t *testing.T) {
 	block := messageBlock{Type: "user", Raw: "hello world"}
 
 	// Split layout: should have "YOU" label
-	SetLayoutDirect(&SplitLayout{})
+	_ = SetLayoutDirect(&SplitLayout{})
 	splitOut := renderSingleBlock(block, r, false)
 	if !strings.Contains(splitOut, "YOU") {
 		t.Error("split layout should render YOU label")
 	}
 
 	// Flat layout: should have "❯" prefix, no "YOU"
-	SetLayoutDirect(&FlatLayout{})
+	_ = SetLayoutDirect(&FlatLayout{})
 	flatOut := renderSingleBlock(block, r, false)
 	if !strings.Contains(flatOut, "❯") {
 		t.Error("flat layout should render ❯ prefix")

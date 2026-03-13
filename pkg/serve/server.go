@@ -254,8 +254,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		if err != nil {
 			return
 		}
-		// SA1019: conn.Close - deprecated library maintained by Coder at https://github.com/coder/websocket
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 
@@ -308,8 +307,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			case evt, ok := <-ch:
 				if !ok {
 					// Closed by broadcast (slow consumer).
-					// SA1019: conn.Close - deprecated library maintained by Coder at https://github.com/coder/websocket
-					conn.Close(websocket.StatusGoingAway, "too slow")
+					conn.Close(websocket.StatusGoingAway, "too slow") //nolint:errcheck,staticcheck
 					return
 				}
 				if err := wsWriteJSON(ctx, conn, evt); err != nil {
@@ -435,7 +433,7 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "missing audio file: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		defer file.Close()
+		defer file.Close() //nolint:errcheck
 
 		text, err := mgr.transcriber.Transcribe(r.Context(), file, header.Filename)
 		if err != nil {
@@ -513,7 +511,7 @@ func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // wsWriteJSON writes a JSON message to a WebSocket connection.

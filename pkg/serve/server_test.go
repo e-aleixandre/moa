@@ -60,12 +60,12 @@ func TestListSessions_Empty(t *testing.T) {
 	defer cancel()
 
 	resp := apiReq(t, srv, "GET", "/api/sessions", "")
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 	var list []SessionInfo
-	json.NewDecoder(resp.Body).Decode(&list)
+	_ = json.NewDecoder(resp.Body).Decode(&list)
 	if len(list) != 0 {
 		t.Fatalf("expected empty list, got %d", len(list))
 	}
@@ -77,19 +77,19 @@ func TestCreateAndSend(t *testing.T) {
 
 	// Create session.
 	resp := apiReq(t, srv, "POST", "/api/sessions", `{"title":"test","model":"sonnet"}`)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 201 {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 	var info SessionInfo
-	json.NewDecoder(resp.Body).Decode(&info)
+	_ = json.NewDecoder(resp.Body).Decode(&info)
 	if info.ID == "" {
 		t.Fatal("expected session ID")
 	}
 
 	// Send message.
 	resp2 := apiReq(t, srv, "POST", "/api/sessions/"+info.ID+"/send", `{"text":"hello"}`)
-	defer resp2.Body.Close()
+	defer resp2.Body.Close() //nolint:errcheck
 	if resp2.StatusCode != 202 {
 		t.Fatalf("expected 202, got %d", resp2.StatusCode)
 	}
@@ -132,7 +132,7 @@ func TestSend_WhileBusy_409(t *testing.T) {
 
 	// First send.
 	resp := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", `{"text":"first"}`)
-	resp.Body.Close()
+	resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 202 {
 		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
@@ -146,7 +146,7 @@ func TestSend_WhileBusy_409(t *testing.T) {
 
 	// Second send should be 202 (steer).
 	resp2 := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", `{"text":"second"}`)
-	resp2.Body.Close()
+	resp2.Body.Close() //nolint:errcheck
 	if resp2.StatusCode != 202 {
 		t.Fatalf("expected 202 (steer), got %d", resp2.StatusCode)
 	}
@@ -164,7 +164,7 @@ func TestCSRF_MissingHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 403 {
 		t.Fatalf("expected 403, got %d", resp.StatusCode)
 	}
@@ -183,7 +183,7 @@ func TestWebSocket_Init(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
 
 	var evt Event
 	if err := wsjson.Read(ctx, conn, &evt); err != nil {
@@ -219,15 +219,15 @@ func TestWebSocket_Streaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
 
 	// Read init event.
 	var init Event
-	wsjson.Read(wsCtx, conn, &init)
+	_ = wsjson.Read(wsCtx, conn, &init)
 
 	// Send message.
 	resp := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", `{"text":"hello"}`)
-	resp.Body.Close()
+	resp.Body.Close() //nolint:errcheck
 
 	// Collect all events until run_end (which fires after agent events).
 	// The agent emitter delivers events asynchronously, so text_delta and
@@ -284,10 +284,10 @@ func TestWebSocket_Disconnect(t *testing.T) {
 
 	// Read init.
 	var init Event
-	wsjson.Read(ctx, conn, &init)
+	_ = wsjson.Read(ctx, conn, &init)
 
 	// Close connection.
-	conn.Close(websocket.StatusNormalClosure, "bye")
+	_ = conn.Close(websocket.StatusNormalClosure, "bye") //nolint:staticcheck
 
 	// Poll until WS handler cleans up the subscriber.
 	pollUntil(t, 2*time.Second, "0 subscribers after WS disconnect", func() bool {
@@ -302,7 +302,7 @@ func TestCreateSession_InvalidCWD_Returns400(t *testing.T) {
 	defer cancel()
 
 	resp := apiReq(t, srv, "POST", "/api/sessions", `{"title":"test","cwd":"/nonexistent/path/does/not/exist"}`)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
@@ -315,12 +315,12 @@ func TestCreateSession_WithCWD_API(t *testing.T) {
 
 	body := `{"title":"test","cwd":"` + dir + `"}`
 	resp := apiReq(t, srv, "POST", "/api/sessions", body)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 201 {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 	var info SessionInfo
-	json.NewDecoder(resp.Body).Decode(&info)
+	_ = json.NewDecoder(resp.Body).Decode(&info)
 	if info.CWD == "" {
 		t.Fatal("expected CWD in response")
 	}
@@ -332,12 +332,12 @@ func TestCreateSession_DefaultCWD_API(t *testing.T) {
 	defer cancel()
 
 	resp := apiReq(t, srv, "POST", "/api/sessions", `{"title":"test"}`)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 201 {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 	var info SessionInfo
-	json.NewDecoder(resp.Body).Decode(&info)
+	_ = json.NewDecoder(resp.Body).Decode(&info)
 	if info.CWD == "" {
 		t.Fatal("expected CWD to default to workspace root")
 	}
@@ -359,7 +359,7 @@ func TestResumeEndpoint(t *testing.T) {
 	saved := store.Create()
 	saved.Title = "api-resume"
 	saved.Metadata = map[string]any{"model": "test-model", "cwd": dir}
-	store.Save(saved)
+	_ = store.Save(saved)
 
 	prov := newMockProvider(simpleResponseHandler("hello"))
 	mgr := NewManager(ctx, ManagerConfig{
@@ -373,12 +373,12 @@ func TestResumeEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	resp := apiReq(t, srv, "POST", "/api/sessions/"+saved.ID+"/resume", "")
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 	var info SessionInfo
-	json.NewDecoder(resp.Body).Decode(&info)
+	_ = json.NewDecoder(resp.Body).Decode(&info)
 	if info.ID != saved.ID {
 		t.Errorf("ID = %q, want %q", info.ID, saved.ID)
 	}
@@ -393,7 +393,7 @@ func TestResumeEndpoint_NotFound(t *testing.T) {
 	defer cancel()
 
 	resp := apiReq(t, srv, "POST", "/api/sessions/nonexistent/resume", "")
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 500 {
 		// FindSession returns a wrapped ErrNotFound; the handler checks errors.Is
 		// which works. But the session might not exist at all.
@@ -431,7 +431,7 @@ func TestCancelEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	sess, _ := mgr.CreateSession(CreateOpts{CWD: dir})
-	mgr.Send(sess.ID, "block")
+	_, _ = mgr.Send(sess.ID, "block")
 
 	pollUntil(t, 2*time.Second, "running", func() bool {
 		sess.mu.Lock()
@@ -440,7 +440,7 @@ func TestCancelEndpoint(t *testing.T) {
 	})
 
 	resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel", "")
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 204 {
 		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
@@ -460,7 +460,7 @@ func TestCancelEndpoint_NotRunning(t *testing.T) {
 	sess, _ := mgr.CreateSession(CreateOpts{CWD: dir})
 
 	resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel", "")
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
@@ -480,7 +480,7 @@ func TestDeleteEndpoint_SavedSession(t *testing.T) {
 	saved := store.Create()
 	saved.Title = "delete-me"
 	saved.Metadata = map[string]any{"model": "test", "cwd": dir}
-	store.Save(saved)
+	_ = store.Save(saved)
 
 	prov := newMockProvider()
 	mgr := NewManager(ctx, ManagerConfig{
@@ -494,7 +494,7 @@ func TestDeleteEndpoint_SavedSession(t *testing.T) {
 	defer srv.Close()
 
 	resp := apiReq(t, srv, "DELETE", "/api/sessions/"+saved.ID, "")
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 204 {
 		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
@@ -526,7 +526,7 @@ func TestStaticAssets(t *testing.T) {
 			t.Fatalf("GET %s: %v", tt.path, err)
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 		if resp.StatusCode != 200 {
 			t.Errorf("GET %s: expected 200, got %d", tt.path, resp.StatusCode)
 		}
@@ -542,7 +542,7 @@ func TestStaticAssets(t *testing.T) {
 func TestStaticDirOverride(t *testing.T) {
 	dir := t.TempDir()
 	testContent := "test-static-content"
-	os.WriteFile(filepath.Join(dir, "test.txt"), []byte(testContent), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "test.txt"), []byte(testContent), 0644)
 
 	t.Setenv("MOA_SERVE_STATIC_DIR", dir)
 
@@ -554,7 +554,7 @@ func TestStaticDirOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)

@@ -393,7 +393,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 			"model": fullModelSpec(sess.resolvedModel),
 			"cwd":   sess.CWD,
 		}
-		store.Save(persisted)
+		_ = store.Save(persisted)
 		sess.persisted = persisted
 		sess.store = store
 	}
@@ -896,7 +896,7 @@ func (m *Manager) Delete(id string) error {
 
 	// Delete from disk.
 	if store != nil {
-		store.Delete(id)
+		_ = store.Delete(id)
 	}
 	m.invalidateSavedCache()
 	return nil

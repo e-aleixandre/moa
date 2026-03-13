@@ -29,7 +29,7 @@ const metadataKey = "planmode"
 func (s *State) SaveToMetadata() map[string]any {
 	data, _ := json.Marshal(s)
 	var m map[string]any
-	json.Unmarshal(data, &m)
+	_ = json.Unmarshal(data, &m)
 	return m
 }
 

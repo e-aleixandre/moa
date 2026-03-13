@@ -78,7 +78,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg core.MCPServ
 
 	listResult, err := session.ListTools(startCtx, nil)
 	if err != nil {
-		session.Close()
+		_ = session.Close()
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
 

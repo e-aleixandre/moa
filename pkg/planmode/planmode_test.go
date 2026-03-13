@@ -232,7 +232,7 @@ func TestOnChangeCallback(t *testing.T) {
 		mu.Unlock()
 	})
 
-	pm.Enter()
+	_,_ = pm.Enter()
 	pm.Exit()
 
 	mu.Lock()
@@ -247,7 +247,7 @@ func TestOnChangeCallback(t *testing.T) {
 
 func TestStatePersistence(t *testing.T) {
 	pm := newTestPlanMode(t)
-	pm.Enter()
+	_,_ = pm.Enter()
 
 	meta := pm.SaveState()
 
@@ -264,7 +264,7 @@ func TestStatePersistence(t *testing.T) {
 
 func TestSubmitPlan(t *testing.T) {
 	pm := newTestPlanMode(t)
-	pm.Enter()
+	_,_ = pm.Enter()
 
 	submitTool := pm.SubmitPlanTool()
 	ctx := context.Background()
@@ -298,7 +298,7 @@ func TestRequestReviewToolLifecycle(t *testing.T) {
 	}
 
 	// Planning: no request_review.
-	pm.Enter()
+	_,_ = pm.Enter()
 	if _, ok := pm.registry.Get("request_review"); ok {
 		t.Error("request_review should not exist in ModePlanning")
 	}
@@ -322,7 +322,7 @@ func TestRequestReviewToolLifecycle(t *testing.T) {
 
 func TestRequestReviewToolLifecycle_RestoreExecuting(t *testing.T) {
 	pm := newTestPlanMode(t)
-	pm.Enter()
+	_,_ = pm.Enter()
 	pm.StartExecution()
 
 	meta := pm.SaveState()
@@ -338,7 +338,7 @@ func TestRequestReviewToolLifecycle_RestoreExecuting(t *testing.T) {
 
 func TestRequestReviewValidation(t *testing.T) {
 	pm := newTestPlanMode(t)
-	pm.Enter()
+	_,_ = pm.Enter()
 	pm.StartExecution()
 
 	tool, ok := pm.registry.Get("request_review")
@@ -389,7 +389,7 @@ func TestRequestReviewValidation(t *testing.T) {
 
 	// Non-executing mode.
 	pm.Exit()
-	pm.Enter()
+	_,_ = pm.Enter()
 	r, err = requestReviewTool(pm).Execute(ctx, map[string]any{
 		"summary":       "stuff",
 		"files_changed": []any{"a.go"},

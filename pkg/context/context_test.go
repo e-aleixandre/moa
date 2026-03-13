@@ -13,7 +13,7 @@ func TestLoadAgentsMD_Global(t *testing.T) {
 	globalDir := t.TempDir()
 	cwd := t.TempDir()
 
-	os.WriteFile(filepath.Join(globalDir, "AGENTS.md"), []byte("# Global rules"), 0o644)
+	_ = os.WriteFile(filepath.Join(globalDir, "AGENTS.md"), []byte("# Global rules"), 0o644)
 
 	content, err := LoadAgentsMD(cwd, globalDir)
 	if err != nil {
@@ -26,7 +26,7 @@ func TestLoadAgentsMD_Global(t *testing.T) {
 
 func TestLoadAgentsMD_ProjectLocal(t *testing.T) {
 	cwd := t.TempDir()
-	os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("# Project rules"), 0o644)
+	_ = os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("# Project rules"), 0o644)
 
 	content, err := LoadAgentsMD(cwd, "")
 	if err != nil {
@@ -45,8 +45,8 @@ func TestLoadAgentsMD_Priority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("ROOT"), 0o644)
-	os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("SUB"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("ROOT"), 0o644)
+	_ = os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("SUB"), 0o644)
 
 	content, err := LoadAgentsMD(sub, "")
 	if err != nil {
@@ -66,7 +66,7 @@ func TestLoadAgentsMD_Priority(t *testing.T) {
 
 func TestLoadAgentsMD_Dedup(t *testing.T) {
 	cwd := t.TempDir()
-	os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("ONCE"), 0o644)
+	_ = os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("ONCE"), 0o644)
 
 	// Even with cwd == agentHome, should only appear once
 	content, err := LoadAgentsMD(cwd, cwd)

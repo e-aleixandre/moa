@@ -89,7 +89,7 @@ func newWebSearch(cfg ToolConfig, baseURL string) core.Tool {
 				}
 				return core.ErrorResult(fmt.Sprintf("web search failed: %v", err)), nil
 			}
-			defer resp.Body.Close()
+			defer resp.Body.Close() //nolint:errcheck
 
 			if resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

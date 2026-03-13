@@ -24,11 +24,11 @@ func captureJSONLines(t *testing.T, fn func()) []map[string]any {
 	fn()
 
 	os.Stdout = oldStdout
-	w.Close()
+	_ = w.Close()
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	r.Close()
+	_, _ = buf.ReadFrom(r)
+	_ = r.Close()
 
 	var lines []map[string]any
 	dec := json.NewDecoder(&buf)

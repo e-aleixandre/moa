@@ -97,7 +97,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 
 	// Check HTTP status BEFORE returning channel
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(errBody))
 	}
@@ -105,7 +105,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	ch := make(chan core.AssistantEvent, 64)
 
 	go func() {
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
 		a.consumeStream(ctx, resp.Body, ch, req.Tools, oauthMode)
 	}()

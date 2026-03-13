@@ -563,7 +563,7 @@ func runServe(args []string) {
 	port := fs.Int("port", 8080, "HTTP port")
 	host := fs.String("host", "127.0.0.1", "Bind address (use 0.0.0.0 for remote access)")
 	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
-	fs.Parse(args)
+	_ = fs.Parse(args)
 
 	if *host != "127.0.0.1" && *host != "localhost" && *host != "::1" {
 		fmt.Fprintf(os.Stderr, "⚠️  WARNING: Binding to %s with NO authentication.\n", *host)
@@ -618,7 +618,7 @@ func runServe(args []string) {
 		<-ctx.Done()
 		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 		defer c()
-		httpServer.Shutdown(shutdownCtx)
+		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
@@ -666,7 +666,7 @@ func handleLogin(provider string, authStore *auth.Store) {
 		fmt.Println("  2) API key")
 		fmt.Print("Choice [1]: ")
 		var choice string
-		fmt.Scanln(&choice)
+		_, _ = fmt.Scanln(&choice)
 		choice = strings.TrimSpace(choice)
 		if choice == "" {
 			choice = "1"
@@ -716,7 +716,7 @@ func handleLogin(provider string, authStore *auth.Store) {
 				}
 				key = strings.TrimSpace(string(keyBytes))
 			} else {
-				fmt.Scanln(&key)
+				_, _ = fmt.Scanln(&key)
 				key = strings.TrimSpace(key)
 			}
 			if key == "" {
@@ -751,7 +751,7 @@ func handleLogin(provider string, authStore *auth.Store) {
 			}
 			key = strings.TrimSpace(string(keyBytes))
 		} else {
-			fmt.Scanln(&key)
+			_, _ = fmt.Scanln(&key)
 			key = strings.TrimSpace(key)
 		}
 		if key == "" {
@@ -820,7 +820,7 @@ func printAuthNotice(w io.Writer, notice string) {
 	if notice == "" {
 		return
 	}
-	fmt.Fprintf(w, "\033[90m(using %s)\033[0m\n", notice)
+	_, _ = fmt.Fprintf(w, "\033[90m(using %s)\033[0m\n", notice)
 }
 
 // modelDisplayName returns a compact name for TUI display.
@@ -921,7 +921,7 @@ func loadProjectMCPServers(cfg *core.MoaConfig, cwd, promptContent string) {
 
 	fmt.Fprintf(os.Stderr, "Project .mcp.json found. Trust MCP servers in %s? [y/N] ", cwd)
 	var answer string
-	fmt.Scanln(&answer)
+	_, _ = fmt.Scanln(&answer)
 	if !strings.HasPrefix(strings.ToLower(answer), "y") {
 		return
 	}

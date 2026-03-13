@@ -1515,7 +1515,7 @@ func TestReconfigure_WhileRunning(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go ag.Run(ctx, "hello")
+	go func() { _, _ = ag.Run(ctx, "hello") }()
 	time.Sleep(50 * time.Millisecond) // let it start
 
 	err := ag.Reconfigure(nil, core.Model{ID: "other"}, "high")

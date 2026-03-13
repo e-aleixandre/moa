@@ -267,9 +267,7 @@ func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
 
 	// Write overflow to spill file
 	if b.spillFile != nil {
-		if _, err := b.spillFile.Write(p); err != nil {
-			// best effort — truncation still works without complete spill
-		}
+		_, _ = b.spillFile.Write(p) // best effort — truncation still works without complete spill
 	}
 
 	// Write overflow to circular tail buffer
@@ -310,9 +308,7 @@ func (b *headTailBuffer) initSpillFile() {
 	b.spillFile = f
 	b.SpillPath = f.Name()
 	// Write the head bytes already captured
-	if _, err := f.Write(b.head.Bytes()); err != nil {
-		// best effort — truncation still works without complete spill
-	}
+	_, _ = f.Write(b.head.Bytes()) // best effort — truncation still works without complete spill
 }
 
 // Close closes the spill file if open. Must be called when done.
@@ -338,9 +334,9 @@ func (b *headTailBuffer) String() string {
 		omitted = 0
 	}
 	if b.SpillPath != "" {
-		sb.WriteString(fmt.Sprintf("\n\n[... %d bytes truncated — full output at %s ...]\n\n", omitted, b.SpillPath))
+		fmt.Fprintf(&sb, "\n\n[... %d bytes truncated — full output at %s ...]\n\n", omitted, b.SpillPath)
 	} else {
-		sb.WriteString(fmt.Sprintf("\n\n[... %d bytes truncated ...]\n\n", omitted))
+		fmt.Fprintf(&sb, "\n\n[... %d bytes truncated ...]\n\n", omitted)
 	}
 	sb.WriteString(tailData)
 	return sb.String()
