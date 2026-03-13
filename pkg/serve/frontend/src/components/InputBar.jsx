@@ -98,12 +98,20 @@ export function InputBar({ sessionId, sessionState, tileId }) {
   }, [sessionId]);
 
   // Update command suggestions on input change.
+  // Only show suggestions while the user is still typing the command name
+  // (before the first space). Once they've moved on to arguments, hide them.
   const updateSuggestions = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     const val = el.value;
     if (val.startsWith('/') && !val.includes('\n')) {
-      const filter = val.slice(1).toLowerCase().split(' ')[0];
+      const afterSlash = val.slice(1);
+      // Once there's a space, the user is typing arguments — stop suggesting.
+      if (afterSlash.includes(' ')) {
+        setCmdSuggestions(null);
+        return;
+      }
+      const filter = afterSlash.toLowerCase();
       const matches = COMMANDS.filter(c => c.name.startsWith(filter));
       if (matches.length > 0) {
         setCmdSuggestions(matches);
