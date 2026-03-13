@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
 import { Check, X, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
 import { toolVerb, toolPath, toolPreview, splitPreview, splitPreviewTail } from '../util/format.js';
+import { AskUserPreview } from './AskUserPreview.jsx';
 
 export function ToolCall({ tool }) {
   const [expanded, setExpanded] = useState(false);
@@ -16,10 +17,12 @@ export function ToolCall({ tool }) {
   const StatusIcon = isRunning ? Loader2 : (isRejected || isError) ? X : Check;
   const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
+  const isAskUser = tool.tool_name === 'ask_user';
+
   // For running tools with streaming, show the live output
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
   // Final result (from toolPreview) — only used when not streaming
-  const preview = !liveText ? toolPreview(tool.tool_name, tool.args, tool.result) : null;
+  const preview = !isAskUser && !liveText ? toolPreview(tool.tool_name, tool.args, tool.result) : null;
 
   // Streaming: show tail. Finished: show head.
   const previewData = liveText
@@ -33,10 +36,10 @@ export function ToolCall({ tool }) {
   return (
     <>
       <div class={`tool-call status-${statusCls}`}>
-        <div class="tool-call-head" onClick={() => fullText && setModalOpen(true)} style={{ cursor: fullText ? 'pointer' : 'default' }}>
+        <div class="tool-call-head" onClick={() => !isAskUser && fullText && setModalOpen(true)} style={{ cursor: !isAskUser && fullText ? 'pointer' : 'default' }}>
           <span class={`tool-call-verb ${verbCls}`}>{verb}</span>
           <span class="tool-call-path">{path}</span>
-          {fullText && (
+          {!isAskUser && fullText && (
             <button class="tool-call-expand" title="Expand" onClick={(e) => { e.stopPropagation(); setModalOpen(true); }}>
               <Maximize2 />
             </button>
@@ -47,7 +50,11 @@ export function ToolCall({ tool }) {
           </span>
         </div>
 
-        {previewData && previewData.visible && (
+        {isAskUser && !isRunning && (
+          <AskUserPreview args={tool.args} result={tool.result} />
+        )}
+
+        {!isAskUser && previewData && previewData.visible && (
           <pre class={`tool-call-preview${isErrorBody ? ' error-body' : ''}${liveText ? ' streaming' : ''}`}>
             {expanded && !liveText ? fullText : previewData.visible}
           </pre>

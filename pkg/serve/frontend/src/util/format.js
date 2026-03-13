@@ -79,12 +79,8 @@ export function toolPreview(name, args, result) {
     if (a.new_text) return { text: a.new_text, kind: 'input' };
   }
 
-  // ask_user: show questions with options and answers
-  if (n === 'ask_user') {
-    const text = formatAskUser(a.questions, result);
-    if (text) return { text, kind: 'output' };
-    return null;
-  }
+  // ask_user is rendered by AskUserPreview component — skip here.
+  if (n === 'ask_user') return null;
 
   // For everything else, show the result
   if (result) return { text: result, kind: 'output' };
@@ -129,40 +125,6 @@ function shortenCmd(cmd) {
 
 function tryParse(s) {
   try { return JSON.parse(s); } catch { return null; }
-}
-
-/** Format ask_user questions and answers into a readable block. */
-function formatAskUser(questions, result) {
-  if (!Array.isArray(questions) || questions.length === 0) return result || '';
-
-  // Parse answers from result.
-  // Single question: entire result is the answer.
-  // Multiple: result is "Q: ...\nA: ..." pairs.
-  let answers = [];
-  if (result) {
-    if (questions.length === 1) {
-      answers = [result.trim()];
-    } else {
-      for (const line of result.split('\n')) {
-        if (line.startsWith('A: ')) answers.push(line.substring(3));
-      }
-    }
-  }
-
-  const lines = [];
-  for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
-    if (i > 0) lines.push('');
-    let qLine = 'Q: ' + (q.question || '');
-    if (Array.isArray(q.options) && q.options.length > 0) {
-      qLine += '  [' + q.options.join(' | ') + ']';
-    }
-    lines.push(qLine);
-    if (i < answers.length && answers[i]) {
-      lines.push('A: ' + answers[i]);
-    }
-  }
-  return lines.join('\n');
 }
 
 export function escapeHtml(str) {

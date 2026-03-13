@@ -1383,14 +1383,42 @@ func TestBuildToolBlockData_AskUser_SingleQuestion(t *testing.T) {
 	if data.Target != "¿Qué tipo de proyecto?" {
 		t.Errorf("Target = %q, want question text", data.Target)
 	}
-	if !strings.Contains(data.Body, "Q: ¿Qué tipo de proyecto?") {
+	if !strings.Contains(data.Body, "¿Qué tipo de proyecto?") {
 		t.Error("Body should contain question text")
 	}
-	if !strings.Contains(data.Body, "A: API REST") {
-		t.Error("Body should contain answer")
+	if !strings.Contains(data.Body, "● API REST") {
+		t.Error("Body should mark selected option with ●")
 	}
-	if !strings.Contains(data.Body, "API REST | CLI | Librería") {
-		t.Error("Body should show options")
+	if !strings.Contains(data.Body, "○ CLI") {
+		t.Error("Body should mark unselected options with ○")
+	}
+	if !strings.Contains(data.Body, "○ Librería") {
+		t.Error("Body should mark unselected options with ○")
+	}
+}
+
+func TestBuildToolBlockData_AskUser_CustomAnswer(t *testing.T) {
+	block := messageBlock{
+		Type: "tool", ToolName: "ask_user",
+		ToolArgs: map[string]any{
+			"questions": []any{
+				map[string]any{
+					"question": "¿Qué tipo?",
+					"options":  []any{"A", "B"},
+				},
+			},
+		},
+		ToolResult: "Mi respuesta custom", ToolDone: true,
+	}
+	data := buildToolBlockData(block, false)
+	if !strings.Contains(data.Body, "○ A") {
+		t.Error("Body should show unselected options with ○")
+	}
+	if !strings.Contains(data.Body, "○ B") {
+		t.Error("Body should show unselected options with ○")
+	}
+	if !strings.Contains(data.Body, "✎ Mi respuesta custom") {
+		t.Error("Body should show custom answer with ✎")
 	}
 }
 
@@ -1407,11 +1435,11 @@ func TestBuildToolBlockData_AskUser_MultipleQuestions(t *testing.T) {
 		ToolDone:   true,
 	}
 	data := buildToolBlockData(block, false)
-	if !strings.Contains(data.Body, "A: Answer one") {
-		t.Error("Body should contain first answer")
+	if !strings.Contains(data.Body, "→ Answer one") {
+		t.Error("Body should show first answer with →")
 	}
-	if !strings.Contains(data.Body, "A: Answer two") {
-		t.Error("Body should contain second answer")
+	if !strings.Contains(data.Body, "→ Answer two") {
+		t.Error("Body should show second answer with →")
 	}
 }
 
@@ -1426,11 +1454,15 @@ func TestBuildToolBlockData_AskUser_Pending(t *testing.T) {
 		ToolResult: "", ToolDone: false,
 	}
 	data := buildToolBlockData(block, false)
-	if !strings.Contains(data.Body, "Q: Pick one") {
+	if !strings.Contains(data.Body, "Pick one") {
 		t.Error("Body should show question even without answer")
 	}
-	if strings.Contains(data.Body, "A:") {
-		t.Error("Body should not show answer line when pending")
+	// All options unselected when pending.
+	if strings.Contains(data.Body, "●") {
+		t.Error("Body should not have selected bullet when pending")
+	}
+	if !strings.Contains(data.Body, "○ A") || !strings.Contains(data.Body, "○ B") {
+		t.Error("Body should show all options as unselected")
 	}
 }
 
