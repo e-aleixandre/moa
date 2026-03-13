@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/compaction"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -75,14 +76,14 @@ func drainSteer(ch <-chan string) []string {
 
 // agentLoop is the core loop.
 //
-// 1. Fire before_agent_start hooks
-// 2. For each turn:
-//   a. Fire context hooks
-//   b. Convert messages to LLM format
-//   c. Stream from provider
-//   d. Consume events, build assistant message
-//   e. Extract and execute tool calls
-//   f. If no tool calls → done
+//  1. Fire before_agent_start hooks
+//  2. For each turn:
+//     a. Fire context hooks
+//     b. Convert messages to LLM format
+//     c. Stream from provider
+//     d. Consume events, build assistant message
+//     e. Extract and execute tool calls
+//     f. If no tool calls → done
 //
 // Lifecycle guarantee: agent_start is always followed by agent_end.
 // If an error occurs, agent_error is emitted before agent_end.
@@ -276,6 +277,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 // consumeStream reads events from the provider channel, builds the assistant message,
 // and emits AgentEvents for each streaming event.
+//
+// Semantics: message_end means the provider finished emitting this assistant
+// message. It does not mean the turn has ended (tool execution may still follow).
 func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *Emitter) (*core.Message, error) {
 	var finalMsg *core.Message
 
@@ -365,17 +369,24 @@ func extractToolCalls(msg *core.Message) []core.Content {
 
 // toolExecSlot holds the state for one tool call during parallel execution.
 type toolExecSlot struct {
-	tc       core.Content
-	approved bool
-	reject   string      // rejection reason (empty if approved)
-	result   core.Result // populated after execution
-	isError  bool
+	tc           core.Content
+	approved     bool
+	startEmitted bool
+	rejectReason string      // rejection reason (empty if approved)
+	rejectKind   string      // "permission" or "other"
+	result       core.Result // populated after execution
+	isError      bool
 }
+
+const (
+	rejectKindPermission = "permission"
+	rejectKindOther      = "other"
+)
 
 // executeTools runs tool calls concurrently using a three-phase approach:
 //
-//  1. Pre-flight (sequential): guardrails, extension hooks, validation.
-//     Rejected calls are handled immediately via rejectToolCall.
+//  1. Pre-flight (sequential): guardrails, permission checks, extension hooks,
+//     and validation. Tool start is emitted per-call right before permission check.
 //  2. Execute (concurrent): approved calls run in parallel goroutines.
 //     Each writes to its own slot — no shared mutable state.
 //  3. Collect (sequential, in original order): run FireToolResult hooks,
@@ -392,38 +403,54 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		slots[i].tc = tc
 
 		if maxCalls > 0 && i >= maxCalls {
-			slots[i].reject = "Tool call skipped: max tool calls per turn exceeded"
+			slots[i].rejectReason = "Tool call skipped: max tool calls per turn exceeded"
+			slots[i].rejectKind = rejectKindOther
 			continue
 		}
-		// Permission check (may block waiting for user approval)
+
+		// Emit start right before permission evaluation so the UI can show
+		// what is being requested before the prompt appears.
+		cfg.emitter.Emit(core.AgentEvent{
+			Type:       core.AgentEventToolExecStart,
+			ToolCallID: tc.ToolCallID,
+			ToolName:   tc.ToolName,
+			Args:       tc.Arguments,
+		})
+		slots[i].startEmitted = true
+		// Best effort: flush start to subscribers before we might block on
+		// permission checks, so the UI sees the tool call first.
+		if cfg.permissionCheck != nil {
+			cfg.emitter.Drain(250 * time.Millisecond)
+		}
+
+		// Permission check (may block waiting for user approval).
 		if cfg.permissionCheck != nil {
 			if decision := cfg.permissionCheck(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
-				slots[i].reject = "Permission denied: " + decision.Reason
+				kind := decision.Kind
+				if kind == "" {
+					kind = core.ToolCallDecisionKindPermission
+				}
+				if kind == core.ToolCallDecisionKindPermission {
+					slots[i].rejectReason = "Permission denied: " + decision.Reason
+					slots[i].rejectKind = rejectKindPermission
+				} else {
+					slots[i].rejectReason = "Tool call blocked: " + decision.Reason
+					slots[i].rejectKind = rejectKindOther
+				}
 				continue
 			}
 		}
 		if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
-			slots[i].reject = "Tool call blocked: " + decision.Reason
+			slots[i].rejectReason = "Tool call blocked: " + decision.Reason
+			slots[i].rejectKind = rejectKindOther
 			continue
 		}
 		if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
-			slots[i].reject = "Parameter validation error: " + err.Error()
+			slots[i].rejectReason = "Parameter validation error: " + err.Error()
+			slots[i].rejectKind = rejectKindOther
 			continue
 		}
 		slots[i].approved = true
-	}
-
-	// Emit start events for approved calls.
-	for i := range slots {
-		if !slots[i].approved {
-			continue
-		}
-		cfg.emitter.Emit(core.AgentEvent{
-			Type:       core.AgentEventToolExecStart,
-			ToolCallID: slots[i].tc.ToolCallID,
-			ToolName:   slots[i].tc.ToolName,
-			Args:       slots[i].tc.Arguments,
-		})
 	}
 
 	// Phase 2: execute with conflict-aware scheduling.
@@ -435,7 +462,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 	var allDone sync.WaitGroup
 
 	pathDone := map[string]<-chan struct{}{} // per-path: signals when prior writer finishes
-	var lastShell <-chan struct{}             // last shell completion (nil initially)
+	var lastShell <-chan struct{}            // last shell completion (nil initially)
 
 	for i := range slots {
 		if !slots[i].approved {
@@ -510,11 +537,9 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 	allDone.Wait()
 
 	// Phase 3: collect results in original order.
-	// Rejected calls emit start+end and append error results here (not in
-	// pre-flight) to preserve the original tool call ordering in Messages.
 	for i := range slots {
 		if !slots[i].approved {
-			rejectToolCall(cfg, slots[i].tc, slots[i].reject)
+			rejectToolCall(cfg, slots[i])
 			continue
 		}
 
@@ -527,8 +552,9 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			ToolName:   slots[i].tc.ToolName,
 			Result:     &result,
 			IsError:    isError,
+			Rejected:   false,
 		})
-		cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(slots[i].tc, result, isError))
+		cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(slots[i].tc, result, isError, false))
 	}
 }
 
@@ -559,33 +585,46 @@ func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (core.Result
 	return result, result.IsError
 }
 
-// rejectToolCall emits the start/end events and appends an error result
-// for a tool call that was rejected (skipped, blocked, or failed validation).
-func rejectToolCall(cfg *loopConfig, tc core.Content, reason string) {
-	cfg.emitter.Emit(core.AgentEvent{
-		Type:       core.AgentEventToolExecStart,
-		ToolCallID: tc.ToolCallID,
-		ToolName:   tc.ToolName,
-		Args:       tc.Arguments,
-	})
+// rejectToolCall emits tool lifecycle end state and appends an error result
+// for a tool call that was rejected (skipped, blocked, permission denied,
+// or failed validation).
+func rejectToolCall(cfg *loopConfig, slot toolExecSlot) {
+	if !slot.startEmitted {
+		cfg.emitter.Emit(core.AgentEvent{
+			Type:       core.AgentEventToolExecStart,
+			ToolCallID: slot.tc.ToolCallID,
+			ToolName:   slot.tc.ToolName,
+			Args:       slot.tc.Arguments,
+		})
+	}
+	rejected := slot.rejectKind == rejectKindPermission
+	reason := slot.rejectReason
+	if reason == "" {
+		reason = "Tool call rejected"
+	}
 	result := core.ErrorResult(reason)
-	cfg.state.Messages = append(cfg.state.Messages, core.WrapMessage(
-		core.NewToolResultMessage(tc.ToolCallID, tc.ToolName, result.Content, true),
-	))
+	cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(slot.tc, result, true, rejected))
 	cfg.emitter.Emit(core.AgentEvent{
 		Type:       core.AgentEventToolExecEnd,
-		ToolCallID: tc.ToolCallID,
-		ToolName:   tc.ToolName,
+		ToolCallID: slot.tc.ToolCallID,
+		ToolName:   slot.tc.ToolName,
 		IsError:    true,
+		Rejected:   rejected,
 		Result:     &result,
 	})
 }
 
 // toolResultMessage creates an AgentMessage wrapping a tool result.
-func toolResultMessage(tc core.Content, result core.Result, isError bool) core.AgentMessage {
-	return core.WrapMessage(core.NewToolResultMessage(
+func toolResultMessage(tc core.Content, result core.Result, isError bool, rejected bool) core.AgentMessage {
+	msg := core.WrapMessage(core.NewToolResultMessage(
 		tc.ToolCallID, tc.ToolName,
 		result.Content, isError,
 	))
+	if rejected {
+		if msg.Custom == nil {
+			msg.Custom = make(map[string]any)
+		}
+		msg.Custom["rejected"] = true
+	}
+	return msg
 }
-

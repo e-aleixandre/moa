@@ -77,6 +77,11 @@ type AgentConfig struct {
 	// Set Enabled:false to disable.
 	Compaction *core.CompactionSettings
 
+	// DrainTimeout is the maximum time Send/Run will wait for subscribers to
+	// finish processing events before returning. Default: 2s.
+	// Set to 0 to disable auto-drain.
+	DrainTimeout time.Duration
+
 	Logger *slog.Logger
 }
 
@@ -109,6 +114,9 @@ func New(cfg AgentConfig) (*Agent, error) {
 	if cfg.Tools == nil {
 		cfg.Tools = core.NewRegistry()
 	}
+	if cfg.DrainTimeout == 0 {
+		cfg.DrainTimeout = 2 * time.Second
+	}
 	if cfg.Compaction == nil {
 		defaults := core.DefaultCompactionSettings
 		cfg.Compaction = &defaults
@@ -134,8 +142,8 @@ func New(cfg AgentConfig) (*Agent, error) {
 // Run initializes state with a new prompt and runs the agent loop.
 // Any previous conversation state is replaced. For multi-turn, use Send.
 // Returns all messages produced during the run.
-// Events are delivered asynchronously to subscribers; there is no guarantee
-// all events are delivered by the time Run returns.
+// Before returning, Run waits for all accepted in-flight events to be processed
+// by subscribers (up to DrainTimeout). Dropped events are not waited on.
 func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, error) {
 	return a.execute(ctx, func() {
 		a.state = AgentState{
@@ -158,6 +166,8 @@ func (a *Agent) IsRunning() bool {
 // If no previous state exists (e.g., first call without Run), state is auto-initialized.
 // State mutation is atomic with the "not running" check — concurrent Send calls
 // cannot corrupt state.
+// Before returning, Send waits for all accepted in-flight events to be processed
+// by subscribers (up to DrainTimeout). Dropped events are not waited on.
 func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, error) {
 	return a.execute(ctx, func() {
 		if a.state.Model.ID == "" {
@@ -172,6 +182,8 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 // and runs the agent loop, continuing the conversation.
 // The content slice is shallow-copied to prevent caller aliasing. This is sufficient
 // for text and image content blocks which only contain immutable string fields.
+// Before returning, SendWithContent waits for all accepted in-flight events to be
+// processed by subscribers (up to DrainTimeout). Dropped events are not waited on.
 func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error) {
 	cc := make([]core.Content, len(content))
 	copy(cc, content)
@@ -373,13 +385,14 @@ func (a *Agent) Messages() []core.AgentMessage {
 
 // Subscribe registers a listener for agent events.
 // Returns an unsubscribe function. Listeners are async — slow listeners don't block the loop.
+// Send/Run auto-drain before returning, so all accepted events are processed.
 func (a *Agent) Subscribe(fn func(core.AgentEvent)) func() {
 	return a.emitter.Subscribe(fn)
 }
 
-// Drain waits until all pending events have been delivered to subscribers,
-// or timeout expires. Call after Run() in headless mode to ensure terminal
-// events (agent_end) are delivered before process exit.
+// Drain waits until all in-flight events have been processed by subscribers,
+// or timeout expires. Rarely needed — Send/Run auto-drain before returning.
+// Kept for backward compatibility and special cases (e.g., mid-run flushes).
 func (a *Agent) Drain(timeout time.Duration) {
 	a.emitter.Drain(timeout)
 }
@@ -558,6 +571,12 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 			Role:    "assistant",
 			Content: []core.Content{core.TextContent("(interrupted by user)")},
 		}))
+	}
+
+	// Ensure all async events from this run have been processed by subscribers
+	// before returning. The timeout is a safety net for stuck handlers.
+	if a.config.DrainTimeout > 0 {
+		a.emitter.Drain(a.config.DrainTimeout)
 	}
 
 	// Return a copy — the internal slice is reused across turns (Send appends).

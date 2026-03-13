@@ -18,8 +18,10 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 const renderInterval = 16 * time.Millisecond // ~60fps
@@ -128,6 +130,9 @@ type appModel struct {
 	// Permissions
 	permGate *permission.Gate
 
+	// Verify
+	verifyCancel context.CancelFunc // non-nil while /verify is running
+
 	// Plan mode
 	planMode              *planmode.PlanMode
 	planMenu              planMenu
@@ -139,6 +144,9 @@ type appModel struct {
 	pendingReviewFeedback string                 // reviewer feedback to prepend to next user message
 	taskStore             *tasks.Store
 	taskWidget            taskWidget
+
+	// Prompt templates
+	promptTemplates []promptpkg.Template
 
 	// Subagent status
 	subagentCountCh  <-chan int
@@ -169,6 +177,7 @@ type Config struct {
 	SubagentNotifyCh      <-chan SubagentNotification // receives async subagent completion notifications (nil = disabled)
 	PlanMode              *planmode.PlanMode          // plan mode instance (nil = disabled)
 	TaskStore             *tasks.Store                // task store (nil = no task tracking)
+	PromptTemplates       []promptpkg.Template        // available prompt templates (nil = none)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -233,6 +242,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		subagentNotifyCh:     cfg.SubagentNotifyCh,
 		planMode:             cfg.PlanMode,
 		taskStore:            cfg.TaskStore,
+		promptTemplates:      cfg.PromptTemplates,
 		baseSystemPrompt:     ag.SystemPrompt(),
 	}
 
@@ -514,6 +524,24 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case verifyResultMsg:
+		m.s.running = false
+		m.input.SetEnabled(true)
+		m.verifyCancel = nil
+		m.status.SetText("")
+		if msg.Err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: msg.Err.Error()})
+		} else {
+			text := verify.FormatResult(*msg.Result)
+			blockType := "status"
+			if !msg.Result.AllPass {
+				blockType = "error"
+			}
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: blockType, Raw: text})
+		}
+		m.updateViewport()
+		return m, nil
+
 	case permissionRequestMsg:
 		// Auto-exit transcript mode so the prompt is visible and actionable
 		var cmds []tea.Cmd
@@ -748,6 +776,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			content := m.renderTranscriptBlocks(m.s.fullHistory)
 			return m, tea.Sequence(clearScreen(), tea.Println(content))
 		case tea.KeyCtrlC:
+			if m.verifyCancel != nil {
+				m.verifyCancel()
+				return m, nil
+			}
 			if m.s.running {
 				m.agent.Abort()
 				return m, nil
@@ -769,9 +801,16 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.textarea.Reset()
 			return m, m.forceRepaint()
 		}
-		// Ctrl+C escalation: clear input → abort agent → quit
+		// Ctrl+C escalation: clear input → cancel verify → abort agent → quit
 		if strings.TrimSpace(m.input.textarea.Value()) != "" {
 			m.input.textarea.Reset()
+			return m, nil
+		}
+		if m.verifyCancel != nil {
+			m.verifyCancel()
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status", Raw: "(verify interrupted)",
+			})
 			return m, nil
 		}
 		if m.s.running {
@@ -1001,4 +1040,3 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
-

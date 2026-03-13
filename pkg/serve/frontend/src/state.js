@@ -227,10 +227,16 @@ function normalizeHistory(raw) {
           }
           const tr = resultMap[c.tool_call_id];
           let resultText = null;
-          let status = 'done';
+          let status = 'running';
           if (tr) {
             resultText = (tr.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
-            if (tr.is_error) status = 'error';
+            if (tr.custom?.rejected === true) {
+              status = 'rejected';
+            } else if (tr.is_error) {
+              status = 'error';
+            } else {
+              status = 'done';
+            }
           }
           result.push({
             _type: 'tool_start',
@@ -347,6 +353,25 @@ export function handleWsMessageEnd(id, fullText) {
 export function handleWsToolStart(id, data) {
   const sess = state.sessions[id];
   if (!sess) return;
+
+  const existingIdx = (sess.messages || []).findIndex(
+    m => m._type === 'tool_start' && m.tool_call_id === data.tool_call_id,
+  );
+
+  if (existingIdx >= 0) {
+    const messages = sess.messages.map((m, idx) => {
+      if (idx !== existingIdx) return m;
+      return {
+        ...m,
+        tool_name: data.tool_name,
+        args: data.args,
+        status: 'running',
+      };
+    });
+    updateSession(id, { messages });
+    return;
+  }
+
   const toolMsg = {
     _type: 'tool_start',
     tool_call_id: data.tool_call_id,
@@ -374,9 +399,14 @@ export function handleWsToolEnd(id, data) {
   }
   const sess = state.sessions[id];
   if (!sess) return;
+
+  const nextStatus = data.rejected === true
+    ? 'rejected'
+    : (data.is_error ? 'error' : 'done');
+
   const messages = sess.messages.map(m => {
     if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
-      return { ...m, status: data.is_error ? 'error' : 'done', result: data.result, streamingResult: null };
+      return { ...m, status: nextStatus, result: data.result, streamingResult: null };
     }
     return m;
   });
@@ -670,7 +700,26 @@ export function autoSelectMobile() {
   }
 }
 
+const resumingIds = new Set();
+
 function afterVisibilityChange() {
   const visible = visibleSessionIds(state);
-  syncConnections(visible);
+
+  // Auto-resume saved sessions that are visible in tiles.
+  // Without this, syncConnections would try to open a WebSocket to a session
+  // that only exists on disk, getting 404 → infinite reconnect loop.
+  for (const id of visible) {
+    const sess = state.sessions[id];
+    if (sess?.state === 'saved' && !resumingIds.has(id)) {
+      resumingIds.add(id);
+      resumeSession(id)
+        .catch(e => console.error('Auto-resume failed for', id, e))
+        .finally(() => resumingIds.delete(id));
+    }
+  }
+
+  // Only open WebSockets for non-saved sessions (resumed ones will
+  // trigger another afterVisibilityChange via loadSessions).
+  const connectable = visible.filter(id => state.sessions[id]?.state !== 'saved');
+  syncConnections(connectable);
 }

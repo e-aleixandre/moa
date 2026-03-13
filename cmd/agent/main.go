@@ -25,14 +25,17 @@ import (
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/provider"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/serve"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/skill"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // Set by goreleaser ldflags.
@@ -238,6 +241,13 @@ func main() {
 		permGate = permission.New(permMode, permCfg)
 	}
 
+	// Discover skills early — needed by both subagent config and system prompt.
+	skills := skill.Discover(cwd)
+	skillsIndex := skill.FormatIndex(skills)
+
+	// Discover prompt templates for TUI.
+	promptTemplates := promptpkg.Discover(cwd)
+
 	var agHolder atomic.Pointer[agent.Agent]
 	subagentCountCh := make(chan int, 16)
 	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
@@ -276,6 +286,7 @@ func main() {
 		ParentTools:   toolReg,
 		AppCtx:        ctx,
 		WorkspaceRoot: cwd,
+		SkillsIndex:   skillsIndex,
 		OnAsyncJobChange: func(count int) {
 			select {
 			case subagentCountCh <- count:
@@ -317,8 +328,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Verify tool — register only if .moa/verify.json exists and is valid.
+	verifyCfg, verifyErr := verify.LoadConfig(cwd)
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid .moa/verify.json: %v\n", verifyErr)
+	}
+	if verifyCfg != nil {
+		toolReg.Register(verify.NewTool(cwd))
+	}
+
+	// Register skill tool (skills already discovered above).
+	if len(skills) > 0 {
+		toolReg.Register(skill.NewTool(skills))
+	}
+
 	// Build system prompt after all tools are registered.
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd)
+	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil, skillsIndex)
 
 	// Resolve budget: flag wins (including explicit 0), else config.
 	resolvedBudget := moaCfg.MaxBudget
@@ -480,6 +505,7 @@ func main() {
 			SubagentNotifyCh:      subagentNotifyCh,
 			PlanMode:              pm,
 			TaskStore:             taskStore,
+			PromptTemplates:       promptTemplates,
 			OnPinnedModelsChange: func(ids []string) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 					cfg.PinnedModels = ids
@@ -537,9 +563,6 @@ func main() {
 	}
 
 	msgs, err := ag.Run(ctx, promptContent)
-
-	// Drain emitter: ensure all async events are delivered before exit.
-	ag.Drain(2 * time.Second)
 
 	if !jsonOutput {
 		if finalText := core.ExtractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {

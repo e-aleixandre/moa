@@ -152,7 +152,7 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 	switch mode {
 	case ModeAsk:
 		if matchPolicy(deny, name, args) {
-			return &core.ToolCallDecision{Block: true, Reason: "denied by policy"}
+			return &core.ToolCallDecision{Block: true, Reason: "denied by policy", Kind: core.ToolCallDecisionKindPermission}
 		}
 		if matchPolicy(allow, name, args) {
 			return nil
@@ -164,7 +164,7 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 			case DecisionApprove:
 				return nil
 			case DecisionDeny:
-				return &core.ToolCallDecision{Block: true, Reason: "denied by AI evaluator"}
+				return &core.ToolCallDecision{Block: true, Reason: "denied by AI evaluator", Kind: core.ToolCallDecisionKindPermission}
 			case DecisionAsk:
 				// fall through to user prompt
 			}
@@ -181,7 +181,7 @@ func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *c
 	select {
 	case g.reqCh <- Request{ToolName: name, Args: args, Response: respCh}:
 	case <-ctx.Done():
-		return &core.ToolCallDecision{Block: true, Reason: "cancelled"}
+		return &core.ToolCallDecision{Block: true, Reason: "cancelled", Kind: core.ToolCallDecisionKindPermission}
 	}
 
 	select {
@@ -196,8 +196,8 @@ func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *c
 		if resp.Feedback != "" {
 			reason = resp.Feedback
 		}
-		return &core.ToolCallDecision{Block: true, Reason: reason}
+		return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPermission}
 	case <-ctx.Done():
-		return &core.ToolCallDecision{Block: true, Reason: "cancelled"}
+		return &core.ToolCallDecision{Block: true, Reason: "cancelled", Kind: core.ToolCallDecisionKindPermission}
 	}
 }

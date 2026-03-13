@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // --- Commands ---
@@ -27,6 +29,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	}
 	if strings.HasPrefix(cmd, "tasks ") {
 		return m.handleTasksCommand(strings.TrimSpace(cmd[6:]))
+	}
+	if cmd == "prompt" || strings.HasPrefix(cmd, "prompt ") {
+		return m.handlePromptTemplate(strings.TrimSpace(strings.TrimPrefix(cmd, "prompt")))
 	}
 
 	switch cmd {
@@ -108,6 +113,28 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "plan":
 		return m.handlePlanCommand()
+
+	case "verify":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Cannot verify while agent is running",
+			})
+			return m, nil
+		}
+		m.s.running = true
+		m.input.SetEnabled(false)
+		m.status.SetText("running verify checks...")
+		cwd := m.cwd
+		ctx, cancel := context.WithCancel(m.baseCtx)
+		m.verifyCancel = cancel
+		return m, func() tea.Msg {
+			defer cancel()
+			result, err := verify.Execute(ctx, cwd)
+			if err != nil {
+				return verifyResultMsg{Err: err}
+			}
+			return verifyResultMsg{Result: &result}
+		}
 
 	case "exit", "quit":
 		m.cleanup()
@@ -734,3 +761,38 @@ func (m *appModel) restoreModelFromMetadata(sess *session.Session) {
 	m.topBar.UpdateModelSegment(m.modelName)
 }
 
+// handlePromptTemplate processes `/prompt` and `/prompt <name>`.
+func (m appModel) handlePromptTemplate(name string) (tea.Model, tea.Cmd) {
+	if len(m.promptTemplates) == 0 {
+		m.status.SetText("no prompt templates found in .moa/prompts/ or ~/.config/moa/prompts/")
+		return m, nil
+	}
+
+	if name == "" {
+		// List available templates.
+		var lines []string
+		for _, t := range m.promptTemplates {
+			entry := t.Name
+			if len(t.Placeholders) > 0 {
+				entry += " ({{" + strings.Join(t.Placeholders, "}}, {{") + "}})"
+			}
+			lines = append(lines, "  "+entry)
+		}
+		msg := "available templates:\n" + strings.Join(lines, "\n")
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: msg})
+		m.updateViewport()
+		return m, nil
+	}
+
+	// Find the template by name.
+	for _, t := range m.promptTemplates {
+		if t.Name == name {
+			m.input.textarea.SetValue(t.Content)
+			m.input.textarea.CursorEnd()
+			return m, nil
+		}
+	}
+
+	m.status.SetText("unknown template: " + name)
+	return m, nil
+}

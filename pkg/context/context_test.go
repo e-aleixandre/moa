@@ -95,7 +95,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		{Name: "read", Description: "Read files"},
 	}
 
-	prompt := BuildSystemPrompt("# Project: test", tools, "/test/cwd")
+	prompt := BuildSystemPrompt("# Project: test", tools, "/test/cwd", false)
 
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role description")
@@ -114,10 +114,53 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_WithVerify(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "bash", Description: "Execute commands"},
+		{Name: "verify", Description: "Run verification checks"},
+	}
+	prompt := BuildSystemPrompt("", tools, "/test", true)
+	if !strings.Contains(prompt, "call the verify tool") {
+		t.Error("expected verify guideline when hasVerify=true and verify tool present")
+	}
+}
+
+func TestBuildSystemPrompt_VerifyFalseNoGuideline(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "bash", Description: "Execute commands"},
+		{Name: "verify", Description: "Run verification checks"},
+	}
+	prompt := BuildSystemPrompt("", tools, "/test", false)
+	if strings.Contains(prompt, "call the verify tool") {
+		t.Error("expected no verify guideline when hasVerify=false")
+	}
+}
+
 func TestBuildSystemPrompt_Empty(t *testing.T) {
-	prompt := BuildSystemPrompt("", nil, "")
+	prompt := BuildSystemPrompt("", nil, "", false)
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role even with no AGENTS.md")
+	}
+}
+
+func TestBuildSystemPrompt_WithSkills(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "load_skill", Description: "Load a skill pack"},
+	}
+	skillsIndex := "Available skills (use the load_skill tool to load when relevant):\n- go-testing: Go Testing — Best practices for Go tests\n"
+	prompt := BuildSystemPrompt("", tools, "/test", false, skillsIndex)
+	if !strings.Contains(prompt, "go-testing: Go Testing") {
+		t.Error("expected skills index in prompt")
+	}
+	if !strings.Contains(prompt, "load_skill") {
+		t.Error("expected load_skill tool in prompt")
+	}
+}
+
+func TestBuildSystemPrompt_EmptySkills(t *testing.T) {
+	prompt := BuildSystemPrompt("", nil, "/test", false, "")
+	if strings.Contains(prompt, "Available skills") {
+		t.Error("empty skills index should not appear")
 	}
 }
 

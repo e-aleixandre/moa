@@ -84,7 +84,7 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 	}
 }
 
-func TestBuildRequestBody_WithThinking(t *testing.T) {
+func TestBuildRequestBody_WithThinkingAdaptive46(t *testing.T) {
 	req := core.Request{
 		Model: core.Model{ID: "claude-sonnet-4-6"},
 		Messages: []core.Message{
@@ -109,13 +109,52 @@ func TestBuildRequestBody_WithThinking(t *testing.T) {
 	if !ok {
 		t.Fatal("expected thinking config")
 	}
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking type: got %v", thinking["type"])
+	}
+
+	outputConfig, ok := body["output_config"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output_config with effort")
+	}
+	if outputConfig["effort"] != "medium" {
+		t.Errorf("effort: got %v, want medium", outputConfig["effort"])
+	}
+}
+
+func TestBuildRequestBody_WithThinkingManualLegacy(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "claude-sonnet-4-5"},
+		Messages: []core.Message{
+			core.NewUserMessage("Think hard"),
+		},
+		Options: core.StreamOptions{
+			ThinkingLevel: "high",
+		},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatal("expected thinking config")
+	}
 	if thinking["type"] != "enabled" {
 		t.Errorf("thinking type: got %v", thinking["type"])
 	}
 
-	maxTokens := body["max_tokens"].(float64)
-	if maxTokens < 16000 {
-		t.Errorf("max_tokens should be >= 16000 with thinking, got %v", maxTokens)
+	budget := int(thinking["budget_tokens"].(float64))
+	maxTokens := int(body["max_tokens"].(float64))
+	if maxTokens <= budget {
+		t.Fatalf("max_tokens should be > budget_tokens, got max=%d budget=%d", maxTokens, budget)
 	}
 }
 
@@ -123,7 +162,7 @@ func TestConvertMessages_ToolResult(t *testing.T) {
 	msgs := []core.Message{
 		core.NewUserMessage("Read the file"),
 		{
-			Role:    "assistant",
+			Role: "assistant",
 			Content: []core.Content{
 				core.TextContent("I'll read it."),
 				core.ToolCallContent("toolu_01", "read", map[string]any{"path": "main.go"}),
@@ -449,7 +488,7 @@ func TestConvertMessages_MergeConsecutive(t *testing.T) {
 	msgs := []core.Message{
 		core.NewUserMessage("Do things"),
 		{
-			Role:    "assistant",
+			Role: "assistant",
 			Content: []core.Content{
 				core.ToolCallContent("t1", "bash", map[string]any{"command": "ls"}),
 				core.ToolCallContent("t2", "bash", map[string]any{"command": "pwd"}),

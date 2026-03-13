@@ -407,7 +407,7 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
 			"workspaceRoot": mgr.workspaceRoot,
-			"defaultModel":  mgr.defaultModel.Name,
+			"defaultModel":  fullModelSpec(mgr.defaultModel),
 		}
 		writeJSON(w, http.StatusOK, caps)
 	}

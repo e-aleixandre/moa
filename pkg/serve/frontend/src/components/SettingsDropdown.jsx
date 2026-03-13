@@ -4,7 +4,7 @@ import { configureSession } from '../state.js';
 import { api } from '../api.js';
 
 const THINKING_LEVELS = [
-  { value: 'none', label: 'None' },
+  { value: 'off', label: 'Off' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
@@ -34,7 +34,7 @@ export function SettingsDropdown({ sessionId, session }) {
     return () => document.removeEventListener('mousedown', handle);
   }, [open]);
 
-  const currentThinking = session?.thinking || 'medium';
+  const currentThinking = (session?.thinking === 'none' ? 'off' : session?.thinking) || 'medium';
 
   const handleModel = async (spec) => {
     try {

@@ -169,6 +169,7 @@ var knownCommands = map[string]bool{
 	"plan":        true,
 	"permissions": true,
 	"tasks":       true,
+	"verify":      true,
 }
 
 // ParseCommand returns (command string with args, true) only if text starts with a known /command.

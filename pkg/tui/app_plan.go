@@ -179,7 +179,7 @@ func (m *appModel) syncPermissionCheck() {
 		// Plan mode filter first (if plan mode is active).
 		if pm != nil {
 			if allowed, reason := pm.FilterToolCall(name, args); !allowed {
-				return &core.ToolCallDecision{Block: true, Reason: reason}
+				return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPolicy}
 			}
 		}
 		// Permission gate second (if configured).

@@ -65,10 +65,18 @@ func ErrorResult(msg string) Result {
 	return Result{Content: []Content{TextContent("Error: " + msg)}, IsError: true}
 }
 
+const (
+	// ToolCallDecisionKindPermission marks user-facing permission denials.
+	ToolCallDecisionKindPermission = "permission"
+	// ToolCallDecisionKindPolicy marks non-permission policy/plan blocks.
+	ToolCallDecisionKindPolicy = "policy"
+)
+
 // ToolCallDecision is returned by tool-call hooks to optionally block execution.
 type ToolCallDecision struct {
 	Block  bool
 	Reason string
+	Kind   string // optional classification (e.g. permission, policy)
 }
 
 // Registry holds registered tools. Thread-safe.

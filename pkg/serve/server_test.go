@@ -235,6 +235,8 @@ func TestWebSocket_Streaming(t *testing.T) {
 	// event broadcast by Send's goroutine.
 	gotTextDelta := false
 	gotMessageEnd := false
+	gotTurnStart := false
+	gotTurnEnd := false
 	gotRunEnd := false
 	deadline := time.After(10 * time.Second)
 
@@ -255,6 +257,10 @@ func TestWebSocket_Streaming(t *testing.T) {
 			gotTextDelta = true
 		case "message_end":
 			gotMessageEnd = true
+		case "turn_start":
+			gotTurnStart = true
+		case "turn_end":
+			gotTurnEnd = true
 		case "run_end":
 			gotRunEnd = true
 		}
@@ -265,6 +271,143 @@ func TestWebSocket_Streaming(t *testing.T) {
 	}
 	if !gotMessageEnd {
 		t.Error("expected message_end event")
+	}
+	if !gotTurnStart {
+		t.Error("expected turn_start event")
+	}
+	if !gotTurnEnd {
+		t.Error("expected turn_end event")
+	}
+}
+
+func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	toolCallHandler := func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 4)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role: "assistant",
+				Content: []core.Content{
+					core.ToolCallContent("tc-1", "bash", map[string]any{"command": "echo hi"}),
+				},
+				StopReason: "tool_use",
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, ".moa"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".moa", "config.json"), []byte(`{"permissions":{"mode":"ask"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := newMockProvider(toolCallHandler, simpleResponseHandler("done"))
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
+		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:   workspace,
+		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		SessionBaseDir:  t.TempDir(),
+	})
+
+	httpSrv := httptest.NewServer(NewServer(mgr))
+	defer httpSrv.Close()
+
+	sess, _ := mgr.CreateSession(CreateOpts{})
+
+	wsCtx, wsCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer wsCancel()
+	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+
+	var init Event
+	if err := wsjson.Read(wsCtx, conn, &init); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", `{"text":"hello"}`)
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	}
+
+	idxToolStart := -1
+	idxPermission := -1
+	seenRejected := false
+	eventIdx := 0
+	resolved := false
+	gotRunEnd := false
+
+	deadline := time.After(10 * time.Second)
+	for !gotRunEnd {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for run_end (tool_start=%d permission=%d rejected=%v)", idxToolStart, idxPermission, seenRejected)
+		default:
+		}
+
+		var evt Event
+		if err := wsjson.Read(wsCtx, conn, &evt); err != nil {
+			t.Fatalf("ws read error: %v", err)
+		}
+
+		switch evt.Type {
+		case "tool_start":
+			if idxToolStart == -1 {
+				idxToolStart = eventIdx
+			}
+		case "permission_request":
+			if idxPermission == -1 {
+				idxPermission = eventIdx
+			}
+			if !resolved {
+				data, _ := evt.Data.(map[string]any)
+				permID, _ := data["id"].(string)
+				if permID == "" {
+					t.Fatal("permission_request missing id")
+				}
+				respPerm := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/permission", `{"id":"`+permID+`","approved":false,"feedback":""}`)
+				respPerm.Body.Close() //nolint:errcheck
+				if respPerm.StatusCode != 200 {
+					t.Fatalf("expected 200 on permission resolve, got %d", respPerm.StatusCode)
+				}
+				resolved = true
+			}
+		case "tool_end":
+			data, _ := evt.Data.(map[string]any)
+			if data["tool_call_id"] == "tc-1" {
+				rejected, _ := data["rejected"].(bool)
+				seenRejected = rejected
+			}
+		case "run_end":
+			gotRunEnd = true
+		}
+		eventIdx++
+	}
+
+	if idxToolStart == -1 {
+		t.Fatal("missing tool_start event")
+	}
+	if idxPermission == -1 {
+		t.Fatal("missing permission_request event")
+	}
+	if idxToolStart > idxPermission {
+		t.Fatalf("tool_start must arrive before permission_request (tool_start=%d permission=%d)", idxToolStart, idxPermission)
+	}
+	if !seenRejected {
+		t.Fatal("expected tool_end with rejected=true after denial")
 	}
 }
 

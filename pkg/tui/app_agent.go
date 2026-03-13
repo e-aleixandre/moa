@@ -176,9 +176,17 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 				Type: "thinking", Raw: m.s.thinkingText,
 			})
 		}
-		if m.s.streamText != "" {
+		assistantText := m.s.streamText
+		if assistantText == "" {
+			for _, c := range e.Message.Content {
+				if c.Type == "text" {
+					assistantText += c.Text
+				}
+			}
+		}
+		if assistantText != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "assistant", Raw: m.s.streamText,
+				Type: "assistant", Raw: assistantText,
 			})
 		}
 		m.s.streamText = ""
@@ -501,4 +509,3 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 		}
 	}
 }
-
