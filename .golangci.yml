@@ -1,0 +1,14 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  disable:
+    - depguard
+
+issues:
+  exclude-dirs:
+    - pkg/serve/static
+    - pkg/serve/frontend/node_modules

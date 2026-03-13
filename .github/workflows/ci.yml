@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: pkg/serve/frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: pkg/serve/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build
+        run: go build ./...
+        env:
+          GOFLAGS: -mod=readonly
+
+      - name: Check go.sum tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.sum
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: pkg/serve/frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: pkg/serve/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.1.6

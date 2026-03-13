@@ -35,6 +35,13 @@ import (
 	"github.com/ealeixandre/moa/pkg/tui"
 )
 
+// Set by goreleaser ldflags.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 type ProviderBuildResult struct {
 	Provider   core.Provider
 	AuthNotice string
@@ -70,9 +77,15 @@ func (r *resumeFlag) IsBoolFlag() bool { return true }
 
 func main() {
 	// Dispatch subcommands before flag.Parse() (which owns the default flagset).
-	if len(os.Args) > 1 && os.Args[1] == "serve" {
-		runServe(os.Args[2:])
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve":
+			runServe(os.Args[2:])
+			return
+		case "version", "--version", "-v":
+			fmt.Printf("moa %s (commit %s, built %s)\n", version, commit, date)
+			return
+		}
 	}
 
 	os.Args = normalizeArgs(os.Args)
