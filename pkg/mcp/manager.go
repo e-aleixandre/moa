@@ -150,6 +150,8 @@ func wrapMCPTool(serverName string, mcpTool *sdkmcp.Tool, session *sdkmcp.Client
 
 	label := serverName + "/" + mcpTool.Name
 
+	// Effect defaults to EffectUnknown (zero value), which the scheduler
+	// treats as a barrier — safe for external tools with unknown side effects.
 	return core.Tool{
 		Name:        fullName,
 		Label:       label,

@@ -38,6 +38,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 			},
 			"required": ["command"]
 		}`),
+		Effect: core.EffectShell,
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			command := getString(params, "command", "")
 			if command == "" {

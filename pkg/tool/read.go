@@ -55,6 +55,7 @@ func NewRead(cfg ToolConfig) core.Tool {
 			},
 			"required": ["path"]
 		}`),
+		Effect: core.EffectReadOnly,
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			path := getString(params, "path", "")
 			if path == "" {

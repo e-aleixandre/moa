@@ -39,6 +39,7 @@ func NewFetch(cfg ToolConfig) core.Tool {
 			},
 			"required": ["url"]
 		}`),
+		Effect: core.EffectReadOnly,
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			rawURL := getString(params, "url", "")
 			if rawURL == "" {

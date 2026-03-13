@@ -37,6 +37,7 @@ func NewGrep(cfg ToolConfig) core.Tool {
 			},
 			"required": ["pattern"]
 		}`),
+		Effect: core.EffectReadOnly,
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			pattern := getString(params, "pattern", "")
 			if pattern == "" {

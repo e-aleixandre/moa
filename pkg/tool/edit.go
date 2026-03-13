@@ -34,6 +34,18 @@ func NewEdit(cfg ToolConfig) core.Tool {
 			},
 			"required": ["path", "oldText", "newText"]
 		}`),
+		Effect: core.EffectWritePath,
+		LockKey: func(args map[string]any) string {
+			p := getString(args, "path", "")
+			if p == "" {
+				return ""
+			}
+			resolved, err := safePath(cfg, p)
+			if err != nil {
+				return ""
+			}
+			return resolved
+		},
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			path := getString(params, "path", "")
 			oldText := getString(params, "oldText", "")

@@ -392,19 +392,88 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		})
 	}
 
-	// Phase 2: execute approved calls concurrently.
-	var wg sync.WaitGroup
+	// Phase 2: execute with conflict-aware scheduling.
+	//
+	// ReadOnly tools run in parallel with everything. WritePath tools
+	// sharing the same lock key run sequentially (preserving original order),
+	// but different keys run in parallel. Shell/Unknown tools act as barriers:
+	// they wait for all prior non-read calls before executing.
+	var allDone sync.WaitGroup
+
+	pathDone := map[string]<-chan struct{}{} // per-path: signals when prior writer finishes
+	var lastShell <-chan struct{}             // last shell completion (nil initially)
+
 	for i := range slots {
 		if !slots[i].approved {
 			continue
 		}
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
-		}(i)
+		t, _ := cfg.tools.Get(slots[i].tc.ToolName)
+		effect := t.Effect
+
+		// WritePath with failed LockKey → treat as shell.
+		var lockKey string
+		if effect == core.EffectWritePath {
+			if t.LockKey != nil {
+				lockKey = t.LockKey(slots[i].tc.Arguments)
+			}
+			if lockKey == "" {
+				effect = core.EffectShell
+			}
+		}
+
+		switch effect {
+		case core.EffectReadOnly:
+			allDone.Add(1)
+			go func(idx int) {
+				defer allDone.Done()
+				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+			}(i)
+
+		case core.EffectWritePath:
+			done := make(chan struct{})
+			waitForPath := pathDone[lockKey] // nil if first writer to this path
+			waitForShell := lastShell        // wait for most recent shell barrier
+			pathDone[lockKey] = done
+
+			allDone.Add(1)
+			go func(idx int, wPath, wShell <-chan struct{}) {
+				defer allDone.Done()
+				defer close(done)
+				if wPath != nil {
+					<-wPath
+				}
+				if wShell != nil {
+					<-wShell
+				}
+				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+			}(i, waitForPath, waitForShell)
+
+		default: // EffectShell, EffectUnknown
+			done := make(chan struct{})
+			allDone.Add(1)
+			// Wait for all pending path writers + previous shell.
+			waits := make([]<-chan struct{}, 0, len(pathDone)+1)
+			for _, ch := range pathDone {
+				waits = append(waits, ch)
+			}
+			if lastShell != nil {
+				waits = append(waits, lastShell)
+			}
+			go func(idx int, waits []<-chan struct{}) {
+				defer allDone.Done()
+				defer close(done)
+				for _, w := range waits {
+					<-w
+				}
+				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+			}(i, waits)
+			// Shell becomes the new barrier; reset path tracking.
+			lastShell = done
+			pathDone = map[string]<-chan struct{}{}
+		}
 	}
-	wg.Wait()
+
+	allDone.Wait()
 
 	// Phase 3: collect results in original order.
 	// Rejected calls emit start+end and append error results here (not in

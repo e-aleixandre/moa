@@ -7,6 +7,17 @@ import (
 	"sync"
 )
 
+// ToolEffect classifies a tool's side effects for the conflict-aware scheduler.
+// The zero value (EffectUnknown) is treated as a barrier — safe by default.
+type ToolEffect int
+
+const (
+	EffectUnknown   ToolEffect = iota // zero value — serialized (conservative)
+	EffectReadOnly                    // no side effects — safe to parallelize
+	EffectWritePath                   // writes to a specific path via LockKey
+	EffectShell                       // may write anywhere — acts as barrier
+)
+
 // Tool is a callable function with JSON Schema parameters.
 type Tool struct {
 	Name        string          `json:"name"`
@@ -14,7 +25,13 @@ type Tool struct {
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
 	Execute     ExecuteFunc     `json:"-"`
+	Effect      ToolEffect      `json:"-"` // scheduling hint for conflict-aware execution
+	LockKey     LockKeyFunc     `json:"-"` // required when Effect is EffectWritePath
 }
+
+// LockKeyFunc returns a canonical path used as a lock key for scheduling.
+// Returns empty string on failure, which causes fallback to shell scheduling.
+type LockKeyFunc func(args map[string]any) string
 
 // Spec returns a ToolSpec (definition without the execute function).
 func (t Tool) Spec() ToolSpec {
@@ -66,7 +83,11 @@ func NewRegistry() *Registry {
 }
 
 // Register adds or replaces a tool.
+// Panics if a WritePath tool is missing its LockKey function.
 func (r *Registry) Register(t Tool) {
+	if t.Effect == EffectWritePath && t.LockKey == nil {
+		panic("tool " + t.Name + ": EffectWritePath requires LockKey")
+	}
 	r.mu.Lock()
 	r.tools[t.Name] = t
 	r.mu.Unlock()

@@ -606,6 +606,7 @@ func TestParallelToolCalls_ConcurrentExecution(t *testing.T) {
 		Name:        "slow",
 		Description: "Sleeps briefly",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`),
+		Effect:      core.EffectReadOnly,
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			time.Sleep(100 * time.Millisecond)
 			id, _ := params["id"].(string)

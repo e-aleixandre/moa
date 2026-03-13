@@ -56,6 +56,7 @@ func newWebSearch(cfg ToolConfig, baseURL string) core.Tool {
 			},
 			"required": ["query"]
 		}`),
+		Effect: core.EffectReadOnly,
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			query := getString(params, "query", "")
 			if query == "" {
