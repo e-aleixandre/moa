@@ -106,11 +106,7 @@ func unifiedDiff(old, new string, contextLines int) string {
 		sb.WriteByte('\n')
 	}
 
-	result := sb.String()
-	if strings.HasSuffix(result, "\n") {
-		result = result[:len(result)-1]
-	}
-	return result
+	return strings.TrimSuffix(sb.String(), "\n")
 }
 
 func splitLines(s string) []string {

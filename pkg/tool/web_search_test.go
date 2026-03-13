@@ -28,7 +28,9 @@ func TestWebSearch_Success(t *testing.T) {
 			{Title: "Table-Driven Tests", URL: "https://go.dev/wiki/TableDrivenTests", Description: "A pattern for tests", Age: "3 months ago"},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -68,7 +70,9 @@ func TestWebSearch_EmptyResults(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := braveResponse{}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -91,7 +95,9 @@ func TestWebSearch_EmptyResults(t *testing.T) {
 func TestWebSearch_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte("rate limited"))
+		if _, err := w.Write([]byte("rate limited")); err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -129,17 +135,22 @@ func TestWebSearch_CountClamp(t *testing.T) {
 		gotCount = r.URL.Query().Get("count")
 		resp := braveResponse{}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
 	tool := newWebSearch(ToolConfig{BraveAPIKey: "key"}, srv.URL)
 
 	// count > 20 should be clamped to 20
-	tool.Execute(context.Background(), map[string]any{
+	_, err := tool.Execute(context.Background(), map[string]any{
 		"query": "test",
 		"count": float64(50),
 	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if gotCount != "20" {
 		t.Errorf("expected count clamped to 20, got %q", gotCount)
 	}

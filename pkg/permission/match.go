@@ -69,10 +69,7 @@ func parsePattern(pattern string) (tool, argPat string, hasArg bool) {
 	}
 
 	tool = pattern[:idx]
-	rest := pattern[idx+1:]
-	if strings.HasSuffix(rest, ")") {
-		rest = rest[:len(rest)-1]
-	}
+	rest := strings.TrimSuffix(pattern[idx+1:], ")")
 	return tool, rest, true
 }
 

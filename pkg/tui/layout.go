@@ -128,9 +128,10 @@ func buildSubagentBlockData(block messageBlock, expanded bool) ToolBlockData {
 	}
 
 	icon := "✓"
-	if block.SubagentStatus == "failed" {
+	switch block.SubagentStatus {
+	case "failed":
 		icon = "✗"
-	} else if block.SubagentStatus == "cancelled" {
+	case "cancelled":
 		icon = "⊘"
 	}
 

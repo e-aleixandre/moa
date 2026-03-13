@@ -54,7 +54,9 @@ func TestStore_FilePermissions(t *testing.T) {
 	path := filepath.Join(tmp, "auth.json")
 	store := NewStore(path)
 
-	store.Set("test", Credential{Type: "api_key", Key: "secret"})
+	if err := store.Set("test", Credential{Type: "api_key", Key: "secret"}); err != nil {
+		t.Fatal(err)
+	}
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -109,7 +111,9 @@ func TestStore_GetAPIKey_StoredAPIKey(t *testing.T) {
 	// Unset env var to test stored key
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	store.Set("anthropic", Credential{Type: "api_key", Key: "sk-ant-api03-stored"})
+	if err := store.Set("anthropic", Credential{Type: "api_key", Key: "sk-ant-api03-stored"}); err != nil {
+		t.Fatal(err)
+	}
 
 	key, isOAuth, err := store.GetAPIKey("anthropic")
 	if err != nil {

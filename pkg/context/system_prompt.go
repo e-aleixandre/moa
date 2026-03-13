@@ -46,7 +46,7 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string) strin
 					desc = desc[:197] + "..."
 				}
 			}
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", t.Name, desc))
+			fmt.Fprintf(&sb, "- %s: %s\n", t.Name, desc)
 		}
 		sb.WriteString("\n")
 	}
@@ -104,8 +104,8 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string) strin
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	sb.WriteString(fmt.Sprintf("Current date and time: %s\n", time.Now().Format("Monday, January 2, 2006 at 3:04:05 PM MST")))
-	sb.WriteString(fmt.Sprintf("Current working directory: %s\n", cwd))
+	fmt.Fprintf(&sb, "Current date and time: %s\n", time.Now().Format("Monday, January 2, 2006 at 3:04:05 PM MST"))
+	fmt.Fprintf(&sb, "Current working directory: %s\n", cwd)
 
 	return sb.String()
 }

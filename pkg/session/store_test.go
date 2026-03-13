@@ -138,13 +138,17 @@ func TestList(t *testing.T) {
 
 	s1 := store.Create()
 	s1.Title = "first"
-	store.Save(s1)
+	if err := store.Save(s1); err != nil {
+		t.Fatalf("Save s1: %v", err)
+	}
 
 	time.Sleep(10 * time.Millisecond)
 
 	s2 := store.Create()
 	s2.Title = "second"
-	store.Save(s2)
+	if err := store.Save(s2); err != nil {
+		t.Fatalf("Save s2: %v", err)
+	}
 
 	summaries, err := store.List()
 	if err != nil {
@@ -167,7 +171,9 @@ func TestDelete(t *testing.T) {
 
 	sess := store.Create()
 	sess.Title = "to delete"
-	store.Save(sess)
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	if err := store.Delete(sess.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -180,7 +186,10 @@ func TestDelete(t *testing.T) {
 	}
 
 	// List should be empty
-	summaries, _ := store.List()
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
 	if len(summaries) != 0 {
 		t.Errorf("List = %d, want 0 after delete", len(summaries))
 	}
@@ -208,7 +217,10 @@ func TestAtomicWrite_NoCorrruption(t *testing.T) {
 	}
 
 	// No .tmp files should remain
-	entries, _ := os.ReadDir(store.Dir())
+	entries, err := os.ReadDir(store.Dir())
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) == ".tmp" {
 			t.Errorf("found leftover tmp file: %s", e.Name())
@@ -261,8 +273,12 @@ func TestFileStore_Load_NotFound(t *testing.T) {
 func TestFileStore_Delete_ThenLoad_NotFound(t *testing.T) {
 	store := tempStore(t)
 	sess := store.Create()
-	store.Save(sess)
-	store.Delete(sess.ID)
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.Delete(sess.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
 
 	_, err := store.Load(sess.ID)
 	if !errors.Is(err, ErrNotFound) {
@@ -329,7 +345,9 @@ func TestSummary_IncludesMetadata(t *testing.T) {
 	sess.Title = "meta test"
 	sess.Metadata["model"] = "claude-sonnet-4"
 	sess.Metadata["cwd"] = "/test/project"
-	store.Save(sess)
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	summaries, err := store.List()
 	if err != nil {
@@ -356,7 +374,9 @@ func TestListAll(t *testing.T) {
 	}
 	sess1 := s1.Create()
 	sess1.Title = "alpha session"
-	s1.Save(sess1)
+	if err := s1.Save(sess1); err != nil {
+		t.Fatalf("Save sess1: %v", err)
+	}
 
 	s2, err := NewFileStore(base, "/project/beta")
 	if err != nil {
@@ -364,7 +384,9 @@ func TestListAll(t *testing.T) {
 	}
 	sess2 := s2.Create()
 	sess2.Title = "beta session"
-	s2.Save(sess2)
+	if err := s2.Save(sess2); err != nil {
+		t.Fatalf("Save sess2: %v", err)
+	}
 
 	all, err := ListAll(base)
 	if err != nil {
@@ -389,7 +411,9 @@ func TestFindSession(t *testing.T) {
 	}
 	sess := store.Create()
 	sess.Title = "findme"
-	store.Save(sess)
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	found, foundStore, err := FindSession(base, sess.ID)
 	if err != nil {
@@ -420,7 +444,9 @@ func TestDeleteByID(t *testing.T) {
 	}
 	sess := store.Create()
 	sess.Title = "deleteme"
-	store.Save(sess)
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	if err := DeleteByID(base, sess.ID); err != nil {
 		t.Fatal(err)

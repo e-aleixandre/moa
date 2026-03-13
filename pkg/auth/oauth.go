@@ -106,7 +106,7 @@ func RefreshAnthropicToken(refreshToken string) (*OAuthCredentials, error) {
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -157,7 +157,7 @@ func exchangeToken(code, state, verifier string) (*OAuthCredentials, error) {
 	if err != nil {
 		return nil, fmt.Errorf("token exchange request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

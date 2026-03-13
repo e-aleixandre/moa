@@ -113,7 +113,7 @@ func openaiExchangeToken(code, verifier string) (*OAuthCredentials, error) {
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -150,7 +150,7 @@ func RefreshOpenAIToken(refreshToken string) (*OAuthCredentials, error) {
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -232,7 +232,7 @@ func startCallbackServer(expectedState string) (*callbackServer, error) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `<!doctype html><html><body><p>Authentication successful. Return to your terminal.</p></body></html>`)
+		_, _ = fmt.Fprint(w, `<!doctype html><html><body><p>Authentication successful. Return to your terminal.</p></body></html>`)
 
 		select {
 		case cs.codeCh <- code:
@@ -241,7 +241,9 @@ func startCallbackServer(expectedState string) (*callbackServer, error) {
 	})
 
 	cs.server = &http.Server{Handler: mux}
-	go cs.server.Serve(listener)
+	go func() {
+		_ = cs.server.Serve(listener)
+	}()
 
 	return cs, nil
 }
@@ -258,5 +260,5 @@ func (cs *callbackServer) WaitForCode(timeout time.Duration) string {
 func (cs *callbackServer) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cs.server.Shutdown(ctx)
+	_ = cs.server.Shutdown(ctx)
 }

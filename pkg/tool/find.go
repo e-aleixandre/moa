@@ -93,9 +93,10 @@ func buildFindArgs(pattern, searchPath, fileType string) []string {
 	// Try fd first (respects .gitignore by default), fallback to find
 	if fdPath, err := exec.LookPath("fd"); err == nil {
 		args := []string{fdPath, "--glob", "--color=never"}
-		if fileType == "f" {
+		switch fileType {
+		case "f":
 			args = append(args, "--type", "f")
-		} else if fileType == "d" {
+		case "d":
 			args = append(args, "--type", "d")
 		}
 		args = append(args, "--", pattern, searchPath)
@@ -104,9 +105,10 @@ func buildFindArgs(pattern, searchPath, fileType string) []string {
 
 	// Fallback to find
 	args := []string{"find", searchPath}
-	if fileType == "f" {
+	switch fileType {
+	case "f":
 		args = append(args, "-type", "f")
-	} else if fileType == "d" {
+	case "d":
 		args = append(args, "-type", "d")
 	}
 	args = append(args, "-name", pattern)

@@ -41,7 +41,9 @@ func TestLoadAgentsMD_Priority(t *testing.T) {
 	// Create: /tmp/root/AGENTS.md and /tmp/root/sub/AGENTS.md
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
-	os.Mkdir(sub, 0o755)
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("ROOT"), 0o644)
 	os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("SUB"), 0o644)

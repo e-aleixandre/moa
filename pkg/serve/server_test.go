@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
+	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -179,7 +179,7 @@ func TestWebSocket_Init(t *testing.T) {
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
 
-	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestWebSocket_Streaming(t *testing.T) {
 	wsCtx, wsCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer wsCancel()
 
-	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
+	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestWebSocket_Disconnect(t *testing.T) {
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
 
-	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
 	if err != nil {
 		t.Fatal(err)
 	}

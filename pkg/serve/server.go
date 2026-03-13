@@ -11,8 +11,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
+	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/planmode"
@@ -250,13 +250,14 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// Origin validation: nhooyr.io/websocket validates by default that
 		// the Origin header matches the Host header (same-origin check).
 		// This prevents cross-site WebSocket hijacking.
-		conn, err := websocket.Accept(w, r, nil)
+		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck // TODO: migrate to coder/websocket
 		if err != nil {
 			return
 		}
+		// SA1019: conn.Close - deprecated library maintained by Coder at https://github.com/coder/websocket
 		defer conn.Close(websocket.StatusNormalClosure, "")
 
-		ctx := conn.CloseRead(r.Context())
+		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 
 		// Send current state on connect.
 		sess.mu.Lock()
@@ -307,6 +308,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			case evt, ok := <-ch:
 				if !ok {
 					// Closed by broadcast (slow consumer).
+					// SA1019: conn.Close - deprecated library maintained by Coder at https://github.com/coder/websocket
 					conn.Close(websocket.StatusGoingAway, "too slow")
 					return
 				}
@@ -515,7 +517,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // wsWriteJSON writes a JSON message to a WebSocket connection.
-func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error {
+func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck
 	return wsjson.Write(ctx, conn, v)
 }
 

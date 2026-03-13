@@ -136,9 +136,10 @@ func toolList(s *Store) (core.Result, error) {
 	sb.WriteString(fmt.Sprintf("Tasks (%d/%d done):\n", done, total))
 	for _, t := range tasks {
 		icon := "☐"
-		if t.Status == "done" {
+		switch t.Status {
+		case "done":
 			icon = "☑"
-		} else if t.Status == "in_progress" {
+		case "in_progress":
 			icon = "▶"
 		}
 		sb.WriteString(fmt.Sprintf("\n%s #%d: %s", icon, t.ID, t.Title))

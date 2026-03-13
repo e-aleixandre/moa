@@ -181,7 +181,7 @@ func readTextFile(resolved, displayPath string, offset, limit int) (core.Result,
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	return paginateReader(f, displayPath, offset, limit)
 }

@@ -174,7 +174,9 @@ func TestBash_ContextCancel(t *testing.T) {
 func TestRead_TextFile(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.txt")
-	os.WriteFile(path, []byte("line1\nline2\nline3"), 0o644)
+	if err := os.WriteFile(path, []byte("line1\nline2\nline3"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{"path": "test.txt"}, nil)
@@ -190,7 +192,9 @@ func TestRead_TextFile(t *testing.T) {
 func TestRead_WithOffset(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.txt")
-	os.WriteFile(path, []byte("line1\nline2\nline3\nline4"), 0o644)
+	if err := os.WriteFile(path, []byte("line1\nline2\nline3\nline4"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{
@@ -246,7 +250,9 @@ func TestWrite_CreateFile(t *testing.T) {
 func TestEdit_ReplaceExact(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "file.go")
-	os.WriteFile(path, []byte("func main() {\n\tfmt.Println(\"hello\")\n}"), 0o644)
+	if err := os.WriteFile(path, []byte("func main() {\n\tfmt.Println(\"hello\")\n}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	edit := NewEdit(ToolConfig{WorkspaceRoot: tmp})
 	result, err := edit.Execute(context.Background(), map[string]any{
@@ -270,7 +276,9 @@ func TestEdit_ReplaceExact(t *testing.T) {
 func TestEdit_NotFound(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "file.txt")
-	os.WriteFile(path, []byte("hello"), 0o644)
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	edit := NewEdit(ToolConfig{WorkspaceRoot: tmp})
 	result, _ := edit.Execute(context.Background(), map[string]any{
@@ -286,7 +294,9 @@ func TestEdit_NotFound(t *testing.T) {
 func TestEdit_MultipleMatches(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "file.txt")
-	os.WriteFile(path, []byte("hello hello hello"), 0o644)
+	if err := os.WriteFile(path, []byte("hello hello hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	edit := NewEdit(ToolConfig{WorkspaceRoot: tmp})
 	result, _ := edit.Execute(context.Background(), map[string]any{
@@ -301,9 +311,15 @@ func TestEdit_MultipleMatches(t *testing.T) {
 
 func TestLs_Directory(t *testing.T) {
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("a"), 0o644)
-	os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("b"), 0o644)
-	os.Mkdir(filepath.Join(tmp, "subdir"), 0o755)
+	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(tmp, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	ls := NewLs(ToolConfig{WorkspaceRoot: tmp})
 	result, err := ls.Execute(context.Background(), map[string]any{}, nil)
@@ -382,7 +398,9 @@ func TestFind_PathEscape(t *testing.T) {
 
 func TestGrep_DefaultPath(t *testing.T) {
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "test.txt"), []byte("hello world"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmp, "test.txt"), []byte("hello world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	grep := NewGrep(ToolConfig{WorkspaceRoot: tmp})
 
@@ -400,7 +418,9 @@ func TestGrep_DefaultPath(t *testing.T) {
 
 func TestFind_DefaultPath(t *testing.T) {
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "test.txt"), []byte("hello"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmp, "test.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	find := NewFind(ToolConfig{WorkspaceRoot: tmp})
 
@@ -418,7 +438,9 @@ func TestFind_DefaultPath(t *testing.T) {
 
 func TestGrep_DashPattern(t *testing.T) {
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "test.txt"), []byte("hello -test world\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmp, "test.txt"), []byte("hello -test world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	grep := NewGrep(ToolConfig{WorkspaceRoot: tmp})
 	result, err := grep.Execute(context.Background(), map[string]any{
@@ -438,7 +460,9 @@ func TestGrep_DashPattern(t *testing.T) {
 
 func TestFind_DashPattern(t *testing.T) {
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "-test.txt"), []byte("x"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmp, "-test.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	find := NewFind(ToolConfig{WorkspaceRoot: tmp})
 	result, err := find.Execute(context.Background(), map[string]any{
@@ -455,7 +479,9 @@ func TestFind_DashPattern(t *testing.T) {
 func TestRead_ExactLimitLines(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.txt")
-	os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644)
+	if err := os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{
@@ -474,7 +500,9 @@ func TestRead_ExactLimitLines(t *testing.T) {
 func TestRead_EmptyFileWithOffset(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "empty.txt")
-	os.WriteFile(path, []byte(""), 0o644)
+	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{
@@ -491,7 +519,9 @@ func TestRead_EmptyFileWithOffset(t *testing.T) {
 func TestRead_OffsetPastEOF(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.txt")
-	os.WriteFile(path, []byte("line1\nline2\n"), 0o644)
+	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{
@@ -513,7 +543,9 @@ func TestRead_UTF8Boundary(t *testing.T) {
 	// Write content that, after byte truncation, might cut a multi-byte char.
 	// Each '€' is 3 bytes (U+20AC). Fill up to just over maxOutputBytes.
 	euro := strings.Repeat("€", (maxOutputBytes/3)+10)
-	os.WriteFile(path, []byte(euro), 0o644)
+	if err := os.WriteFile(path, []byte(euro), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{
@@ -539,7 +571,9 @@ func TestRead_LongLine(t *testing.T) {
 	path := filepath.Join(tmp, "test.txt")
 	// Write a single line longer than maxOutputBytes
 	long := strings.Repeat("x", maxOutputBytes+1000)
-	os.WriteFile(path, []byte(long), 0o644)
+	if err := os.WriteFile(path, []byte(long), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{"path": "test.txt"}, nil)
@@ -562,7 +596,9 @@ func TestHeadTailBuffer_SmallInput(t *testing.T) {
 	var b headTailBuffer
 	b.headMax = 100
 	b.tailMax = 100
-	b.Write([]byte("hello world"))
+	if _, err := b.Write([]byte("hello world")); err != nil {
+		t.Fatal(err)
+	}
 	out := b.String()
 	if out != "hello world" {
 		t.Errorf("got %q", out)
@@ -576,7 +612,9 @@ func TestHeadTailBuffer_ExactHead(t *testing.T) {
 	var b headTailBuffer
 	b.headMax = 5
 	b.tailMax = 5
-	b.Write([]byte("12345"))
+	if _, err := b.Write([]byte("12345")); err != nil {
+		t.Fatal(err)
+	}
 	if b.truncated {
 		t.Error("exactly headMax should not truncate")
 	}
@@ -591,9 +629,15 @@ func TestHeadTailBuffer_HeadPlusTail(t *testing.T) {
 	b.tailMax = 10
 
 	// Write 30 bytes: head gets 10, tail gets last 10
-	b.Write([]byte("HHHHHHHHHH"))          // fills head (10 bytes)
-	b.Write([]byte("middle-data-ignored")) // 19 bytes to tail
-	b.Write([]byte("TTTTTTTTTT"))          // last 10 to tail
+	if _, err := b.Write([]byte("HHHHHHHHHH")); err != nil { // fills head (10 bytes)
+		t.Fatal(err)
+	}
+	if _, err := b.Write([]byte("middle-data-ignored")); err != nil { // 19 bytes to tail
+		t.Fatal(err)
+	}
+	if _, err := b.Write([]byte("TTTTTTTTTT")); err != nil { // last 10 to tail
+		t.Fatal(err)
+	}
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
@@ -619,8 +663,12 @@ func TestHeadTailBuffer_TailWraps(t *testing.T) {
 	b.tailMax = 5
 
 	// Head: "AAAAA", then overflow: write 20 bytes, tail should keep last 5
-	b.Write([]byte("AAAAA"))
-	b.Write([]byte("12345678901234567890"))
+	if _, err := b.Write([]byte("AAAAA")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Write([]byte("12345678901234567890")); err != nil {
+		t.Fatal(err)
+	}
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
@@ -643,7 +691,9 @@ func TestHeadTailBuffer_MultipleSmallWrites(t *testing.T) {
 	b.tailMax = 4
 
 	for _, c := range "ABCDEFGHIJ" {
-		b.Write([]byte(string(c)))
+		if _, err := b.Write([]byte(string(c))); err != nil {
+			t.Fatal(err)
+		}
 	}
 	b.Close()
 	defer func() {
@@ -666,7 +716,9 @@ func TestHeadTailBuffer_ZeroTail(t *testing.T) {
 	b.headMax = 5
 	b.tailMax = 0
 
-	b.Write([]byte("ABCDEFGHIJ"))
+	if _, err := b.Write([]byte("ABCDEFGHIJ")); err != nil {
+		t.Fatal(err)
+	}
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
@@ -688,7 +740,9 @@ func TestHeadTailBuffer_SplitWrite(t *testing.T) {
 	b.headMax = 5
 	b.tailMax = 5
 
-	b.Write([]byte("ABCDEFGHIJ")) // 10 bytes in one write
+	if _, err := b.Write([]byte("ABCDEFGHIJ")); err != nil { // 10 bytes in one write
+		t.Fatal(err)
+	}
 	b.Close()
 	defer func() {
 		if b.SpillPath != "" {
@@ -711,7 +765,9 @@ func TestHeadTailBuffer_SpillFile(t *testing.T) {
 
 	// Write 50 bytes — should trigger spill
 	data := "HHHHHHHHHH" + "MMMMMMMMMMMMMMMMMMMM" + "TTTTTTTTTT"
-	b.Write([]byte(data))
+	if _, err := b.Write([]byte(data)); err != nil {
+		t.Fatal(err)
+	}
 	b.Close()
 
 	if b.SpillPath == "" {
@@ -739,7 +795,9 @@ func TestHeadTailBuffer_NoSpillWhenNotTruncated(t *testing.T) {
 	var b headTailBuffer
 	b.headMax = 100
 	b.tailMax = 100
-	b.Write([]byte("small"))
+	if _, err := b.Write([]byte("small")); err != nil {
+		t.Fatal(err)
+	}
 	b.Close()
 	if b.SpillPath != "" {
 		os.Remove(b.SpillPath)
@@ -753,19 +811,28 @@ func TestHeadTailBuffer_AcceptedBytes(t *testing.T) {
 	b.tailMax = 10
 
 	// First write fits entirely in head
-	accepted, _ := b.Write([]byte("12345"))
+	accepted, err := b.Write([]byte("12345"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if accepted != 5 {
 		t.Fatalf("expected 5 accepted, got %d", accepted)
 	}
 
 	// Second write partially fits (5 of 8 bytes)
-	accepted, _ = b.Write([]byte("67890abc"))
+	accepted, err = b.Write([]byte("67890abc"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if accepted != 5 {
 		t.Fatalf("expected 5 accepted (head had 5 remaining), got %d", accepted)
 	}
 
 	// Third write: head is full, nothing accepted
-	accepted, _ = b.Write([]byte("more data"))
+	accepted, err = b.Write([]byte("more data"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if accepted != 0 {
 		t.Fatalf("expected 0 accepted (head full), got %d", accepted)
 	}
@@ -820,7 +887,9 @@ func TestRead_PDF(t *testing.T) {
 
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.pdf")
-	os.WriteFile(path, minimalPDF("Hello PDF World"), 0o644)
+	if err := os.WriteFile(path, minimalPDF("Hello PDF World"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{"path": "test.pdf"}, nil)
@@ -843,7 +912,9 @@ func TestRead_PDF_NotInstalled(t *testing.T) {
 
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.pdf")
-	os.WriteFile(path, minimalPDF("test"), 0o644)
+	if err := os.WriteFile(path, minimalPDF("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{"path": "test.pdf"}, nil)
@@ -869,7 +940,9 @@ func TestRead_PDF_Corrupt(t *testing.T) {
 
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "corrupt.pdf")
-	os.WriteFile(path, []byte("not a real PDF at all"), 0o644)
+	if err := os.WriteFile(path, []byte("not a real PDF at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 	result, err := read.Execute(context.Background(), map[string]any{"path": "corrupt.pdf"}, nil)
@@ -894,7 +967,9 @@ func TestRead_PDF_OffsetLimit(t *testing.T) {
 	// Use a real PDF with known text.
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "multi.pdf")
-	os.WriteFile(path, minimalPDF("Line1", "Line2", "Line3", "Line4", "Line5"), 0o644)
+	if err := os.WriteFile(path, minimalPDF("Line1", "Line2", "Line3", "Line4", "Line5"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
 

@@ -27,7 +27,7 @@ func TestStream_TextResponse(t *testing.T) {
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w,
+		_, _ = fmt.Fprint(w,
 			sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}],"status":"in_progress"}}`)+
 				sseEvent(`{"type":"response.output_text.delta","delta":"Hello"}`)+
 				sseEvent(`{"type":"response.output_text.delta","delta":" world"}`)+
@@ -85,7 +85,7 @@ func TestStream_ToolCallResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w,
+		_, _ = fmt.Fprint(w,
 			sseEvent(`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"bash","arguments":""}}`)+
 				sseEvent(`{"type":"response.function_call_arguments.delta","delta":"{\"comm"}`)+
 				sseEvent(`{"type":"response.function_call_arguments.delta","delta":"and\":\"ls\"}"}`)+
@@ -157,7 +157,7 @@ func TestStream_ThinkingResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w,
+		_, _ = fmt.Fprint(w,
 			sseEvent(`{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1"}}`)+
 				sseEvent(`{"type":"response.reasoning_summary_text.delta","delta":"I think "}`)+
 				sseEvent(`{"type":"response.reasoning_summary_text.delta","delta":"therefore"}`)+
@@ -231,7 +231,7 @@ func TestStream_ErrorEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w,
+		_, _ = fmt.Fprint(w,
 			sseEvent(`{"type":"error","code":"rate_limit","message":"too many requests"}`),
 		)
 	}))
@@ -260,7 +260,7 @@ func TestStream_ErrorEvent(t *testing.T) {
 func TestStream_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
-		fmt.Fprint(w, `{"error":{"message":"invalid api key"}}`)
+		_, _ = fmt.Fprint(w, `{"error":{"message":"invalid api key"}}`)
 	}))
 	defer server.Close()
 
@@ -278,7 +278,7 @@ func TestStream_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w,
+		_, _ = fmt.Fprint(w,
 			sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
 				sseEvent(`{"type":"response.output_text.delta","delta":"hi"}`),
 		)
@@ -321,7 +321,7 @@ func TestNewOAuth_UsesCodexEndpoint(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		fmt.Fprint(w,
+		_, _ = fmt.Fprint(w,
 			sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
 				sseEvent(`{"type":"response.output_text.delta","delta":"ok"}`)+
 				sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),

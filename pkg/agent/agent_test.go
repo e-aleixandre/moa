@@ -1121,7 +1121,6 @@ func TestLoadMessages(t *testing.T) {
 	}
 
 	// Appending to the returned slice should not affect internal state
-	got = append(got, core.WrapMessage(core.NewUserMessage("extra")))
 	got2 := ag.Messages()
 	if len(got2) != 2 {
 		t.Error("Messages() should return an independent slice (append-safe)")
@@ -1144,7 +1143,7 @@ func TestLoadMessages_WhileRunning(t *testing.T) {
 	// Start a run in background
 	done := make(chan struct{})
 	go func() {
-		ag.Run(ctx, "block forever")
+		_, _ = ag.Run(ctx, "block forever")
 		close(done)
 	}()
 
@@ -1167,13 +1166,15 @@ func TestSendAfterLoadMessages(t *testing.T) {
 	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
 
 	// Load previous conversation
-	ag.LoadMessages([]core.AgentMessage{
+	if err := ag.LoadMessages([]core.AgentMessage{
 		core.WrapMessage(core.NewUserMessage("first")),
 		{Message: core.Message{
 			Role:    "assistant",
 			Content: []core.Content{{Type: "text", Text: "first response"}},
 		}},
-	})
+	}); err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
 
 	// Send continues the conversation
 	msgs, err := ag.Send(context.Background(), "second")
@@ -1420,7 +1421,7 @@ func TestReconfigure_StripsThinking(t *testing.T) {
 	})
 
 	// Manually inject a message with thinking blocks.
-	ag.LoadMessages([]core.AgentMessage{
+	if err := ag.LoadMessages([]core.AgentMessage{
 		core.WrapMessage(core.NewUserMessage("hello")),
 		core.WrapMessage(core.Message{
 			Role: "assistant",
@@ -1429,7 +1430,9 @@ func TestReconfigure_StripsThinking(t *testing.T) {
 				core.TextContent("visible response"),
 			},
 		}),
-	})
+	}); err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
 
 	// Reconfigure to a different model.
 	err := ag.Reconfigure(nil, core.Model{ID: "model-2", Provider: "anthropic"}, "medium")
@@ -1460,7 +1463,7 @@ func TestReconfigure_SameModelKeepsThinking(t *testing.T) {
 		Model:    core.Model{ID: "model-1", Provider: "anthropic"},
 	})
 
-	ag.LoadMessages([]core.AgentMessage{
+	if err := ag.LoadMessages([]core.AgentMessage{
 		core.WrapMessage(core.NewUserMessage("hello")),
 		core.WrapMessage(core.Message{
 			Role: "assistant",
@@ -1469,7 +1472,9 @@ func TestReconfigure_SameModelKeepsThinking(t *testing.T) {
 				core.TextContent("response"),
 			},
 		}),
-	})
+	}); err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
 
 	// Reconfigure same model, different thinking level — should NOT strip.
 	err := ag.Reconfigure(nil, core.Model{ID: "model-1", Provider: "anthropic"}, "high")

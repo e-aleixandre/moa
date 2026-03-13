@@ -560,9 +560,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionSavedMsg:
 		// Session saved asynchronously. Log errors but don't interrupt the user.
-		if msg.err != nil {
-			// TODO: consider a subtle status indicator for save failures
-		}
+		// TODO: consider a subtle status indicator for save failures
 		return m, nil
 
 	case pinnedModelsSavedMsg:
@@ -948,12 +946,12 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPgUp:
 		if !m.s.transcript {
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 		}
 		return m, nil
 	case tea.KeyPgDown:
 		if !m.s.transcript {
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 		}
 		return m, nil
 

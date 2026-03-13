@@ -44,7 +44,9 @@ func TestHost_ToolCallBlock(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	// bash should be blocked
 	decision := host.FireToolCall(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
@@ -73,7 +75,9 @@ func TestHost_BeforeAgentStart_InjectMessages(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	msgs := host.FireBeforeAgentStart(context.Background())
 	if len(msgs) != 1 {
@@ -94,7 +98,9 @@ func TestHost_PanicRecovery(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	// Should not panic; should return nil (no block)
 	decision := host.FireToolCall(context.Background(), "bash", nil)
@@ -119,7 +125,9 @@ func TestHost_DeadlineTimeout(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	start := time.Now()
 	decision := host.FireToolCall(context.Background(), "bash", nil)
@@ -148,7 +156,9 @@ func TestHost_ToolResult_Modify(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	original := core.TextResult("original output")
 	result := host.FireToolResult(context.Background(), "bash", original, false)
@@ -173,7 +183,9 @@ func TestHost_Context_ModifyMessages(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	msgs := []core.AgentMessage{core.WrapMessage(core.NewUserMessage("original"))}
 	result := host.FireContext(context.Background(), msgs)
@@ -192,7 +204,9 @@ func TestHost_Observer_Async(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	host.FireObserver(core.AgentEvent{Type: core.AgentEventTurnStart})
 
@@ -217,7 +231,9 @@ func TestHost_RegisterTool(t *testing.T) {
 		api.RegisterTool(core.Tool{Name: "custom", Description: "A custom tool"})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, ok := reg.Get("custom"); !ok {
 		t.Fatal("expected custom tool to be registered")
@@ -235,7 +251,9 @@ func TestHook_NonCooperativeTimeout(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	start := time.Now()
 	decision := host.FireToolCall(context.Background(), "bash", nil)
@@ -261,7 +279,9 @@ func TestHook_RepeatedTimeouts(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext)
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
 
 	start := time.Now()
 	for i := 0; i < 10; i++ {
@@ -294,8 +314,12 @@ func TestHost_FirstBlockerWins(t *testing.T) {
 		})
 		return nil
 	}}
-	host.Load(ext1)
-	host.Load(ext2)
+	if err := host.Load(ext1); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Load(ext2); err != nil {
+		t.Fatal(err)
+	}
 
 	decision := host.FireToolCall(context.Background(), "bash", nil)
 	if decision == nil || decision.Reason != "blocker 1" {

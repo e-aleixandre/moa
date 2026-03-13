@@ -79,7 +79,7 @@ func (s *FileStore) Save(sess *Session) error {
 		return fmt.Errorf("session: write error: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp) // cleanup on rename failure
+		_ = os.Remove(tmp) // cleanup on rename failure
 		return fmt.Errorf("session: rename error: %w", err)
 	}
 	return nil

@@ -267,7 +267,9 @@ func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
 
 	// Write overflow to spill file
 	if b.spillFile != nil {
-		b.spillFile.Write(p)
+		if _, err := b.spillFile.Write(p); err != nil {
+			// best effort — truncation still works without complete spill
+		}
 	}
 
 	// Write overflow to circular tail buffer
@@ -297,7 +299,9 @@ func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
 func (b *headTailBuffer) initSpillFile() {
 	dir := b.SpillDir
 	if dir != "" {
-		os.MkdirAll(dir, 0o755)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return // best effort — truncation still works without spill
+		}
 	}
 	f, err := os.CreateTemp(dir, "moa-output-*.txt")
 	if err != nil {
@@ -306,13 +310,15 @@ func (b *headTailBuffer) initSpillFile() {
 	b.spillFile = f
 	b.SpillPath = f.Name()
 	// Write the head bytes already captured
-	f.Write(b.head.Bytes())
+	if _, err := f.Write(b.head.Bytes()); err != nil {
+		// best effort — truncation still works without complete spill
+	}
 }
 
 // Close closes the spill file if open. Must be called when done.
 func (b *headTailBuffer) Close() {
 	if b.spillFile != nil {
-		b.spillFile.Close()
+		_ = b.spillFile.Close()
 		b.spillFile = nil
 	}
 }

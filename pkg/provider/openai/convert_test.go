@@ -68,7 +68,9 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 	}
 
 	var parsed map[string]any
-	json.Unmarshal(body, &parsed)
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
 
 	tools, ok := parsed["tools"].([]any)
 	if !ok || len(tools) != 1 {
@@ -96,7 +98,9 @@ func TestBuildRequestBody_ReasoningEffort(t *testing.T) {
 	}
 
 	var parsed map[string]any
-	json.Unmarshal(body, &parsed)
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
 	r, ok := parsed["reasoning"].(map[string]any)
 	if !ok {
 		t.Fatal("expected reasoning object")

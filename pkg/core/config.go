@@ -194,7 +194,7 @@ func SaveGlobalConfig(update func(*MoaConfig)) error {
 		return fmt.Errorf("writing config: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("saving config: %w", err)
 	}
 	return nil

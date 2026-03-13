@@ -273,12 +273,12 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		m.status.SetText("reviewing plan...")
 		// Build review args for the tool block display.
 		reviewArgs := map[string]any{"plan": m.planMode.PlanFilePath()}
-		modelLabel := "default"
+		var modelLabel string
 		if m.planMenu.reviewModel != "" {
 			modelLabel = m.planMenu.reviewModel
 			reviewArgs["model"] = modelLabel
 		}
-		thinkingLabel := "default"
+		var thinkingLabel string
 		if m.planMenu.reviewThinking != "" {
 			thinkingLabel = m.planMenu.reviewThinking
 			reviewArgs["thinking"] = thinkingLabel

@@ -40,7 +40,9 @@ const sampleArticleHTML = `<!DOCTYPE html>
 func TestFetch_ReadabilityExtraction(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(sampleArticleHTML))
+		if _, err := w.Write([]byte(sampleArticleHTML)); err != nil {
+			t.Logf("failed to write response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -78,7 +80,9 @@ func TestFetch_ReadabilityExtraction(t *testing.T) {
 func TestFetch_RawMode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><body><p>Hello</p></body></html>"))
+		if _, err := w.Write([]byte("<html><body><p>Hello</p></body></html>")); err != nil {
+			t.Logf("failed to write response: %v", err)
+		}
 	}))
 	defer srv.Close()
 

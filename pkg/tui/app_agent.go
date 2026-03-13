@@ -355,7 +355,7 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	}
 	// Only look at messages produced during this run (after runStartMsgCount).
 	// This prevents re-creating assistant blocks from a previous turn on abort.
-	newMsgs := msgs
+	var newMsgs []core.AgentMessage
 	if m.s.runStartMsgCount < len(msgs) {
 		newMsgs = msgs[m.s.runStartMsgCount:]
 	} else {

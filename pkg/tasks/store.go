@@ -206,7 +206,9 @@ func (s *Store) SaveToMetadata() map[string]any {
 	st := s.SaveState()
 	data, _ := json.Marshal(st)
 	var m map[string]any
-	json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		return map[string]any{metadataKey: map[string]any{}}
+	}
 	return map[string]any{metadataKey: m}
 }
 

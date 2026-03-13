@@ -18,8 +18,13 @@ func TestSaveGlobalConfig_RoundTrip(t *testing.T) {
 	// read-modify-write cycle by writing an initial file and calling loadConfigFile.
 
 	initial := MoaConfig{PinnedModels: []string{"claude-sonnet-4-5"}}
-	data, _ := json.Marshal(initial)
-	os.WriteFile(cfgPath, data, 0o600)
+	data, err := json.Marshal(initial)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, data, 0o600); err != nil {
+		t.Fatalf("write initial: %v", err)
+	}
 
 	// Simulate what SaveGlobalConfig does (we can't easily redirect home in tests,
 	// so we exercise the underlying primitives directly).
@@ -72,9 +77,16 @@ func TestSaveGlobalConfig_PreservesOtherFields(t *testing.T) {
 		Permissions: PermissionsConfig{Mode: "ask", Allow: []string{"Bash(npm:*)"}},
 	}
 	cfgDir := filepath.Join(home, ".config", "moa")
-	os.MkdirAll(cfgDir, 0o700)
-	data, _ := json.MarshalIndent(initial, "", "  ")
-	os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0o600)
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	data, err := json.MarshalIndent(initial, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	// Save only updates pinned models.
 	if err := SaveGlobalConfig(func(cfg *MoaConfig) {
@@ -108,7 +120,7 @@ func TestMergeConfigs_PinnedModelsFromGlobalOnly(t *testing.T) {
 func TestLoadMCPFile_Valid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".mcp.json")
-	os.WriteFile(path, []byte(`{
+	if err := os.WriteFile(path, []byte(`{
 		"mcpServers": {
 			"db": {
 				"command": "mcp-sqlite",
@@ -120,7 +132,9 @@ func TestLoadMCPFile_Valid(t *testing.T) {
 				"args": ["/home"]
 			}
 		}
-	}`), 0o600)
+	}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	servers, err := LoadMCPFile(path)
 	if err != nil {
@@ -148,7 +162,9 @@ func TestLoadMCPFile_Valid(t *testing.T) {
 func TestLoadMCPFile_Invalid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".mcp.json")
-	os.WriteFile(path, []byte(`not json`), 0o600)
+	if err := os.WriteFile(path, []byte(`not json`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	_, err := LoadMCPFile(path)
 	if err == nil {

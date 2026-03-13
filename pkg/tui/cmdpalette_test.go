@@ -81,9 +81,7 @@ func TestCmdPalette_CursorClamped(t *testing.T) {
 func TestCmdPalette_NoMatchesInactive(t *testing.T) {
 	var p cmdPalette
 	p.Update("/zzz")
-	if p.active && len(p.matches) == 0 {
-		// Active but no matches is fine — view will be empty
-	}
+	// Active but no matches is fine — view will be empty
 	if p.Selected() != "" {
 		t.Error("should return empty for no matches")
 	}
