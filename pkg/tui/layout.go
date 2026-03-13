@@ -211,6 +211,44 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 		}
 		body = block.ToolResult
 
+	case "plan_review":
+		action = "🔍 plan review"
+		target, _ = stringArg(block.ToolArgs, "plan")
+		body = block.ToolResult
+		tail = true
+
+	case "request_review":
+		action = "🔍 code review"
+		if summary, ok := stringArg(block.ToolArgs, "summary"); ok {
+			if len(summary) > 80 {
+				summary = summary[:77] + "..."
+			}
+			target = summary
+		}
+		body = block.ToolResult
+		tail = true
+
+	case "tasks":
+		action, _ = stringArg(block.ToolArgs, "action")
+		switch action {
+		case "create":
+			action = "📝 new task"
+			target, _ = stringArg(block.ToolArgs, "title")
+		case "done":
+			action = "✅ task done"
+			if id, ok := block.ToolArgs["id"]; ok {
+				target = fmt.Sprintf("#%v", id)
+			}
+		case "list":
+			action = "📋 list tasks"
+		default:
+			action = "tasks " + action
+			if id, ok := block.ToolArgs["id"]; ok {
+				target = fmt.Sprintf("#%v", id)
+			}
+		}
+		body = block.ToolResult
+
 	default:
 		action = block.ToolName
 		target = sortedArgSummary(block.ToolArgs)

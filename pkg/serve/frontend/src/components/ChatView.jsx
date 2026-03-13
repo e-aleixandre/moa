@@ -5,6 +5,7 @@ import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { ModelPill } from './ModelPill.jsx';
+import { TaskBar } from './TaskBar.jsx';
 
 export function ChatView({ state, onToggleOverview, onOpenPalette }) {
   const session = state.activeSession ? state.sessions[state.activeSession] : null;
@@ -64,7 +65,7 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
       {session.untrustedMcp && <McpBanner sessionId={state.activeSession} />}
 
       <MessageList session={session} />
-
+      <TaskBar session={session} />
       <InputBar sessionId={state.activeSession} sessionState={session.state} />
     </div>
   );

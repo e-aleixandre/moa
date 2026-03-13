@@ -15,6 +15,7 @@ import (
 	"nhooyr.io/websocket/wsjson"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -37,7 +38,9 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
+	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
 
@@ -266,12 +269,27 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		}
 		sess.mu.Unlock()
 
+		var taskList any
+		if sess.taskStore != nil {
+			taskList = sess.taskStore.Tasks()
+		}
+
 		initData := map[string]any{
 			"messages": history,
 			"state":    string(state),
 		}
 		if pendingPerm != nil {
 			initData["pending_permission"] = pendingPerm
+		}
+		if taskList != nil {
+			initData["tasks"] = taskList
+		}
+		if sess.planMode != nil {
+			mode := sess.planMode.Mode()
+			if mode != planmode.ModeOff {
+				initData["plan_mode"] = string(mode)
+				initData["plan_file"] = sess.planMode.PlanFilePath()
+			}
 		}
 		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData}); err != nil {
 			return
@@ -420,6 +438,60 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{"text": text})
+	}
+}
+
+func handleListCommands() http.HandlerFunc {
+	type cmdDef struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Args        string `json:"args,omitempty"`
+	}
+	commands := []cmdDef{
+		{Name: "clear", Description: "Clear conversation history"},
+		{Name: "compact", Description: "Compact conversation to reduce context size"},
+		{Name: "model", Description: "Switch model", Args: "<model>"},
+		{Name: "thinking", Description: "Set thinking level", Args: "<off|low|medium|high>"},
+		{Name: "plan", Description: "Enter/exit plan mode", Args: "[exit]"},
+		{Name: "tasks", Description: "View/manage tasks", Args: "[done <id> | reset]"},
+	}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, commands)
+	}
+}
+
+func handleCommand(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Command string `json:"command"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Command == "" {
+			http.Error(w, "command required", http.StatusBadRequest)
+			return
+		}
+		result, err := mgr.ExecCommand(sess.ID, body.Command)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			if errors.Is(err, ErrBusy) {
+				http.Error(w, "session is busy", http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 	}
 }
 

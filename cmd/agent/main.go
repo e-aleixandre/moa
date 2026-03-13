@@ -23,6 +23,8 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/provider"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/serve"
@@ -327,10 +329,12 @@ func main() {
 	if promptContent == "" {
 		// Interactive mode — launch TUI with session persistence
 		var sessionStore session.SessionStore
+		var sessionDir string
 		if fs, err := session.NewFileStore("", cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: session persistence disabled: %v\n", err)
 		} else {
 			sessionStore = fs
+			sessionDir = fs.Dir()
 		}
 
 		var sess *session.Session
@@ -377,6 +381,64 @@ func main() {
 			sess.Metadata["model"] = modelSpec(resolvedModel)
 		}
 
+		// Create plan mode.
+		reviewModel := resolvedModel
+		if moaCfg.PlanReviewModel != "" {
+			if m, ok := core.ResolveModel(moaCfg.PlanReviewModel); ok {
+				reviewModel = m
+			}
+		}
+		reviewThinking := "low"
+		if moaCfg.PlanReviewThinking != "" {
+			reviewThinking = moaCfg.PlanReviewThinking
+		}
+		// Code review model: code_review_model → plan_review_model → current model.
+		codeReviewModel := reviewModel
+		if moaCfg.CodeReviewModel != "" {
+			if m, ok := core.ResolveModel(moaCfg.CodeReviewModel); ok {
+				codeReviewModel = m
+			}
+		}
+		codeReviewThinking := reviewThinking
+		if moaCfg.CodeReviewThinking != "" {
+			codeReviewThinking = moaCfg.CodeReviewThinking
+		}
+
+		providerFactory := func(model core.Model) (core.Provider, error) {
+			build, err := buildProvider(model, authStore)
+			if err != nil {
+				return nil, err
+			}
+			return build.Provider, nil
+		}
+
+		// Create task store and register the tasks tool globally.
+		taskStore := tasks.NewStore()
+		toolReg.Register(tasks.NewTool(taskStore))
+
+		pm := planmode.New(planmode.Config{
+			Registry:   toolReg,
+			SessionDir: sessionDir,
+			TaskStore:  taskStore,
+			ReviewCfg: planmode.ReviewConfig{
+				ProviderFactory: providerFactory,
+				Model:           reviewModel,
+				ThinkingLevel:   reviewThinking,
+				ParentTools:     toolReg,
+			},
+			CodeReviewCfg: planmode.ReviewConfig{
+				ProviderFactory: providerFactory,
+				Model:           codeReviewModel,
+				ThinkingLevel:   codeReviewThinking,
+				ParentTools:     toolReg,
+			},
+		})
+		// Restore plan mode state from session metadata.
+		if sess != nil && sess.Metadata != nil {
+			pm.RestoreState(sess.Metadata)
+			pm.ApplyRestoredState()
+		}
+
 		app := tui.New(ag, ctx, tui.Config{
 			SessionStore:          sessionStore,
 			Session:               sess,
@@ -387,6 +449,8 @@ func main() {
 			PinnedModels:          moaCfg.PinnedModels,
 			SubagentCountCh:       subagentCountCh,
 			SubagentNotifyCh:      subagentNotifyCh,
+			PlanMode:              pm,
+			TaskStore:             taskStore,
 			OnPinnedModelsChange: func(ids []string) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 					cfg.PinnedModels = ids

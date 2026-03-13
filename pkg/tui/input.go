@@ -10,10 +10,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// inputModel wraps textarea for user input.
+const maxHistory = 100
+
+// inputModel wraps textarea for user input with history navigation.
 type inputModel struct {
 	textarea textarea.Model
 	enabled  bool
+	history  []string // oldest first
+	histIdx  int      // -1 = draft (not navigating)
+	draft    string   // saved draft when navigating history
 }
 
 // inputBorderStyle and inputActiveBorderStyle are theme-derived.
@@ -37,14 +42,77 @@ func newInput() inputModel {
 	)
 
 	ta.Focus()
-	return inputModel{textarea: ta, enabled: true}
+	return inputModel{textarea: ta, enabled: true, histIdx: -1}
 }
 
-// Submit returns the trimmed text and resets the textarea. Empty string if nothing.
+// Submit returns the trimmed text, pushes it to history, and resets the textarea.
 func (m *inputModel) Submit() string {
 	text := strings.TrimSpace(m.textarea.Value())
 	m.textarea.Reset()
+	m.histIdx = -1
+	m.draft = ""
+	if text == "" {
+		return ""
+	}
+	// Deduplicate: skip if same as last entry.
+	if len(m.history) == 0 || m.history[len(m.history)-1] != text {
+		m.history = append(m.history, text)
+		if len(m.history) > maxHistory {
+			m.history = m.history[len(m.history)-maxHistory:]
+		}
+	}
 	return text
+}
+
+// HistoryUp navigates to the previous history entry.
+// Returns true if it consumed the key (caller should not propagate).
+func (m *inputModel) HistoryUp() bool {
+	if len(m.history) == 0 {
+		return false
+	}
+	// Only activate when cursor is on the first line.
+	if m.textarea.Line() != 0 {
+		return false
+	}
+	if m.histIdx == -1 {
+		// Entering history — save current text as draft.
+		m.draft = m.textarea.Value()
+		m.histIdx = len(m.history) - 1
+	} else if m.histIdx > 0 {
+		m.histIdx--
+	} else {
+		return true // already at oldest, consume but do nothing
+	}
+	m.textarea.Reset()
+	m.textarea.SetValue(m.history[m.histIdx])
+	m.textarea.CursorEnd()
+	return true
+}
+
+// HistoryDown navigates to the next history entry, or back to draft.
+// Returns true if it consumed the key.
+func (m *inputModel) HistoryDown() bool {
+	if m.histIdx == -1 {
+		return false // not navigating history
+	}
+	// Only activate when cursor is on the last line.
+	if m.textarea.Line() != m.textarea.LineCount()-1 {
+		return false
+	}
+	m.histIdx++
+	if m.histIdx >= len(m.history) {
+		// Past newest → restore draft.
+		m.histIdx = -1
+		m.textarea.Reset()
+		m.textarea.SetValue(m.draft)
+		m.textarea.CursorEnd()
+		m.draft = ""
+	} else {
+		m.textarea.Reset()
+		m.textarea.SetValue(m.history[m.histIdx])
+		m.textarea.CursorEnd()
+	}
+	return true
 }
 
 // SetEnabled enables/disables input and manages focus.
@@ -98,7 +166,9 @@ var knownCommands = map[string]bool{
 	"models":      true,
 	"thinking":    true,
 	"compact":     true,
+	"plan":        true,
 	"permissions": true,
+	"tasks":       true,
 }
 
 // ParseCommand returns (command string with args, true) only if text starts with a known /command.

@@ -41,7 +41,11 @@ type MoaConfig struct {
 	PinnedModels    []string          `json:"pinned_models"`    // Model IDs pinned for Ctrl+P cycling
 	BraveAPIKey     string            `json:"brave_api_key"`    // Brave Search API key for web_search tool
 	MCPServers      map[string]MCPServer `json:"mcp_servers"`   // MCP tool server connections
-	TrustedMCPPaths []string          `json:"trusted_mcp_paths"` // Project paths trusted for .mcp.json auto-load
+	TrustedMCPPaths    []string          `json:"trusted_mcp_paths"`    // Project paths trusted for .mcp.json auto-load
+	PlanReviewModel    string            `json:"plan_review_model"`    // Model for plan reviewer (default: current model)
+	PlanReviewThinking string            `json:"plan_review_thinking"` // Thinking level for plan reviewer (default: "low")
+	CodeReviewModel    string            `json:"code_review_model,omitempty"`    // Model for code reviewer (default: plan review model)
+	CodeReviewThinking string            `json:"code_review_thinking,omitempty"` // Thinking level for code reviewer (default: plan review thinking)
 }
 
 // MCPServer defines an MCP tool server connection (stdio transport).
@@ -131,6 +135,26 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	}
 	if override.Permissions.Model != "" {
 		merged.Permissions.Model = override.Permissions.Model
+	}
+	if override.PlanReviewModel != "" {
+		merged.PlanReviewModel = override.PlanReviewModel
+	} else {
+		merged.PlanReviewModel = base.PlanReviewModel
+	}
+	if override.PlanReviewThinking != "" {
+		merged.PlanReviewThinking = override.PlanReviewThinking
+	} else {
+		merged.PlanReviewThinking = base.PlanReviewThinking
+	}
+	if override.CodeReviewModel != "" {
+		merged.CodeReviewModel = override.CodeReviewModel
+	} else {
+		merged.CodeReviewModel = base.CodeReviewModel
+	}
+	if override.CodeReviewThinking != "" {
+		merged.CodeReviewThinking = override.CodeReviewThinking
+	} else {
+		merged.CodeReviewThinking = base.CodeReviewThinking
 	}
 	return merged
 }

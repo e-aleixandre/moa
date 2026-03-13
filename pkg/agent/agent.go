@@ -276,6 +276,24 @@ func (a *Agent) ThinkingLevel() string {
 	return a.config.ThinkingLevel
 }
 
+// SystemPrompt returns the current system prompt.
+func (a *Agent) SystemPrompt() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.SystemPrompt
+}
+
+// SetSystemPrompt replaces the system prompt. Returns error if the agent is running.
+func (a *Agent) SetSystemPrompt(prompt string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot change system prompt while agent is running")
+	}
+	a.config.SystemPrompt = prompt
+	return nil
+}
+
 // PermissionCheck returns the current permission callback.
 func (a *Agent) PermissionCheck() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 	a.mu.Lock()

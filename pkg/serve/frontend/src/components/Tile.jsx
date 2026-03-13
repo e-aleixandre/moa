@@ -8,6 +8,7 @@ import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { ModelPill } from './ModelPill.jsx';
+import { TaskBar } from './TaskBar.jsx';
 
 export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
   const [dragOver, setDragOver] = useState(false);
@@ -136,6 +137,9 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
         <span class="tile-number" title={formatShortcut(String(tileIndex + 1), { mod: true })}>{tileIndex + 1}</span>
         <span class={`state-dot ${session.state}`} />
         <span class="tile-title">{session.title || 'Untitled'}</span>
+        {session.planMode && session.planMode !== 'off' && (
+          <span class={`plan-badge plan-${session.planMode}`}>📋 {session.planMode}</span>
+        )}
         {session.subagentCount > 0 && (
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
@@ -150,6 +154,7 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
 
       {session.untrustedMcp && <McpBanner sessionId={sessionId} />}
       <MessageList session={session} />
+      <TaskBar session={session} />
       <InputBar sessionId={sessionId} sessionState={session.state} tileId={tileId} />
     </div>
   );

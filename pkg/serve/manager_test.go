@@ -965,3 +965,73 @@ func TestCancel_WhileIdle(t *testing.T) {
 		t.Fatal("expected error cancelling idle session")
 	}
 }
+
+func TestExecCommand_Clear(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	prov := newMockProvider(simpleResponseHandler("hello"))
+	mgr := newTestManagerWithRoot(t, ctx, prov, dir)
+
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Send a message to create history.
+	mgr.Send(sess.ID, "hi")
+	pollUntil(t, 5*time.Second, "run complete", func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.State == StateIdle
+	})
+
+	if len(sess.History()) == 0 {
+		t.Fatal("expected messages after send")
+	}
+
+	// Clear.
+	result, err := mgr.ExecCommand(sess.ID, "/clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK {
+		t.Fatalf("expected OK, got: %s", result.Message)
+	}
+	if len(sess.History()) != 0 {
+		t.Fatalf("expected 0 messages after clear, got %d", len(sess.History()))
+	}
+}
+
+func TestExecCommand_UnknownCommand(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(), dir)
+
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := mgr.ExecCommand(sess.ID, "/nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OK {
+		t.Fatal("expected not OK for unknown command")
+	}
+}
+
+func TestExecCommand_NotFound(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(), t.TempDir())
+
+	_, err := mgr.ExecCommand("nonexistent", "/clear")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}

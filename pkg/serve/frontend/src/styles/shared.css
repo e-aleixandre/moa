@@ -53,6 +53,20 @@ kbd.shortcut-hint {
 }
 .subagent-badge .lucide { width: 12px; height: 12px; }
 
+/* Plan mode badge */
+.plan-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.plan-badge.plan-planning { color: var(--blue); background: rgba(137, 180, 250, 0.12); }
+.plan-badge.plan-ready { color: var(--green); background: rgba(166, 227, 161, 0.12); }
+.plan-badge.plan-reviewing { color: var(--mauve); background: rgba(203, 166, 247, 0.12); }
+.plan-badge.plan-executing { color: var(--peach); background: rgba(250, 179, 135, 0.12); }
+
 /* Delete confirmation (sidebar + drawer) */
 .delete-confirm {
   display: flex;

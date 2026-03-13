@@ -136,6 +136,9 @@ export async function loadSessions() {
         streamingText: existing ? existing.streamingText : null,
         thinkingText: existing ? existing.thinkingText : null,
         subagentCount: existing ? existing.subagentCount : 0,
+        tasks: existing ? existing.tasks : [],
+        planMode: info.plan_mode || (existing ? existing.planMode : 'off'),
+        planFile: info.plan_file || (existing ? existing.planFile : null),
       };
     }
     // Detect attention transitions (hidden sessions only)
@@ -194,6 +197,9 @@ export function handleWsInit(id, data) {
     pendingPerm: data.pending_permission || null,
     streamingText: null,
     thinkingText: null,
+    tasks: data.tasks || [],
+    planMode: data.plan_mode || 'off',
+    planFile: data.plan_file || null,
   });
 }
 
@@ -434,6 +440,32 @@ export async function configureSession(id, { model, thinking }) {
 export async function trustMcp(id) {
   await api('POST', `/api/sessions/${id}/trust-mcp`);
   updateSession(id, { untrustedMcp: false });
+}
+
+export async function execCommand(id, command) {
+  return api('POST', `/api/sessions/${id}/command`, { command });
+}
+
+export function handleWsTasksUpdate(id, data) {
+  updateSession(id, { tasks: data.tasks || [] });
+}
+
+export function handleWsPlanMode(id, data) {
+  updateSession(id, {
+    planMode: data.mode || 'off',
+    planFile: data.plan_file || null,
+  });
+}
+
+export function handleWsCommand(id, data) {
+  if (data.command === 'clear') {
+    updateSession(id, { messages: [], streamingText: null, thinkingText: null });
+  } else if (data.command === 'compact') {
+    // Server sends updated messages with the compact event.
+    if (data.messages) {
+      updateSession(id, { messages: normalizeHistory(data.messages) });
+    }
+  }
 }
 
 // --- Tile tree actions ---

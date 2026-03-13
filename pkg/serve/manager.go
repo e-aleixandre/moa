@@ -25,7 +25,9 @@ import (
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/subagent"
+	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
 
@@ -69,6 +71,10 @@ type ManagedSession struct {
 	pending            *pendingPermission
 	lastResolvedPermID string
 
+	// Task tracking and plan mode.
+	taskStore *tasks.Store
+	planMode  *planmode.PlanMode
+
 	// Per-session internals for MCP trust reload and subagent config.
 	toolReg      *core.Registry
 	agentsMD     string
@@ -94,6 +100,8 @@ type SessionInfo struct {
 	Updated      time.Time    `json:"updated"`
 	Error        string       `json:"error,omitempty"`
 	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
+	PlanMode     string       `json:"plan_mode,omitempty"`
+	PlanFile     string       `json:"plan_file,omitempty"`
 }
 
 // Subscribe registers a channel to receive session events. Returns the channel
@@ -217,6 +225,12 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 			"is_error":     e.IsError,
 			"result":       text,
 		}})
+		// Broadcast updated task list after tasks tool changes.
+		if e.ToolName == "tasks" && s.taskStore != nil {
+			s.broadcast(Event{Type: "tasks_update", Data: map[string]any{
+				"tasks": s.taskStore.Tasks(),
+			}})
+		}
 
 	default:
 		s.broadcast(Event{Type: e.Type})
@@ -228,7 +242,7 @@ func (s *ManagedSession) info() SessionInfo {
 	if s.agent != nil {
 		thinking = s.agent.ThinkingLevel()
 	}
-	return SessionInfo{
+	info := SessionInfo{
 		ID:           s.ID,
 		Title:        s.Title,
 		State:        s.State,
@@ -240,6 +254,14 @@ func (s *ManagedSession) info() SessionInfo {
 		Error:        s.Error,
 		UntrustedMCP: s.UntrustedMCP,
 	}
+	if s.planMode != nil {
+		mode := s.planMode.Mode()
+		if mode != planmode.ModeOff {
+			info.PlanMode = string(mode)
+			info.PlanFile = s.planMode.PlanFilePath()
+		}
+	}
+	return info
 }
 
 // save persists the session to disk. No-op if persistence is unavailable
@@ -254,6 +276,24 @@ func (s *ManagedSession) save() {
 	s.persisted.Messages = make([]core.AgentMessage, len(s.messages))
 	copy(s.persisted.Messages, s.messages)
 	s.persisted.CompactionEpoch = s.agent.CompactionEpoch()
+	// Persist task store state.
+	if s.taskStore != nil {
+		if s.persisted.Metadata == nil {
+			s.persisted.Metadata = make(map[string]any)
+		}
+		for k, v := range s.taskStore.SaveToMetadata() {
+			s.persisted.Metadata[k] = v
+		}
+	}
+	// Persist plan mode state.
+	if s.planMode != nil {
+		if s.persisted.Metadata == nil {
+			s.persisted.Metadata = make(map[string]any)
+		}
+		for k, v := range s.planMode.SaveState() {
+			s.persisted.Metadata[k] = v
+		}
+	}
 	snapshot := *s.persisted
 	store := s.store
 	s.mu.Unlock()
@@ -390,10 +430,14 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		BraveAPIKey:    sessionCfg.BraveAPIKey,
 	})
 
-	// 6. AGENTS.md from session CWD.
+	// 6. Task store — always available.
+	taskStore := tasks.NewStore()
+	toolReg.Register(tasks.NewTool(taskStore))
+
+	// 7. AGENTS.md from session CWD.
 	agentsMD, _ := agentcontext.LoadAgentsMD(cwd, os.Getenv("AGENT_HOME"))
 
-	// 7. Permission gate from session config (mirrors CLI logic).
+	// 8. Permission gate from session config (mirrors CLI logic).
 	permMode := permission.Mode(sessionCfg.Permissions.Mode)
 	if permMode == "" {
 		permMode = permission.ModeYolo
@@ -419,7 +463,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		gate = permission.New(permMode, permCfg)
 	}
 
-	// 8. MCP servers.
+	// 9. MCP servers.
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
 	untrustedMCP := false
 	mcpPath := filepath.Join(cwd, ".mcp.json")
@@ -443,7 +487,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		}
 	}
 
-	// 9. Subagents. Declare sess and agHolder before closures; both are
+	// 10. Subagents. Declare sess and agHolder before closures; both are
 	// populated before the session is exposed to callers.
 	var sess *ManagedSession
 	var agHolder atomic.Pointer[agent.Agent]
@@ -517,10 +561,50 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		},
 	})
 
-	// 10. System prompt (after ALL tools registered: builtins + MCP + subagents).
+	// 11. Plan mode.
+	reviewModel := model
+	if sessionCfg.PlanReviewModel != "" {
+		if rm, ok := core.ResolveModel(sessionCfg.PlanReviewModel); ok {
+			reviewModel = rm
+		}
+	}
+	reviewThinking := "medium"
+	if sessionCfg.PlanReviewThinking != "" {
+		reviewThinking = sessionCfg.PlanReviewThinking
+	}
+	codeReviewModel := reviewModel
+	if sessionCfg.CodeReviewModel != "" {
+		if crm, ok := core.ResolveModel(sessionCfg.CodeReviewModel); ok {
+			codeReviewModel = crm
+		}
+	}
+	codeReviewThinking := reviewThinking
+	if sessionCfg.CodeReviewThinking != "" {
+		codeReviewThinking = sessionCfg.CodeReviewThinking
+	}
+
+	pm := planmode.New(planmode.Config{
+		Registry:   toolReg,
+		SessionDir: cwd,
+		TaskStore:  taskStore,
+		ReviewCfg: planmode.ReviewConfig{
+			ProviderFactory: m.providerFactory,
+			Model:           reviewModel,
+			ThinkingLevel:   reviewThinking,
+			ParentTools:     toolReg,
+		},
+		CodeReviewCfg: planmode.ReviewConfig{
+			ProviderFactory: m.providerFactory,
+			Model:           codeReviewModel,
+			ThinkingLevel:   codeReviewThinking,
+			ParentTools:     toolReg,
+		},
+	})
+
+	// 12. System prompt (after ALL tools registered: builtins + MCP + subagents).
 	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd)
 
-	// 11. Agent.
+	// 13. Agent.
 	agentCfg := agent.AgentConfig{
 		Provider:            prov,
 		Model:               model,
@@ -532,8 +616,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		MaxToolCallsPerTurn: 20,
 		MaxRunDuration:      30 * time.Minute,
 	}
-	if gate != nil {
-		agentCfg.PermissionCheck = gate.Check
+	// Compose permission check: plan mode filter + permission gate.
+	agentCfg.PermissionCheck = func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+		if allowed, reason := pm.FilterToolCall(name, args); !allowed {
+			return &core.ToolCallDecision{Block: true, Reason: reason}
+		}
+		if gate != nil {
+			return gate.Check(ctx, name, args)
+		}
+		return nil
 	}
 
 	ag, err := agent.New(agentCfg)
@@ -543,7 +634,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	}
 	agHolder.Store(ag)
 
-	// 12. Build session.
+	// 14. Build session.
 	sess = &ManagedSession{
 		ID:            id,
 		Title:         title,
@@ -561,7 +652,19 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		resolvedModel: model,
 		mcpMgr:        mcpMgr,
 		UntrustedMCP:  untrustedMCP,
+		taskStore:     taskStore,
+		planMode:      pm,
 	}
+
+	pm.SetOnChange(func(mode planmode.Mode) {
+		data := map[string]any{
+			"mode": string(mode),
+		}
+		if mode != planmode.ModeOff {
+			data["plan_file"] = pm.PlanFilePath()
+		}
+		sess.broadcast(Event{Type: "plan_mode", Data: data})
+	})
 
 	sess.unsub = ag.Subscribe(func(e core.AgentEvent) {
 		sess.broadcastAgentEvent(e)
@@ -801,6 +904,15 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	sess.persisted = saved
 	sess.store = store
 	sess.Created = saved.Created
+	// Restore task store state.
+	if sess.taskStore != nil && saved.Metadata != nil {
+		sess.taskStore.RestoreFromMetadata(saved.Metadata)
+	}
+	// Restore plan mode state.
+	if sess.planMode != nil && saved.Metadata != nil {
+		sess.planMode.RestoreState(saved.Metadata)
+		sess.planMode.ApplyRestoredState()
+	}
 	sess.mu.Unlock()
 
 	return sess, nil
@@ -855,6 +967,192 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 
 	sess.broadcast(Event{Type: "config_change", Data: result})
 	return result, nil
+}
+
+// CommandResult is the response from executing a slash command.
+type CommandResult struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+// ExecCommand executes a slash command in a session.
+func (m *Manager) ExecCommand(sessionID, rawCommand string) (*CommandResult, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return nil, ErrNotFound
+	}
+
+	parts := strings.Fields(rawCommand)
+	if len(parts) == 0 {
+		return &CommandResult{OK: false, Message: "empty command"}, nil
+	}
+
+	// Strip leading "/" if present (frontend may send it either way).
+	cmd := strings.TrimPrefix(parts[0], "/")
+	args := parts[1:]
+
+	switch cmd {
+	case "clear":
+		sess.mu.Lock()
+		if sess.State == StateRunning || sess.State == StatePermission {
+			sess.mu.Unlock()
+			return nil, ErrBusy
+		}
+		sess.mu.Unlock()
+
+		if err := sess.agent.Reset(); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+
+		sess.mu.Lock()
+		sess.messages = nil
+		sess.mu.Unlock()
+
+		sess.save()
+		sess.broadcast(Event{Type: "command", Data: map[string]any{
+			"command": "clear",
+		}})
+		return &CommandResult{OK: true, Message: "conversation cleared"}, nil
+
+	case "compact":
+		sess.mu.Lock()
+		if sess.State == StateRunning || sess.State == StatePermission {
+			sess.mu.Unlock()
+			return nil, ErrBusy
+		}
+		sess.mu.Unlock()
+
+		if _, err := sess.agent.Compact(sess.sessionCtx); err != nil {
+			return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
+		}
+
+		sess.mu.Lock()
+		sess.messages = sess.agent.Messages()
+		sess.mu.Unlock()
+
+		sess.save()
+		sess.broadcast(Event{Type: "command", Data: map[string]any{
+			"command":  "compact",
+			"messages": sess.agent.Messages(),
+		}})
+		return &CommandResult{OK: true, Message: "conversation compacted"}, nil
+
+	case "model":
+		if len(args) == 0 {
+			return &CommandResult{OK: false, Message: "usage: /model <name>"}, nil
+		}
+		result, err := m.ReconfigureSession(sessionID, strings.Join(args, " "), "")
+		if err != nil {
+			if errors.Is(err, ErrBusy) {
+				return nil, ErrBusy
+			}
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		return &CommandResult{OK: true, Message: "model: " + result["model"]}, nil
+
+	case "thinking":
+		if len(args) == 0 {
+			return &CommandResult{OK: false, Message: "usage: /thinking <off|low|medium|high>"}, nil
+		}
+		result, err := m.ReconfigureSession(sessionID, "", args[0])
+		if err != nil {
+			if errors.Is(err, ErrBusy) {
+				return nil, ErrBusy
+			}
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		return &CommandResult{OK: true, Message: "thinking: " + result["thinking"]}, nil
+
+	case "plan":
+		if sess.planMode == nil {
+			return &CommandResult{OK: false, Message: "plan mode not available"}, nil
+		}
+		sess.mu.Lock()
+		if sess.State == StateRunning || sess.State == StatePermission {
+			sess.mu.Unlock()
+			return nil, ErrBusy
+		}
+		sess.mu.Unlock()
+
+		mode := sess.planMode.Mode()
+
+		if len(args) > 0 && args[0] == "exit" {
+			if mode == planmode.ModeOff {
+				return &CommandResult{OK: false, Message: "not in plan mode"}, nil
+			}
+			sess.planMode.Exit()
+			sess.broadcast(Event{Type: "plan_mode", Data: map[string]any{
+				"mode": string(planmode.ModeOff),
+			}})
+			return &CommandResult{OK: true, Message: "exited plan mode"}, nil
+		}
+
+		if mode == planmode.ModeOff {
+			planPath, err := sess.planMode.Enter()
+			if err != nil {
+				return &CommandResult{OK: false, Message: err.Error()}, nil
+			}
+			sess.broadcast(Event{Type: "plan_mode", Data: map[string]any{
+				"mode":      string(planmode.ModePlanning),
+				"plan_file": planPath,
+			}})
+			return &CommandResult{OK: true, Message: "entered plan mode → " + planPath}, nil
+		}
+
+		return &CommandResult{OK: true, Message: "plan mode: " + string(mode)}, nil
+
+	case "tasks":
+		if sess.taskStore == nil {
+			return &CommandResult{OK: false, Message: "task tracking not available"}, nil
+		}
+		if len(args) == 0 {
+			// List tasks.
+			taskList := sess.taskStore.Tasks()
+			if len(taskList) == 0 {
+				return &CommandResult{OK: true, Message: "No tasks"}, nil
+			}
+			done := 0
+			var lines []string
+			for _, t := range taskList {
+				icon := "☐"
+				if t.Status == "done" {
+					icon = "☑"
+					done++
+				}
+				lines = append(lines, fmt.Sprintf("%s #%d: %s", icon, t.ID, t.Title))
+			}
+			lines = append(lines, fmt.Sprintf("\n%d/%d complete", done, len(taskList)))
+			return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
+		}
+		switch args[0] {
+		case "done":
+			if len(args) < 2 {
+				return &CommandResult{OK: false, Message: "usage: /tasks done <id>"}, nil
+			}
+			var id int
+			if _, err := fmt.Sscanf(args[1], "%d", &id); err != nil {
+				return &CommandResult{OK: false, Message: "invalid task ID: " + args[1]}, nil
+			}
+			if !sess.taskStore.MarkDone(id) {
+				return &CommandResult{OK: false, Message: fmt.Sprintf("task #%d not found", id)}, nil
+			}
+			sess.broadcast(Event{Type: "tasks_update", Data: map[string]any{
+				"tasks": sess.taskStore.Tasks(),
+			}})
+			return &CommandResult{OK: true, Message: fmt.Sprintf("✅ Task #%d marked done", id)}, nil
+		case "reset":
+			sess.taskStore.Reset()
+			sess.broadcast(Event{Type: "tasks_update", Data: map[string]any{
+				"tasks": sess.taskStore.Tasks(),
+			}})
+			return &CommandResult{OK: true, Message: "Tasks cleared"}, nil
+		default:
+			return &CommandResult{OK: false, Message: "usage: /tasks [done <id> | reset]"}, nil
+		}
+
+	default:
+		return &CommandResult{OK: false, Message: "unknown command: /" + cmd}, nil
+	}
 }
 
 // Cancel aborts the running agent in a session.

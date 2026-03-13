@@ -6,6 +6,7 @@ import {
   handleWsStateChange, handleWsPermissionRequest,
   handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
+  handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
 } from './state.js';
 
 const HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
@@ -105,6 +106,15 @@ function routeEvent(sessionId, evt) {
       break;
     case 'run_end':
       handleWsRunEnd(sessionId);
+      break;
+    case 'command':
+      handleWsCommand(sessionId, evt.data);
+      break;
+    case 'tasks_update':
+      handleWsTasksUpdate(sessionId, evt.data);
+      break;
+    case 'plan_mode':
+      handleWsPlanMode(sessionId, evt.data);
       break;
   }
 }

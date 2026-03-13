@@ -98,6 +98,56 @@
   box-shadow: 0 2px 8px rgba(203,166,247,0.25);
 }
 
+/* Command suggestions popup */
+.cmd-suggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 4px;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.25);
+  overflow: hidden;
+  z-index: 10;
+}
+
+.cmd-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.08s;
+  font-size: 13px;
+}
+.cmd-suggestion-item:hover,
+.cmd-suggestion-item.selected {
+  background: var(--surface0);
+}
+
+.cmd-suggestion-name {
+  color: var(--peach);
+  font-weight: 600;
+  font-family: var(--mono);
+  flex-shrink: 0;
+}
+
+.cmd-suggestion-args {
+  color: var(--overlay0);
+  font-family: var(--mono);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.cmd-suggestion-desc {
+  color: var(--subtext0);
+  margin-left: auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .input-stop {
   background: var(--red-dim);
   color: var(--red);

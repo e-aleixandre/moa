@@ -145,6 +145,8 @@ const (
 	SegmentModel       = "model"
 	SegmentThinking    = "thinking"
 	SegmentPermissions = "permissions"
+	SegmentPlan        = "plan"
+	SegmentTasks       = "tasks"
 	SegmentCost        = "cost"
 	SegmentContext     = "context"
 )
@@ -154,6 +156,8 @@ const (
 	PriorityModel       = 10
 	PriorityThinking    = 20
 	PriorityPermissions = 30
+	PriorityPlan        = 40
+	PriorityTasks       = 45
 	PriorityCost        = 80
 	PriorityContext     = 90 // rightmost of the built-ins
 )
@@ -199,6 +203,16 @@ func (sl *StatusLine) UpdatePermissionsSegment(mode string) {
 	sl.Set(SegmentPermissions, mode, PriorityPermissions)
 }
 
+// UpdatePlanSegment sets the plan mode segment. Pass "" to remove.
+func (sl *StatusLine) UpdatePlanSegment(mode string) {
+	if mode == "" {
+		sl.Remove(SegmentPlan)
+		return
+	}
+	text := statusLineKeyStyle.Render("plan ") + statusLineValueStyle.Render(mode)
+	sl.Set(SegmentPlan, text, PriorityPlan)
+}
+
 // UpdateCostSegment sets the session cost segment.
 func (sl *StatusLine) UpdateCostSegment(cost float64) {
 	if cost <= 0 {
@@ -213,6 +227,16 @@ func (sl *StatusLine) UpdateCostSegment(cost float64) {
 	}
 	text := statusLineKeyStyle.Render("cost ") + statusLineValueStyle.Render(val)
 	sl.Set(SegmentCost, text, PriorityCost)
+}
+
+// UpdateTasksSegment sets the task progress segment.
+func (sl *StatusLine) UpdateTasksSegment(done, total int) {
+	if total == 0 {
+		sl.Remove(SegmentTasks)
+		return
+	}
+	text := statusLineKeyStyle.Render("📋 ") + statusLineValueStyle.Render(fmt.Sprintf("%d/%d", done, total))
+	sl.Set(SegmentTasks, text, PriorityTasks)
 }
 
 // UpdateContextSegment sets the context usage segment.

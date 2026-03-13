@@ -1,0 +1,47 @@
+/* Task bar — single-line compact indicator above input */
+
+.task-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  background: var(--mantle);
+  border-top: 1px solid var(--surface0);
+  font-size: 11px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.task-bar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.task-bar-pill .lucide { width: 11px; height: 11px; }
+
+.task-bar-pill.plan-planning { color: var(--blue); background: rgba(137, 180, 250, 0.1); }
+.task-bar-pill.plan-ready { color: var(--green); background: rgba(166, 227, 161, 0.1); }
+.task-bar-pill.plan-reviewing { color: var(--mauve); background: rgba(203, 166, 247, 0.1); }
+.task-bar-pill.plan-executing { color: var(--peach); background: rgba(250, 179, 135, 0.1); }
+
+.task-bar-pill.tasks {
+  color: var(--subtext1);
+  background: var(--surface0);
+}
+
+.task-bar-current {
+  color: var(--overlay1);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}

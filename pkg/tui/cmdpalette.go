@@ -19,7 +19,9 @@ var allCommands = []commandDef{
 	{Name: "model", Args: "<spec>", Desc: "Switch model or open picker"},
 	{Name: "thinking", Args: "<level>", Desc: "Set thinking level (off/minimal/low/medium/high)"},
 	{Name: "compact", Desc: "Force context compaction"},
+	{Name: "plan", Desc: "Toggle plan mode (plan-then-execute workflow)"},
 	{Name: "permissions", Args: "<mode>", Desc: "View or set permission mode (yolo/ask/auto)"},
+	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
 	{Name: "clear", Desc: "Clear conversation and start fresh"},
 	{Name: "exit", Desc: "Quit moa"},
 }
