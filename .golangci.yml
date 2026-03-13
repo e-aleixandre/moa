@@ -9,8 +9,7 @@ linters:
     - unused
   disable:
     - depguard
-
-issues:
-  exclude-dirs:
-    - pkg/serve/static
-    - pkg/serve/frontend/node_modules
+  exclusions:
+    paths:
+      - pkg/serve/static
+      - pkg/serve/frontend/node_modules
