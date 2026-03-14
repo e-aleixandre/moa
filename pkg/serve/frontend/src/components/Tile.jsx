@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'preact/hooks';
 import { MessageSquarePlus, GripHorizontal, GitFork, Columns2, Rows2, X } from 'lucide-preact';
-import { focusTile, assignToTile, swapTiles, splitTile, closeTile, getTileCount } from '../state.js';
+import { focusTile, assignToTile, swapTiles, splitTile, closeTile } from '../tile-actions.js';
+import { getTileCount } from '../store.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { useTouchDrag, registerDropTarget } from '../hooks/useTouchDrag.js';
 import { MessageList } from './MessageList.jsx';
@@ -101,22 +102,20 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        <div class="tile-header" draggable onDragStart={handleDragStart} {...touchDragProps}>
+          <GripHorizontal class="drag-handle" />
+          <span class="tile-number" title={formatShortcut(String(tileIndex + 1), { mod: true })}>{tileIndex + 1}</span>
+          <span class="tile-title empty-title">Empty</span>
+          <button class="tile-action-btn" onClick={(e) => stop(e, () => splitTile(tileId, 'horizontal'))} title="Split right"><Columns2 /></button>
+          <button class="tile-action-btn" onClick={(e) => stop(e, () => splitTile(tileId, 'vertical'))} title="Split down"><Rows2 /></button>
+          {canClose && (
+            <button class="tile-action-btn tile-close-btn" onClick={(e) => stop(e, () => closeTile(tileId))} title="Close pane"><X /></button>
+          )}
+        </div>
         <div class="tile-empty">
           <MessageSquarePlus />
           <span>Drag a session here</span>
-          <div class="tile-empty-actions">
-            <button onClick={() => splitTile(tileId, 'horizontal')}>
-              <Columns2 /> Split right
-            </button>
-            <button onClick={() => splitTile(tileId, 'vertical')}>
-              <Rows2 /> Split down
-            </button>
-          </div>
-          {canClose && (
-            <button class="tile-empty-close" onClick={() => closeTile(tileId)}>
-              <X /> Close pane
-            </button>
-          )}
+          <span class="tile-empty-hint">{formatShortcut('K', { mod: true })} to pick a session</span>
         </div>
       </div>
     );
@@ -137,9 +136,6 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
         <span class="tile-number" title={formatShortcut(String(tileIndex + 1), { mod: true })}>{tileIndex + 1}</span>
         <span class={`state-dot ${session.state}`} />
         <span class="tile-title">{session.title || 'Untitled'}</span>
-        {session.planMode && session.planMode !== 'off' && (
-          <span class={`plan-badge plan-${session.planMode}`}>📋 {session.planMode}</span>
-        )}
         {session.subagentCount > 0 && (
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
@@ -155,7 +151,7 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
       {session.untrustedMcp && <McpBanner sessionId={sessionId} />}
       <MessageList session={session} />
       <TaskBar session={session} />
-      <InputBar sessionId={sessionId} sessionState={session.state} tileId={tileId} />
+      <InputBar sessionId={sessionId} session={session} tileId={tileId} />
     </div>
   );
 }

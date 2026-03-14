@@ -4,38 +4,25 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"golang.org/x/term"
 
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/auth"
-	agentcontext "github.com/ealeixandre/moa/pkg/context"
+	"github.com/ealeixandre/moa/pkg/bootstrap"
+	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/planmode"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
-	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/provider"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
-	"github.com/ealeixandre/moa/pkg/serve"
 	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/skill"
-	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
-	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // Set by goreleaser ldflags.
@@ -44,11 +31,6 @@ var (
 	commit  = "none"
 	date    = "unknown"
 )
-
-type ProviderBuildResult struct {
-	Provider   core.Provider
-	AuthNotice string
-}
 
 type resumeFlag struct {
 	Enabled bool
@@ -167,114 +149,55 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Load AGENTS.md
-	agentHome := os.Getenv("AGENT_HOME")
-	agentsMD, _ := agentcontext.LoadAgentsMD(cwd, agentHome)
-
-	// Load config: global (~/.config/moa/config.json) + project (<cwd>/.moa/config.json)
+	// Load config (pre-bootstrap) for MCP trust prompt — CLI-specific interactive flow.
 	moaCfg := core.LoadMoaConfig(cwd)
-
-	// Project .mcp.json — requires explicit trust (interactive prompt first time).
 	loadProjectMCPServers(&moaCfg, cwd, promptContent)
 
-	// Build tool registry.
-	// Always allow the spill output dir so the model can read truncated output files.
-	allowedPaths := append(moaCfg.AllowedPaths, tool.SpillOutputDir())
-	toolReg := core.NewRegistry()
-	tool.RegisterBuiltins(toolReg, tool.ToolConfig{
-		WorkspaceRoot:  cwd,
-		DisableSandbox: *yolo || moaCfg.DisableSandbox,
-		AllowedPaths:   allowedPaths,
-		BashTimeout:    5 * time.Minute,
-		BraveAPIKey:    moaCfg.BraveAPIKey,
-	})
-
-	// MCP servers — zero cost when none configured.
-	var mcpManager *mcp.Manager
-	if len(moaCfg.MCPServers) > 0 {
-		mcpManager = mcp.NewManager(nil)
-		mcpManager.Start(ctx, moaCfg.MCPServers)
-		for _, t := range mcpManager.Tools() {
-			toolReg.Register(t)
-		}
-		defer mcpManager.Close()
+	// Resolve budget: flag wins (including explicit 0), else config.
+	resolvedBudget := moaCfg.MaxBudget
+	if *maxBudget >= 0 {
+		resolvedBudget = *maxBudget
+	}
+	if math.IsNaN(resolvedBudget) || math.IsInf(resolvedBudget, 0) {
+		fmt.Fprintf(os.Stderr, "error: --max-budget must be a finite number\n")
+		os.Exit(1)
 	}
 
-	// Build permission gate.
-	// Priority: --yolo flag > --permissions flag > config > default (yolo)
-	permMode := permission.Mode(moaCfg.Permissions.Mode)
+	// Resolve permission mode: --yolo flag > --permissions flag > config.
+	permModeStr := ""
 	if *perms != "" {
-		permMode = permission.Mode(*perms)
+		permModeStr = *perms
 	}
 	if *yolo {
-		permMode = permission.ModeYolo
-	}
-	if permMode == "" {
-		permMode = permission.ModeYolo
-	}
-	var permGate *permission.Gate
-	if permMode != permission.ModeYolo {
-		permCfg := permission.Config{
-			Allow: moaCfg.Permissions.Allow,
-			Deny:  moaCfg.Permissions.Deny,
-			Rules: moaCfg.Permissions.Rules,
-		}
-
-		// Build AI evaluator for auto mode
-		if permMode == permission.ModeAuto {
-			evalModelSpec := moaCfg.Permissions.Model
-			if *permsModel != "" {
-				evalModelSpec = *permsModel
-			}
-			if evalModelSpec == "" {
-				evalModelSpec = "haiku" // sensible default: cheap and fast
-			}
-			evalModel, _ := core.ResolveModel(evalModelSpec)
-			evalProvider, err := buildProvider(evalModel, authStore)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: auto permissions disabled (evaluator provider: %v)\n", err)
-			} else {
-				permCfg.Evaluator = permission.NewEvaluator(evalProvider.Provider, evalModel)
-			}
-		}
-
-		permGate = permission.New(permMode, permCfg)
+		permModeStr = "yolo"
 	}
 
-	// Discover skills early — needed by both subagent config and system prompt.
-	skills := skill.Discover(cwd)
-	skillsIndex := skill.FormatIndex(skills)
-
-	// Discover prompt templates for TUI.
-	promptTemplates := promptpkg.Discover(cwd)
-
-	var agHolder atomic.Pointer[agent.Agent]
+	// Subagent notification channels for TUI.
 	subagentCountCh := make(chan int, 16)
 	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
 	useTUI := promptContent == ""
-	if err := subagent.RegisterAll(toolReg, subagent.Config{
-		DefaultModel: resolvedModel,
-		CurrentModel: func() core.Model {
-			if a := agHolder.Load(); a != nil {
-				return a.Model()
-			}
-			return resolvedModel
-		},
-		CurrentThinkingLevel: func() string {
-			if a := agHolder.Load(); a != nil {
-				return a.ThinkingLevel()
-			}
-			return *thinking
-		},
-		CurrentPermissionCheck: func() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-			if a := agHolder.Load(); a != nil {
-				return a.PermissionCheck()
-			}
-			if permGate != nil {
-				return permGate.Check
-			}
-			return nil
-		},
+
+	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
+	// plan mode, skills, verify, and agent.
+	//
+	// Race safety: getAgent captures `sess` by reference. It's only called from
+	// OnAsyncComplete callbacks, which fire after BuildSession returns (subagent
+	// jobs can't complete before the agent is created). The `sess` pointer is
+	// written once below and never reassigned, so there's no concurrent access.
+	// File checkpoints for /undo.
+	cpStore := checkpoint.New(20)
+
+	var sess *bootstrap.Session
+	getAgent := func() *agent.Agent {
+		if sess != nil {
+			return sess.Agent
+		}
+		return nil
+	}
+	sess, err = bootstrap.BuildSession(bootstrap.SessionConfig{
+		CWD:             cwd,
+		Model:           resolvedModel,
+		Provider:        providerBuild.Provider,
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
 			build, err := buildProvider(model, authStore)
 			if err != nil {
@@ -282,11 +205,16 @@ func main() {
 			}
 			return build.Provider, nil
 		},
-		AgentsMD:      agentsMD,
-		ParentTools:   toolReg,
-		AppCtx:        ctx,
-		WorkspaceRoot: cwd,
-		SkillsIndex:   skillsIndex,
+		MoaCfg:              &moaCfg,
+		Ctx:                 ctx,
+		ThinkingLevel:       *thinking,
+		MaxTurns:            *maxTurns,
+		MaxBudget:           resolvedBudget,
+		DisableSandbox:      *yolo,
+		PermissionMode:      permModeStr,
+		PermissionEvalModel: *permsModel,
+		EnableAskUser:       useTUI,
+		BeforeWrite:         cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
 			select {
 			case subagentCountCh <- count:
@@ -294,15 +222,8 @@ func main() {
 			}
 		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string) {
-			var agentText string
-			switch status {
-			case "completed":
-				agentText = fmt.Sprintf("[subagent completed] Job %s finished.\nTask: %s\n\nResult (last 50 lines):\n%s", jobID, task, resultTail)
-			case "failed":
-				agentText = fmt.Sprintf("[subagent failed] Job %s failed.\nTask: %s\nError: %s", jobID, task, resultTail)
-			case "cancelled":
-				agentText = fmt.Sprintf("[subagent cancelled] Job %s was cancelled.\nTask: %s", jobID, task)
-			default:
+			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail)
+			if agentText == "" {
 				return
 			}
 			if useTUI {
@@ -317,145 +238,84 @@ func main() {
 				default:
 				}
 			} else {
-				// Headless: steer directly.
-				if a := agHolder.Load(); a != nil {
+				if a := getAgent(); a != nil {
 					a.Steer(agentText)
 				}
 			}
 		},
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "subagent registration: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Verify tool — register only if .moa/verify.json exists and is valid.
-	verifyCfg, verifyErr := verify.LoadConfig(cwd)
-	if verifyErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: invalid .moa/verify.json: %v\n", verifyErr)
-	}
-	if verifyCfg != nil {
-		toolReg.Register(verify.NewTool(cwd))
-	}
-
-	// Register skill tool (skills already discovered above).
-	if len(skills) > 0 {
-		toolReg.Register(skill.NewTool(skills))
-	}
-
-	// Build system prompt after all tools are registered.
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cwd, verifyCfg != nil, skillsIndex)
-
-	// Resolve budget: flag wins (including explicit 0), else config.
-	resolvedBudget := moaCfg.MaxBudget
-	if *maxBudget >= 0 {
-		resolvedBudget = *maxBudget
-	}
-	if math.IsNaN(resolvedBudget) || math.IsInf(resolvedBudget, 0) {
-		fmt.Fprintf(os.Stderr, "error: --max-budget must be a finite number\n")
-		os.Exit(1)
-	}
-
-	// Build agent
-	agentCfg := agent.AgentConfig{
-		Provider:            providerBuild.Provider,
-		Model:               resolvedModel,
-		SystemPrompt:        systemPrompt,
-		ThinkingLevel:       *thinking,
-		Tools:               toolReg,
-		WorkspaceRoot:       cwd,
-		MaxTurns:            *maxTurns,
-		MaxToolCallsPerTurn: 20,
-		MaxRunDuration:      30 * time.Minute,
-		MaxBudget:           resolvedBudget,
-	}
-	if permGate != nil {
-		agentCfg.PermissionCheck = permGate.Check
-	}
-	ag, err := agent.New(agentCfg)
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	agHolder.Store(ag)
+	if sess.MCPManager != nil {
+		defer sess.MCPManager.Close()
+	}
+
+	ag := sess.Agent
+
+	// Discover prompt templates for TUI (CLI-specific, not part of bootstrap).
+	promptTemplates := promptpkg.Discover(cwd)
 
 	// --- Mode selection ---
 
 	if promptContent == "" {
 		// Interactive mode — launch TUI with session persistence
 		var sessionStore session.SessionStore
-		var sessionDir string
 		if fs, err := session.NewFileStore("", cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: session persistence disabled: %v\n", err)
 		} else {
 			sessionStore = fs
-			sessionDir = fs.Dir()
 		}
 
-		var sess *session.Session
+		var persistedSess *session.Session
 		startInSessionBrowser := false
 		if sessionStore != nil {
 			switch {
 			case resume.Enabled && resume.ID == "":
 				startInSessionBrowser = true
 			case resume.Enabled:
-				sess, err = sessionStore.Load(resume.ID)
+				persistedSess, err = sessionStore.Load(resume.ID)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not load session %q: %v\n", resume.ID, err)
 				}
 			case *continueFlag:
-				sess, err = sessionStore.Latest()
+				persistedSess, err = sessionStore.Latest()
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not load latest session: %v\n", err)
 				}
-				if sess == nil {
+				if persistedSess == nil {
 					fmt.Fprintf(os.Stderr, "No previous session found. Starting fresh.\n")
 				}
 			}
 		}
-		if sess != nil {
-			if err := ag.LoadState(sess.Messages, sess.CompactionEpoch); err != nil {
+		if persistedSess != nil {
+			if err := ag.LoadState(persistedSess.Messages, persistedSess.CompactionEpoch); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
-				sess = nil
+				persistedSess = nil
 			} else {
-				// Backfill metadata for sessions saved before CWD-scoped persistence.
-				if sess.Metadata == nil {
-					sess.Metadata = make(map[string]any)
+				if persistedSess.Metadata == nil {
+					persistedSess.Metadata = make(map[string]any)
 				}
-				if sess.Metadata["cwd"] == nil {
-					sess.Metadata["cwd"] = cwd
+				if persistedSess.Metadata["cwd"] == nil {
+					persistedSess.Metadata["cwd"] = cwd
 				}
-				if sess.Metadata["model"] == nil {
-					sess.Metadata["model"] = modelSpec(resolvedModel)
+				if persistedSess.Metadata["model"] == nil {
+					persistedSess.Metadata["model"] = modelSpec(resolvedModel)
 				}
 			}
 		}
-		if sess == nil && sessionStore != nil && !startInSessionBrowser {
-			sess = sessionStore.Create()
-			sess.Metadata["cwd"] = cwd
-			sess.Metadata["model"] = modelSpec(resolvedModel)
+		if persistedSess == nil && sessionStore != nil && !startInSessionBrowser {
+			persistedSess = sessionStore.Create()
+			persistedSess.Metadata["cwd"] = cwd
+			persistedSess.Metadata["model"] = modelSpec(resolvedModel)
 		}
 
-		// Create plan mode.
-		reviewModel := resolvedModel
-		if moaCfg.PlanReviewModel != "" {
-			if m, ok := core.ResolveModel(moaCfg.PlanReviewModel); ok {
-				reviewModel = m
-			}
-		}
-		reviewThinking := "low"
-		if moaCfg.PlanReviewThinking != "" {
-			reviewThinking = moaCfg.PlanReviewThinking
-		}
-		// Code review model: code_review_model → plan_review_model → current model.
-		codeReviewModel := reviewModel
-		if moaCfg.CodeReviewModel != "" {
-			if m, ok := core.ResolveModel(moaCfg.CodeReviewModel); ok {
-				codeReviewModel = m
-			}
-		}
-		codeReviewThinking := reviewThinking
-		if moaCfg.CodeReviewThinking != "" {
-			codeReviewThinking = moaCfg.CodeReviewThinking
+		pm := sess.PlanMode
+		// Restore plan mode state from persisted session metadata.
+		if persistedSess != nil && persistedSess.Metadata != nil {
+			pm.RestoreState(persistedSess.Metadata)
+			pm.ApplyRestoredState()
 		}
 
 		providerFactory := func(model core.Model) (core.Provider, error) {
@@ -466,58 +326,36 @@ func main() {
 			return build.Provider, nil
 		}
 
-		// Create task store and register the tasks tool globally.
-		taskStore := tasks.NewStore()
-		toolReg.Register(tasks.NewTool(taskStore))
-
-		pm := planmode.New(planmode.Config{
-			Registry:   toolReg,
-			SessionDir: sessionDir,
-			TaskStore:  taskStore,
-			ReviewCfg: planmode.ReviewConfig{
-				ProviderFactory: providerFactory,
-				Model:           reviewModel,
-				ThinkingLevel:   reviewThinking,
-				ParentTools:     toolReg,
-			},
-			CodeReviewCfg: planmode.ReviewConfig{
-				ProviderFactory: providerFactory,
-				Model:           codeReviewModel,
-				ThinkingLevel:   codeReviewThinking,
-				ParentTools:     toolReg,
-			},
-		})
-		// Restore plan mode state from session metadata.
-		if sess != nil && sess.Metadata != nil {
-			pm.RestoreState(sess.Metadata)
-			pm.ApplyRestoredState()
+		// Build transcriber from OpenAI API key (same logic as serve).
+		var transcriber core.Transcriber
+		if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Key != "" {
+			transcriber = openai.New(cred.Key)
+		} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
+			transcriber = openai.New(apiKey)
 		}
 
 		app := tui.New(ag, ctx, tui.Config{
 			SessionStore:          sessionStore,
-			Session:               sess,
+			Session:               persistedSess,
 			StartInSessionBrowser: startInSessionBrowser,
 			ModelName:             modelDisplayName(resolvedModel),
 			CWD:                   cwd,
-			PermissionGate:        permGate,
+			PermissionGate:        sess.Gate,
+			AskBridge:             sess.AskBridge,
 			PinnedModels:          moaCfg.PinnedModels,
 			SubagentCountCh:       subagentCountCh,
 			SubagentNotifyCh:      subagentNotifyCh,
 			PlanMode:              pm,
-			TaskStore:             taskStore,
+			TaskStore:             sess.TaskStore,
 			PromptTemplates:       promptTemplates,
 			OnPinnedModelsChange: func(ids []string) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 					cfg.PinnedModels = ids
 				})
 			},
-			ProviderFactory: func(model core.Model) (core.Provider, error) {
-				build, err := buildProvider(model, authStore)
-				if err != nil {
-					return nil, err
-				}
-				return build.Provider, nil
-			},
+			ProviderFactory:   providerFactory,
+			Transcriber:       transcriber,
+			CheckpointStore:   cpStore,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {
@@ -581,386 +419,6 @@ func main() {
 	}
 }
 
-func runServe(args []string) {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	port := fs.Int("port", 8080, "HTTP port")
-	host := fs.String("host", "127.0.0.1", "Bind address (use 0.0.0.0 for remote access)")
-	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
-	_ = fs.Parse(args)
 
-	if *host != "127.0.0.1" && *host != "localhost" && *host != "::1" {
-		fmt.Fprintf(os.Stderr, "⚠️  WARNING: Binding to %s with NO authentication.\n", *host)
-		fmt.Fprintf(os.Stderr, "   Anyone with network access can control agents.\n")
-		fmt.Fprintf(os.Stderr, "   Use a reverse proxy + auth, or Tailscale, for remote access.\n\n")
-	}
-
-	defaultModel, _ := core.ResolveModel(*modelFlag)
-	authStore := auth.NewStore("")
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot get working directory: %v\n", err)
-		os.Exit(1)
-	}
-	moaCfg := core.LoadMoaConfig(cwd)
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	// Build transcriber from OpenAI API key.
-	// Priority: 1) "openai-transcribe" credential in auth store
-	//           2) OpenAI credential if it's an API key (not OAuth)
-	var transcriber core.Transcriber
-	if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Key != "" {
-		transcriber = openai.New(cred.Key)
-	} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
-		transcriber = openai.New(apiKey)
-	}
-
-	mgr := serve.NewManager(ctx, serve.ManagerConfig{
-		ProviderFactory: func(model core.Model) (core.Provider, error) {
-			build, err := buildProvider(model, authStore)
-			if err != nil {
-				return nil, err
-			}
-			return build.Provider, nil
-		},
-		Transcriber:   transcriber,
-		DefaultModel:  defaultModel,
-		WorkspaceRoot: cwd,
-		MoaCfg:        moaCfg,
-	})
-
-	srv := serve.NewServer(mgr)
-
-	addr := fmt.Sprintf("%s:%d", *host, *port)
-	fmt.Printf("moa serve listening on http://%s\n", addr)
-
-	httpServer := &http.Server{Addr: addr, Handler: srv}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
-		defer c()
-		_ = httpServer.Shutdown(shutdownCtx)
-	}()
-
-	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// handleLogin performs provider-specific login.
-func handleLogin(provider string, authStore *auth.Store) {
-	switch provider {
-	case "anthropic":
-		fmt.Println("Logging in to Anthropic (Claude Max)...")
-		creds, err := auth.LoginAnthropic(
-			func(url string) {
-				fmt.Println("\nOpening browser for Anthropic authentication...")
-				fmt.Printf("If the browser doesn't open, visit:\n%s\n\n", url)
-				auth.OpenBrowser(url)
-			},
-			func() (string, error) {
-				fmt.Print("Paste the callback URL or authorization code here: ")
-				var code string
-				_, err := fmt.Scanln(&code)
-				return code, err
-			},
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
-			os.Exit(1)
-		}
-		if err := authStore.Set("anthropic", auth.Credential{
-			Type:    "oauth",
-			Access:  creds.Access,
-			Refresh: creds.Refresh,
-			Expires: creds.Expires,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("✓ Login successful! Credentials saved.")
-
-	case "openai":
-		fmt.Println("Choose auth method:")
-		fmt.Println("  1) ChatGPT Plus/Pro subscription (OAuth)")
-		fmt.Println("  2) API key")
-		fmt.Print("Choice [1]: ")
-		var choice string
-		_, _ = fmt.Scanln(&choice)
-		choice = strings.TrimSpace(choice)
-		if choice == "" {
-			choice = "1"
-		}
-
-		switch choice {
-		case "1":
-			fmt.Println("Logging in to OpenAI (ChatGPT subscription)...")
-			creds, err := auth.LoginOpenAI(
-				func(url string) {
-					fmt.Println("\nOpening browser for OpenAI authentication...")
-					fmt.Printf("If the browser doesn't open, visit:\n%s\n\n", url)
-					auth.OpenBrowser(url)
-				},
-				func() (string, error) {
-					fmt.Print("Paste the callback URL or authorization code here: ")
-					var code string
-					_, err := fmt.Scanln(&code)
-					return code, err
-				},
-			)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
-				os.Exit(1)
-			}
-			if err := authStore.Set("openai", auth.Credential{
-				Type:      "oauth",
-				Access:    creds.Access,
-				Refresh:   creds.Refresh,
-				Expires:   creds.Expires,
-				AccountID: creds.AccountID,
-			}); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Println("✓ OpenAI OAuth login successful!")
-
-		case "2":
-			fmt.Print("Enter your OpenAI API key: ")
-			var key string
-			if term.IsTerminal(int(os.Stdin.Fd())) {
-				keyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Println()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Failed to read key: %v\n", err)
-					os.Exit(1)
-				}
-				key = strings.TrimSpace(string(keyBytes))
-			} else {
-				_, _ = fmt.Scanln(&key)
-				key = strings.TrimSpace(key)
-			}
-			if key == "" {
-				fmt.Fprintf(os.Stderr, "No key provided.\n")
-				os.Exit(1)
-			}
-			if err := authStore.Set("openai", auth.Credential{
-				Type: "api_key",
-				Key:  key,
-			}); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Println("✓ OpenAI API key saved.")
-
-		default:
-			fmt.Fprintf(os.Stderr, "Invalid choice.\n")
-			os.Exit(1)
-		}
-
-	case "openai-transcribe":
-		fmt.Println("Store an OpenAI API key for Whisper speech-to-text.")
-		fmt.Println("This is separate from the main OpenAI credential (OAuth/API key).")
-		fmt.Print("Enter your OpenAI API key: ")
-		var key string
-		if term.IsTerminal(int(os.Stdin.Fd())) {
-			keyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to read key: %v\n", err)
-				os.Exit(1)
-			}
-			key = strings.TrimSpace(string(keyBytes))
-		} else {
-			_, _ = fmt.Scanln(&key)
-			key = strings.TrimSpace(key)
-		}
-		if key == "" {
-			fmt.Fprintf(os.Stderr, "No key provided.\n")
-			os.Exit(1)
-		}
-		if err := authStore.Set("openai-transcribe", auth.Credential{
-			Type: "api_key",
-			Key:  key,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("✓ OpenAI transcription key saved. Voice input is now available in the web UI.")
-
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, openai-transcribe\n", provider)
-		os.Exit(1)
-	}
-}
-
-// buildProvider creates the appropriate provider based on the model's Provider field.
-// It must stay side-effect free because the TUI reuses it while Bubble Tea owns
-// the terminal. Callers decide whether any auth notice should be rendered.
-func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult, error) {
-	// CLI default: empty provider means anthropic.
-	providerName := model.Provider
-	if providerName == "" {
-		providerName = "anthropic"
-	}
-
-	apiKey, isOAuth, err := authStore.GetAPIKey(providerName)
-	if err != nil {
-		return ProviderBuildResult{}, err
-	}
-
-	cfg := provider.Config{
-		APIKey:  apiKey,
-		IsOAuth: isOAuth,
-	}
-
-	var authNotice string
-	switch providerName {
-	case "openai":
-		if isOAuth {
-			cfg.AccountID = authStore.GetAccountID("openai")
-			authNotice = "ChatGPT subscription OAuth"
-		}
-	case "anthropic":
-		if isOAuth {
-			authNotice = "Claude Max OAuth"
-		}
-	}
-
-	m := model
-	m.Provider = providerName
-	p, err := provider.New(m, cfg)
-	if err != nil {
-		return ProviderBuildResult{}, err
-	}
-
-	return ProviderBuildResult{Provider: p, AuthNotice: authNotice}, nil
-}
-
-func printAuthNotice(w io.Writer, notice string) {
-	if notice == "" {
-		return
-	}
-	_, _ = fmt.Fprintf(w, "\033[90m(using %s)\033[0m\n", notice)
-}
-
-// modelDisplayName returns a compact name for TUI display.
-func modelDisplayName(m core.Model) string {
-	if m.Name != "" {
-		return m.Name
-	}
-	return m.ID
-}
-
-func modelSpec(m core.Model) string {
-	if m.Provider != "" {
-		return m.Provider + "/" + m.ID
-	}
-	return m.ID
-}
-
-// resolvePrompt resolves the prompt from flag, @file, or stdin pipe.
-func resolvePrompt(p string) (string, error) {
-	if p != "" {
-		if strings.HasPrefix(p, "@") {
-			filePath := strings.TrimPrefix(p, "@")
-			data, err := os.ReadFile(filePath)
-			if err != nil {
-				return "", fmt.Errorf("reading prompt file %s: %w", filePath, err)
-			}
-			content := strings.TrimSpace(string(data))
-			if content == "" {
-				return "", fmt.Errorf("prompt file %s is empty", filePath)
-			}
-			return content, nil
-		}
-		return p, nil
-	}
-
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return "", nil
-	}
-	if fi.Mode()&os.ModeCharDevice == 0 {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("reading stdin: %w", err)
-		}
-		content := strings.TrimSpace(string(data))
-		if content == "" {
-			return "", fmt.Errorf("stdin is empty")
-		}
-		return content, nil
-	}
-
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
-	}
-
-	return "", nil
-}
-
-func normalizeArgs(args []string) []string {
-	if len(args) <= 1 {
-		return args
-	}
-	out := []string{args[0]}
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		if (arg == "--resume" || arg == "-resume") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-			out = append(out, arg+"="+args[i+1])
-			i++
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
-}
-
-// loadProjectMCPServers loads .mcp.json from the project root if trusted.
-// On first encounter in interactive mode, prompts the user and persists trust.
-func loadProjectMCPServers(cfg *core.MoaConfig, cwd, promptContent string) {
-	path := filepath.Join(cwd, ".mcp.json")
-	if _, err := os.Stat(path); err != nil {
-		return
-	}
-
-	if core.IsMCPPathTrusted(*cfg, cwd) {
-		servers, err := core.LoadMCPFile(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: invalid .mcp.json: %v\n", err)
-			return
-		}
-		cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
-		return
-	}
-
-	// Interactive prompt only when no -p flag and stdin is a terminal.
-	if promptContent != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
-		return
-	}
-
-	fmt.Fprintf(os.Stderr, "Project .mcp.json found. Trust MCP servers in %s? [y/N] ", cwd)
-	var answer string
-	_, _ = fmt.Scanln(&answer)
-	if !strings.HasPrefix(strings.ToLower(answer), "y") {
-		return
-	}
-
-	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
-		c.TrustedMCPPaths = append(c.TrustedMCPPaths, cwd)
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not persist MCP trust: %v\n", err)
-	}
-
-	servers, err := core.LoadMCPFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: invalid .mcp.json: %v\n", err)
-		return
-	}
-	cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
-}
 
 

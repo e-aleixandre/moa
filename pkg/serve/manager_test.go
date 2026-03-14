@@ -163,10 +163,8 @@ func TestSend_StateTransitions(t *testing.T) {
 			select {
 			case evt := <-ch:
 				if evt.Type == "state_change" {
-					if data, ok := evt.Data.(map[string]any); ok {
-						if data["state"] == "running" {
-							return true
-						}
+					if data, ok := evt.Data.(StateChangeData); ok && data.State == "running" {
+						return true
 					}
 				}
 			default:
@@ -181,10 +179,8 @@ func TestSend_StateTransitions(t *testing.T) {
 			select {
 			case evt := <-ch:
 				if evt.Type == "state_change" {
-					if data, ok := evt.Data.(map[string]any); ok {
-						if data["state"] == "idle" {
-							return true
-						}
+					if data, ok := evt.Data.(StateChangeData); ok && data.State == "idle" {
+						return true
 					}
 				}
 			default:
@@ -540,7 +536,7 @@ func TestDelete_CancelsSessionContext(t *testing.T) {
 	id := sess.ID
 
 	// Capture session context before delete.
-	sessCtx := sess.sessionCtx
+	sessCtx := sess.runtime.sessionCtx
 
 	_, err = mgr.Send(id, "hello")
 	if err != nil {
@@ -582,7 +578,7 @@ func TestCreateSession_PermissionsFromConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Default permission mode is yolo → gate should be nil.
-	if sess.gate != nil {
+	if sess.runtime.gate != nil {
 		t.Fatal("expected nil gate for yolo mode (default)")
 	}
 }
@@ -632,7 +628,7 @@ func TestAutoSave_AfterRun(t *testing.T) {
 	}
 
 	// Verify persisted file was created.
-	if sess.persisted == nil {
+	if sess.persistence.persisted == nil {
 		t.Fatal("expected persisted session")
 	}
 

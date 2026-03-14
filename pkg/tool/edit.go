@@ -79,18 +79,29 @@ func NewEdit(cfg ToolConfig) core.Tool {
 			}
 
 			newContent := strings.Replace(content, oldText, newText, 1)
+
+			if cfg.BeforeWrite != nil {
+				if err := cfg.BeforeWrite(resolved); err != nil {
+					return core.ErrorResult(fmt.Sprintf("checkpoint: %v", err)), nil
+				}
+			}
+
 			if err := os.WriteFile(resolved, []byte(newContent), 0o644); err != nil {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
 			}
 
-			// Emit diff for TUI display via onUpdate
-			if onUpdate != nil {
-				diff := unifiedDiff(content, newContent, 3)
-				if diff != "" {
-					onUpdate(core.TextResult(diff))
-				}
+			diff := unifiedDiff(content, newContent, 3)
+
+			// Emit diff for TUI streaming display.
+			if onUpdate != nil && diff != "" {
+				onUpdate(core.TextResult(diff))
 			}
 
+			// Include diff in result — frontend uses it for display with
+			// real line numbers, LLM sees what changed.
+			if diff != "" {
+				return core.TextResult(fmt.Sprintf("Edited %s\n\n%s", path, diff)), nil
+			}
 			return core.TextResult(fmt.Sprintf("Edited %s", path)), nil
 		},
 	}

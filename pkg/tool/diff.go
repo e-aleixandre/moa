@@ -101,9 +101,15 @@ func unifiedDiff(old, new string, contextLines int) string {
 			inHunk = true
 		}
 
-		sb.WriteByte(l.op)
-		sb.WriteString(l.text)
-		sb.WriteByte('\n')
+		ln := lineNums[i]
+		switch l.op {
+		case '-':
+			fmt.Fprintf(&sb, "%4d -%s\n", ln[0], l.text)
+		case '+':
+			fmt.Fprintf(&sb, "%4d +%s\n", ln[1], l.text)
+		default:
+			fmt.Fprintf(&sb, "%4d  %s\n", ln[0], l.text)
+		}
 	}
 
 	return strings.TrimSuffix(sb.String(), "\n")

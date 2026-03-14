@@ -1,11 +1,17 @@
 package tui
 
 import (
+	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
+
+// askUserMsg carries a batch of questions from the ask_user tool.
+type askUserMsg struct {
+	Prompt askuser.Prompt
+}
 
 // agentEventMsg wraps an agent event for the TUI event loop.
 // RunGen scopes the event to a specific run — late events from previous runs are ignored.
@@ -94,4 +100,13 @@ type clipboardImageMsg struct {
 type verifyResultMsg struct {
 	Result *verify.Result
 	Err    error
+}
+
+// shellResultMsg carries the result of an async ! or !! shell escape.
+type shellResultMsg struct {
+	Command string
+	Output  string
+	IsError bool
+	Silent  bool // !! prefix
+	Running bool // was the agent running when the command was dispatched?
 }

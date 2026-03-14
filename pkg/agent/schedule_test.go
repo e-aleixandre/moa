@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -103,8 +104,8 @@ func assertNotStarted(t *testing.T, b *schedBarrier, label string) {
 func TestSchedule_TwoReadsParallel(t *testing.T) {
 	b1, b2 := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{Name: "r1", Effect: core.EffectReadOnly, Execute: b1.execute})
-	reg.Register(core.Tool{Name: "r2", Effect: core.EffectReadOnly, Execute: b2.execute})
+	_ = reg.Register(core.Tool{Name: "r1", Effect: core.EffectReadOnly, Execute: b1.execute})
+	_ = reg.Register(core.Tool{Name: "r2", Effect: core.EffectReadOnly, Execute: b2.execute})
 
 	cfg := makeCfg(reg)
 	calls := []core.Content{
@@ -126,7 +127,7 @@ func TestSchedule_TwoReadsParallel(t *testing.T) {
 func TestSchedule_TwoWritesSamePath_Sequential(t *testing.T) {
 	b1, b2 := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: b1.execute,
@@ -135,7 +136,7 @@ func TestSchedule_TwoWritesSamePath_Sequential(t *testing.T) {
 	// executions, so register one tool but use two barriers via an atomic counter.
 	var callCount atomic.Int32
 	reg.Unregister("w")
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: func(ctx context.Context, args map[string]any, onUpdate func(core.Result)) (core.Result, error) {
@@ -168,12 +169,12 @@ func TestSchedule_TwoWritesSamePath_Sequential(t *testing.T) {
 func TestSchedule_TwoWritesDifferentPaths_Parallel(t *testing.T) {
 	b1, b2 := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "wa", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: b1.execute,
 	})
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "wb", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/b.go" },
 		Execute: b2.execute,
@@ -198,12 +199,12 @@ func TestSchedule_TwoWritesDifferentPaths_Parallel(t *testing.T) {
 func TestSchedule_ShellWaitsForPriorWrite(t *testing.T) {
 	bWrite, bShell := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: bWrite.execute,
 	})
-	reg.Register(core.Tool{Name: "sh", Effect: core.EffectShell, Execute: bShell.execute})
+	_ = reg.Register(core.Tool{Name: "sh", Effect: core.EffectShell, Execute: bShell.execute})
 
 	cfg := makeCfg(reg)
 	calls := []core.Content{
@@ -226,8 +227,8 @@ func TestSchedule_ShellWaitsForPriorWrite(t *testing.T) {
 func TestSchedule_WriteAfterShellWaits(t *testing.T) {
 	bShell, bWrite := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{Name: "sh", Effect: core.EffectShell, Execute: bShell.execute})
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{Name: "sh", Effect: core.EffectShell, Execute: bShell.execute})
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: bWrite.execute,
@@ -255,8 +256,8 @@ func TestSchedule_MixedBashFirst(t *testing.T) {
 	// [bash, write /a] → bash runs first, write waits.
 	bBash, bWrite := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{Name: "bash", Effect: core.EffectShell, Execute: bBash.execute})
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{Name: "bash", Effect: core.EffectShell, Execute: bBash.execute})
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: bWrite.execute,
@@ -286,7 +287,7 @@ func TestSchedule_WriteBashWrite(t *testing.T) {
 	b1, bBash, b2 := newBarrier(), newBarrier(), newBarrier()
 
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: func(ctx context.Context, args map[string]any, onUpdate func(core.Result)) (core.Result, error) {
@@ -297,7 +298,7 @@ func TestSchedule_WriteBashWrite(t *testing.T) {
 			return b2.execute(ctx, args, onUpdate)
 		},
 	})
-	reg.Register(core.Tool{Name: "bash", Effect: core.EffectShell, Execute: bBash.execute})
+	_ = reg.Register(core.Tool{Name: "bash", Effect: core.EffectShell, Execute: bBash.execute})
 
 	cfg := makeCfg(reg)
 	calls := []core.Content{
@@ -326,13 +327,13 @@ func TestSchedule_WriteBashWrite(t *testing.T) {
 func TestSchedule_UnknownEffectTreatedAsShell(t *testing.T) {
 	bWrite, bUnknown := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: bWrite.execute,
 	})
 	// Effect zero value = EffectUnknown — should serialize like shell.
-	reg.Register(core.Tool{Name: "unk", Execute: bUnknown.execute})
+	_ = reg.Register(core.Tool{Name: "unk", Execute: bUnknown.execute})
 
 	cfg := makeCfg(reg)
 	calls := []core.Content{
@@ -357,12 +358,12 @@ func TestSchedule_WritePathNilLockKey_FallsBackToShell(t *testing.T) {
 	// So this tests the runtime fallback when LockKey returns "".
 	bWrite, bBad := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "w", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "/a.go" },
 		Execute: bWrite.execute,
 	})
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "bad", Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string { return "" }, // empty = fallback
 		Execute: bBad.execute,
@@ -386,28 +387,25 @@ func TestSchedule_WritePathNilLockKey_FallsBackToShell(t *testing.T) {
 	<-done
 }
 
-func TestSchedule_RegisterWritePathNilLockKey_Panics(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic for WritePath with nil LockKey")
-		}
-	}()
+func TestRegister_WritePathNilLockKey_ReturnsError(t *testing.T) {
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	err := reg.Register(core.Tool{
 		Name: "bad", Effect: core.EffectWritePath,
 		// LockKey intentionally nil
 		Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
 			return core.TextResult("ok"), nil
 		},
 	})
+	if err == nil {
+		t.Fatal("expected error for WritePath with nil LockKey")
+	}
 }
 
 func TestSchedule_ReadDoesNotBlockShell(t *testing.T) {
 	bRead, bShell := newBarrier(), newBarrier()
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{Name: "r", Effect: core.EffectReadOnly, Execute: bRead.execute})
-	reg.Register(core.Tool{Name: "sh", Effect: core.EffectShell, Execute: bShell.execute})
+	_ = reg.Register(core.Tool{Name: "r", Effect: core.EffectReadOnly, Execute: bRead.execute})
+	_ = reg.Register(core.Tool{Name: "sh", Effect: core.EffectShell, Execute: bShell.execute})
 
 	cfg := makeCfg(reg)
 	calls := []core.Content{
@@ -434,7 +432,7 @@ func TestSchedule_ResultsInOriginalOrder(t *testing.T) {
 
 	reg := core.NewRegistry()
 	// "slow" signals started and blocks; "fast" completes immediately.
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "slow", Effect: core.EffectReadOnly,
 		Execute: func(_ context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
 			close(started)
@@ -442,7 +440,7 @@ func TestSchedule_ResultsInOriginalOrder(t *testing.T) {
 			return core.TextResult("slow"), nil
 		},
 	})
-	reg.Register(core.Tool{
+	_ = reg.Register(core.Tool{
 		Name: "fast", Effect: core.EffectReadOnly,
 		Execute: func(_ context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
 			return core.TextResult("fast"), nil
@@ -471,5 +469,33 @@ func TestSchedule_ResultsInOriginalOrder(t *testing.T) {
 	}
 	if cfg.state.Messages[1].Content[0].Text != "fast" {
 		t.Errorf("second result should be 'fast', got %q", cfg.state.Messages[1].Content[0].Text)
+	}
+}
+
+func TestRunTool_PanicRecovery(t *testing.T) {
+	reg := core.NewRegistry()
+	_ = reg.Register(core.Tool{
+		Name: "boom", Effect: core.EffectReadOnly,
+		Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
+			panic("kaboom")
+		},
+	})
+
+	cfg := makeCfg(reg)
+	tc := makeToolCall("1", "boom", nil)
+
+	result, isError := runTool(context.Background(), cfg, tc)
+	if !isError {
+		t.Fatal("expected isError=true after panic")
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("expected non-empty result content")
+	}
+	text := result.Content[0].Text
+	if text == "" {
+		t.Fatal("expected error message in result")
+	}
+	if !strings.Contains(text, "panicked") || !strings.Contains(text, "kaboom") {
+		t.Errorf("expected panic message, got %q", text)
 	}
 }

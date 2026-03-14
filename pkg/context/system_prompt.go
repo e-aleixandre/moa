@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/git"
 )
 
 // toolSnippets provides concise one-line descriptions for built-in tools.
@@ -95,6 +96,16 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 		sb.WriteString("- After completing coding tasks, call the verify tool to validate your changes before reporting done\n")
 	}
 
+	// Subagent guidance
+	if toolSet["subagent"] {
+		sb.WriteString(`- Use subagents for tasks that benefit from a separate context window:
+  • Systematic changes across many files (e.g. renaming imports, updating API calls)
+  • Investigating how a feature works (exploring code without polluting your context)
+  • Parallel independent tasks (use async=true)
+  Each subagent gets a fresh context, so your own window stays focused on the main task.
+`)
+	}
+
 	// Always include these
 	sb.WriteString(`- Be concise in your responses
 - Show file paths clearly when working with files
@@ -121,6 +132,13 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 	}
 	fmt.Fprintf(&sb, "Current date and time: %s\n", time.Now().Format("Monday, January 2, 2006 at 3:04:05 PM MST"))
 	fmt.Fprintf(&sb, "Current working directory: %s\n", cwd)
+
+	// Git context (injected by bootstrap if available)
+	if gitCtx := git.Context(cwd); gitCtx != "" {
+		sb.WriteString("\n## Git\n\n")
+		sb.WriteString(gitCtx)
+		sb.WriteString("\n")
+	}
 
 	return sb.String()
 }

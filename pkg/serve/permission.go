@@ -28,19 +28,24 @@ type pendingPermission struct {
 // the agent goroutine (not this one) — this goroutine just records the
 // pending request and broadcasts it for the web UI.
 func (s *ManagedSession) permissionBridge(ctx context.Context) {
-	if s.gate == nil {
+	s.mu.Lock()
+	gate := s.runtime.gate
+	stop := s.approvals.bridgeStop
+	s.mu.Unlock()
+
+	if gate == nil {
 		return
 	}
 	for {
 		select {
-		case req, ok := <-s.gate.Requests():
+		case req, ok := <-gate.Requests():
 			if !ok {
 				return
 			}
 			id := fmt.Sprintf("perm_%d", permissionIDCounter.Add(1))
 
 			s.mu.Lock()
-			s.pending = &pendingPermission{
+			s.approvals.pending = &pendingPermission{
 				ID:       id,
 				ToolName: req.ToolName,
 				Args:     req.Args,
@@ -56,6 +61,8 @@ func (s *ManagedSession) permissionBridge(ctx context.Context) {
 				"args":      req.Args,
 			}})
 
+		case <-stop:
+			return
 		case <-ctx.Done():
 			return
 		}
@@ -74,32 +81,32 @@ func (s *ManagedSession) ResolvePermission(id string, approved bool, feedback st
 	defer s.mu.Unlock()
 
 	// True idempotency: if this ID was already resolved, return success.
-	if id == s.lastResolvedPermID {
+	if id == s.approvals.lastResolvedPermID {
 		return nil
 	}
 
-	if s.pending == nil {
+	if s.approvals.pending == nil {
 		return fmt.Errorf("no pending permission request")
 	}
-	if s.pending.ID != id {
-		return fmt.Errorf("stale permission request (expected %s, got %s)", s.pending.ID, id)
+	if s.approvals.pending.ID != id {
+		return fmt.Errorf("stale permission request (expected %s, got %s)", s.approvals.pending.ID, id)
 	}
-	if s.pending.resolved {
+	if s.approvals.pending.resolved {
 		return nil
 	}
-	s.pending.resolved = true
+	s.approvals.pending.resolved = true
 
 	// Non-blocking send — the channel is buffered(1) in gate.askUser.
 	select {
-	case s.pending.response <- permission.Response{
+	case s.approvals.pending.response <- permission.Response{
 		Approved: approved,
 		Feedback: feedback,
 	}:
 	default:
 	}
 
-	s.lastResolvedPermID = id
-	s.pending = nil
+	s.approvals.lastResolvedPermID = id
+	s.approvals.pending = nil
 
 	// Only transition state if still in permission state (run might have
 	// been cancelled/completed between request and resolution).

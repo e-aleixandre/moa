@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'preact/hooks';
 import { Message } from './Message.jsx';
 import { ToolCall } from './ToolCall.jsx';
 import { PermissionCard } from './PermissionCard.jsx';
+import { AskUserCard } from './AskUserCard.jsx';
 
 export function MessageList({ session, onResolvePermission }) {
   const containerRef = useRef(null);
@@ -37,6 +38,8 @@ export function MessageList({ session, onResolvePermission }) {
   const streaming = session.streamingText;
   const thinking = session.thinkingText;
   const pendingPerm = session.pendingPerm;
+  const pendingAsk = session.pendingAsk;
+  // pendingSteers are rendered in InputBar, not here.
 
   return (
     <div class="messages" ref={containerRef} onScroll={checkScroll} style="position:relative">
@@ -68,6 +71,13 @@ export function MessageList({ session, onResolvePermission }) {
           perm={pendingPerm}
           sessionId={session.id}
           onResolve={onResolvePermission}
+        />
+      )}
+
+      {pendingAsk && (
+        <AskUserCard
+          ask={pendingAsk}
+          sessionId={session.id}
         />
       )}
 

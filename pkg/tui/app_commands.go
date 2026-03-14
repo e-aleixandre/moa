@@ -3,6 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,8 +85,11 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.pendingImage = nil
 		m.s.pendingImageMime = ""
 		m.s.sessionCost = 0
+		m.s.sessionInput = 0
+		m.s.sessionCacheRead = 0
 		m.s.expanded = false
-		m.topBar.UpdateCostSegment(0)
+		m.statusBar.UpdateCostSegment(0)
+		m.statusBar.UpdateCacheSegment(0)
 		// Delete old session, create fresh one
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
@@ -136,6 +142,59 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			return verifyResultMsg{Result: &result}
 		}
 
+	case "settings":
+		return m.openSettingsMenu()
+
+	case "voice":
+		return m.handleVoiceToggle()
+
+	case "undo":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Cannot undo while agent is running",
+			})
+			return m, nil
+		}
+		if m.checkpoints == nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Checkpoints not available",
+			})
+			return m, nil
+		}
+		cp, err := m.checkpoints.Undo()
+		if err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: err.Error(),
+			})
+			return m, nil
+		}
+		var restored []string
+		var errs []string
+		for _, snap := range cp.Files {
+			if snap.Content == nil {
+				if err := os.Remove(snap.Path); err != nil && !os.IsNotExist(err) {
+					errs = append(errs, fmt.Sprintf("delete %s: %v", filepath.Base(snap.Path), err))
+				} else {
+					restored = append(restored, "deleted "+filepath.Base(snap.Path))
+				}
+			} else {
+				if err := os.WriteFile(snap.Path, snap.Content, snap.Perm); err != nil {
+					errs = append(errs, fmt.Sprintf("restore %s: %v", filepath.Base(snap.Path), err))
+				} else {
+					restored = append(restored, "restored "+filepath.Base(snap.Path))
+				}
+			}
+		}
+		msg := fmt.Sprintf("⏪ Reverted checkpoint %q: %s", cp.Label, strings.Join(restored, ", "))
+		if len(errs) > 0 {
+			msg += "\n⚠️ Errors: " + strings.Join(errs, "; ")
+			m.checkpoints.Repush(cp)
+			msg += "\nCheckpoint preserved — retry with /undo"
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: msg})
+		m.updateViewport()
+		return m, nil
+
 	case "exit", "quit":
 		m.cleanup()
 		return m, tea.Quit
@@ -149,6 +208,47 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 // handlePickerKey routes keys to the model picker.
 // handlePermissionKey routes keys to the permission prompt.
+func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		m.askPrompt.CursorUp()
+		return m, nil
+	case tea.KeyDown:
+		m.askPrompt.CursorDown()
+		return m, nil
+	case tea.KeyEnter:
+		if m.askPrompt.Submit() {
+			// All questions answered.
+			return m, nil
+		}
+		return m, nil
+	case tea.KeyShiftTab:
+		m.askPrompt.Back()
+		return m, nil
+	case tea.KeyBackspace:
+		m.askPrompt.Backspace()
+		return m, nil
+	case tea.KeyEsc:
+		m.askPrompt.Cancel()
+		return m, nil
+	case tea.KeyRunes, tea.KeySpace:
+		s := msg.String()
+		// Number shortcuts to pick an option directly.
+		if len(s) == 1 && s[0] >= '1' && s[0] <= '9' && !m.askPrompt.isCustom() {
+			idx := int(s[0] - '1')
+			if idx < m.askPrompt.optionCount() {
+				m.askPrompt.cursor = idx
+				return m, nil
+			}
+		}
+		for _, r := range s {
+			m.askPrompt.TypeRune(r)
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var listenCmd tea.Cmd
 	if m.permGate != nil {
@@ -454,7 +554,7 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 		name = newModel.ID
 	}
 	m.modelName = name
-	m.topBar.UpdateModelSegment(name)
+	m.statusBar.UpdateModelSegment(name)
 	m.refreshContextSegment()
 	m.s.pendingStatus = ""
 	m.s.pendingTimeline = newModelSwitchEvent(newModel)
@@ -539,7 +639,7 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 	if newMode == permission.ModeYolo {
 		m.permGate = nil
 		m.syncPermissionCheck()
-		m.topBar.UpdatePermissionsSegment("")
+		m.statusBar.UpdatePermissionsSegment("")
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "permissions: yolo (all tools auto-approved)",
 		})
@@ -567,7 +667,7 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 		}
 
 		m.syncPermissionCheck()
-		m.topBar.UpdatePermissionsSegment(string(newMode))
+		m.statusBar.UpdatePermissionsSegment(string(newMode))
 		cmds = append(cmds, m.waitForPermission())
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
@@ -596,7 +696,7 @@ func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.topBar.UpdateThinkingSegment(level)
+	m.statusBar.UpdateThinkingSegment(level)
 	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", level)
 	return m, nil
 }
@@ -681,7 +781,10 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.pendingImage = nil
 	m.s.pendingImageMime = ""
 	m.s.sessionCost = 0
-	m.topBar.UpdateCostSegment(0)
+	m.s.sessionInput = 0
+	m.s.sessionCacheRead = 0
+	m.statusBar.UpdateCostSegment(0)
+	m.statusBar.UpdateCacheSegment(0)
 
 	// Restore model from session metadata when resuming.
 	if sess != nil && sess.Metadata != nil {
@@ -701,10 +804,10 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 		m.rebuildSystemPrompt()
 		mode := m.planMode.Mode()
 		if mode != planmode.ModeOff {
-			m.topBar.UpdatePlanSegment(string(mode))
+			m.statusBar.UpdatePlanSegment(string(mode))
 		} else {
-			m.topBar.UpdatePlanSegment("")
-			m.topBar.UpdateTasksSegment(0, 0)
+			m.statusBar.UpdatePlanSegment("")
+			m.statusBar.UpdateTasksSegment(0, 0)
 		}
 		// Restore task progress display if in executing mode.
 		if mode == planmode.ModeExecuting {
@@ -758,7 +861,7 @@ func (m *appModel) restoreModelFromMetadata(sess *session.Session) {
 		name = model.ID
 	}
 	m.modelName = name
-	m.topBar.UpdateModelSegment(m.modelName)
+	m.statusBar.UpdateModelSegment(m.modelName)
 }
 
 // handlePromptTemplate processes `/prompt` and `/prompt <name>`.
@@ -794,5 +897,181 @@ func (m appModel) handlePromptTemplate(name string) (tea.Model, tea.Cmd) {
 	}
 
 	m.status.SetText("unknown template: " + name)
+	return m, nil
+}
+
+// openSettingsMenu builds entries from current state and opens the menu.
+func (m appModel) openSettingsMenu() (tea.Model, tea.Cmd) {
+	permMode := "yolo"
+	if m.permGate != nil {
+		permMode = string(m.permGate.Mode())
+	}
+	thinking := m.agent.ThinkingLevel()
+	model := m.agent.Model()
+
+	entries := []settingsEntry{
+		{key: "Model", value: model.Name, options: nil}, // display-only; use /model or Ctrl+P
+		{key: "Thinking", value: thinking, options: []string{"off", "minimal", "low", "medium", "high"}},
+		{key: "Permissions", value: permMode, options: []string{"yolo", "ask", "auto"}},
+	}
+
+	m.settingsMenu.Open(entries)
+	m.input.SetEnabled(false)
+	return m, nil
+}
+
+// handleSettingsKey routes key events to the settings menu.
+func (m appModel) handleSettingsKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		m.settingsMenu.MoveUp()
+	case "down", "j":
+		m.settingsMenu.MoveDown()
+	case "enter", "right", "l", "tab":
+		return m.applySettingsCycle()
+	case "left", "h":
+		return m.applySettingsCycleReverse()
+	case "esc", "q":
+		m.settingsMenu.Close()
+		m.input.SetEnabled(true)
+	}
+	return m, nil
+}
+
+// applySettingsCycle cycles the current setting forward and applies it.
+func (m appModel) applySettingsCycle() (tea.Model, tea.Cmd) {
+	key, val := m.settingsMenu.CycleValue()
+	return m.applySettingsChange(key, val)
+}
+
+// applySettingsCycleReverse cycles the current setting backward and applies it.
+func (m appModel) applySettingsCycleReverse() (tea.Model, tea.Cmd) {
+	if !m.settingsMenu.active || m.settingsMenu.cursor >= len(m.settingsMenu.entries) {
+		return m, nil
+	}
+	e := &m.settingsMenu.entries[m.settingsMenu.cursor]
+	if len(e.options) == 0 {
+		return m, nil
+	}
+	idx := len(e.options) - 1
+	for i, opt := range e.options {
+		if opt == e.value {
+			idx = (i - 1 + len(e.options)) % len(e.options)
+			break
+		}
+	}
+	e.value = e.options[idx]
+	return m.applySettingsChange(e.key, e.value)
+}
+
+// applySettingsChange applies a setting change immediately.
+func (m appModel) applySettingsChange(key, val string) (tea.Model, tea.Cmd) {
+	if key == "" {
+		return m, nil
+	}
+	switch key {
+	case "Thinking":
+		return m.handleThinkingSwitch(val)
+	case "Permissions":
+		return m.handlePermissionsSwitch(val)
+	}
+	return m, nil
+}
+
+// handleShellEscape dispatches a shell command asynchronously.
+//
+// When the agent is idle:
+//
+//	!command  → persist as "user" message (model sees it next turn)
+//	!!command → persist as "shell" message (model never sees it)
+//
+// When the agent is running:
+//
+//	!command  → steer the output into the conversation mid-run
+//	!!command → show output only, no steer, not persisted
+func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
+	silent := strings.HasPrefix(text, "!!")
+	var command string
+	if silent {
+		command = strings.TrimSpace(text[2:])
+	} else {
+		command = strings.TrimSpace(text[1:])
+	}
+	if command == "" {
+		return m, nil
+	}
+
+	// Show a pending tool block immediately while the command runs.
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type:     "tool",
+		ToolName: "bash",
+		ToolArgs: map[string]any{"command": command},
+	})
+	m.s.viewportDirty = true
+	m.updateViewport()
+
+	running := m.agent.IsRunning()
+	cwd := m.cwd
+	baseCtx := m.baseCtx
+
+	return m, func() tea.Msg {
+		cmd := exec.CommandContext(baseCtx, "sh", "-c", command)
+		cmd.Dir = cwd
+		out, _ := cmd.CombinedOutput()
+		output := strings.TrimRight(string(out), "\n")
+		isError := cmd.ProcessState != nil && !cmd.ProcessState.Success()
+		return shellResultMsg{
+			Command: command,
+			Output:  output,
+			IsError: isError,
+			Silent:  silent,
+			Running: running,
+		}
+	}
+}
+
+// handleShellResult processes the completed shell escape command.
+func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
+	if msg.Running && !msg.Silent {
+		body := fmt.Sprintf("Shell output (from user):\n$ %s\n%s", msg.Command, msg.Output)
+		m.agent.Steer(body)
+	} else if !msg.Running {
+		var body string
+		if msg.Output != "" {
+			body = fmt.Sprintf("$ %s\n%s", msg.Command, msg.Output)
+		} else {
+			body = fmt.Sprintf("$ %s\n(no output)", msg.Command)
+		}
+		role := "user"
+		if msg.Silent {
+			role = "shell"
+		}
+		agentMsg := core.AgentMessage{
+			Message: core.Message{
+				Role:    role,
+				Content: []core.Content{core.TextContent(body)},
+			},
+			Custom: map[string]any{"shell": true},
+		}
+		if err := m.agent.AppendMessage(agentMsg); err != nil {
+			m.s.pendingStatus = "✗ shell: " + err.Error()
+		}
+	}
+
+	// Update the pending tool block with the result.
+	for i := len(m.s.blocks) - 1; i >= 0; i-- {
+		b := &m.s.blocks[i]
+		if b.ToolName == "bash" && !b.ToolDone {
+			if cmd, _ := b.ToolArgs["command"].(string); cmd == msg.Command {
+				b.ToolResult = msg.Output
+				b.ToolDone = true
+				b.IsError = msg.IsError
+				break
+			}
+		}
+	}
+
+	m.s.viewportDirty = true
+	m.updateViewport()
 	return m, nil
 }

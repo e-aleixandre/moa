@@ -82,6 +82,13 @@
 .tool-call-preview::-webkit-scrollbar { display: none; }
 .tool-call-preview.error-body { color: var(--red); }
 
+/* Diff rendering */
+.tool-call-preview.diff-preview { background: var(--mantle); }
+.diff-add { color: var(--green); }
+.diff-del { color: var(--red); opacity: 0.75; }
+.diff-ctx { color: var(--overlay1); }
+.diff-hdr { color: var(--blue); opacity: 0.6; font-style: italic; }
+
 .tool-call-footer {
   background: var(--mantle);
   padding: 4px 14px 6px;
@@ -184,6 +191,81 @@
   margin: 0;
 }
 .tool-modal-content.error-body { color: var(--red); }
+
+/* ─── ask_user Q&A preview ──────────────────────────────── */
+
+.tool-call-verb.ask-user { color: var(--lavender); }
+
+.ask-preview {
+  background: var(--mantle);
+  padding: 10px 14px;
+  border-top: 1px solid rgba(69,71,90,0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ask-preview-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-preview-text {
+  font-size: 13px;
+  color: var(--subtext1);
+  line-height: 1.4;
+}
+
+.ask-preview-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.ask-preview-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--surface1);
+  color: var(--overlay1);
+  background: transparent;
+  transition: all var(--duration) var(--ease);
+}
+
+.ask-preview-option.selected {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-dim);
+}
+
+.ask-preview-option.selected.custom {
+  color: var(--lavender);
+  border-color: var(--lavender);
+  background: var(--mauve-dim);
+}
+
+.ask-preview-check {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.ask-preview-free-answer {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--green);
+  padding-left: 2px;
+}
+.ask-preview-free-answer::before {
+  content: '→ ';
+  color: var(--overlay0);
+}
 
 @media (max-width: 768px) {
   .tool-modal-overlay { padding: 8px; }

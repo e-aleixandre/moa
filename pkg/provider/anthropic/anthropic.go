@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/provider/retry"
 )
 
 // Anthropic implements core.Provider for the Anthropic Messages API.
@@ -71,31 +72,30 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		return nil, fmt.Errorf("anthropic: building request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/v1/messages", bytes.NewReader(body))
+	buildReq := func() (*http.Request, error) {
+		r, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/v1/messages", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("anthropic-version", "2023-06-01")
+		if oauthMode {
+			r.Header.Set("Authorization", "Bearer "+apiKey)
+			r.Header.Set("anthropic-beta", "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14")
+			r.Header.Set("User-Agent", "claude-cli/"+claudeCodeVersion)
+			r.Header.Set("x-app", "cli")
+		} else {
+			r.Header.Set("X-API-Key", apiKey)
+		}
+		return r, nil
+	}
+
+	resp, err := retry.Do(ctx, a.client, buildReq, retry.DefaultPolicy, nil)
 	if err != nil {
-		return nil, fmt.Errorf("anthropic: creating request: %w", err)
+		return nil, fmt.Errorf("anthropic: %w", err)
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-
-	if oauthMode {
-		// OAuth: Bearer auth + Claude Code identity headers (required by Anthropic)
-		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-		httpReq.Header.Set("anthropic-beta", "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14")
-		httpReq.Header.Set("User-Agent", "claude-cli/"+claudeCodeVersion)
-		httpReq.Header.Set("x-app", "cli")
-	} else {
-		// Standard API key auth
-		httpReq.Header.Set("X-API-Key", apiKey)
-	}
-
-	resp, err := a.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: http: %w", err)
-	}
-
-	// Check HTTP status BEFORE returning channel
+	// Non-retryable error status (400, 401, etc.) — returned as-is by retry.Do.
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close() //nolint:errcheck
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

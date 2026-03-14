@@ -251,6 +251,10 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 		}
 		body = block.ToolResult
 
+	case "ask_user":
+		action = "❓ questions"
+		target, body = formatAskUserBlock(block)
+
 	default:
 		action = block.ToolName
 		target = sortedArgSummary(block.ToolArgs)
@@ -344,6 +348,102 @@ func stringArg(args map[string]any, key string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// formatAskUserBlock extracts a human-readable target and body from ask_user args/result.
+// Target shows the first question text. Body renders each question with bullet-style
+// options where ● marks the chosen answer and ○ marks the rest. Custom answers
+// (not matching any option) are shown with a ✎ prefix.
+func formatAskUserBlock(block messageBlock) (target, body string) {
+	questions, _ := block.ToolArgs["questions"].([]any)
+	if len(questions) == 0 {
+		return "", block.ToolResult
+	}
+
+	answers := parseAskUserAnswers(block.ToolResult, len(questions))
+
+	var sb strings.Builder
+	for i, raw := range questions {
+		q, _ := raw.(map[string]any)
+		if q == nil {
+			continue
+		}
+		text, _ := q["question"].(string)
+		if i > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(text)
+
+		answer := ""
+		if i < len(answers) {
+			answer = answers[i]
+		}
+
+		opts := extractStringSlice(q["options"])
+		if len(opts) > 0 {
+			isCustom := answer != "" && !containsString(opts, answer)
+			for _, opt := range opts {
+				if opt == answer {
+					fmt.Fprintf(&sb, "\n  ● %s", opt)
+				} else {
+					fmt.Fprintf(&sb, "\n  ○ %s", opt)
+				}
+			}
+			if isCustom {
+				fmt.Fprintf(&sb, "\n  ✎ %s", answer)
+			}
+		} else if answer != "" {
+			fmt.Fprintf(&sb, "\n  → %s", answer)
+		}
+
+		if i == 0 {
+			target = text
+			if len(target) > 80 {
+				target = target[:77] + "…"
+			}
+		}
+	}
+	return target, sb.String()
+}
+
+// parseAskUserAnswers extracts individual answers from the tool result.
+func parseAskUserAnswers(result string, count int) []string {
+	if result == "" {
+		return nil
+	}
+	if count == 1 {
+		return []string{strings.TrimSpace(result)}
+	}
+	answers := make([]string, 0, count)
+	for _, line := range strings.Split(result, "\n") {
+		if strings.HasPrefix(line, "A: ") {
+			answers = append(answers, strings.TrimPrefix(line, "A: "))
+		}
+	}
+	return answers
+}
+
+func extractStringSlice(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func containsString(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedArgSummary(args map[string]any) string {

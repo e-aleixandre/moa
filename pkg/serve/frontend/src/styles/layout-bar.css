@@ -52,6 +52,9 @@
 .layout-btn.active .layout-mini-cell { background: var(--peach); }
 .layout-btn:hover:not(.active) .layout-mini-cell { background: var(--subtext0); }
 
+.add-pane-btn { padding: 6px 8px; }
+.add-pane-btn .lucide { width: 14px; height: 14px; }
+
 .layout-bar-spacer { flex: 1; }
 
 .layout-bar .sound-toggle {

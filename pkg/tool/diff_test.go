@@ -5,95 +5,53 @@ import (
 	"testing"
 )
 
-func TestUnifiedDiff_SimpleReplace(t *testing.T) {
-	old := "line1\nline2\nline3\nline4\nline5"
-	new := "line1\nline2\nchanged\nline4\nline5"
+func TestUnifiedDiff_LineNumbers(t *testing.T) {
+	old := "line1\nline2\nline3\nline4\nline5\nline6\nline7\n"
+	new := "line1\nline2\nline3\nchanged4\nline5\nline6\nline7\n"
 
-	diff := unifiedDiff(old, new, 1)
+	diff := unifiedDiff(old, new, 2)
+	if diff == "" {
+		t.Fatal("expected non-empty diff")
+	}
 
-	if !strings.Contains(diff, "-line3") {
-		t.Error("should contain deleted line")
+	// Should contain line numbers.
+	if !strings.Contains(diff, "   4 -line4") {
+		t.Errorf("expected line 4 deletion with number, got:\n%s", diff)
 	}
-	if !strings.Contains(diff, "+changed") {
-		t.Error("should contain added line")
+	if !strings.Contains(diff, "   4 +changed4") {
+		t.Errorf("expected line 4 addition with number, got:\n%s", diff)
 	}
-	// Context lines
-	if !strings.Contains(diff, " line2") {
-		t.Error("should contain context before")
-	}
-	if !strings.Contains(diff, " line4") {
-		t.Error("should contain context after")
-	}
-}
-
-func TestUnifiedDiff_MultilineReplace(t *testing.T) {
-	old := "a\nb\nc\nd\ne"
-	new := "a\nX\nY\nd\ne"
-
-	diff := unifiedDiff(old, new, 1)
-
-	if !strings.Contains(diff, "-b") {
-		t.Error("should contain -b")
-	}
-	if !strings.Contains(diff, "-c") {
-		t.Error("should contain -c")
-	}
-	if !strings.Contains(diff, "+X") {
-		t.Error("should contain +X")
-	}
-	if !strings.Contains(diff, "+Y") {
-		t.Error("should contain +Y")
+	// Context lines should also have numbers.
+	if !strings.Contains(diff, "   2  line2") || !strings.Contains(diff, "   3  line3") {
+		t.Errorf("expected context lines with numbers, got:\n%s", diff)
 	}
 }
 
-func TestUnifiedDiff_Insertion(t *testing.T) {
-	old := "a\nb"
-	new := "a\nnew\nb"
-
-	diff := unifiedDiff(old, new, 1)
-
-	if !strings.Contains(diff, "+new") {
-		t.Error("should contain inserted line")
+func TestUnifiedDiff_MultipleHunks(t *testing.T) {
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = "line" + string(rune('A'+i))
 	}
-	// Original lines preserved
-	if strings.Contains(diff, "-a") || strings.Contains(diff, "-b") {
-		t.Error("should not delete original lines")
-	}
-}
+	old := strings.Join(lines, "\n") + "\n"
 
-func TestUnifiedDiff_Deletion(t *testing.T) {
-	old := "a\nremove\nb"
-	new := "a\nb"
+	modified := make([]string, 20)
+	copy(modified, lines)
+	modified[2] = "CHANGED_C"
+	modified[17] = "CHANGED_R"
+	new := strings.Join(modified, "\n") + "\n"
 
-	diff := unifiedDiff(old, new, 1)
-
-	if !strings.Contains(diff, "-remove") {
-		t.Error("should contain deleted line")
-	}
-	// No added lines (lines starting with "+", excluding hunk headers)
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "@@") {
-			t.Errorf("should not have additions, got: %q", line)
-		}
+	diff := unifiedDiff(old, new, 2)
+	// Should have two @@ markers.
+	count := strings.Count(diff, "@@")
+	if count < 2 {
+		t.Errorf("expected at least 2 hunk headers, got %d in:\n%s", count, diff)
 	}
 }
 
 func TestUnifiedDiff_NoChange(t *testing.T) {
-	text := "a\nb\nc"
+	text := "same\ncontent\n"
 	diff := unifiedDiff(text, text, 3)
-
 	if diff != "" {
-		t.Errorf("identical text should produce empty diff, got: %q", diff)
-	}
-}
-
-func TestUnifiedDiff_HunkHeader(t *testing.T) {
-	old := "a\nb\nc"
-	new := "a\nX\nc"
-
-	diff := unifiedDiff(old, new, 1)
-
-	if !strings.Contains(diff, "@@") {
-		t.Error("should contain hunk header")
+		t.Errorf("expected empty diff for identical content, got:\n%s", diff)
 	}
 }

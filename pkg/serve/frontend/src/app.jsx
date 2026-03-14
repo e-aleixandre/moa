@@ -1,10 +1,10 @@
 import { render } from 'preact';
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
+import { store } from './store.js';
+import { loadSessions, startPolling } from './session-actions.js';
 import {
-  store, loadSessions, startPolling, setMobile,
-  autoFillTiles, autoSelectMobile,
-  focusTileByIndex,
-} from './state.js';
+  setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex,
+} from './tile-actions.js';
 import { inputBarRegistry } from './components/InputBar.jsx';
 import { requestNotificationPermission } from './notifications.js';
 import { useHotkeys } from './hooks/useHotkeys.js';

@@ -13,11 +13,23 @@ import (
 	"github.com/ealeixandre/moa/pkg/planmode"
 )
 
+// truncateLabel creates a short label for checkpoint identification.
+func truncateLabel(s string) string {
+	if len(s) > 60 {
+		return s[:60] + "…"
+	}
+	return s
+}
+
 // --- Agent interaction ---
 
 // prepareRun sets up the common run state (running flag, gen counter, stream state, status).
+// Opens a checkpoint (if available) for undo tracking.
 // Returns the run generation for tagging the result.
-func (m *appModel) prepareRun() uint64 {
+func (m *appModel) prepareRun(label string) uint64 {
+	if m.checkpoints != nil {
+		m.checkpoints.Begin(label)
+	}
 	m.s.running = true
 	m.s.runGen++
 	m.s.runStartMsgCount = len(m.agent.Messages())
@@ -28,7 +40,7 @@ func (m *appModel) prepareRun() uint64 {
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
 	m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
-	m.status.SetText("thinking...")
+	m.status.SetText("working...")
 	return m.s.runGen
 }
 
@@ -110,7 +122,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		m.session.SetTitle(text, 80)
 	}
 
-	gen := m.prepareRun()
+	gen := m.prepareRun(truncateLabel(text))
 	m.updateViewport()
 
 	if hasImage {
@@ -141,7 +153,7 @@ func (m appModel) startNotificationRun(n SubagentNotification) (tea.Model, tea.C
 		SubagentResult: n.ResultTail,
 	})
 
-	gen := m.prepareRun()
+	gen := m.prepareRun(truncateLabel(n.Task))
 	m.updateViewport()
 	return m, m.launchAgentSend(n.AgentText, gen)
 }
@@ -168,7 +180,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
 		m.s.streamState = stateStreaming
-		m.status.SetText("thinking...")
+		m.status.SetText("generating...")
 
 	case core.AgentEventMessageEnd:
 		if m.s.thinkingText != "" {
@@ -242,7 +254,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		if m.s.activeTools <= 0 {
 			m.s.activeTools = 0
 			m.s.streamState = stateStreaming
-			m.status.SetText("thinking...")
+			m.status.SetText("generating...")
 		} else if m.s.activeTools == 1 {
 			m.status.SetText("running tool...")
 		} else {
@@ -254,6 +266,14 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		}
 
 	case core.AgentEventSteer:
+		// Remove from queued steers (if present).
+		for i, s := range m.s.queuedSteers {
+			if s == e.Text {
+				m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
+				break
+			}
+		}
+		// Add to blocks as a real message.
 		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type:           "subagent",
@@ -281,7 +301,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", e.Compaction.TokensBefore/1000, e.Compaction.TokensAfter/1000),
 			})
 		}
-		m.status.SetText("thinking...")
+		m.status.SetText("generating...")
 		m.s.viewportDirty = true
 	}
 }
@@ -302,11 +322,26 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	// Does NOT rebuild blocks — preserves event-derived blocks (tool with args, etc.).
 	m.patchFromMessages(msg.Messages)
 
+	// Close the checkpoint: Commit on success/error, Discard on cancel.
+	if m.checkpoints != nil {
+		if msg.Err != nil && errors.Is(msg.Err, context.Canceled) {
+			m.checkpoints.Discard()
+		} else {
+			m.checkpoints.Commit()
+		}
+	}
+
 	m.s.running = false
 	m.s.streamState = stateIdle
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
+	// Flush any steers still in the queue — their AgentEventSteer may still be
+	// buffered in the event channel but will be ignored (stale runGen).
+	for _, s := range m.s.queuedSteers {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: s})
+	}
+	m.s.queuedSteers = nil
 	m.status.SetText("")
 	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 	m.input.SetEnabled(true)
@@ -321,7 +356,7 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 
 	// Plan mode: check if plan was submitted → show action menu.
 	if m.planMode != nil && m.planMode.OnPlanSubmitted() {
-		m.topBar.UpdatePlanSegment("ready")
+		m.statusBar.UpdatePlanSegment("ready")
 		m.planMenu.OpenPostSubmit()
 		m.lastMenuVariant = menuPostSubmit
 		m.input.SetEnabled(false)
@@ -332,8 +367,8 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 		m.planMode.Exit()
 		m.syncPermissionCheck()
 		m.rebuildSystemPrompt()
-		m.topBar.UpdatePlanSegment("")
-		m.topBar.UpdateTasksSegment(0, 0)
+		m.statusBar.UpdatePlanSegment("")
+		m.statusBar.UpdateTasksSegment(0, 0)
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "✅ All tasks complete — plan mode finished",
 		})
@@ -361,65 +396,70 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	if msgs == nil {
 		return
 	}
-	// Only look at messages produced during this run (after runStartMsgCount).
-	// This prevents re-creating assistant blocks from a previous turn on abort.
+	// Only look at messages produced during this run.
 	var newMsgs []core.AgentMessage
 	if m.s.runStartMsgCount < len(msgs) {
 		newMsgs = msgs[m.s.runStartMsgCount:]
 	} else {
-		newMsgs = nil
+		return
 	}
 
-	// Extract the final assistant text from new messages only.
-	var lastAssistantText string
-	var lastThinkingText string
-	for i := len(newMsgs) - 1; i >= 0; i-- {
-		if newMsgs[i].Role == "assistant" {
-			for _, c := range newMsgs[i].Content {
-				if c.Type == "text" && c.Text != "" {
-					lastAssistantText = c.Text
-				}
-				if c.Type == "thinking" && c.Thinking != "" {
-					lastThinkingText = c.Thinking
-				}
+	// Collect assistant texts and thinking from this run's messages, in order.
+	type assistantEntry struct {
+		text     string
+		thinking string
+	}
+	var entries []assistantEntry
+	for _, msg := range newMsgs {
+		if msg.Role != "assistant" {
+			continue
+		}
+		var e assistantEntry
+		for _, c := range msg.Content {
+			if c.Type == "text" && c.Text != "" {
+				e.text = c.Text
 			}
-			break
+			if c.Type == "thinking" && c.Thinking != "" {
+				e.thinking = c.Thinking
+			}
+		}
+		if e.text != "" || e.thinking != "" {
+			entries = append(entries, e)
 		}
 	}
+	if len(entries) == 0 {
+		return
+	}
 
-	// Search boundary: only patch blocks from the current run.
 	searchFrom := m.s.runStartBlockIdx
 
-	// Patch or create thinking block
-	if lastThinkingText != "" {
-		found := false
-		for i := len(m.s.blocks) - 1; i >= searchFrom; i-- {
-			if m.s.blocks[i].Type == "thinking" {
-				m.s.blocks[i].Raw = lastThinkingText
-				found = true
-				break
+	// Match existing blocks to entries in order. Each entry may have
+	// a thinking+assistant pair. We walk blocks forward, consuming entries
+	// as we match assistant blocks (the authoritative anchor).
+	entryIdx := 0
+	for i := searchFrom; i < len(m.s.blocks) && entryIdx < len(entries); i++ {
+		switch m.s.blocks[i].Type {
+		case "thinking":
+			if entries[entryIdx].thinking != "" {
+				m.s.blocks[i].Raw = entries[entryIdx].thinking
 			}
-		}
-		if !found {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "thinking", Raw: lastThinkingText,
-			})
+		case "assistant":
+			m.s.blocks[i].Raw = entries[entryIdx].text
+			entryIdx++
 		}
 	}
 
-	// Patch or create assistant block
-	if lastAssistantText != "" {
-		found := false
-		for i := len(m.s.blocks) - 1; i >= searchFrom; i-- {
-			if m.s.blocks[i].Type == "assistant" {
-				m.s.blocks[i].Raw = lastAssistantText
-				found = true
-				break
-			}
-		}
-		if !found {
+	// Create blocks for messages that have no corresponding block yet
+	// (events still buffered in the event channel when runResult arrived).
+	for ; entryIdx < len(entries); entryIdx++ {
+		if entries[entryIdx].thinking != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "assistant", Raw: lastAssistantText,
+				Type: "thinking", Raw: entries[entryIdx].thinking,
+			})
+		}
+		if entries[entryIdx].text != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "assistant", Raw: entries[entryIdx].text,
 			})
 		}
 	}
@@ -434,7 +474,24 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	pendingCalls := make(map[string]core.Content) // ToolCallID → tool_call Content
 
 	for _, msg := range msgs {
+		// Shell messages (both "user" with custom.shell and "shell" role)
+		// render as bash tool blocks regardless of role.
+		if isShellMessage(msg) {
+			cmd, output := parseShellBody(firstTextContent(msg.Content))
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type:       "tool",
+				ToolName:   "bash",
+				ToolArgs:   map[string]any{"command": cmd},
+				ToolResult: output,
+				ToolDone:   true,
+			})
+			continue
+		}
+
 		switch msg.Role {
+		case "shell":
+			// Already handled above, but in case custom field is missing.
+			continue
 		case "user":
 			if len(msg.Content) > 0 {
 				text := msg.Content[0].Text
@@ -508,4 +565,37 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			}
 		}
 	}
+}
+
+// isShellMessage returns true for messages produced by ! or !! shell escapes.
+func isShellMessage(msg core.AgentMessage) bool {
+	if msg.Role == "shell" {
+		return true
+	}
+	if msg.Custom != nil {
+		if v, ok := msg.Custom["shell"]; ok {
+			if b, ok := v.(bool); ok && b {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseShellBody splits "$ command\noutput" back into command and output.
+func parseShellBody(body string) (command, output string) {
+	if !strings.HasPrefix(body, "$ ") {
+		return "", body
+	}
+	body = body[2:]
+	if idx := strings.IndexByte(body, '\n'); idx >= 0 {
+		command = body[:idx]
+		output = body[idx+1:]
+		if output == "(no output)" {
+			output = ""
+		}
+	} else {
+		command = body
+	}
+	return command, output
 }

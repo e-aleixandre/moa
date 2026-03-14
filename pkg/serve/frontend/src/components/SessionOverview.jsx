@@ -1,6 +1,7 @@
 import { useCallback, useRef, useMemo } from 'preact/hooks';
 import { Plus, Sparkles, Archive } from 'lucide-preact';
-import { setActiveSession, resumeSession } from '../state.js';
+import { setActiveSession } from '../tile-actions.js';
+import { resumeSession } from '../session-actions.js';
 import { shortModel } from '../util/format.js';
 
 export function SessionOverview({ state, onSelect, onNewSession }) {

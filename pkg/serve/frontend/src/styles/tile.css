@@ -148,26 +148,14 @@
 }
 .tile-empty .lucide { width: 36px; height: 36px; color: var(--surface2); stroke-width: 1.25; }
 .tile-empty span    { color: var(--overlay0); font-size: 13px; }
+.empty-title        { color: var(--overlay0); }
 
-.tile-empty-actions { display: flex; gap: 8px; margin-top: 4px; }
-.tile-empty-actions button,
-.tile-empty-close {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--overlay1);
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--surface0);
-  transition: all 0.15s;
+.tile-empty-hint {
+  font-size: 12px;
+  color: var(--surface2);
+  margin-top: 4px;
 }
-.tile-empty-actions button:hover,
-.tile-empty-close:hover { background: var(--surface1); color: var(--text); }
-.tile-empty-actions .lucide,
-.tile-empty-close .lucide { width: 12px; height: 12px; }
-.tile-empty-close { margin-top: 2px; color: var(--overlay0); background: transparent; }
-.tile-empty-close:hover { color: var(--red); background: var(--red-dim); }
+.tile.focused .tile-empty-hint { color: var(--overlay0); }
 
 /* Touch drag ghost (appended to body by useTouchDrag) */
 .touch-drag-ghost {

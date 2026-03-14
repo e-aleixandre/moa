@@ -23,12 +23,12 @@ func (m *appModel) refreshTaskDisplay() {
 		return
 	}
 	done, total := m.taskStore.Progress()
-	m.topBar.UpdateTasksSegment(done, total)
+	m.statusBar.UpdateTasksSegment(done, total)
 	if m.planMode != nil && m.planMode.Mode() == planmode.ModeExecuting {
 		if total > 0 {
-			m.topBar.UpdatePlanSegment(fmt.Sprintf("executing 📋 %d/%d", done, total))
+			m.statusBar.UpdatePlanSegment(fmt.Sprintf("executing 📋 %d/%d", done, total))
 		} else {
-			m.topBar.UpdatePlanSegment("executing")
+			m.statusBar.UpdatePlanSegment("executing")
 		}
 	}
 	m.s.viewportDirty = true
@@ -89,6 +89,9 @@ func (m *appModel) computeChromeHeight() int {
 			h += lipgloss.Height(tv)
 		}
 	}
+	if len(m.s.queuedSteers) > 0 {
+		h++ // renderQueuedSteers is always one line
+	}
 	if m.permPrompt.active {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			h += lipgloss.Height(pv)
@@ -110,14 +113,9 @@ func (m *appModel) computeChromeHeight() int {
 			h += lipgloss.Height(iv)
 		}
 	}
-	if m.topBar != nil {
-		if tv := m.topBar.View(m.width); tv != "" {
+	if m.statusBar != nil {
+		if tv := m.statusBar.View(m.width); tv != "" {
 			h += lipgloss.Height(tv)
-		}
-	}
-	if m.bottomBar != nil {
-		if bv := m.bottomBar.View(m.width); bv != "" {
-			h += lipgloss.Height(bv)
 		}
 	}
 	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
@@ -233,6 +231,7 @@ func (m *appModel) cleanup() {
 			m.unsub()
 		}
 		m.agent.Abort()
+		m.voice.reset()
 	})
 }
 
@@ -253,9 +252,18 @@ func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
 	for _, msg := range msgs[start:] {
 		if msg.Role == "assistant" && msg.Usage != nil {
 			m.s.sessionCost += model.Pricing.Cost(*msg.Usage)
+			m.s.sessionInput += msg.Usage.Input
+			m.s.sessionCacheRead += msg.Usage.CacheRead
 		}
 	}
-	m.topBar.UpdateCostSegment(m.s.sessionCost)
+	m.statusBar.UpdateCostSegment(m.s.sessionCost)
+
+	// Cache hit %: cache_read / (input + cache_read).
+	totalInput := m.s.sessionInput + m.s.sessionCacheRead
+	if totalInput > 0 {
+		pct := m.s.sessionCacheRead * 100 / totalInput
+		m.statusBar.UpdateCacheSegment(pct)
+	}
 }
 
 // refreshContextSegment recalculates the context usage percentage and updates
@@ -266,13 +274,13 @@ func (m *appModel) refreshContextSegment() {
 	}
 	model := m.agent.Model()
 	if model.MaxInput <= 0 {
-		m.topBar.Remove(SegmentContext)
+		m.statusBar.Remove(SegmentContext)
 		return
 	}
 	msgs := m.agent.Messages()
 	estimate := core.EstimateContextTokens(msgs, "", nil, m.agent.CompactionEpoch())
 	pct := (estimate.Tokens * 100) / model.MaxInput
-	m.topBar.UpdateContextSegment(pct)
+	m.statusBar.UpdateContextSegment(pct)
 }
 
 // thinkingLevels defines the cycle order for Shift+Tab.
@@ -324,4 +332,26 @@ func parseSubagentNotification(text string) (task, status, result string, ok boo
 		}
 	}
 	return "", "", "", false
+}
+
+// renderQueuedSteers renders the queued steer messages shown above the input.
+func (m appModel) renderQueuedSteers() string {
+	t := ActiveTheme
+	text := lipgloss.NewStyle().Foreground(t.Overlay1)
+	badge := lipgloss.NewStyle().Foreground(t.Surface2).Background(t.Overlay0).
+		PaddingLeft(1).PaddingRight(1)
+
+	n := len(m.s.queuedSteers)
+	last := m.s.queuedSteers[n-1]
+
+	// Truncate long messages to one line.
+	if len(last) > 60 {
+		last = last[:57] + "…"
+	}
+
+	tag := badge.Render("queued")
+	if n > 1 {
+		tag = badge.Render(fmt.Sprintf("queued ×%d", n))
+	}
+	return "  " + tag + " " + text.Render(last)
 }

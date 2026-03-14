@@ -101,6 +101,8 @@ func TestCreateAndSend(t *testing.T) {
 		defer sess.mu.Unlock()
 		return sess.State == StateIdle
 	})
+	// Small wait for async session save to flush.
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestSend_WhileBusy_409(t *testing.T) {
@@ -150,6 +152,13 @@ func TestSend_WhileBusy_409(t *testing.T) {
 	if resp2.StatusCode != 202 {
 		t.Fatalf("expected 202 (steer), got %d", resp2.StatusCode)
 	}
+
+	// Wait for the run to finish so async saves don't race with TempDir cleanup.
+	pollUntil(t, 2*time.Second, "idle", func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.State == StateIdle || sess.State == StateError
+	})
 }
 
 func TestCSRF_MissingHeader(t *testing.T) {
@@ -380,8 +389,8 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 				}
 				respPerm := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/permission", `{"id":"`+permID+`","approved":false,"feedback":""}`)
 				respPerm.Body.Close() //nolint:errcheck
-				if respPerm.StatusCode != 200 {
-					t.Fatalf("expected 200 on permission resolve, got %d", respPerm.StatusCode)
+				if respPerm.StatusCode != 204 {
+					t.Fatalf("expected 204 on permission resolve, got %d", respPerm.StatusCode)
 				}
 				resolved = true
 			}
@@ -593,6 +602,8 @@ func TestCancelEndpoint(t *testing.T) {
 		defer sess.mu.Unlock()
 		return sess.State == StateIdle
 	})
+	// Small wait for async session save to flush.
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestCancelEndpoint_NotRunning(t *testing.T) {

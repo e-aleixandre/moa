@@ -25,7 +25,7 @@ type API interface {
 	OnContext(fn ContextHook)
 
 	// Tool registration
-	RegisterTool(t core.Tool)
+	RegisterTool(t core.Tool) error
 	UnregisterTool(name string)
 
 	// Logging

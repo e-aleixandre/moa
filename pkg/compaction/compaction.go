@@ -68,13 +68,34 @@ func FindCutPoint(msgs []core.AgentMessage, contextTokens, contextWindow int, se
 	return 0
 }
 
-// maxSerializationChars caps the serialization to prevent the summarization
-// request itself from exceeding model limits.
-const maxSerializationChars = 400_000
+// defaultMaxSerializationChars is used when the model's context window is
+// unknown (MaxInput == 0). Fits comfortably in a 200k-token model.
+const defaultMaxSerializationChars = 400_000
+
+// maxSerializationChars derives a serialization cap from the model's context
+// window. The serialized transcript goes into a user message for the
+// summarization LLM call, so it must fit in the model's input with room for
+// the system prompt (~500 tokens) and the output summary.
+//
+// Heuristic: MaxInput * 2 chars (≈ half the context in tokens, since ~4
+// chars ≈ 1 token). Clamped to defaultMaxSerializationChars minimum so
+// small-context models don't produce useless micro-summaries.
+func maxSerializationChars(maxInput int) int {
+	if maxInput <= 0 {
+		return defaultMaxSerializationChars
+	}
+	limit := maxInput * 2 // tokens → chars, using half the context
+	if limit < 40_000 {
+		limit = 40_000 // floor: ~10k tokens minimum for a useful summary
+	}
+	return limit
+}
 
 // SerializeForSummary converts messages to a human-readable transcript for
-// the summarization prompt. Truncates at maxSerializationChars.
-func SerializeForSummary(msgs []core.AgentMessage) string {
+// the summarization prompt. Truncates at a limit derived from the model's
+// context window (maxInput tokens). Pass 0 for the default (400k chars).
+func SerializeForSummary(msgs []core.AgentMessage, maxInput int) string {
+	limit := maxSerializationChars(maxInput)
 	var b strings.Builder
 	for _, m := range msgs {
 		switch m.Role {
@@ -103,8 +124,7 @@ func SerializeForSummary(msgs []core.AgentMessage) string {
 			b.WriteString(extractText(m.Message))
 			b.WriteByte('\n')
 		}
-		// Check AFTER writing so even a single huge message doesn't blow past the cap.
-		if b.Len() > maxSerializationChars {
+		if b.Len() > limit {
 			b.WriteString("\n[...truncated]\n")
 			break
 		}
@@ -193,7 +213,7 @@ func (f FileOps) Modified() []string {
 // GenerateSummary makes an LLM call to summarize conversation messages.
 // Returns the summary text, provider-reported usage (may be nil), or an error.
 func GenerateSummary(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, previousSummary string) (string, *core.Usage, error) {
-	serialized := SerializeForSummary(msgs)
+	serialized := SerializeForSummary(msgs, model.MaxInput)
 	prompt := buildPrompt(serialized, previousSummary)
 
 	req := core.Request{

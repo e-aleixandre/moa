@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
 import { Check, X, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
 import { toolVerb, toolPath, toolPreview, splitPreview, splitPreviewTail } from '../util/format.js';
+import { AskUserPreview } from './AskUserPreview.jsx';
 
 export function ToolCall({ tool }) {
   const [expanded, setExpanded] = useState(false);
@@ -16,10 +17,13 @@ export function ToolCall({ tool }) {
   const StatusIcon = isRunning ? Loader2 : (isRejected || isError) ? X : Check;
   const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
+  const isAskUser = tool.tool_name === 'ask_user';
+
   // For running tools with streaming, show the live output
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
   // Final result (from toolPreview) — only used when not streaming
-  const preview = !liveText ? toolPreview(tool.tool_name, tool.args, tool.result) : null;
+  const preview = !isAskUser && !liveText ? toolPreview(tool.tool_name, tool.args, tool.result) : null;
+  const isDiff = !isAskUser && !liveText && preview && preview.kind === 'diff';
 
   // Streaming: show tail. Finished: show head.
   const previewData = liveText
@@ -33,10 +37,10 @@ export function ToolCall({ tool }) {
   return (
     <>
       <div class={`tool-call status-${statusCls}`}>
-        <div class="tool-call-head" onClick={() => fullText && setModalOpen(true)} style={{ cursor: fullText ? 'pointer' : 'default' }}>
+        <div class="tool-call-head" onClick={() => !isAskUser && fullText && setModalOpen(true)} style={{ cursor: !isAskUser && fullText ? 'pointer' : 'default' }}>
           <span class={`tool-call-verb ${verbCls}`}>{verb}</span>
           <span class="tool-call-path">{path}</span>
-          {fullText && (
+          {!isAskUser && fullText && (
             <button class="tool-call-expand" title="Expand" onClick={(e) => { e.stopPropagation(); setModalOpen(true); }}>
               <Maximize2 />
             </button>
@@ -47,9 +51,16 @@ export function ToolCall({ tool }) {
           </span>
         </div>
 
-        {previewData && previewData.visible && (
-          <pre class={`tool-call-preview${isErrorBody ? ' error-body' : ''}${liveText ? ' streaming' : ''}`}>
-            {expanded && !liveText ? fullText : previewData.visible}
+        {isAskUser && !isRunning && (
+          <AskUserPreview args={tool.args} result={tool.result} />
+        )}
+
+        {!isAskUser && previewData && previewData.visible && (
+          <pre class={`tool-call-preview${isErrorBody ? ' error-body' : ''}${liveText ? ' streaming' : ''}${isDiff ? ' diff-preview' : ''}`}>
+            {isDiff
+              ? renderDiffLines(expanded && !liveText ? fullText : previewData.visible)
+              : (expanded && !liveText ? fullText : previewData.visible)
+            }
           </pre>
         )}
 
@@ -77,6 +88,7 @@ export function ToolCall({ tool }) {
           path={path}
           fullText={fullText}
           isRunning={isRunning}
+          isDiff={isDiff}
           onClose={() => setModalOpen(false)}
         />
       )}
@@ -84,7 +96,19 @@ export function ToolCall({ tool }) {
   );
 }
 
-function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, onClose }) {
+function renderDiffLines(text) {
+  if (!text) return text;
+  return text.split('\n').map((line, i) => {
+    let cls = 'diff-ctx';
+    if (line.startsWith('@@')) cls = 'diff-hdr';
+    else if (/^\s*\d+\s+\+/.test(line)) cls = 'diff-add';
+    else if (/^\s*\d+\s+-/.test(line)) cls = 'diff-del';
+    // Skip the "Edited path" header line — render as context.
+    return <div key={i} class={cls}>{line}</div>;
+  });
+}
+
+function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, isDiff, onClose }) {
   const contentRef = useRef(null);
   const wasAtBottom = useRef(true);
 
@@ -136,7 +160,7 @@ function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, onClose
           class={`tool-modal-content${(tool.status === 'error' || tool.status === 'rejected') ? ' error-body' : ''}`}
           onScroll={handleScroll}
         >
-          {fullText || '(no output)'}
+          {isDiff ? renderDiffLines(fullText) : (fullText || '(no output)')}
         </pre>
       </div>
     </div>

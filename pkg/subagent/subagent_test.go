@@ -183,7 +183,7 @@ func newSubagentTools(t *testing.T, cfg Config, parentTools ...core.Tool) (core.
 	t.Helper()
 	reg := core.NewRegistry()
 	for _, tool := range parentTools {
-		reg.Register(tool)
+		_ = reg.Register(tool)
 	}
 	cfg.ParentTools = reg
 	jobs := newJobStore()
@@ -208,11 +208,11 @@ func TestSubagentSyncBasic(t *testing.T) {
 
 func TestBuildChildRegistryFiltersNestedAndDedupes(t *testing.T) {
 	parent := core.NewRegistry()
-	parent.Register(core.Tool{Name: "read"})
-	parent.Register(core.Tool{Name: "subagent"})
-	parent.Register(core.Tool{Name: "subagent_status"})
-	parent.Register(core.Tool{Name: "subagent_cancel"})
-	parent.Register(core.Tool{Name: "grep"})
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "subagent"})
+	_ = parent.Register(core.Tool{Name: "subagent_status"})
+	_ = parent.Register(core.Tool{Name: "subagent_cancel"})
+	_ = parent.Register(core.Tool{Name: "grep"})
 
 	reg, errRes := buildChildRegistry(parent, map[string]any{"tools": []any{"read", "read", "grep"}})
 	if errRes != nil {
@@ -224,11 +224,45 @@ func TestBuildChildRegistryFiltersNestedAndDedupes(t *testing.T) {
 	if _, ok := reg.Get("subagent"); ok {
 		t.Fatal("child registry should not include subagent")
 	}
+
+	// Explicitly requesting excluded tools should silently skip them, not error.
+	reg2, errRes2 := buildChildRegistry(parent, map[string]any{
+		"tools": []any{"read", "subagent", "subagent_status", "grep"},
+	})
+	if errRes2 != nil {
+		t.Fatalf("expected excluded tools to be silently skipped, got error: %s", textOf(*errRes2))
+	}
+	if reg2.Count() != 2 {
+		t.Fatalf("expected 2 tools (read+grep), got %d", reg2.Count())
+	}
+}
+
+func TestBuildChildRegistryCaseInsensitive(t *testing.T) {
+	parent := core.NewRegistry()
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "bash"})
+	_ = parent.Register(core.Tool{Name: "write"})
+
+	// Model sends Claude Code casing ("Read", "Bash") — should still resolve.
+	reg, errRes := buildChildRegistry(parent, map[string]any{
+		"tools": []any{"Read", "Bash", "WRITE"},
+	})
+	if errRes != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes))
+	}
+	if reg.Count() != 3 {
+		t.Fatalf("expected 3 tools, got %d", reg.Count())
+	}
+	for _, name := range []string{"read", "bash", "write"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("expected tool %q to be registered", name)
+		}
+	}
 }
 
 func TestBuildChildRegistryRejectsEmptyAndUnknownTools(t *testing.T) {
 	parent := core.NewRegistry()
-	parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "read"})
 
 	_, errRes := buildChildRegistry(parent, map[string]any{"tools": []any{}})
 	if errRes == nil || !strings.Contains(textOf(*errRes), "tools array cannot be empty") {

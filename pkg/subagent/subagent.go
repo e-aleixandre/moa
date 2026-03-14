@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -19,6 +20,10 @@ const (
 	defaultMaxTurns            = 50
 	defaultMaxToolCallsPerTurn = 20
 	defaultMaxRunDuration      = 10 * time.Minute
+
+	// asyncResultTailLines is how many trailing lines of a completed async
+	// subagent result are included in the notification to the parent.
+	asyncResultTailLines = 50
 )
 
 // excludedTools prevents recursive subagent spawning.
@@ -55,9 +60,15 @@ func RegisterAll(reg *core.Registry, cfg Config) error {
 		return errors.New("subagent: AppCtx is required")
 	}
 	jobs := newJobStore()
-	reg.Register(newSubagent(cfg, jobs))
-	reg.Register(newSubagentStatus(jobs))
-	reg.Register(newSubagentCancel(jobs))
+	for _, t := range []core.Tool{
+		newSubagent(cfg, jobs),
+		newSubagentStatus(jobs),
+		newSubagentCancel(jobs),
+	} {
+		if err := reg.Register(t); err != nil {
+			return fmt.Errorf("subagent: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -255,7 +266,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 			if !ok {
 				return
 			}
-			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tailLines(snap.Result, 50))
+			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tailLines(snap.Result, asyncResultTailLines))
 		}
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())
@@ -324,7 +335,7 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 	selected, ok := params["tools"]
 	if !ok {
 		for _, t := range allowed {
-			reg.Register(t)
+			core.RegisterOrLog(reg, t)
 		}
 		return reg, nil
 	}
@@ -346,16 +357,25 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 			res := core.ErrorResult("tools must be an array of strings")
 			return nil, &res
 		}
+		// Normalize: the model may use Claude Code casing ("Read", "Bash")
+		// but the registry uses lowercase ("read", "bash").
+		name = strings.ToLower(name)
 		if seen[name] {
 			continue
 		}
 		t, ok := allowed[name]
 		if !ok {
+			// Silently skip excluded tools (subagent, subagent_status, etc.)
+			// — the model naturally includes them since it sees them in its
+			// own toolset, but children can't use them.
+			if excludedTools[name] {
+				continue
+			}
 			res := core.ErrorResult("unknown tool: " + name)
 			return nil, &res
 		}
 		seen[name] = true
-		reg.Register(t)
+		core.RegisterOrLog(reg, t)
 	}
 	return reg, nil
 }

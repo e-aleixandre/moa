@@ -31,7 +31,7 @@ func TestHeadless_ServerPattern(t *testing.T) {
 	}
 
 	reg := core.NewRegistry()
-	reg.Register(echoTool)
+	_ = reg.Register(echoTool)
 
 	// Turn 1: simple text response.
 	// Turn 2: tool call to echo, then (after tool result) final text.

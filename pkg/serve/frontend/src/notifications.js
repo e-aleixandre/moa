@@ -87,13 +87,14 @@ export function triggerAttention(session, toolName, soundEnabled) {
   }
 }
 
-// Turn done — called from state.js when a non-visible session finishes
+// Turn done — called from state.js when a non-visible session finishes.
+// Always shows a toast (the session isn't on screen). Sound/browser
+// notifications only fire when the tab is hidden (background use).
 export function triggerDone(session, soundEnabled) {
   const title = session.title || 'Untitled';
 
   addToast({ sessionId: session.id, title, detail: 'finished', type: 'done' });
 
-  // Background notifications (tab hidden / phone locked)
   if (document.hidden) {
     if (soundEnabled) initAudio().then(playBeep);
     browserNotify(title, 'Turn finished');

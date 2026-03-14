@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/provider/retry"
 )
 
 const (
@@ -75,21 +76,23 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+o.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("openai: creating request: %w", err)
+	buildReq := func() (*http.Request, error) {
+		r, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+o.endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Authorization", "Bearer "+apiKey)
+		r.Header.Set("Accept", "text/event-stream")
+		if o.accountID != "" {
+			r.Header.Set("chatgpt-account-id", o.accountID)
+		}
+		return r, nil
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("Accept", "text/event-stream")
-	if o.accountID != "" {
-		httpReq.Header.Set("chatgpt-account-id", o.accountID)
-	}
-
-	resp, err := o.client.Do(httpReq)
+	resp, err := retry.Do(ctx, o.client, buildReq, retry.DefaultPolicy, nil)
 	if err != nil {
-		return nil, fmt.Errorf("openai: http: %w", err)
+		return nil, fmt.Errorf("openai: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {

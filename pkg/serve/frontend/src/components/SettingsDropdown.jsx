@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { Settings, Brain, ChevronDown, Check } from 'lucide-preact';
-import { configureSession } from '../state.js';
+import { Settings, Brain, ChevronDown, Check, Shield } from 'lucide-preact';
+import { configureSession } from '../session-actions.js';
 import { api } from '../api.js';
 
 const THINKING_LEVELS = [
@@ -8,6 +8,12 @@ const THINKING_LEVELS = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
+];
+
+const PERMISSION_MODES = [
+  { value: 'yolo', label: 'YOLO', desc: 'Auto-approve all' },
+  { value: 'ask', label: 'ASK', desc: 'Confirm writes' },
+  { value: 'auto', label: 'AUTO', desc: 'AI decides' },
 ];
 
 export function SettingsDropdown({ sessionId, session }) {
@@ -46,9 +52,17 @@ export function SettingsDropdown({ sessionId, session }) {
 
   const handleThinking = async (level) => {
     try {
-      await configureSession(sessionId, { model: '', thinking: level });
+      await configureSession(sessionId, { thinking: level });
     } catch (e) {
       console.error('Thinking change failed:', e);
+    }
+  };
+
+  const handlePermission = async (mode) => {
+    try {
+      await configureSession(sessionId, { permissionMode: mode });
+    } catch (e) {
+      console.error('Permission mode change failed:', e);
     }
   };
 
@@ -79,6 +93,23 @@ export function SettingsDropdown({ sessionId, session }) {
                   class={`settings-thinking-btn ${currentThinking === value ? 'active' : ''}`}
                   onClick={() => !busy && handleThinking(value)}
                   disabled={busy}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-label"><Shield /> Permissions</div>
+            <div class="settings-thinking-row">
+              {PERMISSION_MODES.map(({ value, label, desc }) => (
+                <button
+                  key={value}
+                  class={`settings-thinking-btn ${(session?.permissionMode || 'yolo') === value ? 'active' : ''}`}
+                  onClick={() => !busy && handlePermission(value)}
+                  disabled={busy}
+                  title={desc}
                 >
                   {label}
                 </button>

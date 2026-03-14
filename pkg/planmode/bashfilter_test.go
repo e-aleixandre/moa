@@ -36,6 +36,13 @@ func TestIsSafeCommand_Allowed(t *testing.T) {
 		"git remote -v",
 		"git tag -l",
 		"git tag --list",
+		// Pipelines between safe commands
+		"grep -r 'TODO' . | head -20",
+		"cat README.md | head -5",
+		"git log --oneline | head -10",
+		"find . -name '*.go' | wc -l",
+		"grep -r 'func' pkg/ | sort | uniq",
+		"cat file.txt | grep pattern | head -5",
 	}
 	for _, cmd := range safe {
 		if !IsSafeCommand(cmd) {
@@ -82,7 +89,7 @@ func TestIsSafeCommand_Blocked(t *testing.T) {
 func TestIsSafeCommand_ShellOperatorBypass(t *testing.T) {
 	bypasses := []string{
 		"ls && rm -rf /",
-		"cat file.txt | rm -rf /",
+		"cat file.txt | rm -rf /",       // rm is not a safe command
 		"echo foo; rm -rf /",
 		"ls || rm -rf /",
 		"echo $(rm -rf /)",
@@ -92,7 +99,8 @@ func TestIsSafeCommand_ShellOperatorBypass(t *testing.T) {
 		"cat << EOF\nrm -rf /\nEOF",
 		"git status && git push",
 		"ls -la; curl http://evil.com",
-		"find . -name '*.go' | xargs rm",
+		"find . -name '*.go' | xargs rm", // xargs is not a safe command
+		"grep foo | sed 's/a/b/'",        // sed is not a safe command
 	}
 	for _, cmd := range bypasses {
 		if IsSafeCommand(cmd) {

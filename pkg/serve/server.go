@@ -9,7 +9,9 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
@@ -34,11 +36,13 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
@@ -206,7 +210,31 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		limitBody(w, r, maxJSONBodySize)
+		var body struct {
+			ID      string   `json:"id"`
+			Answers []string `json:"answers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := sess.ResolveAskUser(body.ID, body.Answers); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -219,22 +247,43 @@ func handleConfig(mgr *Manager) http.HandlerFunc {
 		}
 		limitBody(w, r, maxJSONBodySize)
 		var body struct {
-			Model    string `json:"model"`
-			Thinking string `json:"thinking"`
+			Model          string `json:"model"`
+			Thinking       string `json:"thinking"`
+			PermissionMode string `json:"permission_mode"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		result, err := mgr.ReconfigureSession(sess.ID, body.Model, body.Thinking)
-		if err != nil {
-			if errors.Is(err, ErrBusy) {
-				http.Error(w, "session is busy", http.StatusConflict)
+
+		result := map[string]string{}
+
+		// Handle permission mode change.
+		if body.PermissionMode != "" {
+			mode, err := mgr.SetPermissionMode(sess.ID, body.PermissionMode)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			result["permission_mode"] = mode
 		}
+
+		// Handle model/thinking change.
+		if body.Model != "" || body.Thinking != "" {
+			reconf, err := mgr.ReconfigureSession(sess.ID, body.Model, body.Thinking)
+			if err != nil {
+				if errors.Is(err, ErrBusy) {
+					http.Error(w, "session is busy", http.StatusConflict)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for k, v := range reconf {
+				result[k] = v
+			}
+		}
+
 		writeJSON(w, http.StatusOK, result)
 	}
 }
@@ -263,36 +312,39 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		history := make([]core.AgentMessage, len(sess.messages))
 		copy(history, sess.messages)
 		state := sess.State
-		var pendingPerm map[string]any
-		if sess.pending != nil && !sess.pending.resolved {
-			pendingPerm = map[string]any{
-				"id":        sess.pending.ID,
-				"tool_name": sess.pending.ToolName,
-				"args":      sess.pending.Args,
+		var pendingPerm *PermissionData
+		if sess.approvals.pending != nil && !sess.approvals.pending.resolved {
+			pendingPerm = &PermissionData{
+				ID:       sess.approvals.pending.ID,
+				ToolName: sess.approvals.pending.ToolName,
+				Args:     sess.approvals.pending.Args,
+			}
+		}
+		var pendingAsk *AskData
+		if sess.approvals.pendingAsk != nil && !sess.approvals.pendingAsk.resolved {
+			pendingAsk = &AskData{
+				ID:        sess.approvals.pendingAsk.ID,
+				Questions: sess.approvals.pendingAsk.Questions,
 			}
 		}
 		sess.mu.Unlock()
 
-		var taskList any
-		if sess.taskStore != nil {
-			taskList = sess.taskStore.Tasks()
+		initData := InitData{
+			Messages:          history,
+			State:             string(state),
+			ContextPercent:    sess.contextPercent(),
+			PermissionMode:    sess.permissionMode(),
+			PendingPermission: pendingPerm,
+			PendingAsk:        pendingAsk,
 		}
-
-		initData := map[string]any{
-			"messages": history,
-			"state":    string(state),
+		if sess.runtime.taskStore != nil {
+			initData.Tasks = sess.runtime.taskStore.Tasks()
 		}
-		if pendingPerm != nil {
-			initData["pending_permission"] = pendingPerm
-		}
-		if taskList != nil {
-			initData["tasks"] = taskList
-		}
-		if sess.planMode != nil {
-			mode := sess.planMode.Mode()
+		if sess.runtime.planMode != nil {
+			mode := sess.runtime.planMode.Mode()
 			if mode != planmode.ModeOff {
-				initData["plan_mode"] = string(mode)
-				initData["plan_file"] = sess.planMode.PlanFilePath()
+				initData.PlanMode = string(mode)
+				initData.PlanFile = sess.runtime.planMode.PlanFilePath()
 			}
 		}
 		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData}); err != nil {
@@ -497,6 +549,74 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func handleShell(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		limitBody(w, r, maxJSONBodySize)
+		var body struct {
+			Command string `json:"command"`
+			Silent  bool   `json:"silent"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Command == "" {
+			http.Error(w, "command required", http.StatusBadRequest)
+			return
+		}
+
+		// Use the request context as-is — no artificial timeout. The user
+		// can cancel from the web UI if the command takes too long.
+		cmd := exec.CommandContext(r.Context(), "sh", "-c", body.Command)
+		cmd.Dir = sess.CWD
+		out, _ := cmd.CombinedOutput()
+
+		exitCode := 0
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+
+		output := strings.TrimRight(string(out), "\n")
+		var msgBody string
+		if output != "" {
+			msgBody = fmt.Sprintf("$ %s\n%s", body.Command, output)
+		} else {
+			msgBody = fmt.Sprintf("$ %s\n(no output)", body.Command)
+		}
+
+		sess.mu.Lock()
+		ag := sess.runtime.agent
+		running := ag.IsRunning()
+		sess.mu.Unlock()
+
+		if running && !body.Silent {
+			ag.Steer(fmt.Sprintf("Shell output (from user):\n%s", msgBody))
+		} else if !running {
+			role := "user"
+			if body.Silent {
+				role = "shell"
+			}
+			_ = ag.AppendMessage(core.AgentMessage{
+				Message: core.Message{
+					Role:    role,
+					Content: []core.Content{core.TextContent(msgBody)},
+				},
+				Custom: map[string]any{"shell": true},
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"output":    output,
+			"exit_code": exitCode,
+		})
 	}
 }
 

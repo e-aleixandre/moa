@@ -97,7 +97,8 @@ func (sl *StatusLine) View(width int) string {
 	// with tea.Println-based scrollback in non-alt-screen mode.
 	content = strings.ReplaceAll(content, "\n", " ")
 	if width > 0 {
-		content = truncateVisible(content, width-2) // account for style padding
+		pl := sl.style.GetPaddingLeft() + sl.style.GetPaddingRight()
+		content = truncateVisible(content, width-pl)
 	}
 	return sl.style.Width(width).Render(content)
 }
@@ -148,6 +149,7 @@ const (
 	SegmentPlan        = "plan"
 	SegmentTasks       = "tasks"
 	SegmentCost        = "cost"
+	SegmentCache       = "cache"
 	SegmentContext     = "context"
 )
 
@@ -159,13 +161,14 @@ const (
 	PriorityPlan        = 40
 	PriorityTasks       = 45
 	PriorityCost        = 80
+	PriorityCache       = 85
 	PriorityContext     = 90 // rightmost of the built-ins
 )
 
 // statusLineSep is rebuilt by RebuildUI via rebuildStatusLineVars.
 var statusLineSep string
 
-// Context usage level styles — rebuilt by RebuildUI.
+// Segment styles — no background, blends with the terminal.
 var (
 	statusLineStyle            lipgloss.Style
 	statusLineContextLowStyle  lipgloss.Style
@@ -177,7 +180,7 @@ var (
 func rebuildStatusLineVars() {
 	t := ActiveTheme
 	statusLineSep = statusLineSepStyle.Render("  ·  ")
-	statusLineStyle = lipgloss.NewStyle().Foreground(t.Text).Background(t.Surface0)
+	statusLineStyle = lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(1)
 	statusLineContextLowStyle = lipgloss.NewStyle().Foreground(t.Green)
 	statusLineContextMedStyle = lipgloss.NewStyle().Foreground(t.Yellow)
 	statusLineContextHighStyle = lipgloss.NewStyle().Foreground(t.Red)
@@ -200,7 +203,8 @@ func (sl *StatusLine) UpdatePermissionsSegment(mode string) {
 	if mode == "" {
 		mode = "yolo"
 	}
-	sl.Set(SegmentPermissions, mode, PriorityPermissions)
+	text := statusLineKeyStyle.Render("perms ") + statusLineValueStyle.Render(mode)
+	sl.Set(SegmentPermissions, text, PriorityPermissions)
 }
 
 // UpdatePlanSegment sets the plan mode segment. Pass "" to remove.
@@ -227,6 +231,17 @@ func (sl *StatusLine) UpdateCostSegment(cost float64) {
 	}
 	text := statusLineKeyStyle.Render("cost ") + statusLineValueStyle.Render(val)
 	sl.Set(SegmentCost, text, PriorityCost)
+}
+
+// UpdateCacheSegment sets the cache hit rate segment.
+// pct is 0-100. Only shown when > 0.
+func (sl *StatusLine) UpdateCacheSegment(pct int) {
+	if pct <= 0 {
+		sl.Remove(SegmentCache)
+		return
+	}
+	text := statusLineKeyStyle.Render("cache ") + statusLineValueStyle.Render(fmt.Sprintf("%d%%", pct))
+	sl.Set(SegmentCache, text, PriorityCache)
 }
 
 // UpdateTasksSegment sets the task progress segment.

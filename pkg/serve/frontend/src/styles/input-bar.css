@@ -2,11 +2,44 @@
 
 .input-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 12px 14px;
   background: var(--mantle);
   align-items: flex-end;
   box-shadow: 0 -2px 8px rgba(0,0,0,0.12);
+}
+
+/* Queued steer indicator — full width row above the input */
+.input-steers {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--overlay1);
+  border-left: 2px solid var(--overlay0);
+}
+.input-steer-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.input-steer-count {
+  color: var(--overlay0);
+  font-size: 11px;
+}
+.input-steer-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--overlay0);
+  background: var(--surface0);
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 
 /* Wrapper: positions mic inside the textarea area */
@@ -38,6 +71,13 @@
   outline: none;
   border-color: var(--peach);
   box-shadow: 0 0 0 2px var(--peach-dim);
+}
+.input-bar.busy textarea {
+  border-color: var(--mauve);
+}
+.input-bar.busy textarea:focus {
+  border-color: var(--mauve);
+  box-shadow: 0 0 0 2px rgba(203,166,247,0.15);
 }
 .input-bar textarea::placeholder { color: var(--overlay0); }
 
@@ -148,15 +188,37 @@
   white-space: nowrap;
 }
 
-.input-stop {
-  background: var(--red-dim);
-  color: var(--red);
-  border: 1px solid rgba(243,139,168,0.2);
-  border-radius: var(--radius-md);
-  padding: 0 12px;
-  min-height: 42px;
+/* Activity indicator above input when agent is running */
+.input-activity {
+  width: 100%;
   display: flex;
   align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--subtext0);
 }
-.input-stop:hover { background: rgba(243,139,168,0.18); }
-.input-stop .lucide { width: 15px; height: 15px; }
+.input-activity-spinner {
+  width: 14px;
+  height: 14px;
+  color: var(--blue);
+  animation: spin 1.2s linear infinite;
+  flex-shrink: 0;
+}
+.input-activity-label {
+  flex: 1;
+  font-weight: 500;
+  color: var(--subtext1);
+}
+.input-activity-abort {
+  font-size: 11px;
+  color: var(--overlay1);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  transition: all 0.15s;
+}
+.input-activity-abort:hover {
+  background: var(--surface1);
+  color: var(--red);
+}

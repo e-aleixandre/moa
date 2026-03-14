@@ -7,7 +7,8 @@ import {
   handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
-} from './state.js';
+  handleWsAskUser, handleWsContextUpdate, handleWsSteer,
+} from './ws-handlers.js';
 
 const HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
 
@@ -16,8 +17,10 @@ export async function api(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-  if (r.status === 204 || r.status === 202) return null;
-  return r.json();
+  if (r.status === 204) return null;
+  const text = await r.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
 // --- Centralized WS Manager ---
@@ -116,6 +119,9 @@ function routeEvent(sessionId, evt) {
     case 'permission_request':
       handleWsPermissionRequest(sessionId, evt.data);
       break;
+    case 'ask_user':
+      handleWsAskUser(sessionId, evt.data);
+      break;
     case 'config_change':
       handleWsConfigChange(sessionId, evt.data);
       break;
@@ -136,6 +142,12 @@ function routeEvent(sessionId, evt) {
       break;
     case 'plan_mode':
       handleWsPlanMode(sessionId, evt.data);
+      break;
+    case 'steer':
+      handleWsSteer(sessionId, evt.data);
+      break;
+    case 'context_update':
+      handleWsContextUpdate(sessionId, evt.data);
       break;
   }
 }

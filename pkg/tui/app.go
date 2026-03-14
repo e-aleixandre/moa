@@ -14,6 +14,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/askuser"
+	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -57,13 +59,16 @@ type state struct {
 	pendingStatus    string                // transient generic status shown in View(), never persisted
 	pendingTimeline  *pendingTimelineEvent // live timeline event shown in View() until next send
 	sessionCost      float64               // accumulated USD cost this session
+	sessionInput     int                   // accumulated input tokens (for cache %)
+	sessionCacheRead int                   // accumulated cache_read tokens
 	runStartMsgCount int                   // message count at start of current run (for delta cost)
 	asyncSubagents   int                   // running async subagent count (for status display)
 	transcript       bool                  // true when in transcript mode (Ctrl+O)
 	fullHistory      bool                  // true when Ctrl+E in transcript mode shows everything
 	runStartBlockIdx int                   // block index at start of current run (patch boundary)
-	pendingImage     []byte                // raw image bytes waiting to be sent with next message
-	pendingImageMime string                // mime type of pending image
+	pendingImage     []byte   // raw image bytes waiting to be sent with next message
+	pendingImageMime string   // mime type of pending image
+	queuedSteers     []string // steer messages waiting to be processed by the agent
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -110,9 +115,9 @@ type appModel struct {
 	thinkingPicker thinkingPicker
 	cmdPalette     cmdPalette
 	permPrompt     permissionPrompt
+	askPrompt      askPrompt
 	sessionBrowser sessionBrowser
-	topBar         *StatusLine
-	bottomBar      *StatusLine
+	statusBar *StatusLine
 
 	// Session persistence
 	sessionStore session.SessionStore // nil if persistence is disabled
@@ -130,8 +135,14 @@ type appModel struct {
 	// Permissions
 	permGate *permission.Gate
 
+	// Ask user
+	askBridge *askuser.Bridge
+
 	// Verify
 	verifyCancel context.CancelFunc // non-nil while /verify is running
+
+	// Settings menu
+	settingsMenu settingsMenu
 
 	// Plan mode
 	planMode              *planmode.PlanMode
@@ -147,6 +158,12 @@ type appModel struct {
 
 	// Prompt templates
 	promptTemplates []promptpkg.Template
+
+	// Voice input
+	voice voiceRecorder
+
+	// Checkpoints (/undo)
+	checkpoints *checkpoint.Store
 
 	// Subagent status
 	subagentCountCh  <-chan int
@@ -171,6 +188,7 @@ type Config struct {
 	CWD                   string                      // working directory for session metadata
 	ProviderFactory       ProviderFactory             // creates providers for /model switching (nil = switching disabled)
 	PermissionGate        *permission.Gate            // permission gate (nil = yolo, no prompts)
+	AskBridge             *askuser.Bridge             // bridge for ask_user tool (nil = disabled)
 	PinnedModels          []string                    // model IDs pre-pinned for Ctrl+P cycling (loaded from global config)
 	OnPinnedModelsChange  func([]string) error        // called when the user changes pinned models (nil = no persistence)
 	SubagentCountCh       <-chan int                  // receives running async subagent count updates (nil = disabled)
@@ -178,6 +196,8 @@ type Config struct {
 	PlanMode              *planmode.PlanMode          // plan mode instance (nil = disabled)
 	TaskStore             *tasks.Store                // task store (nil = no task tracking)
 	PromptTemplates       []promptpkg.Template        // available prompt templates (nil = none)
+	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
+	CheckpointStore       *checkpoint.Store           // file checkpoint store for /undo (nil = disabled)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -228,8 +248,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		status:               newStatus(),
 		picker:               newPicker(),
 		sessionBrowser:       newSessionBrowser(),
-		topBar:               NewStatusLine(statusLineStyle),
-		bottomBar:            NewStatusLine(statusLineStyle),
+		statusBar:            NewStatusLine(statusLineStyle),
 		sessionStore:         cfg.SessionStore,
 		session:              cfg.Session,
 		cwd:                  cfg.CWD,
@@ -238,25 +257,28 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		permGate:             cfg.PermissionGate,
+		askBridge:            cfg.AskBridge,
 		subagentCountCh:      cfg.SubagentCountCh,
 		subagentNotifyCh:     cfg.SubagentNotifyCh,
 		planMode:             cfg.PlanMode,
 		taskStore:            cfg.TaskStore,
 		promptTemplates:      cfg.PromptTemplates,
+		voice:                voiceRecorder{transcriber: cfg.Transcriber},
+		checkpoints:          cfg.CheckpointStore,
 		baseSystemPrompt:     ag.SystemPrompt(),
 	}
 
 	// Initialize status line segments.
 	if cfg.ModelName != "" {
-		m.topBar.UpdateModelSegment(cfg.ModelName)
+		m.statusBar.UpdateModelSegment(cfg.ModelName)
 	}
-	m.topBar.UpdateThinkingSegment(ag.ThinkingLevel())
+	m.statusBar.UpdateThinkingSegment(ag.ThinkingLevel())
 	if m.permGate != nil {
-		m.topBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
+		m.statusBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
 	} else {
-		m.topBar.UpdatePermissionsSegment("yolo")
+		m.statusBar.UpdatePermissionsSegment("yolo")
 	}
-	m.topBar.UpdateContextSegment(0)
+	m.statusBar.UpdateContextSegment(0)
 	if cfg.StartInSessionBrowser {
 		m.sessionBrowser.Open()
 		m.input.SetEnabled(false)
@@ -295,13 +317,16 @@ func (m appModel) Init() tea.Cmd {
 	if m.subagentNotifyCh != nil {
 		cmds = append(cmds, m.waitForSubagentNotify())
 	}
+	if m.askBridge != nil {
+		cmds = append(cmds, m.waitForQuestion())
+	}
 	// Sync plan mode on init (handles restored sessions).
 	if m.planMode != nil {
 		m.syncPermissionCheck()
 		m.rebuildSystemPrompt()
 		mode := m.planMode.Mode()
 		if mode != planmode.ModeOff {
-			m.topBar.UpdatePlanSegment(string(mode))
+			m.statusBar.UpdatePlanSegment(string(mode))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -334,6 +359,23 @@ func (m appModel) waitForSubagentCount() tea.Cmd {
 			}
 			return asyncSubagentCountMsg{count: count}
 		case <-quit:
+			return nil
+		}
+	}
+}
+
+// waitForQuestion listens for the next ask_user question from the bridge.
+func (m appModel) waitForQuestion() tea.Cmd {
+	bridge := m.askBridge
+	ctx := m.baseCtx
+	return func() tea.Msg {
+		select {
+		case p, ok := <-bridge.Prompts():
+			if !ok {
+				return nil
+			}
+			return askUserMsg{Prompt: p}
+		case <-ctx.Done():
 			return nil
 		}
 	}
@@ -498,6 +540,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case voiceResultMsg:
+		return m.handleVoiceResult(msg)
+
 	case compactResultMsg:
 		m.s.running = false
 		m.input.SetEnabled(true)
@@ -541,6 +586,21 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.updateViewport()
 		return m, nil
+
+	case shellResultMsg:
+		return m.handleShellResult(msg)
+
+	case askUserMsg:
+		var cmds []tea.Cmd
+		if m.s.transcript {
+			m.s.transcript = false
+			m.s.fullHistory = false
+			m.updateViewport()
+			cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
+		}
+		m.askPrompt.Show(msg.Prompt)
+		cmds = append(cmds, m.waitForQuestion())
+		return m, tea.Batch(cmds...)
 
 	case permissionRequestMsg:
 		// Auto-exit transcript mode so the prompt is visible and actionable
@@ -621,14 +681,11 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Pass through to sub-components
-	if m.s.streamState == stateIdle {
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
-	}
-
-	return m, nil
+	// Pass through to sub-components (input always receives keystrokes so
+	// the user can type while the agent is running — Enter sends a steer).
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
 }
 
 // View renders the full alt-screen layout. The viewport holds durable conversation
@@ -654,7 +711,7 @@ func (m appModel) View() string {
 	}
 
 	// Build bottom chrome (everything below the viewport).
-	// Order matches the original inline layout: notices → topBar → input → bottomBar → palette
+	// Bottom chrome order: notices → input → statusBar → palette
 	var bottomChrome []string
 
 	l := GetActiveLayout()
@@ -682,10 +739,19 @@ func (m appModel) View() string {
 			bottomChrome = append(bottomChrome, tv)
 		}
 	}
+	// Queued steer messages — shown above input while waiting for the agent.
+	if len(m.s.queuedSteers) > 0 {
+		bottomChrome = append(bottomChrome, m.renderQueuedSteers())
+	}
+
 	// Input / modal area
 	if m.permPrompt.active {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			bottomChrome = append(bottomChrome, pv)
+		}
+	} else if m.askPrompt.active {
+		if av := m.askPrompt.View(m.width, ActiveTheme); av != "" {
+			bottomChrome = append(bottomChrome, av)
 		}
 	} else if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
@@ -699,19 +765,18 @@ func (m appModel) View() string {
 		if pv := m.planMenu.View(m.width, ActiveTheme); pv != "" {
 			bottomChrome = append(bottomChrome, pv)
 		}
+	} else if m.settingsMenu.active {
+		if sv := m.settingsMenu.View(m.width, ActiveTheme); sv != "" {
+			bottomChrome = append(bottomChrome, sv)
+		}
 	} else {
 		if iv := m.input.View(); iv != "" {
 			bottomChrome = append(bottomChrome, iv)
 		}
 	}
-	if m.topBar != nil {
-		if tv := m.topBar.View(m.width); tv != "" {
+	if m.statusBar != nil {
+		if tv := m.statusBar.View(m.width); tv != "" {
 			bottomChrome = append(bottomChrome, tv)
-		}
-	}
-	if m.bottomBar != nil {
-		if bv := m.bottomBar.View(m.width); bv != "" {
-			bottomChrome = append(bottomChrome, bv)
 		}
 	}
 	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
@@ -740,6 +805,11 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSessionBrowserKey(msg)
 	}
 
+	// Ask user prompt: intercept all keys.
+	if m.askPrompt.active {
+		return m.handleAskKey(msg)
+	}
+
 	// Permission prompt: intercept all keys.
 	if m.permPrompt.active {
 		return m.handlePermissionKey(msg)
@@ -753,6 +823,11 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Thinking picker: intercept all keys.
 	if m.thinkingPicker.active {
 		return m.handleThinkingPickerKey(msg)
+	}
+
+	// Settings menu: intercept all keys.
+	if m.settingsMenu.active {
+		return m.handleSettingsKey(msg.String())
 	}
 
 	// Plan action menu: intercept most keys, but let Ctrl+E/Ctrl+O through.
@@ -855,7 +930,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.agent.Reconfigure(nil, model, level); err != nil {
 			return m, nil
 		}
-		m.topBar.UpdateThinkingSegment(level)
+		m.statusBar.UpdateThinkingSegment(level)
 		m.status.SetText("thinking: " + level)
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return clearThinkingStatusMsg{}
@@ -902,6 +977,9 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case tea.KeyCtrlR:
+		return m.handleVoiceToggle()
+
 	case tea.KeyCtrlV:
 		if m.s.running {
 			return m, nil
@@ -945,6 +1023,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
+			m.s.queuedSteers = append(m.s.queuedSteers, text)
 			m.agent.Steer(text)
 			return m, nil
 		}
@@ -980,6 +1059,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if cmd, ok := ParseCommand(text); ok {
 			return m.handleCommand(cmd)
+		}
+		// Shell escape: !! = silent (user-only), ! = context (sent with next message)
+		if strings.HasPrefix(text, "!") {
+			return m.handleShellEscape(text)
 		}
 		return m.startAgentRun(text)
 
@@ -1029,14 +1112,13 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	}
 
-	// All other keys: propagate to input when idle, then update palette
+	// All other keys: always propagate to input so the user can type
+	// steer messages while the agent is running. Command palette only
+	// updates when idle (it's meaningless during a run).
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
 	if m.s.streamState == stateIdle {
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		// Update command palette based on current input text
 		m.cmdPalette.Update(m.input.textarea.Value())
-		return m, cmd
 	}
-
-	return m, nil
+	return m, cmd
 }

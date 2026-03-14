@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,14 +95,17 @@ func TestLatest(t *testing.T) {
 	store := tempStore(t)
 
 	// Create two sessions with different update times
+	fakeTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return fakeTime }
+	defer func() { nowFunc = time.Now }()
+
 	s1 := store.Create()
 	s1.Title = "first"
 	if err := store.Save(s1); err != nil {
 		t.Fatalf("Save s1: %v", err)
 	}
 
-	// Ensure different timestamp
-	time.Sleep(10 * time.Millisecond)
+	fakeTime = fakeTime.Add(time.Second)
 
 	s2 := store.Create()
 	s2.Title = "second"
@@ -136,13 +140,17 @@ func TestLatest_Empty(t *testing.T) {
 func TestList(t *testing.T) {
 	store := tempStore(t)
 
+	fakeTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return fakeTime }
+	defer func() { nowFunc = time.Now }()
+
 	s1 := store.Create()
 	s1.Title = "first"
 	if err := store.Save(s1); err != nil {
 		t.Fatalf("Save s1: %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	fakeTime = fakeTime.Add(time.Second)
 
 	s2 := store.Create()
 	s2.Title = "second"
@@ -464,5 +472,35 @@ func TestDeleteByID_NotFound(t *testing.T) {
 	err := DeleteByID(base, "nonexistent")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestFileStore_ConcurrentSave(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sess := store.Create()
+			sess.Title = "concurrent"
+			if err := store.Save(sess); err != nil {
+				t.Errorf("save failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	list, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 10 {
+		t.Errorf("expected 10 sessions, got %d", len(list))
 	}
 }

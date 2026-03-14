@@ -10,6 +10,7 @@
 @import './messages.css';
 @import './tool-call.css';
 @import './permission.css';
+@import './askuser.css';
 @import './input-bar.css';
 @import './task-bar.css';
 @import './settings.css';

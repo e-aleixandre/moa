@@ -26,6 +26,7 @@ export function toolVerb(name) {
   if (n === 'ls')                            return { verb: 'ls',     cls: 'read' };
   if (n === 'fetch_content')                 return { verb: 'fetch',  cls: 'fetch' };
   if (n === 'web_search')                    return { verb: 'search', cls: 'search' };
+  if (n === 'ask_user')                      return { verb: '❓ questions', cls: 'ask-user' };
   return { verb: name, cls: '' };
 }
 
@@ -46,6 +47,14 @@ export function toolPath(name, args) {
     return a.url || '';
   if (n === 'web_search')
     return a.query || '';
+  if (n === 'ask_user') {
+    const qs = a.questions;
+    if (Array.isArray(qs) && qs.length > 0) {
+      const text = qs[0].question || '';
+      return text.length > 80 ? text.substring(0, 77) + '…' : text;
+    }
+    return '';
+  }
 
   // Fallback: first short string value
   for (const v of Object.values(a)) {
@@ -65,10 +74,16 @@ export function toolPreview(name, args, result) {
   if (n === 'write' && a.content)
     return { text: a.content, kind: 'input' };
   if (n === 'edit') {
-    // Show the new text being inserted
-    if (a.newText) return { text: a.newText, kind: 'input' };
-    if (a.new_text) return { text: a.new_text, kind: 'input' };
+    // Use server-computed diff (has real file line numbers).
+    if (result && result.includes('@@')) return { text: result, kind: 'diff' };
+    // Fallback for old results without diff.
+    const oldText = a.oldText || a.old_text || '';
+    const newText = a.newText || a.new_text || '';
+    if (oldText || newText) return { text: formatDiff(oldText, newText), kind: 'diff' };
   }
+
+  // ask_user is rendered by AskUserPreview component — skip here.
+  if (n === 'ask_user') return null;
 
   // For everything else, show the result
   if (result) return { text: result, kind: 'output' };
@@ -102,6 +117,53 @@ export function splitPreviewTail(text, maxLines = PREVIEW_LINES) {
     hidden: total - maxLines,
     total,
   };
+}
+
+/** Format a simple unified-style diff between old and new text with line numbers. */
+function formatDiff(oldText, newText) {
+  const oldLines = oldText ? oldText.split('\n') : [];
+  const newLines = newText ? newText.split('\n') : [];
+  const lines = [];
+  const maxContext = 3;
+
+  // Find common prefix/suffix to reduce noise.
+  let prefixLen = 0;
+  while (prefixLen < oldLines.length && prefixLen < newLines.length && oldLines[prefixLen] === newLines[prefixLen]) {
+    prefixLen++;
+  }
+  let suffixLen = 0;
+  while (suffixLen < oldLines.length - prefixLen && suffixLen < newLines.length - prefixLen &&
+         oldLines[oldLines.length - 1 - suffixLen] === newLines[newLines.length - 1 - suffixLen]) {
+    suffixLen++;
+  }
+
+  const contextStart = Math.max(0, prefixLen - maxContext);
+  const pad = n => String(n).padStart(3);
+
+  // Context before
+  for (let i = contextStart; i < prefixLen; i++) {
+    lines.push(`${pad(i + 1)}   ${oldLines[i]}`);
+  }
+
+  // Removed lines
+  for (let i = prefixLen; i < oldLines.length - suffixLen; i++) {
+    lines.push(`${pad(i + 1)} - ${oldLines[i]}`);
+  }
+
+  // Added lines
+  let newStart = prefixLen;
+  for (let i = prefixLen; i < newLines.length - suffixLen; i++) {
+    lines.push(`${pad(newStart + 1 + (i - prefixLen))} + ${newLines[i]}`);
+  }
+
+  // Context after
+  const afterStart = oldLines.length - suffixLen;
+  const afterEnd = Math.min(oldLines.length, afterStart + maxContext);
+  for (let i = afterStart; i < afterEnd; i++) {
+    lines.push(`${pad(i + 1)}   ${oldLines[i]}`);
+  }
+
+  return lines.join('\n');
 }
 
 function shortenCmd(cmd) {
