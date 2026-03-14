@@ -27,7 +27,7 @@ const COMMANDS = [
   { name: 'tasks', desc: 'View/manage tasks', args: '[done <id> | reset]' },
 ];
 
-export function InputBar({ sessionId, sessionState, tileId }) {
+export function InputBar({ sessionId, sessionState, tileId, pendingSteers }) {
   const textareaRef = useRef(null);
   const busy = sessionState === 'running' || sessionState === 'permission';
   const [canTranscribe, setCanTranscribe] = useState(false);
@@ -283,6 +283,15 @@ export function InputBar({ sessionId, sessionState, tileId }) {
 
   return (
     <div class="input-bar">
+      {pendingSteers && pendingSteers.length > 0 && (
+        <div class="input-steers">
+          {pendingSteers.length === 1
+            ? <span class="input-steer-text">{pendingSteers[0]}</span>
+            : <span class="input-steer-text">{pendingSteers[pendingSteers.length - 1]} <span class="input-steer-count">+{pendingSteers.length - 1}</span></span>
+          }
+          <span class="input-steer-badge">queued</span>
+        </div>
+      )}
       <div class="input-wrap">
         {cmdSuggestions && (
           <div class="cmd-suggestions">

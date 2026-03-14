@@ -24,6 +24,7 @@ var allCommands = []commandDef{
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
 	{Name: "verify", Desc: "Run project verification checks"},
 	{Name: "prompt", Args: "<name>", Desc: "Insert a prompt template"},
+	{Name: "voice", Desc: "Toggle voice recording (Ctrl+R)"},
 	{Name: "settings", Desc: "Open settings menu"},
 	{Name: "clear", Desc: "Clear conversation and start fresh"},
 	{Name: "exit", Desc: "Quit moa"},

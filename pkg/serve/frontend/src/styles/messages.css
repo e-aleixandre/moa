@@ -214,33 +214,5 @@
 .new-messages-btn:hover { background: var(--surface1); }
 .new-messages-btn .lucide { width: 13px; height: 13px; }
 
-/* Queued steer message — shown while the agent hasn't processed it yet */
-.msg-steer {
-  align-self: flex-end;
-  max-width: 82%;
-  background: var(--surface0);
-  border: 1px dashed var(--overlay0);
-  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
-  padding: 10px 16px;
-  font-size: 14px;
-  color: var(--overlay1);
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.55;
-  opacity: 0.7;
-}
-.msg-steer-label {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--overlay0);
-  margin-bottom: 4px;
-}
-.msg-steer-text {
-  display: block;
-}
-
 /* Highlight.js reset */
 .hljs { background: transparent !important; padding: 0 !important; }

@@ -18,6 +18,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/core"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
+	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
@@ -320,6 +321,14 @@ func main() {
 			return build.Provider, nil
 		}
 
+		// Build transcriber from OpenAI API key (same logic as serve).
+		var transcriber core.Transcriber
+		if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Key != "" {
+			transcriber = openai.New(cred.Key)
+		} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
+			transcriber = openai.New(apiKey)
+		}
+
 		app := tui.New(ag, ctx, tui.Config{
 			SessionStore:          sessionStore,
 			Session:               persistedSess,
@@ -340,6 +349,7 @@ func main() {
 				})
 			},
 			ProviderFactory: providerFactory,
+			Transcriber:     transcriber,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {

@@ -89,6 +89,9 @@ func (m *appModel) computeChromeHeight() int {
 			h += lipgloss.Height(tv)
 		}
 	}
+	if len(m.s.queuedSteers) > 0 {
+		h++ // renderQueuedSteers is always one line
+	}
 	if m.permPrompt.active {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			h += lipgloss.Height(pv)
@@ -228,6 +231,7 @@ func (m *appModel) cleanup() {
 			m.unsub()
 		}
 		m.agent.Abort()
+		m.voice.reset()
 	})
 }
 
@@ -319,4 +323,26 @@ func parseSubagentNotification(text string) (task, status, result string, ok boo
 		}
 	}
 	return "", "", "", false
+}
+
+// renderQueuedSteers renders the queued steer messages shown above the input.
+func (m appModel) renderQueuedSteers() string {
+	t := ActiveTheme
+	text := lipgloss.NewStyle().Foreground(t.Overlay1)
+	badge := lipgloss.NewStyle().Foreground(t.Surface2).Background(t.Overlay0).
+		PaddingLeft(1).PaddingRight(1)
+
+	n := len(m.s.queuedSteers)
+	last := m.s.queuedSteers[n-1]
+
+	// Truncate long messages to one line.
+	if len(last) > 60 {
+		last = last[:57] + "…"
+	}
+
+	tag := badge.Render("queued")
+	if n > 1 {
+		tag = badge.Render(fmt.Sprintf("queued ×%d", n))
+	}
+	return "  " + tag + " " + text.Render(last)
 }

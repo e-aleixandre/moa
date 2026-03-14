@@ -63,8 +63,9 @@ type state struct {
 	transcript       bool                  // true when in transcript mode (Ctrl+O)
 	fullHistory      bool                  // true when Ctrl+E in transcript mode shows everything
 	runStartBlockIdx int                   // block index at start of current run (patch boundary)
-	pendingImage     []byte // raw image bytes waiting to be sent with next message
-	pendingImageMime string // mime type of pending image
+	pendingImage     []byte   // raw image bytes waiting to be sent with next message
+	pendingImageMime string   // mime type of pending image
+	queuedSteers     []string // steer messages waiting to be processed by the agent
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -155,6 +156,9 @@ type appModel struct {
 	// Prompt templates
 	promptTemplates []promptpkg.Template
 
+	// Voice input
+	voice voiceRecorder
+
 	// Subagent status
 	subagentCountCh  <-chan int
 	subagentNotifyCh <-chan SubagentNotification
@@ -186,6 +190,7 @@ type Config struct {
 	PlanMode              *planmode.PlanMode          // plan mode instance (nil = disabled)
 	TaskStore             *tasks.Store                // task store (nil = no task tracking)
 	PromptTemplates       []promptpkg.Template        // available prompt templates (nil = none)
+	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -251,6 +256,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		planMode:             cfg.PlanMode,
 		taskStore:            cfg.TaskStore,
 		promptTemplates:      cfg.PromptTemplates,
+		voice:                voiceRecorder{transcriber: cfg.Transcriber},
 		baseSystemPrompt:     ag.SystemPrompt(),
 	}
 
@@ -526,6 +532,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case voiceResultMsg:
+		return m.handleVoiceResult(msg)
+
 	case compactResultMsg:
 		m.s.running = false
 		m.input.SetEnabled(true)
@@ -722,6 +731,11 @@ func (m appModel) View() string {
 			bottomChrome = append(bottomChrome, tv)
 		}
 	}
+	// Queued steer messages — shown above input while waiting for the agent.
+	if len(m.s.queuedSteers) > 0 {
+		bottomChrome = append(bottomChrome, m.renderQueuedSteers())
+	}
+
 	// Input / modal area
 	if m.permPrompt.active {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
@@ -955,6 +969,9 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case tea.KeyCtrlR:
+		return m.handleVoiceToggle()
+
 	case tea.KeyCtrlV:
 		if m.s.running {
 			return m, nil
@@ -998,12 +1015,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
-			// Show a queued steer block immediately so the user sees feedback.
-			// When the agent actually processes it (AgentEventSteer), the
-			// handleAgentEvent handler replaces this with the real block.
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "steer", Raw: text})
-			m.s.viewportDirty = true
-			m.updateViewport()
+			m.s.queuedSteers = append(m.s.queuedSteers, text)
 			m.agent.Steer(text)
 			return m, nil
 		}

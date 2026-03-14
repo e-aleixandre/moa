@@ -140,6 +140,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "settings":
 		return m.openSettingsMenu()
 
+	case "voice":
+		return m.handleVoiceToggle()
+
 	case "exit", "quit":
 		m.cleanup()
 		return m, tea.Quit

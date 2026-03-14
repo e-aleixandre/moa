@@ -59,28 +59,6 @@ func (SplitLayout) RenderUserMessage(text string, width int, theme Theme) string
 	return strings.Join(lines, "\n")
 }
 
-func (SplitLayout) RenderSteerMessage(text string, width int, theme Theme) string {
-	bar := lipgloss.NewStyle().Foreground(theme.Overlay0).Render("│")
-	label := lipgloss.NewStyle().Foreground(theme.Overlay0).Render("YOU (queued)")
-
-	const prefixWidth = 2
-	wrapWidth := width - prefixWidth
-	if wrapWidth < 20 {
-		wrapWidth = 20
-	}
-
-	dim := lipgloss.NewStyle().Foreground(theme.Overlay1)
-	var lines []string
-	lines = append(lines, bar+" "+label)
-	for _, inputLine := range strings.Split(text, "\n") {
-		wrapped := wordwrap.String(inputLine, wrapWidth)
-		for _, wl := range strings.Split(wrapped, "\n") {
-			lines = append(lines, bar+" "+dim.Render(wl))
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (SplitLayout) RenderThinking(text string, width int, theme Theme) string {
 	return lipgloss.NewStyle().
 		Foreground(theme.Overlay0).

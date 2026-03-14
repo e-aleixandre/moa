@@ -254,8 +254,14 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		}
 
 	case core.AgentEventSteer:
-		// Replace the queued "steer" block (if any) with the real user/subagent block.
-		replaced := false
+		// Remove from queued steers (if present).
+		for i, s := range m.s.queuedSteers {
+			if s == e.Text {
+				m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
+				break
+			}
+		}
+		// Add to blocks as a real message.
 		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type:           "subagent",
@@ -264,17 +270,7 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 				SubagentResult: result,
 			})
 		} else {
-			// Find and promote the queued steer block to a normal user block.
-			for i := len(m.s.blocks) - 1; i >= 0; i-- {
-				if m.s.blocks[i].Type == "steer" && m.s.blocks[i].Raw == e.Text {
-					m.s.blocks[i].Type = "user"
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
-			}
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
 		}
 		m.s.viewportDirty = true
 
@@ -319,6 +315,12 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
+	// Flush any steers still in the queue — their AgentEventSteer may still be
+	// buffered in the event channel but will be ignored (stale runGen).
+	for _, s := range m.s.queuedSteers {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: s})
+	}
+	m.s.queuedSteers = nil
 	m.status.SetText("")
 	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 	m.input.SetEnabled(true)
@@ -373,65 +375,70 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	if msgs == nil {
 		return
 	}
-	// Only look at messages produced during this run (after runStartMsgCount).
-	// This prevents re-creating assistant blocks from a previous turn on abort.
+	// Only look at messages produced during this run.
 	var newMsgs []core.AgentMessage
 	if m.s.runStartMsgCount < len(msgs) {
 		newMsgs = msgs[m.s.runStartMsgCount:]
 	} else {
-		newMsgs = nil
+		return
 	}
 
-	// Extract the final assistant text from new messages only.
-	var lastAssistantText string
-	var lastThinkingText string
-	for i := len(newMsgs) - 1; i >= 0; i-- {
-		if newMsgs[i].Role == "assistant" {
-			for _, c := range newMsgs[i].Content {
-				if c.Type == "text" && c.Text != "" {
-					lastAssistantText = c.Text
-				}
-				if c.Type == "thinking" && c.Thinking != "" {
-					lastThinkingText = c.Thinking
-				}
+	// Collect assistant texts and thinking from this run's messages, in order.
+	type assistantEntry struct {
+		text     string
+		thinking string
+	}
+	var entries []assistantEntry
+	for _, msg := range newMsgs {
+		if msg.Role != "assistant" {
+			continue
+		}
+		var e assistantEntry
+		for _, c := range msg.Content {
+			if c.Type == "text" && c.Text != "" {
+				e.text = c.Text
 			}
-			break
+			if c.Type == "thinking" && c.Thinking != "" {
+				e.thinking = c.Thinking
+			}
+		}
+		if e.text != "" || e.thinking != "" {
+			entries = append(entries, e)
 		}
 	}
+	if len(entries) == 0 {
+		return
+	}
 
-	// Search boundary: only patch blocks from the current run.
 	searchFrom := m.s.runStartBlockIdx
 
-	// Patch or create thinking block
-	if lastThinkingText != "" {
-		found := false
-		for i := len(m.s.blocks) - 1; i >= searchFrom; i-- {
-			if m.s.blocks[i].Type == "thinking" {
-				m.s.blocks[i].Raw = lastThinkingText
-				found = true
-				break
+	// Match existing blocks to entries in order. Each entry may have
+	// a thinking+assistant pair. We walk blocks forward, consuming entries
+	// as we match assistant blocks (the authoritative anchor).
+	entryIdx := 0
+	for i := searchFrom; i < len(m.s.blocks) && entryIdx < len(entries); i++ {
+		switch m.s.blocks[i].Type {
+		case "thinking":
+			if entries[entryIdx].thinking != "" {
+				m.s.blocks[i].Raw = entries[entryIdx].thinking
 			}
-		}
-		if !found {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "thinking", Raw: lastThinkingText,
-			})
+		case "assistant":
+			m.s.blocks[i].Raw = entries[entryIdx].text
+			entryIdx++
 		}
 	}
 
-	// Patch or create assistant block
-	if lastAssistantText != "" {
-		found := false
-		for i := len(m.s.blocks) - 1; i >= searchFrom; i-- {
-			if m.s.blocks[i].Type == "assistant" {
-				m.s.blocks[i].Raw = lastAssistantText
-				found = true
-				break
-			}
-		}
-		if !found {
+	// Create blocks for messages that have no corresponding block yet
+	// (events still buffered in the event channel when runResult arrived).
+	for ; entryIdx < len(entries); entryIdx++ {
+		if entries[entryIdx].thinking != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "assistant", Raw: lastAssistantText,
+				Type: "thinking", Raw: entries[entryIdx].thinking,
+			})
+		}
+		if entries[entryIdx].text != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "assistant", Raw: entries[entryIdx].text,
 			})
 		}
 	}

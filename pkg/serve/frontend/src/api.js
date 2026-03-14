@@ -17,7 +17,7 @@ export async function api(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-  if (r.status === 204 || r.status === 202) return null;
+  if (r.status === 204) return null;
   const text = await r.text();
   if (!text) return null;
   return JSON.parse(text);

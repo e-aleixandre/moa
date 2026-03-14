@@ -439,7 +439,8 @@ func TestPatchFromMessages_DoesNotPatchPreviousTurnBlocks(t *testing.T) {
 		// Turn 2: user block added, but MessageEnd not yet processed
 		{Type: "user", Raw: "turn 2 question"},
 	}
-	m.s.runStartBlockIdx = 2 // run started at the turn-2 user block
+	m.s.runStartBlockIdx = 2  // run started at the turn-2 user block
+	m.s.runStartMsgCount = 2  // skip turn-1 messages (user + assistant)
 
 	// agent.Send returns with turn-2 assistant text, but MessageEnd was missed
 	m.patchFromMessages([]core.AgentMessage{
@@ -478,6 +479,7 @@ func TestPatchFromMessages_DoesNotPatchPreviousTurnThinking(t *testing.T) {
 		{Type: "user", Raw: "q2"},
 	}
 	m.s.runStartBlockIdx = 3 // run started at turn-2 user block
+	m.s.runStartMsgCount = 2 // skip turn-1 messages (user + assistant)
 
 	m.patchFromMessages([]core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "q1"}}}},
@@ -1464,6 +1466,182 @@ func TestBuildToolBlockData_AskUser_Pending(t *testing.T) {
 	if !strings.Contains(data.Body, "○ A") || !strings.Contains(data.Body, "○ B") {
 		t.Error("Body should show all options as unselected")
 	}
+}
+
+// TestSteerQueue verifies steers go to queuedSteers (not blocks) and
+// move to blocks only when AgentEventSteer fires.
+func TestSteerQueue(t *testing.T) {
+	m := newTestModel()
+	m.s.running = true
+	m.s.runGen = 1
+	m.s.runStartBlockIdx = 1
+	m.s.streamState = stateStreaming
+
+	// Initial user message in blocks.
+	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: "hello"})
+
+	// Agent streams a response.
+	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventMessageStart})
+	m.s.streamText = "I'll help you"
+
+	// User queues two steers.
+	m.s.queuedSteers = append(m.s.queuedSteers, "do X instead")
+	m.s.queuedSteers = append(m.s.queuedSteers, "and also Y")
+
+	// Steers must NOT be in blocks.
+	for _, b := range m.s.blocks {
+		if b.Type == "steer" {
+			t.Fatal("steer should not appear in blocks")
+		}
+	}
+	if len(m.s.queuedSteers) != 2 {
+		t.Fatalf("queuedSteers = %d, want 2", len(m.s.queuedSteers))
+	}
+
+	// MessageEnd creates assistant block.
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventMessageEnd,
+		Message: core.AgentMessage{Message: core.Message{
+			Role: "assistant", Content: []core.Content{core.TextContent("I'll help you")},
+		}},
+	})
+
+	// Tool execution.
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecStart, ToolCallID: "t1", ToolName: "bash",
+		Args: map[string]any{"command": "ls"},
+	})
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventToolExecEnd, ToolCallID: "t1", ToolName: "bash",
+		Result: &core.Result{Content: []core.Content{core.TextContent("file.txt")}},
+	})
+
+	// Agent processes the steers.
+	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventSteer, Text: "do X instead"})
+
+	if len(m.s.queuedSteers) != 1 {
+		t.Fatalf("after first steer event: queuedSteers = %d, want 1", len(m.s.queuedSteers))
+	}
+	// First steer should now be in blocks as "user".
+	found := false
+	for _, b := range m.s.blocks {
+		if b.Type == "user" && b.Raw == "do X instead" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("first steer not added to blocks after AgentEventSteer")
+	}
+
+	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventSteer, Text: "and also Y"})
+	if len(m.s.queuedSteers) != 0 {
+		t.Fatalf("after second steer event: queuedSteers = %d, want 0", len(m.s.queuedSteers))
+	}
+
+	// Second response from agent (after processing steers).
+	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventMessageStart})
+	m.s.streamText = "OK doing X and Y"
+	m.handleAgentEvent(core.AgentEvent{
+		Type: core.AgentEventMessageEnd,
+		Message: core.AgentMessage{Message: core.Message{
+			Role: "assistant", Content: []core.Content{core.TextContent("OK doing X and Y")},
+		}},
+	})
+
+	// Both assistant responses must be present.
+	assistantCount := 0
+	for _, b := range m.s.blocks {
+		if b.Type == "assistant" {
+			assistantCount++
+		}
+	}
+	if assistantCount != 2 {
+		t.Errorf("expected 2 assistant blocks, got %d", assistantCount)
+		for i, b := range m.s.blocks {
+			t.Logf("  block %d: type=%q raw=%q", i, b.Type, truncate(b.Raw, 50))
+		}
+	}
+
+	// Simulate patchFromMessages (what handleRunResult does).
+	// With steers, the server has multiple assistant messages.
+	// Patch must NOT overwrite the first with the second.
+	m.s.runStartMsgCount = 0
+	allMsgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.TextContent("Full first response from server"),
+		}}},
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("do X instead")}}},
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("and also Y")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.TextContent("Full second response from server"),
+		}}},
+	}
+	m.patchFromMessages(allMsgs)
+
+	// After patching: both assistant blocks must exist with correct content.
+	var texts []string
+	for _, b := range m.s.blocks {
+		if b.Type == "assistant" {
+			texts = append(texts, b.Raw)
+		}
+	}
+	if len(texts) != 2 {
+		t.Fatalf("after patch: expected 2 assistant blocks, got %d", len(texts))
+	}
+	if texts[0] != "Full first response from server" {
+		t.Errorf("first assistant after patch: %q", texts[0])
+	}
+	if texts[1] != "Full second response from server" {
+		t.Errorf("second assistant after patch: %q", texts[1])
+	}
+}
+
+// TestPatchFromMessages_CreatesBlocks verifies that patchFromMessages creates
+// assistant blocks for server messages that arrived after agentRunResultMsg.
+func TestPatchFromMessages_CreatesBlocks(t *testing.T) {
+	m := newTestModel()
+	m.s.runStartBlockIdx = 0
+	m.s.runStartMsgCount = 0
+
+	// Only one assistant block exists (second MessageEnd not yet processed).
+	m.s.blocks = append(m.s.blocks,
+		messageBlock{Type: "user", Raw: "hello"},
+		messageBlock{Type: "assistant", Raw: "streaming text"},
+		messageBlock{Type: "tool", ToolName: "bash", ToolDone: true},
+	)
+
+	// Server has two assistant messages.
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("first response")}}},
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("steer")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("second response")}}},
+	}
+	m.patchFromMessages(msgs)
+
+	var texts []string
+	for _, b := range m.s.blocks {
+		if b.Type == "assistant" {
+			texts = append(texts, b.Raw)
+		}
+	}
+	if len(texts) != 2 {
+		t.Fatalf("expected 2 assistant blocks, got %d", len(texts))
+	}
+	if texts[0] != "first response" {
+		t.Errorf("block 0: %q, want 'first response'", texts[0])
+	}
+	if texts[1] != "second response" {
+		t.Errorf("block 1: %q, want 'second response'", texts[1])
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func TestGetActiveLayout_NeverNil(t *testing.T) {

@@ -36,32 +36,6 @@ func (FlatLayout) RenderUserMessage(text string, width int, theme Theme) string 
 	return strings.Join(parts, "\n")
 }
 
-func (FlatLayout) RenderSteerMessage(text string, width int, theme Theme) string {
-	prefix := lipgloss.NewStyle().Foreground(theme.Overlay0).Render("❯ ")
-	dim := lipgloss.NewStyle().Foreground(theme.Overlay1)
-	label := lipgloss.NewStyle().Foreground(theme.Overlay0).Render(" (queued)")
-
-	const prefixWidth = 2
-	wrapWidth := width - prefixWidth
-	if wrapWidth < 20 {
-		wrapWidth = 20
-	}
-
-	wrapped := wordwrap.String(text, wrapWidth)
-	lines := strings.Split(wrapped, "\n")
-	pad := strings.Repeat(" ", prefixWidth)
-
-	var parts []string
-	for i, line := range lines {
-		if i == 0 {
-			parts = append(parts, prefix+dim.Render(line)+label)
-		} else {
-			parts = append(parts, pad+dim.Render(line))
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
 func (FlatLayout) RenderThinking(text string, width int, theme Theme) string {
 	return lipgloss.NewStyle().
 		Foreground(theme.Overlay0).

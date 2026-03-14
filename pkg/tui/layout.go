@@ -16,7 +16,6 @@ import (
 // Startup-time only: set the active layout before the TUI starts.
 type Layout interface {
 	RenderUserMessage(text string, width int, theme Theme) string
-	RenderSteerMessage(text string, width int, theme Theme) string
 	RenderThinking(text string, width int, theme Theme) string
 	RenderAssistantText(glamourRendered string, width int) string
 	RenderToolBlock(block ToolBlockData, width int, theme Theme) string

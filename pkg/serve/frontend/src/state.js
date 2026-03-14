@@ -136,6 +136,7 @@ export async function loadSessions() {
         permissionMode: info.permission_mode || (existing ? existing.permissionMode : 'yolo'),
         pendingPerm: existing ? existing.pendingPerm : null,
         pendingAsk: existing ? existing.pendingAsk : null,
+        pendingSteers: existing ? existing.pendingSteers : null,
         streamingText: existing ? existing.streamingText : null,
         thinkingText: existing ? existing.thinkingText : null,
         subagentCount: existing ? existing.subagentCount : 0,
@@ -448,7 +449,7 @@ export function handleWsStateChange(id, data) {
   updateSession(id, { state: data.state, error: data.error || null });
   if (data.state === 'idle' || data.state === 'error') {
     const sess = state.sessions[id];
-    if (sess) updateSession(id, { streamingText: null, thinkingText: null });
+    if (sess) updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null });
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
       // Notify non-visible sessions that finished or errored
@@ -536,9 +537,11 @@ export function handleWsRunEnd(id) {
 export function handleWsSteer(id, data) {
   const sess = state.sessions[id];
   if (!sess) return;
-  // The agent processed this steer — add to messages and remove from queue.
+  // The agent processed this steer — add to messages and remove ONE from queue.
   const userMsg = { role: 'user', content: [{ type: 'text', text: data.text }] };
-  const steers = (sess.pendingSteers || []).filter(t => t !== data.text);
+  const steers = [...(sess.pendingSteers || [])];
+  const idx = steers.indexOf(data.text);
+  if (idx >= 0) steers.splice(idx, 1);
   updateSession(id, {
     messages: [...sess.messages, userMsg],
     pendingSteers: steers.length > 0 ? steers : null,
@@ -573,24 +576,19 @@ export async function sendMessage(id, text) {
   const sess = state.sessions[id];
   if (!sess) return;
 
-  // Show the message as a pending steer immediately. We don't touch
-  // messages[] until we know whether it's a send or steer — concurrent
-  // steers + WS events make optimistic-then-revert unreliable.
-  // For a fresh send (idle), the server's state_change + run events will
-  // populate messages correctly. For a steer, the WS steer event handles it.
-  const wasIdle = sess.state === 'idle' || sess.state === 'error';
-  if (wasIdle) {
-    // First message: add to messages optimistically (no race here — nothing
-    // else is writing to messages while idle).
+  const isIdle = sess.state === 'idle' || sess.state === 'error';
+  if (isIdle) {
+    // First message: add to messages and immediately mark as running so any
+    // subsequent sends (before the WS state_change arrives) go to pendingSteers.
     const userMsg = { role: 'user', content: [{ type: 'text', text }] };
     updateSession(id, {
       messages: [...sess.messages, userMsg],
+      state: 'running',
       streamingText: null,
       thinkingText: null,
     });
   } else {
-    // Agent is running — show as queued. The WS 'steer' event will
-    // move it to messages when the agent processes it.
+    // Agent is running — queue as steer.
     const current = state.sessions[id];
     const steers = current?.pendingSteers || [];
     updateSession(id, { pendingSteers: [...steers, text] });

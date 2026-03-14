@@ -254,6 +254,9 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 			}})
 		}
 
+	case core.AgentEventSteer:
+		s.broadcast(Event{Type: "steer", Data: SteerData{Text: e.Text}})
+
 	default:
 		s.broadcast(Event{Type: e.Type})
 	}
@@ -627,8 +630,9 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 		ag := sess.runtime.agent
 		sess.mu.Unlock()
 		// Steer the running agent — injected between tool calls.
+		// Don't broadcast here: the WS "steer" event is emitted later when the
+		// agent actually processes it (AgentEventSteer in broadcastAgentEvent).
 		ag.Steer(text)
-		sess.broadcast(Event{Type: "steer", Data: SteerData{Text: text}})
 		return "steer", nil
 	}
 	sess.State = StateRunning

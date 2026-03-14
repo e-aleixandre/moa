@@ -15,7 +15,7 @@ const assistantPadChars = 2
 // Blocks are rendered on demand (flush to scrollback or View()) using current
 // terminal width, so resize reflows correctly.
 type messageBlock struct {
-	Type string // "user", "steer", "assistant", "tool", "error", "status", "thinking", "subagent"
+	Type string // "user", "assistant", "tool", "error", "status", "thinking", "subagent"
 	Raw  string // raw content: markdown for assistant, plain text for others
 
 	// Tool blocks (Type == "tool")
@@ -96,8 +96,6 @@ func renderSingleBlockEx(block messageBlock, r *renderer, showThinking bool, exp
 	switch block.Type {
 	case "user":
 		return l.RenderUserMessage(block.Raw, w, t)
-	case "steer":
-		return l.RenderSteerMessage(block.Raw, w, t)
 	case "thinking":
 		if !showThinking {
 			return ""

@@ -39,7 +39,7 @@ export function MessageList({ session, onResolvePermission }) {
   const thinking = session.thinkingText;
   const pendingPerm = session.pendingPerm;
   const pendingAsk = session.pendingAsk;
-  const pendingSteers = session.pendingSteers;
+  // pendingSteers are rendered in InputBar, not here.
 
   return (
     <div class="messages" ref={containerRef} onScroll={checkScroll} style="position:relative">
@@ -65,13 +65,6 @@ export function MessageList({ session, onResolvePermission }) {
           <Message msg={{ role: 'assistant', content: [{ type: 'text', text: streaming }] }} />
         </div>
       )}
-
-      {pendingSteers && pendingSteers.map((text, i) => (
-        <div key={`steer-${i}`} class="msg-steer">
-          <span class="msg-steer-label">queued</span>
-          <span class="msg-steer-text">{text}</span>
-        </div>
-      ))}
 
       {pendingPerm && (
         <PermissionCard
