@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -464,5 +465,35 @@ func TestDeleteByID_NotFound(t *testing.T) {
 	err := DeleteByID(base, "nonexistent")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestFileStore_ConcurrentSave(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sess := store.Create()
+			sess.Title = "concurrent"
+			if err := store.Save(sess); err != nil {
+				t.Errorf("save failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	list, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 10 {
+		t.Errorf("expected 10 sessions, got %d", len(list))
 	}
 }

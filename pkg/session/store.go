@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,7 @@ var _ SessionStore = (*FileStore)(nil)
 // Writes are atomic (temp file + rename) to prevent corruption.
 type FileStore struct {
 	dir string
+	mu  sync.Mutex
 }
 
 // NewFileStore creates a FileStore for sessions scoped to the given CWD.
@@ -63,6 +65,8 @@ func (s *FileStore) Create() *Session {
 // Save writes a session to disk atomically.
 // Updates the session's Updated timestamp before writing.
 func (s *FileStore) Save(sess *Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sess.Updated = time.Now()
 
 	data, err := json.MarshalIndent(sess, "", "  ")
@@ -88,6 +92,12 @@ func (s *FileStore) Save(sess *Session) error {
 // Load reads a session by ID.
 // Returns ErrNotFound (wrapped) if the session does not exist.
 func (s *FileStore) Load(id string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadLocked(id)
+}
+
+func (s *FileStore) loadLocked(id string) (*Session, error) {
 	data, err := os.ReadFile(s.path(id))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -105,15 +115,16 @@ func (s *FileStore) Load(id string) (*Session, error) {
 // Latest returns the most recently updated session.
 // Returns nil, nil if no sessions exist.
 func (s *FileStore) Latest() (*Session, error) {
-	summaries, err := s.List()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	summaries, err := s.listLocked()
 	if err != nil {
 		return nil, err
 	}
 	if len(summaries) == 0 {
 		return nil, nil
 	}
-	// List returns sorted by Updated desc — first is latest
-	return s.Load(summaries[0].ID)
+	return s.loadLocked(summaries[0].ID)
 }
 
 // summaryReadLimit caps how many bytes we read from each session file for
@@ -127,6 +138,12 @@ const summaryReadLimit = 4096
 // Only reads the first summaryReadLimit bytes of each file — avoids loading
 // multi-megabyte message arrays just to show a session list.
 func (s *FileStore) List() ([]Summary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listLocked()
+}
+
+func (s *FileStore) listLocked() ([]Summary, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, fmt.Errorf("session: list error: %w", err)
@@ -190,6 +207,8 @@ func readSummary(path string) (Summary, error) {
 
 // Delete removes a session by ID.
 func (s *FileStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	path := s.path(id)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("session: delete error: %w", err)
