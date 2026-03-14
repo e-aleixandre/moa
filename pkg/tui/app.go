@@ -59,6 +59,8 @@ type state struct {
 	pendingStatus    string                // transient generic status shown in View(), never persisted
 	pendingTimeline  *pendingTimelineEvent // live timeline event shown in View() until next send
 	sessionCost      float64               // accumulated USD cost this session
+	sessionInput     int                   // accumulated input tokens (for cache %)
+	sessionCacheRead int                   // accumulated cache_read tokens
 	runStartMsgCount int                   // message count at start of current run (for delta cost)
 	asyncSubagents   int                   // running async subagent count (for status display)
 	transcript       bool                  // true when in transcript mode (Ctrl+O)

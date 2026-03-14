@@ -242,7 +242,10 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		}
 		m.s.blocks = m.s.blocks[:0]
 		m.s.sessionCost = 0
+		m.s.sessionInput = 0
+		m.s.sessionCacheRead = 0
 		m.statusBar.UpdateCostSegment(0)
+		m.statusBar.UpdateCacheSegment(0)
 		m.planMode.StartExecution()
 		m.syncPermissionCheck()
 		m.rebuildSystemPrompt()

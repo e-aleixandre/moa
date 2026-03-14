@@ -252,9 +252,18 @@ func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
 	for _, msg := range msgs[start:] {
 		if msg.Role == "assistant" && msg.Usage != nil {
 			m.s.sessionCost += model.Pricing.Cost(*msg.Usage)
+			m.s.sessionInput += msg.Usage.Input
+			m.s.sessionCacheRead += msg.Usage.CacheRead
 		}
 	}
 	m.statusBar.UpdateCostSegment(m.s.sessionCost)
+
+	// Cache hit %: cache_read / (input + cache_read).
+	totalInput := m.s.sessionInput + m.s.sessionCacheRead
+	if totalInput > 0 {
+		pct := m.s.sessionCacheRead * 100 / totalInput
+		m.statusBar.UpdateCacheSegment(pct)
+	}
 }
 
 // refreshContextSegment recalculates the context usage percentage and updates

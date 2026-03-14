@@ -149,6 +149,7 @@ const (
 	SegmentPlan        = "plan"
 	SegmentTasks       = "tasks"
 	SegmentCost        = "cost"
+	SegmentCache       = "cache"
 	SegmentContext     = "context"
 )
 
@@ -160,6 +161,7 @@ const (
 	PriorityPlan        = 40
 	PriorityTasks       = 45
 	PriorityCost        = 80
+	PriorityCache       = 85
 	PriorityContext     = 90 // rightmost of the built-ins
 )
 
@@ -229,6 +231,17 @@ func (sl *StatusLine) UpdateCostSegment(cost float64) {
 	}
 	text := statusLineKeyStyle.Render("cost ") + statusLineValueStyle.Render(val)
 	sl.Set(SegmentCost, text, PriorityCost)
+}
+
+// UpdateCacheSegment sets the cache hit rate segment.
+// pct is 0-100. Only shown when > 0.
+func (sl *StatusLine) UpdateCacheSegment(pct int) {
+	if pct <= 0 {
+		sl.Remove(SegmentCache)
+		return
+	}
+	text := statusLineKeyStyle.Render("cache ") + statusLineValueStyle.Render(fmt.Sprintf("%d%%", pct))
+	sl.Set(SegmentCache, text, PriorityCache)
 }
 
 // UpdateTasksSegment sets the task progress segment.

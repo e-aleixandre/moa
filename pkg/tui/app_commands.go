@@ -85,8 +85,11 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.pendingImage = nil
 		m.s.pendingImageMime = ""
 		m.s.sessionCost = 0
+		m.s.sessionInput = 0
+		m.s.sessionCacheRead = 0
 		m.s.expanded = false
 		m.statusBar.UpdateCostSegment(0)
+		m.statusBar.UpdateCacheSegment(0)
 		// Delete old session, create fresh one
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
@@ -766,7 +769,10 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.pendingImage = nil
 	m.s.pendingImageMime = ""
 	m.s.sessionCost = 0
+	m.s.sessionInput = 0
+	m.s.sessionCacheRead = 0
 	m.statusBar.UpdateCostSegment(0)
+	m.statusBar.UpdateCacheSegment(0)
 
 	// Restore model from session metadata when resuming.
 	if sess != nil && sess.Metadata != nil {
