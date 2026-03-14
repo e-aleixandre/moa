@@ -167,6 +167,11 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}
 
+	// 2b. Script tools from .moa/tools/*.json.
+	if err := tool.RegisterScriptTools(toolReg, cfg.CWD); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: script tools: %v\n", err)
+	}
+
 	// 3. Task store — always available.
 	taskStore := tasks.NewStore()
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
