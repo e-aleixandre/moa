@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/git"
 )
 
 // toolSnippets provides concise one-line descriptions for built-in tools.
@@ -131,6 +132,13 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 	}
 	fmt.Fprintf(&sb, "Current date and time: %s\n", time.Now().Format("Monday, January 2, 2006 at 3:04:05 PM MST"))
 	fmt.Fprintf(&sb, "Current working directory: %s\n", cwd)
+
+	// Git context (injected by bootstrap if available)
+	if gitCtx := git.Context(cwd); gitCtx != "" {
+		sb.WriteString("\n## Git\n\n")
+		sb.WriteString(gitCtx)
+		sb.WriteString("\n")
+	}
 
 	return sb.String()
 }
