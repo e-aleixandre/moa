@@ -332,8 +332,8 @@ func (a *hostAPI) OnContext(fn ContextHook) {
 	a.host.mu.Unlock()
 }
 
-func (a *hostAPI) RegisterTool(t core.Tool) {
-	a.host.tools.Register(t)
+func (a *hostAPI) RegisterTool(t core.Tool) error {
+	return a.host.tools.Register(t)
 }
 
 func (a *hostAPI) UnregisterTool(name string) {

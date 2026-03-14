@@ -46,7 +46,7 @@ func Review(ctx context.Context, cfg ReviewConfig, planPath string, onStream Rev
 	reviewReg := core.NewRegistry()
 	for _, name := range []string{"read", "grep", "find", "ls"} {
 		if t, ok := cfg.ParentTools.Get(name); ok {
-			reviewReg.Register(t)
+			core.RegisterOrLog(reviewReg, t)
 		}
 	}
 
@@ -153,7 +153,7 @@ func ReviewCode(ctx context.Context, cfg ReviewConfig, summary string, filesChan
 	reviewReg := core.NewRegistry()
 	for _, name := range []string{"read", "grep", "find", "ls"} {
 		if t, ok := cfg.ParentTools.Get(name); ok {
-			reviewReg.Register(t)
+			core.RegisterOrLog(reviewReg, t)
 		}
 	}
 

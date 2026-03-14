@@ -152,17 +152,19 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	// 2. Tool registry.
 	toolReg := core.NewRegistry()
-	tool.RegisterBuiltins(toolReg, tool.ToolConfig{
+	if err := tool.RegisterBuiltins(toolReg, tool.ToolConfig{
 		WorkspaceRoot:  cfg.CWD,
 		DisableSandbox: cfg.DisableSandbox || moaCfg.DisableSandbox,
 		AllowedPaths:   append(moaCfg.AllowedPaths, tool.SpillOutputDir()),
 		BashTimeout:    5 * time.Minute,
 		BraveAPIKey:    moaCfg.BraveAPIKey,
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("register builtins: %w", err)
+	}
 
 	// 3. Task store — always available.
 	taskStore := tasks.NewStore()
-	toolReg.Register(tasks.NewTool(taskStore))
+	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
 
 	// 4. Verify tool.
 	verifyCfg, verifyErr := verify.LoadConfig(cfg.CWD)
@@ -171,7 +173,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 	hasVerify := verifyCfg != nil
 	if hasVerify {
-		toolReg.Register(verify.NewTool(cfg.CWD))
+		core.RegisterOrLog(toolReg, verify.NewTool(cfg.CWD))
 	}
 
 	// 5. AGENTS.md.
@@ -227,7 +229,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		mcpMgr = mcp.NewManager(nil)
 		mcpMgr.Start(cfg.Ctx, moaCfg.MCPServers)
 		for _, t := range mcpMgr.Tools() {
-			toolReg.Register(t)
+			core.RegisterOrLog(toolReg, t)
 		}
 	}
 
@@ -235,14 +237,14 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	skills := skill.Discover(cfg.CWD)
 	skillsIndex := skill.FormatIndex(skills)
 	if len(skills) > 0 {
-		toolReg.Register(skill.NewTool(skills))
+		core.RegisterOrLog(toolReg, skill.NewTool(skills))
 	}
 
 	// 9. Ask user bridge.
 	var askBridge *askuser.Bridge
 	if cfg.EnableAskUser {
 		askBridge = askuser.NewBridge()
-		toolReg.Register(askuser.NewTool(askBridge))
+		core.RegisterOrLog(toolReg, askuser.NewTool(askBridge))
 	}
 
 	// Build the session struct early so subagent closures can reference it.

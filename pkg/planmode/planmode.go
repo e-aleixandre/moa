@@ -180,7 +180,7 @@ func (pm *PlanMode) OnPlanSubmitted() bool {
 func (pm *PlanMode) StartExecution() {
 	pm.mu.Lock()
 	pm.restoreTools()
-	pm.registry.Register(requestReviewTool(pm))
+	core.RegisterOrLog(pm.registry, requestReviewTool(pm))
 	pm.state.Mode = ModeExecuting
 	pm.state.PlanSubmitted = false
 	onChange := pm.onChange
@@ -222,7 +222,7 @@ func (pm *PlanMode) ContinueRefining() {
 	pm.state.Mode = ModePlanning
 	pm.state.PlanSubmitted = false
 	// Re-register submit_plan (removed when plan was submitted).
-	pm.registry.Register(submitPlanTool(pm))
+	core.RegisterOrLog(pm.registry, submitPlanTool(pm))
 	onChange := pm.onChange
 	pm.mu.Unlock()
 
@@ -322,7 +322,7 @@ func (pm *PlanMode) ApplyRestoredState() {
 
 	case ModeExecuting:
 		// Full tools available — register execution-only tools.
-		pm.registry.Register(requestReviewTool(pm))
+		core.RegisterOrLog(pm.registry, requestReviewTool(pm))
 
 	case ModeOff:
 		// No-op.
@@ -348,11 +348,11 @@ func (pm *PlanMode) switchToPlanningTools() {
 	// Re-register only planning-allowed tools from the snapshot.
 	for name, t := range pm.savedTools {
 		if planningAllowlist[name] {
-			pm.registry.Register(t)
+			core.RegisterOrLog(pm.registry, t)
 		}
 	}
 	// Register plan-mode-specific tools.
-	pm.registry.Register(submitPlanTool(pm))
+	core.RegisterOrLog(pm.registry, submitPlanTool(pm))
 }
 
 // switchToReadyTools sets up read-only tools (no submit_plan).
@@ -364,7 +364,7 @@ func (pm *PlanMode) switchToReadyTools() {
 	}
 	for name, t := range pm.savedTools {
 		if planningAllowlist[name] {
-			pm.registry.Register(t)
+			core.RegisterOrLog(pm.registry, t)
 		}
 	}
 }
@@ -382,7 +382,7 @@ func (pm *PlanMode) restoreTools() {
 	}
 	// Re-register original tools.
 	for _, t := range pm.savedTools {
-		pm.registry.Register(t)
+		core.RegisterOrLog(pm.registry, t)
 	}
 	pm.savedTools = nil
 }

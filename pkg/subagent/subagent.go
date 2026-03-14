@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -59,9 +60,15 @@ func RegisterAll(reg *core.Registry, cfg Config) error {
 		return errors.New("subagent: AppCtx is required")
 	}
 	jobs := newJobStore()
-	reg.Register(newSubagent(cfg, jobs))
-	reg.Register(newSubagentStatus(jobs))
-	reg.Register(newSubagentCancel(jobs))
+	for _, t := range []core.Tool{
+		newSubagent(cfg, jobs),
+		newSubagentStatus(jobs),
+		newSubagentCancel(jobs),
+	} {
+		if err := reg.Register(t); err != nil {
+			return fmt.Errorf("subagent: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -328,7 +335,7 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 	selected, ok := params["tools"]
 	if !ok {
 		for _, t := range allowed {
-			reg.Register(t)
+			core.RegisterOrLog(reg, t)
 		}
 		return reg, nil
 	}
@@ -359,7 +366,7 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 			return nil, &res
 		}
 		seen[name] = true
-		reg.Register(t)
+		core.RegisterOrLog(reg, t)
 	}
 	return reg, nil
 }

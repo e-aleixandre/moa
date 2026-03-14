@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 )
@@ -91,14 +93,24 @@ func NewRegistry() *Registry {
 }
 
 // Register adds or replaces a tool.
-// Panics if a WritePath tool is missing its LockKey function.
-func (r *Registry) Register(t Tool) {
+// Returns error if a WritePath tool is missing its LockKey function.
+func (r *Registry) Register(t Tool) error {
 	if t.Effect == EffectWritePath && t.LockKey == nil {
-		panic("tool " + t.Name + ": EffectWritePath requires LockKey")
+		return fmt.Errorf("tool %s: EffectWritePath requires LockKey", t.Name)
 	}
 	r.mu.Lock()
 	r.tools[t.Name] = t
 	r.mu.Unlock()
+	return nil
+}
+
+// RegisterOrLog registers a tool and logs a warning on failure.
+// Use for dynamic tool sources (MCP, extensions, plan mode) where
+// a registration error shouldn't abort the caller.
+func RegisterOrLog(reg *Registry, t Tool) {
+	if err := reg.Register(t); err != nil {
+		slog.Warn("tool registration failed", "tool", t.Name, "error", err)
+	}
 }
 
 // Unregister removes a tool.

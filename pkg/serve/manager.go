@@ -1066,7 +1066,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 
 	// Register new tools.
 	for _, t := range newTools {
-		s.runtime.toolReg.Register(t)
+		core.RegisterOrLog(s.runtime.toolReg, t)
 	}
 	s.runtime.mcpMgr = newMgr
 	s.runtime.UntrustedMCP = false

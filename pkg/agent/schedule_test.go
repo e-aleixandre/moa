@@ -387,21 +387,18 @@ func TestSchedule_WritePathNilLockKey_FallsBackToShell(t *testing.T) {
 	<-done
 }
 
-func TestSchedule_RegisterWritePathNilLockKey_Panics(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic for WritePath with nil LockKey")
-		}
-	}()
+func TestRegister_WritePathNilLockKey_ReturnsError(t *testing.T) {
 	reg := core.NewRegistry()
-	reg.Register(core.Tool{
+	err := reg.Register(core.Tool{
 		Name: "bad", Effect: core.EffectWritePath,
 		// LockKey intentionally nil
 		Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
 			return core.TextResult("ok"), nil
 		},
 	})
+	if err == nil {
+		t.Fatal("expected error for WritePath with nil LockKey")
+	}
 }
 
 func TestSchedule_ReadDoesNotBlockShell(t *testing.T) {
