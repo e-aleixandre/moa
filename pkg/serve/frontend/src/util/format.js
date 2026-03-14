@@ -74,9 +74,9 @@ export function toolPreview(name, args, result) {
   if (n === 'write' && a.content)
     return { text: a.content, kind: 'input' };
   if (n === 'edit') {
-    // Show the new text being inserted
-    if (a.newText) return { text: a.newText, kind: 'input' };
-    if (a.new_text) return { text: a.new_text, kind: 'input' };
+    const oldText = a.oldText || a.old_text || '';
+    const newText = a.newText || a.new_text || '';
+    if (oldText || newText) return { text: formatDiff(oldText, newText), kind: 'diff' };
   }
 
   // ask_user is rendered by AskUserPreview component — skip here.
@@ -114,6 +114,55 @@ export function splitPreviewTail(text, maxLines = PREVIEW_LINES) {
     hidden: total - maxLines,
     total,
   };
+}
+
+/** Format a simple unified-style diff between old and new text. */
+function formatDiff(oldText, newText) {
+  const oldLines = oldText ? oldText.split('\n') : [];
+  const newLines = newText ? newText.split('\n') : [];
+  const lines = [];
+
+  // Simple line-by-line diff: show removed then added.
+  // For short edits this is clearer than a full LCS algorithm.
+  const maxContext = 3;
+
+  // Find common prefix/suffix to reduce noise.
+  let prefixLen = 0;
+  while (prefixLen < oldLines.length && prefixLen < newLines.length && oldLines[prefixLen] === newLines[prefixLen]) {
+    prefixLen++;
+  }
+  let suffixLen = 0;
+  while (suffixLen < oldLines.length - prefixLen && suffixLen < newLines.length - prefixLen &&
+         oldLines[oldLines.length - 1 - suffixLen] === newLines[newLines.length - 1 - suffixLen]) {
+    suffixLen++;
+  }
+
+  const contextStart = Math.max(0, prefixLen - maxContext);
+  const contextEnd = suffixLen > 0 ? Math.min(oldLines.length, oldLines.length - suffixLen + maxContext) : oldLines.length;
+
+  // Context before
+  for (let i = contextStart; i < prefixLen; i++) {
+    lines.push('  ' + oldLines[i]);
+  }
+
+  // Removed lines
+  for (let i = prefixLen; i < oldLines.length - suffixLen; i++) {
+    lines.push('- ' + oldLines[i]);
+  }
+
+  // Added lines
+  for (let i = prefixLen; i < newLines.length - suffixLen; i++) {
+    lines.push('+ ' + newLines[i]);
+  }
+
+  // Context after
+  const afterStart = oldLines.length - suffixLen;
+  const afterEnd = Math.min(oldLines.length, afterStart + maxContext);
+  for (let i = afterStart; i < afterEnd; i++) {
+    lines.push('  ' + oldLines[i]);
+  }
+
+  return lines.join('\n');
 }
 
 function shortenCmd(cmd) {

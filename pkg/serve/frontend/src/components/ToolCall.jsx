@@ -18,6 +18,7 @@ export function ToolCall({ tool }) {
   const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
   const isAskUser = tool.tool_name === 'ask_user';
+  const isDiff = !isAskUser && !liveText && preview && preview.kind === 'diff';
 
   // For running tools with streaming, show the live output
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
@@ -55,8 +56,11 @@ export function ToolCall({ tool }) {
         )}
 
         {!isAskUser && previewData && previewData.visible && (
-          <pre class={`tool-call-preview${isErrorBody ? ' error-body' : ''}${liveText ? ' streaming' : ''}`}>
-            {expanded && !liveText ? fullText : previewData.visible}
+          <pre class={`tool-call-preview${isErrorBody ? ' error-body' : ''}${liveText ? ' streaming' : ''}${isDiff ? ' diff-preview' : ''}`}>
+            {isDiff
+              ? renderDiffLines(expanded && !liveText ? fullText : previewData.visible)
+              : (expanded && !liveText ? fullText : previewData.visible)
+            }
           </pre>
         )}
 
@@ -84,6 +88,7 @@ export function ToolCall({ tool }) {
           path={path}
           fullText={fullText}
           isRunning={isRunning}
+          isDiff={isDiff}
           onClose={() => setModalOpen(false)}
         />
       )}
@@ -91,7 +96,17 @@ export function ToolCall({ tool }) {
   );
 }
 
-function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, onClose }) {
+function renderDiffLines(text) {
+  if (!text) return text;
+  return text.split('\n').map((line, i) => {
+    let cls = 'diff-ctx';
+    if (line.startsWith('+ ')) cls = 'diff-add';
+    else if (line.startsWith('- ')) cls = 'diff-del';
+    return <div key={i} class={cls}>{line}</div>;
+  });
+}
+
+function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, isDiff, onClose }) {
   const contentRef = useRef(null);
   const wasAtBottom = useRef(true);
 
@@ -143,7 +158,7 @@ function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, onClose
           class={`tool-modal-content${(tool.status === 'error' || tool.status === 'rejected') ? ' error-body' : ''}`}
           onScroll={handleScroll}
         >
-          {fullText || '(no output)'}
+          {isDiff ? renderDiffLines(fullText) : (fullText || '(no output)')}
         </pre>
       </div>
     </div>
