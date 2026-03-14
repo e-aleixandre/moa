@@ -241,10 +241,10 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 	var files []string
 	for _, snap := range cp.Files {
 		if snap.Content == nil {
-			os.Remove(snap.Path)
+			_ = os.Remove(snap.Path)
 			files = append(files, "deleted "+filepath.Base(snap.Path))
 		} else {
-			os.WriteFile(snap.Path, snap.Content, snap.Perm)
+			_ = os.WriteFile(snap.Path, snap.Content, snap.Perm)
 			files = append(files, "restored "+filepath.Base(snap.Path))
 		}
 	}

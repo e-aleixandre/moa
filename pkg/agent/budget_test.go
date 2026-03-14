@@ -125,7 +125,7 @@ func TestBudget_ExceededMidRun_NoOrphanedToolCalls(t *testing.T) {
 	)
 
 	reg := core.NewRegistry()
-	reg.Register(echoTool)
+	_ = reg.Register(echoTool)
 
 	ag, err := New(AgentConfig{
 		Provider:     prov,
@@ -241,7 +241,7 @@ func TestBudget_ExceededOnToolCallTurn(t *testing.T) {
 	)
 
 	reg := core.NewRegistry()
-	reg.Register(echoTool)
+	_ = reg.Register(echoTool)
 
 	ag, err := New(AgentConfig{
 		Provider:     prov,

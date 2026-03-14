@@ -102,8 +102,8 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("expected empty registry")
 	}
 
-	r.Register(Tool{Name: "bash", Description: "Execute commands"})
-	r.Register(Tool{Name: "read", Description: "Read files"})
+	_ = r.Register(Tool{Name: "bash", Description: "Execute commands"})
+	_ = r.Register(Tool{Name: "read", Description: "Read files"})
 
 	if r.Count() != 2 {
 		t.Fatalf("expected 2 tools, got %d", r.Count())
@@ -137,9 +137,9 @@ func TestRegistry(t *testing.T) {
 
 func TestRegistry_DeterministicOrder(t *testing.T) {
 	r := NewRegistry()
-	r.Register(Tool{Name: "charlie"})
-	r.Register(Tool{Name: "alpha"})
-	r.Register(Tool{Name: "bravo"})
+	_ = r.Register(Tool{Name: "charlie"})
+	_ = r.Register(Tool{Name: "alpha"})
+	_ = r.Register(Tool{Name: "bravo"})
 
 	// All() should be sorted
 	for i := 0; i < 10; i++ {

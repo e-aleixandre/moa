@@ -113,7 +113,7 @@ func TestSafePath_AllowedPaths(t *testing.T) {
 func TestRegisterBuiltins(t *testing.T) {
 	reg := core.NewRegistry()
 	tmp := t.TempDir()
-	RegisterBuiltins(reg, ToolConfig{WorkspaceRoot: tmp})
+	_ = RegisterBuiltins(reg, ToolConfig{WorkspaceRoot: tmp})
 
 	expected := []string{"bash", "read", "write", "edit", "grep", "find", "ls", "fetch_content"}
 	for _, name := range expected {
@@ -996,10 +996,10 @@ func TestRead_PDF_OffsetLimit(t *testing.T) {
 func TestRegisterSubset(t *testing.T) {
 	reg := core.NewRegistry()
 	cfg := ToolConfig{WorkspaceRoot: t.TempDir()}
-	RegisterRead(reg, cfg)
-	RegisterGrep(reg, cfg)
-	RegisterFind(reg, cfg)
-	RegisterLs(reg, cfg)
+	_ = RegisterRead(reg, cfg)
+	_ = RegisterGrep(reg, cfg)
+	_ = RegisterFind(reg, cfg)
+	_ = RegisterLs(reg, cfg)
 
 	if reg.Count() != 4 {
 		t.Fatalf("expected 4 tools, got %d", reg.Count())

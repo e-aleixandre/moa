@@ -183,7 +183,7 @@ func newSubagentTools(t *testing.T, cfg Config, parentTools ...core.Tool) (core.
 	t.Helper()
 	reg := core.NewRegistry()
 	for _, tool := range parentTools {
-		reg.Register(tool)
+		_ = reg.Register(tool)
 	}
 	cfg.ParentTools = reg
 	jobs := newJobStore()
@@ -208,11 +208,11 @@ func TestSubagentSyncBasic(t *testing.T) {
 
 func TestBuildChildRegistryFiltersNestedAndDedupes(t *testing.T) {
 	parent := core.NewRegistry()
-	parent.Register(core.Tool{Name: "read"})
-	parent.Register(core.Tool{Name: "subagent"})
-	parent.Register(core.Tool{Name: "subagent_status"})
-	parent.Register(core.Tool{Name: "subagent_cancel"})
-	parent.Register(core.Tool{Name: "grep"})
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "subagent"})
+	_ = parent.Register(core.Tool{Name: "subagent_status"})
+	_ = parent.Register(core.Tool{Name: "subagent_cancel"})
+	_ = parent.Register(core.Tool{Name: "grep"})
 
 	reg, errRes := buildChildRegistry(parent, map[string]any{"tools": []any{"read", "read", "grep"}})
 	if errRes != nil {
@@ -228,7 +228,7 @@ func TestBuildChildRegistryFiltersNestedAndDedupes(t *testing.T) {
 
 func TestBuildChildRegistryRejectsEmptyAndUnknownTools(t *testing.T) {
 	parent := core.NewRegistry()
-	parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "read"})
 
 	_, errRes := buildChildRegistry(parent, map[string]any{"tools": []any{}})
 	if errRes == nil || !strings.Contains(textOf(*errRes), "tools array cannot be empty") {

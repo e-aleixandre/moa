@@ -15,7 +15,7 @@ func newTestRegistry() *core.Registry {
 	reg := core.NewRegistry()
 	for _, name := range []string{"read", "write", "edit", "bash", "grep", "find", "ls", "web_search", "subagent"} {
 		n := name
-		reg.Register(core.Tool{
+		_ = reg.Register(core.Tool{
 			Name:  n,
 			Label: n,
 			Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
@@ -32,7 +32,7 @@ func newTestPlanMode(t *testing.T) *PlanMode {
 	reg := newTestRegistry()
 	// Register the tasks tool globally (same as main.go does).
 	ts := tasks.NewStore()
-	reg.Register(tasks.NewTool(ts))
+	_ = reg.Register(tasks.NewTool(ts))
 	return New(Config{
 		Registry:   reg,
 		SessionDir: dir,
@@ -72,7 +72,7 @@ func TestToolSwitching(t *testing.T) {
 	dir := t.TempDir()
 	reg := newTestRegistry()
 	ts := tasks.NewStore()
-	reg.Register(tasks.NewTool(ts))
+	_ = reg.Register(tasks.NewTool(ts))
 	originalCount := reg.Count()
 
 	pm := New(Config{Registry: reg, SessionDir: dir, TaskStore: ts})

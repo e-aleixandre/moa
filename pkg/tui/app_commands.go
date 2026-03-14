@@ -168,10 +168,10 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		var restored []string
 		for _, snap := range cp.Files {
 			if snap.Content == nil {
-				os.Remove(snap.Path)
+				_ = os.Remove(snap.Path)
 				restored = append(restored, "deleted "+filepath.Base(snap.Path))
 			} else {
-				os.WriteFile(snap.Path, snap.Content, snap.Perm)
+				_ = os.WriteFile(snap.Path, snap.Content, snap.Perm)
 				restored = append(restored, "restored "+filepath.Base(snap.Path))
 			}
 		}

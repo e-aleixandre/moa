@@ -22,9 +22,6 @@ const (
 	voiceTranscribing            // audio sent to Whisper, waiting for text
 )
 
-// voiceStartMsg signals that recording has started successfully.
-type voiceStartMsg struct{}
-
 // voiceResultMsg carries the transcribed text (or error) back to the TUI.
 type voiceResultMsg struct {
 	Text string

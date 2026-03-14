@@ -87,7 +87,7 @@ func toolCallResponse(toolID, toolName string, args map[string]any) func(req cor
 func newTestAgent(provider core.Provider, tools ...core.Tool) *Agent {
 	reg := core.NewRegistry()
 	for _, t := range tools {
-		reg.Register(t)
+		_ = reg.Register(t)
 	}
 	ag, err := New(AgentConfig{
 		Provider:            provider,
@@ -320,7 +320,7 @@ func TestLoop_ToolCallBlocked(t *testing.T) {
 	)
 
 	reg := core.NewRegistry()
-	reg.Register(bashTool)
+	_ = reg.Register(bashTool)
 	ag, err := New(AgentConfig{
 		Provider:            provider,
 		Model:               core.Model{ID: "test"},
@@ -386,7 +386,7 @@ func TestLoop_ToolPermissionDenied_MarksRejected(t *testing.T) {
 	)
 
 	reg := core.NewRegistry()
-	reg.Register(bashTool)
+	_ = reg.Register(bashTool)
 	ag, err := New(AgentConfig{
 		Provider:            provider,
 		Model:               core.Model{ID: "test"},
@@ -644,7 +644,7 @@ func TestLoop_MaxToolCallsPerTurn_SkippedResults(t *testing.T) {
 	provider := NewMockProvider(fourToolCalls, simpleTextResponse("Done."))
 
 	reg := core.NewRegistry()
-	reg.Register(echoTool)
+	_ = reg.Register(echoTool)
 	ag, err := New(AgentConfig{
 		Provider:            provider,
 		Model:               core.Model{ID: "test"},
@@ -726,7 +726,7 @@ func TestParallelToolCalls_ConcurrentExecution(t *testing.T) {
 
 	provider := NewMockProvider(threeToolCalls, simpleTextResponse("All done."))
 	reg := core.NewRegistry()
-	reg.Register(sleepTool)
+	_ = reg.Register(sleepTool)
 	ag, err := New(AgentConfig{
 		Provider:       provider,
 		Model:          core.Model{ID: "test"},
@@ -843,7 +843,7 @@ func TestParallelToolCalls_EventOrder(t *testing.T) {
 
 	provider := NewMockProvider(twoToolCalls, simpleTextResponse("Done."))
 	reg := core.NewRegistry()
-	reg.Register(sleepTool)
+	_ = reg.Register(sleepTool)
 	ag, err := New(AgentConfig{
 		Provider:       provider,
 		Model:          core.Model{ID: "test"},
@@ -931,7 +931,7 @@ func TestParallelToolCalls_ContextCancellation(t *testing.T) {
 
 	provider := NewMockProvider(twoToolCalls)
 	reg := core.NewRegistry()
-	reg.Register(blockTool)
+	_ = reg.Register(blockTool)
 	ag, err := New(AgentConfig{
 		Provider:       provider,
 		Model:          core.Model{ID: "test"},

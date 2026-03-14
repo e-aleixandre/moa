@@ -228,7 +228,7 @@ func TestHost_RegisterTool(t *testing.T) {
 	host := NewHost(reg, nil)
 
 	ext := &testExtension{initFunc: func(api API) error {
-		api.RegisterTool(core.Tool{Name: "custom", Description: "A custom tool"})
+		_ = api.RegisterTool(core.Tool{Name: "custom", Description: "A custom tool"})
 		return nil
 	}}
 	if err := host.Load(ext); err != nil {
@@ -339,7 +339,7 @@ func TestHost_Load_RollbackOnError(t *testing.T) {
 		api.OnBeforeAgentStart(func(ctx context.Context) ([]core.AgentMessage, error) {
 			return nil, nil
 		})
-		api.RegisterTool(core.Tool{Name: "phantom"})
+		_ = api.RegisterTool(core.Tool{Name: "phantom"})
 		return fmt.Errorf("init failed")
 	}}
 
