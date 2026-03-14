@@ -72,6 +72,13 @@
   border-color: var(--peach);
   box-shadow: 0 0 0 2px var(--peach-dim);
 }
+.input-bar.busy textarea {
+  border-color: var(--mauve);
+}
+.input-bar.busy textarea:focus {
+  border-color: var(--mauve);
+  box-shadow: 0 0 0 2px rgba(203,166,247,0.15);
+}
 .input-bar textarea::placeholder { color: var(--overlay0); }
 
 /* Mic button — sits inside textarea, bottom right */

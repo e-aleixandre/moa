@@ -300,7 +300,7 @@ export function InputBar({ sessionId, session, tileId }) {
   }
 
   return (
-    <div class="input-bar">
+    <div class={`input-bar ${busy ? 'busy' : ''}`}>
       {busy && activityLabel && (
         <div class="input-activity">
           <Loader2 class="input-activity-spinner" />
