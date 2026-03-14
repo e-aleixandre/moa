@@ -100,8 +100,9 @@ function renderDiffLines(text) {
   if (!text) return text;
   return text.split('\n').map((line, i) => {
     let cls = 'diff-ctx';
-    if (line.startsWith('+ ')) cls = 'diff-add';
-    else if (line.startsWith('- ')) cls = 'diff-del';
+    // Match " NNN + text" or " NNN - text" or " NNN   text" format
+    if (/^\s*\d+\s+\+/.test(line) || /^\s+\+/.test(line)) cls = 'diff-add';
+    else if (/^\s*\d+\s+-/.test(line) || /^\s+-/.test(line)) cls = 'diff-del';
     return <div key={i} class={cls}>{line}</div>;
   });
 }
