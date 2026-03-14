@@ -226,6 +226,29 @@ func TestBuildChildRegistryFiltersNestedAndDedupes(t *testing.T) {
 	}
 }
 
+func TestBuildChildRegistryCaseInsensitive(t *testing.T) {
+	parent := core.NewRegistry()
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "bash"})
+	_ = parent.Register(core.Tool{Name: "write"})
+
+	// Model sends Claude Code casing ("Read", "Bash") — should still resolve.
+	reg, errRes := buildChildRegistry(parent, map[string]any{
+		"tools": []any{"Read", "Bash", "WRITE"},
+	})
+	if errRes != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes))
+	}
+	if reg.Count() != 3 {
+		t.Fatalf("expected 3 tools, got %d", reg.Count())
+	}
+	for _, name := range []string{"read", "bash", "write"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("expected tool %q to be registered", name)
+		}
+	}
+}
+
 func TestBuildChildRegistryRejectsEmptyAndUnknownTools(t *testing.T) {
 	parent := core.NewRegistry()
 	_ = parent.Register(core.Tool{Name: "read"})

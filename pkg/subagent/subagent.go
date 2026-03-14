@@ -357,6 +357,9 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 			res := core.ErrorResult("tools must be an array of strings")
 			return nil, &res
 		}
+		// Normalize: the model may use Claude Code casing ("Read", "Bash")
+		// but the registry uses lowercase ("read", "bash").
+		name = strings.ToLower(name)
 		if seen[name] {
 			continue
 		}

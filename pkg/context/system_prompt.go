@@ -95,6 +95,16 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 		sb.WriteString("- After completing coding tasks, call the verify tool to validate your changes before reporting done\n")
 	}
 
+	// Subagent guidance
+	if toolSet["subagent"] {
+		sb.WriteString(`- Use subagents for tasks that benefit from a separate context window:
+  • Systematic changes across many files (e.g. renaming imports, updating API calls)
+  • Investigating how a feature works (exploring code without polluting your context)
+  • Parallel independent tasks (use async=true)
+  Each subagent gets a fresh context, so your own window stays focused on the main task.
+`)
+	}
+
 	// Always include these
 	sb.WriteString(`- Be concise in your responses
 - Show file paths clearly when working with files
