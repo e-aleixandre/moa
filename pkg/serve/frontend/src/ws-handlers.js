@@ -220,7 +220,7 @@ export function handleWsToolStart(id, data) {
     status: 'running',
     result: null,
   };
-  updateSession(id, { messages: [...sess.messages, toolMsg] });
+  updateSession(id, { messages: [...sess.messages, toolMsg], runningTool: data.tool_name });
 }
 
 export function handleWsToolUpdate(id, data) {
@@ -249,7 +249,7 @@ export function handleWsToolEnd(id, data) {
     }
     return m;
   });
-  updateSession(id, { messages });
+  updateSession(id, { messages, runningTool: null });
 }
 
 export function handleWsStateChange(id, data) {
@@ -347,7 +347,7 @@ export function handleWsRunEnd(id) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
-  updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null });
+  updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, runningTool: null });
 }
 
 export function handleWsSteer(id, data) {

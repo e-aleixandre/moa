@@ -66,7 +66,7 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
 
       <MessageList session={session} />
       <TaskBar session={session} />
-      <InputBar sessionId={state.activeSession} sessionState={session.state} pendingSteers={session.pendingSteers} />
+      <InputBar sessionId={state.activeSession} session={session} />
     </div>
   );
 }

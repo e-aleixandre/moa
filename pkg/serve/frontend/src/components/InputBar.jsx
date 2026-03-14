@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
-import { SendHorizonal, Square, Zap, Mic, MicOff, Loader2 } from 'lucide-preact';
+import { SendHorizonal, Mic, MicOff, Loader2 } from 'lucide-preact';
 import { sendMessage, cancelRun, execCommand, execShell } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
@@ -27,8 +27,10 @@ const COMMANDS = [
   { name: 'tasks', desc: 'View/manage tasks', args: '[done <id> | reset]' },
 ];
 
-export function InputBar({ sessionId, sessionState, tileId, pendingSteers }) {
+export function InputBar({ sessionId, session, tileId }) {
   const textareaRef = useRef(null);
+  const sessionState = session?.state;
+  const pendingSteers = session?.pendingSteers;
   const busy = sessionState === 'running' || sessionState === 'permission';
   const [canTranscribe, setCanTranscribe] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
@@ -224,6 +226,13 @@ export function InputBar({ sessionId, sessionState, tileId, pendingSteers }) {
       }
     }
 
+    // Esc aborts running agent.
+    if (e.key === 'Escape' && busy) {
+      e.preventDefault();
+      handleStop();
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -281,9 +290,27 @@ export function InputBar({ sessionId, sessionState, tileId, pendingSteers }) {
     }
   };
 
+  // Derive activity label from session state.
+  let activityLabel = null;
+  if (busy) {
+    if (session?.thinkingText) activityLabel = 'Thinking…';
+    else if (session?.streamingText) activityLabel = 'Generating…';
+    else if (session?.runningTool) activityLabel = `Running ${session.runningTool}…`;
+    else activityLabel = 'Working…';
+  }
+
   return (
     <div class="input-bar">
-      {pendingSteers && pendingSteers.length > 0 && (
+      {busy && activityLabel && (
+        <div class="input-activity">
+          <Loader2 class="input-activity-spinner" />
+          <span class="input-activity-label">{activityLabel}</span>
+          <button class="input-activity-abort" onClick={handleStop} title="Stop (Esc)">
+            Esc to abort
+          </button>
+        </div>
+      )}
+      {!busy && pendingSteers && pendingSteers.length > 0 && (
         <div class="input-steers">
           {pendingSteers.length === 1
             ? <span class="input-steer-text">{pendingSteers[0]}</span>
@@ -327,16 +354,13 @@ export function InputBar({ sessionId, sessionState, tileId, pendingSteers }) {
           </button>
         )}
       </div>
-      {busy && (
-        <button class="input-stop" onClick={handleStop} title="Stop"><Square /></button>
-      )}
       <button
         class={`input-send ${busy ? 'steer' : ''}`}
         onClick={handleSend}
         disabled={!sessionId}
         title={busy ? 'Steer' : 'Send'}
       >
-        {busy ? <Zap /> : <SendHorizonal />}
+        <SendHorizonal />
       </button>
     </div>
   );

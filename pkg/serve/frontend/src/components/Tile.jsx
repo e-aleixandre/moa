@@ -151,7 +151,7 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
       {session.untrustedMcp && <McpBanner sessionId={sessionId} />}
       <MessageList session={session} />
       <TaskBar session={session} />
-      <InputBar sessionId={sessionId} sessionState={session.state} tileId={tileId} pendingSteers={session.pendingSteers} />
+      <InputBar sessionId={sessionId} session={session} tileId={tileId} />
     </div>
   );
 }
