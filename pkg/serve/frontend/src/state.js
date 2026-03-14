@@ -572,20 +572,33 @@ export async function sendMessage(id, text) {
   const sess = state.sessions[id];
   if (!sess) return;
 
-  const isRunning = sess.state === 'running' || sess.state === 'permission';
-  if (isRunning) {
-    // Agent is running — show as a queued steer, don't add to messages yet.
-    updateSession(id, { pendingSteer: text });
-  } else {
-    const userMsg = { role: 'user', content: [{ type: 'text', text }] };
-    updateSession(id, {
-      messages: [...sess.messages, userMsg],
-      streamingText: null,
-      thinkingText: null,
-    });
-  }
+  // Optimistically add the user message. If the server reports it was a
+  // steer (agent was already running), we'll move it to pendingSteer.
+  const userMsg = { role: 'user', content: [{ type: 'text', text }] };
+  updateSession(id, {
+    messages: [...sess.messages, userMsg],
+    streamingText: null,
+    thinkingText: null,
+  });
+
   const res = await api('POST', `/api/sessions/${id}/send`, { text });
-  return res?.action || 'send';
+  const action = res?.action || 'send';
+
+  if (action === 'steer') {
+    // The server steered — the optimistic message is in the wrong place.
+    // Remove it from messages and show as pendingSteer instead.
+    const current = state.sessions[id];
+    if (current) {
+      const msgs = current.messages;
+      const last = msgs[msgs.length - 1];
+      const isOurs = last?.role === 'user' && last?.content?.[0]?.text === text;
+      updateSession(id, {
+        messages: isOurs ? msgs.slice(0, -1) : msgs,
+        pendingSteer: text,
+      });
+    }
+  }
+  return action;
 }
 
 export async function cancelRun(id) {
