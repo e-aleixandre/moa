@@ -560,7 +560,8 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 
 // runTool calls a tool's Execute function and streams partial results.
 // No lifecycle events — the caller controls event ordering.
-func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (core.Result, bool) {
+// Panics in Execute are recovered and returned as error results.
+func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core.Result, isError bool) {
 	t, ok := cfg.tools.Get(tc.ToolName)
 	if !ok {
 		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true
@@ -568,6 +569,14 @@ func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (core.Result
 	if t.Execute == nil {
 		return core.ErrorResult(fmt.Sprintf("tool %s has no execute function", tc.ToolName)), true
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			cfg.emitter.logger.Error("tool panic recovered", "tool", tc.ToolName, "error", r)
+			result = core.ErrorResult(fmt.Sprintf("tool %s panicked: %v", tc.ToolName, r))
+			isError = true
+		}
+	}()
 
 	onUpdate := func(partial core.Result) {
 		cfg.emitter.Emit(core.AgentEvent{

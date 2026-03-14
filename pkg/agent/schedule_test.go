@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -471,5 +472,33 @@ func TestSchedule_ResultsInOriginalOrder(t *testing.T) {
 	}
 	if cfg.state.Messages[1].Content[0].Text != "fast" {
 		t.Errorf("second result should be 'fast', got %q", cfg.state.Messages[1].Content[0].Text)
+	}
+}
+
+func TestRunTool_PanicRecovery(t *testing.T) {
+	reg := core.NewRegistry()
+	reg.Register(core.Tool{
+		Name: "boom", Effect: core.EffectReadOnly,
+		Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
+			panic("kaboom")
+		},
+	})
+
+	cfg := makeCfg(reg)
+	tc := makeToolCall("1", "boom", nil)
+
+	result, isError := runTool(context.Background(), cfg, tc)
+	if !isError {
+		t.Fatal("expected isError=true after panic")
+	}
+	if result.Content == nil || len(result.Content) == 0 {
+		t.Fatal("expected non-empty result content")
+	}
+	text := result.Content[0].Text
+	if text == "" {
+		t.Fatal("expected error message in result")
+	}
+	if !strings.Contains(text, "panicked") || !strings.Contains(text, "kaboom") {
+		t.Errorf("expected panic message, got %q", text)
 	}
 }
