@@ -177,8 +177,11 @@ func main() {
 
 	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
 	// plan mode, skills, verify, and agent.
-	// getAgent is used by the OnAsyncComplete closure — safe because it's only
-	// called after BuildSession returns and sess is set.
+	//
+	// Race safety: getAgent captures `sess` by reference. It's only called from
+	// OnAsyncComplete callbacks, which fire after BuildSession returns (subagent
+	// jobs can't complete before the agent is created). The `sess` pointer is
+	// written once below and never reassigned, so there's no concurrent access.
 	var sess *bootstrap.Session
 	getAgent := func() *agent.Agent {
 		if sess != nil {

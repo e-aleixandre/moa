@@ -920,7 +920,7 @@ func (m appModel) applySettingsChange(key, val string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleShellEscape runs a user-typed shell command.
+// handleShellEscape dispatches a shell command asynchronously.
 //
 // When the agent is idle:
 //
@@ -943,56 +943,75 @@ func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Dir = m.cwd
-	out, _ := cmd.CombinedOutput()
-	output := strings.TrimRight(string(out), "\n")
-	isError := cmd.ProcessState != nil && !cmd.ProcessState.Success()
+	// Show a pending tool block immediately while the command runs.
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type:     "tool",
+		ToolName: "bash",
+		ToolArgs: map[string]any{"command": command},
+	})
+	m.s.viewportDirty = true
+	m.updateViewport()
 
 	running := m.agent.IsRunning()
+	cwd := m.cwd
+	baseCtx := m.baseCtx
 
-	if running && !silent {
-		// Steer the output into the running conversation.
-		body := fmt.Sprintf("Shell output (from user):\n$ %s\n%s", command, output)
+	return m, func() tea.Msg {
+		cmd := exec.CommandContext(baseCtx, "sh", "-c", command)
+		cmd.Dir = cwd
+		out, _ := cmd.CombinedOutput()
+		output := strings.TrimRight(string(out), "\n")
+		isError := cmd.ProcessState != nil && !cmd.ProcessState.Success()
+		return shellResultMsg{
+			Command: command,
+			Output:  output,
+			IsError: isError,
+			Silent:  silent,
+			Running: running,
+		}
+	}
+}
+
+// handleShellResult processes the completed shell escape command.
+func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
+	if msg.Running && !msg.Silent {
+		body := fmt.Sprintf("Shell output (from user):\n$ %s\n%s", msg.Command, msg.Output)
 		m.agent.Steer(body)
-	} else if !running {
-		// Persist in the conversation history.
+	} else if !msg.Running {
 		var body string
-		if output != "" {
-			body = fmt.Sprintf("$ %s\n%s", command, output)
+		if msg.Output != "" {
+			body = fmt.Sprintf("$ %s\n%s", msg.Command, msg.Output)
 		} else {
-			body = fmt.Sprintf("$ %s\n(no output)", command)
+			body = fmt.Sprintf("$ %s\n(no output)", msg.Command)
 		}
 		role := "user"
-		if silent {
+		if msg.Silent {
 			role = "shell"
 		}
-		msg := core.AgentMessage{
+		agentMsg := core.AgentMessage{
 			Message: core.Message{
 				Role:    role,
 				Content: []core.Content{core.TextContent(body)},
 			},
 			Custom: map[string]any{"shell": true},
 		}
-		if err := m.agent.AppendMessage(msg); err != nil {
+		if err := m.agent.AppendMessage(agentMsg); err != nil {
 			m.s.pendingStatus = "✗ shell: " + err.Error()
-			return m, nil
 		}
 	}
-	// running && silent → just show, don't steer or persist
 
-	// Show as a tool block in the TUI.
-	m.s.blocks = append(m.s.blocks, messageBlock{
-		Type:       "tool",
-		ToolName:   "bash",
-		ToolArgs:   map[string]any{"command": command},
-		ToolResult: output,
-		ToolDone:   true,
-		IsError:    isError,
-	})
+	// Update the pending tool block with the result.
+	for i := len(m.s.blocks) - 1; i >= 0; i-- {
+		b := &m.s.blocks[i]
+		if b.ToolName == "bash" && !b.ToolDone {
+			if cmd, _ := b.ToolArgs["command"].(string); cmd == msg.Command {
+				b.ToolResult = msg.Output
+				b.ToolDone = true
+				b.IsError = msg.IsError
+				break
+			}
+		}
+	}
 
 	m.s.viewportDirty = true
 	m.updateViewport()

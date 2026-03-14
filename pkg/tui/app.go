@@ -570,6 +570,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case shellResultMsg:
+		return m.handleShellResult(msg)
+
 	case askUserMsg:
 		var cmds []tea.Cmd
 		if m.s.transcript {
@@ -661,14 +664,11 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Pass through to sub-components
-	if m.s.streamState == stateIdle {
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
-	}
-
-	return m, nil
+	// Pass through to sub-components (input always receives keystrokes so
+	// the user can type while the agent is running — Enter sends a steer).
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
 }
 
 // View renders the full alt-screen layout. The viewport holds durable conversation

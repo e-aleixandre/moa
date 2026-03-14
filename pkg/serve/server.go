@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
@@ -574,9 +573,9 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "sh", "-c", body.Command)
+		// Use the request context as-is — no artificial timeout. The user
+		// can cancel from the web UI if the command takes too long.
+		cmd := exec.CommandContext(r.Context(), "sh", "-c", body.Command)
 		cmd.Dir = sess.CWD
 		out, _ := cmd.CombinedOutput()
 

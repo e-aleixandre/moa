@@ -101,3 +101,12 @@ type verifyResultMsg struct {
 	Result *verify.Result
 	Err    error
 }
+
+// shellResultMsg carries the result of an async ! or !! shell escape.
+type shellResultMsg struct {
+	Command string
+	Output  string
+	IsError bool
+	Silent  bool // !! prefix
+	Running bool // was the agent running when the command was dispatched?
+}

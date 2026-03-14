@@ -21,6 +21,14 @@ type askPrompt struct {
 }
 
 func (a *askPrompt) Show(p askuser.Prompt) {
+	if len(p.Questions) == 0 {
+		// Nothing to show — send empty answers so the tool doesn't hang.
+		select {
+		case p.Response <- nil:
+		default:
+		}
+		return
+	}
 	a.active = true
 	a.prompt = p
 	a.current = 0

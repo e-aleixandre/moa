@@ -4,9 +4,17 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 )
 
+// askIDCounter is seeded with the process start time so IDs don't collide
+// across restarts (a client with a stale WebSocket could send a resolve for
+// an ID from a previous process).
 var askIDCounter atomic.Uint64
+
+func init() {
+	askIDCounter.Store(uint64(time.Now().UnixMilli()))
+}
 
 type pendingAskUser struct {
 	ID        string     `json:"id"`
