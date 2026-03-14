@@ -39,7 +39,7 @@ export function MessageList({ session, onResolvePermission }) {
   const thinking = session.thinkingText;
   const pendingPerm = session.pendingPerm;
   const pendingAsk = session.pendingAsk;
-  const pendingSteer = session.pendingSteer;
+  const pendingSteers = session.pendingSteers;
 
   return (
     <div class="messages" ref={containerRef} onScroll={checkScroll} style="position:relative">
@@ -66,12 +66,12 @@ export function MessageList({ session, onResolvePermission }) {
         </div>
       )}
 
-      {pendingSteer && (
-        <div class="msg-steer">
+      {pendingSteers && pendingSteers.map((text, i) => (
+        <div key={`steer-${i}`} class="msg-steer">
           <span class="msg-steer-label">queued</span>
-          <span class="msg-steer-text">{pendingSteer}</span>
+          <span class="msg-steer-text">{text}</span>
         </div>
-      )}
+      ))}
 
       {pendingPerm && (
         <PermissionCard
