@@ -87,6 +87,7 @@
 .diff-add { color: var(--green); }
 .diff-del { color: var(--red); opacity: 0.75; }
 .diff-ctx { color: var(--overlay1); }
+.diff-hdr { color: var(--blue); opacity: 0.6; font-style: italic; }
 
 .tool-call-footer {
   background: var(--mantle);

@@ -74,6 +74,9 @@ export function toolPreview(name, args, result) {
   if (n === 'write' && a.content)
     return { text: a.content, kind: 'input' };
   if (n === 'edit') {
+    // Use server-computed diff (has real file line numbers).
+    if (result && result.includes('@@')) return { text: result, kind: 'diff' };
+    // Fallback for old results without diff.
     const oldText = a.oldText || a.old_text || '';
     const newText = a.newText || a.new_text || '';
     if (oldText || newText) return { text: formatDiff(oldText, newText), kind: 'diff' };

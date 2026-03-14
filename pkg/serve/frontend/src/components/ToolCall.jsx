@@ -100,9 +100,10 @@ function renderDiffLines(text) {
   if (!text) return text;
   return text.split('\n').map((line, i) => {
     let cls = 'diff-ctx';
-    // Match " NNN + text" or " NNN - text" or " NNN   text" format
-    if (/^\s*\d+\s+\+/.test(line) || /^\s+\+/.test(line)) cls = 'diff-add';
-    else if (/^\s*\d+\s+-/.test(line) || /^\s+-/.test(line)) cls = 'diff-del';
+    if (line.startsWith('@@')) cls = 'diff-hdr';
+    else if (/^\s*\d+\s+\+/.test(line)) cls = 'diff-add';
+    else if (/^\s*\d+\s+-/.test(line)) cls = 'diff-del';
+    // Skip the "Edited path" header line — render as context.
     return <div key={i} class={cls}>{line}</div>;
   });
 }
