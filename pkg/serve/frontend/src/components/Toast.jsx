@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { X } from 'lucide-preact';
 import { getToasts, subscribeToasts, removeToast } from '../notifications.js';
-import { assignToTile, setActiveSession, store } from '../state.js';
+import { store } from '../store.js';
+import { assignToTile, setActiveSession } from '../tile-actions.js';
 import { allTileIds, findTile } from '../tileTree.js';
 
 export function ToastContainer() {

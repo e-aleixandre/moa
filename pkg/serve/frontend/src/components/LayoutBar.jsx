@@ -1,5 +1,5 @@
 import { Bell, BellOff, Search, PanelRight, PanelBottom } from 'lucide-preact';
-import { applyPreset, addPane, toggleSound } from '../state.js';
+import { applyPreset, addPane, toggleSound } from '../tile-actions.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { PRESETS } from '../layoutPresets.js';
 

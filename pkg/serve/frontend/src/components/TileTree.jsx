@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'preact/hooks';
-import { resizeSplit } from '../state.js';
+import { resizeSplit } from '../tile-actions.js';
 import { allTileIds } from '../tileTree.js';
 import { Tile } from './Tile.jsx';
 

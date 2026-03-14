@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-preact';
-import { setActiveSession } from '../state.js';
+import { setActiveSession } from '../tile-actions.js';
 
 export function TabBar({ state, onOpenPalette }) {
   const sessions = Object.values(state.sessions)

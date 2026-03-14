@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks';
 import { MessageCircleQuestion, Send, SkipForward } from 'lucide-preact';
-import { resolveAskUser } from '../state.js';
+import { resolveAskUser } from '../session-actions.js';
 
 export function AskUserCard({ ask, sessionId }) {
   const questions = ask.questions || [];

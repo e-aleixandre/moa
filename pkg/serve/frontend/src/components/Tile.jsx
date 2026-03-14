@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'preact/hooks';
 import { MessageSquarePlus, GripHorizontal, GitFork, Columns2, Rows2, X } from 'lucide-preact';
-import { focusTile, assignToTile, swapTiles, splitTile, closeTile, getTileCount } from '../state.js';
+import { focusTile, assignToTile, swapTiles, splitTile, closeTile } from '../tile-actions.js';
+import { getTileCount } from '../store.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { useTouchDrag, registerDropTarget } from '../hooks/useTouchDrag.js';
 import { MessageList } from './MessageList.jsx';

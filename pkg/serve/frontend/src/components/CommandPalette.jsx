@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'preact/hooks';
 import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft } from 'lucide-preact';
-import {
-  store, assignToTile, resumeSession, createSession,
-  sessionsByGroup, isSessionInTile,
-} from '../state.js';
+import { store, sessionsByGroup, isSessionInTile } from '../store.js';
+import { assignToTile } from '../tile-actions.js';
+import { resumeSession, createSession } from '../session-actions.js';
 import { allTileIds, findTile } from '../tileTree.js';
 
 // Cached capabilities from server

@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { ShieldAlert, Check, X } from 'lucide-preact';
-import { resolvePermission } from '../state.js';
+import { resolvePermission } from '../session-actions.js';
 import { formatArgs } from '../util/format.js';
 
 export function PermissionCard({ perm, sessionId }) {

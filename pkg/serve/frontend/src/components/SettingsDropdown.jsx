@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { Settings, Brain, ChevronDown, Check, Shield } from 'lucide-preact';
-import { configureSession } from '../state.js';
+import { configureSession } from '../session-actions.js';
 import { api } from '../api.js';
 
 const THINKING_LEVELS = [

@@ -8,7 +8,7 @@ import {
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer,
-} from './state.js';
+} from './ws-handlers.js';
 
 const HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
 

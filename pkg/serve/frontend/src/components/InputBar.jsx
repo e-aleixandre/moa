@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
 import { SendHorizonal, Square, Zap, Mic, MicOff, Loader2 } from 'lucide-preact';
-import { sendMessage, cancelRun, execCommand, execShell } from '../state.js';
+import { sendMessage, cancelRun, execCommand, execShell } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';

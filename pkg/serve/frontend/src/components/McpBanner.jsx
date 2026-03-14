@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { AlertTriangle } from 'lucide-preact';
-import { trustMcp } from '../state.js';
+import { trustMcp } from '../session-actions.js';
 
 export function McpBanner({ sessionId }) {
   const [dismissed, setDismissed] = useState(false);

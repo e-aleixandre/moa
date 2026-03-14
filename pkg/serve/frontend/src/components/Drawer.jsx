@@ -1,9 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { X, Plus, Check } from 'lucide-preact';
-import {
-  toggleDrawer, setActiveSession, deleteSession,
-  resumeSession, sessionsByGroup,
-} from '../state.js';
+import { sessionsByGroup } from '../store.js';
+import { setActiveSession } from '../tile-actions.js';
+import { deleteSession, resumeSession } from '../session-actions.js';
+
+// toggleDrawer was previously an unused import — the Drawer is mobile-only
+// and currently not rendered. Stub to avoid reference errors until cleanup.
+function toggleDrawer() {}
 
 export function Drawer({ state, onOpenPalette }) {
   const [filter, setFilter] = useState('');
