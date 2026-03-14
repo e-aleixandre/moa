@@ -24,8 +24,11 @@ var planningAllowlist = map[string]bool{
 	"edit":        true, // restricted to plan file via FilterToolCall
 	"web_search":  true,
 	"fetch":       true,
-	"submit_plan": true,
-	"tasks":       true,
+	"submit_plan":     true,
+	"tasks":           true,
+	"subagent":        true, // read-only context gathering; children inherit the restricted registry
+	"subagent_status": true,
+	"subagent_cancel": true,
 }
 
 // Config configures a PlanMode instance.

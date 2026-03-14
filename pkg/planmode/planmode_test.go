@@ -82,12 +82,8 @@ func TestToolSwitching(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// In planning mode, subagent should be gone.
-	if _, ok := reg.Get("subagent"); ok {
-		t.Error("subagent should be unregistered in planning mode")
-	}
-	// Planning tools should be present (tasks is in allowlist).
-	for _, name := range []string{"read", "grep", "find", "ls", "bash", "write", "edit", "submit_plan", "tasks"} {
+	// Planning tools should be present (including subagent for context gathering).
+	for _, name := range []string{"read", "grep", "find", "ls", "bash", "write", "edit", "submit_plan", "tasks", "subagent"} {
 		if _, ok := reg.Get(name); !ok {
 			t.Errorf("expected %s to be available in planning mode", name)
 		}

@@ -3,35 +3,46 @@ package planmode
 import "strings"
 
 // IsSafeCommand checks whether a bash command is safe for planning mode.
-// Two-layer defense:
-//  1. Reject any shell control operators (pipes, chains, subshells, redirects).
-//  2. Match against a known-safe command prefix allowlist.
+// Pipelines are allowed if every segment is a known-safe command.
+// Shell control operators (&&, ||, ;, redirects, subshells) are always rejected.
 func IsSafeCommand(command string) bool {
 	cmd := strings.TrimSpace(command)
 	if cmd == "" {
 		return false
 	}
-	if hasShellOperators(cmd) {
+	// Reject dangerous operators first (everything except pipes).
+	if hasDangerousOperators(cmd) {
 		return false
 	}
-	return matchesSafePrefix(cmd)
+	// Split on pipe and check each segment independently.
+	segments := strings.Split(cmd, "|")
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			return false
+		}
+		if !matchesSafePrefix(seg) {
+			return false
+		}
+	}
+	return true
 }
 
-// shellOperators are tokens that enable command chaining, piping, output
-// redirection, or subshell execution. Presence means we can't reason about
-// what the command does, so we reject outright.
-var shellOperators = []string{
-	"&&", "||", "|", ";",
+// dangerousOperators are tokens that enable command chaining, output
+// redirection, or subshell execution. Pipes (|) are handled separately —
+// allowed when all segments are known-safe commands.
+var dangerousOperators = []string{
+	"&&", "||", ";",
 	"$(", "`",
 	">>", ">",
 	"<<",
-	"&",  // background execution
-	"<",  // input redirection / process substitution <(...)
+	"&", // background execution
+	"<", // input redirection / process substitution <(...)
 	"\n", // multi-line
 }
 
-func hasShellOperators(cmd string) bool {
-	for _, op := range shellOperators {
+func hasDangerousOperators(cmd string) bool {
+	for _, op := range dangerousOperators {
 		if strings.Contains(cmd, op) {
 			return true
 		}
@@ -97,6 +108,7 @@ var exactSafe = []string{
 	"git status", "git branch", "git log", "git diff",
 	"git ls-files", "git describe",
 	"tree",
+	"sort", "uniq", "wc", "head", "tail", "cat",
 }
 
 func matchesSafePrefix(cmd string) bool {
