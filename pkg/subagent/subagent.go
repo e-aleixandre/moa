@@ -365,6 +365,12 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 		}
 		t, ok := allowed[name]
 		if !ok {
+			// Silently skip excluded tools (subagent, subagent_status, etc.)
+			// — the model naturally includes them since it sees them in its
+			// own toolset, but children can't use them.
+			if excludedTools[name] {
+				continue
+			}
 			res := core.ErrorResult("unknown tool: " + name)
 			return nil, &res
 		}

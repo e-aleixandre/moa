@@ -224,6 +224,17 @@ func TestBuildChildRegistryFiltersNestedAndDedupes(t *testing.T) {
 	if _, ok := reg.Get("subagent"); ok {
 		t.Fatal("child registry should not include subagent")
 	}
+
+	// Explicitly requesting excluded tools should silently skip them, not error.
+	reg2, errRes2 := buildChildRegistry(parent, map[string]any{
+		"tools": []any{"read", "subagent", "subagent_status", "grep"},
+	})
+	if errRes2 != nil {
+		t.Fatalf("expected excluded tools to be silently skipped, got error: %s", textOf(*errRes2))
+	}
+	if reg2.Count() != 2 {
+		t.Fatalf("expected 2 tools (read+grep), got %d", reg2.Count())
+	}
 }
 
 func TestBuildChildRegistryCaseInsensitive(t *testing.T) {
