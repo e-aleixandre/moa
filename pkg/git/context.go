@@ -3,10 +3,15 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// cmdTimeout caps git commands to prevent hangs on network mounts.
+const cmdTimeout = 2 * time.Second
 
 // Context returns a human-readable summary of the git state for cwd.
 // Returns "" if cwd is not in a git repo or git is not available.
@@ -43,14 +48,18 @@ func Context(cwd string) string {
 }
 
 func isRepo(cwd string) bool {
-	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = cwd
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
 func run(cwd string, args ...string) string {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cwd
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

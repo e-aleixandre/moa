@@ -13,10 +13,13 @@ import (
 )
 
 // Policy controls retry behaviour.
+// Use DefaultPolicy for standard settings. A zero-value Policy
+// means "use defaults" — set Disabled=true to skip retries entirely.
 type Policy struct {
-	MaxRetries int           // 0 = no retries (default 5)
+	MaxRetries int           // max retry attempts (default 5)
 	BaseDelay  time.Duration // initial wait (default 1s)
 	MaxDelay   time.Duration // cap per wait (default 32s)
+	Disabled   bool          // true = no retries, single attempt only
 }
 
 // DefaultPolicy is the default retry policy.
@@ -76,8 +79,16 @@ type OnRetry func(attempt int, status int, wait time.Duration)
 // (necessary because http.Request.Body is consumed on each attempt).
 // Returns the successful response or the last error.
 func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request, error), p Policy, notify OnRetry) (*http.Response, error) {
-	if p.MaxRetries == 0 {
+	if p.Disabled {
+		p.MaxRetries = 0
+	} else if p.MaxRetries == 0 {
 		p = DefaultPolicy
+	}
+	if p.BaseDelay == 0 {
+		p.BaseDelay = DefaultPolicy.BaseDelay
+	}
+	if p.MaxDelay == 0 {
+		p.MaxDelay = DefaultPolicy.MaxDelay
 	}
 
 	var lastErr error

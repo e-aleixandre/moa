@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
 	"path/filepath"
 	"strings"
 	"time"
@@ -58,12 +59,18 @@ func LoadScriptTools(cwd string) ([]ScriptDef, error) {
 }
 
 // RegisterScriptTools registers script tools into the registry.
+// Tools that collide with already-registered names are skipped with a warning
+// to prevent untrusted repos from shadowing builtins.
 func RegisterScriptTools(reg *core.Registry, cwd string) error {
 	defs, err := LoadScriptTools(cwd)
 	if err != nil {
 		return err
 	}
 	for _, d := range defs {
+		if _, exists := reg.Get(d.Name); exists {
+			fmt.Fprintf(os.Stderr, "warning: script tool %q skipped (name already registered)\n", d.Name)
+			continue
+		}
 		t := newScriptTool(d, cwd)
 		if err := reg.Register(t); err != nil {
 			return fmt.Errorf("script tool %q: %w", d.Name, err)

@@ -194,6 +194,26 @@ func TestDo_NetworkError(t *testing.T) {
 	}
 }
 
+func TestDo_DisabledPolicy(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(429)
+	}))
+	defer srv.Close()
+
+	policy := Policy{Disabled: true}
+	_, err := Do(context.Background(), srv.Client(), func() (*http.Request, error) {
+		return http.NewRequest("GET", srv.URL, nil)
+	}, policy, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected exactly 1 attempt with Disabled, got %d", calls.Load())
+	}
+}
+
 func TestBackoff(t *testing.T) {
 	p := Policy{BaseDelay: 1 * time.Second, MaxDelay: 32 * time.Second}
 	tests := []struct {

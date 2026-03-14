@@ -239,17 +239,28 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	var files []string
+	var errs []string
 	for _, snap := range cp.Files {
 		if snap.Content == nil {
-			_ = os.Remove(snap.Path)
-			files = append(files, "deleted "+filepath.Base(snap.Path))
+			if err := os.Remove(snap.Path); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Sprintf("delete %s: %v", filepath.Base(snap.Path), err))
+			} else {
+				files = append(files, "deleted "+filepath.Base(snap.Path))
+			}
 		} else {
-			_ = os.WriteFile(snap.Path, snap.Content, snap.Perm)
-			files = append(files, "restored "+filepath.Base(snap.Path))
+			if err := os.WriteFile(snap.Path, snap.Content, snap.Perm); err != nil {
+				errs = append(errs, fmt.Sprintf("restore %s: %v", filepath.Base(snap.Path), err))
+			} else {
+				files = append(files, "restored "+filepath.Base(snap.Path))
+			}
 		}
 	}
+	msg := fmt.Sprintf("⏪ Reverted %q: %s", cp.Label, strings.Join(files, ", "))
+	if len(errs) > 0 {
+		msg += "\n⚠️ Errors: " + strings.Join(errs, "; ")
+	}
 	return &CommandResult{
-		OK:      true,
-		Message: fmt.Sprintf("⏪ Reverted %q: %s", cp.Label, strings.Join(files, ", ")),
+		OK:      len(errs) == 0,
+		Message: msg,
 	}, nil
 }
