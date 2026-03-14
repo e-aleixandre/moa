@@ -1,6 +1,6 @@
 // ws-handlers.js — WebSocket event handlers and streaming delta batching
 
-import { triggerAttention, triggerDone } from './notifications.js';
+import { triggerAttention, triggerDone, addToast } from './notifications.js';
 import { store, updateSession, visibleSessionIds } from './store.js';
 
 // --- Message normalization ---
@@ -331,9 +331,16 @@ export function handleWsSubagentCount(id, count) {
 }
 
 export function handleWsSubagentComplete(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess) return;
-  updateSession(id, { messages: [...sess.messages, { _type: 'system', text: data.text }] });
+  // Don't add to messages — the subagent result is injected into the agent
+  // via Steer/Enqueue and will flow naturally as the agent's response.
+  // Just show a transient notification.
+  const statusIcon = data.status === 'completed' ? '✓' : data.status === 'failed' ? '✗' : '⊘';
+  addToast({
+    sessionId: id,
+    title: `Subagent ${statusIcon} ${data.status}`,
+    detail: data.task || data.job_id,
+    type: data.status === 'completed' ? 'done' : 'attention',
+  });
 }
 
 export function handleWsRunEnd(id) {

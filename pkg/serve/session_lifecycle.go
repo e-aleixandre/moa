@@ -129,6 +129,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 				return
 			}
 			if a := bs.Agent; a != nil {
+				// Track this text so broadcastAgentEvent suppresses the
+				// duplicate steer WS event when the agent processes it.
+				s.runtime.subagentTexts.Store(agentText, struct{}{})
 				if a.IsRunning() {
 					a.Steer(agentText)
 				} else {

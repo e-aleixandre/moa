@@ -79,6 +79,10 @@ type sessionRuntime struct {
 	taskStore     *tasks.Store
 	planMode      *planmode.PlanMode
 	checkpoints   *checkpoint.Store   // nil when checkpoints disabled
+
+	// subagentTexts tracks notification texts injected via Steer/Enqueue
+	// so broadcastAgentEvent can suppress duplicate steer WS events.
+	subagentTexts sync.Map
 }
 
 // sessionApprovals tracks pending permission and ask_user prompts.
@@ -249,6 +253,11 @@ func (s *ManagedSession) broadcastAgentEvent(e core.AgentEvent) {
 		}
 
 	case core.AgentEventSteer:
+		// Suppress steer events that originated from subagent completions —
+		// the frontend already got the subagent_complete event.
+		if _, wasSubagent := s.runtime.subagentTexts.LoadAndDelete(e.Text); wasSubagent {
+			break
+		}
 		s.broadcast(Event{Type: "steer", Data: SteerData{Text: e.Text}})
 
 	default:
