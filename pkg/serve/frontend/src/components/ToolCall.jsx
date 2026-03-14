@@ -18,12 +18,12 @@ export function ToolCall({ tool }) {
   const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
   const isAskUser = tool.tool_name === 'ask_user';
-  const isDiff = !isAskUser && !liveText && preview && preview.kind === 'diff';
 
   // For running tools with streaming, show the live output
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
   // Final result (from toolPreview) — only used when not streaming
   const preview = !isAskUser && !liveText ? toolPreview(tool.tool_name, tool.args, tool.result) : null;
+  const isDiff = !isAskUser && !liveText && preview && preview.kind === 'diff';
 
   // Streaming: show tail. Finished: show head.
   const previewData = liveText
