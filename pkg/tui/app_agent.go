@@ -254,6 +254,8 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 		}
 
 	case core.AgentEventSteer:
+		// Replace the queued "steer" block (if any) with the real user/subagent block.
+		replaced := false
 		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type:           "subagent",
@@ -262,7 +264,17 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 				SubagentResult: result,
 			})
 		} else {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
+			// Find and promote the queued steer block to a normal user block.
+			for i := len(m.s.blocks) - 1; i >= 0; i-- {
+				if m.s.blocks[i].Type == "steer" && m.s.blocks[i].Raw == e.Text {
+					m.s.blocks[i].Type = "user"
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
+			}
 		}
 		m.s.viewportDirty = true
 

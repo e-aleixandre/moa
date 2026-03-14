@@ -530,7 +530,18 @@ export function handleWsRunEnd(id) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
-  updateSession(id, { streamingText: null, thinkingText: null });
+  updateSession(id, { streamingText: null, thinkingText: null, pendingSteer: null });
+}
+
+export function handleWsSteer(id, data) {
+  const sess = state.sessions[id];
+  if (!sess) return;
+  // The agent processed the steer — move it from pending to the message list.
+  const userMsg = { role: 'user', content: [{ type: 'text', text: data.text }] };
+  updateSession(id, {
+    messages: [...sess.messages, userMsg],
+    pendingSteer: null,
+  });
 }
 
 // --- API actions ---
@@ -559,7 +570,13 @@ export async function deleteSession(id) {
 
 export async function sendMessage(id, text) {
   const sess = state.sessions[id];
-  if (sess) {
+  if (!sess) return;
+
+  const isRunning = sess.state === 'running' || sess.state === 'permission';
+  if (isRunning) {
+    // Agent is running — show as a queued steer, don't add to messages yet.
+    updateSession(id, { pendingSteer: text });
+  } else {
     const userMsg = { role: 'user', content: [{ type: 'text', text }] };
     updateSession(id, {
       messages: [...sess.messages, userMsg],

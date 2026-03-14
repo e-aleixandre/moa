@@ -998,6 +998,12 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
+			// Show a queued steer block immediately so the user sees feedback.
+			// When the agent actually processes it (AgentEventSteer), the
+			// handleAgentEvent handler replaces this with the real block.
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "steer", Raw: text})
+			m.s.viewportDirty = true
+			m.updateViewport()
 			m.agent.Steer(text)
 			return m, nil
 		}

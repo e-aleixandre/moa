@@ -39,6 +39,7 @@ export function MessageList({ session, onResolvePermission }) {
   const thinking = session.thinkingText;
   const pendingPerm = session.pendingPerm;
   const pendingAsk = session.pendingAsk;
+  const pendingSteer = session.pendingSteer;
 
   return (
     <div class="messages" ref={containerRef} onScroll={checkScroll} style="position:relative">
@@ -62,6 +63,13 @@ export function MessageList({ session, onResolvePermission }) {
       {streaming && (
         <div class="streaming">
           <Message msg={{ role: 'assistant', content: [{ type: 'text', text: streaming }] }} />
+        </div>
+      )}
+
+      {pendingSteer && (
+        <div class="msg-steer">
+          <span class="msg-steer-label">queued</span>
+          <span class="msg-steer-text">{pendingSteer}</span>
         </div>
       )}
 
