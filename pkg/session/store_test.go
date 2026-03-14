@@ -95,14 +95,17 @@ func TestLatest(t *testing.T) {
 	store := tempStore(t)
 
 	// Create two sessions with different update times
+	fakeTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return fakeTime }
+	defer func() { nowFunc = time.Now }()
+
 	s1 := store.Create()
 	s1.Title = "first"
 	if err := store.Save(s1); err != nil {
 		t.Fatalf("Save s1: %v", err)
 	}
 
-	// Ensure different timestamp
-	time.Sleep(10 * time.Millisecond)
+	fakeTime = fakeTime.Add(time.Second)
 
 	s2 := store.Create()
 	s2.Title = "second"
@@ -137,13 +140,17 @@ func TestLatest_Empty(t *testing.T) {
 func TestList(t *testing.T) {
 	store := tempStore(t)
 
+	fakeTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return fakeTime }
+	defer func() { nowFunc = time.Now }()
+
 	s1 := store.Create()
 	s1.Title = "first"
 	if err := store.Save(s1); err != nil {
 		t.Fatalf("Save s1: %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	fakeTime = fakeTime.Add(time.Second)
 
 	s2 := store.Create()
 	s2.Title = "second"

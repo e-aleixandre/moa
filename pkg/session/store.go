@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// nowFunc is the clock used for timestamps. Tests can override it.
+var nowFunc = time.Now
+
 // Compile-time check: FileStore implements SessionStore.
 var _ SessionStore = (*FileStore)(nil)
 
@@ -56,8 +59,8 @@ func (s *FileStore) Dir() string {
 func (s *FileStore) Create() *Session {
 	return &Session{
 		ID:       newID(),
-		Created:  time.Now(),
-		Updated:  time.Now(),
+		Created:  nowFunc(),
+		Updated:  nowFunc(),
 		Metadata: make(map[string]any),
 	}
 }
@@ -67,7 +70,7 @@ func (s *FileStore) Create() *Session {
 func (s *FileStore) Save(sess *Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess.Updated = time.Now()
+	sess.Updated = nowFunc()
 
 	data, err := json.MarshalIndent(sess, "", "  ")
 	if err != nil {
@@ -227,7 +230,7 @@ func newID() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
 		// Fallback to timestamp if crypto/rand fails (shouldn't happen)
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return fmt.Sprintf("%d", nowFunc().UnixNano())
 	}
 	return hex.EncodeToString(b)
 }
