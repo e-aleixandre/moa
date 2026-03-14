@@ -63,6 +63,10 @@ type SessionConfig struct {
 	// Feature toggles. All default to true.
 	EnableAskUser bool // Register ask_user tool. Default: true.
 
+	// BeforeWrite is called before write/edit tools modify a file.
+	// Used by the checkpoint system to capture pre-edit state.
+	BeforeWrite func(path string) error
+
 	// Subagent callbacks. All optional (nil = no-op).
 	OnAsyncJobChange func(count int)
 	OnAsyncComplete  func(jobID, task, status, resultTail string)
@@ -158,6 +162,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		AllowedPaths:   append(moaCfg.AllowedPaths, tool.SpillOutputDir()),
 		BashTimeout:    5 * time.Minute,
 		BraveAPIKey:    moaCfg.BraveAPIKey,
+		BeforeWrite:    cfg.BeforeWrite,
 	}); err != nil {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}

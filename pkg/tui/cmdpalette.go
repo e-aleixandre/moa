@@ -22,6 +22,7 @@ var allCommands = []commandDef{
 	{Name: "plan", Desc: "Toggle plan mode (plan-then-execute workflow)"},
 	{Name: "permissions", Args: "<mode>", Desc: "View or set permission mode (yolo/ask/auto)"},
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
+	{Name: "undo", Desc: "Revert files changed in the last agent turn"},
 	{Name: "verify", Desc: "Run project verification checks"},
 	{Name: "prompt", Args: "<name>", Desc: "Insert a prompt template"},
 	{Name: "voice", Desc: "Toggle voice recording (Ctrl+R)"},

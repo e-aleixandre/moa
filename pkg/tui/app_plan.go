@@ -366,7 +366,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 // to get proper render ticks and spinner.
 func (m appModel) sendMessage(text string) (tea.Model, tea.Cmd) {
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
-	gen := m.prepareRun()
+	gen := m.prepareRun(truncateLabel(text))
 	m.input.SetEnabled(false)
 	m.updateViewport()
 	return m, m.launchAgentSend(text, gen)

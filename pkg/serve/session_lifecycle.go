@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/bootstrap"
+	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/planmode"
@@ -96,6 +97,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
 
+	// File checkpoints for /undo.
+	cpStore := checkpoint.New(20)
+
 	// Forward-declare for closures (populated before the session is exposed).
 	var sess *ManagedSession
 	var bs *bootstrap.Session
@@ -109,6 +113,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		ProviderFactory: m.providerFactory,
 		Ctx:             sessionCtx,
 		EnableAskUser:   true,
+		BeforeWrite:     cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
 				s.broadcast(Event{Type: "subagent_count", Data: SubagentCountData{Count: count}})
@@ -189,6 +194,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 			UntrustedMCP:  bs.UntrustedMCP,
 			taskStore:     bs.TaskStore,
 			planMode:      pm,
+			checkpoints:   cpStore,
 		},
 		approvals: sessionApprovals{
 			askBridge: bs.AskBridge,

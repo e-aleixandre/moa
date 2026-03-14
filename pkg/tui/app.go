@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/askuser"
+	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -159,6 +160,9 @@ type appModel struct {
 	// Voice input
 	voice voiceRecorder
 
+	// Checkpoints (/undo)
+	checkpoints *checkpoint.Store
+
 	// Subagent status
 	subagentCountCh  <-chan int
 	subagentNotifyCh <-chan SubagentNotification
@@ -191,6 +195,7 @@ type Config struct {
 	TaskStore             *tasks.Store                // task store (nil = no task tracking)
 	PromptTemplates       []promptpkg.Template        // available prompt templates (nil = none)
 	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
+	CheckpointStore       *checkpoint.Store           // file checkpoint store for /undo (nil = disabled)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -257,6 +262,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		taskStore:            cfg.TaskStore,
 		promptTemplates:      cfg.PromptTemplates,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber},
+		checkpoints:          cfg.CheckpointStore,
 		baseSystemPrompt:     ag.SystemPrompt(),
 	}
 

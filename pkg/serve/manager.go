@@ -12,6 +12,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/askuser"
+	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -77,6 +78,7 @@ type sessionRuntime struct {
 	UntrustedMCP  bool                   // true when .mcp.json exists but not trusted
 	taskStore     *tasks.Store
 	planMode      *planmode.PlanMode
+	checkpoints   *checkpoint.Store   // nil when checkpoints disabled
 }
 
 // sessionApprovals tracks pending permission and ask_user prompts.
@@ -441,7 +443,26 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 
 	go func() {
 		defer cancel()
+
+		// Open checkpoint for undo tracking.
+		if sess.runtime.checkpoints != nil {
+			label := text
+			if len(label) > 60 {
+				label = label[:60] + "…"
+			}
+			sess.runtime.checkpoints.Begin(label)
+		}
+
 		msgs, err := sess.runtime.agent.Send(runCtx, text)
+
+		// Close checkpoint: Commit on success/error, Discard on cancel.
+		if sess.runtime.checkpoints != nil {
+			if err != nil && runCtx.Err() != nil {
+				sess.runtime.checkpoints.Discard()
+			} else {
+				sess.runtime.checkpoints.Commit()
+			}
+		}
 
 		sess.mu.Lock()
 		sess.messages = msgs

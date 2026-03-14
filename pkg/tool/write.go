@@ -60,6 +60,12 @@ func NewWrite(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(fmt.Sprintf("mkdir: %v", err)), nil
 			}
 
+			if cfg.BeforeWrite != nil {
+				if err := cfg.BeforeWrite(resolved); err != nil {
+					return core.ErrorResult(fmt.Sprintf("checkpoint: %v", err)), nil
+				}
+			}
+
 			if err := os.WriteFile(resolved, []byte(content), 0o644); err != nil {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
 			}

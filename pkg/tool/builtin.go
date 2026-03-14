@@ -19,6 +19,11 @@ type ToolConfig struct {
 	AllowedPaths   []string // Additional directories allowed outside WorkspaceRoot.
 	BashTimeout   time.Duration // Default: 5 minutes.
 	BraveAPIKey   string        // Brave Search API key (empty = web_search not registered).
+
+	// BeforeWrite is called before modifying a file (write/edit tools).
+	// If it returns an error, the write is aborted. Used by the checkpoint
+	// system to capture pre-edit state. nil = no hook.
+	BeforeWrite func(path string) error
 }
 
 // Defaults fills in zero-value fields with defaults.

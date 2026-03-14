@@ -79,6 +79,13 @@ func NewEdit(cfg ToolConfig) core.Tool {
 			}
 
 			newContent := strings.Replace(content, oldText, newText, 1)
+
+			if cfg.BeforeWrite != nil {
+				if err := cfg.BeforeWrite(resolved); err != nil {
+					return core.ErrorResult(fmt.Sprintf("checkpoint: %v", err)), nil
+				}
+			}
+
 			if err := os.WriteFile(resolved, []byte(newContent), 0o644); err != nil {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
 			}

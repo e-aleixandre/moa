@@ -3,6 +3,8 @@ package serve
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/planmode"
@@ -21,6 +23,7 @@ var commandRegistry = map[string]commandHandler{
 	"plan":        cmdPlan,
 	"tasks":       cmdTasks,
 	"permissions": cmdPermissions,
+	"undo":        cmdUndo,
 }
 
 // ExecCommand executes a slash command in a session.
@@ -222,4 +225,31 @@ func cmdPermissions(m *Manager, sess *ManagedSession, args []string) (*CommandRe
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "permissions: " + newMode}, nil
+}
+
+func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+	if err := requireIdle(sess); err != nil {
+		return nil, err
+	}
+	if sess.runtime.checkpoints == nil {
+		return &CommandResult{OK: false, Message: "checkpoints not available"}, nil
+	}
+	cp, err := sess.runtime.checkpoints.Undo()
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
+	var files []string
+	for _, snap := range cp.Files {
+		if snap.Content == nil {
+			os.Remove(snap.Path)
+			files = append(files, "deleted "+filepath.Base(snap.Path))
+		} else {
+			os.WriteFile(snap.Path, snap.Content, snap.Perm)
+			files = append(files, "restored "+filepath.Base(snap.Path))
+		}
+	}
+	return &CommandResult{
+		OK:      true,
+		Message: fmt.Sprintf("⏪ Reverted %q: %s", cp.Label, strings.Join(files, ", ")),
+	}, nil
 }

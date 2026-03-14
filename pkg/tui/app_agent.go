@@ -13,11 +13,23 @@ import (
 	"github.com/ealeixandre/moa/pkg/planmode"
 )
 
+// truncateLabel creates a short label for checkpoint identification.
+func truncateLabel(s string) string {
+	if len(s) > 60 {
+		return s[:60] + "…"
+	}
+	return s
+}
+
 // --- Agent interaction ---
 
 // prepareRun sets up the common run state (running flag, gen counter, stream state, status).
+// Opens a checkpoint (if available) for undo tracking.
 // Returns the run generation for tagging the result.
-func (m *appModel) prepareRun() uint64 {
+func (m *appModel) prepareRun(label string) uint64 {
+	if m.checkpoints != nil {
+		m.checkpoints.Begin(label)
+	}
 	m.s.running = true
 	m.s.runGen++
 	m.s.runStartMsgCount = len(m.agent.Messages())
@@ -110,7 +122,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		m.session.SetTitle(text, 80)
 	}
 
-	gen := m.prepareRun()
+	gen := m.prepareRun(truncateLabel(text))
 	m.updateViewport()
 
 	if hasImage {
@@ -141,7 +153,7 @@ func (m appModel) startNotificationRun(n SubagentNotification) (tea.Model, tea.C
 		SubagentResult: n.ResultTail,
 	})
 
-	gen := m.prepareRun()
+	gen := m.prepareRun(truncateLabel(n.Task))
 	m.updateViewport()
 	return m, m.launchAgentSend(n.AgentText, gen)
 }
@@ -309,6 +321,15 @@ func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
 	// Patch: correct last assistant/thinking content from source-of-truth.
 	// Does NOT rebuild blocks — preserves event-derived blocks (tool with args, etc.).
 	m.patchFromMessages(msg.Messages)
+
+	// Close the checkpoint: Commit on success/error, Discard on cancel.
+	if m.checkpoints != nil {
+		if msg.Err != nil && errors.Is(msg.Err, context.Canceled) {
+			m.checkpoints.Discard()
+		} else {
+			m.checkpoints.Commit()
+		}
+	}
 
 	m.s.running = false
 	m.s.streamState = stateIdle

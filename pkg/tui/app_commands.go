@@ -3,7 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -142,6 +144,41 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "voice":
 		return m.handleVoiceToggle()
+
+	case "undo":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Cannot undo while agent is running",
+			})
+			return m, nil
+		}
+		if m.checkpoints == nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Checkpoints not available",
+			})
+			return m, nil
+		}
+		cp, err := m.checkpoints.Undo()
+		if err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: err.Error(),
+			})
+			return m, nil
+		}
+		var restored []string
+		for _, snap := range cp.Files {
+			if snap.Content == nil {
+				os.Remove(snap.Path)
+				restored = append(restored, "deleted "+filepath.Base(snap.Path))
+			} else {
+				os.WriteFile(snap.Path, snap.Content, snap.Perm)
+				restored = append(restored, "restored "+filepath.Base(snap.Path))
+			}
+		}
+		msg := fmt.Sprintf("⏪ Reverted checkpoint %q: %s", cp.Label, strings.Join(restored, ", "))
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: msg})
+		m.updateViewport()
+		return m, nil
 
 	case "exit", "quit":
 		m.cleanup()

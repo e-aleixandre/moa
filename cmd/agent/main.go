@@ -16,6 +16,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/auth"
 	"github.com/ealeixandre/moa/pkg/bootstrap"
+	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
@@ -183,6 +184,9 @@ func main() {
 	// OnAsyncComplete callbacks, which fire after BuildSession returns (subagent
 	// jobs can't complete before the agent is created). The `sess` pointer is
 	// written once below and never reassigned, so there's no concurrent access.
+	// File checkpoints for /undo.
+	cpStore := checkpoint.New(20)
+
 	var sess *bootstrap.Session
 	getAgent := func() *agent.Agent {
 		if sess != nil {
@@ -210,6 +214,7 @@ func main() {
 		PermissionMode:      permModeStr,
 		PermissionEvalModel: *permsModel,
 		EnableAskUser:       useTUI,
+		BeforeWrite:         cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
 			select {
 			case subagentCountCh <- count:
@@ -348,8 +353,9 @@ func main() {
 					cfg.PinnedModels = ids
 				})
 			},
-			ProviderFactory: providerFactory,
-			Transcriber:     transcriber,
+			ProviderFactory:   providerFactory,
+			Transcriber:       transcriber,
+			CheckpointStore:   cpStore,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {
