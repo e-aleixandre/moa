@@ -1086,14 +1086,13 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	}
 
-	// All other keys: propagate to input when idle, then update palette
+	// All other keys: always propagate to input so the user can type
+	// steer messages while the agent is running. Command palette only
+	// updates when idle (it's meaningless during a run).
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
 	if m.s.streamState == stateIdle {
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		// Update command palette based on current input text
 		m.cmdPalette.Update(m.input.textarea.Value())
-		return m, cmd
 	}
-
-	return m, nil
+	return m, cmd
 }
