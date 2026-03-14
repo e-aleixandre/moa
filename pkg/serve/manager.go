@@ -91,6 +91,7 @@ type sessionApprovals struct {
 	lastResolvedPermID string
 	askBridge          *askuser.Bridge
 	pendingAsk         *pendingAskUser
+	bridgeStop         chan struct{} // closed to stop the current permissionBridge goroutine
 }
 
 // sessionPersistence handles disk storage.
@@ -476,8 +477,9 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 		sess.mu.Lock()
 		sess.messages = msgs
 		sess.runCancel = nil
-		// Clear any stale pending permission (run ended while waiting).
+		// Clear stale approval state (run ended while waiting).
 		sess.approvals.pending = nil
+		sess.approvals.pendingAsk = nil
 		if err != nil && runCtx.Err() == nil {
 			sess.State = StateError
 			sess.Error = err.Error()

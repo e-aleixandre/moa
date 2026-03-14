@@ -116,6 +116,7 @@ func (v *voiceRecorder) startRecording(parentCtx context.Context) tea.Cmd {
 
 		if err := cmd.Start(); err != nil {
 			cancel()
+			_ = os.Remove(path) // cleanup temp file on start failure
 			return voiceResultMsg{Err: fmt.Errorf("starting recorder: %w", err)}
 		}
 

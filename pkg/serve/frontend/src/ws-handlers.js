@@ -156,7 +156,7 @@ export function handleWsInit(id, data) {
     contextPercent: data.context_percent ?? -1,
     permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission || null,
-    pendingAsk: data.pending_ask || (store.get().sessions[id]?.pendingAsk || null),
+    pendingAsk: data.pending_ask || null,
     streamingText: null,
     thinkingText: null,
     tasks: data.tasks || [],

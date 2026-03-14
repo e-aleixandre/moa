@@ -258,6 +258,9 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 	msg := fmt.Sprintf("⏪ Reverted %q: %s", cp.Label, strings.Join(files, ", "))
 	if len(errs) > 0 {
 		msg += "\n⚠️ Errors: " + strings.Join(errs, "; ")
+		// Push checkpoint back so /undo can be retried.
+		sess.runtime.checkpoints.Repush(cp)
+		msg += "\nCheckpoint preserved — retry with /undo"
 	}
 	return &CommandResult{
 		OK:      len(errs) == 0,

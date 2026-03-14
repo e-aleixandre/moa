@@ -28,12 +28,17 @@ type pendingPermission struct {
 // the agent goroutine (not this one) — this goroutine just records the
 // pending request and broadcasts it for the web UI.
 func (s *ManagedSession) permissionBridge(ctx context.Context) {
-	if s.runtime.gate == nil {
+	s.mu.Lock()
+	gate := s.runtime.gate
+	stop := s.approvals.bridgeStop
+	s.mu.Unlock()
+
+	if gate == nil {
 		return
 	}
 	for {
 		select {
-		case req, ok := <-s.runtime.gate.Requests():
+		case req, ok := <-gate.Requests():
 			if !ok {
 				return
 			}
@@ -56,6 +61,8 @@ func (s *ManagedSession) permissionBridge(ctx context.Context) {
 				"args":      req.Args,
 			}})
 
+		case <-stop:
+			return
 		case <-ctx.Done():
 			return
 		}

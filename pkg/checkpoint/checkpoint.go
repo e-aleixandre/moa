@@ -160,7 +160,20 @@ func (s *Store) Discard() {
 	s.mu.Unlock()
 }
 
+// Repush puts a checkpoint back on the ring buffer after a failed undo.
+// This allows the caller to retry /undo after fixing the restore failure.
+func (s *Store) Repush(cp *Checkpoint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ring[s.head] = *cp
+	s.head = (s.head + 1) % s.cap
+	if s.count < s.cap {
+		s.count++
+	}
+}
+
 // Undo pops the most recent checkpoint and returns it for the caller to restore.
+// If restoration fails, call Repush to put it back for retry.
 // Returns error if no checkpoints exist or if a turn is in progress.
 func (s *Store) Undo() (*Checkpoint, error) {
 	s.mu.Lock()

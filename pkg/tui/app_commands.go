@@ -188,6 +188,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		msg := fmt.Sprintf("⏪ Reverted checkpoint %q: %s", cp.Label, strings.Join(restored, ", "))
 		if len(errs) > 0 {
 			msg += "\n⚠️ Errors: " + strings.Join(errs, "; ")
+			m.checkpoints.Repush(cp)
+			msg += "\nCheckpoint preserved — retry with /undo"
 		}
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: msg})
 		m.updateViewport()

@@ -92,9 +92,16 @@ func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
 
 	sess.mu.Lock()
 	if newMode == permission.ModeYolo {
+		// Stop existing bridge if running.
+		if sess.approvals.bridgeStop != nil {
+			close(sess.approvals.bridgeStop)
+			sess.approvals.bridgeStop = nil
+		}
 		sess.runtime.gate = nil
 	} else if sess.runtime.gate == nil {
+		// Transitioning from yolo → ask/auto: create new gate + bridge.
 		sess.runtime.gate = permission.New(newMode, permission.Config{})
+		sess.approvals.bridgeStop = make(chan struct{})
 		go sess.permissionBridge(sess.runtime.sessionCtx)
 	} else {
 		sess.runtime.gate.SetMode(newMode)

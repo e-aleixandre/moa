@@ -104,11 +104,14 @@ func newScriptTool(d ScriptDef, cwd string) core.Tool {
 			cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			cmdLine := d.Command
+			// Pass args positionally via $1 to prevent shell injection.
+			// The command can reference them as "$1", "$@", etc.
+			var cmd *exec.Cmd
 			if args != "" {
-				cmdLine += " " + args
+				cmd = exec.CommandContext(cmdCtx, "bash", "-c", d.Command+` "$@"`, "_", args)
+			} else {
+				cmd = exec.CommandContext(cmdCtx, "bash", "-c", d.Command)
 			}
-			cmd := exec.CommandContext(cmdCtx, "bash", "-c", cmdLine)
 			cmd.Dir = cwd
 
 			out, err := cmd.CombinedOutput()

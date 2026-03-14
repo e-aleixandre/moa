@@ -217,6 +217,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 	})
 
 	if bs.Gate != nil {
+		sess.approvals.bridgeStop = make(chan struct{})
 		go sess.permissionBridge(sessionCtx)
 	}
 	if bs.AskBridge != nil {
