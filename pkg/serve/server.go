@@ -9,7 +9,10 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
@@ -40,6 +43,7 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
@@ -546,6 +550,74 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func handleShell(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		limitBody(w, r, maxJSONBodySize)
+		var body struct {
+			Command string `json:"command"`
+			Silent  bool   `json:"silent"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Command == "" {
+			http.Error(w, "command required", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "sh", "-c", body.Command)
+		cmd.Dir = sess.CWD
+		out, _ := cmd.CombinedOutput()
+
+		exitCode := 0
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+
+		output := strings.TrimRight(string(out), "\n")
+		var msgBody string
+		if output != "" {
+			msgBody = fmt.Sprintf("$ %s\n%s", body.Command, output)
+		} else {
+			msgBody = fmt.Sprintf("$ %s\n(no output)", body.Command)
+		}
+
+		sess.mu.Lock()
+		ag := sess.runtime.agent
+		running := ag.IsRunning()
+		sess.mu.Unlock()
+
+		if running && !body.Silent {
+			ag.Steer(fmt.Sprintf("Shell output (from user):\n%s", msgBody))
+		} else if !running {
+			role := "user"
+			if body.Silent {
+				role = "shell"
+			}
+			_ = ag.AppendMessage(core.AgentMessage{
+				Message: core.Message{
+					Role:    role,
+					Content: []core.Content{core.TextContent(msgBody)},
+				},
+				Custom: map[string]any{"shell": true},
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"output":    output,
+			"exit_code": exitCode,
+		})
 	}
 }
 

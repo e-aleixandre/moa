@@ -434,7 +434,24 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	pendingCalls := make(map[string]core.Content) // ToolCallID → tool_call Content
 
 	for _, msg := range msgs {
+		// Shell messages (both "user" with custom.shell and "shell" role)
+		// render as bash tool blocks regardless of role.
+		if isShellMessage(msg) {
+			cmd, output := parseShellBody(firstTextContent(msg.Content))
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type:       "tool",
+				ToolName:   "bash",
+				ToolArgs:   map[string]any{"command": cmd},
+				ToolResult: output,
+				ToolDone:   true,
+			})
+			continue
+		}
+
 		switch msg.Role {
+		case "shell":
+			// Already handled above, but in case custom field is missing.
+			continue
 		case "user":
 			if len(msg.Content) > 0 {
 				text := msg.Content[0].Text
@@ -508,4 +525,37 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			}
 		}
 	}
+}
+
+// isShellMessage returns true for messages produced by ! or !! shell escapes.
+func isShellMessage(msg core.AgentMessage) bool {
+	if msg.Role == "shell" {
+		return true
+	}
+	if msg.Custom != nil {
+		if v, ok := msg.Custom["shell"]; ok {
+			if b, ok := v.(bool); ok && b {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseShellBody splits "$ command\noutput" back into command and output.
+func parseShellBody(body string) (command, output string) {
+	if !strings.HasPrefix(body, "$ ") {
+		return "", body
+	}
+	body = body[2:]
+	if idx := strings.IndexByte(body, '\n'); idx >= 0 {
+		command = body[:idx]
+		output = body[idx+1:]
+		if output == "(no output)" {
+			output = ""
+		}
+	} else {
+		command = body
+	}
+	return command, output
 }

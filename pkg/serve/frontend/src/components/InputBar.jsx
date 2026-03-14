@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
 import { SendHorizonal, Square, Zap, Mic, MicOff, Loader2 } from 'lucide-preact';
-import { sendMessage, cancelRun, execCommand } from '../state.js';
+import { sendMessage, cancelRun, execCommand, execShell } from '../state.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';
@@ -154,6 +154,24 @@ export function InputBar({ sessionId, sessionState, tileId }) {
         }
       } catch (e) {
         addToast({ title: 'Command error', detail: e.message, type: 'error' });
+      }
+      return;
+    }
+
+    // Shell escape: !! = silent (user-only), ! = context (sent with next message)
+    if (text.startsWith('!')) {
+      const silent = text.startsWith('!!');
+      const command = (silent ? text.slice(2) : text.slice(1)).trim();
+      if (!command) return;
+      try {
+        const result = await execShell(sessionId, command, silent);
+        if (!result) return;
+        // Show output as a tool-call-like block via sendMessage won't work here —
+        // we add it to the session's pending shell context on the server side.
+        // For now, just show the output inline. The state.execShell handles
+        // adding the tool block to the message list and storing context.
+      } catch (e) {
+        addToast({ title: 'Shell error', detail: e.message, type: 'error' });
       }
       return;
     }

@@ -257,11 +257,34 @@ function normalizeHistory(raw) {
       if (textParts.length > 0) {
         result.push({ role: 'assistant', content: [{ type: 'text', text: textParts.join('') }] });
       }
+    } else if (msg.role === 'shell' || (msg.role === 'user' && msg.custom?.shell)) {
+      // Shell escape messages render as bash tool blocks.
+      const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+      const { command, output } = parseShellBody(text);
+      result.push({
+        _type: 'tool_start',
+        tool_call_id: 'shell_' + result.length,
+        tool_name: 'bash',
+        args: { command },
+        status: 'done',
+        result: output,
+      });
     } else if (msg.role === 'user') {
       result.push(msg);
     }
   }
   return result;
+}
+
+function parseShellBody(body) {
+  if (!body.startsWith('$ ')) return { command: '', output: body };
+  const rest = body.slice(2);
+  const nl = rest.indexOf('\n');
+  if (nl < 0) return { command: rest, output: '' };
+  const command = rest.slice(0, nl);
+  let output = rest.slice(nl + 1);
+  if (output === '(no output)') output = '';
+  return { command, output };
 }
 
 // --- Streaming delta batching ---
@@ -600,6 +623,31 @@ export async function trustMcp(id) {
 
 export async function execCommand(id, command) {
   return api('POST', `/api/sessions/${id}/command`, { command });
+}
+
+// Execute a shell command in the session's working directory.
+// The server persists the result as a message (role "user" or "shell")
+// and steers if the agent is running.
+export async function execShell(id, command, silent) {
+  const result = await api('POST', `/api/sessions/${id}/shell`, { command, silent });
+  const output = (result.output || '').replace(/\n$/, '');
+  const isError = result.exit_code !== 0;
+
+  // Show as a tool block in the conversation immediately.
+  const sess = state.sessions[id];
+  if (sess) {
+    const toolMsg = {
+      _type: 'tool_start',
+      tool_call_id: 'shell_' + Date.now(),
+      tool_name: 'bash',
+      args: { command },
+      status: isError ? 'error' : 'done',
+      result: output,
+    };
+    updateSession(id, { messages: [...sess.messages, toolMsg] });
+  }
+
+  return result;
 }
 
 export function handleWsTasksUpdate(id, data) {

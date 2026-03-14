@@ -63,8 +63,8 @@ type state struct {
 	transcript       bool                  // true when in transcript mode (Ctrl+O)
 	fullHistory      bool                  // true when Ctrl+E in transcript mode shows everything
 	runStartBlockIdx int                   // block index at start of current run (patch boundary)
-	pendingImage     []byte                // raw image bytes waiting to be sent with next message
-	pendingImageMime string                // mime type of pending image
+	pendingImage     []byte // raw image bytes waiting to be sent with next message
+	pendingImageMime string // mime type of pending image
 }
 
 // taggedEvent pairs an agent event with the run generation it was produced in.
@@ -1033,6 +1033,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if cmd, ok := ParseCommand(text); ok {
 			return m.handleCommand(cmd)
+		}
+		// Shell escape: !! = silent (user-only), ! = context (sent with next message)
+		if strings.HasPrefix(text, "!") {
+			return m.handleShellEscape(text)
 		}
 		return m.startAgentRun(text)
 

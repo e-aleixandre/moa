@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -916,5 +917,84 @@ func (m appModel) applySettingsChange(key, val string) (tea.Model, tea.Cmd) {
 	case "Permissions":
 		return m.handlePermissionsSwitch(val)
 	}
+	return m, nil
+}
+
+// handleShellEscape runs a user-typed shell command.
+//
+// When the agent is idle:
+//
+//	!command  → persist as "user" message (model sees it next turn)
+//	!!command → persist as "shell" message (model never sees it)
+//
+// When the agent is running:
+//
+//	!command  → steer the output into the conversation mid-run
+//	!!command → show output only, no steer, not persisted
+func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
+	silent := strings.HasPrefix(text, "!!")
+	var command string
+	if silent {
+		command = strings.TrimSpace(text[2:])
+	} else {
+		command = strings.TrimSpace(text[1:])
+	}
+	if command == "" {
+		return m, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = m.cwd
+	out, _ := cmd.CombinedOutput()
+	output := strings.TrimRight(string(out), "\n")
+	isError := cmd.ProcessState != nil && !cmd.ProcessState.Success()
+
+	running := m.agent.IsRunning()
+
+	if running && !silent {
+		// Steer the output into the running conversation.
+		body := fmt.Sprintf("Shell output (from user):\n$ %s\n%s", command, output)
+		m.agent.Steer(body)
+	} else if !running {
+		// Persist in the conversation history.
+		var body string
+		if output != "" {
+			body = fmt.Sprintf("$ %s\n%s", command, output)
+		} else {
+			body = fmt.Sprintf("$ %s\n(no output)", command)
+		}
+		role := "user"
+		if silent {
+			role = "shell"
+		}
+		msg := core.AgentMessage{
+			Message: core.Message{
+				Role:    role,
+				Content: []core.Content{core.TextContent(body)},
+			},
+			Custom: map[string]any{"shell": true},
+		}
+		if err := m.agent.AppendMessage(msg); err != nil {
+			m.s.pendingStatus = "✗ shell: " + err.Error()
+			return m, nil
+		}
+	}
+	// running && silent → just show, don't steer or persist
+
+	// Show as a tool block in the TUI.
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type:       "tool",
+		ToolName:   "bash",
+		ToolArgs:   map[string]any{"command": command},
+		ToolResult: output,
+		ToolDone:   true,
+		IsError:    isError,
+	})
+
+	m.s.viewportDirty = true
+	m.updateViewport()
 	return m, nil
 }
