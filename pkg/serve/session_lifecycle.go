@@ -138,7 +138,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 				if a.IsRunning() {
 					a.Steer(agentText)
 				} else {
-					a.Enqueue(agentText)
+					// Agent is idle — start a new run so the LLM can
+					// react to the subagent completion (same as TUI's
+					// startNotificationRun).
+					s.startNotificationRun(agentText)
 				}
 			}
 			s.broadcast(Event{Type: "subagent_complete", Data: SubagentCompleteData{

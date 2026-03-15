@@ -512,6 +512,77 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 	return "send", nil
 }
 
+// startNotificationRun triggers an agent run from a subagent completion notification.
+// Must be called with sess.mu NOT held. The session must be in StateIdle.
+func (sess *ManagedSession) startNotificationRun(text string) {
+	sess.mu.Lock()
+	if sess.State != StateIdle {
+		sess.mu.Unlock()
+		// Agent is now running (race with user Send) — enqueue instead.
+		if a := sess.runtime.agent; a != nil {
+			a.Enqueue(text)
+		}
+		return
+	}
+	sess.State = StateRunning
+	sess.Updated = time.Now()
+
+	runCtx, cancel := context.WithCancel(sess.runtime.sessionCtx)
+	sess.runCancel = cancel
+	sess.mu.Unlock()
+
+	sess.broadcast(Event{Type: "state_change", Data: StateChangeData{
+		State: string(StateRunning),
+	}})
+
+	go func() {
+		defer cancel()
+
+		if sess.runtime.checkpoints != nil {
+			sess.runtime.checkpoints.Begin("subagent notification")
+		}
+
+		msgs, err := sess.runtime.agent.Send(runCtx, text)
+
+		if sess.runtime.checkpoints != nil {
+			if err != nil && runCtx.Err() != nil {
+				sess.runtime.checkpoints.Discard()
+			} else {
+				sess.runtime.checkpoints.Commit()
+			}
+		}
+
+		sess.mu.Lock()
+		sess.messages = msgs
+		sess.runCancel = nil
+		sess.approvals.pending = nil
+		sess.approvals.pendingAsk = nil
+		if err != nil && runCtx.Err() == nil {
+			sess.State = StateError
+			sess.Error = err.Error()
+		} else {
+			sess.State = StateIdle
+			sess.Error = ""
+		}
+		sess.Updated = time.Now()
+		newState := sess.State
+		errText := sess.Error
+		sess.mu.Unlock()
+
+		sess.save()
+
+		sess.broadcast(Event{Type: "state_change", Data: StateChangeData{
+			State: string(newState),
+			Error: errText,
+		}})
+		sess.broadcastContextUpdate()
+
+		if finalText := extractFinalText(msgs); finalText != "" {
+			sess.broadcast(Event{Type: "run_end", Data: RunEndData{Text: finalText}})
+		}
+	}()
+}
+
 // broadcastContextUpdate sends the current context usage percentage to WS clients.
 func (s *ManagedSession) broadcastContextUpdate() {
 	pct := s.contextPercent()
