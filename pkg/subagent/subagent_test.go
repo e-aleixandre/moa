@@ -798,7 +798,7 @@ func TestAsyncSubagentOnCompleteOnSuccess(t *testing.T) {
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
-		OnAsyncComplete: func(jobID, task, status, resultTail string) {
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
 			mu.Lock()
 			gotID = jobID
 			gotTask = task
@@ -860,7 +860,7 @@ func TestAsyncSubagentOnCompleteOnCancel(t *testing.T) {
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
-		OnAsyncComplete: func(jobID, task, status, resultTail string) {
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
 			mu.Lock()
 			gotStatus = status
 			called = true

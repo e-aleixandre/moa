@@ -173,7 +173,7 @@ func TestFormatSubagentNotification(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatSubagentNotification("job-1", "do something", tt.status, tt.resultTail)
+			result := FormatSubagentNotification("job-1", "do something", tt.status, tt.resultTail, false)
 			if tt.wantEmpty && result != "" {
 				t.Errorf("expected empty, got %q", result)
 			}

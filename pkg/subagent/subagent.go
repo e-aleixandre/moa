@@ -48,7 +48,8 @@ type Config struct {
 	SkillsIndex            string // pre-formatted skills index for system prompt
 
 	// OnAsyncComplete is called when an async subagent finishes (completed, failed, or cancelled).
-	OnAsyncComplete func(jobID, task, status, resultTail string)
+	// truncated is true when resultTail is only the last N lines of the full output.
+	OnAsyncComplete func(jobID, task, status, resultTail string, truncated bool)
 
 	// OnAsyncJobChange is called when an async job starts or finishes.
 	// count is the current number of running jobs.
@@ -266,7 +267,8 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 			if !ok {
 				return
 			}
-			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tailLines(snap.Result, asyncResultTailLines))
+			tail, wasTruncated := tailLinesWithFlag(snap.Result, asyncResultTailLines)
+			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tail, wasTruncated)
 		}
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())
@@ -508,6 +510,15 @@ func tailLines(s string, n int) string {
 		return s
 	}
 	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// tailLinesWithFlag returns the last n lines and whether truncation occurred.
+func tailLinesWithFlag(s string, n int) (string, bool) {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s, false
+	}
+	return strings.Join(lines[len(lines)-n:], "\n"), true
 }
 
 func getBool(params map[string]any, key string) bool {

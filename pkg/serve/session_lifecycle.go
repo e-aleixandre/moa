@@ -122,12 +122,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 				s.broadcast(Event{Type: "subagent_count", Data: SubagentCountData{Count: count}})
 			}
 		},
-		OnAsyncComplete: func(jobID, task, status, resultTail string) {
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
 			s := sess
 			if s == nil {
 				return
 			}
-			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail)
+			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail, truncated)
 			if agentText == "" {
 				return
 			}

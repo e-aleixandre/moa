@@ -277,6 +277,32 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 		action = "❓ questions"
 		target, body = formatAskUserBlock(block)
 
+	case "subagent":
+		action = "⚡ subagent"
+		target, _ = stringArg(block.ToolArgs, "task")
+		// Build metadata badges for model, thinking, tools
+		var badges []string
+		if m, ok := stringArg(block.ToolArgs, "model"); ok && m != "" {
+			badges = append(badges, m)
+		}
+		if th, ok := stringArg(block.ToolArgs, "thinking"); ok && th != "" {
+			badges = append(badges, "thinking:"+th)
+		}
+		if tools, ok := block.ToolArgs["tools"].([]any); ok && len(tools) > 0 {
+			names := make([]string, 0, len(tools))
+			for _, t := range tools {
+				if s, ok := t.(string); ok {
+					names = append(names, s)
+				}
+			}
+			badges = append(badges, strings.Join(names, ","))
+		}
+		if len(badges) > 0 {
+			target += "  [" + strings.Join(badges, " · ") + "]"
+		}
+		body = block.ToolResult
+		tail = true
+
 	default:
 		action = block.ToolName
 		target = sortedArgSummary(block.ToolArgs)

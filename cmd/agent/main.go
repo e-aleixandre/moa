@@ -232,8 +232,8 @@ func main() {
 			default:
 			}
 		},
-		OnAsyncComplete: func(jobID, task, status, resultTail string) {
-			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail)
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail, truncated)
 			if agentText == "" {
 				return
 			}

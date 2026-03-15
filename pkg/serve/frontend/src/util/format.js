@@ -57,8 +57,14 @@ export function toolPath(name, args) {
     return '';
   }
   if (n === 'subagent') {
-    const task = a.task || '';
-    return task.length > 100 ? task.substring(0, 97) + '…' : task;
+    let task = a.task || '';
+    if (task.length > 80) task = task.substring(0, 77) + '…';
+    const badges = [];
+    if (a.model) badges.push(a.model);
+    if (a.thinking) badges.push('thinking:' + a.thinking);
+    if (Array.isArray(a.tools) && a.tools.length > 0) badges.push(a.tools.join(','));
+    if (badges.length > 0) task += '  [' + badges.join(' · ') + ']';
+    return task;
   }
 
   // Fallback: first short string value

@@ -73,7 +73,7 @@ type SessionConfig struct {
 
 	// Subagent callbacks. All optional (nil = no-op).
 	OnAsyncJobChange func(count int)
-	OnAsyncComplete  func(jobID, task, status, resultTail string)
+	OnAsyncComplete  func(jobID, task, status, resultTail string, truncated bool)
 }
 
 // Session is a fully wired session ready for agent.Run/Send.
@@ -401,10 +401,17 @@ func resolveReviewConfig(fallbackModel core.Model, modelSpec, thinkingSpec strin
 
 // FormatSubagentNotification produces the text injected into the agent's
 // conversation when an async subagent completes. Shared between CLI and serve.
-func FormatSubagentNotification(jobID, task, status, resultTail string) string {
+// FormatSubagentNotification produces the text injected into the agent's
+// conversation when an async subagent completes. The truncated flag indicates
+// that resultTail is only a portion of the full output.
+func FormatSubagentNotification(jobID, task, status, resultTail string, truncated bool) string {
 	switch status {
 	case "completed":
-		return fmt.Sprintf("[subagent completed] Job %s finished.\nTask: %s\n\nResult (last 50 lines):\n%s", jobID, task, resultTail)
+		label := "Result:\n"
+		if truncated {
+			label = "Result (truncated — use subagent_status for full output):\n"
+		}
+		return fmt.Sprintf("[subagent completed] Job %s finished.\nTask: %s\n\n%s%s", jobID, task, label, resultTail)
 	case "failed":
 		return fmt.Sprintf("[subagent failed] Job %s failed.\nTask: %s\nError: %s", jobID, task, resultTail)
 	case "cancelled":
