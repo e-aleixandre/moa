@@ -27,6 +27,7 @@ export function toolVerb(name) {
   if (n === 'fetch_content')                 return { verb: 'fetch',  cls: 'fetch' };
   if (n === 'web_search')                    return { verb: 'search', cls: 'search' };
   if (n === 'ask_user')                      return { verb: '❓ questions', cls: 'ask-user' };
+  if (n === 'subagent')                      return { verb: '⚡ subagent', cls: 'subagent' };
   return { verb: name, cls: '' };
 }
 
@@ -54,6 +55,10 @@ export function toolPath(name, args) {
       return text.length > 80 ? text.substring(0, 77) + '…' : text;
     }
     return '';
+  }
+  if (n === 'subagent') {
+    const task = a.task || '';
+    return task.length > 100 ? task.substring(0, 97) + '…' : task;
   }
 
   // Fallback: first short string value

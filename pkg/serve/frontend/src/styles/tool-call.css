@@ -202,6 +202,7 @@
 /* ─── ask_user Q&A preview ──────────────────────────────── */
 
 .tool-call-verb.ask-user { color: var(--lavender); }
+.tool-call-verb.subagent { color: var(--sky); }
 
 .ask-preview {
   background: var(--mantle);

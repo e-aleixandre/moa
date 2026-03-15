@@ -63,7 +63,20 @@ export function normalizeHistory(raw) {
         result: output,
       });
     } else if (msg.role === 'user') {
-      result.push(msg);
+      const userText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+      const subagent = parseSubagentNotification(userText);
+      if (subagent) {
+        result.push({
+          _type: 'tool_start',
+          tool_call_id: 'subagent_' + result.length,
+          tool_name: 'subagent',
+          args: { task: subagent.task },
+          status: subagent.status === 'completed' ? 'done' : 'error',
+          result: subagent.result,
+        });
+      } else {
+        result.push(msg);
+      }
     }
   }
   return result;
@@ -365,9 +378,6 @@ export function handleWsSubagentCount(id, count) {
 }
 
 export function handleWsSubagentComplete(id, data) {
-  // Don't add to messages — the subagent result is injected into the agent
-  // via Steer/Enqueue and will flow naturally as the agent's response.
-  // Just show a transient notification.
   const statusIcon = data.status === 'completed' ? '✓' : data.status === 'failed' ? '✗' : '⊘';
   addToast({
     sessionId: id,
@@ -375,6 +385,20 @@ export function handleWsSubagentComplete(id, data) {
     detail: data.task || data.job_id,
     type: data.status === 'completed' ? 'done' : 'attention',
   });
+
+  // Add a subagent card to the chat (mirrors TUI's subagent block).
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  const messages = [...(sess.messages || [])];
+  messages.push({
+    _type: 'tool_start',
+    tool_call_id: `subagent-${data.job_id}`,
+    tool_name: 'subagent',
+    args: { task: data.task || '' },
+    status: data.status === 'completed' ? 'done' : 'error',
+    result: data.text || '',
+  });
+  updateSession(id, { messages });
 }
 
 export function handleWsRunEnd(id) {
@@ -416,4 +440,34 @@ export function handleWsCommand(id, data) {
       updateSession(id, { messages: normalizeHistory(data.messages) });
     }
   }
+}
+
+/** Parse a subagent notification from a user message text (mirrors TUI's parseSubagentNotification). */
+function parseSubagentNotification(text) {
+  const prefixes = {
+    '[subagent completed] ': 'completed',
+    '[subagent failed] ': 'failed',
+    '[subagent cancelled] ': 'cancelled',
+  };
+  for (const [prefix, status] of Object.entries(prefixes)) {
+    if (text.startsWith(prefix)) {
+      const rest = text.slice(prefix.length);
+      const lines = rest.split('\n');
+      let task = '';
+      let resultStart = 2;
+      if (lines.length >= 2 && lines[1].startsWith('Task: ')) {
+        task = lines[1].slice('Task: '.length);
+      }
+      let result = lines.slice(resultStart).join('\n').trim();
+      // Strip known result prefixes
+      for (const p of ['Result (last 50 lines):\n', 'Error: ']) {
+        if (result.startsWith(p)) {
+          result = result.slice(p.length).trim();
+          break;
+        }
+      }
+      return { task, status, result };
+    }
+  }
+  return null;
 }
