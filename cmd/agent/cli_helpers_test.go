@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	"github.com/ealeixandre/moa/pkg/core"
+)
 
 func TestParseAllowPattern_Valid(t *testing.T) {
 	tests := []struct {
@@ -44,5 +50,40 @@ func TestParseAllowPattern_Repeated(t *testing.T) {
 	}
 	if len(patterns) != 3 {
 		t.Errorf("expected 3 patterns, got %d", len(patterns))
+	}
+}
+
+type captureProvider struct {
+	keys []string
+}
+
+func (p *captureProvider) Stream(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	p.keys = append(p.keys, req.Options.APIKey)
+	ch := make(chan core.AssistantEvent)
+	close(ch)
+	return ch, nil
+}
+
+func TestRefreshingProvider_UsesLatestKeyEachRequest(t *testing.T) {
+	store := newTestAuthStore(t)
+	base := &captureProvider{}
+	prov := &refreshingProvider{
+		base:         base,
+		providerName: "anthropic",
+		authStore:    store,
+	}
+
+	t.Setenv("ANTHROPIC_API_KEY", "key-1")
+	if _, err := prov.Stream(context.Background(), core.Request{}); err != nil {
+		t.Fatalf("first Stream error: %v", err)
+	}
+
+	t.Setenv("ANTHROPIC_API_KEY", "key-2")
+	if _, err := prov.Stream(context.Background(), core.Request{}); err != nil {
+		t.Fatalf("second Stream error: %v", err)
+	}
+
+	if got, want := base.keys, []string{"key-1", "key-2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("api keys passed = %#v, want %#v", got, want)
 	}
 }

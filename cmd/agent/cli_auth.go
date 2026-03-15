@@ -22,7 +22,7 @@ func handleLogin(providerName string, authStore *auth.Store) {
 				auth.OpenBrowser(url)
 			},
 			func() (string, error) {
-				fmt.Print("Paste the callback URL or authorization code here: ")
+				fmt.Print("Paste callback URL, code#state, or code here: ")
 				var code string
 				_, err := fmt.Scanln(&code)
 				return code, err
@@ -77,7 +77,7 @@ func handleOpenAILogin(authStore *auth.Store) {
 				auth.OpenBrowser(url)
 			},
 			func() (string, error) {
-				fmt.Print("Paste the callback URL or authorization code here: ")
+				fmt.Print("Paste callback URL, code#state, or code here: ")
 				var code string
 				_, err := fmt.Scanln(&code)
 				return code, err

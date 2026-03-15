@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,23 @@ import (
 type ProviderBuildResult struct {
 	Provider   core.Provider
 	AuthNotice string
+}
+
+// refreshingProvider injects a fresh API key into each Stream request.
+// This enables OAuth refresh during long-running sessions without restart.
+type refreshingProvider struct {
+	base         core.Provider
+	providerName string
+	authStore    *auth.Store
+}
+
+func (p *refreshingProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	apiKey, _, err := p.authStore.GetAPIKey(p.providerName)
+	if err != nil {
+		return nil, err
+	}
+	req.Options.APIKey = apiKey
+	return p.base.Stream(ctx, req)
 }
 
 // buildProvider creates the appropriate provider based on the model's Provider field.
@@ -58,7 +76,12 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 		return ProviderBuildResult{}, err
 	}
 
-	return ProviderBuildResult{Provider: p, AuthNotice: authNotice}, nil
+	wrapped := &refreshingProvider{
+		base:         p,
+		providerName: providerName,
+		authStore:    authStore,
+	}
+	return ProviderBuildResult{Provider: wrapped, AuthNotice: authNotice}, nil
 }
 
 func printAuthNotice(w io.Writer, notice string) {

@@ -18,7 +18,7 @@ import (
 
 const (
 	// Anthropic OAuth endpoints
-	clientID    = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	clientID     = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	authorizeURL = "https://claude.ai/oauth/authorize"
 	tokenURL     = "https://console.anthropic.com/v1/oauth/token"
 	redirectURI  = "https://console.anthropic.com/oauth/code/callback"
@@ -50,11 +50,8 @@ func LoginAnthropic(openURL func(string), promptCode func() (string, error)) (*O
 		return nil, fmt.Errorf("generating PKCE: %w", err)
 	}
 
-	// Generate a separate state parameter (not reusing PKCE verifier)
-	state, err := randomState()
-	if err != nil {
-		return nil, fmt.Errorf("generating state: %w", err)
-	}
+	// Anthropic manual OAuth flow expects state coupled to PKCE verifier.
+	state := verifier
 
 	// Build authorize URL
 	params := url.Values{
@@ -85,8 +82,8 @@ func LoginAnthropic(openURL func(string), promptCode func() (string, error)) (*O
 	// Parse input: supports callback URL (?code=...&state=...) or code#state
 	code, returnedState := parseAuthInput(raw)
 
-	// Validate state to prevent CSRF
-	if returnedState != state {
+	// Validate state when provided.
+	if returnedState != "" && returnedState != state {
 		return nil, fmt.Errorf("authorization failed: state mismatch — paste the full callback URL or code#state value and retry")
 	}
 
@@ -180,14 +177,30 @@ func exchangeToken(code, state, verifier string) (*OAuthCredentials, error) {
 // Supports:
 //  1. Full callback URL: https://...?code=ABC&state=XYZ
 //  2. code#state format: ABC#XYZ
+//  3. Callback URL with fragment: https://...#ABC#XYZ
+//  4. Callback URL fragment query: https://...#code=ABC&state=XYZ
 //
-// Returns empty state if format is unrecognized (state validation will reject it).
+// Returns empty state if format is unrecognized.
 func parseAuthInput(raw string) (code, state string) {
 	// Try URL format first
 	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
 		q := u.Query()
 		if c := q.Get("code"); c != "" {
 			return c, q.Get("state")
+		}
+
+		// Some callbacks encode payload in fragment
+		if u.Fragment != "" {
+			// #code#state
+			if parts := strings.SplitN(u.Fragment, "#", 2); len(parts) == 2 && parts[0] != "" {
+				return parts[0], parts[1]
+			}
+			// #code=...&state=...
+			if fq, err := url.ParseQuery(u.Fragment); err == nil {
+				if c := fq.Get("code"); c != "" {
+					return c, fq.Get("state")
+				}
+			}
 		}
 	}
 
@@ -196,7 +209,7 @@ func parseAuthInput(raw string) (code, state string) {
 		return parts[0], parts[1]
 	}
 
-	// Unrecognized format — return empty state (validation will reject)
+	// Unrecognized format — return empty state
 	return raw, ""
 }
 
@@ -212,7 +225,7 @@ func generatePKCE() (verifier, challenge string, err error) {
 	return verifier, challenge, nil
 }
 
-// randomState generates a random state parameter for OAuth CSRF protection.
+// randomState generates a random OAuth state token.
 func randomState() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
