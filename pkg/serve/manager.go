@@ -514,7 +514,7 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 
 // startNotificationRun triggers an agent run from a subagent completion notification.
 // Must be called with sess.mu NOT held. The session must be in StateIdle.
-func (sess *ManagedSession) startNotificationRun(text string) {
+func (sess *ManagedSession) startNotificationRun(text string, custom map[string]any) {
 	sess.mu.Lock()
 	if sess.State != StateIdle {
 		sess.mu.Unlock()
@@ -542,7 +542,7 @@ func (sess *ManagedSession) startNotificationRun(text string) {
 			sess.runtime.checkpoints.Begin("subagent notification")
 		}
 
-		msgs, err := sess.runtime.agent.Send(runCtx, text)
+		msgs, err := sess.runtime.agent.SendWithCustom(runCtx, text, custom)
 
 		if sess.runtime.checkpoints != nil {
 			if err != nil && runCtx.Err() != nil {

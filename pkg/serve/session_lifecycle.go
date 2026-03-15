@@ -141,7 +141,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 					// Agent is idle — start a new run so the LLM can
 					// react to the subagent completion (same as TUI's
 					// startNotificationRun).
-					s.startNotificationRun(agentText)
+					s.startNotificationRun(agentText, map[string]any{
+						"source":           "subagent",
+						"subagent_job_id":  jobID,
+						"subagent_task":    task,
+						"subagent_status":  status,
+						"subagent_result":  resultTail,
+					})
 				}
 			}
 			s.broadcast(Event{Type: "subagent_complete", Data: SubagentCompleteData{

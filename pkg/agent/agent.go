@@ -180,6 +180,20 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 	})
 }
 
+// SendWithCustom appends a user message with custom metadata and runs the agent loop.
+// The custom map is attached to the AgentMessage (persisted in session, available
+// to frontends for rendering decisions) but does not affect LLM behavior.
+func (a *Agent) SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return a.execute(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		msg.Custom = custom
+		a.state.Messages = append(a.state.Messages, msg)
+	})
+}
+
 // SendWithContent appends a user message with mixed content blocks (text + images)
 // and runs the agent loop, continuing the conversation.
 // The content slice is shallow-copied to prevent caller aliasing. This is sufficient

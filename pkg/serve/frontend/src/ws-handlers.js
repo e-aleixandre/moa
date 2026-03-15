@@ -63,19 +63,32 @@ export function normalizeHistory(raw) {
         result: output,
       });
     } else if (msg.role === 'user') {
-      const userText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
-      const subagent = parseSubagentNotification(userText);
-      if (subagent) {
+      if (msg.custom?.source === 'subagent') {
         result.push({
           _type: 'tool_start',
           tool_call_id: 'subagent_' + result.length,
           tool_name: 'subagent',
-          args: { task: subagent.task },
-          status: subagent.status === 'completed' ? 'done' : 'error',
-          result: subagent.result,
+          args: { task: msg.custom.subagent_task || '' },
+          status: (msg.custom.subagent_status || '') === 'completed' ? 'done' : 'error',
+          result: msg.custom.subagent_result || '',
         });
       } else {
-        result.push(msg);
+        // Backwards compatibility: detect prefix-based notifications
+        // from sessions saved before custom metadata was introduced.
+        const userText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+        const subagent = parseSubagentNotification(userText);
+        if (subagent) {
+          result.push({
+            _type: 'tool_start',
+            tool_call_id: 'subagent_' + result.length,
+            tool_name: 'subagent',
+            args: { task: subagent.task },
+            status: subagent.status === 'completed' ? 'done' : 'error',
+            result: subagent.result,
+          });
+        } else {
+          result.push(msg);
+        }
       }
     }
   }

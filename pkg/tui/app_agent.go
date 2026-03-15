@@ -87,6 +87,21 @@ func (m appModel) launchAgentSend(text string, gen uint64) tea.Cmd {
 	)
 }
 
+// launchAgentSendWithCustom returns a tea.Batch that runs agent.SendWithCustom
+// and starts the render tick and spinner.
+func (m appModel) launchAgentSendWithCustom(text string, custom map[string]any, gen uint64) tea.Cmd {
+	agentRef := m.agent
+	baseCtx := m.baseCtx
+	return tea.Batch(
+		func() tea.Msg {
+			msgs, err := agentRef.SendWithCustom(baseCtx, text, custom)
+			return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
+		},
+		renderTick(),
+		m.status.spinner.Tick,
+	)
+}
+
 // launchAgentSendWithContent returns a tea.Batch that runs agent.SendWithContent
 // and starts the render tick and spinner.
 func (m appModel) launchAgentSendWithContent(content []core.Content, gen uint64) tea.Cmd {
@@ -183,7 +198,13 @@ func (m appModel) startNotificationRun(n SubagentNotification) (tea.Model, tea.C
 
 	gen := m.prepareRun(truncateLabel(n.Task))
 	m.updateViewport()
-	return m, m.launchAgentSend(n.AgentText, gen)
+	return m, m.launchAgentSendWithCustom(n.AgentText, map[string]any{
+		"source":          "subagent",
+		"subagent_job_id": n.JobID,
+		"subagent_task":   n.Task,
+		"subagent_status": n.Status,
+		"subagent_result": n.ResultTail,
+	}, gen)
 }
 
 // handleAgentEvent processes a single agent event, updating TUI state.
@@ -525,7 +546,19 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 		case "user":
 			if len(msg.Content) > 0 {
 				text := msg.Content[0].Text
-				if task, status, result, ok := parseSubagentNotification(text); ok {
+				if source, _ := msg.Custom["source"].(string); source == "subagent" {
+					task, _ := msg.Custom["subagent_task"].(string)
+					status, _ := msg.Custom["subagent_status"].(string)
+					result, _ := msg.Custom["subagent_result"].(string)
+					m.s.blocks = append(m.s.blocks, messageBlock{
+						Type:           "subagent",
+						SubagentTask:   task,
+						SubagentStatus: status,
+						SubagentResult: result,
+					})
+				} else if task, status, result, ok := parseSubagentNotification(text); ok {
+					// Backwards compatibility: detect prefix-based notifications
+					// from sessions saved before custom metadata was introduced.
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type:           "subagent",
 						SubagentTask:   task,
