@@ -1,10 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from 'preact/hooks';
 import { Message } from './Message.jsx';
 import { ToolCall } from './ToolCall.jsx';
-import { PermissionCard } from './PermissionCard.jsx';
 import { AskUserCard } from './AskUserCard.jsx';
 
-export function MessageList({ session, onResolvePermission }) {
+export function MessageList({ session }) {
   const containerRef = useRef(null);
   const [atBottom, setAtBottom] = useState(true);
   const [showNewBtn, setShowNewBtn] = useState(false);
@@ -37,7 +36,6 @@ export function MessageList({ session, onResolvePermission }) {
   const messages = session.messages || [];
   const streaming = session.streamingText;
   const thinking = session.thinkingText;
-  const pendingPerm = session.pendingPerm;
   const pendingAsk = session.pendingAsk;
   // pendingSteers are rendered in InputBar, not here.
 
@@ -64,14 +62,6 @@ export function MessageList({ session, onResolvePermission }) {
         <div class="streaming">
           <Message msg={{ role: 'assistant', content: [{ type: 'text', text: streaming }] }} />
         </div>
-      )}
-
-      {pendingPerm && (
-        <PermissionCard
-          perm={pendingPerm}
-          sessionId={session.id}
-          onResolve={onResolvePermission}
-        />
       )}
 
       {pendingAsk && (

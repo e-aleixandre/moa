@@ -22,7 +22,9 @@ export function ToolCall({ tool }) {
   // For running tools with streaming, show the live output
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
   // Final result (from toolPreview) — only used when not streaming
-  const preview = !isAskUser && !liveText ? toolPreview(tool.tool_name, tool.args, tool.result) : null;
+  const preview = !isAskUser && !liveText
+    ? toolPreview(tool.tool_name, tool.args, tool.result, tool.status)
+    : null;
   const isDiff = !isAskUser && !liveText && preview && preview.kind === 'diff';
 
   // Streaming: show tail. Finished: show head.
@@ -33,6 +35,7 @@ export function ToolCall({ tool }) {
   const hasOverflow = previewData && previewData.hidden > 0;
   const fullText = liveText || (preview ? preview.text : '');
   const isErrorBody = !liveText && (tool.status === 'error' || tool.status === 'rejected');
+  const note = !liveText && tool.note ? tool.note : null;
 
   return (
     <>
@@ -77,6 +80,10 @@ export function ToolCall({ tool }) {
           <div class="tool-call-footer">
             ↑ {previewData.hidden} lines above · {previewData.total} total
           </div>
+        )}
+
+        {note && (
+          <div class="tool-call-footer tool-call-note">{note}</div>
         )}
       </div>
 

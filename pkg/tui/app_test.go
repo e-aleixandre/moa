@@ -951,6 +951,56 @@ func TestSummarizeToolBlock_WriteError(t *testing.T) {
 	}
 }
 
+func TestSummarizeToolBlock_EditShowsFallbackDiffBeforeExecution(t *testing.T) {
+	block := messageBlock{
+		Type:     "tool",
+		ToolName: "edit",
+		ToolArgs: map[string]any{
+			"path":    "/tmp/x.txt",
+			"oldText": "line1\nline2",
+			"newText": "line1\nlineX",
+		},
+		ToolDone: false,
+	}
+	action, target, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	if action != "edit" {
+		t.Fatalf("action = %q, want edit", action)
+	}
+	if target != "/tmp/x.txt" {
+		t.Fatalf("target = %q, want /tmp/x.txt", target)
+	}
+	if !strings.Contains(body, "@@ -1 +1 @@") {
+		t.Fatalf("expected fallback diff header, got:\n%s", body)
+	}
+	if !strings.Contains(body, "-line2") || !strings.Contains(body, "+lineX") {
+		t.Fatalf("expected add/del lines in fallback diff, got:\n%s", body)
+	}
+
+	data := buildToolBlockData(block, false)
+	if !data.IsDiff {
+		t.Fatalf("expected IsDiff=true for edit fallback diff")
+	}
+}
+
+func TestDiffLineKind_NumberedAndUnified(t *testing.T) {
+	cases := []struct {
+		line string
+		want int
+	}{
+		{line: "@@ -1 +1 @@", want: 2},
+		{line: "+added", want: 1},
+		{line: "-removed", want: -1},
+		{line: "   4 +added", want: 1},
+		{line: "  10 -removed", want: -1},
+		{line: "   3  context", want: 0},
+	}
+	for _, tc := range cases {
+		if got := diffLineKind(tc.line); got != tc.want {
+			t.Errorf("diffLineKind(%q) = %d, want %d", tc.line, got, tc.want)
+		}
+	}
+}
+
 func TestSummarizeToolBlock_BashRunningWithStreaming(t *testing.T) {
 	block := messageBlock{
 		Type: "tool", ToolName: "bash",

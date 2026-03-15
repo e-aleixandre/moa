@@ -66,7 +66,7 @@ export function toolPath(name, args) {
 }
 
 /** Extract the most relevant content for the tool preview. */
-export function toolPreview(name, args, result) {
+export function toolPreview(name, args, result, status) {
   const n = (name || '').toLowerCase();
   const a = typeof args === 'string' ? tryParse(args) : (args || {});
 

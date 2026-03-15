@@ -5,6 +5,7 @@ package permission
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -34,9 +35,26 @@ type Request struct {
 	Response chan<- Response
 }
 
+const permissionFeedbackArgKey = "__permission_feedback"
+
 // readOnly tools never require approval (even in ask/auto mode).
 var readOnly = map[string]bool{
 	"read": true, "ls": true, "grep": true, "find": true,
+}
+
+// PopApprovedFeedback removes and returns a permission feedback note (if any)
+// injected by askUser on approved decisions.
+func PopApprovedFeedback(args map[string]any) string {
+	if args == nil {
+		return ""
+	}
+	v, ok := args[permissionFeedbackArgKey]
+	if !ok {
+		return ""
+	}
+	delete(args, permissionFeedbackArgKey)
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
 }
 
 // Gate mediates tool permissions. Created once, shared between agent and TUI.
@@ -190,6 +208,9 @@ func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *c
 			g.AddAllow(resp.Allow)
 		}
 		if resp.Approved {
+			if fb := strings.TrimSpace(resp.Feedback); fb != "" && args != nil {
+				args[permissionFeedbackArgKey] = fb
+			}
 			return nil
 		}
 		reason := "denied by user"

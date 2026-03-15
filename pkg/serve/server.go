@@ -197,6 +197,9 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			ID       string `json:"id"`
 			Approved bool   `json:"approved"`
 			Feedback string `json:"feedback"`
+			Allow    string `json:"allow"`
+			Rule     string `json:"rule"`
+			Action   string `json:"action"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -206,7 +209,15 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "permission request ID is required", http.StatusBadRequest)
 			return
 		}
-		if err := sess.ResolvePermission(body.ID, body.Approved, body.Feedback); err != nil {
+		if body.Action == "add_rule" {
+			if err := sess.AddPermissionRule(body.ID, body.Rule); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := sess.ResolvePermissionWithAllow(body.ID, body.Approved, body.Feedback, body.Allow); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -638,5 +649,3 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck
 	return wsjson.Write(ctx, conn, v)
 }
-
-

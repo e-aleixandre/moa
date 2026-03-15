@@ -101,6 +101,13 @@
   transition: color var(--duration) var(--ease);
 }
 .tool-call-footer:hover { color: var(--subtext0); }
+.tool-call-note {
+  color: var(--peach);
+  font-style: normal;
+  border-top: 1px dashed rgba(250,179,135,0.25);
+  cursor: default;
+}
+.tool-call-note:hover { color: var(--peach); }
 
 /* Expand button in header */
 .tool-call-expand {

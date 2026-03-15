@@ -112,6 +112,7 @@ func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
 	sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
 		PermissionMode: result,
 	}})
+	sess.save()
 	return result, nil
 }
 

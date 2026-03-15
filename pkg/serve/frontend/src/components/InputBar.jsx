@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
 import { SendHorizonal, Mic, MicOff, Loader2 } from 'lucide-preact';
-import { sendMessage, cancelRun, execCommand, execShell } from '../session-actions.js';
+import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addPermissionRule } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';
@@ -31,10 +31,19 @@ export function InputBar({ sessionId, session, tileId }) {
   const textareaRef = useRef(null);
   const sessionState = session?.state;
   const pendingSteers = session?.pendingSteers;
-  const busy = sessionState === 'running' || sessionState === 'permission';
+  const busy = sessionState === 'running';
   const [canTranscribe, setCanTranscribe] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
+  const feedbackRef = useRef(null);
+
+  const permissionActive = sessionState === 'permission' && !!session?.pendingPerm;
+  const [permFeedbackOpen, setPermFeedbackOpen] = useState(false);
+  const [permFeedback, setPermFeedback] = useState('');
+  const [permRuleOpen, setPermRuleOpen] = useState(false);
+  const [permRule, setPermRule] = useState('');
+  const [permBusy, setPermBusy] = useState(false);
+  const [permError, setPermError] = useState('');
 
   // Check if transcription is available on mount.
   useEffect(() => {
@@ -45,7 +54,9 @@ export function InputBar({ sessionId, session, tileId }) {
   }, []);
 
   const insertAtCursor = useCallback((text) => {
-    const el = textareaRef.current;
+    const el = (permissionActive && permFeedbackOpen)
+      ? feedbackRef.current
+      : textareaRef.current;
     if (!el) return;
     const start = el.selectionStart;
     const end = el.selectionEnd;
@@ -57,9 +68,25 @@ export function InputBar({ sessionId, session, tileId }) {
     el.selectionStart = el.selectionEnd = newPos;
     el.focus();
     el.dispatchEvent(new Event('input', { bubbles: true }));
-  }, []);
+  }, [permissionActive, permFeedbackOpen]);
 
   const { recording, transcribing, toggle: toggleVoice, supported: voiceSupported } = useVoice(insertAtCursor);
+
+  useEffect(() => {
+    if (!permissionActive) {
+      setPermFeedbackOpen(false);
+      setPermFeedback('');
+      setPermRuleOpen(false);
+      setPermRule('');
+      setPermError('');
+      setPermBusy(false);
+      return;
+    }
+    setPermFeedback('');
+    setPermRuleOpen(false);
+    setPermRule('');
+    setPermError('');
+  }, [permissionActive, session?.pendingPerm?.id]);
 
   const handleMicClick = useCallback(() => {
     if (voiceSupported) {
@@ -290,6 +317,45 @@ export function InputBar({ sessionId, session, tileId }) {
     }
   };
 
+  const handlePermissionResolve = async (approved, alwaysAllow = false) => {
+    if (!sessionId || !session?.pendingPerm || permBusy) return;
+    setPermBusy(true);
+    setPermError('');
+    try {
+      await resolvePermission(sessionId, session.pendingPerm.id, approved, {
+        feedback: permFeedback.trim(),
+        allow: alwaysAllow ? (session.pendingPerm.allow_pattern || '') : '',
+      });
+      setPermFeedbackOpen(false);
+      setPermFeedback('');
+      setPermRuleOpen(false);
+      setPermRule('');
+    } catch (e) {
+      console.error('Permission resolve failed:', e);
+      setPermError(e.message || 'Permission resolve failed');
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
+  const handlePermissionRule = async () => {
+    if (!sessionId || !session?.pendingPerm || permBusy) return;
+    const rule = permRule.trim();
+    if (!rule) return;
+    setPermBusy(true);
+    setPermError('');
+    try {
+      await addPermissionRule(sessionId, session.pendingPerm.id, rule);
+      setPermRule('');
+      setPermRuleOpen(false);
+    } catch (e) {
+      console.error('Add permission rule failed:', e);
+      setPermError(e.message || 'Could not add rule');
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
   // Derive activity label from session state.
   let activityLabel = null;
   if (busy) {
@@ -299,69 +365,144 @@ export function InputBar({ sessionId, session, tileId }) {
     else activityLabel = 'Working…';
   }
 
+  const permissionMode = session?.permissionMode || 'yolo';
+
   return (
-    <div class={`input-bar ${busy ? 'busy' : ''}`}>
-      {busy && activityLabel && (
-        <div class="input-activity">
-          <Loader2 class="input-activity-spinner" />
-          <span class="input-activity-label">{activityLabel}</span>
-          <button class="input-activity-abort" onClick={handleStop} title="Stop (Esc)">
-            Esc to abort
-          </button>
-        </div>
-      )}
-      {!busy && pendingSteers && pendingSteers.length > 0 && (
-        <div class="input-steers">
-          {pendingSteers.length === 1
-            ? <span class="input-steer-text">{pendingSteers[0]}</span>
-            : <span class="input-steer-text">{pendingSteers[pendingSteers.length - 1]} <span class="input-steer-count">+{pendingSteers.length - 1}</span></span>
-          }
-          <span class="input-steer-badge">queued</span>
-        </div>
-      )}
-      <div class="input-wrap">
-        {cmdSuggestions && (
-          <div class="cmd-suggestions">
-            {cmdSuggestions.map((cmd, i) => (
-              <div
-                key={cmd.name}
-                class={`cmd-suggestion-item ${i === cmdCursor ? 'selected' : ''}`}
-                onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(cmd); }}
-                onMouseEnter={() => setCmdCursor(i)}
-              >
-                <span class="cmd-suggestion-name">/{cmd.name}</span>
-                {cmd.args && <span class="cmd-suggestion-args">{cmd.args}</span>}
-                <span class="cmd-suggestion-desc">{cmd.desc}</span>
-              </div>
-            ))}
+    <div class={`input-bar ${busy ? 'busy' : ''} ${permissionActive ? 'permission-active' : ''}`}>
+      {permissionActive ? (
+        <div class="permission-prompt-bar">
+          <div class="permission-prompt-head">
+            <span class="permission-prompt-title">Permission required</span>
+            {permError && <span class="permission-prompt-error">{permError}</span>}
           </div>
-        )}
-        <textarea
-          ref={textareaRef}
-          placeholder={busy ? 'Steer the agent…' : 'Send a message…'}
-          rows="1"
-          onInput={handleInput}
-          onKeyDown={handleKey}
-        />
-        {canTranscribe && (
+
+          <div class="permission-prompt-actions">
+            <button class="btn-approve" disabled={permBusy} onClick={() => handlePermissionResolve(true)}>
+              Approve
+            </button>
+
+            {permissionMode === 'ask' && (
+              <button class="btn-approve permission-always" disabled={permBusy} onClick={() => handlePermissionResolve(true, true)}>
+                Always allow
+              </button>
+            )}
+
+            <button class="btn-deny" disabled={permBusy} onClick={() => handlePermissionResolve(false)}>
+              Deny
+            </button>
+
+            {permissionMode === 'auto' && (
+              <button class="permission-rule-toggle" disabled={permBusy} onClick={() => setPermRuleOpen(v => !v)}>
+                Add rule
+              </button>
+            )}
+
+            <button class="permission-feedback-toggle" disabled={permBusy} onClick={() => setPermFeedbackOpen(v => !v)}>
+              + feedback
+            </button>
+          </div>
+
+          {permRuleOpen && permissionMode === 'auto' && (
+            <div class="permission-inline-editor">
+              <input
+                type="text"
+                value={permRule}
+                onInput={(e) => setPermRule(e.target.value)}
+                placeholder="Type rule and press Save rule"
+              />
+              <button class="permission-rule-save" disabled={permBusy || !permRule.trim()} onClick={handlePermissionRule}>
+                Save rule
+              </button>
+            </div>
+          )}
+
+          {permFeedbackOpen && (
+            <div class="permission-inline-editor">
+              <input
+                ref={feedbackRef}
+                type="text"
+                value={permFeedback}
+                onInput={(e) => setPermFeedback(e.target.value)}
+                placeholder="Optional feedback"
+              />
+              {canTranscribe && (
+                <button
+                  class={`input-mic permission-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''} ${!voiceSupported ? 'unavailable' : ''}`}
+                  onClick={handleMicClick}
+                  disabled={transcribing}
+                  title={!voiceSupported ? 'Voice input (requires HTTPS)' : recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
+                >
+                  {transcribing ? <Loader2 /> : recording ? <MicOff /> : <Mic />}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {busy && activityLabel && (
+            <div class="input-activity">
+              <Loader2 class="input-activity-spinner" />
+              <span class="input-activity-label">{activityLabel}</span>
+              <button class="input-activity-abort" onClick={handleStop} title="Stop (Esc)">
+                Esc to abort
+              </button>
+            </div>
+          )}
+          {!busy && pendingSteers && pendingSteers.length > 0 && (
+            <div class="input-steers">
+              {pendingSteers.length === 1
+                ? <span class="input-steer-text">{pendingSteers[0]}</span>
+                : <span class="input-steer-text">{pendingSteers[pendingSteers.length - 1]} <span class="input-steer-count">+{pendingSteers.length - 1}</span></span>
+              }
+              <span class="input-steer-badge">queued</span>
+            </div>
+          )}
+          <div class="input-wrap">
+            {cmdSuggestions && (
+              <div class="cmd-suggestions">
+                {cmdSuggestions.map((cmd, i) => (
+                  <div
+                    key={cmd.name}
+                    class={`cmd-suggestion-item ${i === cmdCursor ? 'selected' : ''}`}
+                    onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(cmd); }}
+                    onMouseEnter={() => setCmdCursor(i)}
+                  >
+                    <span class="cmd-suggestion-name">/{cmd.name}</span>
+                    {cmd.args && <span class="cmd-suggestion-args">{cmd.args}</span>}
+                    <span class="cmd-suggestion-desc">{cmd.desc}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              placeholder={busy ? 'Steer the agent…' : 'Send a message…'}
+              rows="1"
+              onInput={handleInput}
+              onKeyDown={handleKey}
+            />
+            {canTranscribe && (
+              <button
+                class={`input-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''} ${!voiceSupported ? 'unavailable' : ''}`}
+                onClick={handleMicClick}
+                disabled={transcribing}
+                title={!voiceSupported ? 'Voice input (requires HTTPS)' : recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
+              >
+                {transcribing ? <Loader2 /> : recording ? <MicOff /> : <Mic />}
+              </button>
+            )}
+          </div>
           <button
-            class={`input-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''} ${!voiceSupported ? 'unavailable' : ''}`}
-            onClick={handleMicClick}
-            disabled={transcribing}
-            title={!voiceSupported ? 'Voice input (requires HTTPS)' : recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
+            class={`input-send ${busy ? 'steer' : ''}`}
+            onClick={handleSend}
+            disabled={!sessionId}
+            title={busy ? 'Steer' : 'Send'}
           >
-            {transcribing ? <Loader2 /> : recording ? <MicOff /> : <Mic />}
+            <SendHorizonal />
           </button>
-        )}
-      </div>
-      <button
-        class={`input-send ${busy ? 'steer' : ''}`}
-        onClick={handleSend}
-        disabled={!sessionId}
-        title={busy ? 'Steer' : 'Send'}
-      >
-        <SendHorizonal />
-      </button>
+        </>
+      )}
     </div>
   );
 }

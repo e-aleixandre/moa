@@ -8,6 +8,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/compaction"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
 
@@ -369,13 +370,14 @@ func extractToolCalls(msg *core.Message) []core.Content {
 
 // toolExecSlot holds the state for one tool call during parallel execution.
 type toolExecSlot struct {
-	tc           core.Content
-	approved     bool
-	startEmitted bool
-	rejectReason string      // rejection reason (empty if approved)
-	rejectKind   string      // "permission" or "other"
-	result       core.Result // populated after execution
-	isError      bool
+	tc                 core.Content
+	approved           bool
+	startEmitted       bool
+	rejectReason       string      // rejection reason (empty if approved)
+	rejectKind         string      // "permission" or "other"
+	permissionFeedback string      // optional approved feedback note from permission prompt
+	result             core.Result // populated after execution
+	isError            bool
 }
 
 const (
@@ -440,6 +442,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				continue
 			}
 		}
+		slots[i].permissionFeedback = permission.PopApprovedFeedback(tc.Arguments)
 		if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
 			slots[i].rejectReason = "Tool call blocked: " + decision.Reason
 			slots[i].rejectKind = rejectKindOther
@@ -543,7 +546,8 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			continue
 		}
 
-		result := cfg.hooks.FireToolResult(ctx, slots[i].tc.ToolName, slots[i].result, slots[i].isError)
+		resultWithFeedback := appendPermissionFeedback(slots[i].result, slots[i].permissionFeedback)
+		result := cfg.hooks.FireToolResult(ctx, slots[i].tc.ToolName, resultWithFeedback, slots[i].isError)
 		isError := result.IsError
 
 		cfg.emitter.Emit(core.AgentEvent{
@@ -556,6 +560,26 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		})
 		cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(slots[i].tc, result, isError, false))
 	}
+}
+
+func appendPermissionFeedback(result core.Result, feedback string) core.Result {
+	if feedback == "" {
+		return result
+	}
+	feedback = "Permission feedback: " + feedback
+	for i := range result.Content {
+		if result.Content[i].Type == "text" {
+			text := result.Content[i].Text
+			if text == "" {
+				result.Content[i].Text = feedback
+			} else {
+				result.Content[i].Text = text + "\n\n" + feedback
+			}
+			return result
+		}
+	}
+	result.Content = append(result.Content, core.TextContent(feedback))
+	return result
 }
 
 // runTool calls a tool's Execute function and streams partial results.

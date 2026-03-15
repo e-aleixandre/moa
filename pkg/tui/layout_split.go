@@ -167,12 +167,12 @@ func (SplitLayout) RenderToolBlock(block ToolBlockData, width int, theme Theme) 
 			if inStderr {
 				style = stderrStyle
 			} else if block.IsDiff {
-				switch {
-				case strings.HasPrefix(bl, "+"):
+				switch diffLineKind(bl) {
+				case 1:
 					style = diffAdd
-				case strings.HasPrefix(bl, "-"):
+				case -1:
 					style = diffDel
-				case strings.HasPrefix(bl, "@@"):
+				case 2:
 					style = diffHunk
 				}
 			}
@@ -200,6 +200,9 @@ func splitBadge(block ToolBlockData, theme Theme, bg lipgloss.Color) string {
 	var fg lipgloss.Color
 
 	switch {
+	case block.IsRejected:
+		text = " REJECTED "
+		fg = theme.Peach
 	case block.IsError:
 		text = " ERROR "
 		fg = theme.Red

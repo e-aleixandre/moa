@@ -222,3 +222,92 @@
   background: var(--surface1);
   color: var(--red);
 }
+
+/* Permission-mode prompt replaces the normal input area */
+.permission-prompt-bar {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.permission-prompt-title {
+  color: var(--yellow);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.permission-prompt-error {
+  color: var(--red);
+  font-size: 12px;
+}
+
+.permission-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.permission-always {
+  background: linear-gradient(135deg, var(--teal), var(--sky));
+  box-shadow: 0 2px 6px rgba(148, 226, 213, 0.25);
+}
+
+.permission-rule-toggle,
+.permission-feedback-toggle,
+.permission-rule-save {
+  background: var(--surface0);
+  color: var(--subtext1);
+  border: 1px solid rgba(205, 214, 244, 0.12);
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.permission-rule-toggle:hover,
+.permission-feedback-toggle:hover,
+.permission-rule-save:hover {
+  background: var(--surface1);
+}
+
+.permission-inline-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.permission-inline-editor input {
+  flex: 1;
+  min-width: 0;
+  background: var(--base);
+  color: var(--text);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.permission-inline-editor input:focus {
+  outline: none;
+  border-color: var(--mauve);
+  box-shadow: 0 0 0 2px rgba(203,166,247,0.15);
+}
+
+.permission-mic {
+  position: static;
+  right: auto;
+  bottom: auto;
+  border: 1px solid var(--surface0);
+  background: var(--base);
+  padding: 7px;
+}

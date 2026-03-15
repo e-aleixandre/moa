@@ -133,11 +133,22 @@ export async function cancelRun(id) {
   await api('POST', `/api/sessions/${id}/cancel`);
 }
 
-export async function resolvePermission(sessionId, permId, approved) {
+export async function resolvePermission(sessionId, permId, approved, opts = {}) {
   await api('POST', `/api/sessions/${sessionId}/permission`, {
-    id: permId, approved, feedback: '',
+    id: permId,
+    approved,
+    feedback: opts.feedback || '',
+    allow: opts.allow || '',
   });
   updateSession(sessionId, { pendingPerm: null });
+}
+
+export async function addPermissionRule(sessionId, permId, rule) {
+  await api('POST', `/api/sessions/${sessionId}/permission`, {
+    id: permId,
+    action: 'add_rule',
+    rule,
+  });
 }
 
 export async function resolveAskUser(sessionId, askId, answers) {

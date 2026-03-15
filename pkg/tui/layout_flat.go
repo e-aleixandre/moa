@@ -83,6 +83,8 @@ func (FlatLayout) RenderToolBlock(block ToolBlockData, width int, theme Theme) s
 	}
 	if !block.Done {
 		title += bgS.Render(" ") + dimStyle.Background(bg).Render("running…")
+	} else if block.IsRejected {
+		title += bgS.Render(" ") + lipgloss.NewStyle().Foreground(theme.Peach).Background(bg).Bold(true).Render("rejected")
 	}
 
 	var lines []string
@@ -119,12 +121,12 @@ func (FlatLayout) RenderToolBlock(block ToolBlockData, width int, theme Theme) s
 			if inStderr {
 				style = stderrStyle
 			} else if block.IsDiff {
-				switch {
-				case strings.HasPrefix(bl, "+"):
+				switch diffLineKind(bl) {
+				case 1:
 					style = diffAdd
-				case strings.HasPrefix(bl, "-"):
+				case -1:
 					style = diffDel
-				case strings.HasPrefix(bl, "@@"):
+				case 2:
 					style = diffHunk
 				}
 			}

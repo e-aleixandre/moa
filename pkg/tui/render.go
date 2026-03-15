@@ -26,6 +26,8 @@ type messageBlock struct {
 	ToolDiff   string         // diff output for edit tool (from onUpdate, preserved across ToolExecEnd)
 	ToolDone   bool           // true after tool_execution_end
 	IsError    bool           // true if the tool returned an error
+	Rejected   bool           // true when permission-denied rejection
+	ToolNote   string         // optional footer note (feedback/rejection reason)
 
 	// Subagent blocks (Type == "subagent")
 	SubagentStatus string // "completed", "failed", "cancelled"
@@ -144,4 +146,3 @@ func toolResultText(result *core.Result) string {
 	}
 	return strings.TrimSpace(sb.String())
 }
-

@@ -68,17 +68,17 @@ type ManagedSession struct {
 type sessionRuntime struct {
 	agent         *agent.Agent
 	gate          *permission.Gate
-	unsub         func()                 // unsubscribe from agent events
-	sessionCtx    context.Context        // per-session lifetime; cancelled on Delete
-	sessionCancel context.CancelFunc     // cancels sessionCtx
+	unsub         func()             // unsubscribe from agent events
+	sessionCtx    context.Context    // per-session lifetime; cancelled on Delete
+	sessionCancel context.CancelFunc // cancels sessionCtx
 	toolReg       *core.Registry
 	agentsMD      string
 	resolvedModel core.Model
-	mcpMgr        *mcp.Manager           // nil when no MCP; closed on Delete
-	UntrustedMCP  bool                   // true when .mcp.json exists but not trusted
+	mcpMgr        *mcp.Manager // nil when no MCP; closed on Delete
+	UntrustedMCP  bool         // true when .mcp.json exists but not trusted
 	taskStore     *tasks.Store
 	planMode      *planmode.PlanMode
-	checkpoints   *checkpoint.Store   // nil when checkpoints disabled
+	checkpoints   *checkpoint.Store // nil when checkpoints disabled
 
 	// subagentTexts tracks notification texts injected via Steer/Enqueue
 	// so broadcastAgentEvent can suppress duplicate steer WS events.
@@ -333,6 +333,10 @@ func (s *ManagedSession) save() {
 	s.persistence.persisted.Messages = make([]core.AgentMessage, len(s.messages))
 	copy(s.persistence.persisted.Messages, s.messages)
 	s.persistence.persisted.CompactionEpoch = s.runtime.agent.CompactionEpoch()
+	if s.persistence.persisted.Metadata == nil {
+		s.persistence.persisted.Metadata = make(map[string]any)
+	}
+	s.persistence.persisted.Metadata["permission_mode"] = s.permissionMode()
 	// Persist task store state.
 	if s.runtime.taskStore != nil {
 		if s.persistence.persisted.Metadata == nil {
@@ -408,7 +412,6 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		savedCacheTTL:   30 * time.Second,
 	}
 }
-
 
 // Send delivers a user message to a session and starts the agent run.
 // Returns ErrBusy if the session is already running/waiting for permission.
@@ -595,4 +598,3 @@ type CommandResult struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
 }
-

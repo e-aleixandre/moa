@@ -44,6 +44,7 @@ export function normalizeHistory(raw) {
             args: c.arguments || {},
             status,
             result: resultText,
+            note: extractToolNote(resultText, status === 'rejected'),
           });
         }
       }
@@ -77,6 +78,27 @@ function parseShellBody(body) {
   let output = rest.slice(nl + 1);
   if (output === '(no output)') output = '';
   return { command, output };
+}
+
+function extractToolNote(result, rejected) {
+  const text = (result || '').trim();
+  if (!text) return null;
+
+  if (rejected) {
+    let reason = text;
+    if (reason.startsWith('Error: ')) reason = reason.slice('Error: '.length);
+    if (reason.startsWith('Permission denied: ')) reason = reason.slice('Permission denied: '.length);
+    reason = reason.trim();
+    if (!reason || reason === 'denied by user') return 'Rejected';
+    return `Rejected reason: ${reason}`;
+  }
+
+  const marker = 'Permission feedback:';
+  const idx = text.lastIndexOf(marker);
+  if (idx < 0) return null;
+  const fb = text.slice(idx + marker.length).trim();
+  if (!fb) return null;
+  return `Feedback: ${fb}`;
 }
 
 // --- Streaming delta batching ---
@@ -243,9 +265,16 @@ export function handleWsToolEnd(id, data) {
     ? 'rejected'
     : (data.is_error ? 'error' : 'done');
 
+  const note = extractToolNote(data.result, data.rejected === true);
   const messages = sess.messages.map(m => {
     if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
-      return { ...m, status: nextStatus, result: data.result, streamingResult: null };
+      return {
+        ...m,
+        status: nextStatus,
+        result: data.result,
+        streamingResult: null,
+        note,
+      };
     }
     return m;
   });
@@ -290,7 +319,12 @@ export function handleWsAskUser(id, data) {
 export function handleWsPermissionRequest(id, data) {
   updateSession(id, {
     state: 'permission',
-    pendingPerm: { id: data.id, tool_name: data.tool_name, args: data.args },
+    pendingPerm: {
+      id: data.id,
+      tool_name: data.tool_name,
+      args: data.args,
+      allow_pattern: data.allow_pattern || '',
+    },
   });
   flashSession(id, 'attention');
   const state = store.get();

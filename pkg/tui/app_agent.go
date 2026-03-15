@@ -21,6 +21,34 @@ func truncateLabel(s string) string {
 	return s
 }
 
+func extractToolNote(resultText string, rejected bool) string {
+	t := strings.TrimSpace(resultText)
+	if t == "" {
+		return ""
+	}
+
+	if rejected {
+		t = strings.TrimPrefix(t, "Error: ")
+		t = strings.TrimPrefix(t, "Permission denied: ")
+		t = strings.TrimSpace(t)
+		if t == "" || t == "denied by user" {
+			return "Rejected"
+		}
+		return "Rejected reason: " + t
+	}
+
+	const marker = "Permission feedback:"
+	idx := strings.LastIndex(t, marker)
+	if idx < 0 {
+		return ""
+	}
+	fb := strings.TrimSpace(t[idx+len(marker):])
+	if fb == "" {
+		return ""
+	}
+	return "Feedback: " + fb
+}
+
 // --- Agent interaction ---
 
 // prepareRun sets up the common run state (running flag, gen counter, stream state, status).
@@ -246,7 +274,9 @@ func (m *appModel) handleAgentEvent(e core.AgentEvent) {
 			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
 				b.ToolDone = true
 				b.IsError = e.IsError
+				b.Rejected = e.Rejected
 				b.ToolResult = toolResultText(e.Result)
+				b.ToolNote = extractToolNote(b.ToolResult, b.Rejected)
 				break
 			}
 		}
@@ -544,14 +574,23 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 				}
 			}
 
+			isRejected := false
+			if msg.Custom != nil {
+				if v, ok := msg.Custom["rejected"].(bool); ok {
+					isRejected = v
+				}
+			}
+			trimmed := strings.TrimSpace(resultText)
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type:       "tool",
 				ToolCallID: msg.ToolCallID,
 				ToolName:   msg.ToolName,
 				ToolArgs:   tc.Arguments,
-				ToolResult: strings.TrimSpace(resultText),
+				ToolResult: trimmed,
 				ToolDone:   true,
 				IsError:    msg.IsError,
+				Rejected:   isRejected,
+				ToolNote:   extractToolNote(trimmed, isRejected),
 			})
 		case "compaction_summary":
 			m.s.blocks = append(m.s.blocks, messageBlock{

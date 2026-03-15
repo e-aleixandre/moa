@@ -27,15 +27,17 @@ type Layout interface {
 // ToolBlockData is the layout-facing view of a tool block.
 // All content is pre-processed (truncated/extracted). Layout only arranges it.
 type ToolBlockData struct {
-	ToolName string
-	Action   string // verb: "write", "bash", "read", "edit", "search", "fetch"
-	Target   string // path, command, query
-	Header   string // tail-truncation notice (above body) — may be empty
-	Body     string // content — may be empty (e.g. running tool with no output yet)
-	Footer   string // head-truncation notice (below body) — may be empty
-	IsDiff   bool   // true when Body contains unified diff (color +/- lines)
-	Done     bool
-	IsError  bool
+	ToolName   string
+	Action     string // verb: "write", "bash", "read", "edit", "search", "fetch"
+	Target     string // path, command, query
+	Header     string // tail-truncation notice (above body) — may be empty
+	Body       string // content — may be empty (e.g. running tool with no output yet)
+	Footer     string // head-truncation notice (below body) — may be empty
+	IsDiff     bool   // true when Body contains unified diff (color +/- lines)
+	Done       bool
+	IsError    bool
+	IsRejected bool
+	Note       string // optional note shown in footer area (feedback/reason)
 }
 
 // --- Layout registry ---
@@ -106,16 +108,32 @@ func buildToolBlockData(block messageBlock, expanded bool) ToolBlockData {
 		maxLines = 0
 	}
 	action, target, header, body, footer := summarizeToolBlock(block, maxLines)
+	isEditFallbackDiff := false
+	if block.ToolName == "edit" {
+		_, hasOld := stringArg(block.ToolArgs, "oldText")
+		_, hasNew := stringArg(block.ToolArgs, "newText")
+		isEditFallbackDiff = hasOld || hasNew
+	}
+	note := strings.TrimSpace(block.ToolNote)
+	if note != "" {
+		if footer != "" {
+			footer = footer + "\n" + note
+		} else {
+			footer = note
+		}
+	}
 	return ToolBlockData{
-		ToolName: block.ToolName,
-		Action:   action,
-		Target:   target,
-		Header:   header,
-		Body:     body,
-		Footer:   footer,
-		IsDiff:   block.ToolDiff != "" && !block.IsError,
-		Done:     block.ToolDone,
-		IsError:  block.IsError,
+		ToolName:   block.ToolName,
+		Action:     action,
+		Target:     target,
+		Header:     header,
+		Body:       body,
+		Footer:     footer,
+		IsDiff:     block.ToolName == "edit" && (block.ToolDiff != "" || isEditFallbackDiff),
+		Done:       block.ToolDone,
+		IsError:    block.IsError,
+		IsRejected: block.Rejected,
+		Note:       note,
 	}
 }
 
@@ -187,12 +205,16 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 	case "edit":
 		action = "edit"
 		target, _ = stringArg(block.ToolArgs, "path")
-		if block.IsError {
-			body = block.ToolResult
-		} else if block.ToolDiff != "" {
+		if block.ToolDiff != "" {
 			body = block.ToolDiff
-		} else if newText, ok := stringArg(block.ToolArgs, "newText"); ok {
-			body = newText
+		} else {
+			oldText, _ := stringArg(block.ToolArgs, "oldText")
+			newText, _ := stringArg(block.ToolArgs, "newText")
+			if oldText != "" || newText != "" {
+				body = fallbackEditDiff(oldText, newText)
+			} else {
+				body = block.ToolResult
+			}
 		}
 
 	case "web_search":
@@ -272,6 +294,93 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 		body = strings.TrimSpace(body)
 	}
 	return action, target, header, body, footer
+}
+
+// diffLineKind classifies one diff line:
+//
+//	 2 = hunk header (@@ ... @@)
+//	 1 = addition (+)
+//	-1 = deletion (-)
+//	 0 = context/unknown
+//
+// Supports both plain unified diff lines ("+foo", "-bar") and numbered lines
+// used by edit previews ("   4 +foo", "  10 -bar").
+func diffLineKind(line string) int {
+	if strings.HasPrefix(line, "@@") {
+		return 2
+	}
+	if strings.HasPrefix(line, "+") {
+		return 1
+	}
+	if strings.HasPrefix(line, "-") {
+		return -1
+	}
+	i := 0
+	for i < len(line) && line[i] == ' ' {
+		i++
+	}
+	j := i
+	for j < len(line) && line[j] >= '0' && line[j] <= '9' {
+		j++
+	}
+	if j == i {
+		return 0
+	}
+	k := j
+	for k < len(line) && line[k] == ' ' {
+		k++
+	}
+	if k >= len(line) {
+		return 0
+	}
+	switch line[k] {
+	case '+':
+		return 1
+	case '-':
+		return -1
+	default:
+		return 0
+	}
+}
+
+// fallbackEditDiff builds a readable numbered diff from old/new text so edit
+// cards show a diff immediately (before tool execution/update events arrive).
+func fallbackEditDiff(oldText, newText string) string {
+	oldLines := splitPreserveEmpty(oldText)
+	newLines := splitPreserveEmpty(newText)
+	if len(oldLines) == 0 && len(newLines) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("@@ -1 +1 @@\n")
+
+	maxN := len(oldLines)
+	if len(newLines) > maxN {
+		maxN = len(newLines)
+	}
+	for i := 0; i < maxN; i++ {
+		hasOld := i < len(oldLines)
+		hasNew := i < len(newLines)
+		if hasOld && hasNew && oldLines[i] == newLines[i] {
+			fmt.Fprintf(&sb, "%4d  %s\n", i+1, oldLines[i])
+			continue
+		}
+		if hasOld {
+			fmt.Fprintf(&sb, "%4d -%s\n", i+1, oldLines[i])
+		}
+		if hasNew {
+			fmt.Fprintf(&sb, "%4d +%s\n", i+1, newLines[i])
+		}
+	}
+	return strings.TrimSuffix(sb.String(), "\n")
+}
+
+func splitPreserveEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
 
 // --- Truncation helpers ---
