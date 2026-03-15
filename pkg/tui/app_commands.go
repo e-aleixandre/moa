@@ -559,12 +559,7 @@ func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
 	m.s.pendingStatus = ""
 	m.s.pendingTimeline = newModelSwitchEvent(newModel)
 
-	if m.session != nil {
-		if m.session.Metadata == nil {
-			m.session.Metadata = make(map[string]any)
-		}
-		m.session.Metadata["model"] = fullModelSpec(newModel)
-	}
+	m.saveRuntimeMetadata()
 	return m, nil
 }
 
@@ -673,6 +668,10 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
 		})
 	}
+	m.saveRuntimeMetadata()
+	if saveCmd := m.saveSession(m.agent.Messages()); saveCmd != nil {
+		cmds = append(cmds, saveCmd)
+	}
 	m.updateViewport()
 	return m, tea.Batch(cmds...)
 }
@@ -698,7 +697,12 @@ func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 
 	m.statusBar.UpdateThinkingSegment(level)
 	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", level)
-	return m, nil
+	m.saveRuntimeMetadata()
+	var cmds []tea.Cmd
+	if saveCmd := m.saveSession(m.agent.Messages()); saveCmd != nil {
+		cmds = append(cmds, saveCmd)
+	}
+	return m, tea.Batch(cmds...)
 }
 
 func (m appModel) loadSessionBrowser() tea.Cmd {
@@ -745,8 +749,12 @@ func (m appModel) newSession() *session.Session {
 		return nil
 	}
 	sess := m.sessionStore.Create()
-	sess.Metadata["cwd"] = m.cwd
-	sess.Metadata["model"] = fullModelSpec(m.agent.Model())
+	sess.SetRuntimeMetadata(
+		fullModelSpec(m.agent.Model()),
+		m.cwd,
+		m.currentPermissionMode(),
+		m.agent.ThinkingLevel(),
+	)
 	return sess
 }
 
@@ -755,6 +763,26 @@ func fullModelSpec(model core.Model) string {
 		return model.Provider + "/" + model.ID
 	}
 	return model.ID
+}
+
+func (m appModel) currentPermissionMode() string {
+	if m.permGate == nil {
+		return "yolo"
+	}
+	return string(m.permGate.Mode())
+}
+
+// saveRuntimeMetadata persists the current runtime config to the session metadata.
+func (m appModel) saveRuntimeMetadata() {
+	if m.session == nil {
+		return
+	}
+	m.session.SetRuntimeMetadata(
+		fullModelSpec(m.agent.Model()),
+		m.cwd,
+		m.currentPermissionMode(),
+		m.agent.ThinkingLevel(),
+	)
 }
 
 func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
@@ -786,9 +814,9 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.statusBar.UpdateCostSegment(0)
 	m.statusBar.UpdateCacheSegment(0)
 
-	// Restore model from session metadata when resuming.
+	// Restore model, thinking, and permission mode from session metadata when resuming.
 	if sess != nil && sess.Metadata != nil {
-		m.restoreModelFromMetadata(sess)
+		m.restoreFromMetadata(sess)
 	}
 
 	// Restore plan mode from session metadata.
@@ -829,39 +857,27 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	return m, m.forceRepaint()
 }
 
-func (m *appModel) restoreModelFromMetadata(sess *session.Session) {
-	spec, ok := sess.Metadata["model"].(string)
-	if !ok || spec == "" {
+// restoreFromMetadata restores model, thinking, and permission mode from
+// session metadata using the centralized bootstrap logic, then updates UI.
+func (m *appModel) restoreFromMetadata(sess *session.Session) {
+	if m.bootstrapSess == nil {
 		return
 	}
-	model, _ := core.ResolveModel(spec)
-	if model.ID == "" {
-		return
+	result := m.bootstrapSess.RestoreFromMetadata(sess, m.providerFactory)
+
+	// Update UI from restore results.
+	if result.ModelName != "" {
+		m.modelName = result.ModelName
+		m.statusBar.UpdateModelSegment(m.modelName)
 	}
-	current := m.agent.Model()
-	if model.ID == current.ID {
-		return
+	if result.Thinking != "" {
+		m.statusBar.UpdateThinkingSegment(result.Thinking)
 	}
-	var prov core.Provider
-	if model.Provider != current.Provider {
-		if m.providerFactory == nil {
-			return
-		}
-		p, err := m.providerFactory(model)
-		if err != nil {
-			return
-		}
-		prov = p
-	}
-	if err := m.agent.Reconfigure(prov, model, m.agent.ThinkingLevel()); err != nil {
-		return
-	}
-	name := model.Name
-	if name == "" {
-		name = model.ID
-	}
-	m.modelName = name
-	m.statusBar.UpdateModelSegment(m.modelName)
+
+	// Sync permission gate from bootstrap session.
+	m.permGate = m.bootstrapSess.Gate
+	m.syncPermissionCheck()
+	m.statusBar.UpdatePermissionsSegment(result.PermissionMode)
 }
 
 // handlePromptTemplate processes `/prompt` and `/prompt <name>`.

@@ -289,26 +289,32 @@ func main() {
 				}
 			}
 		}
+		providerFactory := func(model core.Model) (core.Provider, error) {
+			build, err := buildProvider(model, authStore)
+			if err != nil {
+				return nil, err
+			}
+			return build.Provider, nil
+		}
+
 		if persistedSess != nil {
 			if err := ag.LoadState(persistedSess.Messages, persistedSess.CompactionEpoch); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
 				persistedSess = nil
 			} else {
-				if persistedSess.Metadata == nil {
-					persistedSess.Metadata = make(map[string]any)
-				}
-				if persistedSess.Metadata["cwd"] == nil {
-					persistedSess.Metadata["cwd"] = cwd
-				}
-				if persistedSess.Metadata["model"] == nil {
-					persistedSess.Metadata["model"] = modelSpec(resolvedModel)
-				}
+				// Restore model, thinking, and permission mode from session metadata.
+				sess.RestoreFromMetadata(persistedSess, providerFactory)
+				resolvedModel = sess.Model
 			}
 		}
 		if persistedSess == nil && sessionStore != nil && !startInSessionBrowser {
 			persistedSess = sessionStore.Create()
-			persistedSess.Metadata["cwd"] = cwd
-			persistedSess.Metadata["model"] = modelSpec(resolvedModel)
+			persistedSess.SetRuntimeMetadata(
+				bootstrap.FullModelSpec(resolvedModel),
+				cwd,
+				sess.CurrentPermissionMode(),
+				ag.ThinkingLevel(),
+			)
 		}
 
 		pm := sess.PlanMode
@@ -316,14 +322,6 @@ func main() {
 		if persistedSess != nil && persistedSess.Metadata != nil {
 			pm.RestoreState(persistedSess.Metadata)
 			pm.ApplyRestoredState()
-		}
-
-		providerFactory := func(model core.Model) (core.Provider, error) {
-			build, err := buildProvider(model, authStore)
-			if err != nil {
-				return nil, err
-			}
-			return build.Provider, nil
 		}
 
 		// Build transcriber from OpenAI API key (same logic as serve).
@@ -356,6 +354,7 @@ func main() {
 			ProviderFactory:   providerFactory,
 			Transcriber:       transcriber,
 			CheckpointStore:   cpStore,
+			BootstrapSession:  sess,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {

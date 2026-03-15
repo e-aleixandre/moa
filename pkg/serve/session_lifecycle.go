@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,10 +57,12 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 
 	// Finalize persistence.
 	if persisted != nil {
-		persisted.Metadata = map[string]any{
-			"model": fullModelSpec(sess.runtime.resolvedModel),
-			"cwd":   sess.CWD,
-		}
+		persisted.SetRuntimeMetadata(
+			fullModelSpec(sess.runtime.resolvedModel),
+			sess.CWD,
+			sess.permissionMode(),
+			sess.runtime.agent.ThinkingLevel(),
+		)
 		_ = store.Save(persisted)
 		sess.persistence.persisted = persisted
 		sess.persistence.store = store
@@ -309,8 +312,7 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		return nil, err
 	}
 
-	modelID, _ := saved.Metadata["model"].(string)
-	cwd, _ := saved.Metadata["cwd"].(string)
+	modelID, cwd, savedPermMode, savedThinking := saved.RuntimeMeta()
 	if cwd == "" {
 		cwd = m.workspaceRoot
 	}
@@ -319,6 +321,19 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("resume: %w", err)
+	}
+
+	// Restore thinking level from persisted metadata.
+	if savedThinking != "" {
+		_ = sess.runtime.agent.Reconfigure(nil, sess.runtime.agent.Model(), savedThinking)
+	}
+
+	// Restore permission mode from persisted metadata.
+	if savedPermMode != "" {
+		// Use SetPermissionMode which handles gate creation and bridge wiring.
+		if _, pmErr := m.SetPermissionMode(sess.ID, savedPermMode); pmErr != nil {
+			slog.Warn("resume: could not restore permission mode", "id", saved.ID, "mode", savedPermMode, "error", pmErr)
+		}
 	}
 
 	if err := sess.runtime.agent.LoadState(saved.Messages, saved.CompactionEpoch); err != nil {

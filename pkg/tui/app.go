@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/askuser"
+	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -127,6 +128,9 @@ type appModel struct {
 	// Display
 	modelName string
 
+	// Bootstrap session for centralized restore
+	bootstrapSess *bootstrap.Session
+
 	// Provider switching
 	providerFactory      ProviderFactory
 	scopedModels         map[string]bool      // model IDs pinned for Ctrl+P cycling
@@ -198,6 +202,7 @@ type Config struct {
 	PromptTemplates       []promptpkg.Template        // available prompt templates (nil = none)
 	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
 	CheckpointStore       *checkpoint.Store           // file checkpoint store for /undo (nil = disabled)
+	BootstrapSession      *bootstrap.Session          // bootstrap session for centralized restore (nil = legacy)
 }
 
 // New creates the TUI model. The agent must already be configured.
@@ -266,6 +271,12 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		voice:                voiceRecorder{transcriber: cfg.Transcriber},
 		checkpoints:          cfg.CheckpointStore,
 		baseSystemPrompt:     ag.SystemPrompt(),
+		bootstrapSess:        cfg.BootstrapSession,
+	}
+
+	// Restore session state (model, thinking, permissions) from metadata.
+	if m.session != nil && m.session.Metadata != nil {
+		m.restoreFromMetadata(m.session)
 	}
 
 	// Initialize status line segments.

@@ -333,10 +333,12 @@ func (s *ManagedSession) save() {
 	s.persistence.persisted.Messages = make([]core.AgentMessage, len(s.messages))
 	copy(s.persistence.persisted.Messages, s.messages)
 	s.persistence.persisted.CompactionEpoch = s.runtime.agent.CompactionEpoch()
-	if s.persistence.persisted.Metadata == nil {
-		s.persistence.persisted.Metadata = make(map[string]any)
-	}
-	s.persistence.persisted.Metadata["permission_mode"] = s.permissionMode()
+	s.persistence.persisted.SetRuntimeMetadata(
+		fullModelSpec(s.runtime.resolvedModel),
+		s.CWD,
+		s.permissionMode(),
+		s.runtime.agent.ThinkingLevel(),
+	)
 	// Persist task store state.
 	if s.runtime.taskStore != nil {
 		if s.persistence.persisted.Metadata == nil {

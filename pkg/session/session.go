@@ -57,6 +57,41 @@ type Summary struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// RuntimeMetadata keys used for persisting session configuration.
+const (
+	MetaModel          = "model"
+	MetaCWD            = "cwd"
+	MetaPermissionMode = "permission_mode"
+	MetaThinking       = "thinking"
+)
+
+// SetRuntimeMetadata persists the core session configuration (model, cwd,
+// permission mode, thinking level) into Metadata. Called on every state
+// change and at session creation. Centralizes what gets persisted so all
+// frontends (TUI, serve, headless CLI) stay consistent.
+func (s *Session) SetRuntimeMetadata(model, cwd, permissionMode, thinking string) {
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]any)
+	}
+	s.Metadata[MetaModel] = model
+	s.Metadata[MetaCWD] = cwd
+	s.Metadata[MetaPermissionMode] = permissionMode
+	s.Metadata[MetaThinking] = thinking
+}
+
+// RuntimeMeta returns the persisted runtime configuration from Metadata.
+// Missing keys return empty strings.
+func (s *Session) RuntimeMeta() (model, cwd, permissionMode, thinking string) {
+	if s.Metadata == nil {
+		return
+	}
+	model, _ = s.Metadata[MetaModel].(string)
+	cwd, _ = s.Metadata[MetaCWD].(string)
+	permissionMode, _ = s.Metadata[MetaPermissionMode].(string)
+	thinking, _ = s.Metadata[MetaThinking].(string)
+	return
+}
+
 // SetTitle sets the session title from a user message.
 // Only sets if title is empty (first message). Truncates to maxLen.
 func (s *Session) SetTitle(text string, maxLen int) {
