@@ -104,12 +104,17 @@ func (w *jsonLineWriter) handle(e core.AgentEvent) {
 
 	case core.AgentEventToolExecEnd:
 		delete(w.toolOutputLens, e.ToolCallID)
-		w.emit(map[string]any{
+		entry := map[string]any{
 			"type":         "tool_execution_end",
 			"tool_call_id": e.ToolCallID,
 			"tool_name":    e.ToolName,
 			"is_error":     e.IsError,
-		})
+		}
+		if e.Rejected {
+			entry["rejected"] = true
+			entry["reason"] = extractResultText(e.Result)
+		}
+		w.emit(entry)
 		if !e.IsError {
 			w.toolsCompleted++
 		}

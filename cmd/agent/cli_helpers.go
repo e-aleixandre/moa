@@ -82,6 +82,15 @@ func modelSpec(m core.Model) string {
 	return m.ID
 }
 
+// parseAllowPattern validates and normalizes a --allow flag value.
+func parseAllowPattern(val string) (string, error) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return "", fmt.Errorf("allow pattern cannot be empty")
+	}
+	return val, nil
+}
+
 // resolvePrompt resolves the prompt from flag, @file, or stdin pipe.
 func resolvePrompt(p string) (string, error) {
 	if p != "" {

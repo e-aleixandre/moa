@@ -188,8 +188,8 @@ func TestAuto_FallsBackToAsk(t *testing.T) {
 	}
 }
 
-func TestAuto_IgnoresGlobs(t *testing.T) {
-	// Auto mode doesn't use allow/deny globs — only the AI evaluator + rules
+func TestAuto_IgnoresAllowGlobs(t *testing.T) {
+	// Auto mode doesn't use allow globs — only the AI evaluator + rules
 	g := New(ModeAuto, Config{Allow: []string{"Bash(git:*)"}})
 
 	go func() {
@@ -201,5 +201,113 @@ func TestAuto_IgnoresGlobs(t *testing.T) {
 	d := g.Check(context.Background(), "bash", map[string]any{"command": "git log"})
 	if d != nil {
 		t.Error("should approve after user says yes")
+	}
+}
+
+func TestAuto_DenyGlobsApply(t *testing.T) {
+	g := New(ModeAuto, Config{Deny: []string{"Bash(rm:*)"}})
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
+	if d == nil || !d.Block {
+		t.Error("auto mode should apply deny globs before evaluator")
+	}
+}
+
+// --- Headless tests ---
+
+func TestHeadless_DeniesUnmatched(t *testing.T) {
+	g := New(ModeAsk, Config{Headless: true})
+
+	// No allow pattern, headless → immediate deny (no blocking)
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "echo hello"})
+	if d == nil || !d.Block {
+		t.Fatal("headless should deny unmatched tool")
+	}
+	if d.Reason == "" {
+		t.Error("should include denial reason")
+	}
+}
+
+func TestHeadless_ApprovesAllowMatch(t *testing.T) {
+	g := New(ModeAsk, Config{
+		Headless: true,
+		Allow:    []string{"Bash(go:*)"},
+	})
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "go test ./..."})
+	if d != nil {
+		t.Errorf("headless should approve matching allow pattern, got: %s", d.Reason)
+	}
+}
+
+func TestHeadless_DenyGlobWins(t *testing.T) {
+	g := New(ModeAsk, Config{
+		Headless: true,
+		Allow:    []string{"Bash(rm:*)"},
+		Deny:     []string{"Bash(rm:*)"},
+	})
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
+	if d == nil || !d.Block {
+		t.Error("deny should win over allow in headless")
+	}
+}
+
+func TestHeadless_ReadOnlyApproved(t *testing.T) {
+	g := New(ModeAsk, Config{Headless: true})
+
+	for _, tool := range []string{"read", "ls", "grep", "find"} {
+		if d := g.Check(context.Background(), tool, nil); d != nil {
+			t.Errorf("headless should auto-approve read-only tool %s", tool)
+		}
+	}
+}
+
+func TestHeadless_AutoEvaluatorAsk_Denies(t *testing.T) {
+	// In auto mode, when no evaluator is set, falls back to askUser → headless deny
+	g := New(ModeAuto, Config{
+		Headless: true,
+		// No evaluator → falls through to askUser
+	})
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "echo hello"})
+	if d == nil || !d.Block {
+		t.Error("headless auto mode should deny when evaluator says ask")
+	}
+}
+
+func TestHeadless_AutoDenyGlob(t *testing.T) {
+	g := New(ModeAuto, Config{
+		Headless: true,
+		Deny:     []string{"Bash(rm:*)"},
+	})
+
+	d := g.Check(context.Background(), "bash", map[string]any{"command": "rm foo"})
+	if d == nil || !d.Block {
+		t.Error("headless auto mode should apply deny globs")
+	}
+}
+
+func TestNonHeadless_StillBlocks(t *testing.T) {
+	g := New(ModeAsk, Config{Headless: false})
+
+	// Verify non-headless still sends to reqCh (blocks waiting for user)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		select {
+		case req := <-g.Requests():
+			req.Response <- Response{Approved: false, Feedback: "denied by test"}
+		case <-ctx.Done():
+		}
+	}()
+
+	d := g.Check(ctx, "bash", map[string]any{"command": "echo hello"})
+	if d == nil || !d.Block {
+		t.Error("non-headless should still block and get user response")
+	}
+	if d.Reason != "denied by test" {
+		t.Errorf("expected user feedback, got: %s", d.Reason)
 	}
 }

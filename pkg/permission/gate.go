@@ -66,6 +66,7 @@ type Gate struct {
 	deny      []string   // glob patterns always denied
 	rules     []string   // natural language rules for auto mode
 	evaluator *Evaluator // AI evaluator for auto mode (nil = fallback to ask)
+	headless  bool       // deny instead of blocking when no user available
 }
 
 // Config holds the gate's initial settings from merged config files.
@@ -74,6 +75,7 @@ type Config struct {
 	Deny      []string   // glob patterns always denied
 	Rules     []string   // natural language rules for auto mode
 	Evaluator *Evaluator // AI evaluator (nil in ask mode)
+	Headless  bool       // Deny instead of blocking when user approval needed (headless/CLI mode).
 }
 
 // New creates a Gate with the given mode and config.
@@ -85,6 +87,7 @@ func New(mode Mode, cfg Config) *Gate {
 		deny:      cfg.Deny,
 		rules:     cfg.Rules,
 		evaluator: cfg.Evaluator,
+		headless:  cfg.Headless,
 	}
 }
 
@@ -177,6 +180,10 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 		}
 
 	case ModeAuto:
+		// Deny globs take priority (same as ask mode).
+		if matchPolicy(deny, name, args) {
+			return &core.ToolCallDecision{Block: true, Reason: "denied by policy", Kind: core.ToolCallDecisionKindPermission}
+		}
 		if evaluator != nil {
 			switch evaluator.Evaluate(ctx, name, args, rules) {
 			case DecisionApprove:
@@ -194,6 +201,14 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 
 // askUser sends a request to the UI and blocks until the user responds.
 func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+	if g.headless {
+		return &core.ToolCallDecision{
+			Block:  true,
+			Reason: "denied: no interactive approval available (headless mode). Add to permissions.allow to auto-approve.",
+			Kind:   core.ToolCallDecisionKindPermission,
+		}
+	}
+
 	respCh := make(chan Response, 1)
 
 	select {

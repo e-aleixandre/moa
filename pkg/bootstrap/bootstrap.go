@@ -56,6 +56,10 @@ type SessionConfig struct {
 	PermissionMode string
 	// Model spec for auto-mode AI evaluator. Empty = "haiku".
 	PermissionEvalModel string
+	// Headless denies unresolved permissions instead of blocking (no user to approve).
+	Headless bool
+	// ExtraAllowPatterns are merged with config allow patterns (from --allow flags).
+	ExtraAllowPatterns []string
 
 	// PlanMode session dir. If empty, uses CWD.
 	PlanSessionDir string
@@ -199,10 +203,13 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 	var gate *permission.Gate
 	if permMode != permission.ModeYolo {
+		allow := append([]string(nil), moaCfg.Permissions.Allow...)
+		allow = append(allow, cfg.ExtraAllowPatterns...)
 		permCfg := permission.Config{
-			Allow: moaCfg.Permissions.Allow,
-			Deny:  moaCfg.Permissions.Deny,
-			Rules: moaCfg.Permissions.Rules,
+			Allow:    allow,
+			Deny:     moaCfg.Permissions.Deny,
+			Rules:    moaCfg.Permissions.Rules,
+			Headless: cfg.Headless,
 		}
 		if permMode == permission.ModeAuto {
 			evalModelSpec := moaCfg.Permissions.Model

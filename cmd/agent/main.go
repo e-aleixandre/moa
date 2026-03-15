@@ -87,6 +87,15 @@ func main() {
 	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
 	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
 	permsModel := flag.String("permissions-model", "", "Model for auto-mode AI evaluator (e.g. haiku)")
+	var extraAllowPatterns []string
+	flag.Func("allow", "Permission allow pattern (repeatable): \"Bash(go:*)\", \"Write(*.go)\"", func(val string) error {
+		parsed, err := parseAllowPattern(val)
+		if err != nil {
+			return err
+		}
+		extraAllowPatterns = append(extraAllowPatterns, parsed)
+		return nil
+	})
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	flag.Parse()
@@ -213,6 +222,8 @@ func main() {
 		DisableSandbox:      *yolo,
 		PermissionMode:      permModeStr,
 		PermissionEvalModel: *permsModel,
+		Headless:            !useTUI,
+		ExtraAllowPatterns:  extraAllowPatterns,
 		EnableAskUser:       useTUI,
 		BeforeWrite:         cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
@@ -390,11 +401,16 @@ func main() {
 			case core.AgentEventToolExecStart:
 				fmt.Fprintf(os.Stderr, "\n\033[36m[%s]\033[0m %s\n", e.ToolName, tool.SummarizeArgs(e.Args))
 			case core.AgentEventToolExecEnd:
-				icon := "\033[32m✓\033[0m"
-				if e.IsError {
-					icon = "\033[31m✗\033[0m"
+				if e.Rejected {
+					reason := extractDenialReason(e.Result)
+					fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m \033[31m✗ %s\033[0m\n", e.ToolName, reason)
+				} else {
+					icon := "\033[32m✓\033[0m"
+					if e.IsError {
+						icon = "\033[31m✗\033[0m"
+					}
+					fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m %s\n", e.ToolName, icon)
 				}
-				fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m %s\n", e.ToolName, icon)
 			}
 		})
 	}
@@ -418,6 +434,14 @@ func main() {
 	}
 }
 
-
-
-
+// extractDenialReason extracts a human-readable reason from a tool result.
+func extractDenialReason(r *core.Result) string {
+	if r != nil {
+		for _, c := range r.Content {
+			if c.Type == "text" && c.Text != "" {
+				return c.Text
+			}
+		}
+	}
+	return "(no reason)"
+}
