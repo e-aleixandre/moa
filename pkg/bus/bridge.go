@@ -2,7 +2,7 @@ package bus
 
 import (
 	"context"
-	"time"
+	"sync"
 
 	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
@@ -25,26 +25,22 @@ type AgentSubscriber interface {
 
 // AgentController is the command surface of an agent session.
 type AgentController interface {
+	// Commands
 	Abort()
 	Steer(msg string)
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
-	Reconfigure(provider core.Provider, model core.Model, thinkingLevel string) error
-	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
-	SetSystemPrompt(prompt string) error
 	Reset() error
 	Compact(ctx context.Context) (*core.CompactionPayload, error)
+	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
+	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
+
+	// Queries
 	Messages() []core.AgentMessage
 	Model() core.Model
 	ThinkingLevel() string
-	SystemPrompt() string
 	CompactionEpoch() int
 	IsRunning() bool
-	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
-	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
-	LoadMessages(msgs []core.AgentMessage) error
-	AppendMessage(msg core.AgentMessage) error
-	Drain(timeout time.Duration)
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +57,7 @@ type SessionContext struct {
 	SessionCtx context.Context // session lifetime context; cancelled on destroy
 	Bus        EventBus
 	Agent      AgentController
+	State      *StateMachine // may be nil for backward compat
 
 	PlanMode    *planmode.PlanMode  // may be nil
 	TaskStore   *tasks.Store        // may be nil
@@ -75,6 +72,41 @@ type SessionContext struct {
 	// SteerFilter returns false to suppress a steer event (e.g. subagent
 	// completion text in serve). If nil, all steers are published.
 	SteerFilter func(text string) bool
+
+	// Run context management — used by SendPrompt handler.
+	// Protected by runMu.
+	runMu     sync.Mutex
+	runCancel context.CancelFunc // cancels the current run context; nil when idle
+	runGen    uint64             // incremented each run; used to avoid clearing a newer run's cancel
+}
+
+// newRunContext creates a per-run context derived from SessionCtx.
+// Returns the context and a generation token. Caller must hold runMu.
+func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
+	ctx, cancel := context.WithCancel(sctx.SessionCtx)
+	sctx.runCancel = cancel
+	sctx.runGen++
+	return ctx, sctx.runGen
+}
+
+// cancelRun cancels the current run context if any. Safe to call multiple times.
+func (sctx *SessionContext) cancelRun() {
+	sctx.runMu.Lock()
+	defer sctx.runMu.Unlock()
+	if sctx.runCancel != nil {
+		sctx.runCancel()
+		sctx.runCancel = nil
+	}
+}
+
+// clearRunCancel clears the run cancel func only if the generation matches.
+// This prevents a finishing run from clearing a newer run's cancel.
+func (sctx *SessionContext) clearRunCancel(gen uint64) {
+	sctx.runMu.Lock()
+	defer sctx.runMu.Unlock()
+	if sctx.runGen == gen {
+		sctx.runCancel = nil
+	}
 }
 
 // ---------------------------------------------------------------------------

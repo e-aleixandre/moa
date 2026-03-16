@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,9 @@ func RegisterHandlers(sctx *SessionContext) {
 	// -------------------------------------------------------------------
 
 	b.OnCommand(func(cmd AbortRun) error {
+		// Cancel run context FIRST so runCtx.Err() != nil before Agent.Abort()
+		// causes runFn to return. This prevents misclassifying abort as real error.
+		sctx.cancelRun()
 		sctx.Agent.Abort()
 		return nil
 	})
@@ -30,6 +34,9 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SwitchModel) error {
+		if sctx.ProviderFactory == nil {
+			return fmt.Errorf("model switching unavailable: provider factory not configured")
+		}
 		newModel, ok := core.ResolveModel(cmd.ModelSpec)
 		if !ok {
 			return fmt.Errorf("unknown model: %s", cmd.ModelSpec)
@@ -63,6 +70,10 @@ func RegisterHandlers(sctx *SessionContext) {
 	b.OnCommand(func(cmd ClearSession) error {
 		if err := sctx.Agent.Reset(); err != nil {
 			return err
+		}
+		// If we were in error state, transition back to idle.
+		if sctx.State != nil && sctx.State.Current() == StateError {
+			_ = sctx.State.Transition(StateIdle)
 		}
 		sctx.Bus.Publish(CommandExecuted{
 			SessionID: sctx.SessionID,
@@ -207,4 +218,109 @@ func RegisterHandlers(sctx *SessionContext) {
 			AllowedPaths:  sctx.PathPolicy.AllowedPaths(),
 		}, nil
 	})
+
+	// GetSessionState returns the current state.
+	// Note: "permission" state is defined but not wired in this phase.
+	// Permission bridges (Gate.Requests → PermissionRequested) remain
+	// in serve/TUI until Fase 2b.
+	b.OnQuery(func(q GetSessionState) (string, error) {
+		if sctx.State == nil {
+			return "idle", nil
+		}
+		return string(sctx.State.Current()), nil
+	})
+
+	// -------------------------------------------------------------------
+	// Agent run commands (async — spawn goroutine)
+	// -------------------------------------------------------------------
+
+	b.OnCommand(func(cmd SendPrompt) error {
+		return startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
+			return sctx.Agent.Send(ctx, cmd.Text)
+		})
+	})
+
+	b.OnCommand(func(cmd SendPromptWithContent) error {
+		label := "content"
+		if len(cmd.Content) > 0 && cmd.Content[0].Text != "" {
+			label = cmd.Content[0].Text
+		}
+		return startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
+			return sctx.Agent.SendWithContent(ctx, cmd.Content)
+		})
+	})
+}
+
+// startRun is the shared implementation for SendPrompt and SendPromptWithContent.
+// It validates state, creates a per-run context, and spawns the agent run goroutine.
+func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
+	// State transition: idle/error → running.
+	if sctx.State != nil {
+		if err := sctx.State.Transition(StateRunning); err != nil {
+			return fmt.Errorf("cannot send: %w", err)
+		}
+	}
+
+	// Create per-run context with generation token.
+	sctx.runMu.Lock()
+	runCtx, gen := sctx.newRunContext()
+	sctx.runMu.Unlock()
+
+	// Capture message count before run to extract only new text.
+	msgsBefore := len(sctx.Agent.Messages())
+
+	go func() {
+		// Open checkpoint.
+		if sctx.Checkpoints != nil {
+			cpLabel := label
+			if len(cpLabel) > 60 {
+				cpLabel = cpLabel[:60] + "…"
+			}
+			sctx.Checkpoints.Begin(cpLabel)
+		}
+
+		msgs, err := runFn(runCtx)
+
+		// Close checkpoint: Discard on cancel, Commit otherwise.
+		cancelled := runCtx.Err() != nil
+		if sctx.Checkpoints != nil {
+			if cancelled {
+				sctx.Checkpoints.Discard()
+			} else {
+				sctx.Checkpoints.Commit()
+			}
+		}
+
+		// Clear run cancel BEFORE state transition to prevent a race where
+		// a new run starts (setting a new runCancel) and then this goroutine
+		// clears it. The generation token ensures we only clear our own cancel.
+		sctx.clearRunCancel(gen)
+
+		// State transition.
+		if sctx.State != nil {
+			if err != nil && !cancelled {
+				_ = sctx.State.TransitionWithError(StateError, err.Error())
+			} else {
+				_ = sctx.State.Transition(StateIdle)
+			}
+		}
+
+		// Extract final text only from NEW messages.
+		var finalText string
+		if len(msgs) > msgsBefore {
+			finalText = extractFinalAssistantText(msgs[msgsBefore:])
+		}
+
+		// Publish run result.
+		var runErr error
+		if err != nil && !cancelled {
+			runErr = err
+		}
+		sctx.Bus.Publish(RunEnded{
+			SessionID: sctx.SessionID,
+			FinalText: finalText,
+			Err:       runErr,
+		})
+	}()
+	return nil
 }

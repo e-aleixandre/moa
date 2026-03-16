@@ -140,6 +140,7 @@ type StateChanged struct {
 type RunEnded struct {
 	SessionID string
 	FinalText string
+	Err       error // non-nil for real errors (not cancellation)
 }
 
 // ContextUpdated is published when the context window usage percentage changes.
