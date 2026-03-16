@@ -16,6 +16,7 @@ type RestoreResult struct {
 	ModelName      string     // Display name for the model.
 	Thinking       string     // Restored thinking level (empty if unchanged).
 	PermissionMode string     // Restored permission mode ("yolo", "ask", "auto").
+	PathScope      string     // Restored path scope (empty if unchanged).
 }
 
 // RestoreFromMetadata reads persisted runtime configuration from a session's
@@ -58,6 +59,21 @@ func (s *Session) RestoreFromMetadata(sess *session.Session, providerFactory fun
 		s.restorePermissionMode(permMode, providerFactory)
 	}
 	result.PermissionMode = s.CurrentPermissionMode()
+
+	// 4. Restore path scope and allowed paths.
+	if s.PathPolicy != nil {
+		savedScope, savedPaths := sess.PathMeta()
+		if savedScope != "" {
+			s.PathPolicy.SetUnrestricted(savedScope == "unrestricted")
+			result.PathScope = s.PathPolicy.Scope()
+		}
+		for _, p := range savedPaths {
+			_ = s.PathPolicy.AddPath(p) // best-effort; dirs may no longer exist
+		}
+		if result.PathScope == "" && len(savedPaths) > 0 {
+			result.PathScope = s.PathPolicy.Scope()
+		}
+	}
 
 	return result
 }

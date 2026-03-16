@@ -24,6 +24,7 @@ var commandRegistry = map[string]commandHandler{
 	"tasks":       cmdTasks,
 	"permissions": cmdPermissions,
 	"undo":        cmdUndo,
+	"path":        cmdPath,
 }
 
 // ExecCommand executes a slash command in a session.
@@ -266,4 +267,76 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 		OK:      len(errs) == 0,
 		Message: msg,
 	}, nil
+}
+
+func cmdPath(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
+	pp := sess.runtime.pathPolicy
+	if pp == nil {
+		return &CommandResult{OK: false, Message: "path policy not available"}, nil
+	}
+
+	sub := "list"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	switch sub {
+	case "list":
+		var lines []string
+		lines = append(lines, "workspace: "+pp.WorkspaceRoot())
+		lines = append(lines, "scope: "+pp.Scope())
+		if allowed := pp.AllowedPaths(); len(allowed) > 0 {
+			lines = append(lines, "allowed paths:")
+			for _, p := range allowed {
+				lines = append(lines, "  "+p)
+			}
+		}
+		return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
+
+	case "add":
+		if len(args) < 2 {
+			return &CommandResult{OK: false, Message: "usage: /path add <dir>"}, nil
+		}
+		dir := args[1]
+		if err := pp.AddPath(dir); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
+			PathScope: pp.Scope(),
+		}})
+		return &CommandResult{OK: true, Message: fmt.Sprintf("added %s (scope: %s)", dir, pp.Scope())}, nil
+
+	case "rm", "remove":
+		if len(args) < 2 {
+			return &CommandResult{OK: false, Message: "usage: /path rm <dir>"}, nil
+		}
+		dir := args[1]
+		if !pp.RemovePath(dir) {
+			return &CommandResult{OK: false, Message: fmt.Sprintf("%s not in allowed paths", dir)}, nil
+		}
+		sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
+			PathScope: pp.Scope(),
+		}})
+		return &CommandResult{OK: true, Message: fmt.Sprintf("removed %s (scope: %s)", dir, pp.Scope())}, nil
+
+	case "scope":
+		if len(args) < 2 {
+			return &CommandResult{OK: true, Message: "scope: " + pp.Scope()}, nil
+		}
+		switch args[1] {
+		case "workspace":
+			pp.SetUnrestricted(false)
+		case "unrestricted":
+			pp.SetUnrestricted(true)
+		default:
+			return &CommandResult{OK: false, Message: "usage: /path scope workspace|unrestricted"}, nil
+		}
+		sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
+			PathScope: pp.Scope(),
+		}})
+		return &CommandResult{OK: true, Message: "scope: " + pp.Scope()}, nil
+
+	default:
+		return &CommandResult{OK: false, Message: "usage: /path [list|add <dir>|rm <dir>|scope workspace|unrestricted]"}, nil
+	}
 }

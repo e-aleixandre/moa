@@ -48,3 +48,39 @@ func TestSetRuntimeMetadata_PreservesOtherKeys(t *testing.T) {
 		t.Error("custom key was lost")
 	}
 }
+
+func TestSetPathMetadata(t *testing.T) {
+	s := &Session{}
+	s.SetPathMetadata("ws+2", []string{"/extra1", "/extra2"})
+
+	scope, paths := s.PathMeta()
+	if scope != "ws+2" {
+		t.Errorf("scope = %q, want ws+2", scope)
+	}
+	if len(paths) != 2 || paths[0] != "/extra1" || paths[1] != "/extra2" {
+		t.Errorf("paths = %v, want [/extra1 /extra2]", paths)
+	}
+}
+
+func TestPathMeta_NilMetadata(t *testing.T) {
+	s := &Session{}
+	scope, paths := s.PathMeta()
+	if scope != "" || paths != nil {
+		t.Errorf("expected empty, got %q %v", scope, paths)
+	}
+}
+
+func TestSetPathMetadata_PreservesRuntime(t *testing.T) {
+	s := &Session{}
+	s.SetRuntimeMetadata("model", "/cwd", "yolo", "high")
+	s.SetPathMetadata("unrestricted", []string{"/a"})
+
+	model, _, _, _ := s.RuntimeMeta()
+	if model != "model" {
+		t.Error("SetPathMetadata should not overwrite runtime metadata")
+	}
+	scope, _ := s.PathMeta()
+	if scope != "unrestricted" {
+		t.Errorf("scope = %q, want unrestricted", scope)
+	}
+}

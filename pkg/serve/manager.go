@@ -19,6 +19,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // SessionState describes the current state of a managed session.
@@ -79,6 +80,7 @@ type sessionRuntime struct {
 	taskStore     *tasks.Store
 	planMode      *planmode.PlanMode
 	checkpoints   *checkpoint.Store // nil when checkpoints disabled
+	pathPolicy    *tool.PathPolicy  // runtime path scope (nil if not wired)
 
 	// subagentTexts tracks notification texts injected via Steer/Enqueue
 	// so broadcastAgentEvent can suppress duplicate steer WS events.
@@ -356,6 +358,13 @@ func (s *ManagedSession) save() {
 		for k, v := range s.runtime.planMode.SaveState() {
 			s.persistence.persisted.Metadata[k] = v
 		}
+	}
+	// Persist path policy state.
+	if s.runtime.pathPolicy != nil {
+		s.persistence.persisted.SetPathMetadata(
+			s.runtime.pathPolicy.Scope(),
+			s.runtime.pathPolicy.AllowedPaths(),
+		)
 	}
 	snapshot := *s.persistence.persisted
 	store := s.persistence.store

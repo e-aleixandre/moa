@@ -18,6 +18,7 @@ type InitData struct {
 	State             string              `json:"state"`
 	ContextPercent    int                 `json:"context_percent"`
 	PermissionMode    string              `json:"permission_mode"`
+	PathScope         string              `json:"path_scope,omitempty"`
 	PendingPermission *PermissionData     `json:"pending_permission,omitempty"`
 	PendingAsk        *AskData            `json:"pending_ask,omitempty"`
 	Tasks             any                 `json:"tasks,omitempty"`
@@ -108,11 +109,12 @@ type CommandData struct {
 	Messages []core.AgentMessage `json:"messages,omitempty"` // compact sends updated messages
 }
 
-// ConfigChangeData is sent when model/thinking/permissions change.
+// ConfigChangeData is sent when model/thinking/permissions/path scope change.
 type ConfigChangeData struct {
 	Model          string `json:"model,omitempty"`
 	Thinking       string `json:"thinking,omitempty"`
 	PermissionMode string `json:"permission_mode,omitempty"`
+	PathScope      string `json:"path_scope,omitempty"`
 }
 
 // SubagentCountData is sent when async subagent jobs start/finish.

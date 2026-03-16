@@ -24,6 +24,7 @@ import (
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
 
@@ -139,6 +140,9 @@ type appModel struct {
 	// Permissions
 	permGate *permission.Gate
 
+	// Path access
+	pathPolicy *tool.PathPolicy
+
 	// Ask user
 	askBridge *askuser.Bridge
 
@@ -193,6 +197,7 @@ type Config struct {
 	ProviderFactory       ProviderFactory             // creates providers for /model switching (nil = switching disabled)
 	PermissionGate        *permission.Gate            // permission gate (nil = yolo, no prompts)
 	AskBridge             *askuser.Bridge             // bridge for ask_user tool (nil = disabled)
+	PathPolicy            *tool.PathPolicy            // path access policy (nil = no path scope display)
 	PinnedModels          []string                    // model IDs pre-pinned for Ctrl+P cycling (loaded from global config)
 	OnPinnedModelsChange  func([]string) error        // called when the user changes pinned models (nil = no persistence)
 	SubagentCountCh       <-chan int                  // receives running async subagent count updates (nil = disabled)
@@ -262,6 +267,7 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		permGate:             cfg.PermissionGate,
+		pathPolicy:           cfg.PathPolicy,
 		askBridge:            cfg.AskBridge,
 		subagentCountCh:      cfg.SubagentCountCh,
 		subagentNotifyCh:     cfg.SubagentNotifyCh,
@@ -288,6 +294,9 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		m.statusBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
 	} else {
 		m.statusBar.UpdatePermissionsSegment("yolo")
+	}
+	if m.pathPolicy != nil {
+		m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
 	}
 	m.statusBar.UpdateContextSegment(0)
 	if cfg.StartInSessionBrowser {

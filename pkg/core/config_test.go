@@ -319,3 +319,99 @@ func TestMergeConfigs_MaxBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestResolvePathScope(t *testing.T) {
+	tests := []struct {
+		name           string
+		pathScope      string
+		disableSandbox bool
+		permMode       string
+		want           string
+	}{
+		// Explicit path_scope always wins
+		{"explicit workspace", "workspace", true, "yolo", "workspace"},
+		{"explicit unrestricted", "unrestricted", false, "auto", "unrestricted"},
+
+		// Legacy disable_sandbox
+		{"legacy disable_sandbox", "", true, "auto", "unrestricted"},
+		{"legacy disable_sandbox with perm", "", true, "", "unrestricted"},
+
+		// Derive from permission mode
+		{"yolo implies unrestricted", "", false, "yolo", "unrestricted"},
+		{"ask implies unrestricted", "", false, "ask", "unrestricted"},
+		{"auto implies workspace", "", false, "auto", "workspace"},
+		{"empty perm implies workspace", "", false, "", "workspace"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolvePathScope(tc.pathScope, tc.disableSandbox, tc.permMode)
+			if got != tc.want {
+				t.Errorf("ResolvePathScope(%q, %v, %q) = %q, want %q",
+					tc.pathScope, tc.disableSandbox, tc.permMode, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMergeConfigs_PathScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     string
+		override string
+		want     string
+	}{
+		{"both empty", "", "", ""},
+		{"global only", "workspace", "", "workspace"},
+		{"project overrides", "workspace", "unrestricted", "unrestricted"},
+		{"project only", "", "workspace", "workspace"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			merged := mergeConfigs(
+				MoaConfig{PathScope: tc.base},
+				MoaConfig{PathScope: tc.override},
+			)
+			if merged.PathScope != tc.want {
+				t.Errorf("PathScope = %q, want %q", merged.PathScope, tc.want)
+			}
+		})
+	}
+}
+
+func TestPathScope_JSONRoundTrip(t *testing.T) {
+	cfg := MoaConfig{PathScope: "workspace", AllowedPaths: []string{"/extra"}}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got MoaConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PathScope != "workspace" {
+		t.Fatalf("PathScope = %q after roundtrip", got.PathScope)
+	}
+}
+
+func TestResolvePathScope_DisableSandboxWithoutPathScope(t *testing.T) {
+	// Config has disable_sandbox: true but no explicit path_scope.
+	// ResolvePathScope should return "unrestricted".
+	got := ResolvePathScope("", true, "")
+	if got != "unrestricted" {
+		t.Fatalf("ResolvePathScope('', true, '') = %q, want 'unrestricted'", got)
+	}
+	// Also works with any permission mode.
+	got = ResolvePathScope("", true, "auto")
+	if got != "unrestricted" {
+		t.Fatalf("ResolvePathScope('', true, 'auto') = %q, want 'unrestricted'", got)
+	}
+}
+
+func TestResolvePathScope_YoloWithoutPathScope(t *testing.T) {
+	// Permissions mode "yolo" without explicit path_scope → "unrestricted".
+	got := ResolvePathScope("", false, "yolo")
+	if got != "unrestricted" {
+		t.Fatalf("ResolvePathScope('', false, 'yolo') = %q, want 'unrestricted'", got)
+	}
+}

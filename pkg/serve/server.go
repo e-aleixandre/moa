@@ -348,6 +348,9 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			PendingPermission: pendingPerm,
 			PendingAsk:        pendingAsk,
 		}
+		if sess.runtime.pathPolicy != nil {
+			initData.PathScope = sess.runtime.pathPolicy.Scope()
+		}
 		if sess.runtime.taskStore != nil {
 			initData.Tasks = sess.runtime.taskStore.Tasks()
 		}
@@ -519,8 +522,11 @@ func handleListCommands() http.HandlerFunc {
 		{Name: "compact", Description: "Compact conversation to reduce context size"},
 		{Name: "model", Description: "Switch model", Args: "<model>"},
 		{Name: "thinking", Description: "Set thinking level", Args: "<off|low|medium|high>"},
+		{Name: "permissions", Description: "Set permission mode", Args: "<yolo|ask|auto>"},
+		{Name: "path", Description: "Manage path access scope", Args: "[list|add <dir>|rm <dir>|scope workspace|unrestricted]"},
 		{Name: "plan", Description: "Enter/exit plan mode", Args: "[exit]"},
 		{Name: "tasks", Description: "View/manage tasks", Args: "[done <id> | reset]"},
+		{Name: "undo", Description: "Undo last file change"},
 	}
 	return func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, commands)

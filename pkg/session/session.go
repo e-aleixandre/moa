@@ -63,6 +63,8 @@ const (
 	MetaCWD            = "cwd"
 	MetaPermissionMode = "permission_mode"
 	MetaThinking       = "thinking"
+	MetaPathScope      = "path_scope"
+	MetaAllowedPaths   = "allowed_paths"
 )
 
 // SetRuntimeMetadata persists the core session configuration (model, cwd,
@@ -89,6 +91,36 @@ func (s *Session) RuntimeMeta() (model, cwd, permissionMode, thinking string) {
 	cwd, _ = s.Metadata[MetaCWD].(string)
 	permissionMode, _ = s.Metadata[MetaPermissionMode].(string)
 	thinking, _ = s.Metadata[MetaThinking].(string)
+	return
+}
+
+// SetPathMetadata persists path scope and allowed paths to session metadata.
+func (s *Session) SetPathMetadata(scope string, allowedPaths []string) {
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]any)
+	}
+	s.Metadata[MetaPathScope] = scope
+	// Store as []any for JSON compatibility (map[string]any values).
+	paths := make([]any, len(allowedPaths))
+	for i, p := range allowedPaths {
+		paths[i] = p
+	}
+	s.Metadata[MetaAllowedPaths] = paths
+}
+
+// PathMeta returns the persisted path configuration from Metadata.
+func (s *Session) PathMeta() (scope string, allowedPaths []string) {
+	if s.Metadata == nil {
+		return
+	}
+	scope, _ = s.Metadata[MetaPathScope].(string)
+	if raw, ok := s.Metadata[MetaAllowedPaths].([]any); ok {
+		for _, v := range raw {
+			if p, ok := v.(string); ok {
+				allowedPaths = append(allowedPaths, p)
+			}
+		}
+	}
 	return
 }
 

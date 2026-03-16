@@ -21,6 +21,7 @@ var allCommands = []commandDef{
 	{Name: "compact", Desc: "Force context compaction"},
 	{Name: "plan", Desc: "Toggle plan mode (plan-then-execute workflow)"},
 	{Name: "permissions", Args: "<mode>", Desc: "View or set permission mode (yolo/ask/auto)"},
+	{Name: "path", Args: "[list|add|rm|scope]", Desc: "View or manage path access scope"},
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
 	{Name: "undo", Desc: "Revert files changed in the last agent turn"},
 	{Name: "verify", Desc: "Run project verification checks"},

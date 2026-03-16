@@ -87,6 +87,7 @@ func main() {
 	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
 	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
 	permsModel := flag.String("permissions-model", "", "Model for auto-mode AI evaluator (e.g. haiku)")
+	pathScopeFlag := flag.String("path-scope", "", "Path access scope: workspace, unrestricted (default: derived from permissions)")
 	var extraAllowPatterns []string
 	flag.Func("allow", "Permission allow pattern (repeatable): \"Bash(go:*)\", \"Write(*.go)\"", func(val string) error {
 		parsed, err := parseAllowPattern(val)
@@ -94,6 +95,11 @@ func main() {
 			return err
 		}
 		extraAllowPatterns = append(extraAllowPatterns, parsed)
+		return nil
+	})
+	var extraAllowPaths []string
+	flag.Func("allow-path", "Allow access to directory outside workspace (repeatable)", func(val string) error {
+		extraAllowPaths = append(extraAllowPaths, val)
 		return nil
 	})
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
@@ -181,6 +187,12 @@ func main() {
 		permModeStr = "yolo"
 	}
 
+	// Resolve path scope: --yolo implies unrestricted.
+	pathScopeStr := *pathScopeFlag
+	if *yolo && pathScopeStr == "" {
+		pathScopeStr = "unrestricted"
+	}
+
 	// Subagent notification channels for TUI.
 	subagentCountCh := make(chan int, 16)
 	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
@@ -220,6 +232,8 @@ func main() {
 		MaxTurns:            *maxTurns,
 		MaxBudget:           resolvedBudget,
 		DisableSandbox:      *yolo,
+		PathScope:           pathScopeStr,
+		ExtraAllowedPaths:   extraAllowPaths,
 		PermissionMode:      permModeStr,
 		PermissionEvalModel: *permsModel,
 		Headless:            !useTUI,
@@ -350,6 +364,7 @@ func main() {
 			ModelName:             modelDisplayName(resolvedModel),
 			CWD:                   cwd,
 			PermissionGate:        sess.Gate,
+			PathPolicy:            sess.PathPolicy,
 			AskBridge:             sess.AskBridge,
 			PinnedModels:          moaCfg.PinnedModels,
 			SubagentCountCh:       subagentCountCh,

@@ -210,6 +210,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 			taskStore:     bs.TaskStore,
 			planMode:      pm,
 			checkpoints:   cpStore,
+			pathPolicy:    bs.PathPolicy,
 		},
 		approvals: sessionApprovals{
 			askBridge: bs.AskBridge,
@@ -370,6 +371,16 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	if sess.runtime.planMode != nil && saved.Metadata != nil {
 		sess.runtime.planMode.RestoreState(saved.Metadata)
 		sess.runtime.planMode.ApplyRestoredState()
+	}
+	// Restore path policy state.
+	if sess.runtime.pathPolicy != nil && saved.Metadata != nil {
+		savedScope, savedPaths := saved.PathMeta()
+		if savedScope != "" {
+			sess.runtime.pathPolicy.SetUnrestricted(savedScope == "unrestricted")
+		}
+		for _, p := range savedPaths {
+			_ = sess.runtime.pathPolicy.AddPath(p) // best-effort
+		}
 	}
 	sess.mu.Unlock()
 

@@ -146,6 +146,7 @@ const (
 	SegmentModel       = "model"
 	SegmentThinking    = "thinking"
 	SegmentPermissions = "permissions"
+	SegmentPathScope   = "pathscope"
 	SegmentPlan        = "plan"
 	SegmentTasks       = "tasks"
 	SegmentCost        = "cost"
@@ -158,6 +159,7 @@ const (
 	PriorityModel       = 10
 	PriorityThinking    = 20
 	PriorityPermissions = 30
+	PriorityPathScope   = 35
 	PriorityPlan        = 40
 	PriorityTasks       = 45
 	PriorityCost        = 80
@@ -205,6 +207,13 @@ func (sl *StatusLine) UpdatePermissionsSegment(mode string) {
 	}
 	text := statusLineKeyStyle.Render("perms ") + statusLineValueStyle.Render(mode)
 	sl.Set(SegmentPermissions, text, PriorityPermissions)
+}
+
+// UpdatePathScopeSegment sets the filesystem path scope segment.
+// scope should be "workspace", "ws+N", or "unrestricted".
+func (sl *StatusLine) UpdatePathScopeSegment(scope string) {
+	text := statusLineKeyStyle.Render("fs:") + statusLineValueStyle.Render(scope)
+	sl.Set(SegmentPathScope, text, PriorityPathScope)
 }
 
 // UpdatePlanSegment sets the plan mode segment. Pass "" to remove.

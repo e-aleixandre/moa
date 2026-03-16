@@ -36,6 +36,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	if cmd == "prompt" || strings.HasPrefix(cmd, "prompt ") {
 		return m.handlePromptTemplate(strings.TrimSpace(strings.TrimPrefix(cmd, "prompt")))
 	}
+	if cmd == "path" || strings.HasPrefix(cmd, "path ") {
+		return m.handlePathCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "path")))
+	}
 
 	switch cmd {
 	case "model", "models":
@@ -635,6 +638,10 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 		m.permGate = nil
 		m.syncPermissionCheck()
 		m.statusBar.UpdatePermissionsSegment("")
+		if m.pathPolicy != nil {
+			m.pathPolicy.SetUnrestricted(true)
+			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+		}
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "permissions: yolo (all tools auto-approved)",
 		})
@@ -674,6 +681,118 @@ func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
 	}
 	m.updateViewport()
 	return m, tea.Batch(cmds...)
+}
+
+// handlePathCommand processes `/path` and its subcommands.
+func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
+	if m.pathPolicy == nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Path policy not available",
+		})
+		m.updateViewport()
+		return m, nil
+	}
+
+	// Parse subcommand
+	sub := args
+	var subArg string
+	if idx := strings.IndexByte(args, ' '); idx >= 0 {
+		sub = args[:idx]
+		subArg = strings.TrimSpace(args[idx+1:])
+	}
+
+	switch sub {
+	case "", "list":
+		scope := m.pathPolicy.Scope()
+		root := m.pathPolicy.WorkspaceRoot()
+		info := fmt.Sprintf("path scope: %s\nworkspace: %s", scope, root)
+		if paths := m.pathPolicy.AllowedPaths(); len(paths) > 0 {
+			info += "\nallowed paths:\n  " + strings.Join(paths, "\n  ")
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: info})
+
+	case "add":
+		if subArg == "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Usage: /path add <directory>",
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		if err := m.pathPolicy.AddPath(subArg); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: fmt.Sprintf("Cannot add path: %v", err),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status", Raw: fmt.Sprintf("✓ Path added: %s (scope: %s)", subArg, m.pathPolicy.Scope()),
+		})
+		m.savePathMetadata()
+
+	case "rm", "remove":
+		if subArg == "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Usage: /path rm <directory>",
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		if m.pathPolicy.RemovePath(subArg) {
+			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status", Raw: fmt.Sprintf("✓ Path removed: %s (scope: %s)", subArg, m.pathPolicy.Scope()),
+			})
+			m.savePathMetadata()
+		} else {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: fmt.Sprintf("Path not found in allowed list: %s", subArg),
+			})
+		}
+
+	case "scope":
+		switch subArg {
+		case "workspace":
+			m.pathPolicy.SetUnrestricted(false)
+			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status", Raw: "✓ Path scope: " + m.pathPolicy.Scope(),
+			})
+			m.savePathMetadata()
+		case "unrestricted":
+			m.pathPolicy.SetUnrestricted(true)
+			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status", Raw: "✓ Path scope: unrestricted",
+			})
+			m.savePathMetadata()
+		default:
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Usage: /path scope workspace|unrestricted",
+			})
+		}
+
+	default:
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Unknown subcommand: /path " + sub + "\nUsage: /path [list|add <dir>|rm <dir>|scope workspace|unrestricted]",
+		})
+	}
+
+	m.updateViewport()
+	if saveCmd := m.saveSession(m.agent.Messages()); saveCmd != nil {
+		return m, saveCmd
+	}
+	return m, nil
+}
+
+// savePathMetadata persists the current path policy state to session metadata.
+func (m appModel) savePathMetadata() {
+	if m.session == nil || m.pathPolicy == nil {
+		return
+	}
+	m.session.SetPathMetadata(m.pathPolicy.Scope(), m.pathPolicy.AllowedPaths())
 }
 
 // handleThinkingSwitch processes `/thinking <level>`.
@@ -878,6 +997,11 @@ func (m *appModel) restoreFromMetadata(sess *session.Session) {
 	m.permGate = m.bootstrapSess.Gate
 	m.syncPermissionCheck()
 	m.statusBar.UpdatePermissionsSegment(result.PermissionMode)
+
+	// Sync path policy from restore.
+	if result.PathScope != "" && m.pathPolicy != nil {
+		m.statusBar.UpdatePathScopeSegment(result.PathScope)
+	}
 }
 
 // handlePromptTemplate processes `/prompt` and `/prompt <name>`.
