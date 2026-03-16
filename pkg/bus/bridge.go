@@ -1,0 +1,202 @@
+package bus
+
+import (
+	"context"
+	"time"
+
+	"github.com/ealeixandre/moa/pkg/askuser"
+	"github.com/ealeixandre/moa/pkg/checkpoint"
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/tool"
+)
+
+// ---------------------------------------------------------------------------
+// Narrow interfaces — pkg/bus depends on behaviour, not on *agent.Agent.
+// *agent.Agent satisfies both implicitly.
+// ---------------------------------------------------------------------------
+
+// AgentSubscriber allows subscribing to agent events.
+type AgentSubscriber interface {
+	Subscribe(fn func(core.AgentEvent)) func()
+}
+
+// AgentController is the command surface of an agent session.
+type AgentController interface {
+	Abort()
+	Steer(msg string)
+	SetModel(provider core.Provider, model core.Model) error
+	SetThinkingLevel(level string) error
+	Reconfigure(provider core.Provider, model core.Model, thinkingLevel string) error
+	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
+	SetSystemPrompt(prompt string) error
+	Reset() error
+	Compact(ctx context.Context) (*core.CompactionPayload, error)
+	Messages() []core.AgentMessage
+	Model() core.Model
+	ThinkingLevel() string
+	SystemPrompt() string
+	CompactionEpoch() int
+	IsRunning() bool
+	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
+	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
+	LoadMessages(msgs []core.AgentMessage) error
+	AppendMessage(msg core.AgentMessage) error
+	Drain(timeout time.Duration)
+}
+
+// ---------------------------------------------------------------------------
+// SessionContext — per-session dependency aggregate
+// ---------------------------------------------------------------------------
+
+// SessionContext holds all session-scoped dependencies needed by handlers and
+// the agent event bridge. Created once per session.
+//
+// Bus is per-session (not shared between sessions). The SessionID in events
+// and commands is metadata for logging/serialization, not routing.
+type SessionContext struct {
+	SessionID  string
+	SessionCtx context.Context // session lifetime context; cancelled on destroy
+	Bus        EventBus
+	Agent      AgentController
+
+	PlanMode    *planmode.PlanMode  // may be nil
+	TaskStore   *tasks.Store        // may be nil
+	Checkpoints *checkpoint.Store   // may be nil
+	Gate        *permission.Gate    // may be nil
+	PathPolicy  *tool.PathPolicy    // may be nil
+	AskBridge   *askuser.Bridge     // may be nil
+
+	ProviderFactory  func(core.Model) (core.Provider, error)
+	BaseSystemPrompt string
+
+	// SteerFilter returns false to suppress a steer event (e.g. subagent
+	// completion text in serve). If nil, all steers are published.
+	SteerFilter func(text string) bool
+}
+
+// ---------------------------------------------------------------------------
+// Bridge — translates core.AgentEvent → typed bus events
+// ---------------------------------------------------------------------------
+
+// Bridge subscribes to an agent's event emitter and publishes typed bus events.
+// Returns an unsubscribe function. Call it when the session is destroyed.
+func Bridge(sctx *SessionContext, subscriber AgentSubscriber) func() {
+	return subscriber.Subscribe(func(e core.AgentEvent) {
+		bridgeEvent(sctx, e)
+	})
+}
+
+// bridgeEvent translates a single core.AgentEvent into typed bus event(s).
+func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
+	sid := sctx.SessionID
+	b := sctx.Bus
+
+	switch e.Type {
+	case core.AgentEventStart:
+		b.Publish(AgentStarted{SessionID: sid})
+
+	case core.AgentEventEnd:
+		b.Publish(AgentEnded{SessionID: sid, Messages: e.Messages})
+
+	case core.AgentEventError:
+		b.Publish(AgentError{SessionID: sid, Err: e.Error})
+
+	case core.AgentEventTurnStart:
+		b.Publish(TurnStarted{SessionID: sid})
+
+	case core.AgentEventTurnEnd:
+		b.Publish(TurnEnded{SessionID: sid})
+
+	case core.AgentEventMessageStart:
+		b.Publish(MessageStarted{SessionID: sid, Message: e.Message})
+
+	case core.AgentEventMessageUpdate:
+		if e.AssistantEvent == nil {
+			return
+		}
+		switch e.AssistantEvent.Type {
+		case core.ProviderEventTextDelta:
+			b.Publish(TextDelta{SessionID: sid, Delta: e.AssistantEvent.Delta})
+		case core.ProviderEventThinkingDelta:
+			b.Publish(ThinkingDelta{SessionID: sid, Delta: e.AssistantEvent.Delta})
+		}
+
+	case core.AgentEventMessageEnd:
+		var fullText string
+		for _, c := range e.Message.Content {
+			if c.Type == "text" {
+				fullText += c.Text
+			}
+		}
+		b.Publish(MessageEnded{SessionID: sid, Message: e.Message, FullText: fullText})
+
+	case core.AgentEventToolExecStart:
+		b.Publish(ToolExecStarted{
+			SessionID:  sid,
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			Args:       e.Args,
+		})
+
+	case core.AgentEventToolExecUpdate:
+		var delta string
+		if e.Result != nil {
+			for _, c := range e.Result.Content {
+				if c.Type == "text" {
+					delta += c.Text
+				}
+			}
+		}
+		if delta != "" {
+			b.Publish(ToolExecUpdate{
+				SessionID:  sid,
+				ToolCallID: e.ToolCallID,
+				Delta:      delta,
+			})
+		}
+
+	case core.AgentEventToolExecEnd:
+		var resultText string
+		if e.Result != nil {
+			for _, c := range e.Result.Content {
+				if c.Type == "text" {
+					resultText += c.Text
+				}
+			}
+		}
+		b.Publish(ToolExecEnded{
+			SessionID:  sid,
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			Result:     resultText,
+			IsError:    e.IsError,
+			Rejected:   e.Rejected,
+		})
+		// Emit task update on tool_end only (matches serve and TUI behavior).
+		if e.ToolName == "tasks" && sctx.TaskStore != nil {
+			b.Publish(TasksUpdated{
+				SessionID: sid,
+				Tasks:     sctx.TaskStore.Tasks(),
+			})
+		}
+
+	case core.AgentEventSteer:
+		if sctx.SteerFilter != nil && !sctx.SteerFilter(e.Text) {
+			return
+		}
+		b.Publish(Steered{SessionID: sid, Text: e.Text})
+
+	case core.AgentEventCompactionStart:
+		b.Publish(CompactionStarted{SessionID: sid})
+
+	case core.AgentEventCompactionEnd:
+		b.Publish(CompactionEnded{
+			SessionID: sid,
+			Payload:   e.Compaction,
+			Err:       e.Error,
+		})
+	}
+}

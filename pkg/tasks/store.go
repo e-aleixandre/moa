@@ -4,6 +4,7 @@ package tasks
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -130,6 +131,19 @@ func (s *Store) MarkDone(id int) bool {
 	t.Status = "done"
 	t.CompletedAt = time.Now().UnixMilli()
 	return true
+}
+
+// MarkDoneErr marks a task as done. Returns an error if the task is not found.
+func (s *Store) MarkDoneErr(id int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.find(id)
+	if t == nil {
+		return fmt.Errorf("task #%d not found", id)
+	}
+	t.Status = "done"
+	t.CompletedAt = time.Now().UnixMilli()
+	return nil
 }
 
 // Get returns a copy of a task by ID. Returns (Task{}, false) if not found.
