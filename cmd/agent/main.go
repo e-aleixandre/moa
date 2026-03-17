@@ -10,10 +10,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/auth"
 	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/bus"
@@ -23,7 +23,6 @@ import (
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
 )
 
@@ -197,30 +196,15 @@ func main() {
 
 	useTUI := promptContent == ""
 
-	// Create bus early so subagent callbacks can publish to it.
-	var tuiBus *bus.LocalBus
-	if useTUI {
-		tuiBus = bus.NewLocalBus()
-	}
+	// Create bus early so subagent callbacks can publish to it (both TUI and headless).
+	preBus := bus.NewLocalBus()
 
 	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
 	// plan mode, skills, verify, and agent.
-	//
-	// Race safety: getAgent captures `sess` by reference. It's only called from
-	// OnAsyncComplete callbacks, which fire after BuildSession returns (subagent
-	// jobs can't complete before the agent is created). The `sess` pointer is
-	// written once below and never reassigned, so there's no concurrent access.
 	// File checkpoints for /undo.
 	cpStore := checkpoint.New(20)
 
-	var sess *bootstrap.Session
-	getAgent := func() *agent.Agent {
-		if sess != nil {
-			return sess.Agent
-		}
-		return nil
-	}
-	sess, err = bootstrap.BuildSession(bootstrap.SessionConfig{
+	sess, err := bootstrap.BuildSession(bootstrap.SessionConfig{
 		CWD:             cwd,
 		Model:           resolvedModel,
 		Provider:        providerBuild.Provider,
@@ -246,27 +230,19 @@ func main() {
 		EnableAskUser:       useTUI,
 		BeforeWrite:         cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
-			if tuiBus != nil {
-				tuiBus.Publish(bus.SubagentCountChanged{Count: count})
-			}
+			preBus.Publish(bus.SubagentCountChanged{Count: count})
 		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
 			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail, truncated)
 			if agentText == "" {
 				return
 			}
-			if tuiBus != nil {
-				tuiBus.Publish(bus.SubagentCompleted{
-					JobID:  jobID,
-					Task:   task,
-					Status: status,
-					Text:   agentText,
-				})
-			} else {
-				if a := getAgent(); a != nil {
-					a.Steer(agentText)
-				}
-			}
+			preBus.Publish(bus.SubagentCompleted{
+				JobID:  jobID,
+				Task:   task,
+				Status: status,
+				Text:   agentText,
+			})
 		},
 	})
 	if err != nil {
@@ -369,7 +345,7 @@ func main() {
 			sessionID = persistedSess.ID
 		}
 		rt, err := bus.NewSessionRuntime(bus.RuntimeConfig{
-			Bus:              tuiBus,
+			Bus:              preBus,
 			SessionID:        sessionID,
 			Ctx:              ctx,
 			Agent:            ag,
@@ -426,55 +402,90 @@ func main() {
 
 	printAuthNotice(os.Stderr, providerBuild.AuthNotice)
 
-	var streamedChars atomic.Int64
-	if jsonOutput {
-		jw := newJSONLineWriter()
-		ag.Subscribe(jw.handle)
-	} else {
-		ag.Subscribe(func(e core.AgentEvent) {
-			switch e.Type {
-			case core.AgentEventMessageUpdate:
-				if e.AssistantEvent != nil {
-					switch e.AssistantEvent.Type {
-					case core.ProviderEventTextDelta:
-						fmt.Print(e.AssistantEvent.Delta)
-						streamedChars.Add(int64(len(e.AssistantEvent.Delta)))
-					case core.ProviderEventThinkingDelta:
-						fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.AssistantEvent.Delta)
-					}
-				}
-			case core.AgentEventToolExecStart:
-				fmt.Fprintf(os.Stderr, "\n\033[36m[%s]\033[0m %s\n", e.ToolName, tool.SummarizeArgs(e.Args))
-			case core.AgentEventToolExecEnd:
-				if e.Rejected {
-					reason := extractDenialReason(e.Result)
-					fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m \033[31m✗ %s\033[0m\n", e.ToolName, reason)
-				} else {
-					icon := "\033[32m✓\033[0m"
-					if e.IsError {
-						icon = "\033[31m✗\033[0m"
-					}
-					fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m %s\n", e.ToolName, icon)
-				}
+	// Create SessionRuntime for headless — same contract as TUI and serve.
+	gateConfig := permission.Config{Headless: true}
+	if sess.Gate != nil {
+		gateConfig = sess.Gate.SnapshotConfig()
+	}
+	rt, err := bus.NewSessionRuntime(bus.RuntimeConfig{
+		Bus:       preBus,
+		SessionID: "headless",
+		Ctx:       ctx,
+		Agent:     ag,
+		TaskStore: sess.TaskStore,
+		PlanMode:  sess.PlanMode,
+		Gate:      sess.Gate,
+		PathPolicy: sess.PathPolicy,
+		AskBridge:  sess.AskBridge,
+		ProviderFactory: func(model core.Model) (core.Provider, error) {
+			build, err := buildProvider(model, authStore)
+			if err != nil {
+				return nil, err
 			}
-		})
+			return build.Provider, nil
+		},
+		BaseSystemPrompt: ag.SystemPrompt(),
+		GateConfig:       gateConfig,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
+		os.Exit(1)
 	}
 
-	msgs, err := ag.Run(ctx, promptContent)
+	// Subagent completions → steer into the running agent.
+	rt.Bus.Subscribe(func(e bus.SubagentCompleted) {
+		_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+	})
+
+	// Subscribe for output (SubscribeAll guarantees event order).
+	var streamedChars atomic.Int64
+	done := make(chan bus.RunEnded, 1)
+
+	if jsonOutput {
+		jw := newJSONLineWriter()
+		jw.subscribeAll(rt.Bus, done)
+	} else {
+		subscribeHeadlessAll(rt.Bus, &streamedChars, done)
+	}
+
+	// Launch run via bus.
+	if err := rt.Bus.Execute(bus.SendPrompt{Text: promptContent}); err != nil {
+		rt.Close()
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Wait for completion (or context cancellation), then drain to ensure all output is flushed.
+	var result bus.RunEnded
+	select {
+	case result = <-done:
+	case <-ctx.Done():
+		// Context cancelled before RunEnded arrived — drain and exit.
+		rt.Bus.Drain(2 * time.Second)
+		rt.Close()
+		fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
+		os.Exit(130)
+	}
+	rt.Bus.Drain(5 * time.Second)
 
 	if !jsonOutput {
-		if finalText := core.ExtractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
-			fmt.Print(finalText)
+		if result.FinalText != "" && streamedChars.Load() == 0 {
+			fmt.Print(result.FinalText)
 		}
 		fmt.Println()
 	}
 
-	if err != nil {
-		if ctx.Err() != nil {
-			fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
-			os.Exit(130)
-		}
-		fmt.Fprintf(os.Stderr, "\nerror: %v\n", err)
+	// Explicit cleanup — os.Exit skips defers.
+	rt.Close()
+
+	// Check context cancellation independently — RunEnded.Err is nil on cancellation
+	// (only "real errors" populate Err), so we must check ctx.Err() separately.
+	if ctx.Err() != nil {
+		fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
+		os.Exit(130)
+	}
+	if result.Err != nil {
+		fmt.Fprintf(os.Stderr, "\nerror: %v\n", result.Err)
 		os.Exit(1)
 	}
 }
@@ -492,14 +503,4 @@ func (p *tuiPersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[st
 	return p.store.Save(p.session)
 }
 
-// extractDenialReason extracts a human-readable reason from a tool result.
-func extractDenialReason(r *core.Result) string {
-	if r != nil {
-		for _, c := range r.Content {
-			if c.Type == "text" && c.Text != "" {
-				return c.Text
-			}
-		}
-	}
-	return "(no reason)"
-}
+

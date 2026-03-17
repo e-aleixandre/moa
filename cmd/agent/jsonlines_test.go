@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/bus"
 )
 
 // captureJSONLines runs fn with stdout redirected and returns parsed JSON objects.
@@ -42,11 +43,21 @@ func captureJSONLines(t *testing.T, fn func()) []map[string]any {
 	return lines
 }
 
+// publishAndDrain publishes events to the bus and waits for processing.
+func publishAndDrain(b *bus.LocalBus, events ...any) {
+	for _, e := range events {
+		b.Publish(e)
+	}
+	b.Drain(time.Second)
+}
+
 func TestJSONLineWriter_AgentStartEnd(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{Type: core.AgentEventStart})
-		jw.handle(core.AgentEvent{Type: core.AgentEventEnd})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b, bus.AgentStarted{}, bus.AgentEnded{})
 	})
 
 	// agent_start, summary, agent_end
@@ -66,14 +77,11 @@ func TestJSONLineWriter_AgentStartEnd(t *testing.T) {
 
 func TestJSONLineWriter_TextDelta(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{
-			Type: core.AgentEventMessageUpdate,
-			AssistantEvent: &core.AssistantEvent{
-				Type:  core.ProviderEventTextDelta,
-				Delta: "Hello world",
-			},
-		})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b, bus.TextDelta{Delta: "Hello world"})
 	})
 
 	if len(lines) != 1 {
@@ -92,14 +100,11 @@ func TestJSONLineWriter_TextDelta(t *testing.T) {
 
 func TestJSONLineWriter_ThinkingDelta(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{
-			Type: core.AgentEventMessageUpdate,
-			AssistantEvent: &core.AssistantEvent{
-				Type:  core.ProviderEventThinkingDelta,
-				Delta: "hmm...",
-			},
-		})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b, bus.ThinkingDelta{Delta: "hmm..."})
 	})
 
 	if len(lines) != 1 {
@@ -112,29 +117,30 @@ func TestJSONLineWriter_ThinkingDelta(t *testing.T) {
 
 func TestJSONLineWriter_ToolExecution(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{
-			Type:       core.AgentEventToolExecStart,
-			ToolCallID: "tc_1",
-			ToolName:   "bash",
-			Args:       map[string]any{"command": "ls -la"},
-		})
-		jw.handle(core.AgentEvent{
-			Type:       core.AgentEventToolExecUpdate,
-			ToolCallID: "tc_1",
-			Result:     &core.Result{Content: []core.Content{{Type: "text", Text: "file1.txt"}}},
-		})
-		jw.handle(core.AgentEvent{
-			Type:       core.AgentEventToolExecUpdate,
-			ToolCallID: "tc_1",
-			Result:     &core.Result{Content: []core.Content{{Type: "text", Text: "file1.txt\nfile2.txt"}}},
-		})
-		jw.handle(core.AgentEvent{
-			Type:       core.AgentEventToolExecEnd,
-			ToolCallID: "tc_1",
-			ToolName:   "bash",
-			IsError:    false,
-		})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.ToolExecStarted{
+				ToolCallID: "tc_1",
+				ToolName:   "bash",
+				Args:       map[string]any{"command": "ls -la"},
+			},
+			bus.ToolExecUpdate{
+				ToolCallID: "tc_1",
+				Delta:      "file1.txt",
+			},
+			bus.ToolExecUpdate{
+				ToolCallID: "tc_1",
+				Delta:      "\nfile2.txt",
+			},
+			bus.ToolExecEnded{
+				ToolCallID: "tc_1",
+				ToolName:   "bash",
+				IsError:    false,
+			},
+		)
 	})
 
 	// start, update1, update2, end, progress
@@ -154,12 +160,12 @@ func TestJSONLineWriter_ToolExecution(t *testing.T) {
 		t.Errorf("expected 'ls -la', got %v", args["command"])
 	}
 
-	// Update 1: full text = "file1.txt" → delta = "file1.txt"
+	// Update 1: delta = "file1.txt"
 	if lines[1]["text"] != "file1.txt" {
 		t.Errorf("expected 'file1.txt', got %v", lines[1]["text"])
 	}
 
-	// Update 2: full text = "file1.txt\nfile2.txt" → delta = "\nfile2.txt"
+	// Update 2: delta = "\nfile2.txt"
 	if lines[2]["text"] != "\nfile2.txt" {
 		t.Errorf("expected '\\nfile2.txt', got %v", lines[2]["text"])
 	}
@@ -180,9 +186,11 @@ func TestJSONLineWriter_ToolExecution(t *testing.T) {
 
 func TestJSONLineWriter_ToolExecEnd_Error(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{
-			Type:       core.AgentEventToolExecEnd,
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b, bus.ToolExecEnded{
 			ToolCallID: "tc_2",
 			ToolName:   "bash",
 			IsError:    true,
@@ -203,11 +211,11 @@ func TestJSONLineWriter_ToolExecEnd_Error(t *testing.T) {
 
 func TestJSONLineWriter_AgentError(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{
-			Type:  core.AgentEventError,
-			Error: os.ErrDeadlineExceeded,
-		})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b, bus.AgentError{Err: os.ErrDeadlineExceeded})
 	})
 
 	if len(lines) != 1 {
@@ -223,9 +231,11 @@ func TestJSONLineWriter_AgentError(t *testing.T) {
 
 func TestJSONLineWriter_Compaction(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{Type: core.AgentEventCompactionStart})
-		jw.handle(core.AgentEvent{Type: core.AgentEventCompactionEnd})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b, bus.CompactionStarted{}, bus.CompactionEnded{})
 	})
 
 	if len(lines) != 2 {
@@ -241,13 +251,18 @@ func TestJSONLineWriter_Compaction(t *testing.T) {
 
 func TestJSONLineWriter_IgnoredEvents(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		// TurnStart is no longer ignored (increments turn counter), but
-		// TurnEnd, Steer, MessageStart, MessageEnd still produce no output.
-		jw.handle(core.AgentEvent{Type: core.AgentEventTurnEnd})
-		jw.handle(core.AgentEvent{Type: core.AgentEventSteer, Text: "hello"})
-		jw.handle(core.AgentEvent{Type: core.AgentEventMessageStart})
-		jw.handle(core.AgentEvent{Type: core.AgentEventMessageEnd})
+		jw.subscribeAll(b, nil)
+		// TurnStart increments counter but produces no output.
+		// TurnEnded, Steered, MessageStarted, MessageEnded produce no output.
+		publishAndDrain(b,
+			bus.TurnEnded{},
+			bus.Steered{Text: "hello"},
+			bus.MessageStarted{},
+			bus.MessageEnded{},
+		)
 	})
 
 	if len(lines) != 0 {
@@ -255,48 +270,24 @@ func TestJSONLineWriter_IgnoredEvents(t *testing.T) {
 	}
 }
 
-func TestJSONLineWriter_NilAssistantEvent(t *testing.T) {
-	lines := captureJSONLines(t, func() {
-		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{Type: core.AgentEventMessageUpdate})
-	})
-
-	if len(lines) != 0 {
-		t.Fatalf("expected 0 lines for nil AssistantEvent, got %d", len(lines))
-	}
-}
-
-func TestJSONLineWriter_NilResult(t *testing.T) {
-	lines := captureJSONLines(t, func() {
-		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{
-			Type:       core.AgentEventToolExecUpdate,
-			ToolCallID: "tc_1",
-			Result:     nil,
-		})
-	})
-
-	// nil result → no delta → no output
-	if len(lines) != 0 {
-		t.Fatalf("expected 0 lines for nil result, got %d", len(lines))
-	}
-}
-
 func TestJSONLineWriter_Progress(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
-		jw.handle(core.AgentEvent{
-			Type:     core.AgentEventToolExecStart,
-			ToolName: "edit",
-			Args:     map[string]any{"path": "foo.go"},
-		})
-		jw.handle(core.AgentEvent{
-			Type:     core.AgentEventToolExecEnd,
-			ToolName: "edit",
-			IsError:  false,
-		})
-		jw.handle(core.AgentEvent{Type: core.AgentEventEnd})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.TurnStarted{},
+			bus.ToolExecStarted{
+				ToolName: "edit",
+				Args:     map[string]any{"path": "foo.go"},
+			},
+			bus.ToolExecEnded{
+				ToolName: "edit",
+				IsError:  false,
+			},
+			bus.AgentEnded{},
+		)
 	})
 
 	// tool_execution_start, tool_execution_end, progress, summary, agent_end
@@ -340,19 +331,22 @@ func TestJSONLineWriter_Progress(t *testing.T) {
 
 func TestJSONLineWriter_ProgressSkipsErrorTools(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
-		jw.handle(core.AgentEvent{
-			Type:     core.AgentEventToolExecEnd,
-			ToolName: "bash",
-			IsError:  true,
-		})
-		jw.handle(core.AgentEvent{
-			Type:     core.AgentEventToolExecEnd,
-			ToolName: "edit",
-			IsError:  false,
-		})
-		jw.handle(core.AgentEvent{Type: core.AgentEventEnd})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.TurnStarted{},
+			bus.ToolExecEnded{
+				ToolName: "bash",
+				IsError:  true,
+			},
+			bus.ToolExecEnded{
+				ToolName: "edit",
+				IsError:  false,
+			},
+			bus.AgentEnded{},
+		)
 	})
 
 	// Find the summary line
@@ -373,14 +367,18 @@ func TestJSONLineWriter_ProgressSkipsErrorTools(t *testing.T) {
 
 func TestJSONLineWriter_TurnStartCountsInProgress(t *testing.T) {
 	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
 		jw := newJSONLineWriter()
-		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
-		jw.handle(core.AgentEvent{Type: core.AgentEventTurnStart})
-		jw.handle(core.AgentEvent{
-			Type:     core.AgentEventToolExecEnd,
-			ToolName: "bash",
-			IsError:  false,
-		})
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.TurnStarted{},
+			bus.TurnStarted{},
+			bus.ToolExecEnded{
+				ToolName: "bash",
+				IsError:  false,
+			},
+		)
 	})
 
 	// Find the progress line
