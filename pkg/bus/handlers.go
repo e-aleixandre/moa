@@ -13,6 +13,28 @@ import (
 	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
+// rebuildSystemPrompt updates the agent's system prompt based on the current
+// plan mode state. Called by plan mode handlers after state transitions.
+func rebuildSystemPrompt(sctx *SessionContext) {
+	if sctx.PlanMode == nil {
+		return
+	}
+	prompt := sctx.BaseSystemPrompt
+	mode := sctx.PlanMode.Mode()
+	planFile := sctx.PlanMode.PlanFilePath()
+	if mode == planmode.ModePlanning {
+		if p := planmode.PlanningPrompt(planFile); p != "" {
+			prompt += "\n\n" + p
+		}
+	}
+	if mode == planmode.ModeExecuting {
+		if p := planmode.ExecutionPrompt(planFile); p != "" {
+			prompt += "\n\n" + p
+		}
+	}
+	_ = sctx.Agent.SetSystemPrompt(prompt)
+}
+
 // RegisterHandlers registers command and query handlers for a session on its bus.
 // Call once after creating a SessionContext.
 func RegisterHandlers(sctx *SessionContext) {
@@ -193,9 +215,17 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.PlanMode == nil {
 			return PlanModeInfo{Mode: "off"}, nil
 		}
+		rc := sctx.PlanMode.GetReviewConfig()
+		reviewName := rc.Model.Name
+		if reviewName == "" {
+			reviewName = rc.Model.ID
+		}
 		return PlanModeInfo{
-			Mode:     string(sctx.PlanMode.Mode()),
-			PlanFile: sctx.PlanMode.PlanFilePath(),
+			Mode:                string(sctx.PlanMode.Mode()),
+			PlanFile:            sctx.PlanMode.PlanFilePath(),
+			ReviewModelID:       rc.Model.ID,
+			ReviewModelName:     reviewName,
+			ReviewThinkingLevel: rc.ThinkingLevel,
 		}, nil
 	})
 
@@ -208,6 +238,18 @@ func RegisterHandlers(sctx *SessionContext) {
 			return string(g.Mode()), nil
 		}
 		return "yolo", nil
+	})
+
+	b.OnQuery(func(q GetPermissionInfo) (PermissionInfo, error) {
+		g := sctx.GetGate()
+		if g == nil {
+			return PermissionInfo{Mode: "yolo"}, nil
+		}
+		return PermissionInfo{
+			Mode:          string(g.Mode()),
+			AllowPatterns: g.AllowPatterns(),
+			Rules:         g.Rules(),
+		}, nil
 	})
 
 	b.OnQuery(func(q GetPathPolicy) (PathPolicyInfo, error) {
@@ -283,6 +325,9 @@ func RegisterHandlers(sctx *SessionContext) {
 				sctx.Approvals.StopPermissionBridge()
 			}
 			sctx.SetGate(nil)
+			if sctx.PathPolicy != nil {
+				sctx.PathPolicy.SetUnrestricted(true)
+			}
 		} else if sctx.GetGate() == nil {
 			// Reconstruct gate with preserved config (allow/deny/rules/headless).
 			g := permission.New(newMode, sctx.GateConfig)
@@ -300,10 +345,15 @@ func RegisterHandlers(sctx *SessionContext) {
 		} else {
 			modeStr = "yolo"
 		}
-		sctx.Bus.Publish(ConfigChanged{
+		evt := ConfigChanged{
 			SessionID:      sctx.SessionID,
 			PermissionMode: modeStr,
-		})
+		}
+		// If path policy was changed (yolo → unrestricted), include it.
+		if sctx.PathPolicy != nil {
+			evt.PathScope = sctx.PathPolicy.Scope()
+		}
+		sctx.Bus.Publish(evt)
 		return nil
 	})
 
@@ -348,16 +398,9 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.PlanMode == nil {
 			return fmt.Errorf("plan mode not available")
 		}
-		planPath, err := sctx.PlanMode.Enter()
-		if err != nil {
-			return err
-		}
-		sctx.Bus.Publish(PlanModeChanged{
-			SessionID: sctx.SessionID,
-			Mode:      string(planmode.ModePlanning),
-			PlanFile:  planPath,
-		})
-		return nil
+		// Enter() calls onChange → publishes PlanModeChanged.
+		_, err := sctx.PlanMode.Enter()
+		return err
 	})
 
 	b.OnCommand(func(cmd ExitPlanMode) error {
@@ -367,11 +410,8 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.PlanMode.Mode() == planmode.ModeOff {
 			return fmt.Errorf("not in plan mode")
 		}
+		// Exit() calls onChange → publishes PlanModeChanged.
 		sctx.PlanMode.Exit()
-		sctx.Bus.Publish(PlanModeChanged{
-			SessionID: sctx.SessionID,
-			Mode:      string(planmode.ModeOff),
-		})
 		return nil
 	})
 
@@ -384,8 +424,8 @@ func RegisterHandlers(sctx *SessionContext) {
 				return fmt.Errorf("reset before execution: %w", err)
 			}
 		}
+		// StartExecution() calls onChange → publishes PlanModeChanged.
 		sctx.PlanMode.StartExecution()
-		// PlanModeChanged is published by PlanMode's onChange callback.
 		return nil
 	})
 
@@ -393,8 +433,8 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.PlanMode == nil {
 			return fmt.Errorf("plan mode not available")
 		}
+		// StartReview() calls onChange → publishes PlanModeChanged.
 		sctx.PlanMode.StartReview()
-		// PlanModeChanged is published by PlanMode's onChange callback.
 		return nil
 	})
 
@@ -402,8 +442,17 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.PlanMode == nil {
 			return fmt.Errorf("plan mode not available")
 		}
+		// ContinueRefining() calls onChange → publishes PlanModeChanged.
 		sctx.PlanMode.ContinueRefining()
-		// PlanModeChanged is published by PlanMode's onChange callback.
+		return nil
+	})
+
+	b.OnCommand(func(cmd FinishPlanReview) error {
+		if sctx.PlanMode == nil {
+			return fmt.Errorf("plan mode not available")
+		}
+		// ReviewDone() calls onChange → publishes PlanModeChanged.
+		sctx.PlanMode.ReviewDone()
 		return nil
 	})
 
@@ -474,6 +523,23 @@ func RegisterHandlers(sctx *SessionContext) {
 			return PendingApprovalInfo{}, nil
 		}
 		return sctx.Approvals.PendingInfo(), nil
+	})
+
+	// -------------------------------------------------------------------
+	// Plan submitted reactor — detects when submit_plan tool completes
+	// -------------------------------------------------------------------
+
+	b.Subscribe(func(e ToolExecEnded) {
+		if e.ToolName == "submit_plan" && !e.IsError && !e.Rejected {
+			if sctx.PlanMode != nil && sctx.PlanMode.OnPlanSubmitted() {
+				rebuildSystemPrompt(sctx)
+				sctx.Bus.Publish(PlanModeChanged{
+					SessionID: sctx.SessionID,
+					Mode:      string(planmode.ModeReady),
+					PlanFile:  sctx.PlanMode.PlanFilePath(),
+				})
+			}
+		}
 	})
 
 	// -------------------------------------------------------------------
@@ -565,6 +631,7 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 		}
 		sctx.Bus.Publish(RunEnded{
 			SessionID: sctx.SessionID,
+			RunGen:    gen,
 			FinalText: finalText,
 			Err:       runErr,
 		})

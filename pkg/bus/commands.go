@@ -110,14 +110,17 @@ type StartPlanExecution struct {
 }
 
 // StartPlanReview transitions from ready → reviewing.
+// Review configuration (model, thinking) is handled by the TUI locally,
+// not by the bus — the plan mode state machine only tracks the mode transition.
 type StartPlanReview struct {
-	SessionID      string
-	ReviewModel    string
-	ReviewThinking string
+	SessionID string
 }
 
 // ContinueRefining transitions from reviewing → planning (continue refining).
 type ContinueRefining struct{ SessionID string }
+
+// FinishPlanReview completes the review phase and transitions to ready.
+type FinishPlanReview struct{ SessionID string }
 
 // ---------------------------------------------------------------------------
 // Tasks

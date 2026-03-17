@@ -16,8 +16,10 @@ import (
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/auth"
 	"github.com/ealeixandre/moa/pkg/bootstrap"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -193,10 +195,13 @@ func main() {
 		pathScopeStr = "unrestricted"
 	}
 
-	// Subagent notification channels for TUI.
-	subagentCountCh := make(chan int, 16)
-	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
 	useTUI := promptContent == ""
+
+	// Create bus early so subagent callbacks can publish to it.
+	var tuiBus *bus.LocalBus
+	if useTUI {
+		tuiBus = bus.NewLocalBus()
+	}
 
 	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
 	// plan mode, skills, verify, and agent.
@@ -241,9 +246,8 @@ func main() {
 		EnableAskUser:       useTUI,
 		BeforeWrite:         cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
-			select {
-			case subagentCountCh <- count:
-			default:
+			if tuiBus != nil {
+				tuiBus.Publish(bus.SubagentCountChanged{Count: count})
 			}
 		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
@@ -251,17 +255,13 @@ func main() {
 			if agentText == "" {
 				return
 			}
-			if useTUI {
-				select {
-				case subagentNotifyCh <- tui.SubagentNotification{
-					JobID:      jobID,
-					Task:       task,
-					Status:     status,
-					AgentText:  agentText,
-					ResultTail: resultTail,
-				}:
-				default:
-				}
+			if tuiBus != nil {
+				tuiBus.Publish(bus.SubagentCompleted{
+					JobID:  jobID,
+					Task:   task,
+					Status: status,
+					Text:   agentText,
+				})
 			} else {
 				if a := getAgent(); a != nil {
 					a.Steer(agentText)
@@ -357,30 +357,60 @@ func main() {
 			transcriber = openai.New(apiKey)
 		}
 
-		app := tui.New(ag, ctx, tui.Config{
+		// Snapshot gate config for runtime — preserves allow/deny/rules for gate reconstruction.
+		gateConfig := permission.Config{Headless: !useTUI}
+		if sess.Gate != nil {
+			gateConfig = sess.Gate.SnapshotConfig()
+		}
+
+		// Create SessionRuntime with the pre-created bus.
+		sessionID := "tui"
+		if persistedSess != nil {
+			sessionID = persistedSess.ID
+		}
+		rt, err := bus.NewSessionRuntime(bus.RuntimeConfig{
+			Bus:              tuiBus,
+			SessionID:        sessionID,
+			Ctx:              ctx,
+			Agent:            ag,
+			TaskStore:        sess.TaskStore,
+			Checkpoints:      cpStore,
+			PlanMode:         pm,
+			Gate:             sess.Gate,
+			PathPolicy:       sess.PathPolicy,
+			AskBridge:        sess.AskBridge,
+			ProviderFactory:  providerFactory,
+			BaseSystemPrompt: ag.SystemPrompt(),
+			GateConfig:       gateConfig,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Sync plan mode state (restore happened before SetOnChange was wired).
+		rt.SyncPlanMode()
+
+		// Attach session persistence.
+		if sessionStore != nil && persistedSess != nil {
+			rt.AttachPersister(&tuiPersister{store: sessionStore, session: persistedSess})
+		}
+
+		app := tui.New(ctx, tui.Config{
+			Runtime:               rt,
+			BootstrapSession:      sess,
 			SessionStore:          sessionStore,
 			Session:               persistedSess,
 			StartInSessionBrowser: startInSessionBrowser,
-			ModelName:             modelDisplayName(resolvedModel),
 			CWD:                   cwd,
-			PermissionGate:        sess.Gate,
-			PathPolicy:            sess.PathPolicy,
-			AskBridge:             sess.AskBridge,
 			PinnedModels:          moaCfg.PinnedModels,
-			SubagentCountCh:       subagentCountCh,
-			SubagentNotifyCh:      subagentNotifyCh,
-			PlanMode:              pm,
-			TaskStore:             sess.TaskStore,
 			PromptTemplates:       promptTemplates,
 			OnPinnedModelsChange: func(ids []string) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 					cfg.PinnedModels = ids
 				})
 			},
-			ProviderFactory:   providerFactory,
 			Transcriber:       transcriber,
-			CheckpointStore:   cpStore,
-			BootstrapSession:  sess,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {
@@ -447,6 +477,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nerror: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// tuiPersister implements bus.SessionPersister for TUI mode.
+type tuiPersister struct {
+	store   session.SessionStore
+	session *session.Session
+}
+
+func (p *tuiPersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[string]any) error {
+	p.session.Messages = msgs
+	p.session.CompactionEpoch = epoch
+	p.session.Metadata = meta
+	return p.store.Save(p.session)
 }
 
 // extractDenialReason extracts a human-readable reason from a tool result.

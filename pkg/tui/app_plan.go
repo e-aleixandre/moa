@@ -1,208 +1,72 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/planmode"
-	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
 // --- Plan mode ---
 
-func (m appModel) handleTasksCommand(args string) (tea.Model, tea.Cmd) {
-	if m.taskStore == nil {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Task tracking not available"})
-		return m, nil
-	}
-
-	parts := strings.Fields(args)
-
-	// /tasks — show task list.
-	if len(parts) == 0 {
-		taskList := m.taskStore.Tasks()
-		if len(taskList) == 0 {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "No tasks"})
-		} else {
-			done := 0
-			var lines []string
-			for _, t := range taskList {
-				icon := "☐"
-				if t.Status == "done" {
-					icon = "☑"
-					done++
-				}
-				lines = append(lines, fmt.Sprintf("%s #%d: %s", icon, t.ID, t.Title))
-			}
-			lines = append(lines, fmt.Sprintf("\n%d/%d complete", done, len(taskList)))
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: strings.Join(lines, "\n")})
-		}
-		m.updateViewport()
-		return m, nil
-	}
-
-	switch parts[0] {
-	case "done":
-		if len(parts) < 2 {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /tasks done <id>"})
-			m.updateViewport()
-			return m, nil
-		}
-		var id int
-		if _, err := fmt.Sscanf(parts[1], "%d", &id); err != nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Invalid task ID: " + parts[1]})
-			m.updateViewport()
-			return m, nil
-		}
-		if !m.taskStore.MarkDone(id) {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: fmt.Sprintf("Task #%d not found", id)})
-			m.updateViewport()
-			return m, nil
-		}
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: fmt.Sprintf("✅ Task #%d marked done", id)})
-		m.refreshTaskDisplay()
-		m.updateViewport()
-		return m, nil
-
-	case "reset":
-		m.taskStore.Reset()
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "Tasks cleared"})
-		m.refreshTaskDisplay()
-		m.updateViewport()
-		return m, nil
-
-	case "show":
-		if len(parts) >= 2 {
-			switch tasks.WidgetMode(parts[1]) {
-			case tasks.WidgetAll, tasks.WidgetCurrent, tasks.WidgetHidden:
-				m.taskStore.SetWidgetMode(tasks.WidgetMode(parts[1]))
-			default:
-				m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /tasks show [all|current|hidden]"})
-				m.updateViewport()
-				return m, nil
-			}
-		} else {
-			// Cycle: all → current → hidden → all.
-			current := m.taskStore.GetWidgetMode()
-			switch current {
-			case tasks.WidgetAll:
-				m.taskStore.SetWidgetMode(tasks.WidgetCurrent)
-			case tasks.WidgetCurrent:
-				m.taskStore.SetWidgetMode(tasks.WidgetHidden)
-			default:
-				m.taskStore.SetWidgetMode(tasks.WidgetAll)
-			}
-		}
-		mode := m.taskStore.GetWidgetMode()
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: fmt.Sprintf("Task widget: %s", mode)})
-		m.updateViewport()
-		return m, nil
-
-	default:
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /tasks [done <n> | reset | show [all|current|hidden]]"})
-		m.updateViewport()
-		return m, nil
-	}
-}
-
 func (m appModel) handlePlanCommand() (tea.Model, tea.Cmd) {
-	if m.planMode == nil {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Plan mode not available"})
-		return m, nil
-	}
-	if m.s.running {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot toggle plan mode while agent is running"})
+	info, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{})
+	if info.Mode == "" || info.Mode == "off" {
+		// Enter plan mode.
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot toggle plan mode while agent is running"})
+			return m, nil
+		}
+		if err := m.runtime.Bus.Execute(bus.EnterPlanMode{}); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Plan mode: " + err.Error()})
+			return m, nil
+		}
+		// PlanModeChanged event updates status bar.
+		// Re-query for plan file path.
+		info, _ = bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{})
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status",
+			Raw:  "📋 Plan mode enabled — plan file: " + info.PlanFile,
+		})
+		m.updateViewport()
 		return m, nil
 	}
 
-	mode := m.planMode.Mode()
-	switch mode {
-	case planmode.ModeReady:
-		// Already have a plan — show the action menu.
+	switch info.Mode {
+	case "ready":
 		m.planMenu.OpenPostSubmit()
 		m.lastMenuVariant = menuPostSubmit
 		m.input.SetEnabled(false)
 		m.updateViewport()
 		return m, nil
 
-	case planmode.ModePlanning:
-		// In the middle of planning — exit.
-		m.planMode.Exit()
-		m.syncPermissionCheck()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("")
-		m.statusBar.UpdateTasksSegment(0, 0)
+	case "planning":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot toggle plan mode while agent is running"})
+			return m, nil
+		}
+		_ = m.runtime.Bus.Execute(bus.ExitPlanMode{})
+		// PlanModeChanged event updates status bar.
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "Plan mode disabled"})
 		m.updateViewport()
 		return m, nil
 
-	case planmode.ModeExecuting:
-		// Can't toggle during execution.
+	case "executing":
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Plan is currently executing — wait for it to finish or use /plan after completion"})
 		m.updateViewport()
 		return m, nil
 
-	case planmode.ModeReviewing:
-		// Can't toggle during review.
+	case "reviewing":
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Plan review in progress"})
 		m.updateViewport()
 		return m, nil
 	}
 
-	planPath, err := m.planMode.Enter()
-	if err != nil {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Plan mode: " + err.Error()})
-		return m, nil
-	}
-	m.syncPermissionCheck()
-	m.rebuildSystemPrompt()
-	m.statusBar.UpdatePlanSegment("planning")
-	m.s.blocks = append(m.s.blocks, messageBlock{
-		Type: "status",
-		Raw:  "📋 Plan mode enabled — plan file: " + planPath,
-	})
-	m.updateViewport()
 	return m, nil
-}
-
-// syncPermissionCheck rebuilds the composed permission check from all sources.
-// Always call this when plan mode or permission gate state changes.
-func (m *appModel) syncPermissionCheck() {
-	pm := m.planMode
-	gate := m.permGate
-	_ = m.agent.SetPermissionCheck(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-		// Plan mode filter first (if plan mode is active).
-		if pm != nil {
-			if allowed, reason := pm.FilterToolCall(name, args); !allowed {
-				return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPolicy}
-			}
-		}
-		// Permission gate second (if configured).
-		if gate != nil {
-			return gate.Check(ctx, name, args)
-		}
-		return nil
-	})
-}
-
-// rebuildSystemPrompt updates the agent's system prompt with plan mode fragments.
-func (m *appModel) rebuildSystemPrompt() {
-	if m.planMode == nil {
-		return
-	}
-	prompt := m.baseSystemPrompt
-	if p := planmode.PlanningPrompt(m.planMode.PlanFilePath()); m.planMode.Mode() == planmode.ModePlanning && p != "" {
-		prompt += "\n\n" + p
-	}
-	if p := planmode.ExecutionPrompt(m.planMode.PlanFilePath()); m.planMode.Mode() == planmode.ModeExecuting && p != "" {
-		prompt += "\n\n" + p
-	}
-	_ = m.agent.SetSystemPrompt(prompt)
 }
 
 // handlePlanMenuKey routes keys to the plan action menu.
@@ -221,12 +85,11 @@ func (m appModel) handlePlanMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.planMenu.Close()
 		m.input.SetEnabled(true)
 	case tea.KeyTab:
-		// Tab on a review action → open model picker for review config.
 		actions := m.planMenu.actions()
 		if m.planMenu.cursor < len(actions) && actions[m.planMenu.cursor].action == planActionReview {
 			m.planMenu.Close()
-			currentModel := m.agent.Model()
-			m.picker.Open(currentModel.ID, m.scopedModels)
+			model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+			m.picker.Open(model.ID, m.scopedModels)
 			m.pickerPurpose = pickerForReviewConfig
 		}
 	}
@@ -234,9 +97,11 @@ func (m appModel) handlePlanMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
+	b := m.runtime.Bus
+
 	switch action {
 	case planActionExecuteClean:
-		if err := m.agent.Reset(); err != nil {
+		if err := b.Execute(bus.StartPlanExecution{CleanContext: true}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
 			return m, nil
 		}
@@ -246,47 +111,38 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		m.s.sessionCacheRead = 0
 		m.statusBar.UpdateCostSegment(0)
 		m.statusBar.UpdateCacheSegment(0)
-		m.planMode.StartExecution()
-		m.syncPermissionCheck()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("executing")
-		planFile := m.planMode.PlanFilePath()
+		info, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "▶ Executing plan (clean context)",
 		})
 		m.updateViewport()
-		return m.sendMessage("Execute the plan saved at " + planFile + ". Read the plan file first, then create tasks and begin implementing.")
+		return m.sendMessage("Execute the plan saved at " + info.PlanFile + ". Read the plan file first, then create tasks and begin implementing.")
 
 	case planActionExecuteKeep:
-		m.planMode.StartExecution()
-		m.syncPermissionCheck()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("executing")
-		planFile := m.planMode.PlanFilePath()
+		if err := b.Execute(bus.StartPlanExecution{CleanContext: false}); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			return m, nil
+		}
+		info, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "▶ Executing plan (keeping context)",
 		})
 		m.updateViewport()
-		return m.sendMessage("Execute the plan saved at " + planFile + ". Read the plan file first, then create tasks and begin implementing.")
+		return m.sendMessage("Execute the plan saved at " + info.PlanFile + ". Read the plan file first, then create tasks and begin implementing.")
 
 	case planActionReview:
-		m.planMode.StartReview()
-		m.statusBar.UpdatePlanSegment("reviewing")
+		_ = b.Execute(bus.StartPlanReview{})
 		m.input.SetEnabled(false)
 		m.status.SetText("reviewing plan...")
 		// Build review args for the tool block display.
-		reviewArgs := map[string]any{"plan": m.planMode.PlanFilePath()}
-		var modelLabel string
+		info, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
+		reviewArgs := map[string]any{"plan": info.PlanFile}
 		if m.planMenu.reviewModel != "" {
-			modelLabel = m.planMenu.reviewModel
-			reviewArgs["model"] = modelLabel
+			reviewArgs["model"] = m.planMenu.reviewModel
 		}
-		var thinkingLabel string
 		if m.planMenu.reviewThinking != "" {
-			thinkingLabel = m.planMenu.reviewThinking
-			reviewArgs["thinking"] = thinkingLabel
+			reviewArgs["thinking"] = m.planMenu.reviewThinking
 		}
-		// Create a tool-like block for the review (streaming output will fill ToolResult).
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type:       "tool",
 			ToolCallID: fmt.Sprintf("review_%d", m.reviewGen+1),
@@ -298,9 +154,8 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(reviewCmd, m.waitForReviewStream(), m.status.spinner.Tick, renderTick())
 
 	case planActionRefine:
-		m.planMode.ContinueRefining()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("planning")
+		_ = b.Execute(bus.ContinueRefining{})
+		// PlanModeChanged event updates status bar.
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "✏️ Continuing to refine plan",
 		})
@@ -308,14 +163,12 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case planActionEditor:
+		info, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 		m.lastMenuVariant = m.planMenu.variant
-		return m, openInEditor(m.planMode.PlanFilePath())
+		return m, openInEditor(info.PlanFile)
 
 	case planActionAutoRefine:
-		// Send reviewer feedback to model for auto-refinement.
-		m.planMode.ContinueRefining()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("planning")
+		_ = b.Execute(bus.ContinueRefining{})
 		feedback := ""
 		if m.lastReviewResult != nil {
 			feedback = m.lastReviewResult.Feedback
@@ -324,10 +177,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		return m.sendMessage(msg)
 
 	case planActionRefineWithOwn:
-		// Let user add instructions, then combine with reviewer feedback.
-		m.planMode.ContinueRefining()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("planning")
+		_ = b.Execute(bus.ContinueRefining{})
 		m.input.SetEnabled(true)
 		feedback := ""
 		if m.lastReviewResult != nil {
@@ -337,23 +187,18 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 			Type: "status",
 			Raw:  "✏️ Type your instructions. They'll be sent along with the reviewer feedback.",
 		})
-		// Store feedback so the next send can prepend it.
 		m.pendingReviewFeedback = feedback
 		m.updateViewport()
 		return m, nil
 
 	case planActionExecAnywayClean:
-		// Same as execute clean but from a rejected review.
 		return m.executePlanAction(planActionExecuteClean)
 
 	case planActionExecAnywayKeep:
-		// Same as execute keep but from a rejected review.
 		return m.executePlanAction(planActionExecuteKeep)
 
 	case planActionStayInPlanMode:
-		m.planMode.ContinueRefining()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("planning")
+		_ = b.Execute(bus.ContinueRefining{})
 		m.input.SetEnabled(true)
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "⏸ Staying in plan mode — edit the plan manually or keep refining",
@@ -365,14 +210,12 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 }
 
 // sendMessage sends a programmatic user message and starts the agent run.
-// Uses the same pipeline as regular input (prepareRun + launchAgentSend)
-// to get proper render ticks and spinner.
 func (m appModel) sendMessage(text string) (tea.Model, tea.Cmd) {
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
-	gen := m.prepareRun(truncateLabel(text))
+	m.prepareRun(truncateLabel(text))
 	m.input.SetEnabled(false)
 	m.updateViewport()
-	return m, m.launchAgentSend(text, gen)
+	return m, m.launchAgentSend(text)
 }
 
 // planReviewStreamMsg carries a text delta from the reviewer.
@@ -391,15 +234,27 @@ type planReviewResultMsg struct {
 func (m *appModel) runPlanReview() tea.Cmd {
 	m.reviewGen++
 	gen := m.reviewGen
-	// Create a buffered channel for stream deltas.
 	ch := make(chan planReviewStreamMsg, 64)
 	m.reviewStreamCh = ch
-	pm := m.planMode
-	planPath := pm.PlanFilePath()
-	reviewCfg := pm.GetReviewConfig()
-	// Apply per-run overrides from the plan menu.
+	info, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{})
+	planPath := info.PlanFile
+
+	// Build review config from PlanMode via the runtime's SessionContext.
+	// The plan mode's GetReviewConfig already has provider factory and tools.
+	sctx := m.runtime.Context()
+	var reviewCfg planmode.ReviewConfig
+	if sctx != nil && sctx.PlanMode != nil {
+		reviewCfg = sctx.PlanMode.GetReviewConfig()
+	}
+	reviewCfg.ThinkingLevel = info.ReviewThinkingLevel
+
+	// Resolve review model.
+	reviewModelID := info.ReviewModelID
 	if m.planMenu.reviewModelID != "" {
-		resolved, _ := core.ResolveModel(m.planMenu.reviewModelID)
+		reviewModelID = m.planMenu.reviewModelID
+	}
+	if reviewModelID != "" {
+		resolved, _ := core.ResolveModel(reviewModelID)
 		if resolved.ID != "" {
 			reviewCfg.Model = resolved
 		}
@@ -407,10 +262,10 @@ func (m *appModel) runPlanReview() tea.Cmd {
 	if m.planMenu.reviewThinking != "" {
 		reviewCfg.ThinkingLevel = m.planMenu.reviewThinking
 	}
+
 	ctx := m.baseCtx
 	return func() tea.Msg {
 		onStream := func(delta string) {
-			// Non-blocking send — drop if buffer full (UI will catch up on next delta).
 			select {
 			case ch <- planReviewStreamMsg{Delta: delta, ReviewGen: gen}:
 			default:
@@ -422,7 +277,6 @@ func (m *appModel) runPlanReview() tea.Cmd {
 	}
 }
 
-// waitForReviewStream returns a Cmd that reads one delta from the review stream channel.
 func (m appModel) waitForReviewStream() tea.Cmd {
 	ch := m.reviewStreamCh
 	if ch == nil {
@@ -431,27 +285,25 @@ func (m appModel) waitForReviewStream() tea.Cmd {
 	return func() tea.Msg {
 		msg, ok := <-ch
 		if !ok {
-			return nil // channel closed, result msg will arrive separately
+			return nil
 		}
 		return msg
 	}
 }
 
 func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, tea.Cmd) {
-	// Ignore stale results (mode changed while review was running).
 	if msg.ReviewGen != m.reviewGen {
 		return m, nil
 	}
-	if m.planMode.Mode() != planmode.ModeReviewing {
+	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{})
+	if planInfo.Mode != "reviewing" {
 		return m, nil
 	}
-	m.planMode.ReviewDone()
-	m.statusBar.UpdatePlanSegment("ready")
+	_ = m.runtime.Bus.Execute(bus.FinishPlanReview{})
 	m.status.SetText("")
 	m.reviewStreamCh = nil
 
 	if msg.Err != nil {
-		// Mark review block as error.
 		for i := len(m.s.blocks) - 1; i >= 0; i-- {
 			b := &m.s.blocks[i]
 			if b.Type == "tool" && b.ToolName == "plan_review" && !b.ToolDone {
@@ -464,7 +316,6 @@ func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, te
 		m.planMenu.OpenPostSubmit()
 		m.lastMenuVariant = menuPostSubmit
 	} else {
-		// Mark review block as done with the final result.
 		for i := len(m.s.blocks) - 1; i >= 0; i-- {
 			b := &m.s.blocks[i]
 			if b.Type == "tool" && b.ToolName == "plan_review" && !b.ToolDone {
@@ -488,7 +339,6 @@ func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, te
 	return m, nil
 }
 
-// openInEditor opens a file in $EDITOR using tea.ExecProcess.
 func openInEditor(path string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -503,4 +353,18 @@ func openInEditor(path string) tea.Cmd {
 
 type editorDoneMsg struct {
 	err error
+}
+
+// commitPendingTimelineEvent appends the pending timeline event to the conversation via bus.
+func (m *appModel) commitPendingTimelineEvent() error {
+	if m.s.pendingTimeline == nil {
+		return nil
+	}
+	err := m.runtime.Bus.Execute(bus.AppendToConversation{Message: m.s.pendingTimeline.Message})
+	if err != nil {
+		return err
+	}
+	m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: m.s.pendingTimeline.Text})
+	m.s.pendingTimeline = nil
+	return nil
 }

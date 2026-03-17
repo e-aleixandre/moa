@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -31,6 +30,24 @@ func newTestModel() appModel {
 		width:    80,
 		height:   24,
 	}
+}
+
+// newTestRuntime creates a SessionRuntime for tests.
+func newTestRuntime(t *testing.T, ag *agent.Agent) *bus.SessionRuntime {
+	t.Helper()
+	rt, err := bus.NewSessionRuntime(bus.RuntimeConfig{
+		Ctx:              context.Background(),
+		Agent:            ag,
+		BaseSystemPrompt: ag.SystemPrompt(),
+		ProviderFactory: func(model core.Model) (core.Provider, error) {
+			return staticProvider{text: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSessionRuntime: %v", err)
+	}
+	t.Cleanup(func() { rt.Close() })
+	return rt
 }
 
 type staticProvider struct{ text string }
@@ -62,11 +79,9 @@ func newSwitchTestApp(t *testing.T) appModel {
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
 	}
-	m := New(ag, context.Background(), Config{
-		ModelName: "Claude Sonnet 4.6",
-		ProviderFactory: func(model core.Model) (core.Provider, error) {
-			return staticProvider{text: "ok"}, nil
-		},
+	rt := newTestRuntime(t, ag)
+	m := New(context.Background(), Config{
+		Runtime: rt,
 	})
 	m.width = 80
 	m.height = 24
@@ -84,7 +99,8 @@ func TestNew_StartInSessionBrowserDisablesInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
 	}
-	m := New(ag, context.Background(), Config{StartInSessionBrowser: true})
+	rt := newTestRuntime(t, ag)
+	m := New(context.Background(), Config{Runtime: rt, StartInSessionBrowser: true})
 	if !m.sessionBrowser.active {
 		t.Fatal("session browser should start active")
 	}
@@ -313,17 +329,15 @@ func TestTranscriptMode_AllowsCtrlC(t *testing.T) {
 }
 
 func TestPermissionRequest_ExitsTranscript(t *testing.T) {
-	m := newTestModel()
+	m := newSwitchTestApp(t)
 	m.s.transcript = true
 	m.s.blocks = []messageBlock{{Type: "user", Raw: "hello"}}
-	m.permGate = permission.New(permission.ModeAsk, permission.Config{})
 
-	result, cmd := m.Update(permissionRequestMsg{
-		Request: permission.Request{
-			ToolName: "bash",
-			Args:     map[string]any{"command": "rm -rf /"},
-		},
-	})
+	result, cmd := m.Update(busEventMsg{event: bus.PermissionRequested{
+		ID:       "perm-1",
+		ToolName: "bash",
+		Args:     map[string]any{"command": "rm -rf /"},
+	}})
 	rm := result.(appModel)
 
 	if rm.s.transcript {
@@ -333,20 +347,18 @@ func TestPermissionRequest_ExitsTranscript(t *testing.T) {
 		t.Error("permission prompt should be active")
 	}
 	if cmd == nil {
-		t.Error("expected non-nil cmd for EnterAltScreen")
+		t.Error("expected non-nil cmd for EnterAltScreen + waitForBusEvent")
 	}
 }
 
-// --- Test 2: handleAgentEvent message_end flushes blocks ---
+// --- Test 2: handleBusEvent message_end flushes blocks ---
 
-func TestHandleAgentEvent_MessageEnd_AppendsBlocks(t *testing.T) {
+func TestHandleBusEvent_MessageEnd_AppendsBlocks(t *testing.T) {
 	m := newTestModel()
 	m.s.streamText = "hello world"
 	m.s.thinkingText = "let me think"
 
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventMessageEnd,
-	})
+	m.handleBusEvent(bus.MessageEnded{})
 
 	if len(m.s.blocks) != 2 {
 		t.Fatalf("blocks = %d, want 2", len(m.s.blocks))
@@ -368,14 +380,12 @@ func TestHandleAgentEvent_MessageEnd_AppendsBlocks(t *testing.T) {
 	}
 }
 
-func TestHandleAgentEvent_MessageEnd_NoContent(t *testing.T) {
+func TestHandleBusEvent_MessageEnd_NoContent(t *testing.T) {
 	m := newTestModel()
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventMessageEnd,
-	})
+	m.handleBusEvent(bus.MessageEnded{})
 
 	if len(m.s.blocks) != 0 {
 		t.Errorf("blocks = %d, want 0 (no content)", len(m.s.blocks))
@@ -582,13 +592,11 @@ func TestPatchFromMessages_CreatesMissingAssistantOnly(t *testing.T) {
 	}
 }
 
-// --- Test 4: handleRunResult resets state ---
+// --- Test 4: handleRunEnded resets state ---
 
-func TestHandleRunResult_ResetsState(t *testing.T) {
-	m := newTestModel()
+func TestHandleRunEnded_ResetsState(t *testing.T) {
+	m := newSwitchTestApp(t)
 	m.s.runGen = 5
-	m.runGenAddr = &atomic.Uint64{}
-	m.runGenAddr.Store(5)
 
 	m.s.blocks = []messageBlock{
 		{Type: "user", Raw: "hello"},
@@ -599,44 +607,29 @@ func TestHandleRunResult_ResetsState(t *testing.T) {
 	m.s.streamState = stateStreaming
 	m.input.SetEnabled(false)
 
-	result, _ := m.handleRunResult(agentRunResultMsg{
-		RunGen: 5,
-		Messages: []core.AgentMessage{
-			{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "hello"}}}},
-			{Message: core.Message{Role: "assistant", Content: []core.Content{{Type: "text", Text: "world"}}}},
-		},
-	})
+	m.handleRunEnded(bus.RunEnded{RunGen: 5})
 
-	rm := result.(appModel)
-	if rm.s.running {
+	if m.s.running {
 		t.Error("running should be false")
 	}
-	if rm.s.streamState != stateIdle {
-		t.Errorf("streamState = %d, want stateIdle", rm.s.streamState)
-	}
-	if len(rm.s.blocks) != 3 {
-		t.Fatalf("blocks = %d, want 3", len(rm.s.blocks))
+	if m.s.streamState != stateIdle {
+		t.Errorf("streamState = %d, want stateIdle", m.s.streamState)
 	}
 }
 
-func TestHandleRunResult_IgnoresOldGen(t *testing.T) {
+func TestHandleBusEvent_RunEnded_IgnoresOldGen(t *testing.T) {
 	m := newTestModel()
 	m.s.runGen = 5
-	m.runGenAddr = &atomic.Uint64{}
-	m.runGenAddr.Store(5)
 	m.s.running = true
 
-	result, cmd := m.handleRunResult(agentRunResultMsg{
-		RunGen: 3, // old generation
-	})
+	cmds := m.handleBusEvent(bus.RunEnded{RunGen: 3}) // old generation
 
-	rm := result.(appModel)
-	// Should still be running (result ignored)
-	if !rm.s.running {
+	// Should still be running (result ignored for mismatched gen)
+	if !m.s.running {
 		t.Error("running should still be true for old gen")
 	}
-	if cmd != nil {
-		t.Error("expected nil Cmd for old gen")
+	if cmds != nil {
+		t.Error("expected nil cmds for old gen")
 	}
 }
 
@@ -726,13 +719,12 @@ func TestClear_ResetsState(t *testing.T) {
 	}
 }
 
-// --- Test: handleAgentEvent tool events ---
+// --- Test: handleBusEvent tool events ---
 
-func TestHandleAgentEvent_ToolStart_AppendsBlock(t *testing.T) {
+func TestHandleBusEvent_ToolStart_AppendsBlock(t *testing.T) {
 	m := newTestModel()
 
-	m.handleAgentEvent(core.AgentEvent{
-		Type:       core.AgentEventToolExecStart,
+	m.handleBusEvent(bus.ToolExecStarted{
 		ToolCallID: "tc-1",
 		ToolName:   "bash",
 		Args:       map[string]any{"command": "ls"},
@@ -755,7 +747,7 @@ func TestHandleAgentEvent_ToolStart_AppendsBlock(t *testing.T) {
 	}
 }
 
-func TestHandleAgentEvent_ToolEnd_UpdatesBlock(t *testing.T) {
+func TestHandleBusEvent_ToolEnd_UpdatesBlock(t *testing.T) {
 	m := newTestModel()
 	m.s.blocks = []messageBlock{
 		{Type: "tool", ToolCallID: "tc-1", ToolName: "bash"},
@@ -764,13 +756,7 @@ func TestHandleAgentEvent_ToolEnd_UpdatesBlock(t *testing.T) {
 	m.s.streamState = stateToolRunning
 
 	result := core.TextResult("file1.go\nfile2.go")
-	m.handleAgentEvent(core.AgentEvent{
-		Type:       core.AgentEventToolExecEnd,
-		ToolCallID: "tc-1",
-		ToolName:   "bash",
-		IsError:    false,
-		Result:     &result,
-	})
+	m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "tc-1", ToolName: "bash", IsError: false, Result: result.Content[0].Text})
 
 	if len(m.s.blocks) != 1 {
 		t.Fatalf("blocks = %d, want 1 (updated in-place)", len(m.s.blocks))
@@ -789,12 +775,12 @@ func TestHandleAgentEvent_ToolEnd_UpdatesBlock(t *testing.T) {
 	}
 }
 
-func TestHandleAgentEvent_ToolUpdate_StreamsOutput(t *testing.T) {
+func TestHandleBusEvent_ToolUpdate_StreamsOutput(t *testing.T) {
 	m := newTestModel()
 
 	// Start a bash tool.
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecStart, ToolCallID: "tc-1", ToolName: "bash",
+	m.handleBusEvent(bus.ToolExecStarted{
+		ToolCallID: "tc-1", ToolName: "bash",
 		Args: map[string]any{"command": "make test"},
 	})
 	if m.s.blocks[0].ToolResult != "" {
@@ -803,13 +789,9 @@ func TestHandleAgentEvent_ToolUpdate_StreamsOutput(t *testing.T) {
 
 	// Stream two chunks.
 	r1 := core.TextResult("PASS pkg/core\n")
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecUpdate, ToolCallID: "tc-1", Result: &r1,
-	})
+	m.handleBusEvent(bus.ToolExecUpdate{ToolCallID: "tc-1", Delta: r1.Content[0].Text})
 	r2 := core.TextResult("PASS pkg/tui\n")
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecUpdate, ToolCallID: "tc-1", Result: &r2,
-	})
+	m.handleBusEvent(bus.ToolExecUpdate{ToolCallID: "tc-1", Delta: r2.Content[0].Text})
 
 	if m.s.blocks[0].ToolResult != "PASS pkg/core\nPASS pkg/tui\n" {
 		t.Errorf("accumulated result = %q", m.s.blocks[0].ToolResult)
@@ -820,9 +802,7 @@ func TestHandleAgentEvent_ToolUpdate_StreamsOutput(t *testing.T) {
 
 	// End replaces with final result.
 	final := core.TextResult("ok\n2 passed")
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-1", ToolName: "bash", Result: &final,
-	})
+	m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "tc-1", ToolName: "bash", Result: final.Content[0].Text})
 	if m.s.blocks[0].ToolResult != "ok\n2 passed" {
 		t.Errorf("final result = %q, want 'ok\\n2 passed'", m.s.blocks[0].ToolResult)
 	}
@@ -831,15 +811,11 @@ func TestHandleAgentEvent_ToolUpdate_StreamsOutput(t *testing.T) {
 	}
 }
 
-func TestHandleAgentEvent_ParallelTools_CountsCorrectly(t *testing.T) {
+func TestHandleBusEvent_ParallelTools_CountsCorrectly(t *testing.T) {
 	m := newTestModel()
 
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecStart, ToolCallID: "tc-1", ToolName: "bash",
-	})
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecStart, ToolCallID: "tc-2", ToolName: "read",
-	})
+	m.handleBusEvent(bus.ToolExecStarted{ToolCallID: "tc-1", ToolName: "bash"})
+	m.handleBusEvent(bus.ToolExecStarted{ToolCallID: "tc-2", ToolName: "read"})
 
 	if m.s.activeTools != 2 {
 		t.Fatalf("activeTools = %d, want 2", m.s.activeTools)
@@ -850,18 +826,14 @@ func TestHandleAgentEvent_ParallelTools_CountsCorrectly(t *testing.T) {
 
 	// First tool finishes
 	r1 := core.TextResult("done")
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-1", ToolName: "bash", Result: &r1,
-	})
+	m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "tc-1", ToolName: "bash", Result: r1.Content[0].Text})
 	if m.s.activeTools != 1 {
 		t.Errorf("activeTools = %d, want 1", m.s.activeTools)
 	}
 
 	// Second tool finishes
 	r2 := core.TextResult("content")
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecEnd, ToolCallID: "tc-2", ToolName: "read", Result: &r2,
-	})
+	m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "tc-2", ToolName: "read", Result: r2.Content[0].Text})
 	if m.s.activeTools != 0 {
 		t.Errorf("activeTools = %d, want 0", m.s.activeTools)
 	}
@@ -1202,7 +1174,8 @@ func TestSwitchToModel_SetsPendingTimeline(t *testing.T) {
 	if len(rm.s.blocks) != 0 {
 		t.Fatalf("blocks = %d, want 0 before send", len(rm.s.blocks))
 	}
-	if got := rm.agent.Model().ID; got != "gpt-5.3-codex" {
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](rm.runtime.Bus, bus.GetModel{})
+	if got := model.ID; got != "gpt-5.3-codex" {
 		t.Fatalf("agent model = %q, want gpt-5.3-codex", got)
 	}
 }
@@ -1255,7 +1228,7 @@ func TestStartAgentRun_CommitsPendingTimelineBeforeUserBlock(t *testing.T) {
 	if got := rm.s.blocks[1]; got.Type != "user" || got.Raw != "hello" {
 		t.Fatalf("blocks[1] = %+v, want user block", got)
 	}
-	msgs := rm.agent.Messages()
+	msgs := rm.currentMessages()
 	if len(msgs) != 1 {
 		t.Fatalf("agent messages = %d, want 1 committed session event before Send executes", len(msgs))
 	}
@@ -1530,8 +1503,10 @@ func TestSteerQueue(t *testing.T) {
 	// Initial user message in blocks.
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: "hello"})
 
+	gen := m.s.runGen // match events to current run
+
 	// Agent streams a response.
-	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventMessageStart})
+	m.handleBusEvent(bus.MessageStarted{RunGen: gen})
 	m.s.streamText = "I'll help you"
 
 	// User queues two steers.
@@ -1549,25 +1524,20 @@ func TestSteerQueue(t *testing.T) {
 	}
 
 	// MessageEnd creates assistant block.
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventMessageEnd,
-		Message: core.AgentMessage{Message: core.Message{
-			Role: "assistant", Content: []core.Content{core.TextContent("I'll help you")},
-		}},
-	})
+	m.handleBusEvent(bus.MessageEnded{RunGen: gen, FullText: "I'll help you"})
 
 	// Tool execution.
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecStart, ToolCallID: "t1", ToolName: "bash",
+	m.handleBusEvent(bus.ToolExecStarted{
+		RunGen: gen, ToolCallID: "t1", ToolName: "bash",
 		Args: map[string]any{"command": "ls"},
 	})
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventToolExecEnd, ToolCallID: "t1", ToolName: "bash",
-		Result: &core.Result{Content: []core.Content{core.TextContent("file.txt")}},
+	m.handleBusEvent(bus.ToolExecEnded{
+		RunGen: gen, ToolCallID: "t1", ToolName: "bash",
+		Result: "file.txt",
 	})
 
 	// Agent processes the steers.
-	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventSteer, Text: "do X instead"})
+	m.handleBusEvent(bus.Steered{RunGen: gen, Text: "do X instead"})
 
 	if len(m.s.queuedSteers) != 1 {
 		t.Fatalf("after first steer event: queuedSteers = %d, want 1", len(m.s.queuedSteers))
@@ -1583,20 +1553,15 @@ func TestSteerQueue(t *testing.T) {
 		t.Error("first steer not added to blocks after AgentEventSteer")
 	}
 
-	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventSteer, Text: "and also Y"})
+	m.handleBusEvent(bus.Steered{RunGen: gen, Text: "and also Y"})
 	if len(m.s.queuedSteers) != 0 {
 		t.Fatalf("after second steer event: queuedSteers = %d, want 0", len(m.s.queuedSteers))
 	}
 
 	// Second response from agent (after processing steers).
-	m.handleAgentEvent(core.AgentEvent{Type: core.AgentEventMessageStart})
+	m.handleBusEvent(bus.MessageStarted{RunGen: gen})
 	m.s.streamText = "OK doing X and Y"
-	m.handleAgentEvent(core.AgentEvent{
-		Type: core.AgentEventMessageEnd,
-		Message: core.AgentMessage{Message: core.Message{
-			Role: "assistant", Content: []core.Content{core.TextContent("OK doing X and Y")},
-		}},
-	})
+	m.handleBusEvent(bus.MessageEnded{RunGen: gen, FullText: "OK doing X and Y"})
 
 	// Both assistant responses must be present.
 	assistantCount := 0
@@ -1731,7 +1696,9 @@ func TestNew_PinnedModelsLoadedFromConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
 	}
-	m := New(ag, context.Background(), Config{
+	rt := newTestRuntime(t, ag)
+	m := New(context.Background(), Config{
+		Runtime:      rt,
 		PinnedModels: []string{"claude-sonnet-4-5", "gpt-4o"},
 	})
 	if !m.scopedModels["claude-sonnet-4-5"] || !m.scopedModels["gpt-4o"] {

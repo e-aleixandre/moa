@@ -44,6 +44,14 @@ type EventBus interface {
 	// Panics on invalid signature or pointer type.
 	Subscribe(handler any) func()
 
+	// SubscribeAll registers a handler that receives ALL events regardless of type.
+	// The handler receives events in publication order within a single goroutine,
+	// guaranteeing ordering. Events are delivered to SubscribeAll handlers BEFORE
+	// typed subscribers.
+	// Returns an unsubscribe function (idempotent, non-blocking).
+	// Returns a no-op unsubscribe if bus is already closed.
+	SubscribeAll(handler func(any)) func()
+
 	// Execute dispatches a command to its registered handler synchronously.
 	// Returns ErrNoHandler if none registered, ErrClosed if bus is closed.
 	// Recovers handler panics and returns them as wrapped errors.
@@ -109,6 +117,7 @@ type LocalBus struct {
 
 	mu        sync.RWMutex
 	eventSubs map[reflect.Type][]*subscriber
+	allSubs   []*subscriber // SubscribeAll handlers — receive ALL events in order
 	cmdH      map[reflect.Type]reflect.Value
 	queryH    map[reflect.Type]reflect.Value
 
@@ -136,6 +145,7 @@ type subscriber struct {
 	stopOnce sync.Once      // guards close(done) — safe for concurrent close/unsub
 	stopped  atomic.Bool    // fast check: true after stop() called
 	bus      *LocalBus      // back-reference for inflight tracking
+	isAll    bool           // true for SubscribeAll handlers (fn is func(any))
 }
 
 // stop signals the subscriber goroutine to drain and exit. Safe to call
@@ -212,6 +222,46 @@ func (b *LocalBus) Subscribe(handler any) func() {
 	}
 }
 
+// SubscribeAll implements EventBus.
+func (b *LocalBus) SubscribeAll(handler func(any)) func() {
+	if handler == nil {
+		panic("bus: SubscribeAll handler must not be nil")
+	}
+
+	b.mu.Lock()
+	if b.closed.Load() {
+		b.mu.Unlock()
+		return func() {} // no-op unsubscribe
+	}
+
+	sub := &subscriber{
+		ch:     make(chan any, subscriberBuffer),
+		fn:     reflect.ValueOf(handler),
+		done:   make(chan struct{}),
+		exited: make(chan struct{}),
+		bus:    b,
+		isAll:  true,
+	}
+	go sub.loop()
+	b.allSubs = append(b.allSubs, sub)
+	b.mu.Unlock()
+
+	var unsubOnce sync.Once
+	return func() {
+		unsubOnce.Do(func() {
+			b.mu.Lock()
+			for i, s := range b.allSubs {
+				if s == sub {
+					b.allSubs = append(b.allSubs[:i], b.allSubs[i+1:]...)
+					break
+				}
+			}
+			b.mu.Unlock()
+			sub.stop()
+		})
+	}
+}
+
 // Publish implements EventBus.
 func (b *LocalBus) Publish(event any) {
 	if event == nil {
@@ -226,6 +276,21 @@ func (b *LocalBus) Publish(event any) {
 	// this cheap. This ensures we never send to a subscriber whose goroutine
 	// has already exited (unsubscribe/close take write lock before stopping).
 	b.mu.RLock()
+
+	// SubscribeAll handlers first — guarantees they see events before typed subs.
+	for _, sub := range b.allSubs {
+		if sub.stopped.Load() {
+			continue
+		}
+		b.inflight.Add(1)
+		select {
+		case sub.ch <- event:
+		default:
+			b.decrementInflight()
+		}
+	}
+
+	// Typed subscribers.
 	subs := b.eventSubs[et]
 	for _, sub := range subs {
 		if sub.stopped.Load() {
@@ -402,10 +467,12 @@ func (b *LocalBus) Close() {
 
 	// Take write lock so no Publish can be in its enqueue loop.
 	b.mu.Lock()
-	allSubs := make([]*subscriber, 0)
+	allSubs := make([]*subscriber, 0, len(b.allSubs))
+	allSubs = append(allSubs, b.allSubs...)
 	for _, subs := range b.eventSubs {
 		allSubs = append(allSubs, subs...)
 	}
+	b.allSubs = nil
 	b.eventSubs = make(map[reflect.Type][]*subscriber)
 	b.mu.Unlock()
 
@@ -452,7 +519,12 @@ func (s *subscriber) loop() {
 func (s *subscriber) process(event any) {
 	defer s.bus.decrementInflight()
 	defer func() { recover() }() // swallow handler panics
-	s.fn.Call([]reflect.Value{reflect.ValueOf(event)})
+	if s.isAll {
+		// SubscribeAll handler: fn is func(any), call directly for efficiency.
+		s.fn.Interface().(func(any))(event)
+	} else {
+		s.fn.Call([]reflect.Value{reflect.ValueOf(event)})
+	}
 }
 
 func (b *LocalBus) decrementInflight() {

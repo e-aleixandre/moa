@@ -21,7 +21,9 @@ type permOption struct {
 type permissionPrompt struct {
 	active   bool
 	mode     permission.Mode
-	request  permission.Request
+	permID   string         // bus permission ID
+	toolName string         // tool being approved
+	args     map[string]any // tool arguments
 	options  []permOption
 	cursor   int
 	amending bool   // Tab: editing feedback after the selected option
@@ -30,15 +32,26 @@ type permissionPrompt struct {
 	ruleBuf  string
 }
 
-func (p *permissionPrompt) Show(req permission.Request, mode permission.Mode) {
+// ShowFromBus populates the prompt from bus event data.
+func (p *permissionPrompt) ShowFromBus(id, toolName string, args map[string]any, allowPattern, modeStr string) {
 	p.active = true
-	p.mode = mode
-	p.request = req
+	p.permID = id
+	p.toolName = toolName
+	p.args = args
 	p.cursor = 0
 	p.amending = false
 	p.amendBuf = ""
 	p.ruleMode = false
 	p.ruleBuf = ""
+
+	mode := permission.ModeAsk
+	switch modeStr {
+	case "auto":
+		mode = permission.ModeAuto
+	case "ask":
+		mode = permission.ModeAsk
+	}
+	p.mode = mode
 
 	switch mode {
 	case permission.ModeAuto:
@@ -48,7 +61,10 @@ func (p *permissionPrompt) Show(req permission.Request, mode permission.Mode) {
 			{label: "Add rule", addRule: true},
 		}
 	default: // ModeAsk
-		pattern := permission.GenerateAllowPattern(req.ToolName, req.Args)
+		pattern := allowPattern
+		if pattern == "" {
+			pattern = permission.GenerateAllowPattern(toolName, args)
+		}
 		p.options = []permOption{
 			{label: "Yes", approved: true},
 			{label: fmt.Sprintf("Yes, always allow %s", pattern), approved: true, allow: pattern},
@@ -57,31 +73,12 @@ func (p *permissionPrompt) Show(req permission.Request, mode permission.Mode) {
 	}
 }
 
-func (p *permissionPrompt) respond(resp permission.Response) {
-	if p.active {
-		p.request.Response <- resp
-		p.active = false
-	}
-}
-
-func (p *permissionPrompt) Confirm() {
-	if !p.active || p.cursor >= len(p.options) {
-		return
-	}
-	opt := p.options[p.cursor]
-	p.respond(permission.Response{
-		Approved: opt.approved,
-		Feedback: strings.TrimSpace(p.amendBuf),
-		Allow:    opt.allow,
-	})
-}
-
 func (p *permissionPrompt) Cancel() {
-	p.respond(permission.Response{Approved: false})
+	p.active = false
 }
 
 // SaveRule stores the typed rule and stays on the prompt.
-// Returns the rule text (caller adds it to the gate).
+// Returns the rule text (caller adds it to the gate via bus).
 func (p *permissionPrompt) SaveRule() string {
 	rule := strings.TrimSpace(p.ruleBuf)
 	p.ruleMode = false
@@ -103,12 +100,12 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 	body := lipgloss.NewStyle().Foreground(theme.Text)
 	green := lipgloss.NewStyle().Foreground(theme.Green)
 
-	summary := permissionSummary(p.request.ToolName, p.request.Args)
+	summary := permissionSummary(p.toolName, p.args)
 
 	var lines []string
 
 	// Header
-	lines = append(lines, warn.Render(fmt.Sprintf("  ⚠ approve %s?", p.request.ToolName)))
+	lines = append(lines, warn.Render(fmt.Sprintf("  ⚠ approve %s?", p.toolName)))
 
 	// Tool summary
 	if summary != "" {

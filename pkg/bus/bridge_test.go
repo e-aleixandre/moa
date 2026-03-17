@@ -164,6 +164,14 @@ func (f *fakeAgent) SetPermissionCheck(fn func(ctx context.Context, name string,
 	return nil
 }
 
+func (f *fakeAgent) SetSystemPrompt(prompt string) error {
+	return nil
+}
+
+func (f *fakeAgent) SystemPrompt() string {
+	return ""
+}
+
 func (f *fakeAgent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

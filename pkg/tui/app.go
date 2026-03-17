@@ -6,25 +6,20 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ealeixandre/moa/pkg/agent"
-	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/bootstrap"
-	"github.com/ealeixandre/moa/pkg/checkpoint"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
 
@@ -40,9 +35,6 @@ const (
 )
 
 // state holds mutable data that must not be copied by Bubble Tea's value semantics.
-// strings.Builder, sync.Once, etc. are not safe to copy.
-// All mutable conversational state lives here behind a pointer.
-// Accessed only from the Bubble Tea goroutine (single-threaded).
 type state struct {
 	blocks           []messageBlock // conversation history, raw content
 	streamText       string         // current streaming assistant text
@@ -73,96 +65,72 @@ type state struct {
 	queuedSteers     []string // steer messages waiting to be processed by the agent
 }
 
-// taggedEvent pairs an agent event with the run generation it was produced in.
-// Tagged at production time (in the subscriber callback), not at consumption time.
-// This prevents late events from being misidentified as belonging to the current run.
-type taggedEvent struct {
-	event core.AgentEvent
-	gen   uint64
-}
-
 type pendingTimelineEvent struct {
 	Text    string
 	Message core.AgentMessage
 }
 
-// appModel is the root Bubble Tea model. It composes all components,
-// routes messages, manages the agent event bridge, and owns conversation state.
+// appModel is the root Bubble Tea model.
 type pickerPurpose int
 
 const (
-	pickerForModelSwitch  pickerPurpose = iota // normal /model switch
-	pickerForReviewConfig                      // choosing review model from plan menu
+	pickerForModelSwitch  pickerPurpose = iota
+	pickerForReviewConfig
 )
 
 type appModel struct {
 	// Pointer to mutable state — safe across Bubble Tea model copies
 	s *state
 
-	// Dependencies (pointers/channels are reference types, safe to copy)
-	agent      *agent.Agent
-	renderer   *renderer
-	eventCh    chan taggedEvent
-	quit       chan struct{}
-	unsub      func()
-	baseCtx    context.Context // parent context for agent runs (carries signal cancellation)
-	runGenAddr *atomic.Uint64  // shared with subscriber for production-time tagging
+	// Bus runtime — all interaction goes through this
+	runtime  *bus.SessionRuntime
+	bsSess   *bootstrap.Session // kept for session switching (runtime factory)
+	eventCh  chan busEventMsg
+	quit     chan struct{}
+	unsubAll func()
+	baseCtx  context.Context // parent context for signal cancellation
 
 	// Components
-	viewport       viewport.Model // scrollable conversation area (alt screen mode)
+	renderer       *renderer
+	viewport       viewport.Model
 	input          inputModel
 	status         statusModel
 	picker         pickerModel
-	pickerPurpose  pickerPurpose // why the picker was opened
+	pickerPurpose  pickerPurpose
 	thinkingPicker thinkingPicker
 	cmdPalette     cmdPalette
 	permPrompt     permissionPrompt
 	askPrompt      askPrompt
 	sessionBrowser sessionBrowser
-	statusBar *StatusLine
+	statusBar      *StatusLine
 
 	// Session persistence
-	sessionStore session.SessionStore // nil if persistence is disabled
-	session      *session.Session     // current session (nil if no persistence)
-	cwd          string               // working directory for session metadata
+	sessionStore session.SessionStore
+	session      *session.Session
+	cwd          string
 
 	// Display
 	modelName string
 
-	// Bootstrap session for centralized restore
-	bootstrapSess *bootstrap.Session
-
-	// Provider switching
-	providerFactory      ProviderFactory
-	scopedModels         map[string]bool      // model IDs pinned for Ctrl+P cycling
-	onPinnedModelsChange func([]string) error // persists pinned model changes (nil = disabled)
-
-	// Permissions
-	permGate *permission.Gate
-
-	// Path access
-	pathPolicy *tool.PathPolicy
-
-	// Ask user
-	askBridge *askuser.Bridge
+	// Provider switching (for model picker — factory data only)
+	scopedModels         map[string]bool
+	onPinnedModelsChange func([]string) error
 
 	// Verify
-	verifyCancel context.CancelFunc // non-nil while /verify is running
+	verifyCancel context.CancelFunc
 
 	// Settings menu
 	settingsMenu settingsMenu
 
-	// Plan mode
-	planMode              *planmode.PlanMode
+	// Plan mode (display-only state — all operations go through bus)
 	planMenu              planMenu
-	baseSystemPrompt      string // system prompt without plan mode fragments
-	reviewGen             uint64 // monotonic counter to detect stale review results
+	reviewGen             uint64
 	reviewStreamCh        chan planReviewStreamMsg
-	lastReviewResult      *planmode.ReviewResult // last review result (for feedback forwarding)
-	lastMenuVariant       planMenuVariant        // to restore after editor
-	pendingReviewFeedback string                 // reviewer feedback to prepend to next user message
-	taskStore             *tasks.Store
+	lastReviewResult      *planmode.ReviewResult
+	lastMenuVariant       planMenuVariant
+	pendingReviewFeedback string
 	taskWidget            taskWidget
+	taskWidgetMode        tasks.WidgetMode // TUI-local display preference
 
 	// Prompt templates
 	promptTemplates []promptpkg.Template
@@ -170,89 +138,71 @@ type appModel struct {
 	// Voice input
 	voice voiceRecorder
 
-	// Checkpoints (/undo)
-	checkpoints *checkpoint.Store
-
-	// Subagent status
-	subagentCountCh  <-chan int
-	subagentNotifyCh <-chan SubagentNotification
-
 	// Layout
 	width  int
 	height int
 }
 
-// ProviderFactory creates a provider for a given model.
-// It must not write directly to stdout/stderr because the TUI may call it
-// while Bubble Tea owns the terminal.
-type ProviderFactory func(model core.Model) (core.Provider, error)
-
-// Config configures the TUI. All fields are optional.
+// Config configures the TUI. All fields are optional except Runtime.
 type Config struct {
+	Runtime               *bus.SessionRuntime         // required — the session bus runtime
+	BootstrapSession      *bootstrap.Session          // kept for session switching (factory for RuntimeConfig)
 	SessionStore          session.SessionStore        // persistence backend (nil = no persistence)
 	Session               *session.Session            // session to resume (nil = fresh start)
 	StartInSessionBrowser bool                        // open the session browser before entering chat
-	ModelName             string                      // display name for the active model (shown on startup)
 	CWD                   string                      // working directory for session metadata
-	ProviderFactory       ProviderFactory             // creates providers for /model switching (nil = switching disabled)
-	PermissionGate        *permission.Gate            // permission gate (nil = yolo, no prompts)
-	AskBridge             *askuser.Bridge             // bridge for ask_user tool (nil = disabled)
-	PathPolicy            *tool.PathPolicy            // path access policy (nil = no path scope display)
-	PinnedModels          []string                    // model IDs pre-pinned for Ctrl+P cycling (loaded from global config)
-	OnPinnedModelsChange  func([]string) error        // called when the user changes pinned models (nil = no persistence)
-	SubagentCountCh       <-chan int                  // receives running async subagent count updates (nil = disabled)
-	SubagentNotifyCh      <-chan SubagentNotification // receives async subagent completion notifications (nil = disabled)
-	PlanMode              *planmode.PlanMode          // plan mode instance (nil = disabled)
-	TaskStore             *tasks.Store                // task store (nil = no task tracking)
-	PromptTemplates       []promptpkg.Template        // available prompt templates (nil = none)
+	PinnedModels          []string                    // model IDs pre-pinned for Ctrl+P cycling
+	OnPinnedModelsChange  func([]string) error        // called when the user changes pinned models
+	PromptTemplates       []promptpkg.Template        // available prompt templates
 	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
-	CheckpointStore       *checkpoint.Store           // file checkpoint store for /undo (nil = disabled)
-	BootstrapSession      *bootstrap.Session          // bootstrap session for centralized restore (nil = legacy)
 }
 
-// New creates the TUI model. The agent must already be configured.
-// ctx is the parent context for agent runs (e.g., signal-aware context from main).
-// Subscribes to agent events internally — the caller should NOT register
-// their own subscriber when using TUI mode.
-func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
-	eventCh := make(chan taggedEvent, 1024)
-	quit := make(chan struct{})
-	runGenAddr := &atomic.Uint64{} // shared with subscriber
+// isStructuralBusEvent returns true for events that must not be dropped.
+// Only text/thinking deltas and tool exec updates are lossy — everything else is structural.
+func isStructuralBusEvent(event any) bool {
+	switch event.(type) {
+	case bus.TextDelta, bus.ThinkingDelta, bus.ToolExecUpdate:
+		return false
+	default:
+		return true
+	}
+}
 
-	// Subscriber bridge: events are tagged with the run generation at PRODUCTION
-	// time (when the subscriber receives them from the emitter). This prevents
-	// late events from being misidentified as belonging to the current run.
-	// Structural events never dropped, deltas are lossy.
-	unsub := ag.Subscribe(func(e core.AgentEvent) {
-		gen := runGenAddr.Load()
-		tagged := taggedEvent{event: e, gen: gen}
-		if isStructuralEvent(e) {
+// New creates the TUI model. All interaction goes through the bus runtime.
+func New(ctx context.Context, cfg Config) appModel {
+	eventCh := make(chan busEventMsg, 1024)
+	quit := make(chan struct{})
+
+	// Single ordered subscription for all bus events.
+	unsubAll := cfg.Runtime.Bus.SubscribeAll(func(event any) {
+		if isStructuralBusEvent(event) {
 			select {
-			case eventCh <- tagged:
+			case eventCh <- busEventMsg{event: event}:
 			case <-time.After(5 * time.Second):
+				// structural event dropped — should not happen
 			}
-			return
-		}
-		select {
-		case eventCh <- tagged:
-		default:
+		} else {
+			select {
+			case eventCh <- busEventMsg{event: event}:
+			default: // lossy for deltas
+			}
 		}
 	})
 
 	vp := viewport.New(0, 0)
 	vp.MouseWheelEnabled = true
 	vp.MouseWheelDelta = 3
-	vp.KeyMap = viewport.KeyMap{} // disable built-in keys; we route manually
+	vp.KeyMap = viewport.KeyMap{}
 
 	m := appModel{
 		s:                    &state{showThinking: true},
-		agent:                ag,
-		renderer:             newRenderer(80),
+		runtime:              cfg.Runtime,
+		bsSess:               cfg.BootstrapSession,
 		eventCh:              eventCh,
 		quit:                 quit,
-		unsub:                unsub,
+		unsubAll:             unsubAll,
 		baseCtx:              ctx,
-		runGenAddr:           runGenAddr,
+		renderer:             newRenderer(80),
 		viewport:             vp,
 		input:                newInput(),
 		status:               newStatus(),
@@ -262,43 +212,40 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 		sessionStore:         cfg.SessionStore,
 		session:              cfg.Session,
 		cwd:                  cfg.CWD,
-		modelName:            cfg.ModelName,
-		providerFactory:      cfg.ProviderFactory,
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
-		permGate:             cfg.PermissionGate,
-		pathPolicy:           cfg.PathPolicy,
-		askBridge:            cfg.AskBridge,
-		subagentCountCh:      cfg.SubagentCountCh,
-		subagentNotifyCh:     cfg.SubagentNotifyCh,
-		planMode:             cfg.PlanMode,
-		taskStore:            cfg.TaskStore,
 		promptTemplates:      cfg.PromptTemplates,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber},
-		checkpoints:          cfg.CheckpointStore,
-		baseSystemPrompt:     ag.SystemPrompt(),
-		bootstrapSess:        cfg.BootstrapSession,
 	}
 
-	// Restore session state (model, thinking, permissions) from metadata.
-	if m.session != nil && m.session.Metadata != nil {
-		m.restoreFromMetadata(m.session)
+	// Query initial state from bus for display.
+	b := cfg.Runtime.Bus
+	if model, err := bus.QueryTyped[bus.GetModel, core.Model](b, bus.GetModel{}); err == nil {
+		name := model.Name
+		if name == "" {
+			name = model.ID
+		}
+		m.modelName = name
+		m.statusBar.UpdateModelSegment(name)
 	}
-
-	// Initialize status line segments.
-	if cfg.ModelName != "" {
-		m.statusBar.UpdateModelSegment(cfg.ModelName)
+	if thinking, err := bus.QueryTyped[bus.GetThinkingLevel, string](b, bus.GetThinkingLevel{}); err == nil {
+		m.statusBar.UpdateThinkingSegment(thinking)
 	}
-	m.statusBar.UpdateThinkingSegment(ag.ThinkingLevel())
-	if m.permGate != nil {
-		m.statusBar.UpdatePermissionsSegment(string(m.permGate.Mode()))
-	} else {
-		m.statusBar.UpdatePermissionsSegment("yolo")
+	if permMode, err := bus.QueryTyped[bus.GetPermissionMode, string](b, bus.GetPermissionMode{}); err == nil {
+		m.statusBar.UpdatePermissionsSegment(permMode)
 	}
-	if m.pathPolicy != nil {
-		m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+	if pathInfo, err := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{}); err == nil && pathInfo.WorkspaceRoot != "" {
+		m.statusBar.UpdatePathScopeSegment(pathInfo.Scope)
 	}
 	m.statusBar.UpdateContextSegment(0)
+
+	// Plan mode initial display.
+	if planInfo, err := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{}); err == nil {
+		if planInfo.Mode != "" && planInfo.Mode != "off" {
+			m.statusBar.UpdatePlanSegment(planInfo.Mode)
+		}
+	}
+
 	if cfg.StartInSessionBrowser {
 		m.sessionBrowser.Open()
 		m.input.SetEnabled(false)
@@ -307,112 +254,29 @@ func New(ag *agent.Agent, ctx context.Context, cfg Config) appModel {
 	return m
 }
 
-// isStructuralEvent returns true for events that must not be dropped.
-// Only text/thinking deltas are lossy — everything else is structural.
-func isStructuralEvent(e core.AgentEvent) bool {
-	if e.Type == core.AgentEventMessageUpdate && e.AssistantEvent != nil {
-		switch e.AssistantEvent.Type {
-		case core.ProviderEventTextDelta, core.ProviderEventThinkingDelta:
-			return false
-		}
-	}
-	return true
-}
-
 // --- Bubble Tea interface ---
 
-// Init returns initial commands: event listener.
-// Cursor is static (no blink) so no BlinkCmd needed — zero idle CPU.
 func (m appModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.waitForEvent()}
-	if m.permGate != nil {
-		cmds = append(cmds, m.waitForPermission())
-	}
+	cmds := []tea.Cmd{m.waitForBusEvent()}
 	if m.sessionBrowser.active {
 		cmds = append(cmds, m.loadSessionBrowser())
 	}
-	if m.subagentCountCh != nil {
-		cmds = append(cmds, m.waitForSubagentCount())
-	}
-	if m.subagentNotifyCh != nil {
-		cmds = append(cmds, m.waitForSubagentNotify())
-	}
-	if m.askBridge != nil {
-		cmds = append(cmds, m.waitForQuestion())
-	}
-	// Sync plan mode on init (handles restored sessions).
-	if m.planMode != nil {
-		m.syncPermissionCheck()
-		m.rebuildSystemPrompt()
-		mode := m.planMode.Mode()
-		if mode != planmode.ModeOff {
-			m.statusBar.UpdatePlanSegment(string(mode))
-		}
-	}
+	// Initial session display on first WindowSizeMsg handled in Update.
 	return tea.Batch(cmds...)
 }
 
-func (m appModel) waitForSubagentNotify() tea.Cmd {
-	ch := m.subagentNotifyCh
+// waitForBusEvent returns a Cmd that blocks until the next bus event.
+func (m appModel) waitForBusEvent() tea.Cmd {
+	ch := m.eventCh
 	quit := m.quit
 	return func() tea.Msg {
 		select {
-		case n, ok := <-ch:
+		case e, ok := <-ch:
 			if !ok {
 				return nil
 			}
-			return subagentNotifyMsg{notification: n}
+			return e
 		case <-quit:
-			return nil
-		}
-	}
-}
-
-func (m appModel) waitForSubagentCount() tea.Cmd {
-	ch := m.subagentCountCh
-	quit := m.quit
-	return func() tea.Msg {
-		select {
-		case count, ok := <-ch:
-			if !ok {
-				return nil
-			}
-			return asyncSubagentCountMsg{count: count}
-		case <-quit:
-			return nil
-		}
-	}
-}
-
-// waitForQuestion listens for the next ask_user question from the bridge.
-func (m appModel) waitForQuestion() tea.Cmd {
-	bridge := m.askBridge
-	ctx := m.baseCtx
-	return func() tea.Msg {
-		select {
-		case p, ok := <-bridge.Prompts():
-			if !ok {
-				return nil
-			}
-			return askUserMsg{Prompt: p}
-		case <-ctx.Done():
-			return nil
-		}
-	}
-}
-
-// waitForPermission listens for the next permission request from the gate.
-func (m appModel) waitForPermission() tea.Cmd {
-	gate := m.permGate
-	ctx := m.baseCtx
-	return func() tea.Msg {
-		select {
-		case req, ok := <-gate.Requests():
-			if !ok {
-				return nil
-			}
-			return permissionRequestMsg{Request: req}
-		case <-ctx.Done():
 			return nil
 		}
 	}
@@ -428,11 +292,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderer.SetWidth(msg.Width)
 		m.input.SetWidth(msg.Width)
 		m.status.SetWidth(msg.Width)
-		// Invalidate stream cache so next tick re-renders with new width.
 		if m.s.streamText != "" && sizeChanged {
 			m.s.dirty = true
 		}
-		// One-shot initialization on first WindowSizeMsg (renderer width is now set).
 		if !m.s.initialized {
 			m.s.initialized = true
 			if m.session != nil && len(m.session.Messages) > 0 {
@@ -442,7 +304,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
-		// Resize: re-render viewport content (blocks may reflow)
 		if sizeChanged && !m.s.transcript {
 			m.updateViewport()
 		}
@@ -459,18 +320,20 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
-	case agentEventMsg:
-		if msg.RunGen == m.s.runGen {
-			m.handleAgentEvent(msg.Event)
-		}
-		return m, m.waitForEvent()
+	case busEventMsg:
+		cmds := m.handleBusEvent(msg.event)
+		allCmds := []tea.Cmd{m.waitForBusEvent()}
+		allCmds = append(allCmds, cmds...)
+		return m, tea.Batch(allCmds...)
 
-	case agentDoneMsg:
-		// Channel closed or quit signaled. Don't re-subscribe.
+	case agentSendErrorMsg:
+		m.s.running = false
+		m.s.streamState = stateIdle
+		m.input.SetEnabled(true)
+		m.status.SetText("")
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: msg.Err.Error()})
+		m.updateViewport()
 		return m, nil
-
-	case agentRunResultMsg:
-		return m.handleRunResult(msg)
 
 	case renderTickMsg:
 		needsRefresh := false
@@ -490,46 +353,24 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if needsRefresh && !m.s.transcript {
 			m.updateViewport()
 		}
-		// Tick runs while agent is running (not just stateStreaming),
-		// so it survives tool_exec transitions. Also during plan review
-		// (which doesn't set running but streams into a tool block).
 		if m.s.running || m.reviewStreamCh != nil {
 			return m, renderTick()
 		}
 		return m, nil
 
 	case clearScreenDoneMsg:
-		// Clear command finished, nothing to do
 		return m, nil
 
 	case clearThinkingStatusMsg:
-		// Clear the ephemeral thinking toggle feedback
 		if !m.s.running {
 			m.status.SetText("")
 		}
 		return m, nil
 
-	case asyncSubagentCountMsg:
-		m.s.asyncSubagents = msg.count
-		return m, m.waitForSubagentCount()
-
-	case subagentNotifyMsg:
-		relistenCmd := m.waitForSubagentNotify()
-		if m.s.running {
-			// Agent is mid-run — inject as steer. The AgentEventSteer handler
-			// will add the subagent block to the chat when it arrives.
-			m.agent.Steer(msg.notification.AgentText)
-			return m, relistenCmd
-		}
-		// Agent is idle — start a notification run.
-		model, cmd := m.startNotificationRun(msg.notification)
-		return model, tea.Batch(cmd, relistenCmd)
-
 	case planReviewStreamMsg:
 		if msg.ReviewGen != m.reviewGen {
 			return m, nil
 		}
-		// Append delta to the review tool block.
 		for i := len(m.s.blocks) - 1; i >= 0; i-- {
 			b := &m.s.blocks[i]
 			if b.Type == "tool" && b.ToolName == "plan_review" && !b.ToolDone {
@@ -571,23 +412,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "error", Raw: "Compaction failed: " + msg.Err.Error(),
 			})
-		} else if msg.Payload == nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status", Raw: "Nothing to compact",
-			})
-		} else {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status",
-				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", msg.Payload.TokensBefore/1000, msg.Payload.TokensAfter/1000),
-			})
+			m.updateViewport()
 		}
-		m.refreshContextSegment()
-		m.updateViewport()
-		var cmds []tea.Cmd
-		if m.agent != nil {
-			cmds = append(cmds, m.saveSession(m.agent.Messages()))
-		}
-		return m, tea.Batch(cmds...)
+		// Success display handled by CompactionEnded bus event.
+		return m, nil
 
 	case verifyResultMsg:
 		m.s.running = false
@@ -609,37 +437,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shellResultMsg:
 		return m.handleShellResult(msg)
-
-	case askUserMsg:
-		var cmds []tea.Cmd
-		if m.s.transcript {
-			m.s.transcript = false
-			m.s.fullHistory = false
-			m.updateViewport()
-			cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
-		}
-		m.askPrompt.Show(msg.Prompt)
-		cmds = append(cmds, m.waitForQuestion())
-		return m, tea.Batch(cmds...)
-
-	case permissionRequestMsg:
-		// Auto-exit transcript mode so the prompt is visible and actionable
-		var cmds []tea.Cmd
-		if m.s.transcript {
-			m.s.transcript = false
-			m.s.fullHistory = false
-			m.updateViewport()
-			cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
-		}
-		mode := permission.ModeAsk
-		if m.permGate != nil {
-			mode = m.permGate.Mode()
-		}
-		m.permPrompt.Show(msg.Request, mode)
-		if len(cmds) > 0 {
-			return m, tea.Batch(cmds...)
-		}
-		return m, nil
 
 	case sessionBrowserLoadedMsg:
 		m.sessionBrowser.SetLoadError(msg.Err)
@@ -667,12 +464,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.activateSession(msg.Session)
 
 	case sessionSavedMsg:
-		// Session saved asynchronously. Log errors but don't interrupt the user.
-		// TODO: consider a subtle status indicator for save failures
 		return m, nil
 
 	case pinnedModelsSavedMsg:
-		// Pinned models saved asynchronously. Errors are silent — not worth interrupting.
 		return m, nil
 
 	case clipboardImageMsg:
@@ -701,21 +495,17 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Pass through to sub-components (input always receives keystrokes so
-	// the user can type while the agent is running — Enter sends a steer).
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
 
-// View renders the full alt-screen layout. The viewport holds durable conversation
-// blocks; ephemeral content (spinner, notices) is rendered outside the viewport.
+// View renders the full alt-screen layout.
 func (m appModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
 	}
 
-	// Transcript mode: minimal footer only
 	if m.s.transcript {
 		hint := "Ctrl+O: back to chat"
 		if m.s.fullHistory {
@@ -730,8 +520,6 @@ func (m appModel) View() string {
 		return m.sessionBrowser.View(m.width, m.height)
 	}
 
-	// Build bottom chrome (everything below the viewport).
-	// Bottom chrome order: notices → input → statusBar → palette
 	var bottomChrome []string
 
 	l := GetActiveLayout()
@@ -751,20 +539,16 @@ func (m appModel) View() string {
 		}
 		bottomChrome = append(bottomChrome, l.RenderLiveNotice(label, m.width, ActiveTheme))
 	}
-	// Task widget (shown whenever there are tasks).
-	if m.taskStore != nil {
-		taskList := m.taskStore.Tasks()
-		widgetMode := m.taskStore.GetWidgetMode()
-		if tv := m.taskWidget.View(taskList, widgetMode, m.width); tv != "" {
+	// Task widget.
+	if taskList, err := bus.QueryTyped[bus.GetTasks, []tasks.Task](m.runtime.Bus, bus.GetTasks{}); err == nil && len(taskList) > 0 {
+		if tv := m.taskWidget.View(taskList, m.taskWidgetMode, m.width); tv != "" {
 			bottomChrome = append(bottomChrome, tv)
 		}
 	}
-	// Queued steer messages — shown above input while waiting for the agent.
 	if len(m.s.queuedSteers) > 0 {
 		bottomChrome = append(bottomChrome, m.renderQueuedSteers())
 	}
 
-	// Input / modal area
 	if m.permPrompt.active {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			bottomChrome = append(bottomChrome, pv)
@@ -803,11 +587,8 @@ func (m appModel) View() string {
 		bottomChrome = append(bottomChrome, pv)
 	}
 
-	// Viewport dimensions are set by updateViewport() (pointer receiver).
-	// View() (value receiver) just reads the current size.
 	botStr := strings.Join(bottomChrome, "\n")
 
-	// Assemble: viewport + bottom chrome
 	var sections []string
 	sections = append(sections, m.viewport.View())
 	if botStr != "" {
@@ -818,56 +599,46 @@ func (m appModel) View() string {
 
 // --- Key handling ---
 
-// handleKey processes global shortcuts. All other keys propagate to
-// the focused component (input when idle).
 func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.active {
 		return m.handleSessionBrowserKey(msg)
 	}
 
-	// Ask user prompt: intercept all keys.
 	if m.askPrompt.active {
 		return m.handleAskKey(msg)
 	}
 
-	// Permission prompt: intercept all keys.
 	if m.permPrompt.active {
 		return m.handlePermissionKey(msg)
 	}
 
-	// Picker mode: intercept all keys.
 	if m.picker.active {
 		return m.handlePickerKey(msg)
 	}
 
-	// Thinking picker: intercept all keys.
 	if m.thinkingPicker.active {
 		return m.handleThinkingPickerKey(msg)
 	}
 
-	// Settings menu: intercept all keys.
 	if m.settingsMenu.active {
 		return m.handleSettingsKey(msg.String())
 	}
 
-	// Plan action menu: intercept most keys, but let Ctrl+E/Ctrl+O through.
 	if m.planMenu.active {
 		switch msg.Type {
 		case tea.KeyCtrlE, tea.KeyCtrlO:
-			// fall through to main switch below
+			// fall through
 		default:
 			return m.handlePlanMenuKey(msg)
 		}
 	}
 
-	// Transcript mode: only allow mode-switch keys.
 	if m.s.transcript {
 		switch msg.Type {
 		case tea.KeyCtrlO, tea.KeyCtrlE:
-			// fall through to main switch below
+			// fall through
 		case tea.KeyCtrlT:
 			m.s.showThinking = !m.s.showThinking
-			// Reprint transcript with updated thinking visibility
 			content := m.renderTranscriptBlocks(m.s.fullHistory)
 			return m, tea.Sequence(clearScreen(), tea.Println(content))
 		case tea.KeyCtrlC:
@@ -876,7 +647,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.s.running {
-				m.agent.Abort()
+				_ = m.runtime.Bus.Execute(bus.AbortRun{})
 				return m, nil
 			}
 			m.cleanup()
@@ -896,7 +667,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.textarea.Reset()
 			return m, m.forceRepaint()
 		}
-		// Ctrl+C escalation: clear input → cancel verify → abort agent → quit
 		if strings.TrimSpace(m.input.textarea.Value()) != "" {
 			m.input.textarea.Reset()
 			return m, nil
@@ -909,7 +679,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.s.running {
-			m.agent.Abort()
+			_ = m.runtime.Bus.Execute(bus.AbortRun{})
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "status", Raw: "(interrupted)",
 			})
@@ -933,7 +703,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status.SetText("thinking hidden (new messages only)")
 		}
-		// Clear the status after a short delay unless the agent is running
 		if !m.s.running {
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 				return clearThinkingStatusMsg{}
@@ -945,12 +714,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.s.running {
 			return m, nil
 		}
-		level := cycleThinkingLevel(m.agent.ThinkingLevel())
-		model := m.agent.Model()
-		if err := m.agent.Reconfigure(nil, model, level); err != nil {
-			return m, nil
-		}
-		m.statusBar.UpdateThinkingSegment(level)
+		current, _ := bus.QueryTyped[bus.GetThinkingLevel, string](m.runtime.Bus, bus.GetThinkingLevel{})
+		level := cycleThinkingLevel(current)
+		_ = m.runtime.Bus.Execute(bus.SetThinking{Level: level})
+		// ConfigChanged event updates status bar
 		m.status.SetText("thinking: " + level)
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return clearThinkingStatusMsg{}
@@ -963,33 +730,27 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.cycleScopedModel()
 
 	case tea.KeyCtrlY:
-		// Rotate permission mode: yolo → ask → auto → yolo
 		if m.s.running {
 			return m, nil
 		}
-		var next permission.Mode
-		if m.permGate == nil {
-			next = permission.ModeAsk
-		} else {
-			switch m.permGate.Mode() {
-			case permission.ModeAsk:
-				next = permission.ModeAuto
-			case permission.ModeAuto:
-				next = permission.ModeYolo
-			default:
-				next = permission.ModeAsk
-			}
+		current, _ := bus.QueryTyped[bus.GetPermissionMode, string](m.runtime.Bus, bus.GetPermissionMode{})
+		var next string
+		switch current {
+		case "ask":
+			next = "auto"
+		case "auto":
+			next = "yolo"
+		default:
+			next = "ask"
 		}
-		return m.handlePermissionsSwitch(string(next))
+		return m.handlePermissionsSwitch(next)
 
 	case tea.KeyCtrlE:
 		if m.s.transcript {
-			// Toggle full history in transcript mode
 			m.s.fullHistory = !m.s.fullHistory
 			content := m.renderTranscriptBlocks(m.s.fullHistory)
 			return m, tea.Sequence(clearScreen(), tea.Println(content))
 		}
-		// In alt screen: toggle expanded tool blocks
 		if len(m.s.blocks) == 0 {
 			return m, nil
 		}
@@ -1008,7 +769,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlO:
 		if m.s.transcript {
-			// Return to alt screen
 			m.s.transcript = false
 			m.s.fullHistory = false
 			m.recomputeInputEnabled()
@@ -1018,7 +778,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				tea.EnableMouseCellMotion,
 			)
 		}
-		// Enter transcript mode
 		if len(m.s.blocks) == 0 {
 			return m, nil
 		}
@@ -1035,7 +794,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEnter:
 		if msg.Alt {
-			// Option/Alt+Enter → pass to textarea for newline insertion
 			break
 		}
 		if m.s.running {
@@ -1044,16 +802,14 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.s.queuedSteers = append(m.s.queuedSteers, text)
-			m.agent.Steer(text)
+			_ = m.runtime.Bus.Execute(bus.SteerAgent{Text: text})
 			return m, nil
 		}
 
-		// Command palette: accept selected command
 		if m.cmdPalette.active {
 			selected := m.cmdPalette.Selected()
 			m.cmdPalette.Close()
 			if selected != "" {
-				// Find command def to check if it takes args
 				hasArgs := false
 				for _, cmd := range allCommands {
 					if cmd.Name == selected && cmd.Args != "" {
@@ -1080,7 +836,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if cmd, ok := ParseCommand(text); ok {
 			return m.handleCommand(cmd)
 		}
-		// Shell escape: !! = silent (user-only), ! = context (sent with next message)
 		if strings.HasPrefix(text, "!") {
 			return m.handleShellEscape(text)
 		}
@@ -1098,7 +853,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyTab:
-		// Tab also accepts palette selection
 		if m.cmdPalette.active {
 			selected := m.cmdPalette.Selected()
 			m.cmdPalette.Close()
@@ -1129,16 +883,466 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cmdPalette.Update(m.input.textarea.Value())
 			return m, nil
 		}
-
 	}
 
-	// All other keys: always propagate to input so the user can type
-	// steer messages while the agent is running. Command palette only
-	// updates when idle (it's meaningless during a run).
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	if m.s.streamState == stateIdle {
 		m.cmdPalette.Update(m.input.textarea.Value())
 	}
 	return m, cmd
+}
+
+// --- Bus event handling ---
+
+func (m *appModel) handleBusEvent(event any) []tea.Cmd {
+	switch e := event.(type) {
+	// --- Streaming ---
+	case bus.TextDelta:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		m.s.streamText += e.Delta
+		m.s.dirty = true
+
+	case bus.ThinkingDelta:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		m.s.thinkingText += e.Delta
+		m.s.dirty = true
+
+	case bus.MessageStarted:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		m.s.streamText = ""
+		m.s.thinkingText = ""
+		m.s.streamCache = ""
+		m.s.streamState = stateStreaming
+		m.status.SetText("generating...")
+
+	case bus.MessageEnded:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		if m.s.thinkingText != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "thinking", Raw: m.s.thinkingText,
+			})
+		}
+		assistantText := m.s.streamText
+		if assistantText == "" {
+			assistantText = e.FullText
+		}
+		if assistantText != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "assistant", Raw: assistantText,
+			})
+		}
+		m.s.streamText = ""
+		m.s.thinkingText = ""
+		m.s.streamCache = ""
+		m.s.viewportDirty = true
+
+	case bus.ToolExecStarted:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		m.s.activeTools++
+		m.s.streamState = stateToolRunning
+		if m.s.activeTools == 1 {
+			m.status.SetText("running " + e.ToolName + "...")
+		} else {
+			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "tool", ToolCallID: e.ToolCallID, ToolName: e.ToolName, ToolArgs: e.Args,
+		})
+		m.s.viewportDirty = true
+
+	case bus.ToolExecUpdate:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			b := &m.s.blocks[i]
+			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
+				if b.ToolName == "edit" {
+					b.ToolDiff = e.Delta
+				} else {
+					b.ToolResult += e.Delta
+				}
+				m.s.viewportDirty = true
+				break
+			}
+		}
+
+	case bus.ToolExecEnded:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		m.s.activeTools--
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			b := &m.s.blocks[i]
+			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
+				b.ToolDone = true
+				b.IsError = e.IsError
+				b.Rejected = e.Rejected
+				b.ToolResult = e.Result
+				b.ToolNote = extractToolNote(b.ToolResult, b.Rejected)
+				break
+			}
+		}
+		m.s.viewportDirty = true
+		if m.s.activeTools <= 0 {
+			m.s.activeTools = 0
+			m.s.streamState = stateStreaming
+			m.status.SetText("generating...")
+		} else if m.s.activeTools == 1 {
+			m.status.SetText("running tool...")
+		} else {
+			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
+		}
+		if e.ToolName == "tasks" {
+			m.refreshTaskDisplay()
+		}
+
+	case bus.Steered:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		for i, s := range m.s.queuedSteers {
+			if s == e.Text {
+				m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
+				break
+			}
+		}
+		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type:           "subagent",
+				SubagentTask:   task,
+				SubagentStatus: status,
+				SubagentResult: result,
+			})
+		} else {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
+		}
+		m.s.viewportDirty = true
+
+	case bus.CompactionStarted:
+		m.status.SetText("compacting context...")
+
+	case bus.CompactionEnded:
+		if e.Err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status",
+				Raw:  "⚠ Compaction failed: " + e.Err.Error() + " (continuing with full context)",
+			})
+		} else if e.Payload != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "status",
+				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", e.Payload.TokensBefore/1000, e.Payload.TokensAfter/1000),
+			})
+		}
+		m.status.SetText("generating...")
+		m.refreshContextSegment()
+		m.s.viewportDirty = true
+
+	// --- Run lifecycle ---
+	case bus.RunEnded:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		return m.handleRunEnded(e)
+
+	// --- Permissions ---
+	case bus.PermissionRequested:
+		return m.handlePermissionRequested(e)
+
+	case bus.PermissionResolved:
+		// no-op for TUI
+
+	// --- Ask user ---
+	case bus.AskUserRequested:
+		return m.handleAskUserRequested(e)
+
+	case bus.AskUserResolved:
+		// no-op
+
+	// --- Config ---
+	case bus.ConfigChanged:
+		if e.Model != "" {
+			m.modelName = e.Model
+			m.statusBar.UpdateModelSegment(e.Model)
+		}
+		if e.Thinking != "" {
+			m.statusBar.UpdateThinkingSegment(e.Thinking)
+		}
+		if e.PermissionMode != "" {
+			m.statusBar.UpdatePermissionsSegment(e.PermissionMode)
+		}
+		if e.PathScope != "" {
+			m.statusBar.UpdatePathScopeSegment(e.PathScope)
+		}
+
+	// --- Plan mode ---
+	case bus.PlanModeChanged:
+		return m.handlePlanModeChanged(e)
+
+	// --- Tasks ---
+	case bus.TasksUpdated:
+		m.refreshTaskDisplay()
+
+	// --- Context ---
+	case bus.ContextUpdated:
+		m.statusBar.UpdateContextSegment(e.Percent)
+
+	// --- Subagents ---
+	case bus.SubagentCountChanged:
+		m.s.asyncSubagents = e.Count
+
+	case bus.SubagentCompleted:
+		return m.handleSubagentCompleted(e)
+	}
+	return nil
+}
+
+func (m *appModel) handlePermissionRequested(e bus.PermissionRequested) []tea.Cmd {
+	var cmds []tea.Cmd
+	if m.s.transcript {
+		m.s.transcript = false
+		m.s.fullHistory = false
+		m.updateViewport()
+		cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
+	}
+	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](m.runtime.Bus, bus.GetPermissionMode{})
+	m.permPrompt.ShowFromBus(e.ID, e.ToolName, e.Args, e.AllowPattern, permMode)
+	return cmds
+}
+
+func (m *appModel) handleAskUserRequested(e bus.AskUserRequested) []tea.Cmd {
+	var cmds []tea.Cmd
+	if m.s.transcript {
+		m.s.transcript = false
+		m.s.fullHistory = false
+		m.updateViewport()
+		cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
+	}
+	m.askPrompt.ShowFromBus(e.ID, e.Questions)
+	return cmds
+}
+
+func (m *appModel) handlePlanModeChanged(e bus.PlanModeChanged) []tea.Cmd {
+	if e.Mode == "" || e.Mode == "off" {
+		m.statusBar.UpdatePlanSegment("")
+		m.statusBar.UpdateTasksSegment(0, 0)
+	} else {
+		m.statusBar.UpdatePlanSegment(e.Mode)
+	}
+	// Plan submitted → show action menu
+	if e.Mode == "ready" {
+		m.planMenu.OpenPostSubmit()
+		m.lastMenuVariant = menuPostSubmit
+		m.input.SetEnabled(false)
+	}
+	return nil
+}
+
+func (m *appModel) handleSubagentCompleted(e bus.SubagentCompleted) []tea.Cmd {
+	if m.s.running {
+		// Agent is mid-run — inject as steer.
+		_ = m.runtime.Bus.Execute(bus.SteerAgent{Text: e.Text})
+		return nil
+	}
+	// Agent is idle — start a notification run.
+	return m.startSubagentNotificationRun(e)
+}
+
+// startSubagentNotificationRun starts an agent run triggered by a subagent completion.
+func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.Cmd {
+	if err := m.commitPendingTimelineEvent(); err != nil {
+		m.s.pendingStatus = "✗ " + err.Error()
+		return nil
+	}
+
+	m.s.pendingStatus = ""
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type:           "subagent",
+		SubagentTask:   e.Task,
+		SubagentStatus: e.Status,
+		SubagentResult: e.Text,
+	})
+
+	m.prepareRun(truncateLabel(e.Task))
+	m.updateViewport()
+
+	b := m.runtime.Bus
+	custom := map[string]any{
+		"source":          "subagent",
+		"subagent_job_id": e.JobID,
+		"subagent_task":   e.Task,
+		"subagent_status": e.Status,
+	}
+	cmd := func() tea.Msg {
+		err := b.Execute(bus.SendPrompt{Text: e.Text, Custom: custom})
+		if err != nil {
+			return agentSendErrorMsg{Err: err}
+		}
+		return nil
+	}
+	return []tea.Cmd{cmd, renderTick(), m.status.spinner.Tick}
+}
+
+// handleRunEnded processes the completion of an agent run.
+func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
+	// Bump gen to ignore late events.
+	m.s.runGen++
+
+	// Query messages for reconciliation.
+	msgs := m.currentMessages()
+	m.patchFromMessages(msgs)
+
+	m.s.running = false
+	m.s.streamState = stateIdle
+	m.s.streamText = ""
+	m.s.thinkingText = ""
+	m.s.streamCache = ""
+	for _, s := range m.s.queuedSteers {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: s})
+	}
+	m.s.queuedSteers = nil
+	m.status.SetText("")
+	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
+	m.input.SetEnabled(true)
+	m.refreshContextSegment()
+	m.accumulateCost(msgs)
+
+	if e.Err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Error: " + e.Err.Error(),
+		})
+	}
+
+	// Plan mode: check if all tasks done during execution → auto-exit.
+	if planInfo, err := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{}); err == nil {
+		if planInfo.Mode == "executing" {
+			if taskList, err := bus.QueryTyped[bus.GetTasks, []tasks.Task](m.runtime.Bus, bus.GetTasks{}); err == nil {
+				allDone := len(taskList) > 0
+				for _, t := range taskList {
+					if t.Status != "done" {
+						allDone = false
+						break
+					}
+				}
+				if allDone {
+					_ = m.runtime.Bus.Execute(bus.ExitPlanMode{})
+					m.s.blocks = append(m.s.blocks, messageBlock{
+						Type: "status", Raw: "✅ All tasks complete — plan mode finished",
+					})
+				}
+			}
+		}
+	}
+
+	m.refreshTaskDisplay()
+	m.updateViewport()
+	return nil
+}
+
+// --- Helpers ---
+
+// currentMessages queries the current conversation from the bus.
+func (m *appModel) currentMessages() []core.AgentMessage {
+	msgs, _ := bus.QueryTyped[bus.GetMessages, []core.AgentMessage](m.runtime.Bus, bus.GetMessages{})
+	return msgs
+}
+
+func (m appModel) forceRepaint() tea.Cmd {
+	w, h := m.width, m.height
+	return func() tea.Msg {
+		return tea.WindowSizeMsg{Width: w, Height: h}
+	}
+}
+
+func renderTick() tea.Cmd {
+	return tea.Tick(renderInterval, func(time.Time) tea.Msg {
+		return renderTickMsg{}
+	})
+}
+
+func (m *appModel) cleanup() {
+	m.s.cleanupOnce.Do(func() {
+		close(m.quit)
+		if m.unsubAll != nil {
+			m.unsubAll()
+		}
+		m.runtime.Close()
+		m.voice.reset()
+	})
+}
+
+// refreshContextSegment recalculates the context usage percentage.
+func (m *appModel) refreshContextSegment() {
+	if pct, err := bus.QueryTyped[bus.GetContextUsage, int](m.runtime.Bus, bus.GetContextUsage{}); err == nil {
+		if pct < 0 {
+			m.statusBar.Remove(SegmentContext)
+		} else {
+			m.statusBar.UpdateContextSegment(pct)
+		}
+	}
+}
+
+// accumulateCost sums Usage from new assistant messages.
+func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
+	if msgs == nil {
+		return
+	}
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+	if model.Pricing == nil {
+		return
+	}
+	start := m.s.runStartMsgCount
+	if start > len(msgs) {
+		return
+	}
+	for _, msg := range msgs[start:] {
+		if msg.Role == "assistant" && msg.Usage != nil {
+			m.s.sessionCost += model.Pricing.Cost(*msg.Usage)
+			m.s.sessionInput += msg.Usage.Input
+			m.s.sessionCacheRead += msg.Usage.CacheRead
+		}
+	}
+	m.statusBar.UpdateCostSegment(m.s.sessionCost)
+	totalInput := m.s.sessionInput + m.s.sessionCacheRead
+	if totalInput > 0 {
+		pct := m.s.sessionCacheRead * 100 / totalInput
+		m.statusBar.UpdateCacheSegment(pct)
+	}
+}
+
+// refreshTaskDisplay updates the task progress in the status bar.
+func (m *appModel) refreshTaskDisplay() {
+	taskList, err := bus.QueryTyped[bus.GetTasks, []tasks.Task](m.runtime.Bus, bus.GetTasks{})
+	if err != nil {
+		return
+	}
+	done := 0
+	for _, t := range taskList {
+		if t.Status == "done" {
+			done++
+		}
+	}
+	total := len(taskList)
+	m.statusBar.UpdateTasksSegment(done, total)
+	if planInfo, err := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{}); err == nil {
+		if planInfo.Mode == "executing" {
+			if total > 0 {
+				m.statusBar.UpdatePlanSegment(fmt.Sprintf("executing 📋 %d/%d", done, total))
+			} else {
+				m.statusBar.UpdatePlanSegment("executing")
+			}
+		}
+	}
+	m.s.viewportDirty = true
 }

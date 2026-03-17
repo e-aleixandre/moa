@@ -19,6 +19,7 @@ import (
 type RuntimeConfig struct {
 	SessionID        string
 	Ctx              context.Context
+	Bus              EventBus        // optional pre-created bus; if nil, a new LocalBus is created
 	Agent            AgentController
 	Subscriber       AgentSubscriber // nil = use Agent if it implements AgentSubscriber
 	TaskStore        *tasks.Store
@@ -77,7 +78,12 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		cfg.Subscriber = sub
 	}
 
-	b := NewLocalBus()
+	var b EventBus
+	if cfg.Bus != nil {
+		b = cfg.Bus
+	} else {
+		b = NewLocalBus()
+	}
 	sm := NewStateMachine(b, cfg.SessionID)
 	am := NewApprovalManager(b, sm, cfg.SessionID)
 
@@ -125,6 +131,20 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		if err := cfg.Agent.LoadState(cfg.InitialMessages, cfg.InitialCompactionEpoch); err != nil {
 			return nil, fmt.Errorf("bus: LoadState: %w", err)
 		}
+	}
+
+	// Take ownership of PlanMode's onChange callback:
+	// 1. Rebuild system prompt (centralized, every transition)
+	// 2. Publish PlanModeChanged event
+	if cfg.PlanMode != nil {
+		cfg.PlanMode.SetOnChange(func(mode planmode.Mode) {
+			rebuildSystemPrompt(sctx)
+			sctx.Bus.Publish(PlanModeChanged{
+				SessionID: sctx.SessionID,
+				Mode:      string(mode),
+				PlanFile:  sctx.PlanMode.PlanFilePath(),
+			})
+		})
 	}
 
 	RegisterHandlers(sctx)
@@ -184,6 +204,25 @@ func (r *SessionRuntime) AttachPersister(p SessionPersister) {
 		panic("bus: AttachPersister called more than once")
 	}
 	RegisterPersistenceReactor(r.Bus, r.sctx, p)
+}
+
+// SyncPlanMode rebuilds the system prompt and publishes PlanModeChanged
+// for the current plan mode state. Call after restoring plan mode from
+// persisted metadata (RestoreState/ApplyRestoredState happen before
+// SetOnChange is wired).
+func (r *SessionRuntime) SyncPlanMode() {
+	if r.sctx.PlanMode == nil {
+		return
+	}
+	rebuildSystemPrompt(r.sctx)
+	mode := r.sctx.PlanMode.Mode()
+	if mode != planmode.ModeOff {
+		r.Bus.Publish(PlanModeChanged{
+			SessionID: r.sctx.SessionID,
+			Mode:      string(mode),
+			PlanFile:  r.sctx.PlanMode.PlanFilePath(),
+		})
+	}
 }
 
 // Context returns the SessionContext. For testing and advanced use.

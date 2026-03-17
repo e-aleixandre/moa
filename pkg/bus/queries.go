@@ -37,8 +37,11 @@ type GetPlanMode struct{ SessionID string }
 
 // PlanModeInfo is the result of GetPlanMode.
 type PlanModeInfo struct {
-	Mode     string
-	PlanFile string
+	Mode                string
+	PlanFile            string
+	ReviewModelID       string // model ID for plan review
+	ReviewModelName     string // display name of review model
+	ReviewThinkingLevel string // thinking level for plan review
 }
 
 // GetCompactionEpoch returns the current compaction epoch counter.
@@ -58,6 +61,17 @@ type PathPolicyInfo struct {
 	WorkspaceRoot string
 	Scope         string
 	AllowedPaths  []string
+}
+
+// GetPermissionInfo returns detailed permission info (mode, patterns, rules).
+// Handler returns: PermissionInfo
+type GetPermissionInfo struct{ SessionID string }
+
+// PermissionInfo is the result of GetPermissionInfo.
+type PermissionInfo struct {
+	Mode          string
+	AllowPatterns []string
+	Rules         []string
 }
 
 // GetSessionError returns the last error message from the state machine.

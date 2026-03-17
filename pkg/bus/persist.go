@@ -71,6 +71,7 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 	b.Subscribe(func(e ConfigChanged) { save() })
 	b.Subscribe(func(e TasksUpdated) { save() })
 	b.Subscribe(func(e CompactionEnded) { save() })
+	b.Subscribe(func(e PlanModeChanged) { save() })
 }
 
 // extractFinalAssistantText returns the text of the last assistant message

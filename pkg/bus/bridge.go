@@ -31,6 +31,7 @@ type AgentController interface {
 	Steer(msg string)
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
+	SetSystemPrompt(prompt string) error
 	Reset() error
 	Compact(ctx context.Context) (*core.CompactionPayload, error)
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
@@ -43,6 +44,7 @@ type AgentController interface {
 	// Queries
 	Messages() []core.AgentMessage
 	Model() core.Model
+	SystemPrompt() string
 	ThinkingLevel() string
 	CompactionEpoch() int
 	IsRunning() bool
@@ -86,6 +88,11 @@ type SessionContext struct {
 	// The Gate object itself is immutable between swaps — only the pointer changes.
 	gate atomic.Pointer[permission.Gate]
 
+	// RunGenAtomic is the current run generation, readable without locks.
+	// Stamped on agent-lifecycle events by the bridge. Written by startRun
+	// (under runMu), read atomically by the bridge.
+	RunGenAtomic atomic.Uint64
+
 	// Run context management — used by SendPrompt handler.
 	// Protected by runMu.
 	runMu     sync.Mutex
@@ -109,6 +116,7 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	ctx, cancel := context.WithCancel(sctx.SessionCtx)
 	sctx.runCancel = cancel
 	sctx.runGen++
+	sctx.RunGenAtomic.Store(sctx.runGen)
 	return ctx, sctx.runGen
 }
 
@@ -147,26 +155,27 @@ func Bridge(sctx *SessionContext, subscriber AgentSubscriber) func() {
 // bridgeEvent translates a single core.AgentEvent into typed bus event(s).
 func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	sid := sctx.SessionID
+	gen := sctx.RunGenAtomic.Load()
 	b := sctx.Bus
 
 	switch e.Type {
 	case core.AgentEventStart:
-		b.Publish(AgentStarted{SessionID: sid})
+		b.Publish(AgentStarted{SessionID: sid, RunGen: gen})
 
 	case core.AgentEventEnd:
-		b.Publish(AgentEnded{SessionID: sid, Messages: e.Messages})
+		b.Publish(AgentEnded{SessionID: sid, RunGen: gen, Messages: e.Messages})
 
 	case core.AgentEventError:
-		b.Publish(AgentError{SessionID: sid, Err: e.Error})
+		b.Publish(AgentError{SessionID: sid, RunGen: gen, Err: e.Error})
 
 	case core.AgentEventTurnStart:
-		b.Publish(TurnStarted{SessionID: sid})
+		b.Publish(TurnStarted{SessionID: sid, RunGen: gen})
 
 	case core.AgentEventTurnEnd:
-		b.Publish(TurnEnded{SessionID: sid})
+		b.Publish(TurnEnded{SessionID: sid, RunGen: gen})
 
 	case core.AgentEventMessageStart:
-		b.Publish(MessageStarted{SessionID: sid, Message: e.Message})
+		b.Publish(MessageStarted{SessionID: sid, RunGen: gen, Message: e.Message})
 
 	case core.AgentEventMessageUpdate:
 		if e.AssistantEvent == nil {
@@ -174,9 +183,9 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 		}
 		switch e.AssistantEvent.Type {
 		case core.ProviderEventTextDelta:
-			b.Publish(TextDelta{SessionID: sid, Delta: e.AssistantEvent.Delta})
+			b.Publish(TextDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta})
 		case core.ProviderEventThinkingDelta:
-			b.Publish(ThinkingDelta{SessionID: sid, Delta: e.AssistantEvent.Delta})
+			b.Publish(ThinkingDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta})
 		}
 
 	case core.AgentEventMessageEnd:
@@ -186,11 +195,12 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 				fullText += c.Text
 			}
 		}
-		b.Publish(MessageEnded{SessionID: sid, Message: e.Message, FullText: fullText})
+		b.Publish(MessageEnded{SessionID: sid, RunGen: gen, Message: e.Message, FullText: fullText})
 
 	case core.AgentEventToolExecStart:
 		b.Publish(ToolExecStarted{
 			SessionID:  sid,
+			RunGen:     gen,
 			ToolCallID: e.ToolCallID,
 			ToolName:   e.ToolName,
 			Args:       e.Args,
@@ -208,6 +218,7 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 		if delta != "" {
 			b.Publish(ToolExecUpdate{
 				SessionID:  sid,
+				RunGen:     gen,
 				ToolCallID: e.ToolCallID,
 				Delta:      delta,
 			})
@@ -224,6 +235,7 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 		}
 		b.Publish(ToolExecEnded{
 			SessionID:  sid,
+			RunGen:     gen,
 			ToolCallID: e.ToolCallID,
 			ToolName:   e.ToolName,
 			Result:     resultText,
@@ -242,14 +254,15 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 		if sctx.SteerFilter != nil && !sctx.SteerFilter(e.Text) {
 			return
 		}
-		b.Publish(Steered{SessionID: sid, Text: e.Text})
+		b.Publish(Steered{SessionID: sid, RunGen: gen, Text: e.Text})
 
 	case core.AgentEventCompactionStart:
-		b.Publish(CompactionStarted{SessionID: sid})
+		b.Publish(CompactionStarted{SessionID: sid, RunGen: gen})
 
 	case core.AgentEventCompactionEnd:
 		b.Publish(CompactionEnded{
 			SessionID: sid,
+			RunGen:    gen,
 			Payload:   e.Compaction,
 			Err:       e.Error,
 		})

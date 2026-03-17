@@ -18,7 +18,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -174,6 +174,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return nil, err
 	}
 
+	// Snapshot gate config for reconstruction after yolo mode.
+	var gateConfig permission.Config
+	if bs.Gate != nil {
+		gateConfig = bs.Gate.SnapshotConfig()
+	}
+
 	// Build RuntimeConfig.
 	rcfg := bus.RuntimeConfig{
 		SessionID:        id,
@@ -187,6 +193,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		AskBridge:        bs.AskBridge,
 		ProviderFactory:  m.providerFactory,
 		BaseSystemPrompt: "",
+		GateConfig:       gateConfig,
 		SteerFilter: func(text string) bool {
 			_, was := subagentTexts.LoadAndDelete(text)
 			return !was
@@ -211,14 +218,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		_ = rt.Bus.Execute(bus.SetThinking{Level: opts.initialThinking})
 	}
 
-	// PlanMode onChange → publish on bus.
-	bs.PlanMode.SetOnChange(func(mode planmode.Mode) {
-		d := bus.PlanModeChanged{SessionID: id, Mode: string(mode)}
-		if mode != planmode.ModeOff {
-			d.PlanFile = bs.PlanMode.PlanFilePath()
-		}
-		rt.Bus.Publish(d)
-	})
+	// PlanMode onChange is owned by the runtime (NewSessionRuntime sets it).
+	// No need to override here — it publishes PlanModeChanged and rebuilds
+	// the system prompt automatically.
 
 	sess = &ManagedSession{
 		ID:      id,
@@ -353,6 +355,7 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	if sctx.PlanMode != nil && saved.Metadata != nil {
 		sctx.PlanMode.RestoreState(saved.Metadata)
 		sctx.PlanMode.ApplyRestoredState()
+		sess.runtime.SyncPlanMode()
 	}
 	if saved.Metadata != nil {
 		savedScope, savedPaths := saved.PathMeta()

@@ -19,17 +19,22 @@ import (
 // ---------------------------------------------------------------------------
 
 // AgentStarted is published when the agent loop begins.
-type AgentStarted struct{ SessionID string }
+type AgentStarted struct {
+	SessionID string
+	RunGen    uint64
+}
 
 // AgentEnded is published when the agent loop finishes normally.
 type AgentEnded struct {
 	SessionID string
+	RunGen    uint64
 	Messages  []core.AgentMessage
 }
 
 // AgentError is published when the agent loop exits with an error.
 type AgentError struct {
 	SessionID string
+	RunGen    uint64
 	Err       error
 }
 
@@ -38,10 +43,16 @@ type AgentError struct {
 // ---------------------------------------------------------------------------
 
 // TurnStarted is published at the start of each agent turn (LLM call).
-type TurnStarted struct{ SessionID string }
+type TurnStarted struct {
+	SessionID string
+	RunGen    uint64
+}
 
 // TurnEnded is published at the end of each agent turn.
-type TurnEnded struct{ SessionID string }
+type TurnEnded struct {
+	SessionID string
+	RunGen    uint64
+}
 
 // ---------------------------------------------------------------------------
 // Message streaming
@@ -50,24 +61,28 @@ type TurnEnded struct{ SessionID string }
 // MessageStarted is published when a new assistant message begins streaming.
 type MessageStarted struct {
 	SessionID string
+	RunGen    uint64
 	Message   core.AgentMessage
 }
 
 // TextDelta is published for each text chunk streamed from the model.
 type TextDelta struct {
 	SessionID string
+	RunGen    uint64
 	Delta     string
 }
 
 // ThinkingDelta is published for each thinking/reasoning chunk from the model.
 type ThinkingDelta struct {
 	SessionID string
+	RunGen    uint64
 	Delta     string
 }
 
 // MessageEnded is published when an assistant message finishes streaming.
 type MessageEnded struct {
 	SessionID string
+	RunGen    uint64
 	Message   core.AgentMessage
 	FullText  string
 }
@@ -79,6 +94,7 @@ type MessageEnded struct {
 // ToolExecStarted is published when a tool call begins execution.
 type ToolExecStarted struct {
 	SessionID  string
+	RunGen     uint64
 	ToolCallID string
 	ToolName   string
 	Args       map[string]any
@@ -87,6 +103,7 @@ type ToolExecStarted struct {
 // ToolExecUpdate is published for streaming tool output.
 type ToolExecUpdate struct {
 	SessionID  string
+	RunGen     uint64
 	ToolCallID string
 	Delta      string
 }
@@ -94,6 +111,7 @@ type ToolExecUpdate struct {
 // ToolExecEnded is published when a tool call finishes.
 type ToolExecEnded struct {
 	SessionID  string
+	RunGen     uint64
 	ToolCallID string
 	ToolName   string
 	Result     string
@@ -106,11 +124,15 @@ type ToolExecEnded struct {
 // ---------------------------------------------------------------------------
 
 // CompactionStarted is published when context compaction begins.
-type CompactionStarted struct{ SessionID string }
+type CompactionStarted struct {
+	SessionID string
+	RunGen    uint64
+}
 
 // CompactionEnded is published when context compaction finishes.
 type CompactionEnded struct {
 	SessionID string
+	RunGen    uint64
 	Payload   *core.CompactionPayload
 	Err       error
 }
@@ -122,6 +144,7 @@ type CompactionEnded struct {
 // Steered is published when a steering message is injected into the agent.
 type Steered struct {
 	SessionID string
+	RunGen    uint64
 	Text      string
 }
 
@@ -139,6 +162,7 @@ type StateChanged struct {
 // RunEnded is published when a full agent run completes (may span multiple turns).
 type RunEnded struct {
 	SessionID string
+	RunGen    uint64
 	FinalText string
 	Err       error // non-nil for real errors (not cancellation)
 }

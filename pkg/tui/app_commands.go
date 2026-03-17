@@ -3,24 +3,21 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // --- Commands ---
 
 func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
-	// Commands with arguments.
 	if strings.HasPrefix(cmd, "model ") {
 		return m.handleModelSwitch(strings.TrimSpace(cmd[6:]))
 	}
@@ -42,38 +39,32 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	switch cmd {
 	case "model", "models":
-		// No argument: open the picker.
-		currentModel := m.agent.Model()
-		m.picker.Open(currentModel.ID, m.scopedModels)
+		model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+		m.picker.Open(model.ID, m.scopedModels)
 		m.input.SetEnabled(false)
 		return m, nil
 
 	case "thinking":
-		thinking := m.agent.ThinkingLevel()
+		thinking, _ := bus.QueryTyped[bus.GetThinkingLevel, string](m.runtime.Bus, bus.GetThinkingLevel{})
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "thinking: " + thinking})
 		m.updateViewport()
 		return m, nil
 
 	case "permissions":
-		mode := "yolo"
-		if m.permGate != nil {
-			mode = string(m.permGate.Mode())
+		info, _ := bus.QueryTyped[bus.GetPermissionInfo, bus.PermissionInfo](m.runtime.Bus, bus.GetPermissionInfo{})
+		text := "permissions: " + info.Mode
+		if len(info.AllowPatterns) > 0 {
+			text += "\nallow: " + strings.Join(info.AllowPatterns, ", ")
 		}
-		info := "permissions: " + mode
-		if m.permGate != nil {
-			if patterns := m.permGate.AllowPatterns(); len(patterns) > 0 {
-				info += "\nallow: " + strings.Join(patterns, ", ")
-			}
-			if rules := m.permGate.Rules(); len(rules) > 0 {
-				info += "\nrules: " + strings.Join(rules, ", ")
-			}
+		if len(info.Rules) > 0 {
+			text += "\nrules: " + strings.Join(info.Rules, ", ")
 		}
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: info})
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: text})
 		m.updateViewport()
 		return m, nil
 
 	case "clear":
-		if err := m.agent.Reset(); err != nil {
+		if err := m.runtime.Bus.Execute(bus.ClearSession{}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "error", Raw: err.Error(),
 			})
@@ -90,16 +81,16 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.sessionCost = 0
 		m.s.sessionInput = 0
 		m.s.sessionCacheRead = 0
-		m.s.expanded = false
 		m.statusBar.UpdateCostSegment(0)
 		m.statusBar.UpdateCacheSegment(0)
-		// Delete old session, create fresh one
+		m.s.expanded = false
 		if m.sessionStore != nil && m.session != nil {
 			_ = m.sessionStore.Delete(m.session.ID)
 			m.session = m.newSession()
 		}
 		m.updateViewport()
 		return m, nil
+
 	case "compact":
 		if m.s.running {
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -110,11 +101,10 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.running = true
 		m.input.SetEnabled(false)
 		m.status.SetText("compacting context...")
-		agent := m.agent
-		ctx := m.baseCtx
+		b := m.runtime.Bus
 		return m, func() tea.Msg {
-			payload, err := agent.Compact(ctx)
-			return compactResultMsg{Payload: payload, Err: err}
+			err := b.Execute(bus.CompactSession{})
+			return compactResultMsg{Err: err}
 		}
 
 	case "tasks":
@@ -158,43 +148,14 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			})
 			return m, nil
 		}
-		if m.checkpoints == nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: "Checkpoints not available",
-			})
-			return m, nil
-		}
-		cp, err := m.checkpoints.Undo()
-		if err != nil {
+		if err := m.runtime.Bus.Execute(bus.UndoLastChange{}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "error", Raw: err.Error(),
 			})
+			m.updateViewport()
 			return m, nil
 		}
-		var restored []string
-		var errs []string
-		for _, snap := range cp.Files {
-			if snap.Content == nil {
-				if err := os.Remove(snap.Path); err != nil && !os.IsNotExist(err) {
-					errs = append(errs, fmt.Sprintf("delete %s: %v", filepath.Base(snap.Path), err))
-				} else {
-					restored = append(restored, "deleted "+filepath.Base(snap.Path))
-				}
-			} else {
-				if err := os.WriteFile(snap.Path, snap.Content, snap.Perm); err != nil {
-					errs = append(errs, fmt.Sprintf("restore %s: %v", filepath.Base(snap.Path), err))
-				} else {
-					restored = append(restored, "restored "+filepath.Base(snap.Path))
-				}
-			}
-		}
-		msg := fmt.Sprintf("⏪ Reverted checkpoint %q: %s", cp.Label, strings.Join(restored, ", "))
-		if len(errs) > 0 {
-			msg += "\n⚠️ Errors: " + strings.Join(errs, "; ")
-			m.checkpoints.Repush(cp)
-			msg += "\nCheckpoint preserved — retry with /undo"
-		}
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: msg})
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "⏪ Undo completed"})
 		m.updateViewport()
 		return m, nil
 
@@ -209,8 +170,7 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handlePickerKey routes keys to the model picker.
-// handlePermissionKey routes keys to the permission prompt.
+// handleAskKey routes keys to the ask prompt.
 func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyUp:
@@ -221,7 +181,11 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyEnter:
 		if m.askPrompt.Submit() {
-			// All questions answered.
+			// All questions answered — resolve via bus.
+			_ = m.runtime.Bus.Execute(bus.ResolveAskUser{
+				AskID:   m.askPrompt.askID,
+				Answers: m.askPrompt.CollectAnswers(),
+			})
 			return m, nil
 		}
 		return m, nil
@@ -232,11 +196,19 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.askPrompt.Backspace()
 		return m, nil
 	case tea.KeyEsc:
+		askID := m.askPrompt.askID
+		// Send empty answers (one per question) so the tool doesn't hang.
+		emptyAnswers := make([]string, len(m.askPrompt.questions))
 		m.askPrompt.Cancel()
+		if err := m.runtime.Bus.Execute(bus.ResolveAskUser{
+			AskID:   askID,
+			Answers: emptyAnswers,
+		}); err != nil {
+			m.s.pendingStatus = "✗ " + err.Error()
+		}
 		return m, nil
 	case tea.KeyRunes, tea.KeySpace:
 		s := msg.String()
-		// Number shortcuts to pick an option directly.
 		if len(s) == 1 && s[0] >= '1' && s[0] <= '9' && !m.askPrompt.isCustom() {
 			idx := int(s[0] - '1')
 			if idx < m.askPrompt.optionCount() {
@@ -253,22 +225,20 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var listenCmd tea.Cmd
-	if m.permGate != nil {
-		listenCmd = m.waitForPermission()
-	}
-
 	// Rule input mode (auto mode, option "Add rule")
 	if m.permPrompt.ruleMode {
 		switch msg.Type {
 		case tea.KeyEnter:
-			if rule := m.permPrompt.SaveRule(); rule != "" && m.permGate != nil {
-				m.permGate.AddRule(rule)
+			if rule := m.permPrompt.SaveRule(); rule != "" {
+				_ = m.runtime.Bus.Execute(bus.AddPermissionRule{
+					PermissionID: m.permPrompt.permID,
+					Rule:         rule,
+				})
 				m.s.blocks = append(m.s.blocks, messageBlock{
 					Type: "status", Raw: fmt.Sprintf("✓ rule added: %s", rule),
 				})
 			}
-			return m, nil // stay on prompt — user still needs to Yes/No
+			return m, nil // stay on prompt
 		case tea.KeyEsc:
 			m.permPrompt.ruleMode = false
 			m.permPrompt.ruleBuf = ""
@@ -292,8 +262,15 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.permPrompt.amending {
 		switch msg.Type {
 		case tea.KeyEnter:
-			m.permPrompt.Confirm()
-			return m, listenCmd
+			opt := m.permPrompt.options[m.permPrompt.cursor]
+			_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+				PermissionID: m.permPrompt.permID,
+				Approved:     opt.approved,
+				Feedback:     strings.TrimSpace(m.permPrompt.amendBuf),
+				AllowPattern: opt.allow,
+			})
+			m.permPrompt.active = false
+			return m, nil
 		case tea.KeyEsc:
 			m.permPrompt.amending = false
 			m.permPrompt.amendBuf = ""
@@ -332,8 +309,14 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.permPrompt.ruleBuf = ""
 			return m, nil
 		}
-		m.permPrompt.Confirm()
-		return m, listenCmd
+		_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+			PermissionID: m.permPrompt.permID,
+			Approved:     opt.approved,
+			Feedback:     strings.TrimSpace(m.permPrompt.amendBuf),
+			AllowPattern: opt.allow,
+		})
+		m.permPrompt.active = false
+		return m, nil
 	case tea.KeyTab:
 		opt := m.permPrompt.options[m.permPrompt.cursor]
 		if opt.addRule {
@@ -345,9 +328,13 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.permPrompt.amendBuf = ""
 		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
-		m.permPrompt.Cancel()
-		m.agent.Abort()
-		return m, listenCmd
+		_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+			PermissionID: m.permPrompt.permID,
+			Approved:     false,
+		})
+		m.permPrompt.active = false
+		_ = m.runtime.Bus.Execute(bus.AbortRun{})
+		return m, nil
 	case tea.KeyRunes:
 		s := msg.String()
 		if len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
@@ -361,8 +348,13 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.permPrompt.cursor = idx
-				m.permPrompt.Confirm()
-				return m, listenCmd
+				_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+					PermissionID: m.permPrompt.permID,
+					Approved:     opt.approved,
+					AllowPattern: opt.allow,
+				})
+				m.permPrompt.active = false
+				return m, nil
 			}
 		}
 	}
@@ -420,7 +412,6 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.picker.Close()
 
 		if m.pickerPurpose == pickerForReviewConfig {
-			// Cancel → reopen plan menu.
 			m.planMenu.active = true
 			m.planMenu.variant = m.lastMenuVariant
 			m.pickerPurpose = pickerForModelSwitch
@@ -448,7 +439,6 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.picker.Close()
 
 		if m.pickerPurpose == pickerForReviewConfig {
-			// Store selected model and open thinking picker.
 			name := selected.Name
 			if name == "" {
 				name = selected.ID
@@ -480,12 +470,10 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleThinkingPickerKey routes keys to the thinking level picker.
 func (m appModel) handleThinkingPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
 		m.thinkingPicker.Close()
-		// Cancel → reopen plan menu without changing thinking.
 		m.planMenu.active = true
 		m.planMenu.variant = m.lastMenuVariant
 		m.pickerPurpose = pickerForModelSwitch
@@ -500,7 +488,6 @@ func (m appModel) handleThinkingPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		selected := m.thinkingPicker.Selected()
 		m.thinkingPicker.Close()
 		m.planMenu.reviewThinking = selected.value
-		// Reopen plan menu with updated config.
 		m.planMenu.active = true
 		m.planMenu.variant = m.lastMenuVariant
 		m.pickerPurpose = pickerForModelSwitch
@@ -522,47 +509,27 @@ func (m appModel) handleThinkingPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// switchToModel performs the actual model switch (shared by picker and /model <spec>).
+// switchToModel performs the actual model switch via bus.
 func (m appModel) switchToModel(newModel core.Model) (tea.Model, tea.Cmd) {
-	oldModel := m.agent.Model()
-	if newModel.Provider == "" {
-		newModel.Provider = oldModel.Provider
+	spec := newModel.ID
+	if newModel.Provider != "" {
+		spec = newModel.Provider + "/" + newModel.ID
 	}
-
-	var newProvider core.Provider
-	if newModel.Provider != oldModel.Provider {
-		if m.providerFactory == nil {
-			m.s.pendingStatus = fmt.Sprintf("✗ Cannot switch from %s to %s: no provider factory", oldModel.Provider, newModel.Provider)
-			m.s.pendingTimeline = nil
-			return m, nil
-		}
-		prov, err := m.providerFactory(newModel)
-		if err != nil {
-			m.s.pendingStatus = "✗ " + err.Error()
-			m.s.pendingTimeline = nil
-			return m, nil
-		}
-		newProvider = prov
-	}
-
-	thinkingLevel := m.agent.ThinkingLevel()
-	if err := m.agent.Reconfigure(newProvider, newModel, thinkingLevel); err != nil {
+	if err := m.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: spec}); err != nil {
 		m.s.pendingStatus = "✗ " + err.Error()
 		m.s.pendingTimeline = nil
 		return m, nil
 	}
-
-	name := newModel.Name
+	// Query new model for display.
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+	name := model.Name
 	if name == "" {
-		name = newModel.ID
+		name = model.ID
 	}
 	m.modelName = name
-	m.statusBar.UpdateModelSegment(name)
 	m.refreshContextSegment()
 	m.s.pendingStatus = ""
-	m.s.pendingTimeline = newModelSwitchEvent(newModel)
-
-	m.saveRuntimeMetadata()
+	m.s.pendingTimeline = newModelSwitchEvent(model)
 	return m, nil
 }
 
@@ -575,7 +542,6 @@ func (m appModel) cycleScopedModel() (tea.Model, tea.Cmd) {
 		})
 	}
 
-	// Build ordered list of scoped models (deterministic from registry order).
 	all := core.ListModels()
 	var scoped []core.Model
 	for _, e := range all {
@@ -588,8 +554,8 @@ func (m appModel) cycleScopedModel() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Find current model in scoped list, advance to next.
-	currentID := m.agent.Model().ID
+	currentModel, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+	currentID := currentModel.ID
 	nextIdx := 0
 	for i, s := range scoped {
 		if s.ID == currentID {
@@ -618,74 +584,26 @@ func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
 
 // handlePermissionsSwitch processes `/permissions <mode>`.
 func (m appModel) handlePermissionsSwitch(modeStr string) (tea.Model, tea.Cmd) {
-	valid := map[string]permission.Mode{
-		"yolo": permission.ModeYolo,
-		"ask":  permission.ModeAsk,
-		"auto": permission.ModeAuto,
-	}
-
-	newMode, ok := valid[modeStr]
-	if !ok {
+	if err := m.runtime.Bus.Execute(bus.SetPermissionMode{Mode: modeStr}); err != nil {
 		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "error", Raw: "Invalid permission mode. Options: yolo, ask, auto",
+			Type: "error", Raw: err.Error(),
 		})
 		m.updateViewport()
 		return m, nil
 	}
-
-	cmds := []tea.Cmd{}
-	if newMode == permission.ModeYolo {
-		m.permGate = nil
-		m.syncPermissionCheck()
-		m.statusBar.UpdatePermissionsSegment("")
-		if m.pathPolicy != nil {
-			m.pathPolicy.SetUnrestricted(true)
-			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
-		}
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "status", Raw: "permissions: yolo (all tools auto-approved)",
-		})
-	} else {
-		if m.permGate == nil {
-			m.permGate = permission.New(newMode, permission.Config{})
-		} else {
-			m.permGate.SetMode(newMode)
-		}
-
-		// Auto mode needs an AI evaluator
-		if newMode == permission.ModeAuto {
-			evalSpec := "haiku"
-			evalModel, _ := core.ResolveModel(evalSpec)
-			if m.providerFactory != nil {
-				prov, err := m.providerFactory(evalModel)
-				if err == nil {
-					m.permGate.SetEvaluator(permission.NewEvaluator(prov, evalModel))
-				} else {
-					m.s.blocks = append(m.s.blocks, messageBlock{
-						Type: "error", Raw: fmt.Sprintf("auto evaluator unavailable: %v (will fall back to ask)", err),
-					})
-				}
-			}
-		}
-
-		m.syncPermissionCheck()
-		m.statusBar.UpdatePermissionsSegment(string(newMode))
-		cmds = append(cmds, m.waitForPermission())
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "status", Raw: fmt.Sprintf("permissions: %s", newMode),
-		})
-	}
-	m.saveRuntimeMetadata()
-	if saveCmd := m.saveSession(m.agent.Messages()); saveCmd != nil {
-		cmds = append(cmds, saveCmd)
-	}
+	// ConfigChanged event handles status bar update.
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type: "status", Raw: "permissions: " + modeStr,
+	})
 	m.updateViewport()
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
 // handlePathCommand processes `/path` and its subcommands.
 func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
-	if m.pathPolicy == nil {
+	b := m.runtime.Bus
+	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+	if pathInfo.WorkspaceRoot == "" {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "error", Raw: "Path policy not available",
 		})
@@ -693,7 +611,6 @@ func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Parse subcommand
 	sub := args
 	var subArg string
 	if idx := strings.IndexByte(args, ' '); idx >= 0 {
@@ -703,11 +620,9 @@ func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
 
 	switch sub {
 	case "", "list":
-		scope := m.pathPolicy.Scope()
-		root := m.pathPolicy.WorkspaceRoot()
-		info := fmt.Sprintf("path scope: %s\nworkspace: %s", scope, root)
-		if paths := m.pathPolicy.AllowedPaths(); len(paths) > 0 {
-			info += "\nallowed paths:\n  " + strings.Join(paths, "\n  ")
+		info := fmt.Sprintf("path scope: %s\nworkspace: %s", pathInfo.Scope, pathInfo.WorkspaceRoot)
+		if len(pathInfo.AllowedPaths) > 0 {
+			info += "\nallowed paths:\n  " + strings.Join(pathInfo.AllowedPaths, "\n  ")
 		}
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: info})
 
@@ -719,18 +634,17 @@ func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
-		if err := m.pathPolicy.AddPath(subArg); err != nil {
+		if err := b.Execute(bus.AddAllowedPath{Path: subArg}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "error", Raw: fmt.Sprintf("Cannot add path: %v", err),
 			})
 			m.updateViewport()
 			return m, nil
 		}
-		m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+		// ConfigChanged event updates PathScope in status bar.
 		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "status", Raw: fmt.Sprintf("✓ Path added: %s (scope: %s)", subArg, m.pathPolicy.Scope()),
+			Type: "status", Raw: fmt.Sprintf("✓ Path added: %s", subArg),
 		})
-		m.savePathMetadata()
 
 	case "rm", "remove":
 		if subArg == "" {
@@ -740,37 +654,24 @@ func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
-		if m.pathPolicy.RemovePath(subArg) {
-			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+		if err := b.Execute(bus.RemoveAllowedPath{Path: subArg}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status", Raw: fmt.Sprintf("✓ Path removed: %s (scope: %s)", subArg, m.pathPolicy.Scope()),
+				Type: "error", Raw: err.Error(),
 			})
-			m.savePathMetadata()
 		} else {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: fmt.Sprintf("Path not found in allowed list: %s", subArg),
+				Type: "status", Raw: fmt.Sprintf("✓ Path removed: %s", subArg),
 			})
 		}
 
 	case "scope":
-		switch subArg {
-		case "workspace":
-			m.pathPolicy.SetUnrestricted(false)
-			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+		if err := b.Execute(bus.SetPathScope{Scope: subArg}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status", Raw: "✓ Path scope: " + m.pathPolicy.Scope(),
+				Type: "error", Raw: err.Error(),
 			})
-			m.savePathMetadata()
-		case "unrestricted":
-			m.pathPolicy.SetUnrestricted(true)
-			m.statusBar.UpdatePathScopeSegment(m.pathPolicy.Scope())
+		} else {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status", Raw: "✓ Path scope: unrestricted",
-			})
-			m.savePathMetadata()
-		default:
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: "Usage: /path scope workspace|unrestricted",
+				Type: "status", Raw: "✓ Path scope: " + subArg,
 			})
 		}
 
@@ -781,18 +682,7 @@ func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
 	}
 
 	m.updateViewport()
-	if saveCmd := m.saveSession(m.agent.Messages()); saveCmd != nil {
-		return m, saveCmd
-	}
 	return m, nil
-}
-
-// savePathMetadata persists the current path policy state to session metadata.
-func (m appModel) savePathMetadata() {
-	if m.session == nil || m.pathPolicy == nil {
-		return
-	}
-	m.session.SetPathMetadata(m.pathPolicy.Scope(), m.pathPolicy.AllowedPaths())
 }
 
 // handleThinkingSwitch processes `/thinking <level>`.
@@ -801,27 +691,13 @@ func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 		m.s.pendingStatus = "✗ Cannot change thinking while agent is running"
 		return m, nil
 	}
-
-	valid := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
-	if !valid[level] {
-		m.s.pendingStatus = "✗ Invalid thinking level. Options: off, minimal, low, medium, high"
-		return m, nil
-	}
-
-	model := m.agent.Model()
-	if err := m.agent.Reconfigure(nil, model, level); err != nil {
+	if err := m.runtime.Bus.Execute(bus.SetThinking{Level: level}); err != nil {
 		m.s.pendingStatus = "✗ " + err.Error()
 		return m, nil
 	}
-
-	m.statusBar.UpdateThinkingSegment(level)
+	// ConfigChanged event updates status bar.
 	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", level)
-	m.saveRuntimeMetadata()
-	var cmds []tea.Cmd
-	if saveCmd := m.saveSession(m.agent.Messages()); saveCmd != nil {
-		cmds = append(cmds, saveCmd)
-	}
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
 func (m appModel) loadSessionBrowser() tea.Cmd {
@@ -868,12 +744,7 @@ func (m appModel) newSession() *session.Session {
 		return nil
 	}
 	sess := m.sessionStore.Create()
-	sess.SetRuntimeMetadata(
-		fullModelSpec(m.agent.Model()),
-		m.cwd,
-		m.currentPermissionMode(),
-		m.agent.ThinkingLevel(),
-	)
+	// Runtime metadata is set via the persistence reactor.
 	return sess
 }
 
@@ -884,36 +755,17 @@ func fullModelSpec(model core.Model) string {
 	return model.ID
 }
 
-func (m appModel) currentPermissionMode() string {
-	if m.permGate == nil {
-		return "yolo"
-	}
-	return string(m.permGate.Mode())
-}
-
-// saveRuntimeMetadata persists the current runtime config to the session metadata.
-func (m appModel) saveRuntimeMetadata() {
-	if m.session == nil {
-		return
-	}
-	m.session.SetRuntimeMetadata(
-		fullModelSpec(m.agent.Model()),
-		m.cwd,
-		m.currentPermissionMode(),
-		m.agent.ThinkingLevel(),
-	)
-}
-
 func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
+	// TODO: In full implementation, switchRuntime would create a new runtime.
+	// For now, use bus commands to load the session state.
 	if sess == nil {
 		sess = m.newSession()
-		if err := m.agent.Reset(); err != nil {
-			m.sessionBrowser.previewErr = err.Error()
-			return m, nil
-		}
-	} else if err := m.agent.LoadState(sess.Messages, sess.CompactionEpoch); err != nil {
-		m.sessionBrowser.previewErr = err.Error()
-		return m, nil
+		_ = m.runtime.Bus.Execute(bus.ClearSession{})
+	} else if len(sess.Messages) > 0 {
+		// Load messages into agent via bus. This is temporary —
+		// full session switching creates a new runtime.
+		// For now, we approximate with ClearSession + metadata restore.
+		_ = m.runtime.Bus.Execute(bus.ClearSession{})
 	}
 
 	m.session = sess
@@ -933,75 +785,42 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.statusBar.UpdateCostSegment(0)
 	m.statusBar.UpdateCacheSegment(0)
 
-	// Restore model, thinking, and permission mode from session metadata when resuming.
+	// Restore metadata via bus commands.
 	if sess != nil && sess.Metadata != nil {
-		m.restoreFromMetadata(sess)
-	}
-
-	// Restore plan mode from session metadata.
-	if m.planMode != nil {
-		if sess != nil && sess.Metadata != nil {
-			m.planMode.RestoreState(sess.Metadata)
-			m.planMode.ApplyRestoredState()
-		} else {
-			// New session — ensure plan mode is off.
-			m.planMode.Exit()
+		if modelSpec, ok := sess.Metadata["model"].(string); ok && modelSpec != "" {
+			_ = m.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec})
 		}
-		m.syncPermissionCheck()
-		m.rebuildSystemPrompt()
-		mode := m.planMode.Mode()
-		if mode != planmode.ModeOff {
-			m.statusBar.UpdatePlanSegment(string(mode))
-		} else {
-			m.statusBar.UpdatePlanSegment("")
-			m.statusBar.UpdateTasksSegment(0, 0)
+		if thinking, ok := sess.Metadata["thinking"].(string); ok && thinking != "" {
+			_ = m.runtime.Bus.Execute(bus.SetThinking{Level: thinking})
 		}
-		// Restore task progress display if in executing mode.
-		if mode == planmode.ModeExecuting {
-			m.refreshTaskDisplay()
+		if mode, ok := sess.Metadata["permission_mode"].(string); ok && mode != "" {
+			_ = m.runtime.Bus.Execute(bus.SetPermissionMode{Mode: mode})
 		}
 	}
 
-	// Restore task store from session metadata.
-	if m.taskStore != nil && sess != nil && sess.Metadata != nil {
-		m.taskStore.RestoreFromMetadata(sess.Metadata)
-		m.refreshTaskDisplay()
+	// Query updated state for display.
+	if model, err := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{}); err == nil {
+		name := model.Name
+		if name == "" {
+			name = model.ID
+		}
+		m.modelName = name
+		m.statusBar.UpdateModelSegment(name)
+	}
+	if thinking, err := bus.QueryTyped[bus.GetThinkingLevel, string](m.runtime.Bus, bus.GetThinkingLevel{}); err == nil {
+		m.statusBar.UpdateThinkingSegment(thinking)
+	}
+	if permMode, err := bus.QueryTyped[bus.GetPermissionMode, string](m.runtime.Bus, bus.GetPermissionMode{}); err == nil {
+		m.statusBar.UpdatePermissionsSegment(permMode)
 	}
 
 	if sess != nil && len(sess.Messages) > 0 {
 		m.rebuildFromMessages(sess.Messages)
 	}
 	m.refreshContextSegment()
+	m.refreshTaskDisplay()
 	m.updateViewport()
 	return m, m.forceRepaint()
-}
-
-// restoreFromMetadata restores model, thinking, and permission mode from
-// session metadata using the centralized bootstrap logic, then updates UI.
-func (m *appModel) restoreFromMetadata(sess *session.Session) {
-	if m.bootstrapSess == nil {
-		return
-	}
-	result := m.bootstrapSess.RestoreFromMetadata(sess, m.providerFactory)
-
-	// Update UI from restore results.
-	if result.ModelName != "" {
-		m.modelName = result.ModelName
-		m.statusBar.UpdateModelSegment(m.modelName)
-	}
-	if result.Thinking != "" {
-		m.statusBar.UpdateThinkingSegment(result.Thinking)
-	}
-
-	// Sync permission gate from bootstrap session.
-	m.permGate = m.bootstrapSess.Gate
-	m.syncPermissionCheck()
-	m.statusBar.UpdatePermissionsSegment(result.PermissionMode)
-
-	// Sync path policy from restore.
-	if result.PathScope != "" && m.pathPolicy != nil {
-		m.statusBar.UpdatePathScopeSegment(result.PathScope)
-	}
 }
 
 // handlePromptTemplate processes `/prompt` and `/prompt <name>`.
@@ -1012,7 +831,6 @@ func (m appModel) handlePromptTemplate(name string) (tea.Model, tea.Cmd) {
 	}
 
 	if name == "" {
-		// List available templates.
 		var lines []string
 		for _, t := range m.promptTemplates {
 			entry := t.Name
@@ -1027,7 +845,6 @@ func (m appModel) handlePromptTemplate(name string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Find the template by name.
 	for _, t := range m.promptTemplates {
 		if t.Name == name {
 			m.input.textarea.SetValue(t.Content)
@@ -1040,17 +857,14 @@ func (m appModel) handlePromptTemplate(name string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openSettingsMenu builds entries from current state and opens the menu.
+// openSettingsMenu builds entries from current state via bus queries.
 func (m appModel) openSettingsMenu() (tea.Model, tea.Cmd) {
-	permMode := "yolo"
-	if m.permGate != nil {
-		permMode = string(m.permGate.Mode())
-	}
-	thinking := m.agent.ThinkingLevel()
-	model := m.agent.Model()
+	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](m.runtime.Bus, bus.GetPermissionMode{})
+	thinking, _ := bus.QueryTyped[bus.GetThinkingLevel, string](m.runtime.Bus, bus.GetThinkingLevel{})
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
 
 	entries := []settingsEntry{
-		{key: "Model", value: model.Name, options: nil}, // display-only; use /model or Ctrl+P
+		{key: "Model", value: model.Name, options: nil},
 		{key: "Thinking", value: thinking, options: []string{"off", "minimal", "low", "medium", "high"}},
 		{key: "Permissions", value: permMode, options: []string{"yolo", "ask", "auto"}},
 	}
@@ -1060,7 +874,6 @@ func (m appModel) openSettingsMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleSettingsKey routes key events to the settings menu.
 func (m appModel) handleSettingsKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "up", "k":
@@ -1078,13 +891,11 @@ func (m appModel) handleSettingsKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// applySettingsCycle cycles the current setting forward and applies it.
 func (m appModel) applySettingsCycle() (tea.Model, tea.Cmd) {
 	key, val := m.settingsMenu.CycleValue()
 	return m.applySettingsChange(key, val)
 }
 
-// applySettingsCycleReverse cycles the current setting backward and applies it.
 func (m appModel) applySettingsCycleReverse() (tea.Model, tea.Cmd) {
 	if !m.settingsMenu.active || m.settingsMenu.cursor >= len(m.settingsMenu.entries) {
 		return m, nil
@@ -1104,7 +915,6 @@ func (m appModel) applySettingsCycleReverse() (tea.Model, tea.Cmd) {
 	return m.applySettingsChange(e.key, e.value)
 }
 
-// applySettingsChange applies a setting change immediately.
 func (m appModel) applySettingsChange(key, val string) (tea.Model, tea.Cmd) {
 	if key == "" {
 		return m, nil
@@ -1119,16 +929,6 @@ func (m appModel) applySettingsChange(key, val string) (tea.Model, tea.Cmd) {
 }
 
 // handleShellEscape dispatches a shell command asynchronously.
-//
-// When the agent is idle:
-//
-//	!command  → persist as "user" message (model sees it next turn)
-//	!!command → persist as "shell" message (model never sees it)
-//
-// When the agent is running:
-//
-//	!command  → steer the output into the conversation mid-run
-//	!!command → show output only, no steer, not persisted
 func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
 	silent := strings.HasPrefix(text, "!!")
 	var command string
@@ -1141,7 +941,6 @@ func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Show a pending tool block immediately while the command runs.
 	m.s.blocks = append(m.s.blocks, messageBlock{
 		Type:     "tool",
 		ToolName: "bash",
@@ -1150,7 +949,8 @@ func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
 	m.s.viewportDirty = true
 	m.updateViewport()
 
-	running := m.agent.IsRunning()
+	b := m.runtime.Bus
+	running := m.s.running
 	cwd := m.cwd
 	baseCtx := m.baseCtx
 
@@ -1160,6 +960,7 @@ func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
 		out, _ := cmd.CombinedOutput()
 		output := strings.TrimRight(string(out), "\n")
 		isError := cmd.ProcessState != nil && !cmd.ProcessState.Success()
+		_ = b // available if needed for steer
 		return shellResultMsg{
 			Command: command,
 			Output:  output,
@@ -1172,9 +973,10 @@ func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
 
 // handleShellResult processes the completed shell escape command.
 func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
+	b := m.runtime.Bus
 	if msg.Running && !msg.Silent {
 		body := fmt.Sprintf("Shell output (from user):\n$ %s\n%s", msg.Command, msg.Output)
-		m.agent.Steer(body)
+		_ = b.Execute(bus.SteerAgent{Text: body})
 	} else if !msg.Running {
 		var body string
 		if msg.Output != "" {
@@ -1193,19 +995,16 @@ func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 			},
 			Custom: map[string]any{"shell": true},
 		}
-		if err := m.agent.AppendMessage(agentMsg); err != nil {
-			m.s.pendingStatus = "✗ shell: " + err.Error()
-		}
+		_ = b.Execute(bus.AppendToConversation{Message: agentMsg})
 	}
 
-	// Update the pending tool block with the result.
 	for i := len(m.s.blocks) - 1; i >= 0; i-- {
-		b := &m.s.blocks[i]
-		if b.ToolName == "bash" && !b.ToolDone {
-			if cmd, _ := b.ToolArgs["command"].(string); cmd == msg.Command {
-				b.ToolResult = msg.Output
-				b.ToolDone = true
-				b.IsError = msg.IsError
+		blk := &m.s.blocks[i]
+		if blk.ToolName == "bash" && !blk.ToolDone {
+			if cmd, _ := blk.ToolArgs["command"].(string); cmd == msg.Command {
+				blk.ToolResult = msg.Output
+				blk.ToolDone = true
+				blk.IsError = msg.IsError
 				break
 			}
 		}
@@ -1214,4 +1013,97 @@ func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 	m.s.viewportDirty = true
 	m.updateViewport()
 	return m, nil
+}
+
+// handleTasksCommand processes `/tasks` and its subcommands.
+func (m appModel) handleTasksCommand(args string) (tea.Model, tea.Cmd) {
+	b := m.runtime.Bus
+	taskList, err := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
+	if err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Task tracking not available"})
+		return m, nil
+	}
+
+	parts := strings.Fields(args)
+
+	if len(parts) == 0 {
+		if len(taskList) == 0 {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "No tasks"})
+		} else {
+			done := 0
+			var lines []string
+			for _, t := range taskList {
+				icon := "☐"
+				if t.Status == "done" {
+					icon = "☑"
+					done++
+				}
+				lines = append(lines, fmt.Sprintf("%s #%d: %s", icon, t.ID, t.Title))
+			}
+			lines = append(lines, fmt.Sprintf("\n%d/%d complete", done, len(taskList)))
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: strings.Join(lines, "\n")})
+		}
+		m.updateViewport()
+		return m, nil
+	}
+
+	switch parts[0] {
+	case "done":
+		if len(parts) < 2 {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /tasks done <id>"})
+			m.updateViewport()
+			return m, nil
+		}
+		var id int
+		if _, err := fmt.Sscanf(parts[1], "%d", &id); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Invalid task ID: " + parts[1]})
+			m.updateViewport()
+			return m, nil
+		}
+		if err := b.Execute(bus.MarkTaskDone{TaskID: id}); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			m.updateViewport()
+			return m, nil
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: fmt.Sprintf("✅ Task #%d marked done", id)})
+		m.refreshTaskDisplay()
+		m.updateViewport()
+		return m, nil
+
+	case "reset":
+		_ = b.Execute(bus.ResetTasks{})
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "Tasks cleared"})
+		m.refreshTaskDisplay()
+		m.updateViewport()
+		return m, nil
+
+	case "show":
+		if len(parts) >= 2 {
+			switch tasks.WidgetMode(parts[1]) {
+			case tasks.WidgetAll, tasks.WidgetCurrent, tasks.WidgetHidden:
+				m.taskWidgetMode = tasks.WidgetMode(parts[1])
+			default:
+				m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /tasks show [all|current|hidden]"})
+				m.updateViewport()
+				return m, nil
+			}
+		} else {
+			switch m.taskWidgetMode {
+			case tasks.WidgetAll:
+				m.taskWidgetMode = tasks.WidgetCurrent
+			case tasks.WidgetCurrent:
+				m.taskWidgetMode = tasks.WidgetHidden
+			default:
+				m.taskWidgetMode = tasks.WidgetAll
+			}
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: fmt.Sprintf("Task widget: %s", m.taskWidgetMode)})
+		m.updateViewport()
+		return m, nil
+
+	default:
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /tasks [done <n> | reset | show [all|current|hidden]]"})
+		m.updateViewport()
+		return m, nil
+	}
 }
