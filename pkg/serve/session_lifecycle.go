@@ -62,7 +62,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
 
 		persisted.SetRuntimeMetadata(
-			fullModelSpec(model),
+			bootstrap.FullModelSpec(model),
 			sess.CWD,
 			permMode,
 			thinking,
@@ -436,9 +436,3 @@ func modelDisplayName(m core.Model) string {
 	return m.ID
 }
 
-func fullModelSpec(m core.Model) string {
-	if m.Provider != "" {
-		return m.Provider + "/" + m.ID
-	}
-	return m.ID
-}

@@ -15,6 +15,7 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
+	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -411,7 +412,7 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
 			"workspaceRoot": mgr.workspaceRoot,
-			"defaultModel":  fullModelSpec(mgr.defaultModel),
+			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),
 		}
 		writeJSON(w, http.StatusOK, caps)
 	}

@@ -159,6 +159,13 @@ type StateChanged struct {
 	Error     string
 }
 
+// RunStarted is published when a new agent run begins (after state transition).
+// Frontends use RunGen to filter events belonging to the current run.
+type RunStarted struct {
+	SessionID string
+	RunGen    uint64
+}
+
 // RunEnded is published when a full agent run completes (may span multiple turns).
 type RunEnded struct {
 	SessionID string

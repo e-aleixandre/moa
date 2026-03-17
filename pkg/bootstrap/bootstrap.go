@@ -108,16 +108,9 @@ type Session struct {
 	// correctly even when Gate is nil (yolo mode).
 	Headless bool
 
-	// AgentHolder exposes the atomic agent pointer for subagent closures.
-	// Set after BuildSession returns. Callers must call StoreAgent(ag) before
-	// using subagents that depend on parent model/thinking/permissions.
+	// agentHolder stores the atomic agent pointer for subagent closures.
+	// Set by BuildSession; updated internally on reconfiguration.
 	agentHolder atomic.Pointer[agent.Agent]
-}
-
-// StoreAgent updates the agent pointer visible to subagent closures.
-// Must be called after agent creation and any reconfiguration.
-func (s *Session) StoreAgent(ag *agent.Agent) {
-	s.agentHolder.Store(ag)
 }
 
 // BuildSession wires up a complete agent session. The returned Session

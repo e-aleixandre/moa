@@ -81,6 +81,10 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SetThinking) error {
+		valid := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
+		if !valid[cmd.Level] {
+			return fmt.Errorf("invalid thinking level %q (options: off, minimal, low, medium, high)", cmd.Level)
+		}
 		if err := sctx.Agent.SetThinkingLevel(cmd.Level); err != nil {
 			return err
 		}
@@ -464,7 +468,12 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.PathPolicy == nil {
 			return fmt.Errorf("path policy not available")
 		}
-		switch strings.ToLower(cmd.Scope) {
+		scope := strings.ToLower(cmd.Scope)
+		// Normalize ws+N → workspace (extra paths come via AddAllowedPath).
+		if strings.HasPrefix(scope, "ws") {
+			scope = "workspace"
+		}
+		switch scope {
 		case "workspace":
 			sctx.PathPolicy.SetUnrestricted(false)
 		case "unrestricted":
@@ -578,6 +587,9 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 	sctx.runMu.Lock()
 	runCtx, gen := sctx.newRunContext()
 	sctx.runMu.Unlock()
+
+	// Notify subscribers of the run generation (single source of truth for runGen).
+	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen})
 
 	// Capture message count before run to extract only new text.
 	msgsBefore := len(sctx.Agent.Messages())

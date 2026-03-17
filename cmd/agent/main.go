@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"os/signal"
@@ -302,9 +303,23 @@ func main() {
 				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
 				persistedSess = nil
 			} else {
-				// Restore model, thinking, and permission mode from session metadata.
-				sess.RestoreFromMetadata(persistedSess, providerFactory)
-				resolvedModel = sess.Model
+				// Restore model pre-runtime (initialization, same approach as serve).
+				savedModel, _, _, _ := persistedSess.RuntimeMeta()
+				if savedModel != "" {
+					if m, ok := core.ResolveModel(savedModel); ok &&
+						(m.ID != resolvedModel.ID || m.Provider != resolvedModel.Provider) {
+						if prov, err := providerFactory(m); err == nil {
+							if err := ag.Reconfigure(prov, m, ag.ThinkingLevel()); err == nil {
+								sess.Model = m
+								resolvedModel = m
+							} else {
+								slog.Warn("restore: model reconfigure failed", "model", savedModel, "error", err)
+							}
+						} else {
+							slog.Warn("restore: provider creation failed", "model", savedModel, "error", err)
+						}
+					}
+				}
 			}
 		}
 		if persistedSess == nil && sessionStore != nil && !startInSessionBrowser {
@@ -349,17 +364,44 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Sync plan mode state (restore happened before SetOnChange was wired).
-		rt.SyncPlanMode()
-
-		// Attach session persistence.
+		// Attach persister BEFORE bus restore so state changes are persisted.
 		if sessionStore != nil && persistedSess != nil {
 			rt.AttachPersister(&tuiPersister{store: sessionStore, session: persistedSess})
 		}
 
+		// Post-runtime: restore thinking, permissions, paths via bus commands.
+		if persistedSess != nil {
+			_, _, savedPermMode, savedThinking := persistedSess.RuntimeMeta()
+			if savedThinking != "" {
+				if err := rt.Bus.Execute(bus.SetThinking{Level: savedThinking}); err != nil {
+					slog.Warn("restore: thinking", "level", savedThinking, "error", err)
+				}
+			}
+			if savedPermMode != "" {
+				if err := rt.Bus.Execute(bus.SetPermissionMode{Mode: savedPermMode}); err != nil {
+					slog.Warn("restore: permission mode", "mode", savedPermMode, "error", err)
+				}
+			}
+			if persistedSess.Metadata != nil {
+				savedScope, savedPaths := persistedSess.PathMeta()
+				if savedScope != "" {
+					if err := rt.Bus.Execute(bus.SetPathScope{Scope: savedScope}); err != nil {
+						slog.Warn("restore: path scope", "scope", savedScope, "error", err)
+					}
+				}
+				for _, p := range savedPaths {
+					if err := rt.Bus.Execute(bus.AddAllowedPath{Path: p}); err != nil {
+						slog.Warn("restore: allowed path", "path", p, "error", err)
+					}
+				}
+			}
+		}
+
+		// Sync plan mode state (restore happened before SetOnChange was wired).
+		rt.SyncPlanMode()
+
 		app := tui.New(ctx, tui.Config{
 			Runtime:               rt,
-			BootstrapSession:      sess,
 			SessionStore:          sessionStore,
 			Session:               persistedSess,
 			StartInSessionBrowser: startInSessionBrowser,

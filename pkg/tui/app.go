@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -48,7 +47,7 @@ type state struct {
 	showThinking     bool                  // toggle thinking visibility (Ctrl+T)
 	expanded         bool                  // toggle expanded tool results (Ctrl+E)
 	initialized      bool                  // first WindowSizeMsg processed
-	runGen           uint64                // incremented on each run; events from old runs are ignored
+	runGen           uint64                // set from bus.RunStarted; single source of truth is the bus
 	cleanupOnce      sync.Once             // idempotent cleanup
 	pendingStatus    string                // transient generic status shown in View(), never persisted
 	pendingTimeline  *pendingTimelineEvent // live timeline event shown in View() until next send
@@ -84,7 +83,6 @@ type appModel struct {
 
 	// Bus runtime — all interaction goes through this
 	runtime  *bus.SessionRuntime
-	bsSess   *bootstrap.Session // kept for session switching (runtime factory)
 	eventCh  chan busEventMsg
 	quit     chan struct{}
 	unsubAll func()
@@ -146,7 +144,6 @@ type appModel struct {
 // Config configures the TUI. All fields are optional except Runtime.
 type Config struct {
 	Runtime               *bus.SessionRuntime         // required — the session bus runtime
-	BootstrapSession      *bootstrap.Session          // kept for session switching (factory for RuntimeConfig)
 	SessionStore          session.SessionStore        // persistence backend (nil = no persistence)
 	Session               *session.Session            // session to resume (nil = fresh start)
 	StartInSessionBrowser bool                        // open the session browser before entering chat
@@ -197,7 +194,6 @@ func New(ctx context.Context, cfg Config) appModel {
 	m := appModel{
 		s:                    &state{showThinking: true},
 		runtime:              cfg.Runtime,
-		bsSess:               cfg.BootstrapSession,
 		eventCh:              eventCh,
 		quit:                 quit,
 		unsubAll:             unsubAll,
@@ -1050,6 +1046,9 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 		m.s.viewportDirty = true
 
 	// --- Run lifecycle ---
+	case bus.RunStarted:
+		m.s.runGen = e.RunGen
+
 	case bus.RunEnded:
 		if e.RunGen != m.s.runGen {
 			return nil
@@ -1196,8 +1195,8 @@ func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.C
 
 // handleRunEnded processes the completion of an agent run.
 func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
-	// Bump gen to ignore late events.
-	m.s.runGen++
+	// No gen bump needed — RunStarted sets the gen for the next run.
+	// Events are ordered through eventCh, so no late events arrive after RunEnded.
 
 	// Query messages for reconciliation.
 	msgs := m.currentMessages()

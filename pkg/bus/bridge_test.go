@@ -14,6 +14,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // ---------------------------------------------------------------------------
@@ -1785,5 +1786,207 @@ func TestQuery_GetPendingApproval(t *testing.T) {
 	}
 	if info.Permission.AllowPattern != "write(*)" {
 		t.Fatalf("AllowPattern = %q", info.Permission.AllowPattern)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SetThinking validation tests
+// ---------------------------------------------------------------------------
+
+func TestHandler_SetThinking_InvalidLevel(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{thinkingLevel: "low"}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	err := b.Execute(SetThinking{Level: "invalid"})
+	if err == nil {
+		t.Fatal("expected error for invalid thinking level")
+	}
+	// Agent thinking should remain unchanged.
+	if fa.ThinkingLevel() != "low" {
+		t.Fatalf("thinkingLevel = %q, want low", fa.ThinkingLevel())
+	}
+}
+
+func TestHandler_SetThinking_ValidLevels(t *testing.T) {
+	for _, level := range []string{"off", "minimal", "low", "medium", "high"} {
+		t.Run(level, func(t *testing.T) {
+			b := NewLocalBus()
+			defer b.Close()
+			fa := &fakeAgent{}
+			sctx := newTestSessionContext(b, fa)
+			RegisterHandlers(sctx)
+
+			if err := b.Execute(SetThinking{Level: level}); err != nil {
+				t.Fatalf("SetThinking(%q) = %v", level, err)
+			}
+			if fa.ThinkingLevel() != level {
+				t.Fatalf("thinkingLevel = %q, want %q", fa.ThinkingLevel(), level)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SetPathScope normalization and validation tests
+// ---------------------------------------------------------------------------
+
+func TestHandler_SetPathScope_Workspace(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.PathPolicy = tool.NewPathPolicy(t.TempDir(), nil, true) // start unrestricted
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(SetPathScope{Scope: "workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if sctx.PathPolicy.Scope() != "workspace" {
+		t.Fatalf("scope = %q, want workspace", sctx.PathPolicy.Scope())
+	}
+}
+
+func TestHandler_SetPathScope_Unrestricted(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.PathPolicy = tool.NewPathPolicy(t.TempDir(), nil, false) // start restricted
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(SetPathScope{Scope: "unrestricted"}); err != nil {
+		t.Fatal(err)
+	}
+	if sctx.PathPolicy.Scope() != "unrestricted" {
+		t.Fatalf("scope = %q, want unrestricted", sctx.PathPolicy.Scope())
+	}
+}
+
+func TestHandler_SetPathScope_WsPlusN_Normalized(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.PathPolicy = tool.NewPathPolicy(t.TempDir(), nil, true) // start unrestricted
+	RegisterHandlers(sctx)
+
+	// ws+3 should be normalized to workspace.
+	if err := b.Execute(SetPathScope{Scope: "ws+3"}); err != nil {
+		t.Fatalf("SetPathScope(ws+3) = %v", err)
+	}
+	if sctx.PathPolicy.Scope() != "workspace" {
+		t.Fatalf("scope = %q, want workspace", sctx.PathPolicy.Scope())
+	}
+}
+
+func TestHandler_SetPathScope_Invalid(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.PathPolicy = tool.NewPathPolicy(t.TempDir(), nil, false)
+	RegisterHandlers(sctx)
+
+	err := b.Execute(SetPathScope{Scope: "bogus"})
+	if err == nil {
+		t.Fatal("expected error for invalid scope")
+	}
+}
+
+func TestHandler_SetPathScope_NilPolicy(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	// PathPolicy is nil.
+	RegisterHandlers(sctx)
+
+	err := b.Execute(SetPathScope{Scope: "workspace"})
+	if err == nil {
+		t.Fatal("expected error when PathPolicy is nil")
+	}
+}
+
+func TestHandler_AddAllowedPath(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.PathPolicy = tool.NewPathPolicy(t.TempDir(), nil, false)
+	RegisterHandlers(sctx)
+
+	extra := t.TempDir()
+	if err := b.Execute(AddAllowedPath{Path: extra}); err != nil {
+		t.Fatal(err)
+	}
+	paths := sctx.PathPolicy.AllowedPaths()
+	if len(paths) != 1 || paths[0] != extra {
+		t.Fatalf("AllowedPaths = %v, want [%s]", paths, extra)
+	}
+	if sctx.PathPolicy.Scope() != "ws+1" {
+		t.Fatalf("scope = %q, want ws+1", sctx.PathPolicy.Scope())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Restore flow integration tests (simulates CLI session restore via bus)
+// ---------------------------------------------------------------------------
+
+func TestRestoreFlow_ThinkingPermissionsPath(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.Approvals = NewApprovalManager(b, sctx.State, "test-session")
+	sctx.PathPolicy = tool.NewPathPolicy(t.TempDir(), nil, false)
+	RegisterHandlers(sctx)
+
+	// Restore thinking.
+	if err := b.Execute(SetThinking{Level: "high"}); err != nil {
+		t.Fatalf("SetThinking: %v", err)
+	}
+
+	// Restore permission mode.
+	if err := b.Execute(SetPermissionMode{Mode: "ask"}); err != nil {
+		t.Fatalf("SetPermissionMode: %v", err)
+	}
+
+	// Restore path scope (ws+2 → normalized to workspace).
+	if err := b.Execute(SetPathScope{Scope: "ws+2"}); err != nil {
+		t.Fatalf("SetPathScope: %v", err)
+	}
+
+	// Restore allowed path.
+	extra := t.TempDir()
+	if err := b.Execute(AddAllowedPath{Path: extra}); err != nil {
+		t.Fatalf("AddAllowedPath: %v", err)
+	}
+
+	// Verify state.
+	if fa.ThinkingLevel() != "high" {
+		t.Errorf("thinking = %q, want high", fa.ThinkingLevel())
+	}
+	if sctx.GetGate() == nil {
+		t.Error("gate should exist after SetPermissionMode(ask)")
+	}
+	// Path scope is "ws+1" because we set workspace + added 1 allowed path.
+	if scope := sctx.PathPolicy.Scope(); scope != "ws+1" {
+		t.Errorf("scope = %q, want ws+1", scope)
+	}
+}
+
+func TestRestoreFlow_InvalidThinking_Error(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	err := b.Execute(SetThinking{Level: "invalid"})
+	if err == nil {
+		t.Error("expected error for invalid thinking level")
 	}
 }

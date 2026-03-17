@@ -748,13 +748,6 @@ func (m appModel) newSession() *session.Session {
 	return sess
 }
 
-func fullModelSpec(model core.Model) string {
-	if model.Provider != "" {
-		return model.Provider + "/" + model.ID
-	}
-	return model.ID
-}
-
 func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	// TODO: In full implementation, switchRuntime would create a new runtime.
 	// For now, use bus commands to load the session state.
