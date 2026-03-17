@@ -187,6 +187,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	allAllowed = append(allAllowed, tool.SpillOutputDir())
 	pathPolicy := tool.NewPathPolicy(cfg.CWD, allAllowed, isUnrestricted)
 
+	fileTracker := tool.NewFileTracker()
 	toolReg := core.NewRegistry()
 	if err := tool.RegisterBuiltins(toolReg, tool.ToolConfig{
 		WorkspaceRoot:  cfg.CWD,
@@ -194,6 +195,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		BashTimeout:    5 * time.Minute,
 		BraveAPIKey:    moaCfg.BraveAPIKey,
 		BeforeWrite:    cfg.BeforeWrite,
+		FileTracker:    fileTracker,
 	}); err != nil {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}

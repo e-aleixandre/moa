@@ -13,6 +13,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/provider/retry"
+	"github.com/ealeixandre/moa/pkg/provider/sseutil"
 )
 
 const (
@@ -105,7 +106,8 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
-		consumeStream(ctx, resp.Body, ch)
+		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
+		consumeStream(ctx, body, ch)
 	}()
 
 	return ch, nil

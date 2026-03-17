@@ -63,6 +63,14 @@ func NewEdit(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(err.Error()), nil
 			}
 
+			// Stale edit protection: warn if the agent hasn't read this file.
+			if cfg.FileTracker != nil && !cfg.FileTracker.WasRead(resolved) {
+				return core.ErrorResult(fmt.Sprintf(
+					"You haven't read %s yet. Read the file first to see its current content before editing.",
+					path,
+				)), nil
+			}
+
 			data, err := os.ReadFile(resolved)
 			if err != nil {
 				return core.ErrorResult(fmt.Sprintf("read: %v", err)), nil

@@ -30,6 +30,11 @@ type ToolConfig struct {
 	// If it returns an error, the write is aborted. Used by the checkpoint
 	// system to capture pre-edit state. nil = no hook.
 	BeforeWrite func(path string) error
+
+	// FileTracker records file reads for stale-edit protection. When set,
+	// the read tool marks files as read and the edit tool warns when
+	// editing files that haven't been read. nil = no tracking.
+	FileTracker *FileTracker
 }
 
 // Defaults fills in zero-value fields with defaults.

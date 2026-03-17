@@ -89,16 +89,28 @@ func NewRead(cfg ToolConfig) core.Tool {
 
 			// Image — no pagination
 			if mimeType, ok := imageExtensions[ext]; ok {
-				return readImage(resolved, mimeType)
+				result, err := readImage(resolved, mimeType)
+				if err == nil && !result.IsError && cfg.FileTracker != nil {
+					cfg.FileTracker.MarkRead(resolved)
+				}
+				return result, err
 			}
 
 			// PDF
 			if ext == ".pdf" {
-				return readPDF(ctx, resolved, path, info.Size(), offset, limit)
+				result, err := readPDF(ctx, resolved, path, info.Size(), offset, limit)
+				if err == nil && !result.IsError && cfg.FileTracker != nil {
+					cfg.FileTracker.MarkRead(resolved)
+				}
+				return result, err
 			}
 
 			// Text file
-			return readTextFile(resolved, path, offset, limit)
+			result, err := readTextFile(resolved, path, offset, limit)
+			if err == nil && !result.IsError && cfg.FileTracker != nil {
+				cfg.FileTracker.MarkRead(resolved)
+			}
+			return result, err
 		},
 	}
 }

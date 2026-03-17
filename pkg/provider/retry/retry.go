@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"time"
@@ -61,13 +62,17 @@ func retryAfter(resp *http.Response) time.Duration {
 	return 0
 }
 
-// backoff calculates exponential backoff with a cap.
+// backoff calculates exponential backoff with a cap and half-jitter.
+// Half-jitter: wait = base*2^attempt/2 + rand(base*2^attempt/2)
+// This prevents thundering herd while keeping a minimum wait floor.
 func backoff(attempt int, p Policy) time.Duration {
-	d := time.Duration(float64(p.BaseDelay) * math.Pow(2, float64(attempt)))
-	if d > p.MaxDelay {
-		d = p.MaxDelay
+	full := time.Duration(float64(p.BaseDelay) * math.Pow(2, float64(attempt)))
+	if full > p.MaxDelay {
+		full = p.MaxDelay
 	}
-	return d
+	half := full / 2
+	jitter := time.Duration(rand.Int64N(int64(half) + 1))
+	return half + jitter
 }
 
 // OnRetry is called before each retry wait. Providers can use this

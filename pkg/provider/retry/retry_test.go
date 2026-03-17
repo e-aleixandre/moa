@@ -216,22 +216,27 @@ func TestDo_DisabledPolicy(t *testing.T) {
 
 func TestBackoff(t *testing.T) {
 	p := Policy{BaseDelay: 1 * time.Second, MaxDelay: 32 * time.Second}
+	// With half-jitter, backoff returns [full/2, full) where full = base * 2^attempt.
 	tests := []struct {
 		attempt int
-		want    time.Duration
+		min     time.Duration
+		max     time.Duration
 	}{
-		{0, 1 * time.Second},
-		{1, 2 * time.Second},
-		{2, 4 * time.Second},
-		{3, 8 * time.Second},
-		{4, 16 * time.Second},
-		{5, 32 * time.Second},
-		{6, 32 * time.Second}, // capped
+		{0, 500 * time.Millisecond, 1 * time.Second},
+		{1, 1 * time.Second, 2 * time.Second},
+		{2, 2 * time.Second, 4 * time.Second},
+		{3, 4 * time.Second, 8 * time.Second},
+		{4, 8 * time.Second, 16 * time.Second},
+		{5, 16 * time.Second, 32 * time.Second},
+		{6, 16 * time.Second, 32 * time.Second}, // capped at MaxDelay
 	}
 	for _, tt := range tests {
-		got := backoff(tt.attempt, p)
-		if got != tt.want {
-			t.Errorf("backoff(%d) = %v, want %v", tt.attempt, got, tt.want)
+		// Run multiple times to verify range with jitter.
+		for range 20 {
+			got := backoff(tt.attempt, p)
+			if got < tt.min || got > tt.max {
+				t.Errorf("backoff(%d) = %v, want [%v, %v]", tt.attempt, got, tt.min, tt.max)
+			}
 		}
 	}
 }

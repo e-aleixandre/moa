@@ -54,6 +54,17 @@ func NewWrite(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(err.Error()), nil
 			}
 
+			// Stale write protection: warn if overwriting an existing file
+			// that the agent hasn't read first.
+			if cfg.FileTracker != nil {
+				if _, statErr := os.Stat(resolved); statErr == nil && !cfg.FileTracker.WasRead(resolved) {
+					return core.ErrorResult(fmt.Sprintf(
+						"File %s already exists but you haven't read it. Read the file first or use edit for surgical changes.",
+						path,
+					)), nil
+				}
+			}
+
 			// Create parent directories
 			dir := filepath.Dir(resolved)
 			if err := os.MkdirAll(dir, 0o755); err != nil {

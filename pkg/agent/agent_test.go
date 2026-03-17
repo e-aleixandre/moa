@@ -210,15 +210,18 @@ func TestLoop_ToolCallAndResult(t *testing.T) {
 }
 
 func TestLoop_MaxTurnsExceeded(t *testing.T) {
-	// Provider always returns a tool call → infinite loop if no guardrail
+	// Provider always returns a tool call → infinite loop if no guardrail.
+	// Each call uses a different arg to avoid triggering doom loop detection.
+	callCounter := 0
 	infiniteTool := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		callCounter++
 		ch := make(chan core.AssistantEvent, 5)
 		go func() {
 			defer close(ch)
 			msg := core.Message{
 				Role: "assistant",
 				Content: []core.Content{
-					core.ToolCallContent("tc-loop", "noop", nil),
+					core.ToolCallContent("tc-loop", "noop", map[string]any{"n": callCounter}),
 				},
 				StopReason: "tool_use",
 				Timestamp:  time.Now().Unix(),
@@ -262,6 +265,52 @@ func TestLoop_MaxTurnsExceeded(t *testing.T) {
 	}
 	if !waitForEvent(events, core.AgentEventError, 500*time.Millisecond) {
 		t.Fatal("missing agent_error event")
+	}
+}
+
+func TestLoop_DoomLoopDetection(t *testing.T) {
+	// Provider always returns the exact same tool call → doom loop detection fires
+	identicalTool := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 5)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role: "assistant",
+				Content: []core.Content{
+					core.ToolCallContent("tc-loop", "noop", map[string]any{"x": "same"}),
+				},
+				StopReason: "tool_use",
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+
+	handlers := make([]func(core.Request) (<-chan core.AssistantEvent, error), 10)
+	for i := range handlers {
+		handlers[i] = identicalTool
+	}
+
+	noopTool := core.Tool{
+		Name:       "noop",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+
+	provider := NewMockProvider(handlers...)
+	ag := newTestAgent(provider, noopTool)
+	ag.config.MaxTurns = 100 // high limit so doom loop fires first
+
+	_, err := ag.Run(context.Background(), "Loop forever")
+	if err == nil {
+		t.Fatal("expected doom loop error")
+	}
+	if !strings.Contains(err.Error(), "doom loop") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

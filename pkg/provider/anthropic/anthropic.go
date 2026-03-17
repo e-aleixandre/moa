@@ -12,6 +12,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/provider/retry"
+	"github.com/ealeixandre/moa/pkg/provider/sseutil"
 )
 
 // Anthropic implements core.Provider for the Anthropic Messages API.
@@ -107,7 +108,8 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
-		a.consumeStream(ctx, resp.Body, ch, req.Tools, oauthMode)
+		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
+		a.consumeStream(ctx, body, ch, req.Tools, oauthMode)
 	}()
 
 	return ch, nil

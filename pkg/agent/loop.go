@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -11,6 +13,10 @@ import (
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
+
+// doomLoopThreshold is the number of consecutive identical tool-call sets
+// that triggers a forced stop. Prevents infinite loops burning tokens.
+const doomLoopThreshold = 3
 
 // Hooks is the interface the agent loop needs from the extension system.
 // Defined here (consumer-side) so the loop doesn't depend on extension internals.
@@ -98,6 +104,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 	turnCount := 0
 	inTurn := false // track open turn for cleanup
+
+	// Doom loop detection: track consecutive identical tool-call sets.
+	var lastToolSig string
+	repeatCount := 0
 
 	var loopErr error
 	defer func() {
@@ -229,6 +239,23 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
+
+		// Doom loop detection: if tool calls are identical to the previous
+		// turn N times in a row, stop to prevent infinite token burn.
+		if len(toolCalls) > 0 {
+			sig := toolCallSignature(toolCalls)
+			if sig == lastToolSig {
+				repeatCount++
+			} else {
+				lastToolSig = sig
+				repeatCount = 1
+			}
+			if repeatCount >= doomLoopThreshold {
+				loopErr = fmt.Errorf("doom loop detected: identical tool calls repeated %d times in a row", repeatCount)
+				return loopErr
+			}
+		}
+
 		if len(toolCalls) == 0 {
 			// Accumulate cost and check budget even on the final message so
 			// callers know when a run blew through the limit.
@@ -645,6 +672,22 @@ func rejectToolCall(cfg *loopConfig, slot toolExecSlot) {
 		Rejected:   rejected,
 		Result:     &result,
 	})
+}
+
+// toolCallSignature produces a stable hash of a set of tool calls (name + args)
+// for doom loop detection. Order-sensitive — same calls in same order = same sig.
+func toolCallSignature(calls []core.Content) string {
+	h := sha256.New()
+	for _, c := range calls {
+		h.Write([]byte(c.ToolName))
+		h.Write([]byte{0})
+		// Marshal args deterministically enough for repeat detection.
+		if b, err := json.Marshal(c.Arguments); err == nil {
+			h.Write(b)
+		}
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // toolResultMessage creates an AgentMessage wrapping a tool result.
