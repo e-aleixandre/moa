@@ -18,6 +18,10 @@ import (
 
 const serverStartTimeout = 15 * time.Second
 
+// ToolPrefix is the namespace prefix for MCP tool names ("mcp__<server>__<tool>").
+// Exported so other packages can detect MCP tools without hardcoding the prefix.
+const ToolPrefix = "mcp__"
+
 // Manager owns MCP client sessions and their lifecycle.
 type Manager struct {
 	logger   *slog.Logger
@@ -141,7 +145,7 @@ func sanitizeToolName(s string) string {
 }
 
 func wrapMCPTool(serverName string, mcpTool *sdkmcp.Tool, session *sdkmcp.ClientSession) (core.Tool, error) {
-	fullName := sanitizeToolName("mcp__" + serverName + "__" + mcpTool.Name)
+	fullName := sanitizeToolName(ToolPrefix + serverName + "__" + mcpTool.Name)
 
 	var params json.RawMessage
 	if mcpTool.InputSchema != nil {

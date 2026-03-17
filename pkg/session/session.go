@@ -130,8 +130,9 @@ func (s *Session) SetTitle(text string, maxLen int) {
 	if s.Title != "" || text == "" {
 		return
 	}
-	if len(text) > maxLen {
-		text = text[:maxLen] + "…"
+	runes := []rune(text)
+	if len(runes) > maxLen {
+		text = string(runes[:maxLen]) + "…"
 	}
 	s.Title = text
 }

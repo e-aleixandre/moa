@@ -182,7 +182,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	resolvedScope := core.ResolvePathScope(pathScope, cfg.DisableSandbox || moaCfg.DisableSandbox, effectivePermMode)
 	isUnrestricted := resolvedScope == "unrestricted"
 
-	allAllowed := append(moaCfg.AllowedPaths, cfg.ExtraAllowedPaths...)
+	allAllowed := append([]string(nil), moaCfg.AllowedPaths...)
+	allAllowed = append(allAllowed, cfg.ExtraAllowedPaths...)
 	allAllowed = append(allAllowed, tool.SpillOutputDir())
 	pathPolicy := tool.NewPathPolicy(cfg.CWD, allAllowed, isUnrestricted)
 
@@ -242,6 +243,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			evalProv, evalErr := cfg.ProviderFactory(evalModel)
 			if evalErr == nil {
 				permCfg.Evaluator = permission.NewEvaluator(evalProv, evalModel)
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: could not create permission evaluator for %q: %v (falling back to ask mode)\n", evalModelSpec, evalErr)
 			}
 		}
 		gate = permission.New(permMode, permCfg)

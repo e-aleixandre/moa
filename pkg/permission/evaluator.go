@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -33,6 +34,10 @@ func NewEvaluator(provider core.Provider, model core.Model) *Evaluator {
 // guide the decision.
 func (e *Evaluator) Evaluate(ctx context.Context, toolName string, args map[string]any, rules []string) Decision {
 	prompt := buildEvalPrompt(toolName, args, rules)
+
+	// Timeout to prevent a slow/hung evaluator from blocking the agent loop.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
 	req := core.Request{
 		Model:    e.model,
@@ -107,13 +112,37 @@ Respond with exactly one word: APPROVE, DENY, or ASK.
 func parseDecision(response string) Decision {
 	s := strings.TrimSpace(strings.ToUpper(response))
 
-	// Handle responses that might have extra text
-	if strings.Contains(s, "APPROVE") {
+	// Exact single-word match first (ideal LLM response).
+	switch s {
+	case "APPROVE":
 		return DecisionApprove
+	case "DENY":
+		return DecisionDeny
+	case "ASK":
+		return DecisionAsk
 	}
+
+	// Fallback: check first word of the response.
+	first, _, _ := strings.Cut(s, " ")
+	first = strings.TrimRight(first, ".,;:!?")
+	switch first {
+	case "APPROVE":
+		return DecisionApprove
+	case "DENY":
+		return DecisionDeny
+	case "ASK":
+		return DecisionAsk
+	}
+
+	// Last resort: substring match, but check DENY before APPROVE
+	// to prevent "DO NOT APPROVE" from matching APPROVE.
 	if strings.Contains(s, "DENY") {
 		return DecisionDeny
 	}
+	if strings.Contains(s, "APPROVE") {
+		return DecisionApprove
+	}
+
 	// Default to ask when uncertain
 	return DecisionAsk
 }

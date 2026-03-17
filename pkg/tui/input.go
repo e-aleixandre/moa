@@ -156,21 +156,19 @@ func (m inputModel) View() string {
 // --- Command parsing ---
 
 // knownCommands is the whitelist of recognized /commands.
-// Unknown /prefixes are treated as regular text (avoids false positives
-// with paths like /etc/passwd or URLs).
-var knownCommands = map[string]bool{
-	"clear":       true,
-	"exit":        true,
-	"quit":        true,
-	"model":       true,
-	"models":      true,
-	"thinking":    true,
-	"compact":     true,
-	"plan":        true,
-	"permissions": true,
-	"tasks":       true,
-	"verify":      true,
-}
+// Derived from allCommands (cmdpalette.go) plus aliases. Unknown /prefixes
+// are treated as regular text (avoids false positives with paths like
+// /etc/passwd or URLs).
+var knownCommands = func() map[string]bool {
+	m := make(map[string]bool, len(allCommands)+4)
+	for _, cmd := range allCommands {
+		m[cmd.Name] = true
+	}
+	// Aliases not in allCommands.
+	m["quit"] = true
+	m["models"] = true
+	return m
+}()
 
 // ParseCommand returns (command string with args, true) only if text starts with a known /command.
 // The returned string includes any arguments (e.g., "/model sonnet" → "model sonnet").

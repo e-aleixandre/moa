@@ -39,15 +39,19 @@ func LoadScriptTools(cwd string) ([]ScriptDef, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: script tool %s: %v\n", e.Name(), err)
 			continue
 		}
 		var d ScriptDef
 		if err := json.Unmarshal(data, &d); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: script tool %s: invalid JSON: %v\n", e.Name(), err)
 			continue
 		}
 		if d.Name == "" || d.Command == "" {
+			fmt.Fprintf(os.Stderr, "warning: script tool %s: missing name or command\n", e.Name())
 			continue
 		}
 		if d.Description == "" {
@@ -117,7 +121,12 @@ func newScriptTool(d ScriptDef, cwd string) core.Tool {
 			out, err := cmd.CombinedOutput()
 			output := string(out)
 			if len(output) > 50000 {
-				output = output[:25000] + "\n\n... (truncated) ...\n\n" + output[len(output)-25000:]
+				// Truncate at rune boundaries to avoid producing invalid UTF-8.
+				runes := []rune(output)
+				if len(runes) > 50000 {
+					half := 25000
+					output = string(runes[:half]) + "\n\n... (truncated) ...\n\n" + string(runes[len(runes)-half:])
+				}
 			}
 
 			if err != nil {

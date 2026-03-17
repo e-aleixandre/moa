@@ -404,7 +404,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 
 	// Deregister old MCP tools.
 	for _, spec := range s.infra.toolReg.Specs() {
-		if strings.HasPrefix(spec.Name, "mcp__") {
+		if strings.HasPrefix(spec.Name, mcp.ToolPrefix) {
 			s.infra.toolReg.Unregister(spec.Name)
 		}
 	}

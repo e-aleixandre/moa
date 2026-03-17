@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
@@ -51,7 +52,10 @@ func NewServer(manager *Manager) http.Handler {
 	if dir := os.Getenv("MOA_SERVE_STATIC_DIR"); dir != "" {
 		staticHandler = http.FileServer(http.Dir(dir))
 	} else {
-		sub, _ := fs.Sub(staticFS, "static")
+		sub, err := fs.Sub(staticFS, "static")
+		if err != nil {
+			panic("serve: embedded static filesystem missing 'static' subtree: " + err.Error())
+		}
 		staticHandler = http.FileServer(http.FS(sub))
 	}
 	mux.Handle("GET /", staticHandler)
@@ -450,17 +454,35 @@ func handleListCommands() http.HandlerFunc {
 		Description string `json:"description"`
 		Args        string `json:"args,omitempty"`
 	}
-	commands := []cmdDef{
-		{Name: "clear", Description: "Clear conversation history"},
-		{Name: "compact", Description: "Compact conversation to reduce context size"},
-		{Name: "model", Description: "Switch model", Args: "<model>"},
-		{Name: "thinking", Description: "Set thinking level", Args: "<off|low|medium|high>"},
-		{Name: "permissions", Description: "Set permission mode", Args: "<yolo|ask|auto>"},
-		{Name: "path", Description: "Manage path access scope", Args: "[list|add <dir>|rm <dir>|scope workspace|unrestricted]"},
-		{Name: "plan", Description: "Enter/exit plan mode", Args: "[exit]"},
-		{Name: "tasks", Description: "View/manage tasks", Args: "[done <id> | reset]"},
-		{Name: "undo", Description: "Undo last file change"},
+
+	// commandMeta provides display metadata for the API. Descriptions and
+	// args live here (not in commandRegistry) because handlers don't need them.
+	commandMeta := map[string]cmdDef{
+		"clear":       {Description: "Clear conversation history"},
+		"compact":     {Description: "Compact conversation to reduce context size"},
+		"model":       {Description: "Switch model", Args: "<model>"},
+		"thinking":    {Description: "Set thinking level", Args: "<off|minimal|low|medium|high>"},
+		"permissions": {Description: "Set permission mode", Args: "<yolo|ask|auto>"},
+		"path":        {Description: "Manage path access scope", Args: "[list|add <dir>|rm <dir>|scope workspace|unrestricted]"},
+		"plan":        {Description: "Enter/exit plan mode", Args: "[exit]"},
+		"tasks":       {Description: "View/manage tasks", Args: "[done <id> | reset]"},
+		"undo":        {Description: "Undo last file change"},
 	}
+
+	// Build the list from commandRegistry to stay in sync.
+	// Sorted for stable JSON output.
+	var commands []cmdDef
+	for name := range commandRegistry {
+		meta, ok := commandMeta[name]
+		if !ok {
+			meta = cmdDef{Description: "/" + name}
+		}
+		meta.Name = name
+		commands = append(commands, meta)
+	}
+	// Sort alphabetically for stable output.
+	sort.Slice(commands, func(i, j int) bool { return commands[i].Name < commands[j].Name })
+
 	return func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, commands)
 	}

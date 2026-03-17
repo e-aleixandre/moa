@@ -19,7 +19,7 @@ var toolSnippets = map[string]string{
 	"write":           "Create or overwrite files. Automatically creates parent directories.",
 	"grep":            "Search file contents for patterns (respects .gitignore).",
 	"find":            "Find files by glob pattern (respects .gitignore).",
-	"ls":              "List directory contents with file sizes and types.",
+	"ls":              "List directory contents. Sorted alphabetically. Directories have '/' suffix.",
 	"subagent":        "Spawn a child agent with its own context for parallel investigation or focused subtasks.",
 	"subagent_status": "Check the status of an async subagent job.",
 	"subagent_cancel": "Cancel a running async subagent job.",
