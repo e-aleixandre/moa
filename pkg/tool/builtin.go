@@ -50,8 +50,10 @@ func (c *ToolConfig) Defaults() {
 func RegisterBash(reg *core.Registry, cfg ToolConfig) error  { cfg.Defaults(); return reg.Register(NewBash(cfg)) }
 func RegisterRead(reg *core.Registry, cfg ToolConfig) error  { cfg.Defaults(); return reg.Register(NewRead(cfg)) }
 func RegisterWrite(reg *core.Registry, cfg ToolConfig) error { cfg.Defaults(); return reg.Register(NewWrite(cfg)) }
-func RegisterEdit(reg *core.Registry, cfg ToolConfig) error  { cfg.Defaults(); return reg.Register(NewEdit(cfg)) }
-func RegisterGrep(reg *core.Registry, cfg ToolConfig) error  { cfg.Defaults(); return reg.Register(NewGrep(cfg)) }
+func RegisterEdit(reg *core.Registry, cfg ToolConfig) error      { cfg.Defaults(); return reg.Register(NewEdit(cfg)) }
+func RegisterMultiEdit(reg *core.Registry, cfg ToolConfig) error   { cfg.Defaults(); return reg.Register(NewMultiEdit(cfg)) }
+func RegisterApplyPatch(reg *core.Registry, cfg ToolConfig) error { cfg.Defaults(); return reg.Register(NewApplyPatch(cfg)) }
+func RegisterGrep(reg *core.Registry, cfg ToolConfig) error       { cfg.Defaults(); return reg.Register(NewGrep(cfg)) }
 func RegisterFind(reg *core.Registry, cfg ToolConfig) error  { cfg.Defaults(); return reg.Register(NewFind(cfg)) }
 func RegisterLs(reg *core.Registry, cfg ToolConfig) error    { cfg.Defaults(); return reg.Register(NewLs(cfg)) }
 func RegisterFetch(reg *core.Registry, cfg ToolConfig) error { cfg.Defaults(); return reg.Register(NewFetch(cfg)) }
@@ -68,8 +70,8 @@ func RegisterWebSearch(reg *core.Registry, cfg ToolConfig) error {
 func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) error {
 	for _, fn := range []func(*core.Registry, ToolConfig) error{
 		RegisterBash, RegisterRead, RegisterWrite, RegisterEdit,
-		RegisterGrep, RegisterFind, RegisterLs, RegisterFetch,
-		RegisterWebSearch,
+		RegisterMultiEdit, RegisterApplyPatch, RegisterGrep,
+		RegisterFind, RegisterLs, RegisterFetch, RegisterWebSearch,
 	} {
 		if err := fn(reg, cfg); err != nil {
 			return fmt.Errorf("builtin: %w", err)

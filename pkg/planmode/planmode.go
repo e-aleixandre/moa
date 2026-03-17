@@ -266,6 +266,12 @@ func (pm *PlanMode) FilterToolCall(toolName string, args map[string]any) (bool, 
 		return true, ""
 	}
 
+	// Multiedit and apply_patch: blocked in planning mode (defense-in-depth;
+	// they're also excluded from planningAllowlist so shouldn't be registered).
+	if toolName == "multiedit" || toolName == "apply_patch" {
+		return false, "In plan mode, file-modifying tools are restricted. Use edit to modify only the plan file."
+	}
+
 	return true, ""
 }
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -15,7 +14,7 @@ func NewEdit(cfg ToolConfig) core.Tool {
 	return core.Tool{
 		Name:        "edit",
 		Label:       "Edit",
-		Description: "Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Returns error if not found or multiple matches.",
+		Description: "Edit a file by replacing text. Supports fuzzy matching for whitespace/indentation differences. Returns error if not found or ambiguous.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -25,11 +24,15 @@ func NewEdit(cfg ToolConfig) core.Tool {
 				},
 				"oldText": {
 					"type": "string",
-					"description": "Exact text to find and replace"
+					"description": "Text to find and replace"
 				},
 				"newText": {
 					"type": "string",
 					"description": "New text to replace the old text with"
+				},
+				"replaceAll": {
+					"type": "boolean",
+					"description": "Replace all occurrences of oldText (default false)"
 				}
 			},
 			"required": ["path", "oldText", "newText"]
@@ -50,6 +53,7 @@ func NewEdit(cfg ToolConfig) core.Tool {
 			path := getString(params, "path", "")
 			oldText := getString(params, "oldText", "")
 			newText := getString(params, "newText", "")
+			replaceAll := getBool(params, "replaceAll", false)
 
 			if path == "" {
 				return core.ErrorResult("path is required"), nil
@@ -77,16 +81,10 @@ func NewEdit(cfg ToolConfig) core.Tool {
 			}
 
 			content := string(data)
-			count := strings.Count(content, oldText)
-
-			if count == 0 {
-				return core.ErrorResult(fmt.Sprintf("oldText not found in %s", path)), nil
+			newContent, matchMsg, editErr := applyEdit(content, oldText, newText, replaceAll)
+			if editErr != nil {
+				return core.ErrorResult(fmt.Sprintf("%v in %s", editErr, path)), nil
 			}
-			if count > 1 {
-				return core.ErrorResult(fmt.Sprintf("oldText matches %d locations in %s — be more specific", count, path)), nil
-			}
-
-			newContent := strings.Replace(content, oldText, newText, 1)
 
 			if cfg.BeforeWrite != nil {
 				if err := cfg.BeforeWrite(resolved); err != nil {
@@ -105,12 +103,12 @@ func NewEdit(cfg ToolConfig) core.Tool {
 				onUpdate(core.TextResult(diff))
 			}
 
-			// Include diff in result — frontend uses it for display with
-			// real line numbers, LLM sees what changed.
+			// Include diff and match info in result.
+			label := fmt.Sprintf("Edited %s (%s)", path, matchMsg)
 			if diff != "" {
-				return core.TextResult(fmt.Sprintf("Edited %s\n\n%s", path, diff)), nil
+				return core.TextResult(fmt.Sprintf("%s\n\n%s", label, diff)), nil
 			}
-			return core.TextResult(fmt.Sprintf("Edited %s", path)), nil
+			return core.TextResult(label), nil
 		},
 	}
 }

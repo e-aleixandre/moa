@@ -15,7 +15,9 @@ import (
 var toolSnippets = map[string]string{
 	"read":            "Read the contents of a file. Supports text files and images.",
 	"bash":            "Execute a bash command. Returns stdout, stderr, and exit code.",
-	"edit":            "Make surgical edits to files (find exact text and replace).",
+	"edit":            "Make surgical edits to files. Supports fuzzy matching for whitespace differences.",
+	"multiedit":       "Make multiple edits to a single file atomically. Prefer over edit for several changes to the same file.",
+	"apply_patch":     "Apply a multi-file patch using *** Begin Patch format. Efficient for large changes across multiple files.",
 	"write":           "Create or overwrite files. Automatically creates parent directories.",
 	"grep":            "Search file contents for patterns (respects .gitignore).",
 	"find":            "Find files by glob pattern (respects .gitignore).",
@@ -78,7 +80,17 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 
 	// Edit
 	if toolSet["edit"] {
-		sb.WriteString("- Use edit for precise changes (old text must match exactly)\n")
+		sb.WriteString("- Use edit for precise changes. Fuzzy matching handles minor whitespace differences automatically.\n")
+	}
+
+	// MultiEdit
+	if toolSet["multiedit"] {
+		sb.WriteString("- Prefer multiedit over multiple edit calls when changing several parts of the same file\n")
+	}
+
+	// ApplyPatch
+	if toolSet["apply_patch"] {
+		sb.WriteString("- For changes spanning multiple files, prefer apply_patch over multiple edit/write calls\n")
 	}
 
 	// Write
