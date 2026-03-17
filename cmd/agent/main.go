@@ -19,7 +19,6 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -333,32 +332,18 @@ func main() {
 			transcriber = openai.New(apiKey)
 		}
 
-		// Snapshot gate config for runtime — preserves allow/deny/rules for gate reconstruction.
-		gateConfig := permission.Config{Headless: !useTUI}
-		if sess.Gate != nil {
-			gateConfig = sess.Gate.SnapshotConfig()
-		}
-
 		// Create SessionRuntime with the pre-created bus.
 		sessionID := "tui"
 		if persistedSess != nil {
 			sessionID = persistedSess.ID
 		}
-		rt, err := bus.NewSessionRuntime(bus.RuntimeConfig{
-			Bus:              preBus,
-			SessionID:        sessionID,
-			Ctx:              ctx,
-			Agent:            ag,
-			TaskStore:        sess.TaskStore,
-			Checkpoints:      cpStore,
-			PlanMode:         pm,
-			Gate:             sess.Gate,
-			PathPolicy:       sess.PathPolicy,
-			AskBridge:        sess.AskBridge,
-			ProviderFactory:  providerFactory,
-			BaseSystemPrompt: ag.SystemPrompt(),
-			GateConfig:       gateConfig,
-		})
+		rcfg := sess.RuntimeConfig()
+		rcfg.SessionID = sessionID
+		rcfg.Ctx = ctx
+		rcfg.Bus = preBus
+		rcfg.Checkpoints = cpStore
+		rcfg.ProviderFactory = providerFactory
+		rt, err := bus.NewSessionRuntime(rcfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
 			os.Exit(1)
@@ -403,30 +388,18 @@ func main() {
 	printAuthNotice(os.Stderr, providerBuild.AuthNotice)
 
 	// Create SessionRuntime for headless — same contract as TUI and serve.
-	gateConfig := permission.Config{Headless: true}
-	if sess.Gate != nil {
-		gateConfig = sess.Gate.SnapshotConfig()
+	rcfg := sess.RuntimeConfig()
+	rcfg.SessionID = "headless"
+	rcfg.Ctx = ctx
+	rcfg.Bus = preBus
+	rcfg.ProviderFactory = func(model core.Model) (core.Provider, error) {
+		build, err := buildProvider(model, authStore)
+		if err != nil {
+			return nil, err
+		}
+		return build.Provider, nil
 	}
-	rt, err := bus.NewSessionRuntime(bus.RuntimeConfig{
-		Bus:       preBus,
-		SessionID: "headless",
-		Ctx:       ctx,
-		Agent:     ag,
-		TaskStore: sess.TaskStore,
-		PlanMode:  sess.PlanMode,
-		Gate:      sess.Gate,
-		PathPolicy: sess.PathPolicy,
-		AskBridge:  sess.AskBridge,
-		ProviderFactory: func(model core.Model) (core.Provider, error) {
-			build, err := buildProvider(model, authStore)
-			if err != nil {
-				return nil, err
-			}
-			return build.Provider, nil
-		},
-		BaseSystemPrompt: ag.SystemPrompt(),
-		GateConfig:       gateConfig,
-	})
+	rt, err := bus.NewSessionRuntime(rcfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
 		os.Exit(1)

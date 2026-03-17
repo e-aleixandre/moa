@@ -18,7 +18,6 @@ import (
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -174,30 +173,16 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return nil, err
 	}
 
-	// Snapshot gate config for reconstruction after yolo mode.
-	var gateConfig permission.Config
-	if bs.Gate != nil {
-		gateConfig = bs.Gate.SnapshotConfig()
-	}
-
-	// Build RuntimeConfig.
-	rcfg := bus.RuntimeConfig{
-		SessionID:        id,
-		Ctx:              sessionCtx,
-		Agent:            bs.Agent,
-		TaskStore:        bs.TaskStore,
-		Checkpoints:      cpStore,
-		PlanMode:         bs.PlanMode,
-		Gate:             bs.Gate,
-		PathPolicy:       bs.PathPolicy,
-		AskBridge:        bs.AskBridge,
-		ProviderFactory:  m.providerFactory,
-		BaseSystemPrompt: "",
-		GateConfig:       gateConfig,
-		SteerFilter: func(text string) bool {
-			_, was := subagentTexts.LoadAndDelete(text)
-			return !was
-		},
+	// Build RuntimeConfig from bootstrap session + serve-specific fields.
+	rcfg := bs.RuntimeConfig()
+	rcfg.SessionID = id
+	rcfg.Ctx = sessionCtx
+	rcfg.Checkpoints = cpStore
+	rcfg.ProviderFactory = m.providerFactory
+	rcfg.BaseSystemPrompt = "" // serve: plan mode prompts don't include base (pre-existing behavior)
+	rcfg.SteerFilter = func(text string) bool {
+		_, was := subagentTexts.LoadAndDelete(text)
+		return !was
 	}
 	if opts != nil {
 		rcfg.InitialMessages = opts.initialMessages

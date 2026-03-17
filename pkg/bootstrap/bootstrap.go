@@ -103,6 +103,11 @@ type Session struct {
 	// UntrustedMCP is true when .mcp.json exists but CWD is not in TrustedMCPPaths.
 	UntrustedMCP bool
 
+	// Headless is true when the session was created in headless mode (no user
+	// to approve permissions). Preserved so RuntimeConfig() can set GateConfig
+	// correctly even when Gate is nil (yolo mode).
+	Headless bool
+
 	// AgentHolder exposes the atomic agent pointer for subagent closures.
 	// Set after BuildSession returns. Callers must call StoreAgent(ag) before
 	// using subagents that depend on parent model/thinking/permissions.
@@ -300,6 +305,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		Model:        cfg.Model,
 		MoaCfg:       moaCfg,
 		UntrustedMCP: untrustedMCP,
+		Headless:     cfg.Headless,
 	}
 
 	// 10. Subagents.
