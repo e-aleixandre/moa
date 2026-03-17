@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
 // commandHandler executes a slash command for a session.
@@ -105,65 +105,52 @@ func cmdThinking(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 }
 
 func cmdPlan(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	sctx := sess.runtime.Context()
-	if sctx.PlanMode == nil {
-		return &CommandResult{OK: false, Message: "plan mode not available"}, nil
-	}
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
 
-	mode := sctx.PlanMode.Mode()
+	b := sess.runtime.Bus
+
+	// Check current mode via query.
+	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 
 	if len(args) > 0 && args[0] == "exit" {
-		if mode == planmode.ModeOff {
-			return &CommandResult{OK: false, Message: "not in plan mode"}, nil
+		if err := b.Execute(bus.ExitPlanMode{}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sctx.PlanMode.Exit()
-		sess.runtime.Bus.Publish(bus.PlanModeChanged{
-			SessionID: sess.ID,
-			Mode:      string(planmode.ModeOff),
-		})
 		return &CommandResult{OK: true, Message: "exited plan mode"}, nil
 	}
 
-	if mode == planmode.ModeOff {
-		planPath, err := sctx.PlanMode.Enter()
-		if err != nil {
+	if planInfo.Mode == "off" {
+		if err := b.Execute(bus.EnterPlanMode{}); err != nil {
 			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sess.runtime.Bus.Publish(bus.PlanModeChanged{
-			SessionID: sess.ID,
-			Mode:      string(planmode.ModePlanning),
-			PlanFile:  planPath,
-		})
-		return &CommandResult{OK: true, Message: "entered plan mode → " + planPath}, nil
+		// Re-query to get the plan file path.
+		planInfo, _ = bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
+		return &CommandResult{OK: true, Message: "entered plan mode → " + planInfo.PlanFile}, nil
 	}
 
-	return &CommandResult{OK: true, Message: "plan mode: " + string(mode)}, nil
+	return &CommandResult{OK: true, Message: "plan mode: " + planInfo.Mode}, nil
 }
 
 func cmdTasks(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	sctx := sess.runtime.Context()
-	if sctx.TaskStore == nil {
-		return &CommandResult{OK: false, Message: "task tracking not available"}, nil
-	}
+	b := sess.runtime.Bus
+
 	if len(args) == 0 {
-		return cmdTasksList(sess)
+		return cmdTasksList(b)
 	}
 	switch args[0] {
 	case "done":
-		return cmdTasksDone(sess, args[1:])
+		return cmdTasksDone(b, args[1:])
 	case "reset":
-		return cmdTasksReset(sess)
+		return cmdTasksReset(b)
 	default:
 		return &CommandResult{OK: false, Message: "usage: /tasks [done <id> | reset]"}, nil
 	}
 }
 
-func cmdTasksList(sess *ManagedSession) (*CommandResult, error) {
-	sctx := sess.runtime.Context()
-	taskList := sctx.TaskStore.Tasks()
+func cmdTasksList(b bus.EventBus) (*CommandResult, error) {
+	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
 	if len(taskList) == 0 {
 		return &CommandResult{OK: true, Message: "No tasks"}, nil
 	}
@@ -181,7 +168,7 @@ func cmdTasksList(sess *ManagedSession) (*CommandResult, error) {
 	return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
 }
 
-func cmdTasksDone(sess *ManagedSession, args []string) (*CommandResult, error) {
+func cmdTasksDone(b bus.EventBus, args []string) (*CommandResult, error) {
 	if len(args) == 0 {
 		return &CommandResult{OK: false, Message: "usage: /tasks done <id>"}, nil
 	}
@@ -189,14 +176,14 @@ func cmdTasksDone(sess *ManagedSession, args []string) (*CommandResult, error) {
 	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
 		return &CommandResult{OK: false, Message: "invalid task ID: " + args[0]}, nil
 	}
-	if err := sess.runtime.Bus.Execute(bus.MarkTaskDone{TaskID: id}); err != nil {
+	if err := b.Execute(bus.MarkTaskDone{TaskID: id}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: fmt.Sprintf("✅ Task #%d marked done", id)}, nil
 }
 
-func cmdTasksReset(sess *ManagedSession) (*CommandResult, error) {
-	if err := sess.runtime.Bus.Execute(bus.ResetTasks{}); err != nil {
+func cmdTasksReset(b bus.EventBus) (*CommandResult, error) {
+	if err := b.Execute(bus.ResetTasks{}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "Tasks cleared"}, nil
@@ -225,9 +212,11 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 }
 
 func cmdPath(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	sctx := sess.runtime.Context()
-	pp := sctx.PathPolicy
-	if pp == nil {
+	b := sess.runtime.Bus
+
+	// Check availability via query.
+	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+	if pathInfo.WorkspaceRoot == "" {
 		return &CommandResult{OK: false, Message: "path policy not available"}, nil
 	}
 
@@ -239,11 +228,11 @@ func cmdPath(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 	switch sub {
 	case "list":
 		var lines []string
-		lines = append(lines, "workspace: "+pp.WorkspaceRoot())
-		lines = append(lines, "scope: "+pp.Scope())
-		if allowed := pp.AllowedPaths(); len(allowed) > 0 {
+		lines = append(lines, "workspace: "+pathInfo.WorkspaceRoot)
+		lines = append(lines, "scope: "+pathInfo.Scope)
+		if len(pathInfo.AllowedPaths) > 0 {
 			lines = append(lines, "allowed paths:")
-			for _, p := range allowed {
+			for _, p := range pathInfo.AllowedPaths {
 				lines = append(lines, "  "+p)
 			}
 		}
@@ -253,44 +242,32 @@ func cmdPath(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 		if len(args) < 2 {
 			return &CommandResult{OK: false, Message: "usage: /path add <dir>"}, nil
 		}
-		dir := args[1]
-		if err := pp.AddPath(dir); err != nil {
+		if err := b.Execute(bus.AddAllowedPath{Path: args[1]}); err != nil {
 			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sess.runtime.Bus.Publish(bus.ConfigChanged{
-			SessionID: sess.ID, PathScope: pp.Scope(),
-		})
-		return &CommandResult{OK: true, Message: fmt.Sprintf("added %s (scope: %s)", dir, pp.Scope())}, nil
+		// Re-query for updated scope.
+		pathInfo, _ = bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+		return &CommandResult{OK: true, Message: fmt.Sprintf("added %s (scope: %s)", args[1], pathInfo.Scope)}, nil
 
 	case "rm", "remove":
 		if len(args) < 2 {
 			return &CommandResult{OK: false, Message: "usage: /path rm <dir>"}, nil
 		}
-		dir := args[1]
-		if !pp.RemovePath(dir) {
-			return &CommandResult{OK: false, Message: fmt.Sprintf("%s not in allowed paths", dir)}, nil
+		if err := b.Execute(bus.RemoveAllowedPath{Path: args[1]}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sess.runtime.Bus.Publish(bus.ConfigChanged{
-			SessionID: sess.ID, PathScope: pp.Scope(),
-		})
-		return &CommandResult{OK: true, Message: fmt.Sprintf("removed %s (scope: %s)", dir, pp.Scope())}, nil
+		pathInfo, _ = bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+		return &CommandResult{OK: true, Message: fmt.Sprintf("removed %s (scope: %s)", args[1], pathInfo.Scope)}, nil
 
 	case "scope":
 		if len(args) < 2 {
-			return &CommandResult{OK: true, Message: "scope: " + pp.Scope()}, nil
+			return &CommandResult{OK: true, Message: "scope: " + pathInfo.Scope}, nil
 		}
-		switch args[1] {
-		case "workspace":
-			pp.SetUnrestricted(false)
-		case "unrestricted":
-			pp.SetUnrestricted(true)
-		default:
-			return &CommandResult{OK: false, Message: "usage: /path scope workspace|unrestricted"}, nil
+		if err := b.Execute(bus.SetPathScope{Scope: args[1]}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sess.runtime.Bus.Publish(bus.ConfigChanged{
-			SessionID: sess.ID, PathScope: pp.Scope(),
-		})
-		return &CommandResult{OK: true, Message: "scope: " + pp.Scope()}, nil
+		pathInfo, _ = bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+		return &CommandResult{OK: true, Message: "scope: " + pathInfo.Scope}, nil
 
 	default:
 		return &CommandResult{OK: false, Message: "usage: /path [list|add <dir>|rm <dir>|scope workspace|unrestricted]"}, nil

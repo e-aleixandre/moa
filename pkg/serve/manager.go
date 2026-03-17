@@ -52,7 +52,6 @@ type serveInfra struct {
 	sessionCtx    context.Context
 	sessionCancel context.CancelFunc
 	toolReg       *core.Registry
-	resolvedModel core.Model
 	mcpMgr        *mcp.Manager
 	UntrustedMCP  bool
 }

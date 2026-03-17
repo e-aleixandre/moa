@@ -27,11 +27,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 		if err := sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec}); err != nil {
 			return nil, err
 		}
-		// Update infra model cache.
 		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
-		sess.mu.Lock()
-		sess.infra.resolvedModel = model
-		sess.mu.Unlock()
 		result["model"] = modelDisplayName(model)
 	}
 

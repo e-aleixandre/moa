@@ -9,6 +9,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
@@ -337,6 +338,124 @@ func RegisterHandlers(sctx *SessionContext) {
 			return fmt.Errorf("approvals not available")
 		}
 		return sctx.Approvals.ResolveAskUser(cmd.AskID, cmd.Answers)
+	})
+
+	// -------------------------------------------------------------------
+	// Plan mode
+	// -------------------------------------------------------------------
+
+	b.OnCommand(func(cmd EnterPlanMode) error {
+		if sctx.PlanMode == nil {
+			return fmt.Errorf("plan mode not available")
+		}
+		planPath, err := sctx.PlanMode.Enter()
+		if err != nil {
+			return err
+		}
+		sctx.Bus.Publish(PlanModeChanged{
+			SessionID: sctx.SessionID,
+			Mode:      string(planmode.ModePlanning),
+			PlanFile:  planPath,
+		})
+		return nil
+	})
+
+	b.OnCommand(func(cmd ExitPlanMode) error {
+		if sctx.PlanMode == nil {
+			return fmt.Errorf("plan mode not available")
+		}
+		if sctx.PlanMode.Mode() == planmode.ModeOff {
+			return fmt.Errorf("not in plan mode")
+		}
+		sctx.PlanMode.Exit()
+		sctx.Bus.Publish(PlanModeChanged{
+			SessionID: sctx.SessionID,
+			Mode:      string(planmode.ModeOff),
+		})
+		return nil
+	})
+
+	b.OnCommand(func(cmd StartPlanExecution) error {
+		if sctx.PlanMode == nil {
+			return fmt.Errorf("plan mode not available")
+		}
+		if cmd.CleanContext {
+			if err := sctx.Agent.Reset(); err != nil {
+				return fmt.Errorf("reset before execution: %w", err)
+			}
+		}
+		sctx.PlanMode.StartExecution()
+		// PlanModeChanged is published by PlanMode's onChange callback.
+		return nil
+	})
+
+	b.OnCommand(func(cmd StartPlanReview) error {
+		if sctx.PlanMode == nil {
+			return fmt.Errorf("plan mode not available")
+		}
+		sctx.PlanMode.StartReview()
+		// PlanModeChanged is published by PlanMode's onChange callback.
+		return nil
+	})
+
+	b.OnCommand(func(cmd ContinueRefining) error {
+		if sctx.PlanMode == nil {
+			return fmt.Errorf("plan mode not available")
+		}
+		sctx.PlanMode.ContinueRefining()
+		// PlanModeChanged is published by PlanMode's onChange callback.
+		return nil
+	})
+
+	// -------------------------------------------------------------------
+	// Path policy
+	// -------------------------------------------------------------------
+
+	b.OnCommand(func(cmd SetPathScope) error {
+		if sctx.PathPolicy == nil {
+			return fmt.Errorf("path policy not available")
+		}
+		switch strings.ToLower(cmd.Scope) {
+		case "workspace":
+			sctx.PathPolicy.SetUnrestricted(false)
+		case "unrestricted":
+			sctx.PathPolicy.SetUnrestricted(true)
+		default:
+			return fmt.Errorf("invalid scope %q (options: workspace, unrestricted)", cmd.Scope)
+		}
+		sctx.Bus.Publish(ConfigChanged{
+			SessionID: sctx.SessionID,
+			PathScope: sctx.PathPolicy.Scope(),
+		})
+		return nil
+	})
+
+	b.OnCommand(func(cmd AddAllowedPath) error {
+		if sctx.PathPolicy == nil {
+			return fmt.Errorf("path policy not available")
+		}
+		if err := sctx.PathPolicy.AddPath(cmd.Path); err != nil {
+			return err
+		}
+		sctx.Bus.Publish(ConfigChanged{
+			SessionID: sctx.SessionID,
+			PathScope: sctx.PathPolicy.Scope(),
+		})
+		return nil
+	})
+
+	b.OnCommand(func(cmd RemoveAllowedPath) error {
+		if sctx.PathPolicy == nil {
+			return fmt.Errorf("path policy not available")
+		}
+		if !sctx.PathPolicy.RemovePath(cmd.Path) {
+			return fmt.Errorf("%s not in allowed paths", cmd.Path)
+		}
+		sctx.Bus.Publish(ConfigChanged{
+			SessionID: sctx.SessionID,
+			PathScope: sctx.PathPolicy.Scope(),
+		})
+		return nil
 	})
 
 	// -------------------------------------------------------------------

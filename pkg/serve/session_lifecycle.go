@@ -231,7 +231,6 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			sessionCtx:    sessionCtx,
 			sessionCancel: sessionCancel,
 			toolReg:       bs.ToolReg,
-			resolvedModel: model,
 			mcpMgr:        bs.MCPManager,
 			UntrustedMCP:  bs.UntrustedMCP,
 		},
@@ -345,6 +344,8 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	}
 
 	// 4. Restore task/plan/path metadata.
+	// Tasks and plan mode use direct restore methods (initialization, not runtime commands).
+	// Path policy uses bus commands for consistency.
 	sctx := sess.runtime.Context()
 	if sctx.TaskStore != nil && saved.Metadata != nil {
 		sctx.TaskStore.RestoreFromMetadata(saved.Metadata)
@@ -353,13 +354,13 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		sctx.PlanMode.RestoreState(saved.Metadata)
 		sctx.PlanMode.ApplyRestoredState()
 	}
-	if sctx.PathPolicy != nil && saved.Metadata != nil {
+	if saved.Metadata != nil {
 		savedScope, savedPaths := saved.PathMeta()
 		if savedScope != "" {
-			sctx.PathPolicy.SetUnrestricted(savedScope == "unrestricted")
+			_ = sess.runtime.Bus.Execute(bus.SetPathScope{Scope: savedScope})
 		}
 		for _, p := range savedPaths {
-			_ = sctx.PathPolicy.AddPath(p)
+			_ = sess.runtime.Bus.Execute(bus.AddAllowedPath{Path: p})
 		}
 	}
 

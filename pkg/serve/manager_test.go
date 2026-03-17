@@ -79,13 +79,27 @@ func newTestManager(t *testing.T, ctx context.Context, provider core.Provider) *
 
 func newTestManagerWithRoot(t *testing.T, ctx context.Context, provider core.Provider, root string) *Manager {
 	t.Helper()
-	return NewManager(ctx, ManagerConfig{
+	mgr := NewManager(ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return provider, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   root,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
 		SessionBaseDir:  t.TempDir(),
 	})
+	// Ensure all sessions are properly shut down before TempDir cleanup.
+	// Without this, async persistence reactors can race with directory removal.
+	t.Cleanup(func() {
+		mgr.mu.RLock()
+		ids := make([]string, 0, len(mgr.sessions))
+		for id := range mgr.sessions {
+			ids = append(ids, id)
+		}
+		mgr.mu.RUnlock()
+		for _, id := range ids {
+			_ = mgr.Delete(id)
+		}
+	})
+	return mgr
 }
 
 // sessState returns the current session state via bus query.
