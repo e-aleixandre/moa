@@ -350,16 +350,24 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 	resolved := false
 	gotRunEnd := false
 
+	// Read events until we have both run_end AND tool_end with rejected.
+	// With the bus architecture, event ordering across types is non-deterministic
+	// (separate subscriber goroutines), so run_end may arrive before tool_end.
 	deadline := time.After(10 * time.Second)
-	for !gotRunEnd {
+	for !(gotRunEnd && seenRejected) {
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for run_end (tool_start=%d permission=%d rejected=%v)", idxToolStart, idxPermission, seenRejected)
+			t.Fatalf("timed out (tool_start=%d permission=%d rejected=%v run_end=%v)", idxToolStart, idxPermission, seenRejected, gotRunEnd)
 		default:
 		}
 
 		var evt Event
 		if err := wsjson.Read(wsCtx, conn, &evt); err != nil {
+			if gotRunEnd {
+				// Connection may close after run_end; if we already have
+				// everything except rejected, that's the real failure.
+				break
+			}
 			t.Fatalf("ws read error: %v", err)
 		}
 
