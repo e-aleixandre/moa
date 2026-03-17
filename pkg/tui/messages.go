@@ -1,34 +1,18 @@
 package tui
 
 import (
-	"github.com/ealeixandre/moa/pkg/askuser"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
 
-// askUserMsg carries a batch of questions from the ask_user tool.
-type askUserMsg struct {
-	Prompt askuser.Prompt
+// busEventMsg wraps any bus event for the Bubble Tea event loop.
+type busEventMsg struct {
+	event any
 }
 
-// agentEventMsg wraps an agent event for the TUI event loop.
-// RunGen scopes the event to a specific run — late events from previous runs are ignored.
-type agentEventMsg struct {
-	Event  core.AgentEvent
-	RunGen uint64
-}
-
-// agentDoneMsg signals the event channel is closed or the TUI is quitting.
-type agentDoneMsg struct{}
-
-// agentRunResultMsg carries the result of agent.Send().
-// Messages is the source-of-truth conversation history for reconciliation.
-type agentRunResultMsg struct {
-	Err      error
-	Messages []core.AgentMessage
-	RunGen   uint64
+// agentSendErrorMsg carries an error from bus.Execute(SendPrompt{}).
+type agentSendErrorMsg struct {
+	Err error
 }
 
 // renderTickMsg triggers a stream cache refresh during streaming (~60fps).
@@ -43,15 +27,10 @@ type sessionSavedMsg struct{ err error }
 // pinnedModelsSavedMsg signals an async pinned-models save completed.
 type pinnedModelsSavedMsg struct{ err error }
 
-// compactResultMsg carries the result of a manual /compact command.
+// compactResultMsg carries the error from a manual /compact command.
+// Success display is handled by the CompactionEnded bus event.
 type compactResultMsg struct {
-	Payload *core.CompactionPayload
-	Err     error
-}
-
-// permissionRequestMsg carries a tool permission request from the agent loop.
-type permissionRequestMsg struct {
-	Request permission.Request
+	Err error
 }
 
 // sessionBrowserLoadedMsg carries the session list shown by --resume.
@@ -72,22 +51,6 @@ type sessionOpenLoadedMsg struct {
 	Session *session.Session
 	Err     error
 }
-
-// asyncSubagentCountMsg carries the current number of running async subagents.
-type asyncSubagentCountMsg struct{ count int }
-
-// SubagentNotification is the structured payload for an async subagent completion.
-// Sent from main.go to the TUI via a channel, avoiding fragile text parsing.
-type SubagentNotification struct {
-	JobID      string // job identifier
-	Task       string // original task description
-	Status     string // "completed", "failed", or "cancelled"
-	AgentText  string // full text for the agent (up to 50 lines of result)
-	ResultTail string // result tail for TUI preview
-}
-
-// subagentNotifyMsg wraps a SubagentNotification for the Bubble Tea event loop.
-type subagentNotifyMsg struct{ notification SubagentNotification }
 
 // clipboardImageMsg carries an image read from the clipboard.
 type clipboardImageMsg struct {
@@ -110,3 +73,6 @@ type shellResultMsg struct {
 	Silent  bool // !! prefix
 	Running bool // was the agent running when the command was dispatched?
 }
+
+// toolResultText is in render.go (unchanged)
+// clearScreenDoneMsg is in expand.go (unchanged)

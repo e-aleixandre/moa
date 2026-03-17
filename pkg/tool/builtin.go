@@ -15,10 +15,16 @@ import (
 // ToolConfig provides shared configuration for built-in tools.
 type ToolConfig struct {
 	WorkspaceRoot  string   // Required. All path operations resolve relative to this.
-	DisableSandbox bool     // When true, safePath allows any absolute path (YOLO mode).
-	AllowedPaths   []string // Additional directories allowed outside WorkspaceRoot.
+	DisableSandbox bool     // When true, safePath allows any absolute path (YOLO mode). Deprecated: use PathPolicy.
+	AllowedPaths   []string // Additional directories allowed outside WorkspaceRoot. Deprecated: use PathPolicy.
 	BashTimeout   time.Duration // Default: 5 minutes.
 	BraveAPIKey   string        // Brave Search API key (empty = web_search not registered).
+
+	// PathPolicy is the runtime-mutable path access policy. When non-nil,
+	// safePath delegates containment checks to this policy instead of using
+	// DisableSandbox/AllowedPaths directly. All tool closures share the same
+	// pointer, so runtime changes (/path add, /path rm) take effect immediately.
+	PathPolicy *PathPolicy
 
 	// BeforeWrite is called before modifying a file (write/edit tools).
 	// If it returns an error, the write is aborted. Used by the checkpoint
@@ -77,10 +83,27 @@ var spillOutputDir = filepath.Join(os.TempDir(), "moa-output")
 // SpillOutputDir returns the directory where tool output spill files are stored.
 func SpillOutputDir() string { return spillOutputDir }
 
+// suggestDir returns a parent directory suitable for /path add suggestions.
+// For a file path like /foo/bar/baz.txt it returns /foo/bar.
+// For a directory path it returns the path itself.
+func suggestDir(absPath string) string {
+	dir := filepath.Dir(absPath)
+	if dir == absPath {
+		return absPath // already a root
+	}
+	return dir
+}
+
 func safePath(cfg ToolConfig, path string) (string, error) {
 	root := cfg.WorkspaceRoot
 
-	if root == "" || cfg.DisableSandbox {
+	// Determine unrestricted mode: PathPolicy takes precedence, then legacy field.
+	unrestricted := cfg.DisableSandbox
+	if cfg.PathPolicy != nil {
+		unrestricted = cfg.PathPolicy.Unrestricted()
+	}
+
+	if root == "" || unrestricted {
 		// No workspace restriction (YOLO mode)
 		if filepath.IsAbs(path) {
 			return filepath.Clean(path), nil
@@ -135,17 +158,24 @@ func safePath(cfg ToolConfig, path string) (string, error) {
 	}
 
 	if !strings.HasPrefix(realResolved, realRoot+string(os.PathSeparator)) && realResolved != realRoot {
-		// Check AllowedPaths before rejecting
-		for _, ap := range cfg.AllowedPaths {
-			realAP, err := filepath.EvalSymlinks(ap)
-			if err != nil {
-				realAP = filepath.Clean(ap)
-			}
-			if realResolved == realAP || strings.HasPrefix(realResolved, realAP+string(os.PathSeparator)) {
+		// Check allowed paths: PathPolicy takes precedence, then legacy field.
+		if cfg.PathPolicy != nil {
+			if cfg.PathPolicy.IsAllowed(realResolved) {
 				return resolved, nil
 			}
+		} else {
+			for _, ap := range cfg.AllowedPaths {
+				realAP, err := filepath.EvalSymlinks(ap)
+				if err != nil {
+					realAP = filepath.Clean(ap)
+				}
+				if realResolved == realAP || strings.HasPrefix(realResolved, realAP+string(os.PathSeparator)) {
+					return resolved, nil
+				}
+			}
 		}
-		return "", fmt.Errorf("path %q escapes workspace %q", path, root)
+		return "", fmt.Errorf("path %q is outside workspace %q.\nHint: use /path add %s or --allow-path %s to allow access",
+			path, root, suggestDir(realResolved), suggestDir(realResolved))
 	}
 
 	return resolved, nil

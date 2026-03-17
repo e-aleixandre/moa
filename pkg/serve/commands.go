@@ -3,15 +3,13 @@ package serve
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
 // commandHandler executes a slash command for a session.
-// args are the arguments after the command name (may be empty).
 type commandHandler func(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error)
 
 // commandRegistry maps command names to handlers.
@@ -24,6 +22,7 @@ var commandRegistry = map[string]commandHandler{
 	"tasks":       cmdTasks,
 	"permissions": cmdPermissions,
 	"undo":        cmdUndo,
+	"path":        cmdPath,
 }
 
 // ExecCommand executes a slash command in a session.
@@ -50,9 +49,8 @@ func (m *Manager) ExecCommand(sessionID, rawCommand string) (*CommandResult, err
 
 // requireIdle returns ErrBusy if the session is running or waiting for permission.
 func requireIdle(sess *ManagedSession) error {
-	sess.mu.Lock()
-	defer sess.mu.Unlock()
-	if sess.State == StateRunning || sess.State == StatePermission {
+	state := sess.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission {
 		return ErrBusy
 	}
 	return nil
@@ -62,15 +60,9 @@ func cmdClear(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, err
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if err := sess.runtime.agent.Reset(); err != nil {
+	if err := sess.runtime.Bus.Execute(bus.ClearSession{}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
-	sess.mu.Lock()
-	sess.messages = nil
-	sess.mu.Unlock()
-
-	sess.save()
-	sess.broadcast(Event{Type: "command", Data: CommandData{Command: "clear"}})
 	return &CommandResult{OK: true, Message: "conversation cleared"}, nil
 }
 
@@ -78,19 +70,9 @@ func cmdCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, e
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if _, err := sess.runtime.agent.Compact(sess.runtime.sessionCtx); err != nil {
+	if err := sess.runtime.Bus.Execute(bus.CompactSession{}); err != nil {
 		return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
 	}
-	sess.mu.Lock()
-	sess.messages = sess.runtime.agent.Messages()
-	sess.mu.Unlock()
-
-	sess.save()
-	sess.broadcast(Event{Type: "command", Data: CommandData{
-		Command:  "compact",
-		Messages: sess.runtime.agent.Messages(),
-	}})
-	sess.broadcastContextUpdate()
 	return &CommandResult{OK: true, Message: "conversation compacted"}, nil
 }
 
@@ -123,60 +105,52 @@ func cmdThinking(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 }
 
 func cmdPlan(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	if sess.runtime.planMode == nil {
-		return &CommandResult{OK: false, Message: "plan mode not available"}, nil
-	}
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
 
-	mode := sess.runtime.planMode.Mode()
+	b := sess.runtime.Bus
+
+	// Check current mode via query.
+	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 
 	if len(args) > 0 && args[0] == "exit" {
-		if mode == planmode.ModeOff {
-			return &CommandResult{OK: false, Message: "not in plan mode"}, nil
+		if err := b.Execute(bus.ExitPlanMode{}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sess.runtime.planMode.Exit()
-		sess.broadcast(Event{Type: "plan_mode", Data: PlanModeData{
-			Mode: string(planmode.ModeOff),
-		}})
 		return &CommandResult{OK: true, Message: "exited plan mode"}, nil
 	}
 
-	if mode == planmode.ModeOff {
-		planPath, err := sess.runtime.planMode.Enter()
-		if err != nil {
+	if planInfo.Mode == "off" {
+		if err := b.Execute(bus.EnterPlanMode{}); err != nil {
 			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
-		sess.broadcast(Event{Type: "plan_mode", Data: PlanModeData{
-			Mode:     string(planmode.ModePlanning),
-			PlanFile: planPath,
-		}})
-		return &CommandResult{OK: true, Message: "entered plan mode → " + planPath}, nil
+		// Re-query to get the plan file path.
+		planInfo, _ = bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
+		return &CommandResult{OK: true, Message: "entered plan mode → " + planInfo.PlanFile}, nil
 	}
 
-	return &CommandResult{OK: true, Message: "plan mode: " + string(mode)}, nil
+	return &CommandResult{OK: true, Message: "plan mode: " + planInfo.Mode}, nil
 }
 
 func cmdTasks(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	if sess.runtime.taskStore == nil {
-		return &CommandResult{OK: false, Message: "task tracking not available"}, nil
-	}
+	b := sess.runtime.Bus
+
 	if len(args) == 0 {
-		return cmdTasksList(sess)
+		return cmdTasksList(b)
 	}
 	switch args[0] {
 	case "done":
-		return cmdTasksDone(sess, args[1:])
+		return cmdTasksDone(b, args[1:])
 	case "reset":
-		return cmdTasksReset(sess)
+		return cmdTasksReset(b)
 	default:
 		return &CommandResult{OK: false, Message: "usage: /tasks [done <id> | reset]"}, nil
 	}
 }
 
-func cmdTasksList(sess *ManagedSession) (*CommandResult, error) {
-	taskList := sess.runtime.taskStore.Tasks()
+func cmdTasksList(b bus.EventBus) (*CommandResult, error) {
+	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
 	if len(taskList) == 0 {
 		return &CommandResult{OK: true, Message: "No tasks"}, nil
 	}
@@ -194,7 +168,7 @@ func cmdTasksList(sess *ManagedSession) (*CommandResult, error) {
 	return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
 }
 
-func cmdTasksDone(sess *ManagedSession, args []string) (*CommandResult, error) {
+func cmdTasksDone(b bus.EventBus, args []string) (*CommandResult, error) {
 	if len(args) == 0 {
 		return &CommandResult{OK: false, Message: "usage: /tasks done <id>"}, nil
 	}
@@ -202,22 +176,22 @@ func cmdTasksDone(sess *ManagedSession, args []string) (*CommandResult, error) {
 	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
 		return &CommandResult{OK: false, Message: "invalid task ID: " + args[0]}, nil
 	}
-	if !sess.runtime.taskStore.MarkDone(id) {
-		return &CommandResult{OK: false, Message: fmt.Sprintf("task #%d not found", id)}, nil
+	if err := b.Execute(bus.MarkTaskDone{TaskID: id}); err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
-	sess.broadcast(Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: sess.runtime.taskStore.Tasks()}})
 	return &CommandResult{OK: true, Message: fmt.Sprintf("✅ Task #%d marked done", id)}, nil
 }
 
-func cmdTasksReset(sess *ManagedSession) (*CommandResult, error) {
-	sess.runtime.taskStore.Reset()
-	sess.broadcast(Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: sess.runtime.taskStore.Tasks()}})
+func cmdTasksReset(b bus.EventBus) (*CommandResult, error) {
+	if err := b.Execute(bus.ResetTasks{}); err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
 	return &CommandResult{OK: true, Message: "Tasks cleared"}, nil
 }
 
 func cmdPermissions(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
 	if len(args) == 0 {
-		mode := sess.permissionMode()
+		mode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
 		return &CommandResult{OK: true, Message: "permissions: " + mode}, nil
 	}
 	newMode, err := m.SetPermissionMode(sess.ID, args[0])
@@ -231,39 +205,71 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if sess.runtime.checkpoints == nil {
-		return &CommandResult{OK: false, Message: "checkpoints not available"}, nil
-	}
-	cp, err := sess.runtime.checkpoints.Undo()
-	if err != nil {
+	if err := sess.runtime.Bus.Execute(bus.UndoLastChange{}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
-	var files []string
-	var errs []string
-	for _, snap := range cp.Files {
-		if snap.Content == nil {
-			if err := os.Remove(snap.Path); err != nil && !os.IsNotExist(err) {
-				errs = append(errs, fmt.Sprintf("delete %s: %v", filepath.Base(snap.Path), err))
-			} else {
-				files = append(files, "deleted "+filepath.Base(snap.Path))
-			}
-		} else {
-			if err := os.WriteFile(snap.Path, snap.Content, snap.Perm); err != nil {
-				errs = append(errs, fmt.Sprintf("restore %s: %v", filepath.Base(snap.Path), err))
-			} else {
-				files = append(files, "restored "+filepath.Base(snap.Path))
+	return &CommandResult{OK: true, Message: "⏪ Undo applied"}, nil
+}
+
+func cmdPath(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
+	b := sess.runtime.Bus
+
+	// Check availability via query.
+	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+	if pathInfo.WorkspaceRoot == "" {
+		return &CommandResult{OK: false, Message: "path policy not available"}, nil
+	}
+
+	sub := "list"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	switch sub {
+	case "list":
+		var lines []string
+		lines = append(lines, "workspace: "+pathInfo.WorkspaceRoot)
+		lines = append(lines, "scope: "+pathInfo.Scope)
+		if len(pathInfo.AllowedPaths) > 0 {
+			lines = append(lines, "allowed paths:")
+			for _, p := range pathInfo.AllowedPaths {
+				lines = append(lines, "  "+p)
 			}
 		}
+		return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
+
+	case "add":
+		if len(args) < 2 {
+			return &CommandResult{OK: false, Message: "usage: /path add <dir>"}, nil
+		}
+		if err := b.Execute(bus.AddAllowedPath{Path: args[1]}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		// Re-query for updated scope.
+		pathInfo, _ = bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+		return &CommandResult{OK: true, Message: fmt.Sprintf("added %s (scope: %s)", args[1], pathInfo.Scope)}, nil
+
+	case "rm", "remove":
+		if len(args) < 2 {
+			return &CommandResult{OK: false, Message: "usage: /path rm <dir>"}, nil
+		}
+		if err := b.Execute(bus.RemoveAllowedPath{Path: args[1]}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		pathInfo, _ = bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+		return &CommandResult{OK: true, Message: fmt.Sprintf("removed %s (scope: %s)", args[1], pathInfo.Scope)}, nil
+
+	case "scope":
+		if len(args) < 2 {
+			return &CommandResult{OK: true, Message: "scope: " + pathInfo.Scope}, nil
+		}
+		if err := b.Execute(bus.SetPathScope{Scope: args[1]}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		pathInfo, _ = bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
+		return &CommandResult{OK: true, Message: "scope: " + pathInfo.Scope}, nil
+
+	default:
+		return &CommandResult{OK: false, Message: "usage: /path [list|add <dir>|rm <dir>|scope workspace|unrestricted]"}, nil
 	}
-	msg := fmt.Sprintf("⏪ Reverted %q: %s", cp.Label, strings.Join(files, ", "))
-	if len(errs) > 0 {
-		msg += "\n⚠️ Errors: " + strings.Join(errs, "; ")
-		// Push checkpoint back so /undo can be retried.
-		sess.runtime.checkpoints.Repush(cp)
-		msg += "\nCheckpoint preserved — retry with /undo"
-	}
-	return &CommandResult{
-		OK:      len(errs) == 0,
-		Message: msg,
-	}, nil
 }

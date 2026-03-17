@@ -10,22 +10,21 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
+	"github.com/ealeixandre/moa/pkg/bootstrap"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
 //go:embed static
 var staticFS embed.FS
 
-// NewServer returns an http.Handler wired to the given manager. It serves
-// the API endpoints, WebSocket connections, and embedded static files.
+// NewServer returns an http.Handler wired to the given manager.
 func NewServer(manager *Manager) http.Handler {
 	mux := http.NewServeMux()
 
@@ -48,8 +47,6 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
 
-	// Dev mode: serve from disk for live reload without recompiling Go.
-	// Production: serve from embedded files.
 	var staticHandler http.Handler
 	if dir := os.Getenv("MOA_SERVE_STATIC_DIR"); dir != "" {
 		staticHandler = http.FileServer(http.Dir(dir))
@@ -62,9 +59,6 @@ func NewServer(manager *Manager) http.Handler {
 	return csrfMiddleware(mux)
 }
 
-// csrfMiddleware requires a custom header on mutating requests.
-// Browsers don't send custom headers on cross-origin form POSTs,
-// so this blocks CSRF attacks without tokens.
 func csrfMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" && r.Method != "HEAD" {
@@ -78,7 +72,6 @@ func csrfMiddleware(next http.Handler) http.Handler {
 }
 
 func handleListModels() http.HandlerFunc {
-	// Cache the result — model list is static for the lifetime of the process.
 	type modelInfo struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
@@ -123,10 +116,7 @@ func handleCreateSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		sess.mu.Lock()
-		info := sess.info()
-		sess.mu.Unlock()
-		writeJSON(w, http.StatusCreated, info)
+		writeJSON(w, http.StatusCreated, sess.info())
 	}
 }
 
@@ -137,10 +127,7 @@ func handleGetSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		sess.mu.Lock()
-		info := sess.info()
-		sess.mu.Unlock()
-		writeJSON(w, http.StatusOK, info)
+		writeJSON(w, http.StatusOK, sess.info())
 	}
 }
 
@@ -210,14 +197,21 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		if body.Action == "add_rule" {
-			if err := sess.AddPermissionRule(body.ID, body.Rule); err != nil {
+			if err := sess.runtime.Bus.Execute(bus.AddPermissionRule{
+				PermissionID: body.ID, Rule: body.Rule,
+			}); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if err := sess.ResolvePermissionWithAllow(body.ID, body.Approved, body.Feedback, body.Allow); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.ResolvePermission{
+			PermissionID: body.ID,
+			Approved:     body.Approved,
+			Feedback:     body.Feedback,
+			AllowPattern: body.Allow,
+		}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -241,7 +235,9 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if err := sess.ResolveAskUser(body.ID, body.Answers); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{
+			AskID: body.ID, Answers: body.Answers,
+		}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -269,7 +265,6 @@ func handleConfig(mgr *Manager) http.HandlerFunc {
 
 		result := map[string]string{}
 
-		// Handle permission mode change.
 		if body.PermissionMode != "" {
 			mode, err := mgr.SetPermissionMode(sess.ID, body.PermissionMode)
 			if err != nil {
@@ -279,7 +274,6 @@ func handleConfig(mgr *Manager) http.HandlerFunc {
 			result["permission_mode"] = mode
 		}
 
-		// Handle model/thinking change.
 		if body.Model != "" || body.Thinking != "" {
 			reconf, err := mgr.ReconfigureSession(sess.ID, body.Model, body.Thinking)
 			if err != nil {
@@ -307,10 +301,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		// Origin validation: nhooyr.io/websocket validates by default that
-		// the Origin header matches the Host header (same-origin check).
-		// This prevents cross-site WebSocket hijacking.
-		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck // TODO: migrate to coder/websocket
+		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck
 		if err != nil {
 			return
 		}
@@ -318,64 +309,25 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 
-		// Send current state on connect.
-		sess.mu.Lock()
-		history := make([]core.AgentMessage, len(sess.messages))
-		copy(history, sess.messages)
-		state := sess.State
-		var pendingPerm *PermissionData
-		if sess.approvals.pending != nil && !sess.approvals.pending.resolved {
-			pendingPerm = &PermissionData{
-				ID:       sess.approvals.pending.ID,
-				ToolName: sess.approvals.pending.ToolName,
-				Args:     sess.approvals.pending.Args,
-			}
-		}
-		var pendingAsk *AskData
-		if sess.approvals.pendingAsk != nil && !sess.approvals.pendingAsk.resolved {
-			pendingAsk = &AskData{
-				ID:        sess.approvals.pendingAsk.ID,
-				Questions: sess.approvals.pendingAsk.Questions,
-			}
-		}
-		sess.mu.Unlock()
-
-		initData := InitData{
-			Messages:          history,
-			State:             string(state),
-			ContextPercent:    sess.contextPercent(),
-			PermissionMode:    sess.permissionMode(),
-			PendingPermission: pendingPerm,
-			PendingAsk:        pendingAsk,
-		}
-		if sess.runtime.taskStore != nil {
-			initData.Tasks = sess.runtime.taskStore.Tasks()
-		}
-		if sess.runtime.planMode != nil {
-			mode := sess.runtime.planMode.Mode()
-			if mode != planmode.ModeOff {
-				initData.PlanMode = string(mode)
-				initData.PlanFile = sess.runtime.planMode.PlanFilePath()
-			}
-		}
+		// Send init data.
+		initData := buildInitData(sess)
 		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData}); err != nil {
 			return
 		}
 
-		ch, unsub := sess.Subscribe()
-		defer unsub()
+		// Create reactor that bridges bus events → WS events.
+		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx)
+		defer reactor.cleanup()
 
 		for {
 			select {
-			case evt, ok := <-ch:
-				if !ok {
-					// Closed by broadcast (slow consumer).
-					conn.Close(websocket.StatusGoingAway, "too slow") //nolint:errcheck,staticcheck
-					return
-				}
+			case evt := <-reactor.Events():
 				if err := wsWriteJSON(ctx, conn, evt); err != nil {
 					return
 				}
+			case <-reactor.Done():
+				conn.Close(websocket.StatusGoingAway, "session closed") //nolint:errcheck,staticcheck
+				return
 			case <-ctx.Done():
 				return
 			}
@@ -392,15 +344,12 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 		}
 
 		cwd := sess.CWD
-
-		// Validate .mcp.json FIRST (before persisting trust).
-		mcpPath := filepath.Join(cwd, ".mcp.json")
+		mcpPath := fmt.Sprintf("%s/.mcp.json", cwd)
 		if _, err := core.LoadMCPFile(mcpPath); err != nil {
 			http.Error(w, fmt.Sprintf("invalid .mcp.json: %v", err), http.StatusBadRequest)
 			return
 		}
 
-		// Persist trust (idempotent — skip if already trusted).
 		if err := core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 			if core.IsMCPPathTrusted(*cfg, cwd) {
 				return
@@ -411,7 +360,6 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		// Reload MCP into session (idempotent — closes old, starts new).
 		sessionCfg := core.LoadMoaConfig(cwd)
 		if err := sess.reloadMCP(sessionCfg); err != nil {
 			if errors.Is(err, ErrBusy) {
@@ -422,10 +370,7 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		sess.mu.Lock()
-		info := sess.info()
-		sess.mu.Unlock()
-		writeJSON(w, http.StatusOK, info)
+		writeJSON(w, http.StatusOK, sess.info())
 	}
 }
 
@@ -444,10 +389,7 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		sess.mu.Lock()
-		info := sess.info()
-		sess.mu.Unlock()
-		writeJSON(w, http.StatusOK, info)
+		writeJSON(w, http.StatusOK, sess.info())
 	}
 }
 
@@ -470,7 +412,7 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
 			"workspaceRoot": mgr.workspaceRoot,
-			"defaultModel":  fullModelSpec(mgr.defaultModel),
+			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),
 		}
 		writeJSON(w, http.StatusOK, caps)
 	}
@@ -482,28 +424,22 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "transcription not available (no OpenAI API key configured)", http.StatusServiceUnavailable)
 			return
 		}
-
-		// Limit upload to 25 MB (Whisper's max).
 		r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
-
 		if err := r.ParseMultipartForm(25 << 20); err != nil {
 			http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-
 		file, header, err := r.FormFile("audio")
 		if err != nil {
 			http.Error(w, "missing audio file: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer file.Close() //nolint:errcheck
-
 		text, err := mgr.transcriber.Transcribe(r.Context(), file, header.Filename)
 		if err != nil {
 			http.Error(w, "transcription failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		writeJSON(w, http.StatusOK, map[string]string{"text": text})
 	}
 }
@@ -519,8 +455,11 @@ func handleListCommands() http.HandlerFunc {
 		{Name: "compact", Description: "Compact conversation to reduce context size"},
 		{Name: "model", Description: "Switch model", Args: "<model>"},
 		{Name: "thinking", Description: "Set thinking level", Args: "<off|low|medium|high>"},
+		{Name: "permissions", Description: "Set permission mode", Args: "<yolo|ask|auto>"},
+		{Name: "path", Description: "Manage path access scope", Args: "[list|add <dir>|rm <dir>|scope workspace|unrestricted]"},
 		{Name: "plan", Description: "Enter/exit plan mode", Args: "[exit]"},
 		{Name: "tasks", Description: "View/manage tasks", Args: "[done <id> | reset]"},
+		{Name: "undo", Description: "Undo last file change"},
 	}
 	return func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, commands)
@@ -584,8 +523,6 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		// Use the request context as-is — no artificial timeout. The user
-		// can cancel from the web UI if the command takes too long.
 		cmd := exec.CommandContext(r.Context(), "sh", "-c", body.Command)
 		cmd.Dir = sess.CWD
 		out, _ := cmd.CombinedOutput()
@@ -603,24 +540,24 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 			msgBody = fmt.Sprintf("$ %s\n(no output)", body.Command)
 		}
 
-		sess.mu.Lock()
-		ag := sess.runtime.agent
-		running := ag.IsRunning()
-		sess.mu.Unlock()
+		b := sess.runtime.Bus
+		state := sess.runtime.State.Current()
 
-		if running && !body.Silent {
-			ag.Steer(fmt.Sprintf("Shell output (from user):\n%s", msgBody))
-		} else if !running {
+		if state == bus.StateRunning && !body.Silent {
+			_ = b.Execute(bus.SteerAgent{Text: fmt.Sprintf("Shell output (from user):\n%s", msgBody)})
+		} else if state != bus.StateRunning {
 			role := "user"
 			if body.Silent {
 				role = "shell"
 			}
-			_ = ag.AppendMessage(core.AgentMessage{
-				Message: core.Message{
-					Role:    role,
-					Content: []core.Content{core.TextContent(msgBody)},
+			_ = b.Execute(bus.AppendToConversation{
+				Message: core.AgentMessage{
+					Message: core.Message{
+						Role:    role,
+						Content: []core.Content{core.TextContent(msgBody)},
+					},
+					Custom: map[string]any{"shell": true},
 				},
-				Custom: map[string]any{"shell": true},
 			})
 		}
 
@@ -631,21 +568,18 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-const maxJSONBodySize = 1 << 20 // 1 MB for JSON endpoints
+const maxJSONBodySize = 1 << 20
 
-// limitBody wraps r.Body with a MaxBytesReader to prevent oversized payloads.
 func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 }
 
-// writeJSON writes a JSON HTTP response.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// wsWriteJSON writes a JSON message to a WebSocket connection.
 func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck
 	return wsjson.Write(ctx, conn, v)
 }

@@ -1,16 +1,14 @@
 package tui
 
 import (
-	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/planmode"
 )
 
 // truncateLabel creates a short label for checkpoint identification.
@@ -51,66 +49,62 @@ func extractToolNote(resultText string, rejected bool) string {
 
 // --- Agent interaction ---
 
-// prepareRun sets up the common run state (running flag, gen counter, stream state, status).
-// Opens a checkpoint (if available) for undo tracking.
-// Returns the run generation for tagging the result.
-func (m *appModel) prepareRun(label string) uint64 {
-	if m.checkpoints != nil {
-		m.checkpoints.Begin(label)
-	}
+// prepareRun sets up the common run state.
+func (m *appModel) prepareRun(label string) {
 	m.s.running = true
-	m.s.runGen++
-	m.s.runStartMsgCount = len(m.agent.Messages())
+	msgs := m.currentMessages()
+	m.s.runStartMsgCount = len(msgs)
 	m.s.runStartBlockIdx = len(m.s.blocks)
-	m.runGenAddr.Store(m.s.runGen)
 	m.s.streamState = stateStreaming
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
 	m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
 	m.status.SetText("working...")
-	return m.s.runGen
 }
 
-// launchAgentSend returns a tea.Batch that runs agent.Send and starts
-// the render tick and spinner.
-func (m appModel) launchAgentSend(text string, gen uint64) tea.Cmd {
-	agentRef := m.agent
-	baseCtx := m.baseCtx
+// launchAgentSend returns a tea.Batch that executes SendPrompt via bus.
+func (m appModel) launchAgentSend(text string) tea.Cmd {
+	b := m.runtime.Bus
 	return tea.Batch(
 		func() tea.Msg {
-			msgs, err := agentRef.Send(baseCtx, text)
-			return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
+			err := b.Execute(bus.SendPrompt{Text: text})
+			if err != nil {
+				return agentSendErrorMsg{Err: err}
+			}
+			return nil
 		},
 		renderTick(),
 		m.status.spinner.Tick,
 	)
 }
 
-// launchAgentSendWithCustom returns a tea.Batch that runs agent.SendWithCustom
-// and starts the render tick and spinner.
-func (m appModel) launchAgentSendWithCustom(text string, custom map[string]any, gen uint64) tea.Cmd {
-	agentRef := m.agent
-	baseCtx := m.baseCtx
+// launchAgentSendWithCustom sends with custom metadata via bus.
+func (m appModel) launchAgentSendWithCustom(text string, custom map[string]any) tea.Cmd {
+	b := m.runtime.Bus
 	return tea.Batch(
 		func() tea.Msg {
-			msgs, err := agentRef.SendWithCustom(baseCtx, text, custom)
-			return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
+			err := b.Execute(bus.SendPrompt{Text: text, Custom: custom})
+			if err != nil {
+				return agentSendErrorMsg{Err: err}
+			}
+			return nil
 		},
 		renderTick(),
 		m.status.spinner.Tick,
 	)
 }
 
-// launchAgentSendWithContent returns a tea.Batch that runs agent.SendWithContent
-// and starts the render tick and spinner.
-func (m appModel) launchAgentSendWithContent(content []core.Content, gen uint64) tea.Cmd {
-	agentRef := m.agent
-	baseCtx := m.baseCtx
+// launchAgentSendWithContent sends structured content via bus.
+func (m appModel) launchAgentSendWithContent(content []core.Content) tea.Cmd {
+	b := m.runtime.Bus
 	return tea.Batch(
 		func() tea.Msg {
-			msgs, err := agentRef.SendWithContent(baseCtx, content)
-			return agentRunResultMsg{Err: err, Messages: msgs, RunGen: gen}
+			err := b.Execute(bus.SendPromptWithContent{Content: content})
+			if err != nil {
+				return agentSendErrorMsg{Err: err}
+			}
+			return nil
 		},
 		renderTick(),
 		m.status.spinner.Tick,
@@ -118,7 +112,6 @@ func (m appModel) launchAgentSendWithContent(content []core.Content, gen uint64)
 }
 
 // checkClipboardImage reads image data from the system clipboard.
-// Calls ReadImage directly — no separate HasImage probe (avoids TOCTOU + extra subprocess).
 func (m appModel) checkClipboardImage() tea.Cmd {
 	return func() tea.Msg {
 		data, mime, err := clipboard.ReadImage()
@@ -133,10 +126,9 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Clear transient status — it's live-only and never persisted.
 	m.s.pendingStatus = ""
 
-	// Prepend reviewer feedback if user is refining with own instructions.
+	// Prepend reviewer feedback if user is refining.
 	if m.pendingReviewFeedback != "" {
 		text = "The reviewer found issues with your plan. Address the feedback and my additional instructions, then resubmit with `submit_plan`:\n\n**Reviewer feedback:**\n" + m.pendingReviewFeedback + "\n\n**My instructions:**\n" + text
 		m.pendingReviewFeedback = ""
@@ -160,12 +152,12 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		})
 	}
 
-	// Set session title from the first user message
+	// Set session title from the first user message.
 	if m.session != nil {
 		m.session.SetTitle(text, 80)
 	}
 
-	gen := m.prepareRun(truncateLabel(text))
+	m.prepareRun(truncateLabel(text))
 	m.updateViewport()
 
 	if hasImage {
@@ -174,280 +166,19 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 			core.TextContent(text),
 			core.ImageContent(encoded, imageMime),
 		}
-		return m, m.launchAgentSendWithContent(content, gen)
+		return m, m.launchAgentSendWithContent(content)
 	}
-	return m, m.launchAgentSend(text, gen)
-}
-
-// startNotificationRun starts an agent run triggered by a subagent completion
-// notification. Shows a subagent block (not a user block) and starts agent.Send
-// so the LLM can react to the notification.
-func (m appModel) startNotificationRun(n SubagentNotification) (tea.Model, tea.Cmd) {
-	if err := m.commitPendingTimelineEvent(); err != nil {
-		m.s.pendingStatus = "✗ " + err.Error()
-		return m, nil
-	}
-
-	m.s.pendingStatus = ""
-	m.s.blocks = append(m.s.blocks, messageBlock{
-		Type:           "subagent",
-		SubagentTask:   n.Task,
-		SubagentStatus: n.Status,
-		SubagentResult: n.ResultTail,
-	})
-
-	gen := m.prepareRun(truncateLabel(n.Task))
-	m.updateViewport()
-	return m, m.launchAgentSendWithCustom(n.AgentText, map[string]any{
-		"source":          "subagent",
-		"subagent_job_id": n.JobID,
-		"subagent_task":   n.Task,
-		"subagent_status": n.Status,
-		"subagent_result": n.ResultTail,
-	}, gen)
-}
-
-// handleAgentEvent processes a single agent event, updating TUI state.
-// Viewport refreshes happen via renderTick, not per-event.
-func (m *appModel) handleAgentEvent(e core.AgentEvent) {
-	switch e.Type {
-	case core.AgentEventMessageUpdate:
-		if e.AssistantEvent == nil {
-			return
-		}
-		switch e.AssistantEvent.Type {
-		case core.ProviderEventTextDelta:
-			m.s.streamText += e.AssistantEvent.Delta
-			m.s.dirty = true
-		case core.ProviderEventThinkingDelta:
-			m.s.thinkingText += e.AssistantEvent.Delta
-			m.s.dirty = true
-		}
-
-	case core.AgentEventMessageStart:
-		m.s.streamText = ""
-		m.s.thinkingText = ""
-		m.s.streamCache = ""
-		m.s.streamState = stateStreaming
-		m.status.SetText("generating...")
-
-	case core.AgentEventMessageEnd:
-		if m.s.thinkingText != "" {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "thinking", Raw: m.s.thinkingText,
-			})
-		}
-		assistantText := m.s.streamText
-		if assistantText == "" {
-			for _, c := range e.Message.Content {
-				if c.Type == "text" {
-					assistantText += c.Text
-				}
-			}
-		}
-		if assistantText != "" {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "assistant", Raw: assistantText,
-			})
-		}
-		m.s.streamText = ""
-		m.s.thinkingText = ""
-		m.s.streamCache = ""
-		m.s.viewportDirty = true
-
-	case core.AgentEventToolExecStart:
-		m.s.activeTools++
-		m.s.streamState = stateToolRunning
-		if m.s.activeTools == 1 {
-			m.status.SetText("running " + e.ToolName + "...")
-		} else {
-			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
-		}
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "tool", ToolCallID: e.ToolCallID, ToolName: e.ToolName, ToolArgs: e.Args,
-		})
-		m.s.viewportDirty = true
-
-	case core.AgentEventToolExecUpdate:
-		for i := len(m.s.blocks) - 1; i >= 0; i-- {
-			b := &m.s.blocks[i]
-			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
-				if e.Result != nil {
-					for _, c := range e.Result.Content {
-						if c.Type == "text" {
-							if b.ToolName == "edit" {
-								b.ToolDiff = c.Text
-							} else {
-								b.ToolResult += c.Text
-							}
-						}
-					}
-					m.s.viewportDirty = true
-				}
-				break
-			}
-		}
-
-	case core.AgentEventToolExecEnd:
-		m.s.activeTools--
-		for i := len(m.s.blocks) - 1; i >= 0; i-- {
-			b := &m.s.blocks[i]
-			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
-				b.ToolDone = true
-				b.IsError = e.IsError
-				b.Rejected = e.Rejected
-				b.ToolResult = toolResultText(e.Result)
-				b.ToolNote = extractToolNote(b.ToolResult, b.Rejected)
-				break
-			}
-		}
-		m.s.viewportDirty = true
-		if m.s.activeTools <= 0 {
-			m.s.activeTools = 0
-			m.s.streamState = stateStreaming
-			m.status.SetText("generating...")
-		} else if m.s.activeTools == 1 {
-			m.status.SetText("running tool...")
-		} else {
-			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
-		}
-		// Live task progress update when a tasks tool call finishes.
-		if e.ToolName == "tasks" && m.taskStore != nil {
-			m.refreshTaskDisplay()
-		}
-
-	case core.AgentEventSteer:
-		// Remove from queued steers (if present).
-		for i, s := range m.s.queuedSteers {
-			if s == e.Text {
-				m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
-				break
-			}
-		}
-		// Add to blocks as a real message.
-		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type:           "subagent",
-				SubagentTask:   task,
-				SubagentStatus: status,
-				SubagentResult: result,
-			})
-		} else {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
-		}
-		m.s.viewportDirty = true
-
-	case core.AgentEventCompactionStart:
-		m.status.SetText("compacting context...")
-
-	case core.AgentEventCompactionEnd:
-		if e.Error != nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status",
-				Raw:  "⚠ Compaction failed: " + e.Error.Error() + " (continuing with full context)",
-			})
-		} else if e.Compaction != nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status",
-				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", e.Compaction.TokensBefore/1000, e.Compaction.TokensAfter/1000),
-			})
-		}
-		m.status.SetText("generating...")
-		m.s.viewportDirty = true
-	}
+	return m, m.launchAgentSend(text)
 }
 
 // --- Reconciliation ---
 
-// handleRunResult processes the final result from agent.Send().
-func (m appModel) handleRunResult(msg agentRunResultMsg) (tea.Model, tea.Cmd) {
-	// Ignore results from previous runs (e.g., aborted run finishing late)
-	if msg.RunGen != m.s.runGen {
-		return m, nil
-	}
-	// Bump generation so any late-arriving events from this run are ignored.
-	m.s.runGen++
-	m.runGenAddr.Store(m.s.runGen)
-
-	// Patch: correct last assistant/thinking content from source-of-truth.
-	// Does NOT rebuild blocks — preserves event-derived blocks (tool with args, etc.).
-	m.patchFromMessages(msg.Messages)
-
-	// Close the checkpoint: Commit on success/error, Discard on cancel.
-	if m.checkpoints != nil {
-		if msg.Err != nil && errors.Is(msg.Err, context.Canceled) {
-			m.checkpoints.Discard()
-		} else {
-			m.checkpoints.Commit()
-		}
-	}
-
-	m.s.running = false
-	m.s.streamState = stateIdle
-	m.s.streamText = ""
-	m.s.thinkingText = ""
-	m.s.streamCache = ""
-	// Flush any steers still in the queue — their AgentEventSteer may still be
-	// buffered in the event channel but will be ignored (stale runGen).
-	for _, s := range m.s.queuedSteers {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: s})
-	}
-	m.s.queuedSteers = nil
-	m.status.SetText("")
-	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
-	m.input.SetEnabled(true)
-	m.refreshContextSegment()
-	m.accumulateCost(msg.Messages)
-
-	if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "error", Raw: "Error: " + msg.Err.Error(),
-		})
-	}
-
-	// Plan mode: check if plan was submitted → show action menu.
-	if m.planMode != nil && m.planMode.OnPlanSubmitted() {
-		m.statusBar.UpdatePlanSegment("ready")
-		m.planMenu.OpenPostSubmit()
-		m.lastMenuVariant = menuPostSubmit
-		m.input.SetEnabled(false)
-	}
-
-	// Plan mode: check if all tasks done during execution → auto-exit.
-	if m.planMode != nil && m.planMode.Mode() == planmode.ModeExecuting && m.taskStore != nil && m.taskStore.AllDone() {
-		m.planMode.Exit()
-		m.syncPermissionCheck()
-		m.rebuildSystemPrompt()
-		m.statusBar.UpdatePlanSegment("")
-		m.statusBar.UpdateTasksSegment(0, 0)
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "status", Raw: "✅ All tasks complete — plan mode finished",
-		})
-	}
-
-	// Update task progress in status bar.
-	m.refreshTaskDisplay()
-
-	m.updateViewport()
-	return m, m.saveSession(msg.Messages)
-}
-
 // patchFromMessages corrects the last assistant/thinking block content from
-// the source-of-truth messages. Does NOT rebuild — preserves event-derived blocks
-// (tool blocks with args and results, etc.) that messages don't contain.
-//
-// Only searches blocks from runStartBlockIdx onwards (current run). This prevents
-// patching a block from a previous turn, which would leave the current turn's
-// content missing from the viewport.
-//
-// Also creates missing blocks: if agentRunResultMsg arrives before the
-// AgentEventMessageEnd event is processed (async emitter race), the assistant/thinking
-// blocks won't exist yet. In that case, append them.
+// the source-of-truth messages.
 func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	if msgs == nil {
 		return
 	}
-	// Only look at messages produced during this run.
 	var newMsgs []core.AgentMessage
 	if m.s.runStartMsgCount < len(msgs) {
 		newMsgs = msgs[m.s.runStartMsgCount:]
@@ -455,7 +186,6 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 		return
 	}
 
-	// Collect assistant texts and thinking from this run's messages, in order.
 	type assistantEntry struct {
 		text     string
 		thinking string
@@ -484,9 +214,6 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 
 	searchFrom := m.s.runStartBlockIdx
 
-	// Match existing blocks to entries in order. Each entry may have
-	// a thinking+assistant pair. We walk blocks forward, consuming entries
-	// as we match assistant blocks (the authoritative anchor).
 	entryIdx := 0
 	for i := searchFrom; i < len(m.s.blocks) && entryIdx < len(entries); i++ {
 		switch m.s.blocks[i].Type {
@@ -500,8 +227,6 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 		}
 	}
 
-	// Create blocks for messages that have no corresponding block yet
-	// (events still buffered in the event channel when runResult arrived).
 	for ; entryIdx < len(entries); entryIdx++ {
 		if entries[entryIdx].thinking != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -516,17 +241,13 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	}
 }
 
-// rebuildFromMessages reconstructs blocks from the agent's source-of-truth messages.
-// Used only for initial recovery — normal flow uses patchFromMessages.
+// rebuildFromMessages reconstructs blocks from the agent's messages.
 func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	m.s.blocks = m.s.blocks[:0]
 
-	// Collect tool_call content from assistant messages to pair with tool_results.
-	pendingCalls := make(map[string]core.Content) // ToolCallID → tool_call Content
+	pendingCalls := make(map[string]core.Content)
 
 	for _, msg := range msgs {
-		// Shell messages (both "user" with custom.shell and "shell" role)
-		// render as bash tool blocks regardless of role.
 		if isShellMessage(msg) {
 			cmd, output := parseShellBody(firstTextContent(msg.Content))
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -541,7 +262,6 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 
 		switch msg.Role {
 		case "shell":
-			// Already handled above, but in case custom field is missing.
 			continue
 		case "user":
 			if len(msg.Content) > 0 {
@@ -557,8 +277,6 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 						SubagentResult: result,
 					})
 				} else if task, status, result, ok := parseSubagentNotification(text); ok {
-					// Backwards compatibility: detect prefix-based notifications
-					// from sessions saved before custom metadata was introduced.
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type:           "subagent",
 						SubagentTask:   task,
@@ -570,10 +288,9 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 						Type: "user", Raw: text,
 					})
 				}
-				// Show image indicators for user messages with images
 				for _, c := range msg.Content {
 					if c.Type == "image" {
-						kb := len(c.Data) * 3 / 4 / 1024 // base64 → raw size estimate
+						kb := len(c.Data) * 3 / 4 / 1024
 						m.s.blocks = append(m.s.blocks, messageBlock{
 							Type: "status",
 							Raw:  fmt.Sprintf("📎 Image attached (%d KB, %s)", kb, c.MimeType),

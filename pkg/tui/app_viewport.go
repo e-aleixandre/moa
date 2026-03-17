@@ -3,12 +3,10 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
 // --- Viewport ---
@@ -18,21 +16,7 @@ import (
 // (spinner, notices) is rendered outside the viewport in View().
 // Also recalculates viewport dimensions from current terminal size.
 // refreshTaskDisplay updates the status bar task segment and plan segment with current progress.
-func (m *appModel) refreshTaskDisplay() {
-	if m.taskStore == nil {
-		return
-	}
-	done, total := m.taskStore.Progress()
-	m.statusBar.UpdateTasksSegment(done, total)
-	if m.planMode != nil && m.planMode.Mode() == planmode.ModeExecuting {
-		if total > 0 {
-			m.statusBar.UpdatePlanSegment(fmt.Sprintf("executing 📋 %d/%d", done, total))
-		} else {
-			m.statusBar.UpdatePlanSegment("executing")
-		}
-	}
-	m.s.viewportDirty = true
-}
+// refreshTaskDisplay is now in app.go (uses bus queries)
 
 func (m *appModel) updateViewport() {
 	// Check scroll position BEFORE resizing — resizing can change maxYOffset
@@ -82,11 +66,11 @@ func (m *appModel) computeChromeHeight() int {
 		h++
 	}
 	// Task widget height.
-	if m.taskStore != nil {
-		taskList := m.taskStore.Tasks()
-		widgetMode := m.taskStore.GetWidgetMode()
-		if tv := m.taskWidget.View(taskList, widgetMode, m.width); tv != "" {
-			h += lipgloss.Height(tv)
+	if m.runtime != nil {
+		if taskList, err := bus.QueryTyped[bus.GetTasks, []tasks.Task](m.runtime.Bus, bus.GetTasks{}); err == nil && len(taskList) > 0 {
+			if tv := m.taskWidget.View(taskList, m.taskWidgetMode, m.width); tv != "" {
+				h += lipgloss.Height(tv)
+			}
 		}
 	}
 	if len(m.s.queuedSteers) > 0 {
@@ -95,6 +79,10 @@ func (m *appModel) computeChromeHeight() int {
 	if m.permPrompt.active {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			h += lipgloss.Height(pv)
+		}
+	} else if m.askPrompt.active {
+		if av := m.askPrompt.View(m.width, ActiveTheme); av != "" {
+			h += lipgloss.Height(av)
 		}
 	} else if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
@@ -186,102 +174,8 @@ func (m *appModel) recomputeInputEnabled() {
 }
 
 // --- Helpers ---
-
-// waitForEvent returns a Cmd that blocks until the next agent event.
-// The run generation comes FROM the tagged event (stamped at production time),
-// not captured at Cmd creation time.
-// forceRepaint sends a synthetic WindowSizeMsg to force Bubble Tea to
-// fully repaint. Fixes ghost lines when the view height shrinks
-// (e.g. command palette closing).
-func (m appModel) forceRepaint() tea.Cmd {
-	w, h := m.width, m.height
-	return func() tea.Msg {
-		return tea.WindowSizeMsg{Width: w, Height: h}
-	}
-}
-
-func (m appModel) waitForEvent() tea.Cmd {
-	eventCh := m.eventCh
-	quit := m.quit
-	return func() tea.Msg {
-		select {
-		case tagged, ok := <-eventCh:
-			if !ok {
-				return agentDoneMsg{}
-			}
-			return agentEventMsg{Event: tagged.event, RunGen: tagged.gen}
-		case <-quit:
-			return agentDoneMsg{}
-		}
-	}
-}
-
-// renderTick returns a Cmd that fires after renderInterval (~60fps).
-func renderTick() tea.Cmd {
-	return tea.Tick(renderInterval, func(time.Time) tea.Msg {
-		return renderTickMsg{}
-	})
-}
-
-// cleanup releases resources. Idempotent — safe to call multiple times.
-func (m *appModel) cleanup() {
-	m.s.cleanupOnce.Do(func() {
-		close(m.quit)
-		if m.unsub != nil {
-			m.unsub()
-		}
-		m.agent.Abort()
-		m.voice.reset()
-	})
-}
-
-// accumulateCost sums Usage from all new assistant messages added during the
-// last run (msgs[runStartMsgCount:]) and adds the cost to the session total.
-func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
-	if msgs == nil || m.agent == nil {
-		return
-	}
-	model := m.agent.Model()
-	if model.Pricing == nil {
-		return
-	}
-	start := m.s.runStartMsgCount
-	if start > len(msgs) {
-		return
-	}
-	for _, msg := range msgs[start:] {
-		if msg.Role == "assistant" && msg.Usage != nil {
-			m.s.sessionCost += model.Pricing.Cost(*msg.Usage)
-			m.s.sessionInput += msg.Usage.Input
-			m.s.sessionCacheRead += msg.Usage.CacheRead
-		}
-	}
-	m.statusBar.UpdateCostSegment(m.s.sessionCost)
-
-	// Cache hit %: cache_read / (input + cache_read).
-	totalInput := m.s.sessionInput + m.s.sessionCacheRead
-	if totalInput > 0 {
-		pct := m.s.sessionCacheRead * 100 / totalInput
-		m.statusBar.UpdateCacheSegment(pct)
-	}
-}
-
-// refreshContextSegment recalculates the context usage percentage and updates
-// the top bar segment. Called after agent runs and model switches.
-func (m *appModel) refreshContextSegment() {
-	if m.agent == nil {
-		return
-	}
-	model := m.agent.Model()
-	if model.MaxInput <= 0 {
-		m.statusBar.Remove(SegmentContext)
-		return
-	}
-	msgs := m.agent.Messages()
-	estimate := core.EstimateContextTokens(msgs, "", nil, m.agent.CompactionEpoch())
-	pct := (estimate.Tokens * 100) / model.MaxInput
-	m.statusBar.UpdateContextSegment(pct)
-}
+// forceRepaint, waitForBusEvent, renderTick, cleanup, accumulateCost,
+// refreshContextSegment, refreshTaskDisplay are now in app.go (bus-based)
 
 // thinkingLevels defines the cycle order for Shift+Tab.
 var thinkingLevels = []string{"off", "minimal", "low", "medium", "high"}

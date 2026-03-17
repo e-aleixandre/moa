@@ -117,6 +117,26 @@ func (g *Gate) Rules() []string {
 	return cp
 }
 
+// SnapshotConfig returns a Config snapshot of the current gate state.
+// Useful for preserving config when reconstructing a gate after yolo mode.
+func (g *Gate) SnapshotConfig() Config {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	allow := make([]string, len(g.allow))
+	copy(allow, g.allow)
+	deny := make([]string, len(g.deny))
+	copy(deny, g.deny)
+	rules := make([]string, len(g.rules))
+	copy(rules, g.rules)
+	return Config{
+		Allow:     allow,
+		Deny:      deny,
+		Rules:     rules,
+		Evaluator: g.evaluator,
+		Headless:  g.headless,
+	}
+}
+
 // Allow returns the current allow patterns.
 func (g *Gate) AllowPatterns() []string {
 	g.mu.RLock()

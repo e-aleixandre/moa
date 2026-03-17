@@ -306,6 +306,45 @@ func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLe
 	return nil
 }
 
+// SetModel changes the model and optionally the provider.
+// If provider is nil, keeps the current provider.
+// Strips thinking blocks from history when the model changes.
+// Returns error if the agent is currently running.
+func (a *Agent) SetModel(provider core.Provider, model core.Model) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot reconfigure while agent is running")
+	}
+
+	oldProvider := a.config.Model.Provider
+	oldModel := a.config.Model.ID
+
+	if provider != nil {
+		a.config.Provider = provider
+	}
+	a.config.Model = model
+	a.state.Model = model
+
+	if model.ID != oldModel || model.Provider != oldProvider {
+		stripThinkingFromHistory(a.state.Messages)
+	}
+
+	return nil
+}
+
+// SetThinkingLevel changes only the thinking level.
+// Returns error if the agent is currently running.
+func (a *Agent) SetThinkingLevel(level string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot reconfigure while agent is running")
+	}
+	a.config.ThinkingLevel = level
+	return nil
+}
+
 // SetPermissionCheck swaps the permission check function at runtime.
 // nil disables permission checks. Returns error if the agent is running.
 func (a *Agent) SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error {

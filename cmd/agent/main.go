@@ -4,24 +4,25 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"os/signal"
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/auth"
 	"github.com/ealeixandre/moa/pkg/bootstrap"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
 )
 
@@ -87,6 +88,7 @@ func main() {
 	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
 	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
 	permsModel := flag.String("permissions-model", "", "Model for auto-mode AI evaluator (e.g. haiku)")
+	pathScopeFlag := flag.String("path-scope", "", "Path access scope: workspace, unrestricted (default: derived from permissions)")
 	var extraAllowPatterns []string
 	flag.Func("allow", "Permission allow pattern (repeatable): \"Bash(go:*)\", \"Write(*.go)\"", func(val string) error {
 		parsed, err := parseAllowPattern(val)
@@ -94,6 +96,11 @@ func main() {
 			return err
 		}
 		extraAllowPatterns = append(extraAllowPatterns, parsed)
+		return nil
+	})
+	var extraAllowPaths []string
+	flag.Func("allow-path", "Allow access to directory outside workspace (repeatable)", func(val string) error {
+		extraAllowPaths = append(extraAllowPaths, val)
 		return nil
 	})
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
@@ -181,29 +188,23 @@ func main() {
 		permModeStr = "yolo"
 	}
 
-	// Subagent notification channels for TUI.
-	subagentCountCh := make(chan int, 16)
-	subagentNotifyCh := make(chan tui.SubagentNotification, 32)
+	// Resolve path scope: --yolo implies unrestricted.
+	pathScopeStr := *pathScopeFlag
+	if *yolo && pathScopeStr == "" {
+		pathScopeStr = "unrestricted"
+	}
+
 	useTUI := promptContent == ""
+
+	// Create bus early so subagent callbacks can publish to it (both TUI and headless).
+	preBus := bus.NewLocalBus()
 
 	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
 	// plan mode, skills, verify, and agent.
-	//
-	// Race safety: getAgent captures `sess` by reference. It's only called from
-	// OnAsyncComplete callbacks, which fire after BuildSession returns (subagent
-	// jobs can't complete before the agent is created). The `sess` pointer is
-	// written once below and never reassigned, so there's no concurrent access.
 	// File checkpoints for /undo.
 	cpStore := checkpoint.New(20)
 
-	var sess *bootstrap.Session
-	getAgent := func() *agent.Agent {
-		if sess != nil {
-			return sess.Agent
-		}
-		return nil
-	}
-	sess, err = bootstrap.BuildSession(bootstrap.SessionConfig{
+	sess, err := bootstrap.BuildSession(bootstrap.SessionConfig{
 		CWD:             cwd,
 		Model:           resolvedModel,
 		Provider:        providerBuild.Provider,
@@ -220,6 +221,8 @@ func main() {
 		MaxTurns:            *maxTurns,
 		MaxBudget:           resolvedBudget,
 		DisableSandbox:      *yolo,
+		PathScope:           pathScopeStr,
+		ExtraAllowedPaths:   extraAllowPaths,
 		PermissionMode:      permModeStr,
 		PermissionEvalModel: *permsModel,
 		Headless:            !useTUI,
@@ -227,32 +230,19 @@ func main() {
 		EnableAskUser:       useTUI,
 		BeforeWrite:         cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
-			select {
-			case subagentCountCh <- count:
-			default:
-			}
+			preBus.Publish(bus.SubagentCountChanged{Count: count})
 		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
 			agentText := bootstrap.FormatSubagentNotification(jobID, task, status, resultTail, truncated)
 			if agentText == "" {
 				return
 			}
-			if useTUI {
-				select {
-				case subagentNotifyCh <- tui.SubagentNotification{
-					JobID:      jobID,
-					Task:       task,
-					Status:     status,
-					AgentText:  agentText,
-					ResultTail: resultTail,
-				}:
-				default:
-				}
-			} else {
-				if a := getAgent(); a != nil {
-					a.Steer(agentText)
-				}
-			}
+			preBus.Publish(bus.SubagentCompleted{
+				JobID:  jobID,
+				Task:   task,
+				Status: status,
+				Text:   agentText,
+			})
 		},
 	})
 	if err != nil {
@@ -313,9 +303,23 @@ func main() {
 				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
 				persistedSess = nil
 			} else {
-				// Restore model, thinking, and permission mode from session metadata.
-				sess.RestoreFromMetadata(persistedSess, providerFactory)
-				resolvedModel = sess.Model
+				// Restore model pre-runtime (initialization, same approach as serve).
+				savedModel, _, _, _ := persistedSess.RuntimeMeta()
+				if savedModel != "" {
+					if m, ok := core.ResolveModel(savedModel); ok &&
+						(m.ID != resolvedModel.ID || m.Provider != resolvedModel.Provider) {
+						if prov, err := providerFactory(m); err == nil {
+							if err := ag.Reconfigure(prov, m, ag.ThinkingLevel()); err == nil {
+								sess.Model = m
+								resolvedModel = m
+							} else {
+								slog.Warn("restore: model reconfigure failed", "model", savedModel, "error", err)
+							}
+						} else {
+							slog.Warn("restore: provider creation failed", "model", savedModel, "error", err)
+						}
+					}
+				}
 			}
 		}
 		if persistedSess == nil && sessionStore != nil && !startInSessionBrowser {
@@ -343,29 +347,73 @@ func main() {
 			transcriber = openai.New(apiKey)
 		}
 
-		app := tui.New(ag, ctx, tui.Config{
+		// Create SessionRuntime with the pre-created bus.
+		sessionID := "tui"
+		if persistedSess != nil {
+			sessionID = persistedSess.ID
+		}
+		rcfg := sess.RuntimeConfig()
+		rcfg.SessionID = sessionID
+		rcfg.Ctx = ctx
+		rcfg.Bus = preBus
+		rcfg.Checkpoints = cpStore
+		rcfg.ProviderFactory = providerFactory
+		rt, err := bus.NewSessionRuntime(rcfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Attach persister BEFORE bus restore so state changes are persisted.
+		if sessionStore != nil && persistedSess != nil {
+			rt.AttachPersister(&tuiPersister{store: sessionStore, session: persistedSess})
+		}
+
+		// Post-runtime: restore thinking, permissions, paths via bus commands.
+		if persistedSess != nil {
+			_, _, savedPermMode, savedThinking := persistedSess.RuntimeMeta()
+			if savedThinking != "" {
+				if err := rt.Bus.Execute(bus.SetThinking{Level: savedThinking}); err != nil {
+					slog.Warn("restore: thinking", "level", savedThinking, "error", err)
+				}
+			}
+			if savedPermMode != "" {
+				if err := rt.Bus.Execute(bus.SetPermissionMode{Mode: savedPermMode}); err != nil {
+					slog.Warn("restore: permission mode", "mode", savedPermMode, "error", err)
+				}
+			}
+			if persistedSess.Metadata != nil {
+				savedScope, savedPaths := persistedSess.PathMeta()
+				if savedScope != "" {
+					if err := rt.Bus.Execute(bus.SetPathScope{Scope: savedScope}); err != nil {
+						slog.Warn("restore: path scope", "scope", savedScope, "error", err)
+					}
+				}
+				for _, p := range savedPaths {
+					if err := rt.Bus.Execute(bus.AddAllowedPath{Path: p}); err != nil {
+						slog.Warn("restore: allowed path", "path", p, "error", err)
+					}
+				}
+			}
+		}
+
+		// Sync plan mode state (restore happened before SetOnChange was wired).
+		rt.SyncPlanMode()
+
+		app := tui.New(ctx, tui.Config{
+			Runtime:               rt,
 			SessionStore:          sessionStore,
 			Session:               persistedSess,
 			StartInSessionBrowser: startInSessionBrowser,
-			ModelName:             modelDisplayName(resolvedModel),
 			CWD:                   cwd,
-			PermissionGate:        sess.Gate,
-			AskBridge:             sess.AskBridge,
 			PinnedModels:          moaCfg.PinnedModels,
-			SubagentCountCh:       subagentCountCh,
-			SubagentNotifyCh:      subagentNotifyCh,
-			PlanMode:              pm,
-			TaskStore:             sess.TaskStore,
 			PromptTemplates:       promptTemplates,
 			OnPinnedModelsChange: func(ids []string) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 					cfg.PinnedModels = ids
 				})
 			},
-			ProviderFactory:   providerFactory,
 			Transcriber:       transcriber,
-			CheckpointStore:   cpStore,
-			BootstrapSession:  sess,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {
@@ -381,67 +429,93 @@ func main() {
 
 	printAuthNotice(os.Stderr, providerBuild.AuthNotice)
 
-	var streamedChars atomic.Int64
-	if jsonOutput {
-		jw := newJSONLineWriter()
-		ag.Subscribe(jw.handle)
-	} else {
-		ag.Subscribe(func(e core.AgentEvent) {
-			switch e.Type {
-			case core.AgentEventMessageUpdate:
-				if e.AssistantEvent != nil {
-					switch e.AssistantEvent.Type {
-					case core.ProviderEventTextDelta:
-						fmt.Print(e.AssistantEvent.Delta)
-						streamedChars.Add(int64(len(e.AssistantEvent.Delta)))
-					case core.ProviderEventThinkingDelta:
-						fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.AssistantEvent.Delta)
-					}
-				}
-			case core.AgentEventToolExecStart:
-				fmt.Fprintf(os.Stderr, "\n\033[36m[%s]\033[0m %s\n", e.ToolName, tool.SummarizeArgs(e.Args))
-			case core.AgentEventToolExecEnd:
-				if e.Rejected {
-					reason := extractDenialReason(e.Result)
-					fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m \033[31m✗ %s\033[0m\n", e.ToolName, reason)
-				} else {
-					icon := "\033[32m✓\033[0m"
-					if e.IsError {
-						icon = "\033[31m✗\033[0m"
-					}
-					fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m %s\n", e.ToolName, icon)
-				}
-			}
-		})
+	// Create SessionRuntime for headless — same contract as TUI and serve.
+	rcfg := sess.RuntimeConfig()
+	rcfg.SessionID = "headless"
+	rcfg.Ctx = ctx
+	rcfg.Bus = preBus
+	rcfg.ProviderFactory = func(model core.Model) (core.Provider, error) {
+		build, err := buildProvider(model, authStore)
+		if err != nil {
+			return nil, err
+		}
+		return build.Provider, nil
+	}
+	rt, err := bus.NewSessionRuntime(rcfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
+		os.Exit(1)
 	}
 
-	msgs, err := ag.Run(ctx, promptContent)
+	// Subagent completions → steer into the running agent.
+	rt.Bus.Subscribe(func(e bus.SubagentCompleted) {
+		_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+	})
+
+	// Subscribe for output (SubscribeAll guarantees event order).
+	var streamedChars atomic.Int64
+	done := make(chan bus.RunEnded, 1)
+
+	if jsonOutput {
+		jw := newJSONLineWriter()
+		jw.subscribeAll(rt.Bus, done)
+	} else {
+		subscribeHeadlessAll(rt.Bus, &streamedChars, done)
+	}
+
+	// Launch run via bus.
+	if err := rt.Bus.Execute(bus.SendPrompt{Text: promptContent}); err != nil {
+		rt.Close()
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Wait for completion (or context cancellation), then drain to ensure all output is flushed.
+	var result bus.RunEnded
+	select {
+	case result = <-done:
+	case <-ctx.Done():
+		// Context cancelled before RunEnded arrived — drain and exit.
+		rt.Bus.Drain(2 * time.Second)
+		rt.Close()
+		fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
+		os.Exit(130)
+	}
+	rt.Bus.Drain(5 * time.Second)
 
 	if !jsonOutput {
-		if finalText := core.ExtractFinalAssistantText(msgs); streamedChars.Load() == 0 && finalText != "" {
-			fmt.Print(finalText)
+		if result.FinalText != "" && streamedChars.Load() == 0 {
+			fmt.Print(result.FinalText)
 		}
 		fmt.Println()
 	}
 
-	if err != nil {
-		if ctx.Err() != nil {
-			fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
-			os.Exit(130)
-		}
-		fmt.Fprintf(os.Stderr, "\nerror: %v\n", err)
+	// Explicit cleanup — os.Exit skips defers.
+	rt.Close()
+
+	// Check context cancellation independently — RunEnded.Err is nil on cancellation
+	// (only "real errors" populate Err), so we must check ctx.Err() separately.
+	if ctx.Err() != nil {
+		fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
+		os.Exit(130)
+	}
+	if result.Err != nil {
+		fmt.Fprintf(os.Stderr, "\nerror: %v\n", result.Err)
 		os.Exit(1)
 	}
 }
 
-// extractDenialReason extracts a human-readable reason from a tool result.
-func extractDenialReason(r *core.Result) string {
-	if r != nil {
-		for _, c := range r.Content {
-			if c.Type == "text" && c.Text != "" {
-				return c.Text
-			}
-		}
-	}
-	return "(no reason)"
+// tuiPersister implements bus.SessionPersister for TUI mode.
+type tuiPersister struct {
+	store   session.SessionStore
+	session *session.Session
 }
+
+func (p *tuiPersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[string]any) error {
+	p.session.Messages = msgs
+	p.session.CompactionEpoch = epoch
+	p.session.Metadata = meta
+	return p.store.Save(p.session)
+}
+
+

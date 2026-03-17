@@ -50,7 +50,13 @@ type SessionConfig struct {
 	MaxToolCallsPerTurn int           // Default: 20
 	MaxRunDuration      time.Duration // Default: 30m
 	MaxBudget           float64       // Default: from config. 0 = unlimited.
-	DisableSandbox      bool          // Overrides config (OR'd).
+	DisableSandbox      bool          // Overrides config (OR'd). Deprecated: use PathScope.
+
+	// PathScope override. Empty = derive from config/permissions.
+	// Valid values: "workspace", "unrestricted".
+	PathScope string
+	// ExtraAllowedPaths are merged with config allowed_paths (from --allow-path flags).
+	ExtraAllowedPaths []string
 
 	// Permission mode override. Empty = from config or "yolo".
 	PermissionMode string
@@ -85,6 +91,7 @@ type Session struct {
 	AskBridge   *askuser.Bridge
 	Gate        *permission.Gate
 	MCPManager  *mcp.Manager
+	PathPolicy  *tool.PathPolicy
 	AgentsMD    string
 	Skills      []skill.Skill
 	SkillsIndex string
@@ -96,16 +103,14 @@ type Session struct {
 	// UntrustedMCP is true when .mcp.json exists but CWD is not in TrustedMCPPaths.
 	UntrustedMCP bool
 
-	// AgentHolder exposes the atomic agent pointer for subagent closures.
-	// Set after BuildSession returns. Callers must call StoreAgent(ag) before
-	// using subagents that depend on parent model/thinking/permissions.
-	agentHolder atomic.Pointer[agent.Agent]
-}
+	// Headless is true when the session was created in headless mode (no user
+	// to approve permissions). Preserved so RuntimeConfig() can set GateConfig
+	// correctly even when Gate is nil (yolo mode).
+	Headless bool
 
-// StoreAgent updates the agent pointer visible to subagent closures.
-// Must be called after agent creation and any reconfiguration.
-func (s *Session) StoreAgent(ag *agent.Agent) {
-	s.agentHolder.Store(ag)
+	// agentHolder stores the atomic agent pointer for subagent closures.
+	// Set by BuildSession; updated internally on reconfiguration.
+	agentHolder atomic.Pointer[agent.Agent]
 }
 
 // BuildSession wires up a complete agent session. The returned Session
@@ -159,11 +164,32 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 
 	// 2. Tool registry.
+	// Resolve permission mode early — needed for path scope derivation.
+	permMode := permission.Mode(moaCfg.Permissions.Mode)
+	if cfg.PermissionMode != "" {
+		permMode = permission.Mode(cfg.PermissionMode)
+	}
+	if permMode == "" {
+		permMode = permission.ModeYolo
+	}
+
+	// Resolve path scope: explicit > legacy > derived from permissions.
+	effectivePermMode := string(permMode)
+	pathScope := cfg.PathScope
+	if pathScope == "" {
+		pathScope = moaCfg.PathScope
+	}
+	resolvedScope := core.ResolvePathScope(pathScope, cfg.DisableSandbox || moaCfg.DisableSandbox, effectivePermMode)
+	isUnrestricted := resolvedScope == "unrestricted"
+
+	allAllowed := append(moaCfg.AllowedPaths, cfg.ExtraAllowedPaths...)
+	allAllowed = append(allAllowed, tool.SpillOutputDir())
+	pathPolicy := tool.NewPathPolicy(cfg.CWD, allAllowed, isUnrestricted)
+
 	toolReg := core.NewRegistry()
 	if err := tool.RegisterBuiltins(toolReg, tool.ToolConfig{
 		WorkspaceRoot:  cfg.CWD,
-		DisableSandbox: cfg.DisableSandbox || moaCfg.DisableSandbox,
-		AllowedPaths:   append(moaCfg.AllowedPaths, tool.SpillOutputDir()),
+		PathPolicy:     pathPolicy,
 		BashTimeout:    5 * time.Minute,
 		BraveAPIKey:    moaCfg.BraveAPIKey,
 		BeforeWrite:    cfg.BeforeWrite,
@@ -194,13 +220,6 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, os.Getenv("AGENT_HOME"))
 
 	// 6. Permission gate.
-	permMode := permission.Mode(moaCfg.Permissions.Mode)
-	if cfg.PermissionMode != "" {
-		permMode = permission.Mode(cfg.PermissionMode)
-	}
-	if permMode == "" {
-		permMode = permission.ModeYolo
-	}
 	var gate *permission.Gate
 	if permMode != permission.ModeYolo {
 		allow := append([]string(nil), moaCfg.Permissions.Allow...)
@@ -271,6 +290,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		AskBridge:    askBridge,
 		Gate:         gate,
 		MCPManager:   mcpMgr,
+		PathPolicy:   pathPolicy,
 		AgentsMD:     agentsMD,
 		Skills:       skills,
 		SkillsIndex:  skillsIndex,
@@ -278,6 +298,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		Model:        cfg.Model,
 		MoaCfg:       moaCfg,
 		UntrustedMCP: untrustedMCP,
+		Headless:     cfg.Headless,
 	}
 
 	// 10. Subagents.

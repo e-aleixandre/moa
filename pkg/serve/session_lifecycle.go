@@ -10,13 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/bootstrap"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -27,9 +28,7 @@ type CreateOpts struct {
 	CWD   string `json:"cwd"`
 }
 
-// CreateSession creates a new agent session. The agent is configured with
-// tools, permissions, and system prompt scoped to the session's working
-// directory — matching CLI behavior for config, AGENTS.md, and MCP trust.
+// CreateSession creates a new agent session.
 func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	cwd := opts.CWD
 	if cwd == "" {
@@ -47,35 +46,52 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		id = persisted.ID
 	}
 	if id == "" {
-		id = newID() // fallback when persistence unavailable
+		id = newID()
 	}
 
-	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd)
+	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Finalize persistence.
-	if persisted != nil {
+	// Attach persistence immediately.
+	if persisted != nil && store != nil {
+		// Get metadata from bus queries.
+		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+		thinking, _ := bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
+		permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
+
 		persisted.SetRuntimeMetadata(
-			fullModelSpec(sess.runtime.resolvedModel),
+			bootstrap.FullModelSpec(model),
 			sess.CWD,
-			sess.permissionMode(),
-			sess.runtime.agent.ThinkingLevel(),
+			permMode,
+			thinking,
 		)
 		_ = store.Save(persisted)
-		sess.persistence.persisted = persisted
-		sess.persistence.store = store
+
+		sp := newServePersister(persisted, store, func() string {
+			sess.mu.Lock()
+			defer sess.mu.Unlock()
+			return sess.Title
+		})
+		sess.persister = sp
+		sess.runtime.AttachPersister(sp)
 	}
 
 	m.invalidateSavedCache()
 	return sess, nil
 }
 
-// buildManagedSession creates an in-memory managed session with full runtime
-// (tools, MCP, permissions, subagents, agent). Does NOT touch persistence.
-// Used by both CreateSession (new sessions) and ResumeSession (restoring saved).
-func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*ManagedSession, error) {
+// buildOpts provides optional initial state for session construction.
+type buildOpts struct {
+	initialMessages        []core.AgentMessage
+	initialCompactionEpoch int
+	initialThinking        string // applied via SetThinking after construction
+}
+
+// buildManagedSession creates an in-memory managed session with full runtime.
+// Does NOT touch persistence.
+func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *buildOpts) (*ManagedSession, error) {
 	// Resolve + canonicalize CWD.
 	canonical, err := core.CanonicalizePath(cwd)
 	if err != nil {
@@ -100,16 +116,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
 
-	// File checkpoints for /undo.
 	cpStore := checkpoint.New(20)
+	subagentTexts := &sync.Map{}
 
-	// Forward-declare for closures (populated before the session is exposed).
+	// Forward-declare for closures.
 	var sess *ManagedSession
-	var bs *bootstrap.Session
 
-	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
-	// plan mode, skills, verify, and agent.
-	bs, err = bootstrap.BuildSession(bootstrap.SessionConfig{
+	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
 		CWD:             cwd,
 		Model:           model,
 		Provider:        prov,
@@ -119,7 +132,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		BeforeWrite:     cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
-				s.broadcast(Event{Type: "subagent_count", Data: SubagentCountData{Count: count}})
+				s.runtime.Bus.Publish(bus.SubagentCountChanged{SessionID: s.ID, Count: count})
 			}
 		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
@@ -131,31 +144,28 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 			if agentText == "" {
 				return
 			}
-			if a := bs.Agent; a != nil {
-				// Track this text so broadcastAgentEvent suppresses the
-				// duplicate steer WS event when the agent processes it.
-				s.runtime.subagentTexts.Store(agentText, struct{}{})
-				if a.IsRunning() {
-					a.Steer(agentText)
-				} else {
-					// Agent is idle — start a new run so the LLM can
-					// react to the subagent completion (same as TUI's
-					// startNotificationRun).
-					s.startNotificationRun(agentText, map[string]any{
-						"source":           "subagent",
-						"subagent_job_id":  jobID,
-						"subagent_task":    task,
-						"subagent_status":  status,
-						"subagent_result":  resultTail,
-					})
+			b := s.runtime.Bus
+			b.Publish(bus.SubagentCompleted{SessionID: s.ID, JobID: jobID, Task: task, Status: status, Text: agentText})
+
+			if s.runtime.State.Current() == bus.StateRunning {
+				subagentTexts.Store(agentText, struct{}{})
+				_ = b.Execute(bus.SteerAgent{Text: agentText})
+			} else {
+				err := b.Execute(bus.SendPrompt{
+					Text: agentText,
+					Custom: map[string]any{
+						"source":          "subagent",
+						"subagent_job_id": jobID,
+						"subagent_task":   task,
+						"subagent_status": status,
+						"subagent_result": resultTail,
+					},
+				})
+				if err != nil {
+					subagentTexts.Store(agentText, struct{}{})
+					_ = b.Execute(bus.SteerAgent{Text: agentText})
 				}
 			}
-			s.broadcast(Event{Type: "subagent_complete", Data: SubagentCompleteData{
-				JobID:  jobID,
-				Task:   task,
-				Status: status,
-				Text:   agentText,
-			}})
 		},
 	})
 	if err != nil {
@@ -163,23 +173,24 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		return nil, err
 	}
 
-	ag := bs.Agent
-	pm := bs.PlanMode
+	// Build RuntimeConfig from bootstrap session + serve-specific fields.
+	rcfg := bs.RuntimeConfig()
+	rcfg.SessionID = id
+	rcfg.Ctx = sessionCtx
+	rcfg.Checkpoints = cpStore
+	rcfg.ProviderFactory = m.providerFactory
+	rcfg.BaseSystemPrompt = "" // serve: plan mode prompts don't include base (pre-existing behavior)
+	rcfg.SteerFilter = func(text string) bool {
+		_, was := subagentTexts.LoadAndDelete(text)
+		return !was
+	}
+	if opts != nil {
+		rcfg.InitialMessages = opts.initialMessages
+		rcfg.InitialCompactionEpoch = opts.initialCompactionEpoch
+	}
 
-	// Compose permission check: plan mode filter + permission gate.
-	// Reads sess.runtime.gate under lock so SetPermissionMode changes take effect immediately.
-	if err := ag.SetPermissionCheck(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-		if allowed, reason := pm.FilterToolCall(name, args); !allowed {
-			return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPolicy}
-		}
-		sess.mu.Lock()
-		g := sess.runtime.gate
-		sess.mu.Unlock()
-		if g != nil {
-			return g.Check(ctx, name, args)
-		}
-		return nil
-	}); err != nil {
+	rt, err := bus.NewSessionRuntime(rcfg)
+	if err != nil {
 		sessionCancel()
 		if bs.MCPManager != nil {
 			bs.MCPManager.Close()
@@ -187,53 +198,29 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string) (*Manage
 		return nil, err
 	}
 
-	// Build managed session.
+	// Apply thinking level if restoring.
+	if opts != nil && opts.initialThinking != "" {
+		_ = rt.Bus.Execute(bus.SetThinking{Level: opts.initialThinking})
+	}
+
+	// PlanMode onChange is owned by the runtime (NewSessionRuntime sets it).
+	// No need to override here — it publishes PlanModeChanged and rebuilds
+	// the system prompt automatically.
+
 	sess = &ManagedSession{
 		ID:      id,
 		Title:   title,
-		State:   StateIdle,
-		Model:   modelDisplayName(model),
 		CWD:     cwd,
 		Created: time.Now(),
 		Updated: time.Now(),
-		runtime: sessionRuntime{
-			agent:         ag,
-			gate:          bs.Gate,
-			unsub:         func() {}, // set below
+		runtime: rt,
+		infra: serveInfra{
 			sessionCtx:    sessionCtx,
 			sessionCancel: sessionCancel,
 			toolReg:       bs.ToolReg,
-			agentsMD:      bs.AgentsMD,
-			resolvedModel: model,
 			mcpMgr:        bs.MCPManager,
 			UntrustedMCP:  bs.UntrustedMCP,
-			taskStore:     bs.TaskStore,
-			planMode:      pm,
-			checkpoints:   cpStore,
 		},
-		approvals: sessionApprovals{
-			askBridge: bs.AskBridge,
-		},
-	}
-
-	pm.SetOnChange(func(mode planmode.Mode) {
-		d := PlanModeData{Mode: string(mode)}
-		if mode != planmode.ModeOff {
-			d.PlanFile = pm.PlanFilePath()
-		}
-		sess.broadcast(Event{Type: "plan_mode", Data: d})
-	})
-
-	sess.runtime.unsub = ag.Subscribe(func(e core.AgentEvent) {
-		sess.broadcastAgentEvent(e)
-	})
-
-	if bs.Gate != nil {
-		sess.approvals.bridgeStop = make(chan struct{})
-		go sess.permissionBridge(sessionCtx)
-	}
-	if bs.AskBridge != nil {
-		go sess.askUserBridge(sessionCtx)
 	}
 
 	m.mu.Lock()
@@ -248,6 +235,7 @@ var (
 	ErrInvalidCWD = errors.New("invalid working directory")
 )
 
+// Delete aborts any running agent, closes resources, and removes the session.
 func (m *Manager) Delete(id string) error {
 	m.mu.Lock()
 	sess, ok := m.sessions[id]
@@ -266,55 +254,53 @@ func (m *Manager) Delete(id string) error {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 
-	// Mark deleted to prevent save() from resurrecting.
-	sess.mu.Lock()
-	sess.persistence.deleted = true
-	store := sess.persistence.store
-	sess.persistence.persisted = nil
-	sess.persistence.store = nil
-	sess.mu.Unlock()
-
-	// Close MCP connections before context cancellation.
-	if sess.runtime.mcpMgr != nil {
-		sess.runtime.mcpMgr.Close()
+	// Mark deleted to prevent persistence from resurrecting.
+	if sess.persister != nil {
+		sess.persister.markDeleted()
 	}
 
-	// Cancel session context — stops bridge, subagent jobs, and in-flight runs.
-	sess.runtime.sessionCancel()
+	// Close MCP connections before context cancellation.
+	if sess.infra.mcpMgr != nil {
+		sess.infra.mcpMgr.Close()
+	}
 
-	sess.runtime.unsub()
-	sess.closeSubscribers()
+	// Cancel session context — stops bridges, subagent jobs, and in-flight runs.
+	sess.infra.sessionCancel()
+
+	// Close runtime — stops bridges, aborts agent, closes bus.
+	sess.runtime.Close()
 
 	// Delete from disk.
-	if store != nil {
-		_ = store.Delete(id)
+	if sess.persister != nil {
+		sess.persister.mu.Lock()
+		store := sess.persister.store
+		sess.persister.mu.Unlock()
+		if store != nil {
+			_ = store.Delete(id)
+		}
 	}
 	m.invalidateSavedCache()
 	return nil
 }
 
 // ResumeSession loads a saved session from disk and creates a full runtime.
-// On failure, only runtime resources are cleaned up — disk state is untouched.
 func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
-	// Use full Lock (not RLock) for check-and-reserve to prevent TOCTOU:
-	// two concurrent ResumeSession calls for the same ID could both pass
-	// an RLock check and create duplicate runtimes.
+	// Reserve the slot to prevent concurrent resumes.
 	m.mu.Lock()
 	if _, ok := m.sessions[id]; ok {
 		m.mu.Unlock()
 		return nil, ErrBusy
 	}
-	// Reserve the slot with a nil placeholder to block concurrent resumes.
-	m.sessions[id] = nil
+	m.sessions[id] = nil // nil placeholder
 	m.mu.Unlock()
 
-	// On any error below, release the reserved slot.
 	cleanup := func() {
 		m.mu.Lock()
 		delete(m.sessions, id)
 		m.mu.Unlock()
 	}
 
+	// 1. Load from disk.
 	saved, store, err := session.FindSession(m.sessionBaseDir, id)
 	if err != nil {
 		cleanup()
@@ -326,59 +312,61 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		cwd = m.workspaceRoot
 	}
 
-	sess, err := m.buildManagedSession(saved.ID, saved.Title, modelID, cwd)
+	// 2. Build with initial state.
+	sess, err := m.buildManagedSession(saved.ID, saved.Title, modelID, cwd, &buildOpts{
+		initialMessages:        saved.Messages,
+		initialCompactionEpoch: saved.CompactionEpoch,
+		initialThinking:        savedThinking,
+	})
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("resume: %w", err)
 	}
 
-	// Restore thinking level from persisted metadata.
-	if savedThinking != "" {
-		_ = sess.runtime.agent.Reconfigure(nil, sess.runtime.agent.Model(), savedThinking)
-	}
-
-	// Restore permission mode from persisted metadata.
+	// 3. Restore permission mode.
 	if savedPermMode != "" {
-		// Use SetPermissionMode which handles gate creation and bridge wiring.
-		if _, pmErr := m.SetPermissionMode(sess.ID, savedPermMode); pmErr != nil {
-			slog.Warn("resume: could not restore permission mode", "id", saved.ID, "mode", savedPermMode, "error", pmErr)
+		if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: savedPermMode}); err != nil {
+			slog.Warn("resume: permission mode", "id", id, "error", err)
 		}
 	}
 
-	if err := sess.runtime.agent.LoadState(saved.Messages, saved.CompactionEpoch); err != nil {
-		sess.runtime.sessionCancel()
-		sess.runtime.unsub()
-		if sess.runtime.mcpMgr != nil {
-			sess.runtime.mcpMgr.Close()
+	// 4. Restore task/plan/path metadata.
+	// Tasks and plan mode use direct restore methods (initialization, not runtime commands).
+	// Path policy uses bus commands for consistency.
+	sctx := sess.runtime.Context()
+	if sctx.TaskStore != nil && saved.Metadata != nil {
+		sctx.TaskStore.RestoreFromMetadata(saved.Metadata)
+	}
+	if sctx.PlanMode != nil && saved.Metadata != nil {
+		sctx.PlanMode.RestoreState(saved.Metadata)
+		sctx.PlanMode.ApplyRestoredState()
+		sess.runtime.SyncPlanMode()
+	}
+	if saved.Metadata != nil {
+		savedScope, savedPaths := saved.PathMeta()
+		if savedScope != "" {
+			_ = sess.runtime.Bus.Execute(bus.SetPathScope{Scope: savedScope})
 		}
-		m.mu.Lock()
-		delete(m.sessions, sess.ID)
-		m.mu.Unlock()
-		return nil, fmt.Errorf("resume: load state: %w", err)
+		for _, p := range savedPaths {
+			_ = sess.runtime.Bus.Execute(bus.AddAllowedPath{Path: p})
+		}
 	}
 
-	sess.mu.Lock()
-	sess.messages = saved.Messages
-	sess.persistence.persisted = saved
-	sess.persistence.store = store
+	// 5. Attach persistence.
+	sp := newServePersister(saved, store, func() string {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.Title
+	})
+	sess.persister = sp
+	sess.runtime.AttachPersister(sp)
+
+	// 6. Finalize.
 	sess.Created = saved.Created
-	// Restore task store state.
-	if sess.runtime.taskStore != nil && saved.Metadata != nil {
-		sess.runtime.taskStore.RestoreFromMetadata(saved.Metadata)
-	}
-	// Restore plan mode state.
-	if sess.runtime.planMode != nil && saved.Metadata != nil {
-		sess.runtime.planMode.RestoreState(saved.Metadata)
-		sess.runtime.planMode.ApplyRestoredState()
-	}
-	sess.mu.Unlock()
-
 	return sess, nil
 }
 
-// ReconfigureSession changes the model and/or thinking level of a session.
-// Only allowed when the session is idle (not running).
-
+// reloadMCP reloads MCP servers for a session.
 func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 	// Phase 1: prepare (no mutation).
 	projectServers, err := core.LoadMCPFile(filepath.Join(s.CWD, ".mcp.json"))
@@ -392,55 +380,52 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 	var newTools []core.Tool
 	if len(merged) > 0 {
 		newMgr = mcp.NewManager(nil)
-		newMgr.Start(s.runtime.sessionCtx, merged)
+		newMgr.Start(s.infra.sessionCtx, merged)
 		newTools = newMgr.Tools()
 	}
 
-	// Abort if new manager produced no tools but old one had some — likely
-	// transient failure. Keep old tools intact.
 	if newMgr != nil && len(newTools) == 0 {
 		newMgr.Close()
 		return fmt.Errorf("MCP servers started but no tools available; keeping existing tools")
 	}
 
-	// Phase 2: swap (under lock, no blocking I/O).
-	s.mu.Lock()
-	if s.State == StateRunning || s.State == StatePermission {
-		s.mu.Unlock()
+	// Phase 2: check state via bus.
+	state := s.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission {
 		if newMgr != nil {
 			newMgr.Close()
 		}
 		return ErrBusy
 	}
 
-	oldMgr := s.runtime.mcpMgr
+	// Phase 3: swap tools.
+	s.mu.Lock()
+	oldMgr := s.infra.mcpMgr
 
-	// Deregister old MCP tools (prefixed "mcp__").
-	for _, spec := range s.runtime.toolReg.Specs() {
+	// Deregister old MCP tools.
+	for _, spec := range s.infra.toolReg.Specs() {
 		if strings.HasPrefix(spec.Name, "mcp__") {
-			s.runtime.toolReg.Unregister(spec.Name)
+			s.infra.toolReg.Unregister(spec.Name)
 		}
 	}
-
 	// Register new tools.
 	for _, t := range newTools {
-		core.RegisterOrLog(s.runtime.toolReg, t)
+		core.RegisterOrLog(s.infra.toolReg, t)
 	}
-	s.runtime.mcpMgr = newMgr
-	s.runtime.UntrustedMCP = false
+	s.infra.mcpMgr = newMgr
+	s.infra.UntrustedMCP = false
 	s.mu.Unlock()
 
-	// Phase 3: cleanup old manager (outside lock — Close may block).
+	// Phase 4: cleanup old.
 	if oldMgr != nil {
 		oldMgr.Close()
 	}
-
 	return nil
 }
 
 func newID() string {
 	b := make([]byte, 8)
-	_, _ = rand.Read(b) //nolint:errcheck // crypto/rand.Read never fails on supported platforms
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
@@ -451,26 +436,3 @@ func modelDisplayName(m core.Model) string {
 	return m.ID
 }
 
-// fullModelSpec returns a provider-qualified model spec for persistence.
-// Format: "provider/id" when provider is set, otherwise just "id".
-func fullModelSpec(m core.Model) string {
-	if m.Provider != "" {
-		return m.Provider + "/" + m.ID
-	}
-	return m.ID
-}
-
-func extractFinalText(msgs []core.AgentMessage) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" {
-			var parts []string
-			for _, c := range msgs[i].Content {
-				if c.Type == "text" && c.Text != "" {
-					parts = append(parts, c.Text)
-				}
-			}
-			return strings.Join(parts, "")
-		}
-	}
-	return ""
-}

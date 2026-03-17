@@ -35,8 +35,9 @@ func CanonicalizePath(path string) (string, error) {
 // files at three levels: global (~/.config/moa/config.json), project (<cwd>/.moa/config.json),
 // and session (flags). Merged with OR for booleans, concatenation for slices.
 type MoaConfig struct {
-	DisableSandbox  bool              `json:"disable_sandbox"`  // YOLO mode: allow any file path
+	DisableSandbox  bool              `json:"disable_sandbox"`  // Deprecated: use PathScope. YOLO mode: allow any file path
 	AllowedPaths    []string          `json:"allowed_paths"`    // Additional directories accessible outside workspace
+	PathScope       string            `json:"path_scope"`       // "workspace", "unrestricted", or "" (derive from permission mode)
 	Permissions     PermissionsConfig `json:"permissions"`      // Tool execution permission policy
 	PinnedModels    []string          `json:"pinned_models"`    // Model IDs pinned for Ctrl+P cycling
 	BraveAPIKey     string            `json:"brave_api_key"`    // Brave Search API key for web_search tool
@@ -126,6 +127,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged := MoaConfig{
 		DisableSandbox:  base.DisableSandbox || override.DisableSandbox,
 		AllowedPaths:    append(base.AllowedPaths, override.AllowedPaths...),
+		PathScope:       mergeScalar(base.PathScope, override.PathScope),
 		PinnedModels:    base.PinnedModels, // global-only preference; project level ignored
 		MCPServers:      MergeMCPServers(base.MCPServers, override.MCPServers),
 		TrustedMCPPaths: base.TrustedMCPPaths, // global-only; persisted via SaveGlobalConfig
@@ -214,4 +216,26 @@ func MergeMCPServers(maps ...map[string]MCPServer) map[string]MCPServer {
 		return nil
 	}
 	return result
+}
+
+// ResolvePathScope determines the effective path scope from config values.
+// Priority:
+//  1. Explicit pathScope ("workspace" or "unrestricted") — use as-is
+//  2. Legacy disableSandbox: true → "unrestricted"
+//  3. Derive from permission mode:
+//     - "yolo" or "ask" → "unrestricted"
+//     - "auto" or "" → "workspace"
+func ResolvePathScope(pathScope string, disableSandbox bool, permMode string) string {
+	if pathScope == "workspace" || pathScope == "unrestricted" {
+		return pathScope
+	}
+	if disableSandbox {
+		return "unrestricted"
+	}
+	switch permMode {
+	case "yolo", "ask":
+		return "unrestricted"
+	default:
+		return "workspace"
+	}
 }

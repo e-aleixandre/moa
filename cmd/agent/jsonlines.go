@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/bus"
 )
 
 // jsonLineWriter emits agent events as JSON-lines to stdout.
@@ -15,9 +15,6 @@ import (
 type jsonLineWriter struct {
 	mu  sync.Mutex
 	enc *json.Encoder
-	// tool_execution_update sends accumulated result, not deltas.
-	// Track last length per toolCallId to compute delta.
-	toolOutputLens map[string]int
 
 	// Progress tracking
 	turnCount      int
@@ -28,105 +25,106 @@ type jsonLineWriter struct {
 
 func newJSONLineWriter() *jsonLineWriter {
 	return &jsonLineWriter{
-		enc:            json.NewEncoder(os.Stdout),
-		toolOutputLens: make(map[string]int),
-		filesTouched:   make(map[string]bool),
-		startTime:      time.Now(),
+		enc:          json.NewEncoder(os.Stdout),
+		filesTouched: make(map[string]bool),
+		startTime:    time.Now(),
 	}
 }
 
-func (w *jsonLineWriter) handle(e core.AgentEvent) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+// subscribeAll subscribes to all bus events via SubscribeAll for guaranteed
+// publication order (single goroutine). When done is non-nil, RunEnded is
+// delivered via a separate typed subscriber to avoid backpressure from
+// high-volume stream events dropping the completion signal.
+func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan<- bus.RunEnded) {
+	// Dedicated completion subscriber — isolated from streaming backpressure.
+	if done != nil {
+		b.Subscribe(func(e bus.RunEnded) { done <- e })
+	}
 
-	switch e.Type {
-	case core.AgentEventStart:
-		w.emit(map[string]any{"type": "agent_start"})
+	// Ordered rendering of all stream events.
+	b.SubscribeAll(func(event any) {
+		w.mu.Lock()
+		defer w.mu.Unlock()
 
-	case core.AgentEventTurnStart:
-		w.turnCount++
+		switch e := event.(type) {
+		case bus.AgentStarted:
+			w.emit(map[string]any{"type": "agent_start"})
 
-	case core.AgentEventEnd:
-		w.emitSummary()
-		w.emit(map[string]any{"type": "agent_end"})
+		case bus.TurnStarted:
+			w.turnCount++
 
-	case core.AgentEventError:
-		errMsg := ""
-		if e.Error != nil {
-			errMsg = e.Error.Error()
-		}
-		w.emit(map[string]any{"type": "agent_error", "error": errMsg})
+		case bus.AgentEnded:
+			w.emitSummary()
+			w.emit(map[string]any{"type": "agent_end"})
 
-	case core.AgentEventMessageUpdate:
-		if e.AssistantEvent == nil {
-			return
-		}
-		switch e.AssistantEvent.Type {
-		case core.ProviderEventTextDelta:
+		case bus.AgentError:
+			errMsg := ""
+			if e.Err != nil {
+				errMsg = e.Err.Error()
+			}
+			w.emit(map[string]any{"type": "agent_error", "error": errMsg})
+
+		case bus.TextDelta:
 			w.emit(map[string]any{
 				"type":       "message_update",
 				"event_type": "text_delta",
-				"delta":      e.AssistantEvent.Delta,
+				"delta":      e.Delta,
 			})
-		case core.ProviderEventThinkingDelta:
+
+		case bus.ThinkingDelta:
 			w.emit(map[string]any{
 				"type":       "message_update",
 				"event_type": "thinking_delta",
-				"delta":      e.AssistantEvent.Delta,
+				"delta":      e.Delta,
 			})
-		}
 
-	case core.AgentEventToolExecStart:
-		if e.ToolName == "edit" || e.ToolName == "write" {
-			if path, ok := e.Args["path"].(string); ok && path != "" {
-				w.filesTouched[path] = true
-			}
-		}
-		w.emit(map[string]any{
-			"type":         "tool_execution_start",
-			"tool_call_id": e.ToolCallID,
-			"tool_name":    e.ToolName,
-			"args":         e.Args,
-		})
+		case bus.ToolExecStarted:
+			w.trackFile(e.ToolName, e.Args)
+			w.emit(map[string]any{
+				"type":         "tool_execution_start",
+				"tool_call_id": e.ToolCallID,
+				"tool_name":    e.ToolName,
+				"args":         e.Args,
+			})
 
-	case core.AgentEventToolExecUpdate:
-		text := extractResultText(e.Result)
-		lastLen := w.toolOutputLens[e.ToolCallID]
-		if len(text) > lastLen {
-			delta := text[lastLen:]
-			w.toolOutputLens[e.ToolCallID] = len(text)
+		case bus.ToolExecUpdate:
 			w.emit(map[string]any{
 				"type":         "tool_execution_update",
 				"tool_call_id": e.ToolCallID,
-				"text":         delta,
+				"text":         e.Delta,
 			})
-		}
 
-	case core.AgentEventToolExecEnd:
-		delete(w.toolOutputLens, e.ToolCallID)
-		entry := map[string]any{
-			"type":         "tool_execution_end",
-			"tool_call_id": e.ToolCallID,
-			"tool_name":    e.ToolName,
-			"is_error":     e.IsError,
-		}
-		if e.Rejected {
-			entry["rejected"] = true
-			entry["reason"] = extractResultText(e.Result)
-		}
-		w.emit(entry)
-		if !e.IsError {
-			w.toolsCompleted++
-		}
-		w.emitProgress()
+		case bus.ToolExecEnded:
+			entry := map[string]any{
+				"type":         "tool_execution_end",
+				"tool_call_id": e.ToolCallID,
+				"tool_name":    e.ToolName,
+				"is_error":     e.IsError,
+			}
+			if e.Rejected {
+				entry["rejected"] = true
+				entry["reason"] = e.Result
+			}
+			w.emit(entry)
+			if !e.IsError {
+				w.toolsCompleted++
+			}
+			w.emitProgress()
 
-	case core.AgentEventCompactionStart:
-		w.emit(map[string]any{"type": "compaction_start"})
+		case bus.CompactionStarted:
+			w.emit(map[string]any{"type": "compaction_start"})
 
-	case core.AgentEventCompactionEnd:
-		w.emit(map[string]any{"type": "compaction_end"})
+		case bus.CompactionEnded:
+			w.emit(map[string]any{"type": "compaction_end"})
+		}
+	})
+}
 
-		// Ignored: turn_end, message_start, message_end, steer
+func (w *jsonLineWriter) trackFile(toolName string, args map[string]any) {
+	if toolName == "edit" || toolName == "write" {
+		if path, ok := args["path"].(string); ok && path != "" {
+			w.filesTouched[path] = true
+		}
 	}
 }
 
@@ -161,17 +159,4 @@ func (w *jsonLineWriter) sortedFiles() []string {
 
 func (w *jsonLineWriter) emit(v map[string]any) {
 	w.enc.Encode(v) //nolint:errcheck // stdout write — nothing useful to do on error
-}
-
-func extractResultText(r *core.Result) string {
-	if r == nil {
-		return ""
-	}
-	var s string
-	for _, c := range r.Content {
-		if c.Type == "text" {
-			s += c.Text
-		}
-	}
-	return s
 }
