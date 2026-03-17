@@ -30,8 +30,8 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 	if lvl := sctx.Agent.ThinkingLevel(); lvl != "" {
 		meta["thinking"] = lvl
 	}
-	if sctx.Gate != nil {
-		meta["permission_mode"] = string(sctx.Gate.Mode())
+	if g := sctx.GetGate(); g != nil {
+		meta["permission_mode"] = string(g.Mode())
 	} else {
 		meta["permission_mode"] = "yolo"
 	}
@@ -54,9 +54,9 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 	return meta
 }
 
-// registerPersistenceReactor subscribes to state-changing events and auto-saves.
+// RegisterPersistenceReactor subscribes to state-changing events and auto-saves.
 // Saves are serialized through a mutex to prevent concurrent Snapshot calls.
-func registerPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersister) {
+func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersister) {
 	var mu sync.Mutex
 	save := func() {
 		mu.Lock()

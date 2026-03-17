@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
 )
 
 // ReconfigureSession changes the model and/or thinking level of a session.
@@ -16,50 +16,43 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 		return nil, ErrNotFound
 	}
 
-	sess.mu.Lock()
-	if sess.State == StateRunning || sess.State == StatePermission {
-		sess.mu.Unlock()
+	state := sess.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission {
 		return nil, ErrBusy
 	}
 
-	// Resolve model (keep current if empty).
-	model := sess.runtime.resolvedModel
+	result := map[string]string{}
+
 	if modelSpec != "" {
-		model, _ = core.ResolveModel(modelSpec)
+		if err := sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec}); err != nil {
+			return nil, err
+		}
+		// Update infra model cache.
+		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+		sess.mu.Lock()
+		sess.infra.resolvedModel = model
+		sess.mu.Unlock()
+		result["model"] = modelDisplayName(model)
 	}
 
-	// Resolve thinking (keep current if empty).
-	thinkingLevel := sess.runtime.agent.ThinkingLevel()
 	if thinking != "" {
-		thinkingLevel = normalizeThinkingLevel(thinking)
-	}
-	sess.mu.Unlock()
-
-	// Create provider for the (possibly new) model.
-	prov, err := m.providerFactory(model)
-	if err != nil {
-		return nil, fmt.Errorf("provider: %w", err)
+		normalized := normalizeThinkingLevel(thinking)
+		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: normalized}); err != nil {
+			return nil, err
+		}
+		result["thinking"] = normalized
 	}
 
-	// Reconfigure the agent (strips thinking blocks on model change).
-	if err := sess.runtime.agent.Reconfigure(prov, model, thinkingLevel); err != nil {
-		return nil, err
+	// Fill in current values for non-changed fields.
+	if result["model"] == "" {
+		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+		result["model"] = modelDisplayName(model)
+	}
+	if result["thinking"] == "" {
+		t, _ := bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
+		result["thinking"] = t
 	}
 
-	sess.mu.Lock()
-	sess.runtime.resolvedModel = model
-	sess.Model = modelDisplayName(model)
-	result := map[string]string{
-		"model":    sess.Model,
-		"thinking": thinkingLevel,
-	}
-	sess.mu.Unlock()
-
-	sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
-		Model:    result["model"],
-		Thinking: result["thinking"],
-	}})
-	sess.broadcastContextUpdate()
 	return result, nil
 }
 
@@ -73,65 +66,30 @@ func normalizeThinkingLevel(level string) string {
 	}
 }
 
-// SetPermissionMode changes the permission mode for a session.
+// SetPermissionMode changes the permission mode for a session via bus command.
 func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
-	valid := map[string]permission.Mode{
-		"yolo": permission.ModeYolo,
-		"ask":  permission.ModeAsk,
-		"auto": permission.ModeAuto,
-	}
-	newMode, ok := valid[strings.ToLower(modeStr)]
-	if !ok {
-		return "", fmt.Errorf("invalid permission mode %q (options: yolo, ask, auto)", modeStr)
-	}
-
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", ErrNotFound
 	}
-
-	sess.mu.Lock()
-	if newMode == permission.ModeYolo {
-		// Stop existing bridge if running.
-		if sess.approvals.bridgeStop != nil {
-			close(sess.approvals.bridgeStop)
-			sess.approvals.bridgeStop = nil
-		}
-		sess.runtime.gate = nil
-	} else if sess.runtime.gate == nil {
-		// Transitioning from yolo → ask/auto: create new gate + bridge.
-		sess.runtime.gate = permission.New(newMode, permission.Config{})
-		sess.approvals.bridgeStop = make(chan struct{})
-		go sess.permissionBridge(sess.runtime.sessionCtx)
-	} else {
-		sess.runtime.gate.SetMode(newMode)
+	if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: modeStr}); err != nil {
+		return "", err
 	}
-	result := sess.permissionMode()
-	sess.mu.Unlock()
-
-	sess.broadcast(Event{Type: "config_change", Data: ConfigChangeData{
-		PermissionMode: result,
-	}})
-	sess.save()
-	return result, nil
+	mode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
+	return mode, nil
 }
 
-// Cancel aborts the running agent in a session.
+// Cancel aborts the running agent in a session via bus command.
 func (m *Manager) Cancel(sessionID string) error {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return ErrNotFound
 	}
-	sess.mu.Lock()
-	if sess.State != StateRunning && sess.State != StatePermission {
-		sess.mu.Unlock()
+
+	state := sess.runtime.State.Current()
+	if state != bus.StateRunning && state != bus.StatePermission {
 		return fmt.Errorf("session is not running")
 	}
-	cancel := sess.runCancel
-	sess.mu.Unlock()
 
-	if cancel != nil {
-		cancel()
-	}
-	return nil
+	return sess.runtime.Bus.Execute(bus.AbortRun{})
 }

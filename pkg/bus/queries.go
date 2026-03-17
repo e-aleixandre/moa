@@ -59,3 +59,11 @@ type PathPolicyInfo struct {
 	Scope         string
 	AllowedPaths  []string
 }
+
+// GetSessionError returns the last error message from the state machine.
+// Handler returns: string
+type GetSessionError struct{ SessionID string }
+
+// GetPendingApproval returns pending permission/ask info for WS init data.
+// Handler returns: PendingApprovalInfo
+type GetPendingApproval struct{ SessionID string }

@@ -193,3 +193,32 @@ func TestStateMachine_InitialState(t *testing.T) {
 		t.Fatalf("initial state = %q, want idle", sm.Current())
 	}
 }
+
+func TestStateMachine_LastError(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sm := NewStateMachine(b, "s1")
+
+	// Initially empty.
+	if sm.LastError() != "" {
+		t.Fatalf("initial lastError = %q, want empty", sm.LastError())
+	}
+
+	// Transition to running (no error).
+	_ = sm.Transition(StateRunning)
+	if sm.LastError() != "" {
+		t.Fatalf("after running, lastError = %q", sm.LastError())
+	}
+
+	// Transition to error with message.
+	_ = sm.TransitionWithError(StateError, "provider timeout")
+	if sm.LastError() != "provider timeout" {
+		t.Fatalf("lastError = %q, want 'provider timeout'", sm.LastError())
+	}
+
+	// Transition to idle clears error.
+	_ = sm.Transition(StateIdle)
+	if sm.LastError() != "" {
+		t.Fatalf("after idle, lastError = %q, want empty", sm.LastError())
+	}
+}

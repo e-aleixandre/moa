@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
@@ -30,6 +31,15 @@ type RuntimeConfig struct {
 	BaseSystemPrompt string
 	Persister        SessionPersister
 	SteerFilter      func(text string) bool
+
+	// GateConfig preserves allow/deny/rules/headless config for gate reconstruction
+	// when switching between permission modes at runtime.
+	GateConfig permission.Config
+
+	// InitialMessages/InitialCompactionEpoch load saved state into the agent
+	// at construction time (before any handlers fire). Used by session restore.
+	InitialMessages        []core.AgentMessage
+	InitialCompactionEpoch int
 }
 
 // SessionRuntime is a fully wired session: bus + state machine + bridge +
@@ -39,9 +49,10 @@ type SessionRuntime struct {
 	Bus   EventBus
 	State *StateMachine
 
-	sctx      *SessionContext
-	unsub     func()
-	closeOnce sync.Once
+	sctx              *SessionContext
+	unsub             func()
+	closeOnce         sync.Once
+	persisterAttached atomic.Bool
 }
 
 // NewSessionRuntime creates a fully wired session runtime.
@@ -68,6 +79,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 
 	b := NewLocalBus()
 	sm := NewStateMachine(b, cfg.SessionID)
+	am := NewApprovalManager(b, sm, cfg.SessionID)
 
 	sctx := &SessionContext{
 		SessionID:        cfg.SessionID,
@@ -75,36 +87,76 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		Bus:              b,
 		Agent:            cfg.Agent,
 		State:            sm,
+		Approvals:        am,
 		TaskStore:        cfg.TaskStore,
 		Checkpoints:      cfg.Checkpoints,
 		PlanMode:         cfg.PlanMode,
-		Gate:             cfg.Gate,
 		PathPolicy:       cfg.PathPolicy,
 		AskBridge:        cfg.AskBridge,
 		ProviderFactory:  cfg.ProviderFactory,
 		BaseSystemPrompt: cfg.BaseSystemPrompt,
 		SteerFilter:      cfg.SteerFilter,
+		GateConfig:       cfg.GateConfig,
+	}
+	sctx.SetGate(cfg.Gate)
+
+	// Compose permission check: plan mode filter + gate check.
+	permCheck := func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+		if sctx.PlanMode != nil {
+			if allowed, reason := sctx.PlanMode.FilterToolCall(name, args); !allowed {
+				return &core.ToolCallDecision{
+					Block:  true,
+					Reason: reason,
+					Kind:   core.ToolCallDecisionKindPolicy,
+				}
+			}
+		}
+		if g := sctx.GetGate(); g != nil {
+			return g.Check(ctx, name, args)
+		}
+		return nil
+	}
+	if err := cfg.Agent.SetPermissionCheck(permCheck); err != nil {
+		return nil, fmt.Errorf("bus: SetPermissionCheck: %w", err)
+	}
+
+	// Load initial state (session restore).
+	if cfg.InitialMessages != nil {
+		if err := cfg.Agent.LoadState(cfg.InitialMessages, cfg.InitialCompactionEpoch); err != nil {
+			return nil, fmt.Errorf("bus: LoadState: %w", err)
+		}
 	}
 
 	RegisterHandlers(sctx)
 	unsub := Bridge(sctx, cfg.Subscriber)
 
-	if cfg.Persister != nil {
-		registerPersistenceReactor(b, sctx, cfg.Persister)
-	}
-
-	return &SessionRuntime{
+	rt := &SessionRuntime{
 		ID:    cfg.SessionID,
 		Bus:   b,
 		State: sm,
 		sctx:  sctx,
 		unsub: unsub,
-	}, nil
+	}
+
+	if cfg.Persister != nil {
+		RegisterPersistenceReactor(b, sctx, cfg.Persister)
+		rt.persisterAttached.Store(true)
+	}
+
+	// Start approval bridges.
+	if cfg.Gate != nil {
+		am.StartPermissionBridge(cfg.Ctx, cfg.Gate)
+	}
+	if cfg.AskBridge != nil {
+		am.StartAskBridge(cfg.Ctx, cfg.AskBridge)
+	}
+
+	return rt, nil
 }
 
 // Close tears down the runtime. Idempotent.
-// Aborts any running agent, cancels the run context, unsubscribes from
-// agent events, and closes the bus.
+// Aborts any running agent, cancels the run context, stops approval bridges,
+// unsubscribes from agent events, and closes the bus.
 func (r *SessionRuntime) Close() {
 	r.closeOnce.Do(func() {
 		// Cancel run context FIRST so runCtx.Err() != nil before Agent.Abort()
@@ -112,6 +164,10 @@ func (r *SessionRuntime) Close() {
 		r.sctx.cancelRun()
 		// Abort running agent to prevent dangling goroutines.
 		r.sctx.Agent.Abort()
+		// Stop approval bridges (auto-denies pending permissions).
+		if r.sctx.Approvals != nil {
+			r.sctx.Approvals.Stop()
+		}
 		// Unsubscribe from agent events.
 		if r.unsub != nil {
 			r.unsub()
@@ -119,6 +175,15 @@ func (r *SessionRuntime) Close() {
 		// Close bus — subscribers drain and exit.
 		r.Bus.Close()
 	})
+}
+
+// AttachPersister registers a persistence reactor on this runtime.
+// Must be called at most once — panics on double call.
+func (r *SessionRuntime) AttachPersister(p SessionPersister) {
+	if !r.persisterAttached.CompareAndSwap(false, true) {
+		panic("bus: AttachPersister called more than once")
+	}
+	RegisterPersistenceReactor(r.Bus, r.sctx, p)
 }
 
 // Context returns the SessionContext. For testing and advanced use.

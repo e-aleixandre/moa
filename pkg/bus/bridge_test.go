@@ -12,6 +12,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
@@ -146,6 +147,29 @@ func (f *fakeAgent) Send(ctx context.Context, prompt string) ([]core.AgentMessag
 		f.messages = append(f.messages, f.sendResult...)
 	}
 	return f.messages, f.sendErr
+}
+
+func (f *fakeAgent) SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return f.Send(ctx, prompt)
+}
+
+func (f *fakeAgent) AppendMessage(msg core.AgentMessage) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.messages = append(f.messages, msg)
+	return nil
+}
+
+func (f *fakeAgent) SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error {
+	return nil
+}
+
+func (f *fakeAgent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.messages = msgs
+	f.compactionEpoch = compactionEpoch
+	return nil
 }
 
 func (f *fakeAgent) SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error) {
@@ -1488,5 +1512,270 @@ func TestHandler_ClearSession_FromError(t *testing.T) {
 	// State should be back to idle.
 	if sctx.State.Current() != StateIdle {
 		t.Fatalf("state = %q, want idle after clear", sctx.State.Current())
+	}
+}
+
+// ===========================================================================
+// New handler tests — SendPrompt with Custom, AppendToConversation,
+// SetPermissionMode, ResolvePermission, ResolveAskUser, queries
+// ===========================================================================
+
+func TestHandler_SendPrompt_WithCustom(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{
+		sendResult: []core.AgentMessage{
+			{Message: core.Message{Role: "assistant", Content: []core.Content{
+				{Type: "text", Text: "custom response"},
+			}}},
+		},
+	}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	gotRunEnded := make(chan RunEnded, 1)
+	b.Subscribe(func(e RunEnded) { gotRunEnded <- e })
+
+	if err := b.Execute(SendPrompt{
+		Text:   "hello",
+		Custom: map[string]any{"source": "subagent"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	re := waitForRunEnded(t, gotRunEnded, b)
+	if re.FinalText != "custom response" {
+		t.Fatalf("FinalText = %q", re.FinalText)
+	}
+}
+
+func TestHandler_AppendToConversation(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	msg := core.AgentMessage{
+		Message: core.Message{
+			Role:    "user",
+			Content: []core.Content{core.TextContent("shell output")},
+		},
+	}
+	if err := b.Execute(AppendToConversation{Message: msg}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := fa.Messages()
+	if len(msgs) != 1 || msgs[0].Role != "user" {
+		t.Fatalf("messages = %+v", msgs)
+	}
+}
+
+func TestHandler_SetPermissionMode_YoloToAsk(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.Approvals = NewApprovalManager(b, sctx.State, "test-session")
+	RegisterHandlers(sctx)
+
+	gotConfig := make(chan ConfigChanged, 1)
+	b.Subscribe(func(e ConfigChanged) { gotConfig <- e })
+
+	// Initially no gate (yolo).
+	if sctx.GetGate() != nil {
+		t.Fatal("expected nil gate initially")
+	}
+
+	// Switch to ask.
+	if err := b.Execute(SetPermissionMode{Mode: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+
+	e := drainChan(gotConfig, b, t)
+	if e.PermissionMode != "ask" {
+		t.Fatalf("PermissionMode = %q", e.PermissionMode)
+	}
+	if sctx.GetGate() == nil {
+		t.Fatal("expected gate to be created")
+	}
+
+	// Query should return ask.
+	mode, err := QueryTyped[GetPermissionMode, string](b, GetPermissionMode{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "ask" {
+		t.Fatalf("mode = %q", mode)
+	}
+}
+
+func TestHandler_SetPermissionMode_AskToYolo(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.Approvals = NewApprovalManager(b, sctx.State, "test-session")
+	RegisterHandlers(sctx)
+
+	// Set up ask mode first.
+	_ = b.Execute(SetPermissionMode{Mode: "ask"})
+	b.Drain(100 * time.Millisecond)
+
+	gotConfig := make(chan ConfigChanged, 2)
+	b.Subscribe(func(e ConfigChanged) { gotConfig <- e })
+
+	// Switch to yolo.
+	if err := b.Execute(SetPermissionMode{Mode: "yolo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	e := drainChan(gotConfig, b, t)
+	if e.PermissionMode != "yolo" {
+		t.Fatalf("PermissionMode = %q", e.PermissionMode)
+	}
+	if sctx.GetGate() != nil {
+		t.Fatal("expected gate to be nil after yolo")
+	}
+}
+
+func TestHandler_SetPermissionMode_Invalid(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	err := b.Execute(SetPermissionMode{Mode: "invalid"})
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+}
+
+func TestHandler_ResolvePermission(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	am := NewApprovalManager(b, sctx.State, "test-session")
+	sctx.Approvals = am
+	RegisterHandlers(sctx)
+
+	// Add pending permission.
+	respCh := make(chan permission.Response, 1)
+	am.mu.Lock()
+	am.perms["p1"] = &PendingPermission{
+		ID: "p1", ToolName: "write", response: respCh,
+	}
+	am.mu.Unlock()
+	sctx.State.ForceState(StatePermission)
+
+	if err := b.Execute(ResolvePermission{
+		PermissionID: "p1", Approved: true, Feedback: "ok",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case resp := <-respCh:
+		if !resp.Approved {
+			t.Fatal("expected approved")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandler_ResolveAskUser(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	am := NewApprovalManager(b, sctx.State, "test-session")
+	sctx.Approvals = am
+	RegisterHandlers(sctx)
+
+	respCh := make(chan []string, 1)
+	am.mu.Lock()
+	am.asks["a1"] = &PendingAsk{
+		ID: "a1", Questions: []AskQuestion{{Text: "Name?"}}, response: respCh,
+	}
+	am.mu.Unlock()
+
+	if err := b.Execute(ResolveAskUser{
+		AskID: "a1", Answers: []string{"Bob"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case answers := <-respCh:
+		if len(answers) != 1 || answers[0] != "Bob" {
+			t.Fatalf("answers = %v", answers)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestQuery_GetSessionError(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	// Initially empty.
+	errStr, err := QueryTyped[GetSessionError, string](b, GetSessionError{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errStr != "" {
+		t.Fatalf("initial error = %q", errStr)
+	}
+
+	// Set error state.
+	sctx.State.ForceState(StateRunning)
+	_ = sctx.State.TransitionWithError(StateError, "boom")
+
+	errStr, _ = QueryTyped[GetSessionError, string](b, GetSessionError{})
+	if errStr != "boom" {
+		t.Fatalf("error = %q, want boom", errStr)
+	}
+}
+
+func TestQuery_GetPendingApproval(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	am := NewApprovalManager(b, sctx.State, "test-session")
+	sctx.Approvals = am
+	RegisterHandlers(sctx)
+
+	// Empty initially.
+	info, err := QueryTyped[GetPendingApproval, PendingApprovalInfo](b, GetPendingApproval{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Permission != nil || info.Ask != nil {
+		t.Fatal("expected empty")
+	}
+
+	// Add pending permission.
+	respCh := make(chan permission.Response, 1)
+	am.mu.Lock()
+	am.perms["p1"] = &PendingPermission{
+		ID: "p1", ToolName: "write", AllowPattern: "write(*)", response: respCh,
+	}
+	am.mu.Unlock()
+
+	info, _ = QueryTyped[GetPendingApproval, PendingApprovalInfo](b, GetPendingApproval{})
+	if info.Permission == nil || info.Permission.ID != "p1" {
+		t.Fatal("expected permission p1")
+	}
+	if info.Permission.AllowPattern != "write(*)" {
+		t.Fatalf("AllowPattern = %q", info.Permission.AllowPattern)
 	}
 }

@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
@@ -33,7 +34,11 @@ type AgentController interface {
 	Reset() error
 	Compact(ctx context.Context) (*core.CompactionPayload, error)
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
+	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
+	AppendMessage(msg core.AgentMessage) error
+	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
+	LoadState(msgs []core.AgentMessage, compactionEpoch int) error
 
 	// Queries
 	Messages() []core.AgentMessage
@@ -57,27 +62,45 @@ type SessionContext struct {
 	SessionCtx context.Context // session lifetime context; cancelled on destroy
 	Bus        EventBus
 	Agent      AgentController
-	State      *StateMachine // may be nil for backward compat
+	State      *StateMachine      // may be nil for backward compat
+	Approvals  *ApprovalManager   // manages pending permissions/asks; may be nil
 
 	PlanMode    *planmode.PlanMode  // may be nil
 	TaskStore   *tasks.Store        // may be nil
 	Checkpoints *checkpoint.Store   // may be nil
-	Gate        *permission.Gate    // may be nil
 	PathPolicy  *tool.PathPolicy    // may be nil
 	AskBridge   *askuser.Bridge     // may be nil
 
 	ProviderFactory  func(core.Model) (core.Provider, error)
 	BaseSystemPrompt string
 
+	// GateConfig is used to reconstruct a Gate when switching from yolo
+	// to ask/auto. Preserves allow/deny patterns, rules, headless, etc.
+	GateConfig permission.Config
+
 	// SteerFilter returns false to suppress a steer event (e.g. subagent
 	// completion text in serve). If nil, all steers are published.
 	SteerFilter func(text string) bool
+
+	// Gate is swapped atomically by SetPermissionMode command.
+	// The Gate object itself is immutable between swaps — only the pointer changes.
+	gate atomic.Pointer[permission.Gate]
 
 	// Run context management — used by SendPrompt handler.
 	// Protected by runMu.
 	runMu     sync.Mutex
 	runCancel context.CancelFunc // cancels the current run context; nil when idle
 	runGen    uint64             // incremented each run; used to avoid clearing a newer run's cancel
+}
+
+// GetGate returns the current permission gate (may be nil for yolo mode).
+func (sctx *SessionContext) GetGate() *permission.Gate {
+	return sctx.gate.Load()
+}
+
+// SetGate atomically replaces the permission gate.
+func (sctx *SessionContext) SetGate(g *permission.Gate) {
+	sctx.gate.Store(g)
 }
 
 // newRunContext creates a per-run context derived from SessionCtx.

@@ -208,10 +208,11 @@ type SubagentCompleted struct {
 
 // PermissionRequested is published when a tool needs user approval.
 type PermissionRequested struct {
-	SessionID string
-	ID        string
-	ToolName  string
-	Args      map[string]any
+	SessionID    string
+	ID           string
+	ToolName     string
+	Args         map[string]any
+	AllowPattern string // glob pattern for "always allow"
 }
 
 // PermissionResolved is published when a pending permission is resolved.

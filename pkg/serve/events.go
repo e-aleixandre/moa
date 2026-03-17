@@ -1,6 +1,9 @@
 package serve
 
-import "github.com/ealeixandre/moa/pkg/core"
+import (
+	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
+)
 
 // Event is a JSON-serializable event sent to WebSocket clients.
 type Event struct {
@@ -28,15 +31,16 @@ type InitData struct {
 
 // PermissionData is a pending permission request.
 type PermissionData struct {
-	ID       string         `json:"id"`
-	ToolName string         `json:"tool_name"`
-	Args     map[string]any `json:"args"`
+	ID           string         `json:"id"`
+	ToolName     string         `json:"tool_name"`
+	Args         map[string]any `json:"args"`
+	AllowPattern string         `json:"allow_pattern,omitempty"`
 }
 
 // AskData is a pending ask_user request.
 type AskData struct {
-	ID        string `json:"id"`
-	Questions []askQ `json:"questions"`
+	ID        string            `json:"id"`
+	Questions []bus.AskQuestion `json:"questions"`
 }
 
 // StateChangeData is sent when the session state changes.

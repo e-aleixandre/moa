@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
@@ -202,10 +203,10 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnQuery(func(q GetPermissionMode) (string, error) {
-		if sctx.Gate == nil {
-			return "yolo", nil
+		if g := sctx.GetGate(); g != nil {
+			return string(g.Mode()), nil
 		}
-		return string(sctx.Gate.Mode()), nil
+		return "yolo", nil
 	})
 
 	b.OnQuery(func(q GetPathPolicy) (PathPolicyInfo, error) {
@@ -236,6 +237,9 @@ func RegisterHandlers(sctx *SessionContext) {
 
 	b.OnCommand(func(cmd SendPrompt) error {
 		return startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
+			if cmd.Custom != nil {
+				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
+			}
 			return sctx.Agent.Send(ctx, cmd.Text)
 		})
 	})
@@ -249,6 +253,130 @@ func RegisterHandlers(sctx *SessionContext) {
 			return sctx.Agent.SendWithContent(ctx, cmd.Content)
 		})
 	})
+
+	// -------------------------------------------------------------------
+	// AppendToConversation
+	// -------------------------------------------------------------------
+
+	b.OnCommand(func(cmd AppendToConversation) error {
+		return sctx.Agent.AppendMessage(cmd.Message)
+	})
+
+	// -------------------------------------------------------------------
+	// Permission management
+	// -------------------------------------------------------------------
+
+	b.OnCommand(func(cmd SetPermissionMode) error {
+		valid := map[string]permission.Mode{
+			"yolo": permission.ModeYolo,
+			"ask":  permission.ModeAsk,
+			"auto": permission.ModeAuto,
+		}
+		newMode, ok := valid[strings.ToLower(cmd.Mode)]
+		if !ok {
+			return fmt.Errorf("invalid permission mode %q (options: yolo, ask, auto)", cmd.Mode)
+		}
+
+		if newMode == permission.ModeYolo {
+			if sctx.Approvals != nil {
+				sctx.Approvals.StopPermissionBridge()
+			}
+			sctx.SetGate(nil)
+		} else if sctx.GetGate() == nil {
+			// Reconstruct gate with preserved config (allow/deny/rules/headless).
+			g := permission.New(newMode, sctx.GateConfig)
+			sctx.SetGate(g)
+			if sctx.Approvals != nil {
+				sctx.Approvals.StartPermissionBridge(sctx.SessionCtx, g)
+			}
+		} else {
+			sctx.GetGate().SetMode(newMode)
+		}
+
+		var modeStr string
+		if g := sctx.GetGate(); g != nil {
+			modeStr = string(g.Mode())
+		} else {
+			modeStr = "yolo"
+		}
+		sctx.Bus.Publish(ConfigChanged{
+			SessionID:      sctx.SessionID,
+			PermissionMode: modeStr,
+		})
+		return nil
+	})
+
+	b.OnCommand(func(cmd ResolvePermission) error {
+		if sctx.Approvals == nil {
+			return fmt.Errorf("approvals not available")
+		}
+		return sctx.Approvals.ResolvePermission(cmd.PermissionID, cmd.Approved, cmd.Feedback, cmd.AllowPattern)
+	})
+
+	b.OnCommand(func(cmd AddPermissionRule) error {
+		g := sctx.GetGate()
+		if g == nil {
+			return fmt.Errorf("no permission gate active")
+		}
+		if sctx.Approvals == nil {
+			return fmt.Errorf("approvals not available")
+		}
+		if err := sctx.Approvals.ValidatePending(cmd.PermissionID); err != nil {
+			return err
+		}
+		rule := strings.TrimSpace(cmd.Rule)
+		if rule == "" {
+			return fmt.Errorf("rule is required")
+		}
+		g.AddRule(rule)
+		return nil
+	})
+
+	b.OnCommand(func(cmd ResolveAskUser) error {
+		if sctx.Approvals == nil {
+			return fmt.Errorf("approvals not available")
+		}
+		return sctx.Approvals.ResolveAskUser(cmd.AskID, cmd.Answers)
+	})
+
+	// -------------------------------------------------------------------
+	// Additional queries
+	// -------------------------------------------------------------------
+
+	b.OnQuery(func(q GetSessionError) (string, error) {
+		if sctx.State == nil {
+			return "", nil
+		}
+		return sctx.State.LastError(), nil
+	})
+
+	b.OnQuery(func(q GetPendingApproval) (PendingApprovalInfo, error) {
+		if sctx.Approvals == nil {
+			return PendingApprovalInfo{}, nil
+		}
+		return sctx.Approvals.PendingInfo(), nil
+	})
+
+	// -------------------------------------------------------------------
+	// ContextUpdated reactor — publishes context usage after state changes
+	// -------------------------------------------------------------------
+
+	publishContextUpdate := func() {
+		model := sctx.Agent.Model()
+		if model.MaxInput <= 0 {
+			return
+		}
+		msgs := sctx.Agent.Messages()
+		est := core.EstimateContextTokens(msgs, "", nil, sctx.Agent.CompactionEpoch())
+		pct := (est.Tokens * 100) / model.MaxInput
+		if pct > 100 {
+			pct = 100
+		}
+		sctx.Bus.Publish(ContextUpdated{SessionID: sctx.SessionID, Percent: pct})
+	}
+	b.Subscribe(func(e RunEnded) { publishContextUpdate() })
+	b.Subscribe(func(e CommandExecuted) { publishContextUpdate() })
+	b.Subscribe(func(e ConfigChanged) { publishContextUpdate() })
 }
 
 // startRun is the shared implementation for SendPrompt and SendPromptWithContent.

@@ -53,7 +53,7 @@ func TestPersistenceReactor_SavesOnRunEnded(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	fp := &fakePersister{}
 
-	registerPersistenceReactor(b, sctx, fp)
+	RegisterPersistenceReactor(b, sctx, fp)
 
 	b.Publish(RunEnded{SessionID: "s1"})
 	b.Drain(time.Second)
@@ -74,7 +74,7 @@ func TestPersistenceReactor_SavesOnConfigChanged(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	fp := &fakePersister{}
 
-	registerPersistenceReactor(b, sctx, fp)
+	RegisterPersistenceReactor(b, sctx, fp)
 
 	b.Publish(ConfigChanged{SessionID: "s1", Model: "gpt-5"})
 	b.Drain(time.Second)
@@ -91,7 +91,7 @@ func TestPersistenceReactor_SavesOnCommandExecuted(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	fp := &fakePersister{}
 
-	registerPersistenceReactor(b, sctx, fp)
+	RegisterPersistenceReactor(b, sctx, fp)
 
 	b.Publish(CommandExecuted{SessionID: "s1", Command: "compact"})
 	b.Drain(time.Second)
@@ -108,7 +108,7 @@ func TestPersistenceReactor_SavesOnTasksUpdated(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	fp := &fakePersister{}
 
-	registerPersistenceReactor(b, sctx, fp)
+	RegisterPersistenceReactor(b, sctx, fp)
 
 	b.Publish(TasksUpdated{SessionID: "s1"})
 	b.Drain(time.Second)
@@ -125,7 +125,7 @@ func TestPersistenceReactor_SavesOnCompactionEnded(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	fp := &fakePersister{}
 
-	registerPersistenceReactor(b, sctx, fp)
+	RegisterPersistenceReactor(b, sctx, fp)
 
 	b.Publish(CompactionEnded{SessionID: "s1"})
 	b.Drain(time.Second)
@@ -142,7 +142,7 @@ func TestPersistenceReactor_MultipleTriggers(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	fp := &fakePersister{}
 
-	registerPersistenceReactor(b, sctx, fp)
+	RegisterPersistenceReactor(b, sctx, fp)
 
 	// Rapid-fire events — all should be serialized.
 	b.Publish(RunEnded{})

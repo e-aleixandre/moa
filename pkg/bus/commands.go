@@ -7,9 +7,11 @@ import "github.com/ealeixandre/moa/pkg/core"
 // ---------------------------------------------------------------------------
 
 // SendPrompt starts an agent run with a text prompt.
+// If Custom is non-nil, SendWithCustom is used instead of Send.
 type SendPrompt struct {
 	SessionID string
 	Text      string
+	Custom    map[string]any
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).
@@ -22,6 +24,12 @@ type SendPromptWithContent struct {
 type SteerAgent struct {
 	SessionID string
 	Text      string
+}
+
+// AppendToConversation adds a message to the conversation without running the agent.
+type AppendToConversation struct {
+	SessionID string
+	Message   core.AgentMessage
 }
 
 // AbortRun cancels a running agent.
@@ -135,6 +143,15 @@ type ResolvePermission struct {
 	Approved     bool
 	Feedback     string
 	AllowPattern string
+}
+
+// AddPermissionRule adds a natural-language rule to auto-mode while a
+// permission request is pending. The request stays open — the user can
+// still approve/deny. This is NOT "always allow this request".
+type AddPermissionRule struct {
+	SessionID    string
+	PermissionID string
+	Rule         string
 }
 
 // ResolveAskUser resolves a pending ask_user prompt.

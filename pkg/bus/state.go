@@ -26,10 +26,11 @@ var validTransitions = map[SessionState]map[SessionState]bool{
 // StateMachine manages session state with validated transitions.
 // Thread-safe. Publishes StateChanged events on every transition.
 type StateMachine struct {
-	mu      sync.Mutex
-	current SessionState
-	bus     EventBus
-	sid     string
+	mu        sync.Mutex
+	current   SessionState
+	lastError string // most recent error message; cleared on non-error transition
+	bus       EventBus
+	sid       string
 }
 
 // NewStateMachine creates a new state machine starting in StateIdle.
@@ -45,10 +46,11 @@ func (sm *StateMachine) Current() SessionState {
 }
 
 // Transition moves to a new state. Returns error if the transition is invalid.
-// Publishes StateChanged on success.
+// Publishes StateChanged on success. Clears lastError.
 func (sm *StateMachine) Transition(to SessionState) error {
 	return sm.TransitionWithError(to, "")
 }
+
 
 // TransitionWithError moves to a new state with an optional error message.
 // Returns error if the transition is invalid. Publishes StateChanged on success.
@@ -59,12 +61,21 @@ func (sm *StateMachine) TransitionWithError(to SessionState, errMsg string) erro
 		return fmt.Errorf("invalid state transition: %s → %s", sm.current, to)
 	}
 	sm.current = to
+	sm.lastError = errMsg
 	sm.bus.Publish(StateChanged{
 		SessionID: sm.sid,
 		State:     string(to),
 		Error:     errMsg,
 	})
 	return nil
+}
+
+// LastError returns the most recent error message. Empty if last transition
+// was non-error or after a clear transition.
+func (sm *StateMachine) LastError() string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	return sm.lastError
 }
 
 // MustTransition panics on invalid transitions. Use in code paths where
