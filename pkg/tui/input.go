@@ -153,6 +153,59 @@ func (m inputModel) View() string {
 	return style.Render(m.textarea.View())
 }
 
+// CursorByteOffset returns the approximate byte offset of the cursor in Value().
+// Uses Line() for the row and LineInfo().CharOffset for the column within the row.
+func (m *inputModel) CursorByteOffset() int {
+	val := m.textarea.Value()
+	row := m.textarea.Line()
+	col := m.textarea.LineInfo().CharOffset
+
+	// Walk through lines to find the start of the cursor row.
+	offset := 0
+	currentRow := 0
+	for i, ch := range val {
+		if currentRow == row {
+			offset = i
+			break
+		}
+		if ch == '\n' {
+			currentRow++
+		}
+	}
+	if currentRow < row {
+		// Cursor is past the last newline — at end of text.
+		return len(val)
+	}
+
+	// Advance by col runes within the row.
+	runeCount := 0
+	for i := offset; i < len(val); i++ {
+		if val[i] == '\n' || runeCount >= col {
+			break
+		}
+		// Count runes (simplified for ASCII-heavy paths).
+		if val[i]&0x80 == 0 {
+			runeCount++
+			offset = i + 1
+		} else {
+			// Multi-byte rune — skip continuation bytes.
+			var size int
+			if val[i]&0xE0 == 0xC0 {
+				size = 2
+			} else if val[i]&0xF0 == 0xE0 {
+				size = 3
+			} else {
+				size = 4
+			}
+			runeCount++
+			offset = i + size
+			i += size - 1
+		}
+	}
+
+	return offset
+}
+
 // --- Command parsing ---
 
 // knownCommands is the whitelist of recognized /commands.

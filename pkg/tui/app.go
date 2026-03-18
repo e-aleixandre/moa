@@ -102,6 +102,7 @@ type appModel struct {
 	pickerPurpose  pickerPurpose
 	thinkingPicker thinkingPicker
 	cmdPalette     cmdPalette
+	filePicker     filePicker
 	permPrompt     permissionPrompt
 	askPrompt      askPrompt
 	sessionBrowser sessionBrowser
@@ -223,6 +224,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		memoryStore:          cfg.MemoryStore,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber},
 	}
+	m.filePicker.SetWorkDir(cfg.CWD)
 
 	// Query initial state from bus for display.
 	b := cfg.Runtime.Bus
@@ -621,6 +623,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
+		if m.filePicker.active {
+			m.filePicker.Close()
+			return m, m.forceRepaint()
+		}
 		if m.cmdPalette.active {
 			m.cmdPalette.Close()
 			m.input.textarea.Reset()
@@ -639,9 +645,6 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.s.running {
 			_ = m.runtime.Bus.Execute(bus.AbortRun{})
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "status", Raw: "(interrupted)",
-			})
 			return m, nil
 		}
 		if msg.Type == tea.KeyCtrlC {
@@ -755,6 +758,14 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Alt {
 			break
 		}
+		if m.filePicker.active {
+			selected := m.filePicker.Selected()
+			m.filePicker.Close()
+			if selected != "" {
+				m.acceptFileMention(selected)
+			}
+			return m, m.forceRepaint()
+		}
 		if m.s.running {
 			text := m.input.Submit()
 			if text == "" {
@@ -814,6 +825,14 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyTab:
+		if m.filePicker.active {
+			selected := m.filePicker.Selected()
+			m.filePicker.Close()
+			if selected != "" {
+				m.acceptFileMention(selected)
+			}
+			return m, m.forceRepaint()
+		}
 		if m.cmdPalette.active {
 			selected := m.cmdPalette.Selected()
 			m.cmdPalette.Close()
@@ -824,8 +843,36 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.forceRepaint()
 		}
+		// Tab path completion when not in any picker.
+		if !m.s.running {
+			text := m.input.textarea.Value()
+			cursorPos := m.input.CursorByteOffset()
+			if newText, newCursor, ok := tabCompletePath(text, cursorPos, m.cwd); ok {
+				m.input.textarea.SetValue(newText)
+				_ = newCursor // SetValue resets cursor; move to end
+				m.input.textarea.CursorEnd()
+				return m, nil
+			}
+		}
 
 	case tea.KeyUp:
+		if m.filePicker.active {
+			m.filePicker.MoveUp()
+			return m, nil
+		}
+		if msg.Alt && len(m.s.queuedSteers) > 0 {
+			// Alt+Up: pull queued steers back into the input for editing/cancelling.
+			combined := strings.Join(m.s.queuedSteers, "\n")
+			m.s.queuedSteers = nil
+			current := m.input.textarea.Value()
+			if current != "" {
+				combined = current + "\n" + combined
+			}
+			m.input.textarea.SetValue(combined)
+			m.input.textarea.CursorEnd()
+			m.updateViewport()
+			return m, nil
+		}
 		if m.cmdPalette.active {
 			m.cmdPalette.MoveUp()
 			return m, nil
@@ -836,6 +883,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyDown:
+		if m.filePicker.active {
+			m.filePicker.MoveDown()
+			return m, nil
+		}
 		if m.cmdPalette.active {
 			m.cmdPalette.MoveDown()
 			return m, nil
@@ -849,9 +900,45 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	if m.s.streamState == stateIdle {
-		m.cmdPalette.Update(m.input.textarea.Value())
+		val := m.input.textarea.Value()
+		m.cmdPalette.Update(val)
+		if !m.cmdPalette.active {
+			m.filePicker.Update(val, m.input.CursorByteOffset())
+		} else {
+			m.filePicker.Close()
+		}
 	}
 	return m, cmd
+}
+
+// acceptFileMention replaces the @filter token in the input with the selected file path.
+func (m *appModel) acceptFileMention(path string) {
+	text := m.input.textarea.Value()
+	cursorPos := m.input.CursorByteOffset()
+
+	// Find the @ that started this mention (walk backwards from cursor).
+	atIdx := -1
+	for i := cursorPos - 1; i >= 0; i-- {
+		if text[i] == '@' {
+			atIdx = i
+			break
+		}
+		if text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r' {
+			break
+		}
+	}
+
+	if atIdx < 0 {
+		// Fallback: just append.
+		m.input.textarea.SetValue(text + path + " ")
+		m.input.textarea.CursorEnd()
+		return
+	}
+
+	// Replace @filter with the path.
+	newText := text[:atIdx] + path + " " + text[cursorPos:]
+	m.input.textarea.SetValue(newText)
+	m.input.textarea.CursorEnd()
 }
 
 // --- Bus event handling ---
@@ -1172,6 +1259,19 @@ func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.C
 func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 	// No gen bump needed — RunStarted sets the gen for the next run.
 	// Events are ordered through eventCh, so no late events arrive after RunEnded.
+
+	// Materialize any in-flight stream content into blocks.
+	// This happens when the run was interrupted before MessageEnded arrived.
+	if m.s.thinkingText != "" {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "thinking", Raw: m.s.thinkingText,
+		})
+	}
+	if m.s.streamText != "" {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "assistant", Raw: m.s.streamText,
+		})
+	}
 
 	// Query messages for reconciliation.
 	msgs := m.currentMessages()

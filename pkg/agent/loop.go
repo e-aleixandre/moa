@@ -223,6 +223,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Consume stream, build assistant message, emit events
 		assistantMsg, err := consumeStream(ctx, ch, cfg.emitter)
 		if err != nil {
+			// On cancellation, save partial content so it persists in session.
+			if assistantMsg != nil && ctx.Err() != nil {
+				cfg.state.Messages = append(cfg.state.Messages, core.WrapMessage(*assistantMsg))
+			}
 			loopErr = fmt.Errorf("stream: %w", err)
 			return loopErr
 		}
@@ -311,9 +315,53 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *Emitter) (*core.Message, error) {
 	var finalMsg *core.Message
 
+	// Accumulate partial content so we can return it on cancellation.
+	var partialText string
+	var partialThinking string
+
 	for {
 		select {
 		case <-ctx.Done():
+			// Drain any remaining buffered events from the channel.
+			// Use a short timeout — the provider goroutine may not close
+			// the channel promptly after context cancellation.
+			drainTimer := time.NewTimer(100 * time.Millisecond)
+			defer drainTimer.Stop()
+		drain:
+			for {
+				select {
+				case event, ok := <-ch:
+					if !ok {
+						break drain
+					}
+					switch event.Type {
+					case core.ProviderEventTextDelta:
+						partialText += event.Delta
+					case core.ProviderEventThinkingDelta:
+						partialThinking += event.Delta
+					case core.ProviderEventDone:
+						if event.Message != nil {
+							return event.Message, nil
+						}
+					}
+				case <-drainTimer.C:
+					break drain
+				}
+			}
+			// Build a partial message from accumulated deltas.
+			if partialText != "" || partialThinking != "" {
+				partial := &core.Message{Role: "assistant"}
+				if partialThinking != "" {
+					partial.Content = append(partial.Content, core.Content{
+						Type:     "thinking",
+						Thinking: partialThinking,
+					})
+				}
+				if partialText != "" {
+					partial.Content = append(partial.Content, core.TextContent(partialText))
+				}
+				return partial, ctx.Err()
+			}
 			return nil, ctx.Err()
 		case event, ok := <-ch:
 			if !ok {
@@ -338,6 +386,10 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 						Message: core.WrapMessage(*event.Partial),
 					})
 				}
+			case core.ProviderEventTextDelta:
+				partialText += event.Delta
+			case core.ProviderEventThinkingDelta:
+				partialThinking += event.Delta
 			case core.ProviderEventDone:
 				finalMsg = event.Message
 				if finalMsg != nil {

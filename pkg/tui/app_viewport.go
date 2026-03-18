@@ -131,6 +131,9 @@ func (m *appModel) buildBottomChrome() string {
 	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
 		parts = append(parts, pv)
 	}
+	if fv := m.filePicker.View(m.width, ActiveTheme); fv != "" {
+		parts = append(parts, fv)
+	}
 
 	return strings.Join(parts, "\n")
 }
