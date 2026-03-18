@@ -123,6 +123,14 @@ func (p *filePicker) Selected() string {
 	return p.matches[p.cursor].path
 }
 
+// SelectedIsDir returns true if the highlighted entry is a directory.
+func (p *filePicker) SelectedIsDir() bool {
+	if !p.active || len(p.matches) == 0 {
+		return false
+	}
+	return p.matches[p.cursor].isDir
+}
+
 func (p *filePicker) Close() {
 	p.active = false
 	p.filter = ""

@@ -759,6 +759,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.filePicker.active {
+			if m.filePicker.SelectedIsDir() {
+				m.navigateFilePicker()
+				return m, m.forceRepaint()
+			}
 			selected := m.filePicker.Selected()
 			m.filePicker.Close()
 			if selected != "" {
@@ -826,6 +830,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyTab:
 		if m.filePicker.active {
+			if m.filePicker.SelectedIsDir() {
+				m.navigateFilePicker()
+				return m, m.forceRepaint()
+			}
 			selected := m.filePicker.Selected()
 			m.filePicker.Close()
 			if selected != "" {
@@ -928,17 +936,43 @@ func (m *appModel) acceptFileMention(path string) {
 		}
 	}
 
+	// Add trailing space unless path ends with / (navigating into directory).
+	suffix := " "
+	if strings.HasSuffix(path, "/") {
+		suffix = ""
+	}
+
 	if atIdx < 0 {
 		// Fallback: just append.
-		m.input.textarea.SetValue(text + path + " ")
+		m.input.textarea.SetValue(text + path + suffix)
 		m.input.textarea.CursorEnd()
 		return
 	}
 
-	// Replace @filter with the path.
-	newText := text[:atIdx] + path + " " + text[cursorPos:]
+	// Keep @ when navigating into dirs so the picker stays active.
+	// Remove @ when accepting a final file.
+	prefix := ""
+	if strings.HasSuffix(path, "/") {
+		prefix = "@"
+	}
+	newText := text[:atIdx] + prefix + path + suffix + text[cursorPos:]
 	m.input.textarea.SetValue(newText)
 	m.input.textarea.CursorEnd()
+}
+
+// navigateFilePicker enters a selected directory: updates the @token to include
+// the directory path and re-triggers the file picker to show its contents.
+func (m *appModel) navigateFilePicker() {
+	selected := m.filePicker.Selected()
+	if selected == "" {
+		return
+	}
+	// Replace the @filter with @dir/ so the picker re-opens showing dir contents.
+	m.acceptFileMention(selected + "/")
+
+	// Re-trigger the file picker with the updated text.
+	val := m.input.textarea.Value()
+	m.filePicker.Update(val, m.input.CursorByteOffset())
 }
 
 // --- Bus event handling ---
