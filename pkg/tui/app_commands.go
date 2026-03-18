@@ -1071,6 +1071,7 @@ func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 				blk.ToolResult = msg.Output
 				blk.ToolDone = true
 				blk.IsError = msg.IsError
+				blk.touch()
 				break
 			}
 		}

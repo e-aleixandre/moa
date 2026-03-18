@@ -220,9 +220,11 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 		case "thinking":
 			if entries[entryIdx].thinking != "" {
 				m.s.blocks[i].Raw = entries[entryIdx].thinking
+				m.s.blocks[i].touch()
 			}
 		case "assistant":
 			m.s.blocks[i].Raw = entries[entryIdx].text
+			m.s.blocks[i].touch()
 			entryIdx++
 		}
 	}

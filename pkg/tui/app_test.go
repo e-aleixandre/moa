@@ -848,12 +848,12 @@ func TestRenderSingleBlock_HidesThinkingWhenDisabled(t *testing.T) {
 	r := newRenderer(80)
 	block := messageBlock{Type: "thinking", Raw: "some thinking"}
 
-	result := renderSingleBlock(block, r, false)
+	result := renderSingleBlock(&block, r, false)
 	if result != "" {
 		t.Errorf("expected empty for hidden thinking, got %q", result)
 	}
 
-	result = renderSingleBlock(block, r, true)
+	result = renderSingleBlock(&block, r, true)
 	if result == "" {
 		t.Error("expected non-empty for visible thinking")
 	}
@@ -863,7 +863,7 @@ func TestRenderSingleBlock_UnknownType(t *testing.T) {
 	r := newRenderer(80)
 	block := messageBlock{Type: "unknown", Raw: "data"}
 
-	result := renderSingleBlock(block, r, true)
+	result := renderSingleBlock(&block, r, true)
 	if result != "" {
 		t.Errorf("expected empty for unknown type, got %q", result)
 	}
@@ -1129,7 +1129,7 @@ func TestRenderToolBlock_HasInternalPadding(t *testing.T) {
 		ToolDone: true, ToolResult: "/home",
 	}
 	r := newRenderer(80)
-	rendered := renderSingleBlock(block, r, false)
+	rendered := renderSingleBlock(&block, r, false)
 	lines := strings.Split(rendered, "\n")
 	// Should have padding lines (empty bg) at top and bottom
 	if len(lines) < 4 {
@@ -1284,14 +1284,14 @@ func TestLayoutSwap_DifferentOutput(t *testing.T) {
 
 	// Split layout: should have "YOU" label
 	_ = SetLayoutDirect(&SplitLayout{})
-	splitOut := renderSingleBlock(block, r, false)
+	splitOut := renderSingleBlock(&block, r, false)
 	if !strings.Contains(splitOut, "YOU") {
 		t.Error("split layout should render YOU label")
 	}
 
 	// Flat layout: should have "❯" prefix, no "YOU"
 	_ = SetLayoutDirect(&FlatLayout{})
-	flatOut := renderSingleBlock(block, r, false)
+	flatOut := renderSingleBlock(&block, r, false)
 	if !strings.Contains(flatOut, "❯") {
 		t.Error("flat layout should render ❯ prefix")
 	}

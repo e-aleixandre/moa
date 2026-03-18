@@ -310,6 +310,7 @@ func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, te
 				b.ToolDone = true
 				b.IsError = true
 				b.ToolResult = "Review failed: " + msg.Err.Error()
+				b.touch()
 				break
 			}
 		}
@@ -321,6 +322,7 @@ func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, te
 			if b.Type == "tool" && b.ToolName == "plan_review" && !b.ToolDone {
 				b.ToolDone = true
 				b.ToolResult = msg.Result.Feedback
+				b.touch()
 				break
 			}
 		}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
@@ -33,7 +34,20 @@ type messageBlock struct {
 	SubagentStatus string // "completed", "failed", "cancelled"
 	SubagentTask   string // original task description
 	SubagentResult string // full result text (for expand)
+
+	// Render cache — avoids re-rendering immutable blocks every frame.
+	// Invalidated when version changes (block mutation) or width/layout changes.
+	version       uint32 // incremented on every mutation
+	cachedRender  string // last rendered string
+	cachedWidth   int    // width used for cachedRender
+	cachedVersion uint32 // version used for cachedRender
+	cachedExpand  bool   // expanded flag used for cachedRender
+	cachedThink   bool   // showThinking flag used for cachedRender
+	cachedLayout  string // layout name used for cachedRender
 }
+
+// touch increments the block's version, invalidating any cached render.
+func (b *messageBlock) touch() { b.version++ }
 
 // renderer caches the glamour TermRenderer. Recreated only on width change.
 type renderer struct {
@@ -83,11 +97,34 @@ func FormatUserMessage(text string) string {
 
 // --- Block rendering ---
 
-func renderSingleBlock(block messageBlock, r *renderer, showThinking bool) string {
-	return renderSingleBlockEx(block, r, showThinking, false)
+func renderSingleBlock(block *messageBlock, r *renderer, showThinking bool) string {
+	return renderSingleBlockCached(block, r, showThinking, false)
 }
 
-func renderSingleBlockEx(block messageBlock, r *renderer, showThinking bool, expanded bool) string {
+// renderSingleBlockCached returns a cached render if the block, width, and
+// display flags haven't changed since the last call. Otherwise re-renders
+// and updates the cache.
+func renderSingleBlockCached(block *messageBlock, r *renderer, showThinking bool, expanded bool) string {
+	layoutName := fmt.Sprintf("%T", GetActiveLayout())
+	if block.cachedRender != "" &&
+		block.cachedVersion == block.version &&
+		block.cachedWidth == r.width &&
+		block.cachedExpand == expanded &&
+		block.cachedThink == showThinking &&
+		block.cachedLayout == layoutName {
+		return block.cachedRender
+	}
+	s := renderSingleBlockImpl(*block, r, showThinking, expanded)
+	block.cachedRender = s
+	block.cachedVersion = block.version
+	block.cachedWidth = r.width
+	block.cachedExpand = expanded
+	block.cachedThink = showThinking
+	block.cachedLayout = layoutName
+	return s
+}
+
+func renderSingleBlockImpl(block messageBlock, r *renderer, showThinking bool, expanded bool) string {
 	l := GetActiveLayout()
 	t := ActiveTheme
 	w := r.width
@@ -124,8 +161,8 @@ func renderSingleBlockEx(block messageBlock, r *renderer, showThinking bool, exp
 // and Ctrl+O reprint (expanded=true).
 func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool, expanded bool) string {
 	var parts []string
-	for _, block := range blocks {
-		if s := renderSingleBlockEx(block, r, showThinking, expanded); s != "" {
+	for i := range blocks {
+		if s := renderSingleBlockCached(&blocks[i], r, showThinking, expanded); s != "" {
 			parts = append(parts, s)
 		}
 	}

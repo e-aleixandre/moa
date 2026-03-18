@@ -35,7 +35,11 @@ func (m *appModel) resizeViewport() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	chromeH := m.computeChromeHeight()
+	// Build chrome once — reused by View() and for height measurement.
+	m.s.chromeCache = m.buildBottomChrome()
+	m.s.chromeCacheDirty = false
+
+	chromeH := lipgloss.Height(m.s.chromeCache) + 1 // +1 gap
 	vpH := m.height - chromeH
 	if vpH < 1 {
 		vpH = 1
@@ -47,71 +51,87 @@ func (m *appModel) resizeViewport() {
 	}
 }
 
-// computeChromeHeight returns the total lines used by non-viewport chrome.
-// Must match View()'s bottom chrome components exactly.
-func (m *appModel) computeChromeHeight() int {
-	h := 0
+// bottomChrome returns the cached bottom chrome string, rebuilding if dirty.
+func (m *appModel) bottomChrome() string {
+	if m.s.chromeCacheDirty {
+		m.s.chromeCache = m.buildBottomChrome()
+		m.s.chromeCacheDirty = false
+	}
+	return m.s.chromeCache
+}
+
+// buildBottomChrome renders all bottom chrome components into a single string.
+func (m *appModel) buildBottomChrome() string {
+	var parts []string
 
 	l := GetActiveLayout()
 	if sv := m.status.View(); sv != "" {
-		h += lipgloss.Height(sv)
+		parts = append(parts, sv)
 	}
 	if m.s.pendingStatus != "" {
-		h += lipgloss.Height(l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
+		parts = append(parts, l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
 	}
 	if m.s.pendingTimeline != nil {
-		h += lipgloss.Height(l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
+		parts = append(parts, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
 	}
 	if m.s.asyncSubagents > 0 {
-		h++
+		label := fmt.Sprintf("⟳ %d subagent running", m.s.asyncSubagents)
+		if m.s.asyncSubagents > 1 {
+			label = fmt.Sprintf("⟳ %d subagents running", m.s.asyncSubagents)
+		}
+		parts = append(parts, l.RenderLiveNotice(label, m.width, ActiveTheme))
 	}
-	// Task widget height.
+	// Task widget.
 	if m.runtime != nil {
 		if taskList, err := bus.QueryTyped[bus.GetTasks, []tasks.Task](m.runtime.Bus, bus.GetTasks{}); err == nil && len(taskList) > 0 {
 			if tv := m.taskWidget.View(taskList, m.taskWidgetMode, m.width); tv != "" {
-				h += lipgloss.Height(tv)
+				parts = append(parts, tv)
 			}
 		}
 	}
 	if len(m.s.queuedSteers) > 0 {
-		h++ // renderQueuedSteers is always one line
+		parts = append(parts, m.renderQueuedSteers())
 	}
+
 	if m.permPrompt.active {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
-			h += lipgloss.Height(pv)
+			parts = append(parts, pv)
 		}
 	} else if m.askPrompt.active {
 		if av := m.askPrompt.View(m.width, ActiveTheme); av != "" {
-			h += lipgloss.Height(av)
+			parts = append(parts, av)
 		}
 	} else if m.picker.active {
 		if pv := m.picker.View(m.width); pv != "" {
-			h += lipgloss.Height(pv)
+			parts = append(parts, pv)
 		}
 	} else if m.thinkingPicker.active {
 		if pv := m.thinkingPicker.View(m.width, ActiveTheme); pv != "" {
-			h += lipgloss.Height(pv)
+			parts = append(parts, pv)
 		}
 	} else if m.planMenu.active {
 		if pv := m.planMenu.View(m.width, ActiveTheme); pv != "" {
-			h += lipgloss.Height(pv)
+			parts = append(parts, pv)
+		}
+	} else if m.settingsMenu.active {
+		if sv := m.settingsMenu.View(m.width, ActiveTheme); sv != "" {
+			parts = append(parts, sv)
 		}
 	} else {
 		if iv := m.input.View(); iv != "" {
-			h += lipgloss.Height(iv)
+			parts = append(parts, iv)
 		}
 	}
 	if m.statusBar != nil {
 		if tv := m.statusBar.View(m.width); tv != "" {
-			h += lipgloss.Height(tv)
+			parts = append(parts, tv)
 		}
 	}
 	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
-		h += lipgloss.Height(pv)
+		parts = append(parts, pv)
 	}
 
-	h++ // gap between viewport and bottom chrome
-	return h
+	return strings.Join(parts, "\n")
 }
 
 // renderViewportContent renders blocks for the viewport (last N turns + streaming).
@@ -119,8 +139,8 @@ func (m *appModel) renderViewportContent() string {
 	blocks := m.visibleBlocks()
 
 	var parts []string
-	for _, block := range blocks {
-		if s := renderSingleBlockEx(block, m.renderer, m.s.showThinking, m.s.expanded); s != "" {
+	for i := range blocks {
+		if s := renderSingleBlockCached(&blocks[i], m.renderer, m.s.showThinking, m.s.expanded); s != "" {
 			parts = append(parts, s)
 		}
 	}
@@ -228,12 +248,28 @@ func parseSubagentNotification(text string) (task, status, result string, ok boo
 	return "", "", "", false
 }
 
+// Cached styles for renderQueuedSteers — built once per theme.
+var (
+	steerTextStyle  = lipgloss.NewStyle()
+	steerBadgeStyle = lipgloss.NewStyle()
+	steerStylesInit bool
+)
+
+func initSteerStyles() {
+	t := ActiveTheme
+	steerTextStyle = lipgloss.NewStyle().Foreground(t.Overlay1)
+	steerBadgeStyle = lipgloss.NewStyle().Foreground(t.Surface2).Background(t.Overlay0).
+		PaddingLeft(1).PaddingRight(1)
+	steerStylesInit = true
+}
+
 // renderQueuedSteers renders the queued steer messages shown above the input.
 func (m appModel) renderQueuedSteers() string {
-	t := ActiveTheme
-	text := lipgloss.NewStyle().Foreground(t.Overlay1)
-	badge := lipgloss.NewStyle().Foreground(t.Surface2).Background(t.Overlay0).
-		PaddingLeft(1).PaddingRight(1)
+	if !steerStylesInit {
+		initSteerStyles()
+	}
+	text := steerTextStyle
+	badge := steerBadgeStyle
 
 	n := len(m.s.queuedSteers)
 	last := m.s.queuedSteers[n-1]

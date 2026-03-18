@@ -23,7 +23,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/verify"
 )
 
-const renderInterval = 16 * time.Millisecond // ~60fps
+const renderInterval = 50 * time.Millisecond // ~20fps — sufficient for streaming text
 
 // streamState tracks what the agent is doing.
 type streamState int
@@ -63,6 +63,8 @@ type state struct {
 	pendingImage     []byte   // raw image bytes waiting to be sent with next message
 	pendingImageMime string   // mime type of pending image
 	queuedSteers     []string // steer messages waiting to be processed by the agent
+	chromeCache      string   // cached bottom chrome string (built once per frame)
+	chromeCacheDirty bool     // chrome needs rebuild
 }
 
 type pendingTimelineEvent struct {
@@ -286,6 +288,17 @@ func (m appModel) waitForBusEvent() tea.Cmd {
 
 // Update is the main message router.
 func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Mark chrome dirty only for events that can change it.
+	// High-frequency streaming events (busEventMsg, renderTickMsg) handle
+	// chrome invalidation in their own paths or via updateViewport.
+	switch msg.(type) {
+	case busEventMsg, renderTickMsg:
+		// These are the hot path during streaming. busEventMsg with TextDelta
+		// doesn't affect chrome. renderTickMsg goes through updateViewport →
+		// resizeViewport which rebuilds chrome unconditionally.
+	default:
+		m.s.chromeCacheDirty = true
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		sizeChanged := m.width != msg.Width || m.height != msg.Height
@@ -377,6 +390,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			b := &m.s.blocks[i]
 			if b.Type == "tool" && b.ToolName == "plan_review" && !b.ToolDone {
 				b.ToolResult += msg.Delta
+				b.touch()
 				m.s.viewportDirty = true
 				break
 			}
@@ -522,74 +536,7 @@ func (m appModel) View() string {
 		return m.sessionBrowser.View(m.width, m.height)
 	}
 
-	var bottomChrome []string
-
-	l := GetActiveLayout()
-	if sv := m.status.View(); sv != "" {
-		bottomChrome = append(bottomChrome, sv)
-	}
-	if m.s.pendingStatus != "" {
-		bottomChrome = append(bottomChrome, l.RenderLiveNotice(m.s.pendingStatus, m.width, ActiveTheme))
-	}
-	if m.s.pendingTimeline != nil {
-		bottomChrome = append(bottomChrome, l.RenderLiveNotice(m.s.pendingTimeline.Text, m.width, ActiveTheme))
-	}
-	if m.s.asyncSubagents > 0 {
-		label := fmt.Sprintf("⟳ %d subagent running", m.s.asyncSubagents)
-		if m.s.asyncSubagents > 1 {
-			label = fmt.Sprintf("⟳ %d subagents running", m.s.asyncSubagents)
-		}
-		bottomChrome = append(bottomChrome, l.RenderLiveNotice(label, m.width, ActiveTheme))
-	}
-	// Task widget.
-	if taskList, err := bus.QueryTyped[bus.GetTasks, []tasks.Task](m.runtime.Bus, bus.GetTasks{}); err == nil && len(taskList) > 0 {
-		if tv := m.taskWidget.View(taskList, m.taskWidgetMode, m.width); tv != "" {
-			bottomChrome = append(bottomChrome, tv)
-		}
-	}
-	if len(m.s.queuedSteers) > 0 {
-		bottomChrome = append(bottomChrome, m.renderQueuedSteers())
-	}
-
-	if m.permPrompt.active {
-		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
-			bottomChrome = append(bottomChrome, pv)
-		}
-	} else if m.askPrompt.active {
-		if av := m.askPrompt.View(m.width, ActiveTheme); av != "" {
-			bottomChrome = append(bottomChrome, av)
-		}
-	} else if m.picker.active {
-		if pv := m.picker.View(m.width); pv != "" {
-			bottomChrome = append(bottomChrome, pv)
-		}
-	} else if m.thinkingPicker.active {
-		if pv := m.thinkingPicker.View(m.width, ActiveTheme); pv != "" {
-			bottomChrome = append(bottomChrome, pv)
-		}
-	} else if m.planMenu.active {
-		if pv := m.planMenu.View(m.width, ActiveTheme); pv != "" {
-			bottomChrome = append(bottomChrome, pv)
-		}
-	} else if m.settingsMenu.active {
-		if sv := m.settingsMenu.View(m.width, ActiveTheme); sv != "" {
-			bottomChrome = append(bottomChrome, sv)
-		}
-	} else {
-		if iv := m.input.View(); iv != "" {
-			bottomChrome = append(bottomChrome, iv)
-		}
-	}
-	if m.statusBar != nil {
-		if tv := m.statusBar.View(m.width); tv != "" {
-			bottomChrome = append(bottomChrome, tv)
-		}
-	}
-	if pv := m.cmdPalette.View(m.width, ActiveTheme); pv != "" {
-		bottomChrome = append(bottomChrome, pv)
-	}
-
-	botStr := strings.Join(bottomChrome, "\n")
+	botStr := m.bottomChrome()
 
 	var sections []string
 	sections = append(sections, m.viewport.View())
@@ -898,6 +845,14 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // --- Bus event handling ---
 
 func (m *appModel) handleBusEvent(event any) []tea.Cmd {
+	// Mark chrome dirty for events that affect status/chrome.
+	// Skip the three high-frequency streaming events that never change chrome.
+	switch event.(type) {
+	case bus.TextDelta, bus.ThinkingDelta, bus.ToolExecUpdate:
+		// no-op: these don't affect status bar, input, or other chrome
+	default:
+		m.s.chromeCacheDirty = true
+	}
 	switch e := event.(type) {
 	// --- Streaming ---
 	case bus.TextDelta:
@@ -975,6 +930,7 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 				} else {
 					b.ToolResult += e.Delta
 				}
+				b.touch()
 				m.s.viewportDirty = true
 				break
 			}
@@ -993,6 +949,7 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 				b.Rejected = e.Rejected
 				b.ToolResult = e.Result
 				b.ToolNote = extractToolNote(b.ToolResult, b.Rejected)
+				b.touch()
 				break
 			}
 		}
