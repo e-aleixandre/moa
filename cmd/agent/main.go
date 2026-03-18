@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -105,7 +106,21 @@ func main() {
 	})
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
+	cpuprofile := flag.String("cpuprofile", "", "Write CPU profile to file")
 	flag.Parse()
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cpuprofile: %v\n", err)
+			os.Exit(1)
+		}
+		pprof.StartCPUProfile(f)
+		defer func() {
+			pprof.StopCPUProfile()
+			f.Close()
+		}()
+	}
 
 	if *output != "text" && *output != "json" {
 		fmt.Fprintf(os.Stderr, "error: --output must be 'text' or 'json'\n")

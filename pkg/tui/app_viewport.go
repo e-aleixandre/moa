@@ -28,6 +28,7 @@ func (m *appModel) updateViewport() {
 	if wasAtBottom {
 		m.viewport.GotoBottom()
 	}
+	m.s.viewportCacheDirty = true // viewport content/scroll changed → re-render on next View()
 }
 
 // resizeViewport recalculates viewport dimensions from terminal size and chrome heights.

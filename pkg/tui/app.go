@@ -65,6 +65,8 @@ type state struct {
 	queuedSteers     []string // steer messages waiting to be processed by the agent
 	chromeCache      string   // cached bottom chrome string (built once per frame)
 	chromeCacheDirty bool     // chrome needs rebuild
+	viewportCache      string // cached viewport.View() output
+	viewportCacheDirty bool   // viewport needs re-render
 }
 
 type pendingTimelineEvent struct {
@@ -328,6 +330,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.s.transcript && !m.sessionBrowser.active {
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
+			m.s.viewportCacheDirty = true // scroll may have changed
 			return m, cmd
 		}
 		return m, nil
@@ -536,10 +539,17 @@ func (m appModel) View() string {
 		return m.sessionBrowser.View(m.width, m.height)
 	}
 
+	// Cache viewport.View() — it's expensive (lipgloss stringWidth per line).
+	// Only re-render when content, scroll position, or size changed.
+	if m.s.viewportCacheDirty || m.s.viewportCache == "" {
+		m.s.viewportCache = m.viewport.View()
+		m.s.viewportCacheDirty = false
+	}
+
 	botStr := m.bottomChrome()
 
 	var sections []string
-	sections = append(sections, m.viewport.View())
+	sections = append(sections, m.s.viewportCache)
 	if botStr != "" {
 		sections = append(sections, botStr)
 	}
@@ -793,11 +803,13 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyPgUp:
 		if !m.s.transcript {
 			m.viewport.HalfPageUp()
+			m.s.viewportCacheDirty = true
 		}
 		return m, nil
 	case tea.KeyPgDown:
 		if !m.s.transcript {
 			m.viewport.HalfPageDown()
+			m.s.viewportCacheDirty = true
 		}
 		return m, nil
 
