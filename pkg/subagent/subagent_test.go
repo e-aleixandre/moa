@@ -237,6 +237,24 @@ func TestBuildChildRegistryFiltersNestedAndDedupes(t *testing.T) {
 	}
 }
 
+func TestBuildChildRegistryExcludesMemory(t *testing.T) {
+	parent := core.NewRegistry()
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "memory"})
+	_ = parent.Register(core.Tool{Name: "grep"})
+
+	reg, errRes := buildChildRegistry(parent, map[string]any{"tools": []any{"read", "memory", "grep"}})
+	if errRes != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes))
+	}
+	if _, ok := reg.Get("memory"); ok {
+		t.Error("child registry should not include memory tool")
+	}
+	if reg.Count() != 2 {
+		t.Fatalf("expected 2 tools (read+grep), got %d", reg.Count())
+	}
+}
+
 func TestBuildChildRegistryCaseInsensitive(t *testing.T) {
 	parent := core.NewRegistry()
 	_ = parent.Register(core.Tool{Name: "read"})

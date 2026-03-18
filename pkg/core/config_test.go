@@ -415,3 +415,43 @@ func TestResolvePathScope_YoloWithoutPathScope(t *testing.T) {
 		t.Fatalf("ResolvePathScope('', false, 'yolo') = %q, want 'unrestricted'", got)
 	}
 }
+
+func TestIsMemoryEnabled_Default(t *testing.T) {
+	if !IsMemoryEnabled(MoaConfig{}) {
+		t.Error("expected memory enabled by default (nil)")
+	}
+}
+
+func TestIsMemoryEnabled_ExplicitTrue(t *testing.T) {
+	v := true
+	if !IsMemoryEnabled(MoaConfig{MemoryEnabled: &v}) {
+		t.Error("expected memory enabled when explicitly true")
+	}
+}
+
+func TestIsMemoryEnabled_ExplicitFalse(t *testing.T) {
+	v := false
+	if IsMemoryEnabled(MoaConfig{MemoryEnabled: &v}) {
+		t.Error("expected memory disabled when explicitly false")
+	}
+}
+
+func TestMergeConfigs_MemoryEnabled_ProjectOverride(t *testing.T) {
+	v := false
+	base := MoaConfig{}               // nil = default true
+	project := MoaConfig{MemoryEnabled: &v} // explicitly false
+	merged := mergeConfigs(base, project)
+	if IsMemoryEnabled(merged) {
+		t.Error("project false should override global nil")
+	}
+}
+
+func TestMergeConfigs_MemoryEnabled_GlobalOnly(t *testing.T) {
+	v := false
+	base := MoaConfig{MemoryEnabled: &v}
+	project := MoaConfig{} // nil = no override
+	merged := mergeConfigs(base, project)
+	if IsMemoryEnabled(merged) {
+		t.Error("global false should persist when project has no override")
+	}
+}

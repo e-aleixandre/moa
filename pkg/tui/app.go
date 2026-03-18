@@ -17,6 +17,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
+	"github.com/ealeixandre/moa/pkg/memory"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/verify"
@@ -133,6 +134,9 @@ type appModel struct {
 	// Prompt templates
 	promptTemplates []promptpkg.Template
 
+	// Memory
+	memoryStore *memory.Store
+
 	// Voice input
 	voice voiceRecorder
 
@@ -152,6 +156,7 @@ type Config struct {
 	OnPinnedModelsChange  func([]string) error        // called when the user changes pinned models
 	PromptTemplates       []promptpkg.Template        // available prompt templates
 	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
+	MemoryStore           *memory.Store               // per-project memory store (nil = memory disabled)
 }
 
 // isStructuralBusEvent returns true for events that must not be dropped.
@@ -211,6 +216,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		promptTemplates:      cfg.PromptTemplates,
+		memoryStore:          cfg.MemoryStore,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber},
 	}
 

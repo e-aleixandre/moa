@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/memory"
 )
 
 func cfgWith(root string) ToolConfig {
@@ -123,6 +124,32 @@ func TestRegisterBuiltins(t *testing.T) {
 	}
 	if reg.Count() != len(expected) {
 		t.Fatalf("expected %d tools, got %d", len(expected), reg.Count())
+	}
+}
+
+func TestRegisterBuiltins_WithMemory(t *testing.T) {
+	reg := core.NewRegistry()
+	tmp := t.TempDir()
+	store := memory.New(t.TempDir())
+	_ = RegisterBuiltins(reg, ToolConfig{WorkspaceRoot: tmp, MemoryStore: store})
+
+	if _, ok := reg.Get("memory"); !ok {
+		t.Error("memory tool should be registered when MemoryStore is set")
+	}
+	// Should be 11 = 10 base + 1 memory
+	if reg.Count() != 11 {
+		t.Fatalf("expected 11 tools, got %d", reg.Count())
+	}
+}
+
+func TestRegisterMemory_NilStore(t *testing.T) {
+	reg := core.NewRegistry()
+	err := RegisterMemory(reg, ToolConfig{WorkspaceRoot: "/test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get("memory"); ok {
+		t.Error("memory tool should NOT be registered when MemoryStore is nil")
 	}
 }
 

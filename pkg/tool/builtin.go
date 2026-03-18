@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/memory"
 )
 
 // ToolConfig provides shared configuration for built-in tools.
@@ -19,6 +20,7 @@ type ToolConfig struct {
 	AllowedPaths   []string // Additional directories allowed outside WorkspaceRoot. Deprecated: use PathPolicy.
 	BashTimeout   time.Duration // Default: 5 minutes.
 	BraveAPIKey   string        // Brave Search API key (empty = web_search not registered).
+	MemoryStore   *memory.Store // Per-project memory store (nil = memory tool not registered).
 
 	// PathPolicy is the runtime-mutable path access policy. When non-nil,
 	// safePath delegates containment checks to this policy instead of using
@@ -66,12 +68,21 @@ func RegisterWebSearch(reg *core.Registry, cfg ToolConfig) error {
 	return nil
 }
 
+func RegisterMemory(reg *core.Registry, cfg ToolConfig) error {
+	cfg.Defaults()
+	if cfg.MemoryStore == nil {
+		return nil // memory disabled, skip silently
+	}
+	return reg.Register(NewMemory(cfg))
+}
+
 // RegisterBuiltins adds all built-in tools to the registry.
 func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) error {
 	for _, fn := range []func(*core.Registry, ToolConfig) error{
 		RegisterBash, RegisterRead, RegisterWrite, RegisterEdit,
 		RegisterMultiEdit, RegisterApplyPatch, RegisterGrep,
 		RegisterFind, RegisterLs, RegisterFetch, RegisterWebSearch,
+		RegisterMemory,
 	} {
 		if err := fn(reg, cfg); err != nil {
 			return fmt.Errorf("builtin: %w", err)

@@ -48,6 +48,16 @@ type MoaConfig struct {
 	CodeReviewModel    string            `json:"code_review_model,omitempty"`    // Model for code reviewer (default: plan review model)
 	CodeReviewThinking string            `json:"code_review_thinking,omitempty"` // Thinking level for code reviewer (default: plan review thinking)
 	MaxBudget          float64           `json:"max_budget"`                     // Max USD per agent run. 0 = unlimited.
+	MemoryEnabled      *bool             `json:"memory_enabled,omitempty"`       // nil = true (enabled by default)
+}
+
+// IsMemoryEnabled returns whether cross-session memory is enabled.
+// Default is true when MemoryEnabled is nil (not configured).
+func IsMemoryEnabled(cfg MoaConfig) bool {
+	if cfg.MemoryEnabled != nil {
+		return *cfg.MemoryEnabled
+	}
+	return true
 }
 
 // MCPServer defines an MCP tool server connection (stdio transport).
@@ -149,6 +159,12 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.MaxBudget = override.MaxBudget
 	} else {
 		merged.MaxBudget = base.MaxBudget
+	}
+	// MemoryEnabled: project overrides global (explicit wins).
+	if override.MemoryEnabled != nil {
+		merged.MemoryEnabled = override.MemoryEnabled
+	} else {
+		merged.MemoryEnabled = base.MemoryEnabled
 	}
 	return merged
 }

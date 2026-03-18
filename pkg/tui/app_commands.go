@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -35,6 +36,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	}
 	if cmd == "path" || strings.HasPrefix(cmd, "path ") {
 		return m.handlePathCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "path")))
+	}
+	if cmd == "memory" || strings.HasPrefix(cmd, "memory ") {
+		return m.handleMemoryCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "memory")))
 	}
 
 	switch cmd {
@@ -683,6 +687,75 @@ func (m appModel) handlePathCommand(args string) (tea.Model, tea.Cmd) {
 
 	m.updateViewport()
 	return m, nil
+}
+
+// handleMemoryCommand processes `/memory [edit|clear|path]`.
+func (m appModel) handleMemoryCommand(subcmd string) (tea.Model, tea.Cmd) {
+	if m.memoryStore == nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Memory is disabled. Set \"memory_enabled\": true in config.",
+		})
+		m.updateViewport()
+		return m, nil
+	}
+
+	cwd := m.cwd
+
+	switch subcmd {
+	case "":
+		content, err := m.memoryStore.Load(cwd)
+		if err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			m.updateViewport()
+			return m, nil
+		}
+		if content == "" {
+			content = "No memory saved for this project yet."
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "📝 Project Memory:\n\n" + content})
+		m.updateViewport()
+		return m, nil
+
+	case "edit":
+		path := m.memoryStore.FilePath(cwd)
+		// Ensure file exists so editor can open it.
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			_ = m.memoryStore.Save(cwd, "# Project Memory\n\n")
+		}
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+		//nolint:gosec // editor is user-controlled by design
+		c := exec.Command(editor, path)
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+			return editorDoneMsg{err: err}
+		})
+
+	case "clear":
+		if err := m.memoryStore.Save(cwd, ""); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			m.updateViewport()
+			return m, nil
+		}
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "🗑️ Project memory cleared."})
+		m.updateViewport()
+		return m, nil
+
+	case "path":
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "status", Raw: m.memoryStore.FilePath(cwd),
+		})
+		m.updateViewport()
+		return m, nil
+
+	default:
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Usage: /memory [edit|clear|path]",
+		})
+		m.updateViewport()
+		return m, nil
+	}
 }
 
 // handleThinkingSwitch processes `/thinking <level>`.

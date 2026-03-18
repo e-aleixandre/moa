@@ -32,6 +32,7 @@ var excludedTools = map[string]bool{
 	"subagent":        true,
 	"subagent_status": true,
 	"subagent_cancel": true,
+	"memory":          true,
 }
 
 type Config struct {
@@ -41,11 +42,12 @@ type Config struct {
 	CurrentPermissionCheck func() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
 	ProviderFactory        func(core.Model) (core.Provider, error)
 	AgentsMD               string
-	PromptBuilder          func(agentsMD string, toolSpecs []core.ToolSpec, cwd string, hasVerify bool, skillsIndex ...string) string
+	PromptBuilder          func(opts agentcontext.SystemPromptOptions) string
 	ParentTools            *core.Registry
 	AppCtx                 context.Context
 	WorkspaceRoot          string // CWD passed to system prompt builder
 	SkillsIndex            string // pre-formatted skills index for system prompt
+	MemoryContent          string // cross-session memory content (already truncated)
 
 	// OnAsyncComplete is called when an async subagent finishes (completed, failed, or cancelled).
 	// truncated is true when resultTail is only the last N lines of the full output.
@@ -141,7 +143,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if promptBuilder == nil {
 				promptBuilder = agentcontext.BuildSystemPrompt
 			}
-			systemPrompt := buildSystemPrompt(promptBuilder, cfg.AgentsMD, childReg.Specs(), cfg.WorkspaceRoot, cfg.SkillsIndex)
+			systemPrompt := buildSystemPrompt(promptBuilder, cfg.AgentsMD, childReg.Specs(), cfg.WorkspaceRoot, cfg.SkillsIndex, cfg.MemoryContent)
 
 			if getBool(params, "async") {
 				if err := ctx.Err(); err != nil {
@@ -412,9 +414,15 @@ func resolveThinking(defaultThinking string, params map[string]any) (string, *co
 	}
 }
 
-func buildSystemPrompt(promptBuilder func(string, []core.ToolSpec, string, bool, ...string) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex string) string {
+func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryContent string) string {
 	const preamble = "You are a focused subagent. Complete the delegated task thoroughly and report your findings concisely. Do not ask clarifying questions — work with what you have.\n\n"
-	return preamble + promptBuilder(agentsMD, specs, cwd, false, skillsIndex)
+	return preamble + promptBuilder(agentcontext.SystemPromptOptions{
+		AgentsMD:      agentsMD,
+		Tools:         specs,
+		CWD:           cwd,
+		SkillsIndex:   skillsIndex,
+		MemoryContent: memoryContent,
+	})
 }
 
 func forwardSyncEvent(e core.AgentEvent, onUpdate func(core.Result)) {

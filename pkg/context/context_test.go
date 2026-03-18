@@ -95,7 +95,11 @@ func TestBuildSystemPrompt(t *testing.T) {
 		{Name: "read", Description: "Read files"},
 	}
 
-	prompt := BuildSystemPrompt("# Project: test", tools, "/test/cwd", false)
+	prompt := BuildSystemPrompt(SystemPromptOptions{
+		AgentsMD: "# Project: test",
+		Tools:    tools,
+		CWD:      "/test/cwd",
+	})
 
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role description")
@@ -119,7 +123,7 @@ func TestBuildSystemPrompt_WithVerify(t *testing.T) {
 		{Name: "bash", Description: "Execute commands"},
 		{Name: "verify", Description: "Run verification checks"},
 	}
-	prompt := BuildSystemPrompt("", tools, "/test", true)
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test", HasVerify: true})
 	if !strings.Contains(prompt, "call the verify tool") {
 		t.Error("expected verify guideline when hasVerify=true and verify tool present")
 	}
@@ -130,14 +134,14 @@ func TestBuildSystemPrompt_VerifyFalseNoGuideline(t *testing.T) {
 		{Name: "bash", Description: "Execute commands"},
 		{Name: "verify", Description: "Run verification checks"},
 	}
-	prompt := BuildSystemPrompt("", tools, "/test", false)
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
 	if strings.Contains(prompt, "call the verify tool") {
 		t.Error("expected no verify guideline when hasVerify=false")
 	}
 }
 
 func TestBuildSystemPrompt_Empty(t *testing.T) {
-	prompt := BuildSystemPrompt("", nil, "", false)
+	prompt := BuildSystemPrompt(SystemPromptOptions{})
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role even with no AGENTS.md")
 	}
@@ -148,7 +152,7 @@ func TestBuildSystemPrompt_WithSkills(t *testing.T) {
 		{Name: "load_skill", Description: "Load a skill pack"},
 	}
 	skillsIndex := "Available skills (use the load_skill tool to load when relevant):\n- go-testing: Go Testing — Best practices for Go tests\n"
-	prompt := BuildSystemPrompt("", tools, "/test", false, skillsIndex)
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test", SkillsIndex: skillsIndex})
 	if !strings.Contains(prompt, "go-testing: Go Testing") {
 		t.Error("expected skills index in prompt")
 	}
@@ -158,9 +162,51 @@ func TestBuildSystemPrompt_WithSkills(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_EmptySkills(t *testing.T) {
-	prompt := BuildSystemPrompt("", nil, "/test", false, "")
+	prompt := BuildSystemPrompt(SystemPromptOptions{CWD: "/test"})
 	if strings.Contains(prompt, "Available skills") {
 		t.Error("empty skills index should not appear")
+	}
+}
+
+func TestBuildSystemPrompt_WithMemory(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptOptions{
+		AgentsMD:      "# Project",
+		CWD:           "/test",
+		MemoryContent: "- Always use Docker\n- Prefer PostgreSQL",
+		SkillsIndex:   "Some skills here",
+	})
+	if !strings.Contains(prompt, "Project Memory") {
+		t.Error("expected Project Memory section")
+	}
+	if !strings.Contains(prompt, "Always use Docker") {
+		t.Error("expected memory content")
+	}
+	// Memory should be between AGENTS.md and skills
+	agentsIdx := strings.Index(prompt, "# Project")
+	memoryIdx := strings.Index(prompt, "Project Memory")
+	skillsIdx := strings.Index(prompt, "Some skills here")
+	if agentsIdx >= memoryIdx {
+		t.Error("memory should come after AGENTS.md")
+	}
+	if memoryIdx >= skillsIdx {
+		t.Error("memory should come before skills")
+	}
+}
+
+func TestBuildSystemPrompt_EmptyMemory(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptOptions{CWD: "/test"})
+	if strings.Contains(prompt, "Project Memory") {
+		t.Error("empty memory should not appear in prompt")
+	}
+}
+
+func TestBuildSystemPrompt_MemoryGuideline(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "memory", Description: "Memory tool"},
+	}
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
+	if !strings.Contains(prompt, "memory tool for future sessions") {
+		t.Error("expected memory guideline when memory tool is available")
 	}
 }
 

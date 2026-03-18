@@ -15,7 +15,7 @@ func TestCmdPalette_ActivatesOnSlash(t *testing.T) {
 
 func TestCmdPalette_FiltersCommands(t *testing.T) {
 	var p cmdPalette
-	p.Update("/mo")
+	p.Update("/mod")
 	if !p.active {
 		t.Error("should be active")
 	}

@@ -414,6 +414,7 @@ func main() {
 				})
 			},
 			Transcriber:       transcriber,
+			MemoryStore:       sess.MemoryStore,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := prog.Run(); err != nil {

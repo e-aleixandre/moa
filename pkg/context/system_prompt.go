@@ -26,14 +26,21 @@ var toolSnippets = map[string]string{
 	"subagent_status": "Check the status of an async subagent job.",
 	"subagent_cancel": "Cancel a running async subagent job.",
 	"verify":          "Run project verification checks (build, test, lint) from .moa/verify.json.",
+	"memory":          "Read or update persistent project memory. Saves learnings and preferences across sessions.",
+}
+
+// SystemPromptOptions configures system prompt generation.
+type SystemPromptOptions struct {
+	AgentsMD      string          // AGENTS.md content (concatenated from all levels)
+	Tools         []core.ToolSpec // registered tools
+	CWD           string          // working directory shown to the agent
+	HasVerify     bool            // .moa/verify.json was loaded
+	MemoryContent string          // cross-session memory (already truncated)
+	SkillsIndex   string          // pre-formatted skills index
 }
 
 // BuildSystemPrompt constructs the system prompt from components.
-// cwd is the working directory shown to the agent; if empty, os.Getwd() is used.
-// hasVerify indicates a valid .moa/verify.json was loaded — adds a guideline
-// instructing the agent to verify after coding tasks.
-// skillsIndex is an optional pre-formatted index of available skills (empty = no skills).
-func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVerify bool, skillsIndex ...string) string {
+func BuildSystemPrompt(opts SystemPromptOptions) string {
 	var sb strings.Builder
 
 	// Identity and role
@@ -42,9 +49,9 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 `)
 
 	// Available tools — concise snippets, not full descriptions
-	if len(tools) > 0 {
+	if len(opts.Tools) > 0 {
 		sb.WriteString("Available tools:\n")
-		for _, t := range tools {
+		for _, t := range opts.Tools {
 			desc := toolSnippets[t.Name]
 			if desc == "" {
 				// Custom/unknown tool — use original description, truncated
@@ -59,8 +66,8 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 	}
 
 	// Build adaptive guidelines based on which tools are available
-	toolSet := make(map[string]bool, len(tools))
-	for _, t := range tools {
+	toolSet := make(map[string]bool, len(opts.Tools))
+	for _, t := range opts.Tools {
 		toolSet[t.Name] = true
 	}
 
@@ -104,7 +111,7 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 	}
 
 	// Verify
-	if hasVerify && toolSet["verify"] {
+	if opts.HasVerify && toolSet["verify"] {
 		sb.WriteString("- After completing coding tasks, call the verify tool to validate your changes before reporting done\n")
 	}
 
@@ -118,6 +125,11 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 `)
 	}
 
+	// Memory
+	if toolSet["memory"] {
+		sb.WriteString("- When the user corrects you or teaches project-specific knowledge, save it with the memory tool for future sessions. Keep memories concise and actionable.\n")
+	}
+
 	// Always include these
 	sb.WriteString(`- Be concise in your responses
 - Show file paths clearly when working with files
@@ -125,20 +137,29 @@ func BuildSystemPrompt(agentsMD string, tools []core.ToolSpec, cwd string, hasVe
 `)
 
 	// AGENTS.md content
-	if agentsMD != "" {
+	if opts.AgentsMD != "" {
 		sb.WriteString("# Project Context\n\n")
 		sb.WriteString("Project-specific instructions and guidelines:\n\n")
-		sb.WriteString(agentsMD)
+		sb.WriteString(opts.AgentsMD)
+		sb.WriteString("\n\n")
+	}
+
+	// Project memory (cross-session)
+	if opts.MemoryContent != "" {
+		sb.WriteString("## Project Memory\n\n")
+		sb.WriteString("Learnings and preferences from previous sessions:\n\n")
+		sb.WriteString(opts.MemoryContent)
 		sb.WriteString("\n\n")
 	}
 
 	// Skills index (if provided)
-	if len(skillsIndex) > 0 && skillsIndex[0] != "" {
-		sb.WriteString(skillsIndex[0])
+	if opts.SkillsIndex != "" {
+		sb.WriteString(opts.SkillsIndex)
 		sb.WriteString("\n\n")
 	}
 
 	// Current date/time and working directory
+	cwd := opts.CWD
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}

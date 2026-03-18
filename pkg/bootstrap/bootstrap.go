@@ -8,6 +8,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
+	"github.com/ealeixandre/moa/pkg/memory"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/skill"
@@ -96,6 +98,7 @@ type Session struct {
 	Skills      []skill.Skill
 	SkillsIndex string
 	SystemPrompt string
+	MemoryStore  *memory.Store
 	HasVerify   bool
 	Model       core.Model
 	MoaCfg      core.MoaConfig
@@ -222,6 +225,32 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// 5. AGENTS.md.
 	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, os.Getenv("AGENT_HOME"))
 
+	// 5b. Project memory.
+	var memStore *memory.Store
+	var memoryContent string
+	if core.IsMemoryEnabled(moaCfg) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			slog.Warn("memory: cannot determine home directory", "error", err)
+		} else {
+			memStore = memory.New(filepath.Join(home, ".config", "moa", "projects"))
+			content, err := memStore.Load(cfg.CWD)
+			if err != nil {
+				slog.Warn("memory: failed to load", "error", err)
+			} else if content != "" {
+				memoryContent = memory.Truncate(content, 200)
+			}
+		}
+	}
+	if memStore != nil {
+		if err := tool.RegisterMemory(toolReg, tool.ToolConfig{
+			WorkspaceRoot: cfg.CWD,
+			MemoryStore:   memStore,
+		}); err != nil {
+			slog.Warn("memory: failed to register tool", "error", err)
+		}
+	}
+
 	// 6. Permission gate.
 	var gate *permission.Gate
 	if permMode != permission.ModeYolo {
@@ -300,6 +329,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		Skills:       skills,
 		SkillsIndex:  skillsIndex,
 		HasVerify:    hasVerify,
+		MemoryStore:  memStore,
 		Model:        cfg.Model,
 		MoaCfg:       moaCfg,
 		UntrustedMCP: untrustedMCP,
@@ -336,6 +366,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		AppCtx:          cfg.Ctx,
 		WorkspaceRoot:   cfg.CWD,
 		SkillsIndex:     skillsIndex,
+		MemoryContent:   memoryContent,
 		OnAsyncJobChange: cfg.OnAsyncJobChange,
 		OnAsyncComplete:  cfg.OnAsyncComplete,
 	}); err != nil {
@@ -377,7 +408,14 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	sess.PlanMode = pm
 
 	// 12. System prompt (after ALL tools registered).
-	systemPrompt := agentcontext.BuildSystemPrompt(agentsMD, toolReg.Specs(), cfg.CWD, hasVerify, skillsIndex)
+	systemPrompt := agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
+		AgentsMD:      agentsMD,
+		Tools:         toolReg.Specs(),
+		CWD:           cfg.CWD,
+		HasVerify:     hasVerify,
+		MemoryContent: memoryContent,
+		SkillsIndex:   skillsIndex,
+	})
 	sess.SystemPrompt = systemPrompt
 
 	// 13. Agent.
