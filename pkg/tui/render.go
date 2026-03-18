@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // assistantPadChars is the left padding added to assistant text by layouts.
@@ -169,17 +168,4 @@ func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool, expande
 	return strings.Join(parts, "\n\n")
 }
 
-// --- Tool result extraction ---
 
-func toolResultText(result *core.Result) string {
-	if result == nil {
-		return ""
-	}
-	var sb strings.Builder
-	for _, c := range result.Content {
-		if c.Type == "text" {
-			sb.WriteString(c.Text)
-		}
-	}
-	return strings.TrimSpace(sb.String())
-}

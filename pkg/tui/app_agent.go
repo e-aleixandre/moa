@@ -79,22 +79,6 @@ func (m appModel) launchAgentSend(text string) tea.Cmd {
 	)
 }
 
-// launchAgentSendWithCustom sends with custom metadata via bus.
-func (m appModel) launchAgentSendWithCustom(text string, custom map[string]any) tea.Cmd {
-	b := m.runtime.Bus
-	return tea.Batch(
-		func() tea.Msg {
-			err := b.Execute(bus.SendPrompt{Text: text, Custom: custom})
-			if err != nil {
-				return agentSendErrorMsg{Err: err}
-			}
-			return nil
-		},
-		renderTick(),
-		m.status.spinner.Tick,
-	)
-}
-
 // launchAgentSendWithContent sends structured content via bus.
 func (m appModel) launchAgentSendWithContent(content []core.Content) tea.Cmd {
 	b := m.runtime.Bus

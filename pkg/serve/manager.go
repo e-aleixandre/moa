@@ -276,11 +276,6 @@ type CommandResult struct {
 	Message string `json:"message"`
 }
 
-// updateTimestamp updates the session's Updated field under lock.
-func (s *ManagedSession) updateTimestamp() {
-	s.mu.Lock()
-	s.Updated = time.Now()
-	s.mu.Unlock()
-}
+
 
 

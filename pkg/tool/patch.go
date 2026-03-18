@@ -74,7 +74,7 @@ Format:
 						return core.ErrorResult(fmt.Sprintf("write %s: %v", s.path, err)), nil
 					}
 					if err := os.Rename(tmpFile, s.path); err != nil {
-						os.Remove(tmpFile) // cleanup
+						_ = os.Remove(tmpFile) // cleanup
 						return core.ErrorResult(fmt.Sprintf("rename %s: %v", s.path, err)), nil
 					}
 
@@ -99,7 +99,7 @@ Format:
 						return core.ErrorResult(fmt.Sprintf("write %s: %v", s.moveTo, err)), nil
 					}
 					if err := os.Rename(tmpFile, s.moveTo); err != nil {
-						os.Remove(tmpFile)
+						_ = os.Remove(tmpFile)
 						return core.ErrorResult(fmt.Sprintf("rename %s: %v", s.moveTo, err)), nil
 					}
 					// Remove old file

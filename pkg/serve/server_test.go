@@ -354,7 +354,7 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 	// With the bus architecture, event ordering across types is non-deterministic
 	// (separate subscriber goroutines), so run_end may arrive before tool_end.
 	deadline := time.After(10 * time.Second)
-	for !(gotRunEnd && seenRejected) {
+	for !gotRunEnd || !seenRejected {
 		select {
 		case <-deadline:
 			t.Fatalf("timed out (tool_start=%d permission=%d rejected=%v run_end=%v)", idxToolStart, idxPermission, seenRejected, gotRunEnd)

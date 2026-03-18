@@ -22,7 +22,7 @@ type renderTickMsg struct{}
 type clearThinkingStatusMsg struct{}
 
 // sessionSavedMsg signals an async session save completed.
-type sessionSavedMsg struct{ err error }
+type sessionSavedMsg struct{}
 
 // pinnedModelsSavedMsg signals an async pinned-models save completed.
 type pinnedModelsSavedMsg struct{ err error }
@@ -74,5 +74,4 @@ type shellResultMsg struct {
 	Running bool // was the agent running when the command was dispatched?
 }
 
-// toolResultText is in render.go (unchanged)
 // clearScreenDoneMsg is in expand.go (unchanged)

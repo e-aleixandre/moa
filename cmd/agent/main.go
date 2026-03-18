@@ -115,10 +115,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "cpuprofile: %v\n", err)
 			os.Exit(1)
 		}
-		pprof.StartCPUProfile(f)
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintf(os.Stderr, "cpuprofile: %v\n", err)
+			_ = f.Close()
+			os.Exit(1)
+		}
 		defer func() {
 			pprof.StopCPUProfile()
-			f.Close()
+			_ = f.Close()
 		}()
 	}
 

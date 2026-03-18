@@ -91,20 +91,6 @@ func printAuthNotice(w io.Writer, notice string) {
 	_, _ = fmt.Fprintf(w, "\033[90m(using %s)\033[0m\n", notice)
 }
 
-func modelDisplayName(m core.Model) string {
-	if m.Name != "" {
-		return m.Name
-	}
-	return m.ID
-}
-
-func modelSpec(m core.Model) string {
-	if m.Provider != "" {
-		return m.Provider + "/" + m.ID
-	}
-	return m.ID
-}
-
 // parseAllowPattern validates and normalizes a --allow flag value.
 func parseAllowPattern(val string) (string, error) {
 	val = strings.TrimSpace(val)

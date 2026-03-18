@@ -518,7 +518,7 @@ func (s *subscriber) loop() {
 
 func (s *subscriber) process(event any) {
 	defer s.bus.decrementInflight()
-	defer func() { recover() }() // swallow handler panics
+	defer func() { _ = recover() }() // swallow handler panics
 	if s.isAll {
 		// SubscribeAll handler: fn is func(any), call directly for efficiency.
 		s.fn.Interface().(func(any))(event)

@@ -80,7 +80,7 @@ func TestPathPolicy_AddPath_Validation(t *testing.T) {
 
 	// File, not directory
 	f := filepath.Join(t.TempDir(), "file.txt")
-	os.WriteFile(f, []byte("x"), 0o644)
+	_ = os.WriteFile(f, []byte("x"), 0o644)
 	if err := p.AddPath(f); err == nil {
 		t.Fatal("should reject file (not directory)")
 	}

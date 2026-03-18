@@ -10,7 +10,7 @@ import (
 func TestMultiEdit_ThreeEditsSuccess(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.go")
-	os.WriteFile(file, []byte("a := 1\nb := 2\nc := 3\n"), 0o644)
+	_ = os.WriteFile(file, []byte("a := 1\nb := 2\nc := 3\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -43,7 +43,7 @@ func TestMultiEdit_AtomicFailure(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.go")
 	original := "a := 1\nb := 2\nc := 3\n"
-	os.WriteFile(file, []byte(original), 0o644)
+	_ = os.WriteFile(file, []byte(original), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -82,7 +82,7 @@ func TestMultiEdit_SequentialDependency(t *testing.T) {
 	// Edit 1 changes text that edit 2 searches for in the new content
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.go")
-	os.WriteFile(file, []byte("old_func()\n"), 0o644)
+	_ = os.WriteFile(file, []byte("old_func()\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -112,7 +112,7 @@ func TestMultiEdit_SequentialDependency(t *testing.T) {
 func TestMultiEdit_FileTrackerCheck(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.go")
-	os.WriteFile(file, []byte("x := 1\n"), 0o644)
+	_ = os.WriteFile(file, []byte("x := 1\n"), 0o644)
 
 	ft := NewFileTracker()
 	// Deliberately NOT marking as read
@@ -139,7 +139,7 @@ func TestMultiEdit_FileTrackerCheck(t *testing.T) {
 func TestMultiEdit_BeforeWriteCalledOnce(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.go")
-	os.WriteFile(file, []byte("a := 1\nb := 2\n"), 0o644)
+	_ = os.WriteFile(file, []byte("a := 1\nb := 2\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -173,7 +173,7 @@ func TestMultiEdit_BeforeWriteCalledOnce(t *testing.T) {
 func TestMultiEdit_ReplaceAll(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.go")
-	os.WriteFile(file, []byte("foo\nbar\nfoo\nbaz\nfoo\n"), 0o644)
+	_ = os.WriteFile(file, []byte("foo\nbar\nfoo\nbaz\nfoo\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)

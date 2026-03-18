@@ -48,7 +48,7 @@ func TestPatch_AddNewFile(t *testing.T) {
 func TestPatch_UpdateExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "main.go")
-	os.WriteFile(file, []byte("func main() {\n\told()\n}\n"), 0o644)
+	_ = os.WriteFile(file, []byte("func main() {\n\told()\n}\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -78,7 +78,7 @@ func TestPatch_UpdateExistingFile(t *testing.T) {
 func TestPatch_DeleteFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "gone.txt")
-	os.WriteFile(file, []byte("bye\n"), 0o644)
+	_ = os.WriteFile(file, []byte("bye\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -104,7 +104,7 @@ func TestPatch_DeleteFile(t *testing.T) {
 func TestPatch_MoveFile(t *testing.T) {
 	dir := t.TempDir()
 	oldFile := filepath.Join(dir, "old.go")
-	os.WriteFile(oldFile, []byte("package old\n\nfunc Foo() {}\n"), 0o644)
+	_ = os.WriteFile(oldFile, []byte("package old\n\nfunc Foo() {}\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(oldFile)
@@ -145,8 +145,8 @@ func TestPatch_MultiFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	file1 := filepath.Join(dir, "a.go")
 	file2 := filepath.Join(dir, "b.go")
-	os.WriteFile(file1, []byte("package a\n"), 0o644)
-	os.WriteFile(file2, []byte("package b\n"), 0o644)
+	_ = os.WriteFile(file1, []byte("package a\n"), 0o644)
+	_ = os.WriteFile(file2, []byte("package b\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file1)
@@ -184,7 +184,7 @@ func TestPatch_ValidationFailureNoChanges(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "exists.go")
 	original := "package exists\n"
-	os.WriteFile(file, []byte(original), 0o644)
+	_ = os.WriteFile(file, []byte(original), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -218,7 +218,7 @@ func TestPatch_ValidationFailureNoChanges(t *testing.T) {
 func TestPatch_FileTrackerCheck(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "unread.go")
-	os.WriteFile(file, []byte("package unread\n"), 0o644)
+	_ = os.WriteFile(file, []byte("package unread\n"), 0o644)
 
 	ft := NewFileTracker()
 	// NOT marking as read
@@ -245,7 +245,7 @@ func TestPatch_FileTrackerCheck(t *testing.T) {
 func TestPatch_SameFileSequentialHunks(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "main.go")
-	os.WriteFile(file, []byte("line1\nline2\nline3\n"), 0o644)
+	_ = os.WriteFile(file, []byte("line1\nline2\nline3\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(file)
@@ -279,7 +279,7 @@ func TestPatch_SameFileSequentialHunks(t *testing.T) {
 func TestPatch_AddExistingFileRejected(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "exists.txt")
-	os.WriteFile(file, []byte(""), 0o644) // empty file
+	_ = os.WriteFile(file, []byte(""), 0o644) // empty file
 
 	tool := newPatchTool(t, dir, nil)
 
@@ -332,8 +332,8 @@ func TestPatch_BeforeWriteCalledPerFile(t *testing.T) {
 	dir := t.TempDir()
 	f1 := filepath.Join(dir, "a.go")
 	f2 := filepath.Join(dir, "b.go")
-	os.WriteFile(f1, []byte("aaa\n"), 0o644)
-	os.WriteFile(f2, []byte("bbb\n"), 0o644)
+	_ = os.WriteFile(f1, []byte("aaa\n"), 0o644)
+	_ = os.WriteFile(f2, []byte("bbb\n"), 0o644)
 
 	ft := NewFileTracker()
 	ft.MarkRead(f1)

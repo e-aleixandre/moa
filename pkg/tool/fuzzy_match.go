@@ -21,7 +21,7 @@ func fuzzyFind(content, oldText string) (start, end int, strategy string, err er
 	idx := strings.Index(content, oldText)
 	if idx >= 0 {
 		// Verify uniqueness
-		if strings.Index(content[idx+1:], oldText) >= 0 {
+		if strings.Contains(content[idx+1:], oldText) {
 			return 0, 0, "", fmt.Errorf("oldText matches multiple locations — be more specific")
 		}
 		return idx, idx + len(oldText), "exact", nil
@@ -289,7 +289,6 @@ func commonLeadingPrefix(lines []string) string {
 		indent := leadingWhitespace(l)
 		if first {
 			prefix = indent
-			first = true
 			first = false
 			continue
 		}

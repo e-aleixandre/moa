@@ -114,7 +114,7 @@ func TestSessionRuntime_Close_AbortsAgent(t *testing.T) {
 	}
 
 	rt.Close()
-	if !fas.fakeAgent.wasAborted() {
+	if !fas.wasAborted() {
 		t.Fatal("Abort not called on Close")
 	}
 }
@@ -154,7 +154,7 @@ func TestSessionRuntime_CustomSessionID(t *testing.T) {
 
 func TestSessionRuntime_FullLifecycle(t *testing.T) {
 	fas := newFakeAgentSubscriber()
-	fas.fakeAgent.sendResult = []core.AgentMessage{
+	fas.sendResult = []core.AgentMessage{
 		{Message: core.Message{Role: "assistant", Content: []core.Content{
 			{Type: "text", Text: "hello from runtime"},
 		}}},
@@ -206,7 +206,7 @@ func TestSessionRuntime_FullLifecycle(t *testing.T) {
 
 func TestSessionRuntime_FullLifecycle_Error(t *testing.T) {
 	fas := newFakeAgentSubscriber()
-	fas.fakeAgent.sendErr = errors.New("boom")
+	fas.sendErr = errors.New("boom")
 
 	rt, err := NewSessionRuntime(RuntimeConfig{
 		Agent:      fas.fakeAgent,
@@ -248,7 +248,7 @@ func TestSessionRuntime_BridgeForwards(t *testing.T) {
 	got := make(chan AgentStarted, 1)
 	rt.Bus.Subscribe(func(e AgentStarted) { got <- e })
 
-	fas.fakeSubscriber.emit(core.AgentEvent{Type: core.AgentEventStart})
+	fas.emit(core.AgentEvent{Type: core.AgentEventStart})
 	rt.Bus.Drain(time.Second)
 	select {
 	case e := <-got:
