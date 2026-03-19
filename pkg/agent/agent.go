@@ -57,6 +57,7 @@ type AgentConfig struct {
 	Model         core.Model
 	SystemPrompt  string
 	ThinkingLevel string
+	MaxTokens     int // Max output tokens per LLM call. 0 = provider default.
 	Tools         *core.Registry
 	Extensions    []extension.Extension
 	WorkspaceRoot string
@@ -577,6 +578,10 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	// Build stream options
 	streamOpts := core.StreamOptions{
 		ThinkingLevel: a.config.ThinkingLevel,
+	}
+	if a.config.MaxTokens > 0 {
+		mt := a.config.MaxTokens
+		streamOpts.MaxTokens = &mt
 	}
 
 	cfg := &loopConfig{
