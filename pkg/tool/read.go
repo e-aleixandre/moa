@@ -72,7 +72,7 @@ func NewRead(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(fmt.Sprintf("cannot read %s: %v", path, err)), nil
 			}
 			if info.IsDir() {
-				return core.ErrorResult(fmt.Sprintf("%s is a directory, use ls instead", path)), nil
+				return listDirectory(resolved, cfg.WorkspaceRoot, "[Note: path is a directory, not a file. Showing directory listing instead. Use the ls tool for directory listings.]\n\n")
 			}
 
 			ext := strings.ToLower(filepath.Ext(resolved))
