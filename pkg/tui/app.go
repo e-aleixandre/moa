@@ -1086,6 +1086,13 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 				break
 			}
 		}
+		// Invalidate file picker cache after successful file edits.
+		if !e.IsError && !e.Rejected {
+			switch e.ToolName {
+			case "edit", "write", "multiedit", "apply_patch":
+				m.filePicker.Invalidate()
+			}
+		}
 		m.s.viewportDirty = true
 		if m.s.activeTools <= 0 {
 			m.s.activeTools = 0
@@ -1150,6 +1157,23 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 			return nil
 		}
 		return m.handleRunEnded(e)
+
+	// --- Auto-verify ---
+	case bus.AutoVerifyStarted:
+		m.status.SetText("running auto-verify...")
+		return nil
+
+	case bus.AutoVerifyEnded:
+		if e.Err != nil {
+			m.status.SetText("auto-verify: " + e.Err.Error())
+			return []tea.Cmd{tea.Tick(3*time.Second, func(time.Time) tea.Msg { return clearThinkingStatusMsg{} })}
+		}
+		if e.AllPass {
+			m.status.SetText("✓ auto-verify passed")
+			return []tea.Cmd{tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearThinkingStatusMsg{} })}
+		}
+		m.status.SetText("✗ auto-verify failed — sending to agent...")
+		return nil
 
 	// --- Permissions ---
 	case bus.PermissionRequested:

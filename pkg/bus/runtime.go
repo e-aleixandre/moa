@@ -33,6 +33,9 @@ type RuntimeConfig struct {
 	Persister        SessionPersister
 	SteerFilter      func(text string) bool
 
+	CWD        string // workspace directory
+	AutoVerify bool   // run verify after edit runs
+
 	// GateConfig preserves allow/deny/rules/headless config for gate reconstruction
 	// when switching between permission modes at runtime.
 	GateConfig permission.Config
@@ -101,6 +104,8 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		AskBridge:        cfg.AskBridge,
 		ProviderFactory:  cfg.ProviderFactory,
 		BaseSystemPrompt: cfg.BaseSystemPrompt,
+		CWD:              cfg.CWD,
+		AutoVerify:       cfg.AutoVerify,
 		SteerFilter:      cfg.SteerFilter,
 		GateConfig:       cfg.GateConfig,
 	}

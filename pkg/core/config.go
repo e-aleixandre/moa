@@ -49,6 +49,7 @@ type MoaConfig struct {
 	CodeReviewThinking string            `json:"code_review_thinking,omitempty"` // Thinking level for code reviewer (default: plan review thinking)
 	MaxBudget          float64           `json:"max_budget"`                     // Max USD per agent run. 0 = unlimited.
 	MemoryEnabled      *bool             `json:"memory_enabled,omitempty"`       // nil = true (enabled by default)
+	AutoVerify         *bool             `json:"auto_verify,omitempty"`          // nil = false (disabled by default)
 }
 
 // IsMemoryEnabled returns whether cross-session memory is enabled.
@@ -58,6 +59,12 @@ func IsMemoryEnabled(cfg MoaConfig) bool {
 		return *cfg.MemoryEnabled
 	}
 	return true
+}
+
+// IsAutoVerifyEnabled returns whether auto-verify is enabled.
+// Default is false when AutoVerify is nil (not configured).
+func IsAutoVerifyEnabled(cfg MoaConfig) bool {
+	return cfg.AutoVerify != nil && *cfg.AutoVerify
 }
 
 // MCPServer defines an MCP tool server connection (stdio transport).
@@ -165,6 +172,12 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.MemoryEnabled = override.MemoryEnabled
 	} else {
 		merged.MemoryEnabled = base.MemoryEnabled
+	}
+	// AutoVerify: project overrides global (explicit wins).
+	if override.AutoVerify != nil {
+		merged.AutoVerify = override.AutoVerify
+	} else {
+		merged.AutoVerify = base.AutoVerify
 	}
 	return merged
 }

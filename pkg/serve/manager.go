@@ -10,6 +10,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/files"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/session"
 )
@@ -137,6 +138,10 @@ type Manager struct {
 	savedCache    []session.Summary
 	savedCacheAt  time.Time
 	savedCacheTTL time.Duration // default 30s, configurable for tests
+
+	// fileScanner is shared across /api/sessions/{id}/files requests.
+	// Invalidated on successful edit tool completions.
+	fileScanner *files.Scanner
 }
 
 // ManagerConfig configures a Manager.
@@ -162,6 +167,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		moaCfg:          cfg.MoaCfg,
 		sessionBaseDir:  cfg.SessionBaseDir,
 		savedCacheTTL:   30 * time.Second,
+		fileScanner:     files.NewScanner(),
 	}
 }
 
@@ -268,6 +274,19 @@ func (m *Manager) Get(id string) (*ManagedSession, bool) {
 		return nil, false // nil placeholder during resume
 	}
 	return s, ok
+}
+
+// InvalidateFileCache invalidates the file scanner cache for a given CWD.
+// Called after successful file edits to keep file suggestions fresh.
+func (m *Manager) InvalidateFileCache(cwd string) {
+	if m.fileScanner != nil && cwd != "" {
+		m.fileScanner.Invalidate(cwd)
+	}
+}
+
+// FileScanner returns the shared file scanner instance.
+func (m *Manager) FileScanner() *files.Scanner {
+	return m.fileScanner
 }
 
 // CommandResult is the response from executing a slash command.

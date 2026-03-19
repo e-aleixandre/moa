@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ealeixandre/moa/pkg/files"
 )
 
 const (
@@ -19,29 +19,27 @@ const (
 type filePicker struct {
 	active  bool
 	filter  string // text after "@" used to filter
-	matches []fileEntry
+	matches []files.Entry
 	cursor  int
 	scroll  int // first visible index
 	workDir string
-	cache   []fileEntry // lazily populated file list
-}
-
-type fileEntry struct {
-	path    string // relative to workdir
-	isDir   bool
-
+	scanner *files.Scanner
 }
 
 func (p *filePicker) SetWorkDir(dir string) {
 	if dir != p.workDir {
 		p.workDir = dir
-		p.cache = nil // invalidate on dir change
+		if p.scanner != nil {
+			p.scanner.Invalidate(dir)
+		}
 	}
 }
 
 // Invalidate forces a rescan on next activation.
 func (p *filePicker) Invalidate() {
-	p.cache = nil
+	if p.scanner != nil && p.workDir != "" {
+		p.scanner.Invalidate(p.workDir)
+	}
 }
 
 // Update checks if the current text triggers the file picker.
@@ -120,7 +118,7 @@ func (p *filePicker) Selected() string {
 	if !p.active || len(p.matches) == 0 {
 		return ""
 	}
-	return p.matches[p.cursor].path
+	return p.matches[p.cursor].Path
 }
 
 // SelectedIsDir returns true if the highlighted entry is a directory.
@@ -128,7 +126,7 @@ func (p *filePicker) SelectedIsDir() bool {
 	if !p.active || len(p.matches) == 0 {
 		return false
 	}
-	return p.matches[p.cursor].isDir
+	return p.matches[p.cursor].IsDir
 }
 
 func (p *filePicker) Close() {
@@ -163,22 +161,22 @@ func (p *filePicker) View(width int, theme Theme) string {
 			cursor = "▸ "
 		}
 
-		icon := "📄"
+		icon := dim.Render("╶")
 		style := nameStyle
-		if entry.isDir {
-			icon = "📁"
+		if entry.IsDir {
+			icon = dirStyle.Render("▸")
 			style = dirStyle
 		}
 
 		var line string
 		if i == p.cursor {
-			line = fmt.Sprintf("%s%s %s", cursor, icon, sel.Render(entry.path))
+			line = fmt.Sprintf("%s%s %s", cursor, icon, sel.Render(entry.Path))
 		} else {
-			line = fmt.Sprintf("%s%s %s", cursor, icon, style.Render(entry.path))
+			line = fmt.Sprintf("%s%s %s", cursor, icon, style.Render(entry.Path))
 		}
 
 		// Show parent dir hint if the filename alone might be ambiguous
-		dir := filepath.Dir(entry.path)
+		dir := filepath.Dir(entry.Path)
 		if dir != "." && i != p.cursor {
 			line += "  " + dim.Render(dir)
 		}
@@ -201,111 +199,12 @@ func (p *filePicker) View(width int, theme Theme) string {
 	return pickerBorderStyle.Width(innerWidth).Render(content)
 }
 
-func (p *filePicker) filterFiles(filter string) []fileEntry {
-	if p.cache == nil {
-		p.cache = p.scanFiles()
+func (p *filePicker) filterFiles(filter string) []files.Entry {
+	if p.scanner == nil {
+		p.scanner = files.NewScanner()
 	}
-
-	if filter == "" {
-		if len(p.cache) > filePickerMaxResults {
-			return p.cache[:filePickerMaxResults]
-		}
-		return p.cache
-	}
-
-	lower := strings.ToLower(filter)
-	var exact, prefix, contains []fileEntry
-
-	for _, entry := range p.cache {
-		lp := strings.ToLower(entry.path)
-		base := strings.ToLower(filepath.Base(entry.path))
-
-		if lp == lower {
-			exact = append(exact, entry)
-		} else if strings.HasPrefix(lp, lower) || strings.HasPrefix(base, lower) {
-			prefix = append(prefix, entry)
-		} else if strings.Contains(lp, lower) {
-			contains = append(contains, entry)
-		}
-
-		if len(exact)+len(prefix)+len(contains) >= filePickerMaxResults {
-			break
-		}
-	}
-
-	result := make([]fileEntry, 0, len(exact)+len(prefix)+len(contains))
-	result = append(result, exact...)
-	result = append(result, prefix...)
-	result = append(result, contains...)
-	return result
-}
-
-func (p *filePicker) scanFiles() []fileEntry {
-	if p.workDir == "" {
-		return nil
-	}
-
-	var entries []fileEntry
-
-	// Use a simple walk, respecting .gitignore-like patterns.
-	skipDirs := map[string]bool{
-		".git":         true,
-		"node_modules": true,
-		"vendor":       true,
-		".next":        true,
-		"dist":         true,
-		"build":        true,
-		"__pycache__":  true,
-		".venv":        true,
-		".cache":       true,
-		".idea":        true,
-		".vscode":      true,
-	}
-
-	_ = filepath.WalkDir(p.workDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		name := d.Name()
-
-		// Skip hidden dirs (except root).
-		if d.IsDir() && path != p.workDir {
-			if skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".") {
-				return filepath.SkipDir
-			}
-		}
-
-		// Skip root itself.
-		if path == p.workDir {
-			return nil
-		}
-
-		rel, err := filepath.Rel(p.workDir, path)
-		if err != nil {
-			return nil
-		}
-
-		entries = append(entries, fileEntry{
-			path:  rel,
-			isDir: d.IsDir(),
-		})
-
-		// Cap total to avoid scanning huge repos.
-		if len(entries) > 5000 {
-			return filepath.SkipAll
-		}
-		return nil
-	})
-
-	// Sort: directories first, then alphabetical.
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].isDir != entries[j].isDir {
-			return entries[i].isDir
-		}
-		return entries[i].path < entries[j].path
-	})
-
-	return entries
+	all := p.scanner.Scan(p.workDir)
+	return files.Filter(all, filter, filePickerMaxResults)
 }
 
 // --- Tab path completion ---

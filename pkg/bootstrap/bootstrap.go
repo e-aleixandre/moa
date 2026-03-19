@@ -102,6 +102,7 @@ type Session struct {
 	HasVerify   bool
 	Model       core.Model
 	MoaCfg      core.MoaConfig
+	CWD         string // workspace directory
 
 	// UntrustedMCP is true when .mcp.json exists but CWD is not in TrustedMCPPaths.
 	UntrustedMCP bool
@@ -332,6 +333,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MemoryStore:  memStore,
 		Model:        cfg.Model,
 		MoaCfg:       moaCfg,
+		CWD:          cfg.CWD,
 		UntrustedMCP: untrustedMCP,
 		Headless:     cfg.Headless,
 	}

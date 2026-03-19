@@ -8,6 +8,7 @@ import {
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer,
+  handleWsAutoVerifyStart, handleWsAutoVerifyEnd,
 } from './ws-handlers.js';
 
 const HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
@@ -148,6 +149,12 @@ function routeEvent(sessionId, evt) {
       break;
     case 'context_update':
       handleWsContextUpdate(sessionId, evt.data);
+      break;
+    case 'auto_verify_start':
+      handleWsAutoVerifyStart(sessionId);
+      break;
+    case 'auto_verify_end':
+      handleWsAutoVerifyEnd(sessionId, evt.data);
       break;
   }
 }

@@ -125,6 +125,16 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 		b.Subscribe(func(e bus.Steered) {
 			send(Event{Type: "steer", Data: SteerData{Text: e.Text}})
 		}),
+		b.Subscribe(func(e bus.AutoVerifyStarted) {
+			send(Event{Type: "auto_verify_start"})
+		}),
+		b.Subscribe(func(e bus.AutoVerifyEnded) {
+			data := map[string]any{"all_pass": e.AllPass, "summary": e.Summary}
+			if e.Err != nil {
+				data["error"] = e.Err.Error()
+			}
+			send(Event{Type: "auto_verify_end", Data: data})
+		}),
 		b.Subscribe(func(e bus.PermissionRequested) {
 			send(Event{Type: "permission_request", Data: PermissionData{
 				ID: e.ID, ToolName: e.ToolName, Args: e.Args,

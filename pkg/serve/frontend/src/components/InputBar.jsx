@@ -4,6 +4,8 @@ import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addP
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';
+import { store, updateSession } from '../store.js';
+import { FileSuggestions } from './FileSuggestions.jsx';
 
 // Global registry: tileId → { toggleVoice }. Used by keyboard shortcuts.
 export const inputBarRegistry = new Map();
@@ -35,6 +37,10 @@ export function InputBar({ sessionId, session, tileId }) {
   const [canTranscribe, setCanTranscribe] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
+  const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
+  const [fileCursor, setFileCursor] = useState(0);
+  const fileAbortRef = useRef(null);
+  const fileDebounceRef = useRef(null);
   const feedbackRef = useRef(null);
 
   const permissionActive = sessionState === 'permission' && !!session?.pendingPerm;
@@ -151,6 +157,119 @@ export function InputBar({ sessionId, session, tileId }) {
     setCmdSuggestions(null);
   }, []);
 
+  // --- File suggestions (@mention) ---
+  const cancelFileRequest = useCallback(() => {
+    if (fileAbortRef.current) {
+      fileAbortRef.current.abort();
+      fileAbortRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount.
+  useEffect(() => {
+    return () => {
+      cancelFileRequest();
+      clearTimeout(fileDebounceRef.current);
+    };
+  }, [cancelFileRequest]);
+
+  const updateFileSuggestions = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el || !sessionId) return;
+    const val = el.value;
+    const cursor = el.selectionStart;
+
+    // Walk backwards from cursor to find @.
+    let atIdx = -1;
+    for (let i = cursor - 1; i >= 0; i--) {
+      if (val[i] === '@') { atIdx = i; break; }
+      if (/\s/.test(val[i])) break;
+    }
+
+    if (atIdx < 0 || (atIdx > 0 && !/\s/.test(val[atIdx - 1]))) {
+      cancelFileRequest();
+      setFileSuggestions(null);
+      return;
+    }
+
+    const filter = val.slice(atIdx + 1, cursor);
+    if (/\s/.test(filter)) {
+      cancelFileRequest();
+      setFileSuggestions(null);
+      return;
+    }
+
+    // Abort previous request.
+    cancelFileRequest();
+    const controller = new AbortController();
+    fileAbortRef.current = controller;
+
+    fetch(`/api/sessions/${sessionId}/files?q=${encodeURIComponent(filter)}&limit=50`, {
+      signal: controller.signal,
+      headers: { 'X-Moa-Request': '1' },
+    })
+    .then(r => r.json())
+    .then(items => {
+      if (!controller.signal.aborted) {
+        setFileSuggestions(items.length > 0 ? items : null);
+        setFileCursor(0);
+      }
+    })
+    .catch(() => {}); // aborted or network error
+  }, [sessionId, cancelFileRequest]);
+
+  const acceptFileMention = useCallback((path, isDir) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const val = el.value;
+    const cursor = el.selectionStart;
+
+    // Find the @ backwards.
+    let atIdx = -1;
+    for (let i = cursor - 1; i >= 0; i--) {
+      if (val[i] === '@') { atIdx = i; break; }
+      if (/\s/.test(val[i])) break;
+    }
+    const before = atIdx >= 0 ? val.slice(0, atIdx) : val.slice(0, cursor);
+    const after = val.slice(cursor);
+
+    if (isDir) {
+      // Navigate into directory: keep @, update filter to dir/.
+      const replacement = '@' + path + '/';
+      el.value = before + replacement + after;
+      el.selectionStart = el.selectionEnd = before.length + replacement.length;
+      setFileSuggestions(null);
+      // Re-trigger to show directory contents.
+      setTimeout(updateFileSuggestions, 50);
+    } else {
+      // Accept file: remove @, insert path + space.
+      el.value = before + path + ' ' + after;
+      el.selectionStart = el.selectionEnd = before.length + path.length + 1;
+      setFileSuggestions(null);
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.focus();
+  }, [updateFileSuggestions]);
+
+  // --- Dequeue steers ---
+  const handleDequeueSteers = useCallback(() => {
+    const sess = store.get().sessions[sessionId];
+    if (!sess?.pendingSteers?.length) return;
+
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const combined = sess.pendingSteers.join('\n');
+    const current = el.value;
+    el.value = current ? current + '\n' + combined : combined;
+
+    updateSession(sessionId, { pendingSteers: null });
+
+    autoResize();
+    el.focus();
+    el.selectionStart = el.selectionEnd = el.value.length;
+  }, [sessionId, autoResize]);
+
   const acceptSuggestion = useCallback((cmd) => {
     const el = textareaRef.current;
     if (!el) return;
@@ -172,6 +291,7 @@ export function InputBar({ sessionId, session, tileId }) {
     pushHistory(text);
     el.value = '';
     setCmdSuggestions(null);
+    setFileSuggestions(null);
     autoResize();
 
     // Detect slash commands.
@@ -229,6 +349,41 @@ export function InputBar({ sessionId, session, tileId }) {
   }, []);
 
   const handleKey = (e) => {
+    // Alt+ArrowUp: dequeue pending steers to input (parity with TUI).
+    if (e.key === 'ArrowUp' && e.altKey) {
+      const sess = store.get().sessions[sessionId];
+      if (sess?.pendingSteers?.length) {
+        e.preventDefault();
+        handleDequeueSteers();
+        return;
+      }
+    }
+
+    // File suggestion navigation (takes priority over cmd suggestions).
+    if (fileSuggestions) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFileCursor(i => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFileCursor(i => Math.min(fileSuggestions.length - 1, i + 1));
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const item = fileSuggestions[fileCursor];
+        acceptFileMention(item.path, item.is_dir);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setFileSuggestions(null);
+        return;
+      }
+    }
+
     // Command suggestion navigation.
     if (cmdSuggestions) {
       if (e.key === 'ArrowUp') {
@@ -306,6 +461,9 @@ export function InputBar({ sessionId, session, tileId }) {
   const handleInput = (e) => {
     autoResize();
     updateSuggestions();
+    // File suggestions with debounce.
+    clearTimeout(fileDebounceRef.current);
+    fileDebounceRef.current = setTimeout(updateFileSuggestions, 100);
   };
 
   const handleStop = async () => {
@@ -358,7 +516,9 @@ export function InputBar({ sessionId, session, tileId }) {
 
   // Derive activity label from session state.
   let activityLabel = null;
-  if (busy) {
+  if (session?.autoVerifying) {
+    activityLabel = 'Running auto-verify…';
+  } else if (busy) {
     if (session?.thinkingText) activityLabel = 'Thinking…';
     else if (session?.streamingText) activityLabel = 'Generating…';
     else if (session?.runningTool) activityLabel = `Running ${session.runningTool}…`;
@@ -440,23 +600,25 @@ export function InputBar({ sessionId, session, tileId }) {
         </div>
       ) : (
         <>
-          {busy && activityLabel && (
+          {(busy || session?.autoVerifying) && activityLabel && (
             <div class="input-activity">
               <Loader2 class="input-activity-spinner" />
               <span class="input-activity-label">{activityLabel}</span>
-              <button class="input-activity-abort" onClick={handleStop} title="Stop (Esc)">
-                Esc to abort
-              </button>
+              {busy && (
+                <button class="input-activity-abort" onClick={handleStop} title="Stop (Esc)">
+                  Esc to abort
+                </button>
+              )}
             </div>
           )}
           {!busy && pendingSteers && pendingSteers.length > 0 && (
-            <div class="input-steers">
+            <button class="input-steers" onClick={handleDequeueSteers} title="Click or Alt+↑ to edit queued messages">
               {pendingSteers.length === 1
                 ? <span class="input-steer-text">{pendingSteers[0]}</span>
                 : <span class="input-steer-text">{pendingSteers[pendingSteers.length - 1]} <span class="input-steer-count">+{pendingSteers.length - 1}</span></span>
               }
-              <span class="input-steer-badge">queued</span>
-            </div>
+              <span class="input-steer-badge">queued · click to edit</span>
+            </button>
           )}
           <div class="input-wrap">
             {cmdSuggestions && (
@@ -474,6 +636,14 @@ export function InputBar({ sessionId, session, tileId }) {
                   </div>
                 ))}
               </div>
+            )}
+            {fileSuggestions && !cmdSuggestions && (
+              <FileSuggestions
+                items={fileSuggestions}
+                cursor={fileCursor}
+                onSelect={acceptFileMention}
+                onHover={setFileCursor}
+              />
             )}
             <textarea
               ref={textareaRef}

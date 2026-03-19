@@ -455,3 +455,47 @@ func TestMergeConfigs_MemoryEnabled_GlobalOnly(t *testing.T) {
 		t.Error("global false should persist when project has no override")
 	}
 }
+
+func TestIsAutoVerifyEnabled_NilIsFalse(t *testing.T) {
+	cfg := MoaConfig{}
+	if IsAutoVerifyEnabled(cfg) {
+		t.Error("nil AutoVerify should be false")
+	}
+}
+
+func TestIsAutoVerifyEnabled_TrueWhenSet(t *testing.T) {
+	v := true
+	cfg := MoaConfig{AutoVerify: &v}
+	if !IsAutoVerifyEnabled(cfg) {
+		t.Error("expected true")
+	}
+}
+
+func TestIsAutoVerifyEnabled_FalseWhenExplicit(t *testing.T) {
+	v := false
+	cfg := MoaConfig{AutoVerify: &v}
+	if IsAutoVerifyEnabled(cfg) {
+		t.Error("expected false")
+	}
+}
+
+func TestMergeConfigs_AutoVerify_ProjectOverridesGlobal(t *testing.T) {
+	globalVal := true
+	projectVal := false
+	base := MoaConfig{AutoVerify: &globalVal}
+	project := MoaConfig{AutoVerify: &projectVal}
+	merged := mergeConfigs(base, project)
+	if IsAutoVerifyEnabled(merged) {
+		t.Error("project false should override global true")
+	}
+}
+
+func TestMergeConfigs_AutoVerify_NilFallsThrough(t *testing.T) {
+	globalVal := true
+	base := MoaConfig{AutoVerify: &globalVal}
+	project := MoaConfig{} // nil
+	merged := mergeConfigs(base, project)
+	if !IsAutoVerifyEnabled(merged) {
+		t.Error("global true should persist when project has no override")
+	}
+}

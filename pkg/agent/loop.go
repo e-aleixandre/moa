@@ -255,7 +255,12 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				repeatCount = 1
 			}
 			if repeatCount >= doomLoopThreshold {
-				loopErr = fmt.Errorf("doom loop detected: identical tool calls repeated %d times in a row", repeatCount)
+				// Log the repeated tool calls for debugging
+				var callNames []string
+				for _, tc := range toolCalls {
+					callNames = append(callNames, fmt.Sprintf("%s(%v)", tc.ToolName, tc.Arguments))
+				}
+				loopErr = fmt.Errorf("doom loop detected: identical tool calls repeated %d times in a row: %v", repeatCount, callNames)
 				return loopErr
 			}
 		}

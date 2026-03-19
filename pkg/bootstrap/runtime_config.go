@@ -9,6 +9,7 @@ package bootstrap
 
 import (
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 )
 
@@ -42,6 +43,8 @@ func (s *Session) RuntimeConfig() bus.RuntimeConfig {
 		PathPolicy:       s.PathPolicy,
 		AskBridge:        s.AskBridge,
 		BaseSystemPrompt: base,
+		CWD:              s.CWD,
+		AutoVerify:       core.IsAutoVerifyEnabled(s.MoaCfg),
 		GateConfig:       gateConfig,
 	}
 }

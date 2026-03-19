@@ -43,6 +43,7 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
@@ -322,6 +323,17 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// Create reactor that bridges bus events → WS events.
 		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx)
 		defer reactor.cleanup()
+
+		// Invalidate file scanner cache on successful file edits.
+		editToolUnsub := sess.runtime.Bus.Subscribe(func(e bus.ToolExecEnded) {
+			if !e.IsError && !e.Rejected {
+				switch e.ToolName {
+				case "edit", "write", "multiedit", "apply_patch":
+					mgr.InvalidateFileCache(sess.CWD)
+				}
+			}
+		})
+		defer editToolUnsub()
 
 		for {
 			select {

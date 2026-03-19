@@ -172,6 +172,7 @@ type RunEnded struct {
 	RunGen    uint64
 	FinalText string
 	Err       error // non-nil for real errors (not cancellation)
+	HadEdits  bool  // true if edit/write/multiedit/apply_patch completed successfully
 }
 
 // ContextUpdated is published when the context window usage percentage changes.
@@ -284,4 +285,21 @@ type CommandExecuted struct {
 	SessionID string
 	Command   string
 	Messages  []core.AgentMessage // non-nil for /compact
+}
+
+// ---------------------------------------------------------------------------
+// Auto-verify
+// ---------------------------------------------------------------------------
+
+// AutoVerifyStarted is published when auto-verify begins after an edit run.
+type AutoVerifyStarted struct {
+	SessionID string
+}
+
+// AutoVerifyEnded is published when auto-verify completes.
+type AutoVerifyEnded struct {
+	SessionID string
+	AllPass   bool
+	Summary   string // formatted failure text, empty if all pass
+	Err       error  // config/execution error
 }

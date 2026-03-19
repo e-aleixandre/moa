@@ -70,8 +70,8 @@ func TestFilePicker_FilterFiles(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result for 'types', got %d", len(results))
 	}
-	if results[0].path != filepath.Join("pkg", "core", "types.go") {
-		t.Fatalf("unexpected path: %s", results[0].path)
+	if results[0].Path != filepath.Join("pkg", "core", "types.go") {
+		t.Fatalf("unexpected path: %s", results[0].Path)
 	}
 }
 

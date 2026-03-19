@@ -6,11 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // rebuildSystemPrompt updates the agent's system prompt based on the current
@@ -282,7 +285,23 @@ func RegisterHandlers(sctx *SessionContext) {
 	// Agent run commands (async — spawn goroutine)
 	// -------------------------------------------------------------------
 
+	// Auto-verify state: retry counter + cancel function for in-flight verify.
+	var autoVerifyCount atomic.Int32
+	var autoVerifyCancel atomic.Pointer[context.CancelFunc]
+
+	// cancelAutoVerify cancels any in-flight auto-verify goroutine.
+	cancelAutoVerify := func() {
+		if fn := autoVerifyCancel.Swap(nil); fn != nil {
+			(*fn)()
+		}
+	}
+
 	b.OnCommand(func(cmd SendPrompt) error {
+		// Reset auto-verify counter on user-initiated prompts.
+		if cmd.Custom == nil || cmd.Custom["source"] != "auto_verify" {
+			autoVerifyCount.Store(0)
+			cancelAutoVerify()
+		}
 		return startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
@@ -292,6 +311,9 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SendPromptWithContent) error {
+		// User-initiated content send resets auto-verify counter.
+		autoVerifyCount.Store(0)
+		cancelAutoVerify()
 		label := "content"
 		if len(cmd.Content) > 0 && cmd.Content[0].Text != "" {
 			label = cmd.Content[0].Text
@@ -571,6 +593,74 @@ func RegisterHandlers(sctx *SessionContext) {
 	b.Subscribe(func(e RunEnded) { publishContextUpdate() })
 	b.Subscribe(func(e CommandExecuted) { publishContextUpdate() })
 	b.Subscribe(func(e ConfigChanged) { publishContextUpdate() })
+
+	// --- Auto-verify ---
+	// After a run that edited files, optionally run verify and re-send failures to agent.
+	b.Subscribe(func(e RunEnded) {
+		if !sctx.AutoVerify || sctx.CWD == "" {
+			return
+		}
+		if e.Err != nil || !e.HadEdits {
+			return
+		}
+		// Guardrail: max 2 auto-verify retries per user-initiated chain.
+		count := autoVerifyCount.Add(1)
+		if count > 2 {
+			return
+		}
+
+		// Capture run generation so we can detect stale results.
+		startRunGen := e.RunGen
+
+		go func() {
+			sctx.Bus.Publish(AutoVerifyStarted{SessionID: sctx.SessionID})
+
+			ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
+			defer cancel()
+
+			// Store cancel so new user runs can abort this verify.
+			autoVerifyCancel.Store(&cancel)
+			defer autoVerifyCancel.CompareAndSwap(&cancel, nil)
+
+			result, err := verify.Execute(ctx, sctx.CWD)
+
+			// Check if a newer run started while we were verifying.
+			if sctx.RunGenAtomic.Load() != startRunGen {
+				return // stale — discard results
+			}
+
+			if err != nil {
+				sctx.Bus.Publish(AutoVerifyEnded{
+					SessionID: sctx.SessionID, Err: err,
+				})
+				return
+			}
+
+			if result.AllPass {
+				sctx.Bus.Publish(AutoVerifyEnded{
+					SessionID: sctx.SessionID, AllPass: true,
+				})
+				autoVerifyCount.Store(0)
+				return
+			}
+
+			summary := formatVerifyFailure(result)
+			sctx.Bus.Publish(AutoVerifyEnded{
+				SessionID: sctx.SessionID, Summary: summary,
+			})
+
+			// Re-send to agent if idle/error; drop if already running.
+			if sctx.State != nil {
+				current := sctx.State.Current()
+				if current == StateIdle || current == StateError {
+					_ = sctx.Bus.Execute(SendPrompt{
+						Text:   summary,
+						Custom: map[string]any{"source": "auto_verify"},
+					})
+				}
+			}
+		}()
+	})
 }
 
 // startRun is the shared implementation for SendPrompt and SendPromptWithContent.
@@ -630,10 +720,13 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			}
 		}
 
-		// Extract final text only from NEW messages.
+		// Extract final text and detect edits from NEW messages.
 		var finalText string
+		var hadEdits bool
 		if len(msgs) > msgsBefore {
-			finalText = extractFinalAssistantText(msgs[msgsBefore:])
+			newMsgs := msgs[msgsBefore:]
+			finalText = extractFinalAssistantText(newMsgs)
+			hadEdits = hasSuccessfulEdits(newMsgs)
 		}
 
 		// Publish run result.
@@ -646,7 +739,43 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			RunGen:    gen,
 			FinalText: finalText,
 			Err:       runErr,
+			HadEdits:  hadEdits,
 		})
 	}()
 	return nil
+}
+
+// hasSuccessfulEdits checks tool_result messages for successful file-editing tools.
+func hasSuccessfulEdits(msgs []core.AgentMessage) bool {
+	editTools := map[string]bool{
+		"edit":        true,
+		"write":       true,
+		"multiedit":   true,
+		"apply_patch": true,
+	}
+	for _, msg := range msgs {
+		if msg.Role != "tool_result" {
+			continue
+		}
+		if editTools[msg.ToolName] && !msg.IsError {
+			return true
+		}
+	}
+	return false
+}
+
+// formatVerifyFailure builds a markdown summary of failing verify checks.
+func formatVerifyFailure(result verify.Result) string {
+	var sb strings.Builder
+	sb.WriteString("Auto-verify failed. Fix the following issues:\n\n")
+	for _, ch := range result.Checks {
+		if !ch.Passed {
+			output := ch.Output
+			if len(output) > 2000 {
+				output = output[:2000] + "\n...(truncated)"
+			}
+			fmt.Fprintf(&sb, "**%s** (exit %d):\n```\n%s\n```\n\n", ch.Name, ch.ExitCode, output)
+		}
+	}
+	return sb.String()
 }

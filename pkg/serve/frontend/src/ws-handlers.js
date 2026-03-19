@@ -484,3 +484,11 @@ function parseSubagentNotification(text) {
   }
   return null;
 }
+
+export function handleWsAutoVerifyStart(id) {
+  updateSession(id, { autoVerifying: true });
+}
+
+export function handleWsAutoVerifyEnd(id, data) {
+  updateSession(id, { autoVerifying: false });
+}

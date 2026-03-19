@@ -80,6 +80,9 @@ type SessionContext struct {
 	// to ask/auto. Preserves allow/deny patterns, rules, headless, etc.
 	GateConfig permission.Config
 
+	CWD        string // workspace directory for tools/verify
+	AutoVerify bool   // run verify automatically after edit runs
+
 	// SteerFilter returns false to suppress a steer event (e.g. subagent
 	// completion text in serve). If nil, all steers are published.
 	SteerFilter func(text string) bool
