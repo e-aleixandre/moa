@@ -210,10 +210,10 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 }
 
 // sendMessage sends a programmatic user message and starts the agent run.
+// Input stays enabled so the user can steer mid-run (same as startAgentRun).
 func (m appModel) sendMessage(text string) (tea.Model, tea.Cmd) {
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
 	m.prepareRun(truncateLabel(text))
-	m.input.SetEnabled(false)
 	m.updateViewport()
 	return m, m.launchAgentSend(text)
 }
@@ -299,6 +299,9 @@ func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, te
 	if planInfo.Mode != "reviewing" {
 		return m, nil
 	}
+	// Set flag BEFORE FinishPlanReview so that the resulting PlanModeChanged("ready")
+	// event doesn't override our post-review menu with the generic post-submit menu.
+	m.postReviewMenuPending = true
 	_ = m.runtime.Bus.Execute(bus.FinishPlanReview{})
 	m.status.SetText("")
 	m.reviewStreamCh = nil

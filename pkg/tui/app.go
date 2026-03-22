@@ -40,6 +40,7 @@ type state struct {
 	streamText       string         // current streaming assistant text
 	thinkingText     string         // current thinking text
 	streamCache      string         // cached glamour render of streamText (updated by renderTick)
+	textMaterialized bool           // text was already materialized into blocks by ToolCallStreaming
 	dirty            bool           // streamText changed since last render tick
 	viewportDirty    bool           // blocks changed, viewport needs refresh on next tick
 	running          bool           // agent is running (tick should continue)
@@ -127,12 +128,13 @@ type appModel struct {
 	settingsMenu settingsMenu
 
 	// Plan mode (display-only state — all operations go through bus)
-	planMenu              planMenu
-	reviewGen             uint64
-	reviewStreamCh        chan planReviewStreamMsg
-	lastReviewResult      *planmode.ReviewResult
-	lastMenuVariant       planMenuVariant
-	pendingReviewFeedback string
+	planMenu               planMenu
+	reviewGen              uint64
+	reviewStreamCh         chan planReviewStreamMsg
+	lastReviewResult       *planmode.ReviewResult
+	lastMenuVariant        planMenuVariant
+	pendingReviewFeedback  string
+	postReviewMenuPending  bool // set before FinishPlanReview to suppress PlanModeChanged→OpenPostSubmit
 	taskWidget            taskWidget
 	taskWidgetMode        tasks.WidgetMode // TUI-local display preference
 
@@ -1009,6 +1011,7 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
+		m.s.textMaterialized = false
 		m.s.streamState = stateStreaming
 		m.status.SetText("generating...")
 
@@ -1022,7 +1025,9 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 			})
 		}
 		assistantText := m.s.streamText
-		if assistantText == "" {
+		if assistantText == "" && !m.s.textMaterialized {
+			// Only fall back to FullText if no text was already materialized
+			// by ToolCallStreaming during this message.
 			assistantText = e.FullText
 		}
 		if assistantText != "" {
@@ -1033,6 +1038,7 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 		m.s.streamText = ""
 		m.s.thinkingText = ""
 		m.s.streamCache = ""
+		m.s.textMaterialized = false
 		m.s.viewportDirty = true
 
 	case bus.ToolCallStreaming:
@@ -1046,12 +1052,14 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 				Type: "thinking", Raw: m.s.thinkingText,
 			})
 			m.s.thinkingText = ""
+			m.s.textMaterialized = true
 		}
 		if m.s.streamText != "" {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "assistant", Raw: m.s.streamText,
 			})
 			m.s.streamText = ""
+			m.s.textMaterialized = true
 		}
 		m.s.streamCache = ""
 		m.s.streamState = stateToolRunning
@@ -1317,12 +1325,14 @@ func (m *appModel) handlePlanModeChanged(e bus.PlanModeChanged) []tea.Cmd {
 	} else {
 		m.statusBar.UpdatePlanSegment(e.Mode)
 	}
-	// Plan submitted → show action menu
-	if e.Mode == "ready" {
+	// Plan submitted → show action menu, but NOT if we just finished a review
+	// (the review result handler opens the appropriate post-review menu).
+	if e.Mode == "ready" && !m.postReviewMenuPending {
 		m.planMenu.OpenPostSubmit()
 		m.lastMenuVariant = menuPostSubmit
 		m.input.SetEnabled(false)
 	}
+	m.postReviewMenuPending = false
 	return nil
 }
 
