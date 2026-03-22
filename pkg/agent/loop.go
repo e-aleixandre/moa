@@ -261,6 +261,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					callNames = append(callNames, fmt.Sprintf("%s(%v)", tc.ToolName, tc.Arguments))
 				}
 				loopErr = fmt.Errorf("doom loop detected: identical tool calls repeated %d times in a row: %v", repeatCount, callNames)
+
+				// Inject tool_result messages for every pending tool_call so
+				// the conversation stays valid (Anthropic requires a tool_result
+				// immediately after every tool_use).
+				injectErrorToolResults(cfg, toolCalls, loopErr.Error())
 				return loopErr
 			}
 		}
@@ -729,6 +734,20 @@ func rejectToolCall(cfg *loopConfig, slot toolExecSlot) {
 		Rejected:   rejected,
 		Result:     &result,
 	})
+}
+
+// injectErrorToolResults appends a tool_result message for each pending tool_call
+// so the conversation stays valid when the run is aborted (e.g. doom loop).
+// Without this, providers like Anthropic reject the session on resume because
+// every tool_use must have a matching tool_result.
+func injectErrorToolResults(cfg *loopConfig, toolCalls []core.Content, errMsg string) {
+	for _, tc := range toolCalls {
+		content := []core.Content{core.TextContent(errMsg)}
+		msg := core.WrapMessage(core.NewToolResultMessage(
+			tc.ToolCallID, tc.ToolName, content, true,
+		))
+		cfg.state.Messages = append(cfg.state.Messages, msg)
+	}
 }
 
 // toolCallSignature produces a stable hash of a set of tool calls (name + args)
