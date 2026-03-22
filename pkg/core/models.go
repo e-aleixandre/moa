@@ -40,15 +40,15 @@ var knownModels = map[string]Model{
 		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
 		Pricing: &Pricing{Input: 1.25, Output: 10, CacheRead: 0.125},
 	},
-	"o3": {
-		ID: "o3", Provider: "openai", API: "openai-chat",
-		Name: "o3", MaxInput: 200_000, MaxOutput: 100_000,
-		Pricing: &Pricing{Input: 1, Output: 4, CacheRead: 0.1},
+	"gpt-5.4": {
+		ID: "gpt-5.4", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.4", MaxInput: 1_050_000, MaxOutput: 128_000,
+		Pricing: &Pricing{Input: 2.5, Output: 15, CacheRead: 0.25},
 	},
-	"o4-mini": {
-		ID: "o4-mini", Provider: "openai", API: "openai-chat",
-		Name: "o4-mini", MaxInput: 200_000, MaxOutput: 100_000,
-		Pricing: &Pricing{Input: 0.55, Output: 2.2, CacheRead: 0.055},
+	"gpt-5.4-mini": {
+		ID: "gpt-5.4-mini", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.4 Mini", MaxInput: 400_000, MaxOutput: 128_000,
+		Pricing: &Pricing{Input: 0.75, Output: 4.5, CacheRead: 0.075},
 	},
 }
 
@@ -62,6 +62,8 @@ var modelAliases = map[string]string{
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
 	"codex-5.2":   "gpt-5.2-codex",
+	"gpt5":        "gpt-5.4",
+	"gpt5-mini":   "gpt-5.4-mini",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
