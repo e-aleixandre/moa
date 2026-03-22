@@ -1,117 +1,63 @@
-# Serve / Web UI
+# Web UI
 
-`moa serve` starts a small HTTP/WebSocket server and exposes Moa in the browser.
-
-It is useful when you want to:
-
-- continue sessions from another device
-- use Moa from mobile more comfortably than a raw terminal
-- keep multiple browser sessions open at once
-
-## Start it
+`moa serve` starts an HTTP/WebSocket server that exposes Moa in the browser.
 
 ```bash
-moa serve
+moa serve                              # http://127.0.0.1:8080
+moa serve --host 0.0.0.0 --port 8080   # expose on network
 ```
 
-Default address:
+## Features
 
-```text
-http://127.0.0.1:8080
-```
+- Multiple concurrent sessions with per-session working directory
+- Session persistence and resume
+- Streaming output over WebSocket
+- Permission prompts and cancel
+- Plan mode, subagents, MCP
+- Model and thinking reconfiguration per session
+- Multi-pane tiled layouts
+- Keyboard-first navigation
+- Voice input
 
-Expose it on your network:
+## Keyboard shortcuts
 
-```bash
-moa serve --host 0.0.0.0 --port 8080
-```
+| Shortcut | Action |
+|----------|--------|
+| `⌘K` / `Alt+K` | Open session palette |
+| `⌘1..9` / `Alt+1..9` | Focus pane by number |
+| `⌘.` / `Alt+.` | Toggle voice input |
+| `Esc` | Close palette / go back |
 
-## What it supports today
-
-- multiple sessions
-- per-session working directory
-- session persistence and resume
-- streaming output over WebSocket
-- permission prompts
-- cancel running sessions
-- subagents
-- MCP loading per session
-- model and thinking reconfiguration
-- command palette for session switching and creation
-- multi-pane tiled layouts
-- keyboard navigation between panes
-- voice input in the focused pane
-
-## Voice input
-
-Voice input is available in the web UI when transcription is configured:
-
-```bash
-moa --login openai-transcribe
-```
-
-It inserts transcribed text into the currently focused input.
-
-Browser microphone access usually requires HTTPS, so voice input works best on localhost, Tailscale, or behind your own HTTPS setup.
-
-## Keyboard-first workflow
-
-`moa serve` is designed to work well from the keyboard:
-
-- `⌘K` on Mac / `Alt+K` elsewhere — open the session palette
-- `⌘1..9` / `Alt+1..9` — focus panes by number
-- `⌘.` / `Alt+.` — toggle voice input for the focused pane
-- `Esc` — close the palette or go back
-
-On non-Mac platforms, Moa uses `Alt` instead of `Ctrl` to avoid common browser shortcut conflicts.
+On non-Mac platforms, `Alt` replaces `⌘` to avoid browser shortcut conflicts.
 
 ## Session palette
 
-The session palette is the main navigation surface in `moa serve`.
+The session palette (`⌘K`) lets you search sessions, jump to open ones, resume saved sessions, or create new ones with a chosen project path.
 
-It lets you:
+## Panes
 
-- search sessions
-- jump to open sessions
-- resume saved sessions
-- create a new session
-- choose a recent project or type a custom path
+On desktop, you can split panes horizontally or vertically, switch focus by keyboard, and apply layout presets from the top bar.
 
-## Panes and layouts
+## Voice input
 
-On desktop, `moa serve` supports multi-pane layouts for working on several sessions at once.
+Requires `moa --login openai-transcribe`. Browser microphone access usually needs HTTPS, so it works best on localhost, Tailscale, or behind your own HTTPS setup.
 
-You can:
+## Security
 
-- split panes horizontally or vertically
-- switch focus by keyboard
-- move sessions between panes
-- apply layout presets from the top bar
+`moa serve` has **no built-in authentication**. Use it on localhost, a private network, or behind a reverse proxy with auth.
 
-## Security note
+## Frontend development
 
-`moa serve` does **not** include built-in authentication.
-
-Safe default use cases:
-
-- localhost
-- Tailscale or another private network
-- behind your own reverse proxy with auth
-
-## Static assets
-
-By default, the web UI is served from embedded assets.
-
-For frontend development, you can override the static directory:
+Override embedded assets for live development:
 
 ```bash
-MOA_SERVE_STATIC_DIR=/path/to/static moa serve
+MOA_SERVE_STATIC_DIR=pkg/serve/frontend/src moa serve
 ```
 
-## Desktop
+<p align="center">
+  <img src="./assets/serve-desktop-overview.png" alt="Desktop" width="900" />
+</p>
 
-![Moa web UI on desktop](./assets/serve-desktop-overview.png)
-
-## Mobile
-
-<img src="./assets/serve-mobile-session.png" alt="Moa web UI on mobile" width="320" />
+<p align="center">
+  <img src="./assets/serve-mobile-session.png" alt="Mobile" width="320" />
+</p>

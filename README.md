@@ -3,70 +3,54 @@
 </p>
 
 <h1 align="center">Moa</h1>
-<p align="center"><strong>My Own Agent</strong> — a lightweight, modular coding agent runtime in Go.</p>
+<p align="center"><strong>My Own Agent</strong> — a lightweight coding agent runtime in Go.</p>
 
 ---
 
-Moa is a local-first coding agent with three interfaces built on the same core:
+Moa is a local-first coding agent with three interfaces on the same core:
 
-- **CLI** for one-shot runs
 - **TUI** for interactive terminal sessions
-- **Web UI** via `moa serve` for using the agent from desktop or mobile
+- **Web UI** via `moa serve` for desktop and mobile
+- **CLI** for one-shot scripts and pipelines
 
-It includes tool calling, permissions, sessions, subagents, MCP support, and automatic context compaction.
-
-The web UI is keyboard-first, with a session palette, multi-pane layouts, pane switching shortcuts, and optional voice input.
+It supports tool calling, permissions, sessions, plan mode, subagents, MCP, memory, budget limits, voice input, and automatic context compaction.
 
 <p align="center">
-  <img src="docs/assets/tui-main.png" alt="Moa terminal UI with tool calls" width="900" />
+  <img src="docs/assets/tui-main.png" alt="Moa terminal UI" width="900" />
 </p>
 
 <p align="center">
   <img src="docs/assets/serve-desktop-overview.png" alt="Moa web UI on desktop" width="900" />
 </p>
 
-<p align="center">
-  <img src="docs/assets/serve-mobile-session.png" alt="Moa web UI on mobile" width="320" />
-</p>
+## Quick start
 
-## Why Moa
+```bash
+make build              # → ./bin/moa
+export ANTHROPIC_API_KEY="..."  # or OPENAI_API_KEY
 
-- **Fast and lightweight**: written in Go, with low baseline overhead
-- **Modular**: one runtime, multiple interfaces
-- **Extensible**: built-in tools, MCP, subagents, and reusable runtime components
-- **Local-first**: designed for your machine first, but usable over the network when needed
+moa                     # interactive TUI
+moa -p "fix the tests"  # one-shot
+moa serve               # web UI at http://127.0.0.1:8080
+```
 
 ## Documentation
 
-- [Overview](docs/overview.md)
-- [Quickstart](docs/quickstart.md)
-- [CLI Reference](docs/cli.md)
-- [Serve / Web UI](docs/serve.md)
-- [TUI Usage](docs/tui.md)
-- [Configuration](docs/configuration.md)
-- [Tools](docs/tools.md)
-- [Architecture](docs/architecture.md)
+| Doc | What it covers |
+|-----|---------------|
+| [Overview](docs/overview.md) | What Moa is, capabilities, how it works |
+| [Quickstart](docs/quickstart.md) | Install, authenticate, first run |
+| [CLI Reference](docs/cli.md) | Flags, model aliases, examples |
+| [TUI Usage](docs/tui.md) | Slash commands, keybindings, plan mode |
+| [Web UI](docs/serve.md) | `moa serve`, panes, voice, keyboard shortcuts |
+| [Configuration](docs/configuration.md) | Config files, fields, permissions, MCP |
+| [Tools](docs/tools.md) | Built-in tools, custom script tools, subagents |
+| [Architecture](docs/architecture.md) | Package map, event bus, runtime model |
 
-## Build
-
-```bash
-make build
-# -> ./bin/moa
-```
-
-## Try it
+## Build & test
 
 ```bash
-moa
-moa -p "summarize this package"
-moa serve
-```
-
-> If you built locally and did not install the binary, use `./bin/moa`.
-
-## Test
-
-```bash
-make test
-make vet
+make build        # compile binary
+make test         # run all tests
+make serve        # build + start web UI
 ```

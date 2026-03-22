@@ -1,56 +1,89 @@
 # Tools
 
-## Registered by default
+## Built-in tools
 
-- `bash` — execute shell commands (streamed output, timeout, truncation + spill file)
-- `read` — read text/image files with offset/limit support
-- `write` — create/overwrite file
-- `edit` — exact-text replacement with single-match enforcement
-- `grep` — search file content (prefers `rg`)
-- `find` — search files by glob (prefers `fd`)
-- `ls` — list directory contents
-- `fetch_content` — fetch URL and return readable markdown
-- `subagent` — spawn child agent
-- `subagent_status` — query async subagent jobs
-- `subagent_cancel` — cancel async subagent jobs
+Always registered:
 
-## Conditionally registered
+| Tool | Description |
+|------|-------------|
+| `bash` | Execute shell commands (streamed, timeout, truncation + spill file) |
+| `read` | Read text/image files with offset/limit |
+| `write` | Create or overwrite files |
+| `edit` | Exact-text replacement (single match enforced) |
+| `multiedit` | Atomic batch of edits to a single file |
+| `apply_patch` | Apply multi-file unified diffs |
+| `grep` | Search file content (prefers `rg` if installed) |
+| `find` | Search files by glob (prefers `fd` if installed) |
+| `ls` | List directory contents |
+| `fetch_content` | Fetch a URL and extract readable markdown |
+| `memory` | Read/update persistent cross-session project notes |
+| `subagent` | Spawn a child agent (sync or async) |
+| `subagent_status` | Poll async subagent jobs |
+| `subagent_cancel` | Cancel a running async subagent |
 
-- `web_search` — enabled only when `brave_api_key` is configured
+Conditionally registered:
 
-## Choosing the right tool
+| Tool | Condition |
+|------|-----------|
+| `web_search` | `brave_api_key` is configured |
+| `ask_user` | TUI or web UI is active (not headless) |
+| `tasks` | Plan mode is active |
+| `verify` | `.moa/verify.json` exists |
 
-- use `grep`, `find`, and `ls` for exploration
-- use `read` before editing files
-- use `edit` for surgical changes
-- use `write` for new files or full-file rewrites
-- use `bash` when shell behavior is actually needed
+## Tool selection guidance
 
-## Sandbox behavior
+- Use `grep`, `find`, `ls` for exploration
+- Use `read` before editing — `edit` warns if the file wasn't read first
+- Use `edit` for surgical changes, `multiedit` for several changes in one file
+- Use `apply_patch` for coordinated changes across multiple files
+- Use `write` for new files or complete rewrites
+- Use `bash` when you need actual shell behavior
 
-Path-based tools use workspace sandboxing unless disabled by:
+## Sandbox
 
-- `-yolo`
-- `disable_sandbox: true`
+Path-based tools are sandboxed to the workspace directory by default. Escape attempts via `..` or symlinks are blocked.
 
-Extra paths can be allowlisted via `allowed_paths`.
+Override with:
+- `-yolo` flag
+- `path_scope: "unrestricted"` in config
+- `allowed_paths` for specific extra directories
+- `/path add <dir>` at runtime in the TUI
 
-## Tool output truncation
+## Subagents
 
-Large outputs are truncated in-memory (head + tail strategy), and full outputs can be spilled to temp files for later inspection.
+```
+subagent(task: "...", model?: "...", thinking?: "...", tools?: [...], async?: bool)
+```
 
-## Subagent usage
+Async flow: call with `async: true` → get a job ID → poll with `subagent_status` → optionally `subagent_cancel`.
 
-`subagent` parameters:
+## Custom script tools
 
-- `task` (required)
-- `tools` (optional allowlist)
-- `model` (optional)
-- `thinking` (optional)
-- `async` (optional bool)
+Define tools as JSON files in `.moa/tools/`:
 
-Async flow:
+```json
+// .moa/tools/deploy.json
+{
+  "name": "deploy",
+  "description": "Deploy to staging",
+  "command": "bash scripts/deploy.sh staging"
+}
+```
 
-1. call `subagent` with `async: true`
-2. poll `subagent_status` with returned job id
-3. optionally `subagent_cancel`
+Each file defines one tool that runs a shell command. The tool is registered automatically when Moa starts in that project.
+
+## Verify
+
+Define project checks in `.moa/verify.json`:
+
+```json
+{
+  "checks": [
+    { "name": "build", "command": "make build" },
+    { "name": "test", "command": "make test" },
+    { "name": "lint", "command": "make lint" }
+  ]
+}
+```
+
+Run with `/verify` in the TUI, or automatically after changes if `auto_verify` is enabled in config.

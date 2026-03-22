@@ -1,21 +1,25 @@
 # CLI Reference
 
-## Main command
+## Flags
 
-```text
--p                  Prompt text or @file
--model              Model alias or provider/model-id (default: sonnet)
--thinking           off|minimal|low|medium|high (default: medium)
--max-turns          Max agent turns (default: 50)
--yolo               Disable sandbox and permissions
--permissions        yolo|ask|auto
--permissions-model  Model used by auto permission evaluator
--continue           Resume latest saved session
--resume             Open session browser (or --resume <id>)
--login              Login to provider: anthropic | openai | openai-transcribe
--logout             Remove stored credentials for provider
--output             text|json (default: text)
-```
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-p` | | Prompt text, or `@file` to read from file |
+| `-model` | `sonnet` | Model alias or `provider/model-id` |
+| `-thinking` | `medium` | `off`, `minimal`, `low`, `medium`, `high` |
+| `-max-turns` | 0 (unlimited) | Max agent turns per run |
+| `-max-budget` | 0 (unlimited) | Max USD spend per run |
+| `-yolo` | false | Disable sandbox and all permissions |
+| `-permissions` | from config | `yolo`, `ask`, `auto` |
+| `-permissions-model` | | Model for `auto` mode evaluator |
+| `-path-scope` | derived | `workspace` or `unrestricted` |
+| `-allow` | | Permission pattern (repeatable), e.g. `"Bash(go:*)"` |
+| `-allow-path` | | Allow extra directory outside workspace (repeatable) |
+| `-continue` | | Resume latest session |
+| `-resume` | | Session browser, or `--resume <id>` for specific session |
+| `-output` | `text` | `text` or `json` (JSON-lines) |
+| `-login` | | `anthropic`, `openai`, `openai-transcribe` |
+| `-logout` | | Remove stored credentials for provider |
 
 ## Serve subcommand
 
@@ -23,27 +27,22 @@
 moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet]
 ```
 
-### Serve flags
+See [Web UI](./serve.md) for details.
 
-```text
---host   Bind address (default: 127.0.0.1)
---port   HTTP port (default: 8080)
---model  Default model for new web sessions
-```
+## Model aliases
 
-If you bind to anything other than localhost, Moa prints a warning because `moa serve` does not include built-in authentication.
+| Alias | Resolves to |
+|-------|------------|
+| `sonnet` | `claude-sonnet-4-6` |
+| `opus` | `claude-opus-4-6` |
+| `haiku` | `claude-haiku-4-5` |
+| `codex` | `gpt-5.3-codex` |
+| `codex-spark` | `gpt-5.3-codex-spark` |
+| `codex-5.2` | `gpt-5.2-codex` |
+| `gpt5` | `gpt-5.4` |
+| `gpt5-mini` | `gpt-5.4-mini` |
 
-`openai-transcribe` enables voice input in the web UI.
-
-## Model selection
-
-Accepted formats:
-
-- alias: `sonnet`, `opus`, `haiku`, `codex`, `codex-spark`, `codex-5.2`
-- canonical id: `claude-sonnet-4-6`
-- provider/id: `anthropic/claude-sonnet-4-6`, `openai/gpt-5.3-codex`
-
-Unknown model IDs are accepted, but context-window-based management is disabled for them.
+You can also use canonical IDs (`claude-sonnet-4-6`) or provider-prefixed IDs (`anthropic/claude-sonnet-4-6`). Unknown IDs are accepted but context-window management is disabled for them.
 
 ## Examples
 
@@ -54,21 +53,15 @@ moa -p "fix flaky tests"
 # explicit provider/model
 moa -model openai/gpt-5.3-codex -p "optimize this query"
 
-# disable sandbox + permissions (full yolo)
-moa -yolo
+# budget-limited run
+moa -max-budget 0.50 -p "refactor auth module"
 
-# ask-mode permissions
-moa -permissions ask
+# permissions with allow patterns
+moa -permissions ask -allow "Bash(go:*)" -allow "Write(*.go)"
 
-# auto-mode permissions with evaluator model override
-moa -permissions auto -permissions-model haiku
+# allow access to extra directory
+moa -allow-path /tmp/shared-data
 
-# start web UI locally
-moa serve
-
-# enable voice input for the web UI
-moa --login openai-transcribe
-
-# expose web UI on the network
+# web UI on the network
 moa serve --host 0.0.0.0 --port 8080
 ```
