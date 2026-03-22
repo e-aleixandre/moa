@@ -49,9 +49,9 @@ func TestParseTruncatedAfterColon(t *testing.T) {
 	p := &PartialParser{}
 	result := p.Parse(`{"path":`)
 	// May return {} or nil — either is acceptable as long as no panic
-	if result != nil && len(result) > 0 {
+	if len(result) > 0 {
 		// If it managed to parse something, path should not have garbage
-		if _, ok := result["path"]; ok {
+		if result["path"] != nil {
 			t.Error("should not have path key with no value")
 		}
 	}
@@ -124,13 +124,8 @@ func TestParseEscapedStrings(t *testing.T) {
 
 func TestParseTruncatedUnicodeEscape(t *testing.T) {
 	p := &PartialParser{}
-	result := p.Parse(`{"text":"\u00`)
-	// Should not panic; result may be nil or have text key
-	if result != nil {
-		if _, ok := result["text"]; ok {
-			// Having the key is fine — value may be empty or partial
-		}
-	}
+	_ = p.Parse(`{"text":"\u00`)
+	// Should not panic; result may be nil or have text key — either is fine.
 }
 
 func TestMonotonicNonRegression(t *testing.T) {
@@ -138,7 +133,7 @@ func TestMonotonicNonRegression(t *testing.T) {
 
 	// First parse with 2 keys
 	r1 := p.Parse(`{"path":"/foo","content":"hello"}`)
-	if r1 == nil || len(r1) < 2 {
+	if len(r1) < 2 {
 		t.Fatal("expected 2 keys")
 	}
 
@@ -192,7 +187,7 @@ func TestParseJustOpenBrace(t *testing.T) {
 	p := &PartialParser{}
 	result := p.Parse(`{`)
 	// Should return {} or nil — either acceptable
-	if result != nil && len(result) != 0 {
+	if len(result) != 0 {
 		t.Errorf("expected empty map or nil for just '{', got %v", result)
 	}
 }
