@@ -1188,14 +1188,14 @@ func TestSwitchToModel_OverwritesPendingTimeline(t *testing.T) {
 	})
 	m = result.(appModel)
 	result, _ = m.switchToModel(core.Model{
-		ID: "o3", Provider: "openai", Name: "o3", MaxInput: 200_000,
+		ID: "gpt-5.4-mini", Provider: "openai", Name: "GPT-5.4 Mini", MaxInput: 400_000,
 	})
 	rm := result.(appModel)
 
 	if rm.s.pendingTimeline == nil {
 		t.Fatal("expected pending timeline event")
 	}
-	if got, want := rm.s.pendingTimeline.Text, "✓ Switched to o3 (openai)"; got != want {
+	if got, want := rm.s.pendingTimeline.Text, "✓ Switched to GPT-5.4 Mini (openai)"; got != want {
 		t.Fatalf("pending timeline = %q, want %q", got, want)
 	}
 	if len(rm.s.blocks) != 0 {
