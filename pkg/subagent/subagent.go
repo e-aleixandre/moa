@@ -17,10 +17,6 @@ import (
 const (
 	jobTTL = 30 * time.Minute
 
-	defaultMaxTurns            = 50
-	defaultMaxToolCallsPerTurn = 20
-	defaultMaxRunDuration      = 10 * time.Minute
-
 	// asyncResultTailLines is how many trailing lines of a completed async
 	// subagent result are included in the notification to the parent.
 	asyncResultTailLines = 50
@@ -306,9 +302,7 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       thinkingLevel,
 		Tools:               childReg,
-		MaxTurns:            defaultMaxTurns,
-		MaxToolCallsPerTurn: defaultMaxToolCallsPerTurn,
-		MaxRunDuration:      defaultMaxRunDuration,
+		// 0 = unlimited for all three guardrails, matching the parent agent's defaults.
 		PermissionCheck: func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			if fn := currentPermissionCheck(cfg); fn != nil {
 				return fn(ctx, name, args)

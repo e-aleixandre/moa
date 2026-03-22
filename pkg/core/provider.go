@@ -90,6 +90,11 @@ type AssistantEvent struct {
 	Partial      *Message `json:"partial,omitempty"`
 	Message      *Message `json:"message,omitempty"`
 	Error        error    `json:"-"`
+
+	// Tool call metadata — populated for toolcall_start, toolcall_delta, toolcall_end events.
+	ToolCallID  string         `json:"tool_call_id,omitempty"`
+	ToolName    string         `json:"tool_name,omitempty"`
+	PartialArgs map[string]any `json:"partial_args,omitempty"`
 }
 
 // IsTerminal returns true for "done" or "error" events.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // IsMCPPathTrusted reports whether path is in the config's trusted MCP paths.
@@ -47,9 +48,12 @@ type MoaConfig struct {
 	PlanReviewThinking string            `json:"plan_review_thinking"` // Thinking level for plan reviewer (default: "low")
 	CodeReviewModel    string            `json:"code_review_model,omitempty"`    // Model for code reviewer (default: plan review model)
 	CodeReviewThinking string            `json:"code_review_thinking,omitempty"` // Thinking level for code reviewer (default: plan review thinking)
-	MaxBudget          float64           `json:"max_budget"`                     // Max USD per agent run. 0 = unlimited.
-	MemoryEnabled      *bool             `json:"memory_enabled,omitempty"`       // nil = true (enabled by default)
-	AutoVerify         *bool             `json:"auto_verify,omitempty"`          // nil = false (disabled by default)
+	MaxBudget            float64           `json:"max_budget"`                       // Max USD per agent run. 0 = unlimited.
+	MaxTurns             int               `json:"max_turns,omitempty"`              // Max agent turns per run. 0 = unlimited.
+	MaxToolCallsPerTurn  int               `json:"max_tool_calls_per_turn,omitempty"` // Max tool calls per turn. 0 = unlimited.
+	MaxRunDurationStr    string            `json:"max_run_duration,omitempty"`        // Max run duration as Go duration string (e.g. "30m"). Empty = unlimited.
+	MemoryEnabled        *bool             `json:"memory_enabled,omitempty"`         // nil = true (enabled by default)
+	AutoVerify           *bool             `json:"auto_verify,omitempty"`            // nil = false (disabled by default)
 }
 
 // IsMemoryEnabled returns whether cross-session memory is enabled.
@@ -65,6 +69,19 @@ func IsMemoryEnabled(cfg MoaConfig) bool {
 // Default is false when AutoVerify is nil (not configured).
 func IsAutoVerifyEnabled(cfg MoaConfig) bool {
 	return cfg.AutoVerify != nil && *cfg.AutoVerify
+}
+
+// GetMaxRunDuration parses MaxRunDurationStr into a time.Duration.
+// Returns 0 (unlimited) if empty or invalid.
+func GetMaxRunDuration(cfg MoaConfig) time.Duration {
+	if cfg.MaxRunDurationStr == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(cfg.MaxRunDurationStr)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 // MCPServer defines an MCP tool server connection (stdio transport).

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/jsonutil"
 	"github.com/ealeixandre/moa/pkg/provider/retry"
 	"github.com/ealeixandre/moa/pkg/provider/sseutil"
 )
@@ -175,6 +176,10 @@ type streamState struct {
 	toolCallName string
 	requestTools []core.ToolSpec // original tool specs for reverse name mapping
 	isOAuth      bool           // whether this request used OAuth (for tool name mapping)
+
+	// Partial JSON parsing for streaming tool call arguments.
+	partialParser jsonutil.PartialParser
+	lastParseLen  int // len(jsonAccum) at last partial parse
 }
 
 // mapEvent converts an Anthropic SSE event to a normalized AssistantEvent.
@@ -303,6 +308,8 @@ func (a *Anthropic) handleContentBlockStart(data string, state *streamState) *co
 		state.toolCallID = payload.ContentBlock.ID
 		state.toolCallName = toolName
 		state.jsonAccum = ""
+		state.partialParser.Reset()
+		state.lastParseLen = 0
 		state.message.Content = append(state.message.Content, core.ToolCallContent(
 			payload.ContentBlock.ID,
 			toolName,
@@ -311,6 +318,8 @@ func (a *Anthropic) handleContentBlockStart(data string, state *streamState) *co
 		return &core.AssistantEvent{
 			Type:         core.ProviderEventToolCallStart,
 			ContentIndex: payload.Index,
+			ToolCallID:   payload.ContentBlock.ID,
+			ToolName:     toolName,
 		}
 
 	default:
@@ -370,11 +379,24 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 
 	case "input_json_delta":
 		state.jsonAccum += payload.Delta.PartialJSON
-		return &core.AssistantEvent{
+		evt := &core.AssistantEvent{
 			Type:         core.ProviderEventToolCallDelta,
 			ContentIndex: idx,
 			Delta:        payload.Delta.PartialJSON,
+			ToolCallID:   state.toolCallID,
+			ToolName:     state.toolCallName,
 		}
+		// Throttled partial parse: only every 200 bytes to cap CPU cost.
+		if len(state.jsonAccum)-state.lastParseLen >= 200 {
+			if parsed := state.partialParser.Parse(state.jsonAccum); parsed != nil {
+				evt.PartialArgs = parsed
+				if idx < len(state.message.Content) {
+					state.message.Content[idx].Arguments = parsed
+				}
+			}
+			state.lastParseLen = len(state.jsonAccum)
+		}
+		return evt
 
 	default:
 		return nil
@@ -398,7 +420,7 @@ func (a *Anthropic) handleContentBlockStop(state *streamState) *core.AssistantEv
 		}
 
 	case "tool_use":
-		// Parse accumulated JSON into arguments
+		// Parse accumulated JSON into arguments (authoritative final parse).
 		if idx < len(state.message.Content) && state.jsonAccum != "" {
 			var args map[string]any
 			if err := json.Unmarshal([]byte(state.jsonAccum), &args); err == nil {
@@ -409,6 +431,8 @@ func (a *Anthropic) handleContentBlockStop(state *streamState) *core.AssistantEv
 		return &core.AssistantEvent{
 			Type:         core.ProviderEventToolCallEnd,
 			ContentIndex: idx,
+			ToolCallID:   state.toolCallID,
+			ToolName:     state.toolCallName,
 		}
 
 	default:

@@ -82,7 +82,11 @@ func (FlatLayout) RenderToolBlock(block ToolBlockData, width int, theme Theme) s
 		title += bgS.Render(" ") + targetStyle.Background(bg).Render(block.Target)
 	}
 	if !block.Done {
-		title += bgS.Render(" ") + dimStyle.Background(bg).Render("running…")
+		if block.Generating {
+			title += bgS.Render(" ") + dimStyle.Background(bg).Render("generating…")
+		} else {
+			title += bgS.Render(" ") + dimStyle.Background(bg).Render("running…")
+		}
 	} else if block.IsRejected {
 		title += bgS.Render(" ") + lipgloss.NewStyle().Foreground(theme.Peach).Background(bg).Bold(true).Render("rejected")
 	}

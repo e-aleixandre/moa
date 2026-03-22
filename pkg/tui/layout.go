@@ -38,6 +38,7 @@ type ToolBlockData struct {
 	IsError    bool
 	IsRejected bool
 	Note       string // optional note shown in footer area (feedback/reason)
+	Generating bool   // true while LLM is streaming args (before execution)
 }
 
 // --- Layout registry ---
@@ -134,6 +135,7 @@ func buildToolBlockData(block messageBlock, expanded bool) ToolBlockData {
 		IsError:    block.IsError,
 		IsRejected: block.Rejected,
 		Note:       note,
+		Generating: block.Generating,
 	}
 }
 

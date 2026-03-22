@@ -132,6 +132,7 @@ function extractToolNote(result, rejected) {
 const pendingTextDeltas = {};
 const pendingThinkingDeltas = {};
 const pendingToolDeltas = {};
+const pendingToolCallBuffers = {}; // sessionId → { toolCallId → { args } }
 let flushScheduled = false;
 
 function scheduleFlush() {
@@ -198,6 +199,7 @@ export function handleWsInit(id, data) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
+  delete pendingToolCallBuffers[id];
   updateSession(id, {
     messages: normalizeHistory(data.messages || []),
     state: data.state || 'idle',
@@ -238,6 +240,85 @@ export function handleWsMessageEnd(id, fullText) {
   });
 }
 
+export function handleWsToolCallStart(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+
+  // Check if block already exists (tool_start arrived before tool_call_start due to reordering).
+  const existingIdx = (sess.messages || []).findIndex(
+    m => m._type === 'tool_start' && m.tool_call_id === data.tool_call_id,
+  );
+
+  if (existingIdx >= 0) {
+    // Don't downgrade status — only update if still generating or missing.
+    const existing = sess.messages[existingIdx];
+    if (existing.status !== 'generating') return; // already advanced past generating
+    const messages = sess.messages.map((m, idx) => {
+      if (idx !== existingIdx) return m;
+      return { ...m, tool_name: data.tool_name };
+    });
+    updateSession(id, { messages });
+    return;
+  }
+
+  // Materialize streaming text before tool block (match TUI ordering).
+  const messages = [...sess.messages];
+  const patch = {};
+  if (sess.streamingText) {
+    messages.push({
+      role: 'assistant',
+      content: [{ type: 'text', text: sess.streamingText }],
+    });
+    patch.streamingText = null;
+    patch.thinkingText = null;
+  }
+
+  // Check if we have buffered args from early deltas.
+  const buffered = pendingToolCallBuffers[id]?.[data.tool_call_id];
+
+  messages.push({
+    _type: 'tool_start',
+    tool_call_id: data.tool_call_id,
+    tool_name: data.tool_name,
+    args: buffered?.args || {},
+    status: 'generating',
+    result: null,
+  });
+
+  // Clean up buffer.
+  if (buffered) {
+    delete pendingToolCallBuffers[id][data.tool_call_id];
+    if (Object.keys(pendingToolCallBuffers[id]).length === 0) {
+      delete pendingToolCallBuffers[id];
+    }
+  }
+
+  updateSession(id, { ...patch, messages });
+}
+
+export function handleWsToolCallDelta(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+
+  // Find existing tool block.
+  const idx = sess.messages.findIndex(
+    m => m._type === 'tool_start' && m.tool_call_id === data.tool_call_id
+  );
+
+  if (idx >= 0) {
+    // Update args immutably.
+    const messages = sess.messages.map((m, i) => {
+      if (i !== idx) return m;
+      return { ...m, args: data.args };
+    });
+    updateSession(id, { messages });
+  } else {
+    // Buffer for later — start event hasn't arrived yet.
+    if (!pendingToolCallBuffers[id]) pendingToolCallBuffers[id] = {};
+    pendingToolCallBuffers[id][data.tool_call_id] = { args: data.args };
+  }
+}
+
 export function handleWsToolStart(id, data) {
   const sess = store.get().sessions[id];
   if (!sess) return;
@@ -256,7 +337,7 @@ export function handleWsToolStart(id, data) {
         status: 'running',
       };
     });
-    updateSession(id, { messages });
+    updateSession(id, { messages, runningTool: data.tool_name });
     return;
   }
 
@@ -418,7 +499,29 @@ export function handleWsRunEnd(id) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
-  updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, runningTool: null });
+  delete pendingToolCallBuffers[id];
+
+  // Mark any generating tools as cancelled.
+  const sess = store.get().sessions[id];
+  if (sess) {
+    let changed = false;
+    const messages = sess.messages.map(m => {
+      if (m._type === 'tool_start' && m.status === 'generating') {
+        changed = true;
+        return { ...m, status: 'error', result: 'Run ended before execution' };
+      }
+      return m;
+    });
+    updateSession(id, {
+      messages: changed ? messages : sess.messages,
+      streamingText: null,
+      thinkingText: null,
+      pendingSteers: null,
+      runningTool: null,
+    });
+  } else {
+    updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, runningTool: null });
+  }
 }
 
 export function handleWsSteer(id, data) {

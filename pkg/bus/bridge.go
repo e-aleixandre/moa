@@ -189,6 +189,22 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 			b.Publish(TextDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta})
 		case core.ProviderEventThinkingDelta:
 			b.Publish(ThinkingDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta})
+		case core.ProviderEventToolCallStart:
+			b.Publish(ToolCallStreaming{
+				SessionID:  sid,
+				RunGen:     gen,
+				ToolCallID: e.AssistantEvent.ToolCallID,
+				ToolName:   e.AssistantEvent.ToolName,
+			})
+		case core.ProviderEventToolCallDelta:
+			if e.AssistantEvent.PartialArgs != nil {
+				b.Publish(ToolCallDelta{
+					SessionID:  sid,
+					RunGen:     gen,
+					ToolCallID: e.AssistantEvent.ToolCallID,
+					Args:       e.AssistantEvent.PartialArgs,
+				})
+			}
 		}
 
 	case core.AgentEventMessageEnd:

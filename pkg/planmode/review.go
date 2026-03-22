@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -56,10 +55,7 @@ func Review(ctx context.Context, cfg ReviewConfig, planPath string, onStream Rev
 		SystemPrompt:        reviewerPrompt,
 		ThinkingLevel:       cfg.ThinkingLevel,
 		Tools:               reviewReg,
-		MaxTurns:            15,
-		MaxToolCallsPerTurn: 20,
-		MaxRunDuration:      5 * time.Minute,
-		Compaction:          &core.CompactionSettings{Enabled: false},
+		Compaction: &core.CompactionSettings{Enabled: false},
 	})
 	if err != nil {
 		return ReviewResult{}, err
@@ -158,15 +154,12 @@ func ReviewCode(ctx context.Context, cfg ReviewConfig, summary string, filesChan
 	}
 
 	child, err := agent.New(agent.AgentConfig{
-		Provider:            provider,
-		Model:               cfg.Model,
-		SystemPrompt:        codeReviewerPrompt,
-		ThinkingLevel:       cfg.ThinkingLevel,
-		Tools:               reviewReg,
-		MaxTurns:            15,
-		MaxToolCallsPerTurn: 20,
-		MaxRunDuration:      5 * time.Minute,
-		Compaction:          &core.CompactionSettings{Enabled: false},
+		Provider:      provider,
+		Model:         cfg.Model,
+		SystemPrompt:  codeReviewerPrompt,
+		ThinkingLevel: cfg.ThinkingLevel,
+		Tools:         reviewReg,
+		Compaction:    &core.CompactionSettings{Enabled: false},
 	})
 	if err != nil {
 		return ReviewResult{}, err

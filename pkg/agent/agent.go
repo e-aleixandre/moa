@@ -101,16 +101,9 @@ func New(cfg AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("agent: MaxBudget requires Model.Pricing to be set")
 	}
 
-	// Apply defaults
-	if cfg.MaxTurns == 0 {
-		cfg.MaxTurns = 50
-	}
-	if cfg.MaxToolCallsPerTurn == 0 {
-		cfg.MaxToolCallsPerTurn = 20
-	}
-	if cfg.MaxRunDuration == 0 {
-		cfg.MaxRunDuration = 30 * time.Minute
-	}
+	// Apply defaults. MaxTurns, MaxToolCallsPerTurn, MaxRunDuration default
+	// to 0 (unlimited), like MaxBudget. Set explicit values via config.json
+	// or CLI flags if you want guardrails.
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}

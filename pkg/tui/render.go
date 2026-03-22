@@ -27,6 +27,7 @@ type messageBlock struct {
 	ToolDone   bool           // true after tool_execution_end
 	IsError    bool           // true if the tool returned an error
 	Rejected   bool           // true when permission-denied rejection
+	Generating bool           // true while LLM is streaming args (before execution)
 	ToolNote   string         // optional footer note (feedback/rejection reason)
 
 	// Subagent blocks (Type == "subagent")

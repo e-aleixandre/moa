@@ -60,6 +60,18 @@ type MessageEndData struct {
 }
 
 // ToolStartData is sent when a tool execution begins.
+// ToolCallStreamingData is sent when the LLM starts generating a tool call.
+type ToolCallStreamingData struct {
+	ToolCallID string `json:"tool_call_id"`
+	ToolName   string `json:"tool_name"`
+}
+
+// ToolCallDeltaData carries incrementally-parsed tool call arguments.
+type ToolCallDeltaData struct {
+	ToolCallID string         `json:"tool_call_id"`
+	Args       map[string]any `json:"args"`
+}
+
 type ToolStartData struct {
 	ToolCallID string         `json:"tool_call_id"`
 	ToolName   string         `json:"tool_name"`

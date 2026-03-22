@@ -168,7 +168,7 @@ type Config struct {
 // Only text/thinking deltas and tool exec updates are lossy — everything else is structural.
 func isStructuralBusEvent(event any) bool {
 	switch event.(type) {
-	case bus.TextDelta, bus.ThinkingDelta, bus.ToolExecUpdate:
+	case bus.TextDelta, bus.ThinkingDelta, bus.ToolExecUpdate, bus.ToolCallDelta:
 		return false
 	default:
 		return true
@@ -981,7 +981,7 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	// Mark chrome dirty for events that affect status/chrome.
 	// Skip the three high-frequency streaming events that never change chrome.
 	switch event.(type) {
-	case bus.TextDelta, bus.ThinkingDelta, bus.ToolExecUpdate:
+	case bus.TextDelta, bus.ThinkingDelta, bus.ToolExecUpdate, bus.ToolCallDelta:
 		// no-op: these don't affect status bar, input, or other chrome
 	default:
 		m.s.chromeCacheDirty = true
@@ -1035,6 +1035,49 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 		m.s.streamCache = ""
 		m.s.viewportDirty = true
 
+	case bus.ToolCallStreaming:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		// Materialize any pending stream text BEFORE the tool block
+		// to maintain correct chronological order.
+		if m.s.thinkingText != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "thinking", Raw: m.s.thinkingText,
+			})
+			m.s.thinkingText = ""
+		}
+		if m.s.streamText != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "assistant", Raw: m.s.streamText,
+			})
+			m.s.streamText = ""
+		}
+		m.s.streamCache = ""
+		m.s.streamState = stateToolRunning
+		m.status.SetText("generating " + e.ToolName + "...")
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type:       "tool",
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			Generating: true,
+		})
+		m.s.viewportDirty = true
+
+	case bus.ToolCallDelta:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			b := &m.s.blocks[i]
+			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
+				b.ToolArgs = e.Args
+				b.touch()
+				m.s.viewportDirty = true
+				break
+			}
+		}
+
 	case bus.ToolExecStarted:
 		if e.RunGen != m.s.runGen {
 			return nil
@@ -1046,9 +1089,24 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 		} else {
 			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
 		}
-		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "tool", ToolCallID: e.ToolCallID, ToolName: e.ToolName, ToolArgs: e.Args,
-		})
+		// Check if block was already created by ToolCallStreaming
+		found := false
+		for i := len(m.s.blocks) - 1; i >= 0; i-- {
+			b := &m.s.blocks[i]
+			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
+				b.ToolArgs = e.Args // authoritative final args
+				b.Generating = false
+				b.touch()
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Fallback: create block (ToolCallStreaming was missed or not emitted)
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "tool", ToolCallID: e.ToolCallID, ToolName: e.ToolName, ToolArgs: e.Args,
+			})
+		}
 		m.s.viewportDirty = true
 
 	case bus.ToolExecUpdate:
@@ -1329,6 +1387,17 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "assistant", Raw: m.s.streamText,
 		})
+	}
+
+	// Clean up any tool blocks still in Generating state (run aborted before execution).
+	for i := range m.s.blocks {
+		if m.s.blocks[i].Type == "tool" && m.s.blocks[i].Generating {
+			m.s.blocks[i].Generating = false
+			m.s.blocks[i].ToolDone = true
+			m.s.blocks[i].IsError = true
+			m.s.blocks[i].ToolResult = "Run ended before tool execution started"
+			m.s.blocks[i].touch()
+		}
 	}
 
 	// Query messages for reconciliation.

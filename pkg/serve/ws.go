@@ -79,6 +79,16 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 		b.Subscribe(func(e bus.MessageEnded) {
 			send(Event{Type: "message_end", Data: MessageEndData{Text: e.FullText}})
 		}),
+		b.Subscribe(func(e bus.ToolCallStreaming) {
+			send(Event{Type: "tool_call_start", Data: ToolCallStreamingData{
+				ToolCallID: e.ToolCallID, ToolName: e.ToolName,
+			}})
+		}),
+		b.Subscribe(func(e bus.ToolCallDelta) {
+			send(Event{Type: "tool_call_delta", Data: ToolCallDeltaData{
+				ToolCallID: e.ToolCallID, Args: e.Args,
+			}})
+		}),
 		b.Subscribe(func(e bus.ToolExecStarted) {
 			send(Event{Type: "tool_start", Data: ToolStartData{
 				ToolCallID: e.ToolCallID, ToolName: e.ToolName, Args: e.Args,
@@ -99,9 +109,7 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 			send(Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}})
 		}),
 		b.Subscribe(func(e bus.RunEnded) {
-			if e.FinalText != "" {
-				send(Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}})
-			}
+			send(Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}})
 		}),
 		b.Subscribe(func(e bus.ContextUpdated) {
 			send(Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}})

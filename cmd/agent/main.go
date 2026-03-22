@@ -80,7 +80,7 @@ func main() {
 	p := flag.String("p", "", "Prompt text or @file to read prompt from file")
 	modelFlag := flag.String("model", "sonnet", "Model: alias (sonnet, opus, codex) or provider/model-id")
 	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
-	maxTurns := flag.Int("max-turns", 50, "Maximum agent turns")
+	maxTurns := flag.Int("max-turns", 0, "Maximum agent turns (0 = unlimited, default from config.json)")
 	maxBudget := flag.Float64("max-budget", -1, "Max USD spend per run (0 = unlimited, default: from config)")
 	continueFlag := flag.Bool("continue", false, "Resume the most recent session")
 	var resume resumeFlag

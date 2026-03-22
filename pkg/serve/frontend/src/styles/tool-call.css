@@ -60,6 +60,8 @@
 .tool-call-tag.rejected { color: var(--peach);  background: var(--peach-dim); }
 .tool-call-tag.running  { color: var(--yellow); background: var(--yellow-dim); }
 .tool-call-tag.running .lucide { animation: spin 1.2s linear infinite; }
+.tool-call-tag.generating  { color: var(--blue); background: var(--blue-dim, var(--yellow-dim)); }
+.tool-call-tag.generating .lucide { animation: spin 1.2s linear infinite; }
 
 @keyframes spin {
   from { transform: rotate(0deg); }

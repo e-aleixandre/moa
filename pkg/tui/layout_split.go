@@ -209,6 +209,9 @@ func splitBadge(block ToolBlockData, theme Theme, bg lipgloss.Color) string {
 	case block.Done:
 		text = " DONE "
 		fg = theme.Green
+	case block.Generating:
+		text = " GENERATING "
+		fg = theme.Blue
 	default:
 		text = " RUNNING "
 		fg = theme.Yellow

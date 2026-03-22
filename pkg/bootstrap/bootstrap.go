@@ -48,9 +48,9 @@ type SessionConfig struct {
 
 	// Agent tuning. Zero values use package defaults.
 	ThinkingLevel       string        // Default: "medium"
-	MaxTurns            int           // Default: 50
-	MaxToolCallsPerTurn int           // Default: 20
-	MaxRunDuration      time.Duration // Default: 30m
+	MaxTurns            int           // 0 = unlimited (default). Overrides config.json.
+	MaxToolCallsPerTurn int           // 0 = unlimited (default). Overrides config.json.
+	MaxRunDuration      time.Duration // 0 = unlimited (default). Overrides config.json.
 	MaxBudget           float64       // Default: from config. 0 = unlimited.
 	DisableSandbox      bool          // Overrides config (OR'd). Deprecated: use PathScope.
 
@@ -143,15 +143,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	if cfg.ThinkingLevel == "" {
 		cfg.ThinkingLevel = "medium"
 	}
-	if cfg.MaxTurns == 0 {
-		cfg.MaxTurns = 50
-	}
-	if cfg.MaxToolCallsPerTurn == 0 {
-		cfg.MaxToolCallsPerTurn = 20
-	}
-	if cfg.MaxRunDuration == 0 {
-		cfg.MaxRunDuration = 30 * time.Minute
-	}
+	// MaxTurns, MaxToolCallsPerTurn, MaxRunDuration: 0 = unlimited.
+	// Explicit values from CLI flags take precedence; otherwise fall through
+	// to config.json values loaded below.
 
 	// 1. Load config.
 	var moaCfg core.MoaConfig
@@ -165,6 +159,21 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	maxBudget := moaCfg.MaxBudget
 	if cfg.MaxBudget > 0 {
 		maxBudget = cfg.MaxBudget
+	}
+
+	// Guardrails: config defaults, overridden by explicit SessionConfig values.
+	// 0 = unlimited for all three.
+	maxTurns := moaCfg.MaxTurns
+	if cfg.MaxTurns > 0 {
+		maxTurns = cfg.MaxTurns
+	}
+	maxToolCallsPerTurn := moaCfg.MaxToolCallsPerTurn
+	if cfg.MaxToolCallsPerTurn > 0 {
+		maxToolCallsPerTurn = cfg.MaxToolCallsPerTurn
+	}
+	maxRunDuration := core.GetMaxRunDuration(moaCfg)
+	if cfg.MaxRunDuration > 0 {
+		maxRunDuration = cfg.MaxRunDuration
 	}
 
 	// 2. Tool registry.
@@ -428,9 +437,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		ThinkingLevel:       cfg.ThinkingLevel,
 		Tools:               toolReg,
 		WorkspaceRoot:       cfg.CWD,
-		MaxTurns:            cfg.MaxTurns,
-		MaxToolCallsPerTurn: cfg.MaxToolCallsPerTurn,
-		MaxRunDuration:      cfg.MaxRunDuration,
+		MaxTurns:            maxTurns,
+		MaxToolCallsPerTurn: maxToolCallsPerTurn,
+		MaxRunDuration:      maxRunDuration,
 		MaxBudget:           maxBudget,
 	}
 	if gate != nil {

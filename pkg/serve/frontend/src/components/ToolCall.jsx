@@ -10,12 +10,13 @@ export function ToolCall({ tool }) {
   const { verb, cls: verbCls } = toolVerb(tool.tool_name);
   const path = toolPath(tool.tool_name, tool.args);
 
-  const isRunning = tool.status === 'running';
+  const isGenerating = tool.status === 'generating';
+  const isRunning = tool.status === 'running' || isGenerating;
   const isRejected = tool.status === 'rejected';
   const isError = tool.status === 'error';
-  const statusCls = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
+  const statusCls = isGenerating ? 'generating' : isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
   const StatusIcon = isRunning ? Loader2 : (isRejected || isError) ? X : Check;
-  const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
+  const statusLabel = isGenerating ? 'generating' : isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
   const isAskUser = tool.tool_name === 'ask_user';
 
@@ -142,11 +143,12 @@ function ToolCallModal({ tool, verb, verbCls, path, fullText, isRunning, isDiff,
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const isGenerating = tool.status === 'generating';
   const isRejected = tool.status === 'rejected';
   const isError = tool.status === 'error';
-  const statusCls = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
-  const StatusIcon = isRunning ? Loader2 : (isRejected || isError) ? X : Check;
-  const statusLabel = isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
+  const statusCls = isGenerating ? 'generating' : isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
+  const StatusIcon = isRunning || isGenerating ? Loader2 : (isRejected || isError) ? X : Check;
+  const statusLabel = isGenerating ? 'generating' : isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
   return (
     <div class="tool-modal-overlay" onClick={onClose}>

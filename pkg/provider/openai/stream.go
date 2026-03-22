@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/jsonutil"
 )
 
 // Responses API SSE event types we handle.
@@ -79,6 +80,10 @@ type streamState struct {
 	currentCallName string
 	currentArgsJSON strings.Builder
 	contentIndex    int
+
+	// Partial JSON parsing for streaming tool call arguments.
+	partialParser jsonutil.PartialParser
+	lastParseLen  int
 }
 
 // consumeStream parses Responses API SSE and emits normalized AssistantEvents.
@@ -182,12 +187,16 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 			state.currentCallID = ev.Item.CallID
 			state.currentCallName = ev.Item.Name
 			state.currentArgsJSON.Reset()
+			state.partialParser.Reset()
+			state.lastParseLen = 0
 			if ev.Item.Arguments != "" {
 				state.currentArgsJSON.WriteString(ev.Item.Arguments)
 			}
 			ch <- core.AssistantEvent{
 				Type:         core.ProviderEventToolCallStart,
 				ContentIndex: state.contentIndex,
+				ToolCallID:   ev.Item.CallID,
+				ToolName:     ev.Item.Name,
 			}
 		case "message":
 			state.contentIndex++
@@ -220,11 +229,22 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 	case eventFuncCallArgsDelta:
 		if ev.Delta != "" {
 			state.currentArgsJSON.WriteString(ev.Delta)
-			ch <- core.AssistantEvent{
+			evt := core.AssistantEvent{
 				Type:         core.ProviderEventToolCallDelta,
 				ContentIndex: state.contentIndex,
 				Delta:        ev.Delta,
+				ToolCallID:   state.currentCallID,
+				ToolName:     state.currentCallName,
 			}
+			// Throttled partial parse: only every 200 bytes to cap CPU cost.
+			accumulated := state.currentArgsJSON.String()
+			if len(accumulated)-state.lastParseLen >= 200 {
+				if parsed := state.partialParser.Parse(accumulated); parsed != nil {
+					evt.PartialArgs = parsed
+				}
+				state.lastParseLen = len(accumulated)
+			}
+			ch <- evt
 		}
 
 	case eventFuncCallArgsDone:
@@ -242,6 +262,8 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		ch <- core.AssistantEvent{
 			Type:         core.ProviderEventToolCallEnd,
 			ContentIndex: state.contentIndex,
+			ToolCallID:   state.currentCallID,
+			ToolName:     state.currentCallName,
 		}
 
 	case eventOutputItemDone:

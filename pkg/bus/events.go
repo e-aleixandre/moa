@@ -88,6 +88,28 @@ type MessageEnded struct {
 }
 
 // ---------------------------------------------------------------------------
+// Tool call streaming (LLM generating tool arguments)
+// ---------------------------------------------------------------------------
+
+// ToolCallStreaming is published when the LLM starts generating a tool call.
+// The tool block should appear in the UI immediately.
+type ToolCallStreaming struct {
+	SessionID  string
+	RunGen     uint64
+	ToolCallID string
+	ToolName   string
+}
+
+// ToolCallDelta is published with incrementally-parsed tool call arguments.
+// High-frequency event — treated as lossy (same as TextDelta/ThinkingDelta).
+type ToolCallDelta struct {
+	SessionID  string
+	RunGen     uint64
+	ToolCallID string
+	Args       map[string]any // partially-parsed, monotonically non-regressing
+}
+
+// ---------------------------------------------------------------------------
 // Tool execution
 // ---------------------------------------------------------------------------
 
