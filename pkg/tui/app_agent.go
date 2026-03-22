@@ -158,7 +158,9 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 // --- Reconciliation ---
 
 // patchFromMessages corrects the last assistant/thinking block content from
-// the source-of-truth messages.
+// the source-of-truth messages. Each text or thinking content block in an
+// assistant message maps 1:1 to a stream-created block (since ToolCallStreaming
+// materializes text before each tool call).
 func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 	if msgs == nil {
 		return
@@ -170,60 +172,59 @@ func (m *appModel) patchFromMessages(msgs []core.AgentMessage) {
 		return
 	}
 
-	type assistantEntry struct {
-		text     string
-		thinking string
+	// Collect individual text and thinking segments across all assistant
+	// messages. A single assistant message can have multiple text blocks
+	// interleaved with tool_use blocks (e.g. [text, tool_use, text, tool_use]).
+	type segment struct {
+		kind string // "text" or "thinking"
+		text string
 	}
-	var entries []assistantEntry
+	var segments []segment
 	for _, msg := range newMsgs {
 		if msg.Role != "assistant" {
 			continue
 		}
-		var e assistantEntry
 		for _, c := range msg.Content {
 			if c.Type == "text" && c.Text != "" {
-				e.text = c.Text
+				segments = append(segments, segment{kind: "text", text: c.Text})
 			}
 			if c.Type == "thinking" && c.Thinking != "" {
-				e.thinking = c.Thinking
+				segments = append(segments, segment{kind: "thinking", text: c.Thinking})
 			}
 		}
-		if e.text != "" || e.thinking != "" {
-			entries = append(entries, e)
-		}
 	}
-	if len(entries) == 0 {
+	if len(segments) == 0 {
 		return
 	}
 
 	searchFrom := m.s.runStartBlockIdx
 
-	entryIdx := 0
-	for i := searchFrom; i < len(m.s.blocks) && entryIdx < len(entries); i++ {
-		switch m.s.blocks[i].Type {
-		case "thinking":
-			if entries[entryIdx].thinking != "" {
-				m.s.blocks[i].Raw = entries[entryIdx].thinking
-				m.s.blocks[i].touch()
-			}
-		case "assistant":
-			m.s.blocks[i].Raw = entries[entryIdx].text
+	// Match segments to existing blocks by type, in order.
+	segIdx := 0
+	for i := searchFrom; i < len(m.s.blocks) && segIdx < len(segments); i++ {
+		seg := segments[segIdx]
+		switch {
+		case m.s.blocks[i].Type == "thinking" && seg.kind == "thinking":
+			m.s.blocks[i].Raw = seg.text
 			m.s.blocks[i].touch()
-			entryIdx++
+			segIdx++
+		case m.s.blocks[i].Type == "assistant" && seg.kind == "text":
+			m.s.blocks[i].Raw = seg.text
+			m.s.blocks[i].touch()
+			segIdx++
 		}
 	}
 
-	for ; entryIdx < len(entries); entryIdx++ {
-		if entries[entryIdx].thinking != "" {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "thinking", Raw: entries[entryIdx].thinking,
-			})
+	// Append any unmatched segments (e.g. stream missed some text).
+	for ; segIdx < len(segments); segIdx++ {
+		seg := segments[segIdx]
+		blockType := "assistant"
+		if seg.kind == "thinking" {
+			blockType = "thinking"
 		}
-		if entries[entryIdx].text != "" {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "assistant", Raw: entries[entryIdx].text,
-			})
-		}
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: blockType, Raw: seg.text,
+		})
 	}
 }
 
