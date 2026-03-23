@@ -137,5 +137,7 @@ kbd.shortcut-hint {
   background: var(--surface1);
   transition: background var(--duration) var(--ease);
 }
-.thinking-block.on { background: var(--mauve); }
+.thinking-block.on { background: var(--blue); }
+.thinking-meter.level-2 .thinking-block.on { background: var(--mauve); }
 .thinking-meter.level-3 .thinking-block.on { background: var(--peach); }
+.thinking-meter.level-4 .thinking-block.on { background: var(--red); }
