@@ -79,6 +79,32 @@ type StreamOptions struct {
 	CacheRetention string   `json:"cache_retention,omitempty"`
 }
 
+// ThinkingLevels is the canonical list of valid thinking levels.
+// All validation and UI should reference this slice — not hardcoded strings.
+var ThinkingLevels = []string{"off", "low", "medium", "high", "xhigh"}
+
+// IsValidThinkingLevel reports whether level is a recognized thinking level.
+func IsValidThinkingLevel(level string) bool {
+	for _, l := range ThinkingLevels {
+		if level == l {
+			return true
+		}
+	}
+	return false
+}
+
+// ThinkingLevelOptions returns a human-readable list for error messages.
+func ThinkingLevelOptions() string {
+	s := ""
+	for i, l := range ThinkingLevels {
+		if i > 0 {
+			s += ", "
+		}
+		s += l
+	}
+	return s
+}
+
 // AssistantEvent is emitted by providers during streaming.
 //
 // Terminal events: "done" (success) or "error" (failure).

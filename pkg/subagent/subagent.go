@@ -94,7 +94,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"thinking": {
 					"type": "string",
-					"description": "Thinking level for the subagent: off, minimal, low, medium, high. Defaults to the current parent thinking level."
+					"description": "Thinking level for the subagent: off, low, medium, high, xhigh. Defaults to the current parent thinking level."
 				},
 				"async": {
 					"type": "boolean",
@@ -400,9 +400,10 @@ func resolveThinking(defaultThinking string, params map[string]any) (string, *co
 		return defaultThinking, nil
 	}
 	switch thinking {
-	case "off", "minimal", "low", "medium", "high":
-		return thinking, nil
 	default:
+		if core.IsValidThinkingLevel(thinking) {
+			return thinking, nil
+		}
 		res := core.ErrorResult("invalid thinking level: " + thinking)
 		return "", &res
 	}

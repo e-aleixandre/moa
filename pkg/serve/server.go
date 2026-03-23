@@ -474,7 +474,7 @@ func handleListCommands() http.HandlerFunc {
 		"clear":       {Description: "Clear conversation history"},
 		"compact":     {Description: "Compact conversation to reduce context size"},
 		"model":       {Description: "Switch model", Args: "<model>"},
-		"thinking":    {Description: "Set thinking level", Args: "<off|minimal|low|medium|high>"},
+		"thinking":    {Description: "Set thinking level", Args: "<off|low|medium|high|xhigh>"},
 		"permissions": {Description: "Set permission mode", Args: "<yolo|ask|auto>"},
 		"path":        {Description: "Manage path access scope", Args: "[list|add <dir>|rm <dir>|scope workspace|unrestricted]"},
 		"plan":        {Description: "Enter/exit plan mode", Args: "[exit]"},

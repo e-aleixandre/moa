@@ -17,7 +17,7 @@ type commandDef struct {
 // allCommands is the full list of available commands, in display order.
 var allCommands = []commandDef{
 	{Name: "model", Args: "<spec>", Desc: "Switch model or open picker"},
-	{Name: "thinking", Args: "<level>", Desc: "Set thinking level (off/minimal/low/medium/high)"},
+	{Name: "thinking", Args: "<level>", Desc: "Set thinking level (off/low/medium/high/xhigh)"},
 	{Name: "compact", Desc: "Force context compaction"},
 	{Name: "plan", Desc: "Toggle plan mode (plan-then-execute workflow)"},
 	{Name: "permissions", Args: "<mode>", Desc: "View or set permission mode (yolo/ask/auto)"},

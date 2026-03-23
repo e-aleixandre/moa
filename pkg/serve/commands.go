@@ -92,7 +92,7 @@ func cmdModel(m *Manager, sess *ManagedSession, args []string) (*CommandResult, 
 
 func cmdThinking(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
 	if len(args) == 0 {
-		return &CommandResult{OK: false, Message: "usage: /thinking <off|low|medium|high>"}, nil
+		return &CommandResult{OK: false, Message: "usage: /thinking <off|low|medium|high|xhigh>"}, nil
 	}
 	result, err := m.ReconfigureSession(sess.ID, "", args[0])
 	if err != nil {

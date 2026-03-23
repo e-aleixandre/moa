@@ -979,7 +979,7 @@ func (m appModel) openSettingsMenu() (tea.Model, tea.Cmd) {
 
 	entries := []settingsEntry{
 		{key: "Model", value: model.Name, options: nil},
-		{key: "Thinking", value: thinking, options: []string{"off", "minimal", "low", "medium", "high"}},
+		{key: "Thinking", value: thinking, options: core.ThinkingLevels},
 		{key: "Permissions", value: permMode, options: []string{"yolo", "ask", "auto"}},
 	}
 

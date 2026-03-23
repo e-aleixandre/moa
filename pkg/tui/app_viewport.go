@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tasks"
 )
 
@@ -206,7 +207,7 @@ func (m *appModel) recomputeInputEnabled() {
 // refreshContextSegment, refreshTaskDisplay are now in app.go (bus-based)
 
 // thinkingLevels defines the cycle order for Shift+Tab.
-var thinkingLevels = []string{"off", "minimal", "low", "medium", "high"}
+var thinkingLevels = core.ThinkingLevels
 
 // cycleThinkingLevel advances to the next thinking level, wrapping at the end.
 func cycleThinkingLevel(current string) string {

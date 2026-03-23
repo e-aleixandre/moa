@@ -85,9 +85,8 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SetThinking) error {
-		valid := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
-		if !valid[cmd.Level] {
-			return fmt.Errorf("invalid thinking level %q (options: off, minimal, low, medium, high)", cmd.Level)
+		if !core.IsValidThinkingLevel(cmd.Level) {
+			return fmt.Errorf("invalid thinking level %q (options: %s)", cmd.Level, core.ThinkingLevelOptions())
 		}
 		if err := sctx.Agent.SetThinkingLevel(cmd.Level); err != nil {
 			return err

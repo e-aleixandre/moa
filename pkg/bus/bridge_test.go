@@ -1811,7 +1811,7 @@ func TestHandler_SetThinking_InvalidLevel(t *testing.T) {
 }
 
 func TestHandler_SetThinking_ValidLevels(t *testing.T) {
-	for _, level := range []string{"off", "minimal", "low", "medium", "high"} {
+	for _, level := range core.ThinkingLevels {
 		t.Run(level, func(t *testing.T) {
 			b := NewLocalBus()
 			defer b.Close()

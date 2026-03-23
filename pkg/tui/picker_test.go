@@ -112,11 +112,11 @@ func TestCycleThinkingLevel(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
-		{"off", "minimal"},
-		{"minimal", "low"},
+		{"off", "low"},
 		{"low", "medium"},
 		{"medium", "high"},
-		{"high", "off"},
+		{"high", "xhigh"},
+		{"xhigh", "off"},
 		{"unknown", "medium"},
 	}
 	for _, tt := range tests {
