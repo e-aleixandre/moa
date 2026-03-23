@@ -16,10 +16,10 @@ type thinkingEntry struct {
 
 var defaultThinkingEntries = []thinkingEntry{
 	{"Off", "off"},
-	{"Minimal", "minimal"},
 	{"Low", "low"},
 	{"Medium", "medium"},
 	{"High", "high"},
+	{"Extra High", "xhigh"},
 }
 
 func (p *thinkingPicker) Open(currentLevel string) {

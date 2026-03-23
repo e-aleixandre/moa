@@ -552,6 +552,15 @@ export function handleWsCommand(id, data) {
   if (data.command === 'clear') {
     updateSession(id, { messages: [], streamingText: null, thinkingText: null });
   } else if (data.command === 'compact') {
+    // Don't replace messages — display stays intact.
+    // Append a compaction marker for visual feedback.
+    const sess = store.get().sessions[id];
+    if (sess) {
+      const marker = { _type: 'system', text: '✂ Context compacted' };
+      updateSession(id, { messages: [...sess.messages, marker] });
+    }
+  } else if (data.command === 'branch') {
+    // Branch switched — reload messages from new branch path.
     if (data.messages) {
       updateSession(id, { messages: normalizeHistory(data.messages) });
     }

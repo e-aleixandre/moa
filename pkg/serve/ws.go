@@ -213,7 +213,8 @@ func (r *wsReactor) cleanup() {
 func buildInitData(sess *ManagedSession) InitData {
 	b := sess.runtime.Bus
 
-	msgs, _ := bus.QueryTyped[bus.GetMessages, []core.AgentMessage](b, bus.GetMessages{})
+	// Use display messages (full history from tree) instead of agent messages.
+	msgs, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	ctxPct, _ := bus.QueryTyped[bus.GetContextUsage, int](b, bus.GetContextUsage{})
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](b, bus.GetPermissionMode{})

@@ -318,8 +318,18 @@ func main() {
 		}
 
 		if persistedSess != nil {
-			if err := ag.LoadState(persistedSess.Messages, persistedSess.CompactionEpoch); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", err)
+			// Determine how to load state: v2 entries (tree) or v1 messages (flat).
+			// For v2, skip loading here — the runtime will reconstruct from entries.
+			var loadErr error
+			if persistedSess.Version >= session.SessionVersion && len(persistedSess.Entries) > 0 {
+				// V2: tree-based. Agent state will be loaded by NewSessionRuntime
+				// from entries via BuildContext. Just validate the tree here.
+				loadErr = session.ValidateEntries(persistedSess.Entries, persistedSess.LeafID)
+			} else if len(persistedSess.Messages) > 0 {
+				loadErr = ag.LoadState(persistedSess.Messages, persistedSess.CompactionEpoch)
+			}
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", loadErr)
 				persistedSess = nil
 			} else {
 				// Restore model pre-runtime (initialization, same approach as serve).
@@ -377,6 +387,10 @@ func main() {
 		rcfg.Bus = preBus
 		rcfg.Checkpoints = cpStore
 		rcfg.ProviderFactory = providerFactory
+		if persistedSess != nil && persistedSess.Version >= session.SessionVersion && len(persistedSess.Entries) > 0 {
+			rcfg.InitialEntries = persistedSess.Entries
+			rcfg.InitialLeafID = persistedSess.LeafID
+		}
 		rt, err := bus.NewSessionRuntime(rcfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
@@ -525,7 +539,7 @@ func main() {
 	}
 }
 
-// tuiPersister implements bus.SessionPersister for TUI mode.
+// tuiPersister implements bus.SessionPersister and bus.TreePersister for TUI mode.
 type tuiPersister struct {
 	store   session.SessionStore
 	session *session.Session
@@ -535,6 +549,17 @@ func (p *tuiPersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[st
 	p.session.Messages = msgs
 	p.session.CompactionEpoch = epoch
 	p.session.Metadata = meta
+	return p.store.Save(p.session)
+}
+
+func (p *tuiPersister) SnapshotTree(entries []session.Entry, leafID string, meta map[string]any) error {
+	p.session.Version = session.SessionVersion
+	p.session.Entries = entries
+	p.session.LeafID = leafID
+	p.session.Metadata = meta
+	// Clear v1 fields
+	p.session.Messages = nil
+	p.session.CompactionEpoch = 0
 	return p.store.Save(p.session)
 }
 

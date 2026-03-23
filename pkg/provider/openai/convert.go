@@ -58,16 +58,21 @@ func buildRequestBody(req core.Request) ([]byte, error) {
 }
 
 // mapReasoningEffort maps our thinking levels to OpenAI reasoning effort.
+// OpenAI supports: none, minimal, low, medium, high, xhigh.
 func mapReasoningEffort(level string) string {
 	switch strings.ToLower(level) {
 	case "off", "none", "":
 		return ""
-	case "minimal", "low":
+	case "minimal":
+		return "minimal"
+	case "low":
 		return "low"
 	case "medium":
 		return "medium"
 	case "high":
 		return "high"
+	case "xhigh":
+		return "xhigh"
 	default:
 		return "medium"
 	}

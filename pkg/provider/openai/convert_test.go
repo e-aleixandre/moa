@@ -174,10 +174,11 @@ func TestMapReasoningEffort(t *testing.T) {
 		{"off", ""},
 		{"none", ""},
 		{"", ""},
-		{"minimal", "low"},
+		{"minimal", "minimal"},
 		{"low", "low"},
 		{"medium", "medium"},
 		{"high", "high"},
+		{"xhigh", "xhigh"},
 	}
 	for _, tt := range tests {
 		got := mapReasoningEffort(tt.in)

@@ -36,15 +36,31 @@ type SessionStore interface {
 	Delete(id string) error
 }
 
+// SessionVersion is the current session format version.
+// V1 (implicit 0): flat Messages array.
+// V2: entry-based tree with branching support.
+const SessionVersion = 2
+
 // Session represents a persistent conversation.
+//
+// Field ordering matters: summary fields (ID, Version, Title, Metadata) come first
+// so the readSummary partial-read optimization (4KB prefix) still works.
 type Session struct {
-	ID              string              `json:"id"`
-	Created         time.Time           `json:"created"`
-	Updated         time.Time           `json:"updated"`
-	Title           string              `json:"title"`
-	Messages        []core.AgentMessage `json:"messages"`
+	// Header fields — read by partial-read list optimization
+	ID       string         `json:"id"`
+	Version  int            `json:"version"`
+	Created  time.Time      `json:"created"`
+	Updated  time.Time      `json:"updated"`
+	Title    string         `json:"title"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+
+	// V2: entry-based tree log
+	LeafID  string  `json:"leaf_id,omitempty"`
+	Entries []Entry `json:"entries,omitempty"`
+
+	// V1 legacy (only present in old sessions, cleared after migration)
+	Messages        []core.AgentMessage `json:"messages,omitempty"`
 	CompactionEpoch int                 `json:"compaction_epoch,omitempty"`
-	Metadata        map[string]any      `json:"metadata,omitempty"` // extensible: model, cost, tags, etc.
 }
 
 // Summary is a lightweight session descriptor without messages.

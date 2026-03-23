@@ -102,6 +102,7 @@ type appModel struct {
 	picker         pickerModel
 	pickerPurpose  pickerPurpose
 	thinkingPicker thinkingPicker
+	branchPicker   branchPicker
 	cmdPalette     cmdPalette
 	filePicker     filePicker
 	permPrompt     permissionPrompt
@@ -318,9 +319,14 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !m.s.initialized {
 			m.s.initialized = true
-			if m.session != nil && len(m.session.Messages) > 0 {
-				m.rebuildFromMessages(m.session.Messages)
-				m.refreshContextSegment()
+			if m.session != nil {
+				// Use display messages from tree (full history including pre-compaction).
+				// Falls back to agent messages if tree is empty.
+				displayMsgs := m.displayMessages()
+				if len(displayMsgs) > 0 {
+					m.rebuildFromMessages(displayMsgs)
+					m.refreshContextSegment()
+				}
 			}
 			m.updateViewport()
 			return m, nil
@@ -581,6 +587,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.thinkingPicker.active {
 		return m.handleThinkingPickerKey(msg)
+	}
+
+	if m.branchPicker.active {
+		return m.handleBranchPickerKey(msg)
 	}
 
 	if m.settingsMenu.active {
@@ -1463,9 +1473,19 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 
 // --- Helpers ---
 
-// currentMessages queries the current conversation from the bus.
+// currentMessages queries the current conversation from the bus (for LLM context).
 func (m *appModel) currentMessages() []core.AgentMessage {
 	msgs, _ := bus.QueryTyped[bus.GetMessages, []core.AgentMessage](m.runtime.Bus, bus.GetMessages{})
+	return msgs
+}
+
+// displayMessages returns the full message history for display (from tree).
+// Falls back to currentMessages if tree is not available.
+func (m *appModel) displayMessages() []core.AgentMessage {
+	msgs, err := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](m.runtime.Bus, bus.GetDisplayMessages{})
+	if err != nil || len(msgs) == 0 {
+		return m.currentMessages()
+	}
 	return msgs
 }
 

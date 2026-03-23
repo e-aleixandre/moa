@@ -499,8 +499,8 @@ func TestAutoSave_AfterRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindSession after auto-save: %v", err)
 	}
-	if len(loaded.Messages) == 0 {
-		t.Fatal("expected saved messages")
+	if len(loaded.Entries) == 0 && len(loaded.Messages) == 0 {
+		t.Fatal("expected saved messages or entries")
 	}
 	if loaded.Title != "persist-test" {
 		t.Errorf("saved title = %q, want 'persist-test'", loaded.Title)

@@ -81,3 +81,22 @@ type GetSessionError struct{ SessionID string }
 // GetPendingApproval returns pending permission/ask info for WS init data.
 // Handler returns: PendingApprovalInfo
 type GetPendingApproval struct{ SessionID string }
+
+// GetDisplayMessages returns the full message history for display (from tree).
+// Unlike GetMessages, this includes pre-compaction messages.
+// Handler returns: []core.AgentMessage
+type GetDisplayMessages struct{ SessionID string }
+
+// GetBranchPoints returns branch points for the branch picker UI.
+// Handler returns: []BranchPoint
+type GetBranchPoints struct{ SessionID string }
+
+// BranchPoint describes a possible branch target in the conversation.
+type BranchPoint struct {
+	EntryID       string `json:"entry_id"`
+	Label         string `json:"label"`          // first line of message
+	Role          string `json:"role"`           // user/assistant
+	Timestamp     int64  `json:"timestamp"`
+	BranchCount   int    `json:"branch_count"`   // number of children
+	IsCurrentPath bool   `json:"is_current_path"`
+}

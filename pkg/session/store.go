@@ -55,10 +55,11 @@ func (s *FileStore) Dir() string {
 	return s.dir
 }
 
-// Create creates a new empty session with a unique ID.
+// Create creates a new empty session with a unique ID (v2 format).
 func (s *FileStore) Create() *Session {
 	return &Session{
 		ID:       newID(),
+		Version:  SessionVersion,
 		Created:  nowFunc(),
 		Updated:  nowFunc(),
 		Metadata: make(map[string]any),
@@ -70,7 +71,18 @@ func (s *FileStore) Create() *Session {
 func (s *FileStore) Save(sess *Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveLocked(sess)
+}
+
+func (s *FileStore) saveLocked(sess *Session) error {
 	sess.Updated = nowFunc()
+
+	// Validate v2 entries before persisting
+	if sess.Version >= SessionVersion && len(sess.Entries) > 0 {
+		if err := ValidateEntries(sess.Entries, sess.LeafID); err != nil {
+			return fmt.Errorf("session: validation error: %w", err)
+		}
+	}
 
 	data, err := json.MarshalIndent(sess, "", "  ")
 	if err != nil {
@@ -101,7 +113,8 @@ func (s *FileStore) Load(id string) (*Session, error) {
 }
 
 func (s *FileStore) loadLocked(id string) (*Session, error) {
-	data, err := os.ReadFile(s.path(id))
+	path := s.path(id)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
@@ -112,6 +125,26 @@ func (s *FileStore) loadLocked(id string) (*Session, error) {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, fmt.Errorf("session: unmarshal error: %w", err)
 	}
+
+	// Auto-migrate v1 → v2
+	if sess.Version < SessionVersion && len(sess.Messages) > 0 {
+		if err := MigrateV1ToV2(&sess); err != nil {
+			return nil, fmt.Errorf("session: migration error: %w", err)
+		}
+		// Validate migrated tree
+		if err := ValidateEntries(sess.Entries, sess.LeafID); err != nil {
+			return nil, fmt.Errorf("session: post-migration validation error: %w", err)
+		}
+		// Back up original before writing migrated version
+		backup := path + ".v1.bak"
+		_ = os.WriteFile(backup, data, 0600)
+		// Persist migrated session
+		_ = s.saveLocked(&sess)
+	} else if sess.Version == 0 {
+		// Empty v1 session — just stamp version
+		sess.Version = SessionVersion
+	}
+
 	return &sess, nil
 }
 

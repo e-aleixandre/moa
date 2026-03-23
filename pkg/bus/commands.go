@@ -92,6 +92,11 @@ type CompactSession struct{ SessionID string }
 // UndoLastChange pops the last checkpoint and restores files.
 type UndoLastChange struct{ SessionID string }
 
+// BranchTo moves the session tree leaf to the given entry ID, starting a new branch.
+// The agent state is rehydrated from the new branch context.
+// Returns error if the agent is running or the target is invalid.
+type BranchTo struct{ EntryID string }
+
 // ---------------------------------------------------------------------------
 // Plan mode
 // ---------------------------------------------------------------------------

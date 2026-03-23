@@ -163,6 +163,15 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case "branch", "back":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Cannot branch while agent is running",
+			})
+			return m, nil
+		}
+		return m.handleBranchCommand()
+
 	case "exit", "quit":
 		m.cleanup()
 		return m, tea.Quit
@@ -510,6 +519,38 @@ func (m appModel) handleThinkingPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.thinkingPicker.MoveUp()
 		}
 	}
+	return m, nil
+}
+
+func (m appModel) handleBranchPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.branchPicker.Close()
+		m.updateViewport()
+		return m, nil
+
+	case tea.KeyUp:
+		m.branchPicker.MoveUp()
+	case tea.KeyDown:
+		m.branchPicker.MoveDown()
+
+	case tea.KeyEnter:
+		selected := m.branchPicker.Selected()
+		m.branchPicker.Close()
+		if selected.EntryID != "" {
+			return m.executeBranch(selected.EntryID)
+		}
+		return m, nil
+
+	case tea.KeyRunes:
+		switch string(msg.Runes) {
+		case "j":
+			m.branchPicker.MoveDown()
+		case "k":
+			m.branchPicker.MoveUp()
+		}
+	}
+	m.updateViewport()
 	return m, nil
 }
 
@@ -880,8 +921,15 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 		m.statusBar.UpdatePermissionsSegment(permMode)
 	}
 
-	if sess != nil && len(sess.Messages) > 0 {
-		m.rebuildFromMessages(sess.Messages)
+	// Use display messages from tree for full history (includes pre-compaction messages).
+	// Fall back to session.Messages for v1 sessions or when tree is empty (e.g., during
+	// activateSession which clears and reloads state — the tree may not be populated yet).
+	displayMsgs := m.displayMessages()
+	if len(displayMsgs) == 0 && sess != nil {
+		displayMsgs = sess.Messages
+	}
+	if len(displayMsgs) > 0 {
+		m.rebuildFromMessages(displayMsgs)
 	}
 	m.refreshContextSegment()
 	m.refreshTaskDisplay()
@@ -1173,4 +1221,37 @@ func (m appModel) handleTasksCommand(args string) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 	}
+}
+
+// handleBranchCommand opens the branch picker.
+func (m appModel) handleBranchCommand() (appModel, tea.Cmd) {
+	points, err := bus.QueryTyped[bus.GetBranchPoints, []bus.BranchPoint](m.runtime.Bus, bus.GetBranchPoints{})
+	if err != nil || len(points) == 0 {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "No branch points available"})
+		m.updateViewport()
+		return m, nil
+	}
+	m.branchPicker.Open(points)
+	m.updateViewport()
+	return m, nil
+}
+
+// executeBranch moves the conversation to the selected branch point.
+func (m appModel) executeBranch(entryID string) (appModel, tea.Cmd) {
+	if err := m.runtime.Bus.Execute(bus.BranchTo{EntryID: entryID}); err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Branch failed: " + err.Error()})
+		m.updateViewport()
+		return m, nil
+	}
+
+	// Rebuild display from tree
+	m.s.blocks = nil
+	displayMsgs := m.displayMessages()
+	if len(displayMsgs) > 0 {
+		m.rebuildFromMessages(displayMsgs)
+	}
+	m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "🌿 Branched — new conversation path started"})
+	m.refreshContextSegment()
+	m.updateViewport()
+	return m, nil
 }

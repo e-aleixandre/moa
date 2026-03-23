@@ -52,6 +52,35 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 	return nil
 }
 
+// SnapshotTree implements bus.TreePersister — saves tree entries instead of flat messages.
+func (sp *servePersister) SnapshotTree(entries []session.Entry, leafID string, metadata map[string]any) error {
+	sp.mu.Lock()
+	if sp.deleted || sp.persisted == nil || sp.store == nil {
+		sp.mu.Unlock()
+		return nil
+	}
+
+	sp.persisted.Title = sp.titleFn()
+	sp.persisted.Version = session.SessionVersion
+	sp.persisted.Entries = make([]session.Entry, len(entries))
+	copy(sp.persisted.Entries, entries)
+	sp.persisted.LeafID = leafID
+	sp.persisted.Metadata = metadata
+	// Clear v1 fields
+	sp.persisted.Messages = nil
+	sp.persisted.CompactionEpoch = 0
+
+	snapshot := *sp.persisted
+	store := sp.store
+	sp.mu.Unlock()
+
+	if err := store.Save(&snapshot); err != nil {
+		slog.Warn("session save failed", "error", err)
+		return err
+	}
+	return nil
+}
+
 // markDeleted prevents future Snapshot calls from writing to disk.
 func (sp *servePersister) markDeleted() {
 	sp.mu.Lock()

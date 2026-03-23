@@ -10,6 +10,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -66,6 +67,7 @@ type SessionContext struct {
 	Agent      AgentController
 	State      *StateMachine      // may be nil for backward compat
 	Approvals  *ApprovalManager   // manages pending permissions/asks; may be nil
+	Tree       *session.Tree      // session entry tree; may be nil during migration
 
 	PlanMode    *planmode.PlanMode  // may be nil
 	TaskStore   *tasks.Store        // may be nil

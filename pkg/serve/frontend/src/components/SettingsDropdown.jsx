@@ -8,6 +8,7 @@ const THINKING_LEVELS = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'Extra' },
 ];
 
 const PERMISSION_MODES = [

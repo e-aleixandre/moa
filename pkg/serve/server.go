@@ -43,6 +43,7 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/branch", handleBranch(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
@@ -533,6 +534,40 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func handleBranch(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		limitBody(w, r, maxJSONBodySize)
+		var body struct {
+			EntryID string `json:"entry_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.EntryID == "" {
+			http.Error(w, "entry_id required", http.StatusBadRequest)
+			return
+		}
+
+		if err := sess.runtime.Bus.Execute(bus.BranchTo{EntryID: body.EntryID}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Return updated messages for the new branch
+		msgs, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](sess.runtime.Bus, bus.GetDisplayMessages{})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"messages": msgs,
+		})
 	}
 }
 

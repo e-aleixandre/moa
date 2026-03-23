@@ -12,6 +12,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
@@ -114,15 +115,25 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd CompactSession) error {
-		_, err := sctx.Agent.Compact(sctx.SessionCtx)
-		// CompactionStarted/CompactionEnded events arrive via the bridge.
-		// Publish CommandExecuted so frontends can refresh the message list.
+		// Emit CompactionStarted/Ended explicitly (agent.Compact doesn't emit lifecycle events).
+		sctx.Bus.Publish(CompactionStarted{SessionID: sctx.SessionID})
+		result, err := sctx.Agent.Compact(sctx.SessionCtx)
+		if err != nil {
+			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
+			return err
+		}
+		// Signal compaction ended (with or without payload).
+		sctx.Bus.Publish(CompactionEnded{
+			SessionID: sctx.SessionID,
+			Payload:   result, // nil if nothing to compact
+		})
+		// Always publish CommandExecuted on success so persistence and frontends react.
 		sctx.Bus.Publish(CommandExecuted{
 			SessionID: sctx.SessionID,
 			Command:   "compact",
 			Messages:  sctx.Agent.Messages(),
 		})
-		return err
+		return nil
 	})
 
 	b.OnCommand(func(cmd UndoLastChange) error {
@@ -557,6 +568,73 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	// -------------------------------------------------------------------
+	// Tree commands & queries
+	// -------------------------------------------------------------------
+
+	b.OnCommand(func(cmd BranchTo) error {
+		if sctx.Tree == nil {
+			return fmt.Errorf("branching not available (no session tree)")
+		}
+		if sctx.State != nil && sctx.State.Current() == StateRunning {
+			return fmt.Errorf("cannot branch while agent is running")
+		}
+		if err := sctx.Tree.Branch(cmd.EntryID); err != nil {
+			return err
+		}
+		// Rehydrate agent state from the new branch context
+		msgs, epoch := sctx.Tree.BuildContext()
+		if err := sctx.Agent.LoadState(msgs, epoch); err != nil {
+			return fmt.Errorf("branch: load state: %w", err)
+		}
+		sctx.Bus.Publish(CommandExecuted{
+			SessionID: sctx.SessionID,
+			Command:   "branch",
+			Messages:  msgs,
+		})
+		return nil
+	})
+
+	b.OnQuery(func(q GetDisplayMessages) ([]core.AgentMessage, error) {
+		if sctx.Tree == nil || sctx.Tree.Len() == 0 {
+			return sctx.Agent.Messages(), nil
+		}
+		return sctx.Tree.AllMessages(), nil
+	})
+
+	b.OnQuery(func(q GetBranchPoints) ([]BranchPoint, error) {
+		if sctx.Tree == nil {
+			return nil, nil
+		}
+		path := sctx.Tree.Path()
+		currentIDs := make(map[string]bool, len(path))
+		for _, e := range path {
+			currentIDs[e.ID] = true
+		}
+
+		var points []BranchPoint
+		for _, e := range sctx.Tree.Entries() {
+			if e.Type != session.EntryMessage {
+				continue
+			}
+			// Only user/assistant entries are valid branch targets
+			if e.Message.Role != "user" && e.Message.Role != "assistant" {
+				continue
+			}
+			label := firstLine(messageText(e.Message))
+			children := sctx.Tree.Children(e.ID)
+			points = append(points, BranchPoint{
+				EntryID:       e.ID,
+				Label:         label,
+				Role:          e.Message.Role,
+				Timestamp:     e.Timestamp.Unix(),
+				BranchCount:   len(children),
+				IsCurrentPath: currentIDs[e.ID],
+			})
+		}
+		return points, nil
+	})
+
+	// -------------------------------------------------------------------
 	// Plan submitted reactor — detects when submit_plan tool completes
 	// -------------------------------------------------------------------
 
@@ -762,6 +840,28 @@ func hasSuccessfulEdits(msgs []core.AgentMessage) bool {
 		}
 	}
 	return false
+}
+
+// firstLine returns the first line of text, truncated to 80 chars.
+func firstLine(s string) string {
+	if i := strings.Index(s, "\n"); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 80 {
+		s = s[:80] + "…"
+	}
+	return s
+}
+
+// messageText extracts the concatenated text content from an AgentMessage.
+func messageText(msg core.AgentMessage) string {
+	var parts []string
+	for _, c := range msg.Content {
+		if c.Type == "text" && c.Text != "" {
+			parts = append(parts, c.Text)
+		}
+	}
+	return strings.Join(parts, "")
 }
 
 // formatVerifyFailure builds a markdown summary of failing verify checks.

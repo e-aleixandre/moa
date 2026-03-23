@@ -110,6 +110,10 @@ func (m *appModel) buildBottomChrome() string {
 		if pv := m.thinkingPicker.View(m.width, ActiveTheme); pv != "" {
 			parts = append(parts, pv)
 		}
+	} else if m.branchPicker.active {
+		if pv := m.branchPicker.Render(m.width); pv != "" {
+			parts = append(parts, pv)
+		}
 	} else if m.planMenu.active {
 		if pv := m.planMenu.View(m.width, ActiveTheme); pv != "" {
 			parts = append(parts, pv)
@@ -193,7 +197,7 @@ func (m *appModel) renderTranscriptBlocks(fullHistory bool) string {
 // recomputeInputEnabled sets input enabled/disabled based on current state.
 // Used when exiting transcript mode to avoid unconditionally enabling input.
 func (m *appModel) recomputeInputEnabled() {
-	enabled := !m.s.running && !m.permPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active
+	enabled := !m.s.running && !m.permPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active && !m.branchPicker.active
 	m.input.SetEnabled(enabled)
 }
 

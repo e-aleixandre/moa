@@ -87,6 +87,10 @@ type buildOpts struct {
 	initialMessages        []core.AgentMessage
 	initialCompactionEpoch int
 	initialThinking        string // applied via SetThinking after construction
+
+	// V2 session tree
+	initialEntries []session.Entry
+	initialLeafID  string
 }
 
 // buildManagedSession creates an in-memory managed session with full runtime.
@@ -185,8 +189,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return !was
 	}
 	if opts != nil {
-		rcfg.InitialMessages = opts.initialMessages
-		rcfg.InitialCompactionEpoch = opts.initialCompactionEpoch
+		if len(opts.initialEntries) > 0 {
+			rcfg.InitialEntries = opts.initialEntries
+			rcfg.InitialLeafID = opts.initialLeafID
+		} else {
+			rcfg.InitialMessages = opts.initialMessages
+			rcfg.InitialCompactionEpoch = opts.initialCompactionEpoch
+		}
 	}
 
 	rt, err := bus.NewSessionRuntime(rcfg)
@@ -317,6 +326,8 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		initialMessages:        saved.Messages,
 		initialCompactionEpoch: saved.CompactionEpoch,
 		initialThinking:        savedThinking,
+		initialEntries:         saved.Entries,
+		initialLeafID:          saved.LeafID,
 	})
 	if err != nil {
 		cleanup()

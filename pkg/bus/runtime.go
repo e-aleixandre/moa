@@ -11,6 +11,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -44,6 +45,12 @@ type RuntimeConfig struct {
 	// at construction time (before any handlers fire). Used by session restore.
 	InitialMessages        []core.AgentMessage
 	InitialCompactionEpoch int
+
+	// InitialEntries/InitialLeafID load a v2 session tree.
+	// When set, the tree is reconstructed and agent state is derived from BuildContext.
+	// InitialMessages is ignored when InitialEntries is set.
+	InitialEntries []session.Entry
+	InitialLeafID  string
 }
 
 // SessionRuntime is a fully wired session: bus + state machine + bridge +
@@ -132,10 +139,25 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	}
 
 	// Load initial state (session restore).
-	if cfg.InitialMessages != nil {
+	if len(cfg.InitialEntries) > 0 {
+		// V2 session: reconstruct tree and derive agent state from it
+		tree, err := session.NewTreeFromEntries(cfg.InitialEntries, cfg.InitialLeafID)
+		if err != nil {
+			return nil, fmt.Errorf("bus: tree reconstruction: %w", err)
+		}
+		sctx.Tree = tree
+		msgs, epoch := tree.BuildContext()
+		if err := cfg.Agent.LoadState(msgs, epoch); err != nil {
+			return nil, fmt.Errorf("bus: LoadState from tree: %w", err)
+		}
+	} else if cfg.InitialMessages != nil {
 		if err := cfg.Agent.LoadState(cfg.InitialMessages, cfg.InitialCompactionEpoch); err != nil {
 			return nil, fmt.Errorf("bus: LoadState: %w", err)
 		}
+	}
+	// Ensure tree exists (even for new/v1 sessions)
+	if sctx.Tree == nil {
+		sctx.Tree = session.NewTree()
 	}
 
 	// Take ownership of PlanMode's onChange callback:
@@ -154,6 +176,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 
 	RegisterHandlers(sctx)
 	unsub := Bridge(sctx, cfg.Subscriber)
+	RegisterTreeSyncer(b, sctx)
 
 	rt := &SessionRuntime{
 		ID:    cfg.SessionID,
