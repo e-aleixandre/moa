@@ -76,9 +76,10 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 		defer mu.Unlock()
 		meta := collectMetadata(sctx)
 
-		// Prefer tree-based persistence when available
-		if hasTree && sctx.Tree != nil && sctx.Tree.Len() > 0 {
-			_ = tp.SnapshotTree(sctx.Tree.Entries(), sctx.Tree.LeafID(), meta)
+		// Prefer tree-based persistence when available (even if empty, to clear v2 fields)
+		if hasTree && sctx.Tree != nil {
+			entries, leafID := sctx.Tree.Snapshot()
+			_ = tp.SnapshotTree(entries, leafID, meta)
 			return
 		}
 

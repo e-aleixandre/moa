@@ -1,7 +1,9 @@
 package session
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -632,5 +634,85 @@ func TestBuildContext_BranchAfterCompaction(t *testing.T) {
 	}
 	if msgs[3].Content[0].Text != "path B" {
 		t.Fatal("last should be path B")
+	}
+}
+
+func TestTree_ConcurrentAccess(t *testing.T) {
+	tree := NewTree()
+
+	// Seed with initial entries so Branch/Path have data to work with
+	id1 := tree.Append(userEntry("seed"))
+	tree.Append(assistantEntry("reply"))
+
+	var wg sync.WaitGroup
+	start := make(chan struct{}) // barrier for simultaneous start
+	const N = 100
+
+	// Writers: Append with Custom maps (exercises DeepCopyMessage)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < N; i++ {
+			e := Entry{
+				Type: EntryMessage,
+				Message: core.AgentMessage{
+					Message: core.NewUserMessage(fmt.Sprintf("msg-%d", i)),
+					Custom:  map[string]any{"i": i, "nested": map[string]any{"k": "v"}},
+				},
+			}
+			tree.Append(e)
+		}
+	}()
+
+	// Writers: Branch back to seed periodically
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < N/10; i++ {
+			_ = tree.Branch(id1)
+			tree.Append(userEntry(fmt.Sprintf("branch-%d", i)))
+		}
+	}()
+
+	// Readers: Len, LeafID, Path, Entries, AllMessages, BuildContext, Snapshot
+	for _, fn := range []func(){
+		func() { tree.Len() },
+		func() { tree.LeafID() },
+		func() { tree.Path() },
+		func() { tree.Entries() },
+		func() { tree.AllMessages() },
+		func() { tree.BuildContext() },
+		func() { tree.Snapshot() },
+	} {
+		fn := fn
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < N; i++ {
+				fn()
+			}
+		}()
+	}
+
+	close(start) // release all goroutines
+	wg.Wait()
+
+	// Basic invariants after concurrent access
+	leafID := tree.LeafID()
+	if leafID == "" {
+		t.Fatal("expected non-empty leafID after concurrent operations")
+	}
+	if _, ok := tree.Entry(leafID); !ok {
+		t.Fatalf("leafID %q not found in tree", leafID)
+	}
+	path := tree.Path()
+	if len(path) == 0 {
+		t.Fatal("expected non-empty path")
+	}
+	if path[len(path)-1].ID != leafID {
+		t.Errorf("path tail = %q, want leafID %q", path[len(path)-1].ID, leafID)
 	}
 }

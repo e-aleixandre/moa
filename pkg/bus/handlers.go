@@ -594,10 +594,12 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnQuery(func(q GetDisplayMessages) ([]core.AgentMessage, error) {
-		if sctx.Tree == nil || sctx.Tree.Len() == 0 {
-			return sctx.Agent.Messages(), nil
+		if sctx.Tree != nil {
+			if msgs := sctx.Tree.AllMessages(); len(msgs) > 0 {
+				return msgs, nil
+			}
 		}
-		return sctx.Tree.AllMessages(), nil
+		return sctx.Agent.Messages(), nil
 	})
 
 	b.OnQuery(func(q GetBranchPoints) ([]BranchPoint, error) {

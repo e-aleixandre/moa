@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -11,12 +12,15 @@ import (
 
 // Tree is an append-only entry log that supports branching.
 // It maintains an index for O(1) lookup and a leaf pointer for the current branch tip.
+// All public methods are safe for concurrent use.
 //
 // Key methods:
 //   - BuildContext() returns messages for the LLM (handles compaction)
 //   - AllMessages() returns ALL messages along the current path (for display)
 //   - Branch() moves the leaf to enable forking
+//   - Snapshot() returns a deep-copied (entries, leafID) pair for persistence
 type Tree struct {
+	mu      sync.RWMutex
 	entries []Entry        // append-only log (all entries from all branches)
 	index   map[string]int // entry ID → index in entries slice
 	leafID  string         // current branch tip
@@ -87,18 +91,22 @@ func (t *Tree) detectCycle(startID string) error {
 // The Message field is deep-copied to enforce immutability.
 // Returns the assigned entry ID.
 func (t *Tree) Append(e Entry) string {
-	e.ID = generateEntryID()
-	e.ParentID = t.leafID
+	// Expensive work outside lock (independent of tree state)
+	id := generateEntryID()
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now()
 	}
-	// Deep copy the message to prevent external mutation
-	if e.Type == EntryMessage {
-		e.Message = DeepCopyMessage(e.Message)
-	}
+	e = DeepCopyEntry(e)
+
+	// All state access under write lock
+	t.mu.Lock()
+	e.ID = id
+	e.ParentID = t.leafID
 	t.entries = append(t.entries, e)
 	t.index[e.ID] = len(t.entries) - 1
 	t.leafID = e.ID
+	t.mu.Unlock()
+
 	return e.ID
 }
 
@@ -108,6 +116,9 @@ func (t *Tree) Append(e Entry) string {
 //   - the entry ID doesn't exist
 //   - the target is a tool_result (would leave dangling tool_call)
 func (t *Tree) Branch(entryID string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	idx, ok := t.index[entryID]
 	if !ok {
 		return fmt.Errorf("tree: unknown entry ID: %s", entryID)
@@ -122,30 +133,55 @@ func (t *Tree) Branch(entryID string) error {
 
 // Clear resets the tree to empty state.
 func (t *Tree) Clear() {
+	t.mu.Lock()
 	t.entries = nil
 	t.index = make(map[string]int)
 	t.leafID = ""
+	t.mu.Unlock()
 }
 
 // LeafID returns the current branch tip entry ID.
 func (t *Tree) LeafID() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return t.leafID
 }
 
-// Entries returns a copy of all entries (for persistence).
+// Entries returns a shallow copy of all entries.
+// For persistence, prefer Snapshot() which deep-copies messages.
 func (t *Tree) Entries() []Entry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	cp := make([]Entry, len(t.entries))
 	copy(cp, t.entries)
 	return cp
 }
 
+// Snapshot returns a deep copy of all entries and the current leaf ID atomically.
+// Entries are deep-copied (including messages) so the caller can serialize without races.
+// Use this instead of separate Entries()+LeafID() calls for persistence.
+func (t *Tree) Snapshot() ([]Entry, string) {
+	t.mu.RLock()
+	entries := make([]Entry, len(t.entries))
+	for i, e := range t.entries {
+		entries[i] = DeepCopyEntry(e)
+	}
+	leafID := t.leafID
+	t.mu.RUnlock()
+	return entries, leafID
+}
+
 // Len returns the total number of entries across all branches.
 func (t *Tree) Len() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return len(t.entries)
 }
 
 // Entry returns an entry by ID.
 func (t *Tree) Entry(id string) (Entry, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	idx, ok := t.index[id]
 	if !ok {
 		return Entry{}, false
@@ -154,15 +190,19 @@ func (t *Tree) Entry(id string) (Entry, bool) {
 }
 
 // Path returns entries from root to the current leaf, in order.
+// Returned entries are shallow copies; do not mutate.
 func (t *Tree) Path() []Entry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	if t.leafID == "" {
 		return nil
 	}
-	return t.pathTo(t.leafID)
+	return t.pathToLocked(t.leafID)
 }
 
-// pathTo returns entries from root to the given entry ID, in order.
-func (t *Tree) pathTo(id string) []Entry {
+// pathToLocked returns entries from root to the given entry ID, in order.
+// Caller must hold at least a read lock.
+func (t *Tree) pathToLocked(id string) []Entry {
 	var stack []Entry
 	for id != "" {
 		idx, ok := t.index[id]
@@ -180,7 +220,10 @@ func (t *Tree) pathTo(id string) []Entry {
 }
 
 // Children returns direct children of the given entry.
+// Returned entries are shallow copies; do not mutate.
 func (t *Tree) Children(entryID string) []Entry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	var children []Entry
 	for _, e := range t.entries {
 		if e.ParentID == entryID {
@@ -199,7 +242,14 @@ func (t *Tree) Children(entryID string) []Entry {
 //  4. If no compaction: emit all message entries
 //  5. Only include LLM-relevant roles (user, assistant, tool_result, compaction_summary)
 func (t *Tree) BuildContext() ([]core.AgentMessage, int) {
-	path := t.Path()
+	// Snapshot path under lock, process outside
+	t.mu.RLock()
+	var path []Entry
+	if t.leafID != "" {
+		path = t.pathToLocked(t.leafID)
+	}
+	t.mu.RUnlock()
+
 	if len(path) == 0 {
 		return nil, 0
 	}
@@ -216,7 +266,7 @@ func (t *Tree) BuildContext() ([]core.AgentMessage, int) {
 
 	if lastCompaction == nil {
 		// No compaction: emit all message entries
-		return t.collectMessages(path), 0
+		return collectMessages(path), 0
 	}
 
 	// With compaction: summary + messages from firstKeptEntryID onward
@@ -247,7 +297,14 @@ func (t *Tree) BuildContext() ([]core.AgentMessage, int) {
 // AllMessages returns ALL messages along the current path (for display).
 // Includes pre-compaction messages. Compaction entries become synthetic status messages.
 func (t *Tree) AllMessages() []core.AgentMessage {
-	path := t.Path()
+	// Snapshot path under lock, process outside
+	t.mu.RLock()
+	var path []Entry
+	if t.leafID != "" {
+		path = t.pathToLocked(t.leafID)
+	}
+	t.mu.RUnlock()
+
 	if len(path) == 0 {
 		return nil
 	}
@@ -284,7 +341,7 @@ func isLLMRole(role string) bool {
 }
 
 // collectMessages extracts AgentMessages from message entries on the path.
-func (t *Tree) collectMessages(path []Entry) []core.AgentMessage {
+func collectMessages(path []Entry) []core.AgentMessage {
 	var msgs []core.AgentMessage
 	for _, e := range path {
 		if e.Type == EntryMessage && isLLMRole(e.Message.Role) {

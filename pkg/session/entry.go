@@ -57,6 +57,22 @@ func (c ConfigChangeData) IsEmpty() bool {
 	return c.Model == "" && c.Thinking == ""
 }
 
+// DeepCopyEntry creates a deep copy of an Entry, including all mutable nested data.
+func DeepCopyEntry(e Entry) Entry {
+	switch e.Type {
+	case EntryMessage:
+		e.Message = DeepCopyMessage(e.Message)
+	case EntryCompaction:
+		if e.Compaction.ReadFiles != nil {
+			e.Compaction.ReadFiles = append([]string(nil), e.Compaction.ReadFiles...)
+		}
+		if e.Compaction.ModifiedFiles != nil {
+			e.Compaction.ModifiedFiles = append([]string(nil), e.Compaction.ModifiedFiles...)
+		}
+	}
+	return e
+}
+
 // DeepCopyMessage creates a deep copy of an AgentMessage,
 // including Custom map and Content slices with their nested maps.
 func DeepCopyMessage(msg core.AgentMessage) core.AgentMessage {
