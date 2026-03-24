@@ -390,7 +390,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// 11. Plan mode.
 	planSessionDir := cfg.PlanSessionDir
 	if planSessionDir == "" {
-		planSessionDir = cfg.CWD
+		home, homeErr := os.UserHomeDir()
+		if homeErr == nil {
+			planSessionDir = filepath.Join(home, ".config", "moa")
+		} else {
+			planSessionDir = cfg.CWD // last resort
+		}
 	}
 	reviewModel, reviewThinking := resolveReviewConfig(cfg.Model, moaCfg.PlanReviewModel, moaCfg.PlanReviewThinking)
 	codeReviewModel, codeReviewThinking := resolveReviewConfig(reviewModel, moaCfg.CodeReviewModel, moaCfg.CodeReviewThinking)
