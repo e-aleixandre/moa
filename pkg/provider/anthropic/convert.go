@@ -241,18 +241,28 @@ func convertAssistantContent(blocks []core.Content, isOAuth bool) []any {
 				"text": b.Text,
 			})
 		case "thinking":
-			block := map[string]any{
-				"type":     "thinking",
-				"thinking": b.Thinking,
-			}
-			if b.ThinkingSignature != "" {
-				block["signature"] = b.ThinkingSignature
-			}
 			if b.Redacted {
-				block["type"] = "redacted_thinking"
-				delete(block, "thinking")
+				result = append(result, map[string]any{
+					"type": "redacted_thinking",
+					"data": b.ThinkingSignature,
+				})
+			} else if strings.TrimSpace(b.Thinking) == "" {
+				// Empty thinking block — skip entirely
+				continue
+			} else if b.ThinkingSignature == "" {
+				// Thinking without signature (e.g. aborted stream) —
+				// emit as plain text to avoid API rejection.
+				result = append(result, map[string]any{
+					"type": "text",
+					"text": b.Thinking,
+				})
+			} else {
+				result = append(result, map[string]any{
+					"type":      "thinking",
+					"thinking":  b.Thinking,
+					"signature": b.ThinkingSignature,
+				})
 			}
-			result = append(result, block)
 		case "tool_call":
 			name := b.ToolName
 			if isOAuth {

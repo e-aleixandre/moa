@@ -510,3 +510,88 @@ func TestConvertMessages_MergeConsecutive(t *testing.T) {
 		t.Fatalf("expected 2 content blocks in merged message, got %d", len(lastContent))
 	}
 }
+
+func TestConvertAssistantContent_ThinkingWithoutSignature(t *testing.T) {
+	// Aborted stream: thinking block without signature should become text
+	blocks := []core.Content{
+		{Type: "thinking", Thinking: "Let me think about this..."},
+		core.TextContent("partial response"),
+	}
+
+	result := convertAssistantContent(blocks, false)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(result))
+	}
+
+	// Thinking without signature → text
+	first := result[0].(map[string]any)
+	if first["type"] != "text" {
+		t.Errorf("expected type=text for signatureless thinking, got %v", first["type"])
+	}
+	if first["text"] != "Let me think about this..." {
+		t.Errorf("text content: got %v", first["text"])
+	}
+	// Must not have thinking/signature fields
+	if _, ok := first["thinking"]; ok {
+		t.Error("text block should not have thinking field")
+	}
+	if _, ok := first["signature"]; ok {
+		t.Error("text block should not have signature field")
+	}
+}
+
+func TestConvertAssistantContent_ThinkingWithSignature(t *testing.T) {
+	// Normal case: thinking with signature preserved as-is
+	blocks := []core.Content{
+		{Type: "thinking", Thinking: "reasoning here", ThinkingSignature: "sig123"},
+		core.TextContent("response"),
+	}
+
+	result := convertAssistantContent(blocks, false)
+
+	first := result[0].(map[string]any)
+	if first["type"] != "thinking" {
+		t.Errorf("expected type=thinking, got %v", first["type"])
+	}
+	if first["signature"] != "sig123" {
+		t.Errorf("signature: got %v", first["signature"])
+	}
+}
+
+func TestConvertAssistantContent_EmptyThinkingSkipped(t *testing.T) {
+	// Empty thinking blocks should be skipped entirely
+	blocks := []core.Content{
+		{Type: "thinking", Thinking: "  "},
+		core.TextContent("response"),
+	}
+
+	result := convertAssistantContent(blocks, false)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 block (empty thinking skipped), got %d", len(result))
+	}
+	first := result[0].(map[string]any)
+	if first["type"] != "text" {
+		t.Errorf("expected text block, got %v", first["type"])
+	}
+}
+
+func TestConvertAssistantContent_RedactedThinking(t *testing.T) {
+	blocks := []core.Content{
+		{Type: "thinking", Redacted: true, ThinkingSignature: "opaque-data"},
+	}
+
+	result := convertAssistantContent(blocks, false)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(result))
+	}
+	first := result[0].(map[string]any)
+	if first["type"] != "redacted_thinking" {
+		t.Errorf("expected redacted_thinking, got %v", first["type"])
+	}
+	if first["data"] != "opaque-data" {
+		t.Errorf("data: got %v", first["data"])
+	}
+}
