@@ -217,6 +217,9 @@ func (m *Manager) List() []SessionInfo {
 
 	list := make([]SessionInfo, 0)
 	for _, s := range active {
+		if s == nil {
+			continue // nil placeholder during ResumeSession
+		}
 		list = append(list, s.info())
 	}
 
