@@ -164,21 +164,71 @@ func ExtractFileOps(msgs []core.AgentMessage) FileOps {
 			if c.Type != "tool_call" {
 				continue
 			}
-			path, _ := c.Arguments["path"].(string)
-			if path == "" {
-				continue
-			}
 			switch c.ToolName {
 			case "read", "Read":
-				ops.Read[path] = true
+				if p, _ := c.Arguments["path"].(string); p != "" {
+					ops.Read[p] = true
+				}
 			case "write", "Write":
-				ops.Written[path] = true
-			case "edit", "Edit":
-				ops.Edited[path] = true
+				if p, _ := c.Arguments["path"].(string); p != "" {
+					ops.Written[p] = true
+				}
+			case "edit", "Edit", "multiedit":
+				if p, _ := c.Arguments["path"].(string); p != "" {
+					ops.Edited[p] = true
+				}
+			case "apply_patch":
+				patch, _ := c.Arguments["patch"].(string)
+				for _, f := range extractPatchFiles(patch) {
+					if f.added {
+						ops.Written[f.path] = true
+					} else {
+						ops.Edited[f.path] = true
+					}
+				}
 			}
 		}
 	}
 	return ops
+}
+
+// patchFile is a single file touched by an apply_patch body.
+type patchFile struct {
+	path  string
+	added bool // *** Add File / *** Move to → created; update/delete → modified
+}
+
+// extractPatchFiles does a best-effort scan of an apply_patch body for the
+// files it touches, reading only the *** ...File: / *** Move to: headers.
+// It deliberately avoids importing the full patch parser so this package keeps
+// depending only on core; a malformed patch still yields whatever headers parse.
+func extractPatchFiles(patch string) []patchFile {
+	if patch == "" {
+		return nil
+	}
+	var files []patchFile
+	for _, line := range strings.Split(patch, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "*** Add File:"):
+			if p := strings.TrimSpace(strings.TrimPrefix(line, "*** Add File:")); p != "" {
+				files = append(files, patchFile{path: p, added: true})
+			}
+		case strings.HasPrefix(line, "*** Update File:"):
+			if p := strings.TrimSpace(strings.TrimPrefix(line, "*** Update File:")); p != "" {
+				files = append(files, patchFile{path: p})
+			}
+		case strings.HasPrefix(line, "*** Delete File:"):
+			if p := strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File:")); p != "" {
+				files = append(files, patchFile{path: p})
+			}
+		case strings.HasPrefix(line, "*** Move to:"):
+			if p := strings.TrimSpace(strings.TrimPrefix(line, "*** Move to:")); p != "" {
+				files = append(files, patchFile{path: p, added: true})
+			}
+		}
+	}
+	return files
 }
 
 // ReadOnly returns files that were read but not modified, sorted.
