@@ -325,13 +325,12 @@ func resolveMaxTokens(req core.Request) int {
 }
 
 // supportsAdaptiveThinking reports whether a model supports Anthropic adaptive
-// thinking (Opus 4.6 and Sonnet 4.6).
+// thinking (Opus 4.8 and Sonnet 5). Haiku 4.5 uses manual extended thinking.
 func supportsAdaptiveThinking(modelID string) bool {
 	id := strings.ToLower(modelID)
-	return strings.Contains(id, "opus-4-6") ||
-		strings.Contains(id, "opus-4.6") ||
-		strings.Contains(id, "sonnet-4-6") ||
-		strings.Contains(id, "sonnet-4.6")
+	return strings.Contains(id, "opus-4-8") ||
+		strings.Contains(id, "opus-4.8") ||
+		strings.Contains(id, "sonnet-5")
 }
 
 // resolveEffort maps our thinking levels to Anthropic adaptive effort.
@@ -346,8 +345,8 @@ func resolveEffort(level, modelID string) string {
 	case "high":
 		return "high"
 	case "xhigh":
-		id := strings.ToLower(modelID)
-		if strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") {
+		// Only Opus exposes the "max" effort tier; Sonnet caps at "high".
+		if strings.Contains(strings.ToLower(modelID), "opus") {
 			return "max"
 		}
 		return "high"
