@@ -583,6 +583,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		hooks:               a.hooks,
 		emitter:             a.emitter,
 		state:               &a.state,
+		stateMu:             &a.mu,
 		model:               a.config.Model,
 		systemPrompt:        a.config.SystemPrompt,
 		streamOpts:          streamOpts,
@@ -607,9 +608,13 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 			break
 		}
 		// Deterministic order: follow-ups first, then steered.
+		// Lock each append: external readers (Messages/CompactionEpoch) may run
+		// concurrently until the deferred cancel-cleanup clears a.cancel.
 		for _, msg := range append(followUps, steered...) {
+			a.mu.Lock()
 			a.state.Messages = append(a.state.Messages,
 				core.WrapMessage(core.NewUserMessage(msg)))
+			a.mu.Unlock()
 			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
 		}
 	}
@@ -620,10 +625,12 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	// consecutive user messages that providers merge into one — the model
 	// sees "2+2=" instead of four separate turns.
 	if err != nil && len(a.state.Messages) > 0 && a.state.Messages[len(a.state.Messages)-1].Role == "user" {
+		a.mu.Lock()
 		a.state.Messages = append(a.state.Messages, core.WrapMessage(core.Message{
 			Role:    "assistant",
 			Content: []core.Content{core.TextContent("(interrupted by user)")},
 		}))
+		a.mu.Unlock()
 	}
 
 	// Ensure all async events from this run have been processed by subscribers

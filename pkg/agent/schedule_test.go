@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -59,6 +60,7 @@ func makeCfg(tools *core.Registry) *loopConfig {
 		hooks:   schedHooks{},
 		emitter: NewEmitter(slog.Default()),
 		state:   &AgentState{},
+		stateMu: &sync.Mutex{},
 	}
 }
 
