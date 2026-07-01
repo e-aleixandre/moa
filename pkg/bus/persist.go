@@ -87,11 +87,23 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 		epoch := sctx.Agent.CompactionEpoch()
 		_ = p.Snapshot(msgs, epoch, meta)
 	}
-	b.Subscribe(func(e RunEnded) { save() })
-	b.Subscribe(func(e CommandExecuted) { save() })
+	if hasTree {
+		// Tree-based persistence: save AFTER the TreeSyncer has applied the
+		// mutation for the same event. The syncer publishes TreeSynced once it
+		// has appended the new turn / compaction / clear, so snapshotting here
+		// always sees the latest tree state. This fixes the lost-last-turn race
+		// where save() and syncMessages() both raced on RunEnded.
+		b.Subscribe(func(e TreeSynced) { save() })
+	} else {
+		// Flat persistence reads Agent.Messages() directly, which is already up
+		// to date when RunEnded fires, so there is no ordering dependency.
+		b.Subscribe(func(e RunEnded) { save() })
+		b.Subscribe(func(e CommandExecuted) { save() })
+		b.Subscribe(func(e CompactionEnded) { save() })
+	}
+	// Metadata-only changes never mutate the tree → safe to persist directly.
 	b.Subscribe(func(e ConfigChanged) { save() })
 	b.Subscribe(func(e TasksUpdated) { save() })
-	b.Subscribe(func(e CompactionEnded) { save() })
 	b.Subscribe(func(e PlanModeChanged) { save() })
 }
 

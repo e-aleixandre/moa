@@ -203,6 +203,15 @@ type ContextUpdated struct {
 	Percent   int
 }
 
+// TreeSynced is published by the TreeSyncer AFTER it has applied a tree mutation
+// (message append, compaction entry, or clear/re-sync) in response to RunEnded /
+// CompactionEnded / CommandExecuted. The tree-based persistence reactor
+// subscribes to THIS instead of RunEnded so it never snapshots the tree before
+// the latest turn has been appended (fixes a lost-last-turn race).
+type TreeSynced struct {
+	SessionID string
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -324,4 +333,17 @@ type AutoVerifyEnded struct {
 	AllPass   bool
 	Summary   string // formatted failure text, empty if all pass
 	Err       error  // config/execution error
+}
+
+// isLossyEvent reports whether an event may be dropped under backpressure.
+// Only high-frequency streaming deltas are lossy; every other event is
+// structural and MUST be delivered — dropping one (e.g. a StateChanged) can
+// leave a UI wedged in "running". Mirrors the TUI's isStructuralBusEvent.
+func isLossyEvent(event any) bool {
+	switch event.(type) {
+	case TextDelta, ThinkingDelta, ToolExecUpdate, ToolCallDelta:
+		return true
+	default:
+		return false
+	}
 }

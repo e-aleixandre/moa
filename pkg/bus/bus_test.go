@@ -147,6 +147,65 @@ func TestPublish_BufferFull(t *testing.T) {
 	b.Drain(time.Second)
 }
 
+// TestPublish_LosslessSurvivesBackpressure verifies the lost-structural-event
+// fix: when a slow subscriber falls behind under a flood of lossy deltas, the
+// deltas are capped/dropped but a lossless structural event (StateChanged)
+// published afterwards is still delivered. Before the fix, a full buffer
+// dropped everything indiscriminately, wedging the UI in "running".
+func TestPublish_LosslessSurvivesBackpressure(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var mu sync.Mutex
+	var lossyProcessed int
+	var sawState bool
+
+	b.SubscribeAll(func(ev any) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release // block so the queue fills while we publish
+		mu.Lock()
+		switch ev.(type) {
+		case TextDelta:
+			lossyProcessed++
+		case StateChanged:
+			sawState = true
+		}
+		mu.Unlock()
+	})
+
+	// Occupy the goroutine with one lossy event so it blocks on <-release.
+	b.Publish(TextDelta{Delta: "occupier"})
+	<-started
+
+	// Flood with lossy deltas well past the cap — most must be dropped.
+	for i := 0; i < subscriberBuffer+500; i++ {
+		b.Publish(TextDelta{Delta: "x"})
+	}
+	// Publish a lossless structural event AFTER the flood.
+	b.Publish(StateChanged{SessionID: "s", State: "idle"})
+
+	close(release)
+	b.Drain(2 * time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawState {
+		t.Fatal("StateChanged (lossless) was dropped under backpressure — must never happen")
+	}
+	// occupier + at most subscriberBuffer queued lossy events survive.
+	if lossyProcessed < 1 {
+		t.Fatal("expected at least the occupier lossy event")
+	}
+	if lossyProcessed > subscriberBuffer+1 {
+		t.Fatalf("processed %d lossy events, want <= %d (cap not enforced)", lossyProcessed, subscriberBuffer+1)
+	}
+}
+
 func TestPublish_AfterClose(t *testing.T) {
 	b := NewLocalBus()
 	called := make(chan struct{}, 1)

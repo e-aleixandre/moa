@@ -34,8 +34,13 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 	// Set initial sync point: count agent messages already loaded
 	ts.lastSyncCount = len(sctx.Agent.Messages())
 
-	// Sync new messages after each run completes
-	b.Subscribe(func(e RunEnded) { ts.syncMessages() })
+	// Sync new messages after each run completes, then signal persistence.
+	// Publishing TreeSynced AFTER the append lets the persistence reactor
+	// snapshot the tree without racing this goroutine (lost-last-turn fix).
+	b.Subscribe(func(e RunEnded) {
+		ts.syncMessages()
+		b.Publish(TreeSynced{SessionID: sctx.SessionID})
+	})
 
 	// Handle compaction (both auto mid-run and manual)
 	b.Subscribe(func(e CompactionEnded) {
@@ -43,6 +48,7 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 			return
 		}
 		ts.handleCompaction(e)
+		b.Publish(TreeSynced{SessionID: sctx.SessionID})
 	})
 
 	// Handle commands: clear resets, others re-sync
@@ -59,6 +65,7 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 			// Re-sync to catch AppendToConversation, model switch side-effects, etc.
 			ts.syncMessages()
 		}
+		b.Publish(TreeSynced{SessionID: sctx.SessionID})
 	})
 
 	return ts
