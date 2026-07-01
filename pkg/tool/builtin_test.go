@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -619,6 +620,38 @@ func TestRead_LongLine(t *testing.T) {
 
 // --- headTailBuffer tests ---
 
+// TestHeadTailBuffer_IoCopyPreservesTail reproduces the find/grep tail-loss bug:
+// os/exec streams command output into the buffer via io.Copy. If Write reports a
+// short write (n < len(p)) without an error on truncation, io.Copy aborts with
+// ErrShortWrite and the tail is lost. Write must consume all of p.
+func TestHeadTailBuffer_IoCopyPreservesTail(t *testing.T) {
+	var b headTailBuffer
+	b.headMax = 20
+	b.tailMax = 20
+	defer func() {
+		b.Close()
+		if b.SpillPath != "" {
+			_ = os.Remove(b.SpillPath)
+		}
+	}()
+
+	src := strings.NewReader("HEAD" + strings.Repeat("m", 5000) + "TAIL_END")
+	n, err := io.Copy(&b, src)
+	if err != nil {
+		t.Fatalf("io.Copy aborted (short-write bug): %v", err)
+	}
+	if want := int64(4 + 5000 + 8); n != want {
+		t.Fatalf("io.Copy consumed %d bytes, want %d", n, want)
+	}
+	out := b.String()
+	if !strings.HasPrefix(out, "HEAD") {
+		t.Error("head lost")
+	}
+	if !strings.HasSuffix(out, "TAIL_END") {
+		t.Errorf("tail lost: output does not end with TAIL_END")
+	}
+}
+
 func TestHeadTailBuffer_SmallInput(t *testing.T) {
 	var b headTailBuffer
 	b.headMax = 100
@@ -837,30 +870,19 @@ func TestHeadTailBuffer_AcceptedBytes(t *testing.T) {
 	b.headMax = 10
 	b.tailMax = 10
 
-	// First write fits entirely in head
-	accepted, err := b.Write([]byte("12345"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if accepted != 5 {
+	// Append reports bytes accepted into the head (for live streaming).
+	// First append fits entirely in head.
+	if accepted := b.Append([]byte("12345")); accepted != 5 {
 		t.Fatalf("expected 5 accepted, got %d", accepted)
 	}
 
-	// Second write partially fits (5 of 8 bytes)
-	accepted, err = b.Write([]byte("67890abc"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if accepted != 5 {
+	// Second append partially fits (5 of 8 bytes)
+	if accepted := b.Append([]byte("67890abc")); accepted != 5 {
 		t.Fatalf("expected 5 accepted (head had 5 remaining), got %d", accepted)
 	}
 
-	// Third write: head is full, nothing accepted
-	accepted, err = b.Write([]byte("more data"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if accepted != 0 {
+	// Third append: head is full, nothing accepted
+	if accepted := b.Append([]byte("more data")); accepted != 0 {
 		t.Fatalf("expected 0 accepted (head full), got %d", accepted)
 	}
 	b.Close()

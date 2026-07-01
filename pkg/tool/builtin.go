@@ -293,10 +293,11 @@ type headTailBuffer struct {
 	SpillPath  string   // path to temp file (empty if no truncation)
 }
 
-// Write appends data to the buffer. Returns the number of bytes accepted into
-// the head buffer (for streaming display) via the first return value. Once
-// truncation kicks in, accepted is 0 — callers should stop sending live updates.
-func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
+// Append ingests p and returns how many bytes were accepted into the head
+// (visible) buffer — used for live streaming. Once truncation kicks in the
+// accepted count drops to 0 and overflow is routed to the circular tail buffer
+// and the spill file. Never fails.
+func (b *headTailBuffer) Append(p []byte) (accepted int) {
 	n := len(p)
 	b.totalBytes += n
 
@@ -304,7 +305,7 @@ func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
 		remaining := b.headMax - b.head.Len()
 		if remaining >= n {
 			b.head.Write(p)
-			return n, nil
+			return n
 		}
 		// Partially fill head, overflow to tail
 		accepted = remaining
@@ -327,7 +328,7 @@ func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
 
 	// Write overflow to circular tail buffer
 	if b.tailMax <= 0 {
-		return accepted, nil
+		return accepted
 	}
 	for len(p) > 0 {
 		space := b.tailMax - b.tailPos
@@ -345,7 +346,17 @@ func (b *headTailBuffer) Write(p []byte) (accepted int, err error) {
 		b.tailPos = 0
 		b.tailFull = true
 	}
-	return accepted, nil
+	return accepted
+}
+
+// Write implements io.Writer. It always consumes all of p — overflow beyond the
+// head is routed to the tail buffer and spill file — and reports len(p) so that
+// io.Copy-based callers (os/exec's stdout/stderr copy for find/grep) never see a
+// short write and abort mid-stream, losing the tail. Use Append when you need
+// the count of bytes accepted into the head for live streaming.
+func (b *headTailBuffer) Write(p []byte) (int, error) {
+	b.Append(p)
+	return len(p), nil
 }
 
 // initSpillFile creates a temp file and writes the head content to it.

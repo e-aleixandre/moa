@@ -106,7 +106,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 				for {
 					n, err := r.Read(tmp)
 					if n > 0 {
-						accepted, _ := buf.Write(tmp[:n])
+						accepted := buf.Append(tmp[:n])
 						if live && onUpdate != nil && accepted > 0 {
 							onUpdate(core.TextResult(string(tmp[:accepted])))
 						}
