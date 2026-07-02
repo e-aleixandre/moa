@@ -594,6 +594,12 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnQuery(func(q GetDisplayMessages) ([]core.AgentMessage, error) {
+		// Prefer the syncer: it composes the tree history with the in-flight
+		// turn (agent messages not yet synced), so a mid-run snapshot is
+		// complete. Falls back to tree/agent when no syncer is registered.
+		if sctx.treeSyncer != nil {
+			return sctx.treeSyncer.DisplayMessages(), nil
+		}
 		if sctx.Tree != nil {
 			if msgs := sctx.Tree.AllMessages(); len(msgs) > 0 {
 				return msgs, nil

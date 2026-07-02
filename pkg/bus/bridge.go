@@ -93,6 +93,12 @@ type SessionContext struct {
 	// The Gate object itself is immutable between swaps — only the pointer changes.
 	gate atomic.Pointer[permission.Gate]
 
+	// treeSyncer is set by RegisterTreeSyncer; nil in tests that don't register
+	// one. GetDisplayMessages uses it to append the in-flight turn (agent
+	// messages not yet synced to the tree) so a mid-run reconnect snapshot is
+	// complete.
+	treeSyncer *TreeSyncer
+
 	// RunGenAtomic is the current run generation, readable without locks.
 	// Stamped on agent-lifecycle events by the bridge. Written by startRun
 	// (under runMu), read atomically by the bridge.

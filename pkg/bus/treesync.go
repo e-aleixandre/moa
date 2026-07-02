@@ -34,6 +34,9 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 	// Set initial sync point: count agent messages already loaded
 	ts.lastSyncCount = len(sctx.Agent.Messages())
 
+	// Expose the syncer so GetDisplayMessages can include the in-flight turn.
+	sctx.treeSyncer = ts
+
 	// Sync new messages after each run completes, then signal persistence.
 	// Publishing TreeSynced AFTER the append lets the persistence reactor
 	// snapshot the tree without racing this goroutine (lost-last-turn fix).
@@ -69,6 +72,32 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 	})
 
 	return ts
+}
+
+// DisplayMessages returns the full display history: the messages already synced
+// to the tree PLUS any agent messages appended since the last sync (the
+// in-flight turn). The tree only gains a turn's messages after RunEnded, so
+// mid-run it lags by exactly the current turn. Without the tail, a WS reconnect
+// during a run rebuilds from a snapshot missing the just-sent user message and
+// the streaming reply, making them vanish until the run ends.
+func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	treeMsgs := ts.tree.AllMessages()
+	agentMsgs := ts.sctx.Agent.Messages()
+
+	// Tail = agent messages not yet synced to the tree. Clamp defensively: a
+	// branch/LoadState can shrink the agent below the last sync point before the
+	// resync command runs, which would otherwise slice out of range.
+	if ts.lastSyncCount >= len(agentMsgs) {
+		return treeMsgs
+	}
+	tail := agentMsgs[ts.lastSyncCount:]
+	out := make([]core.AgentMessage, 0, len(treeMsgs)+len(tail))
+	out = append(out, treeMsgs...)
+	out = append(out, tail...)
+	return out
 }
 
 // syncMessages appends any new agent messages to the tree since the last sync.
