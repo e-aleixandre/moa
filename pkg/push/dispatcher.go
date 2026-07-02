@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -77,7 +78,9 @@ func (d *Dispatcher) send(payload []byte, sub webpush.Subscription) {
 		return
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
+	// Read (and cap) the body so the push service's error reason is visible in
+	// logs; reading also drains it so the connection can be reused.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 
 	switch {
 	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
@@ -86,6 +89,6 @@ func (d *Dispatcher) send(payload []byte, sub webpush.Subscription) {
 			slog.Warn("push: prune subscription", "error", err)
 		}
 	case resp.StatusCode >= 300:
-		slog.Warn("push: unexpected status", "status", resp.StatusCode)
+		slog.Warn("push: send rejected", "status", resp.StatusCode, "reason", strings.TrimSpace(string(body)))
 	}
 }
