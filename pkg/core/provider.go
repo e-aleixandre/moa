@@ -121,6 +121,10 @@ type AssistantEvent struct {
 	ToolCallID  string         `json:"tool_call_id,omitempty"`
 	ToolName    string         `json:"tool_name,omitempty"`
 	PartialArgs map[string]any `json:"partial_args,omitempty"`
+
+	// RateLimit — populated for the "ratelimit" event, emitted once at stream
+	// start from the response headers (independent of message success).
+	RateLimit *RateLimit `json:"rate_limit,omitempty"`
 }
 
 // IsTerminal returns true for "done" or "error" events.
@@ -140,6 +144,7 @@ const (
 	ProviderEventToolCallStart = "toolcall_start"
 	ProviderEventToolCallDelta = "toolcall_delta"
 	ProviderEventToolCallEnd   = "toolcall_end"
+	ProviderEventRateLimit     = "ratelimit"
 	ProviderEventDone          = "done"
 	ProviderEventError         = "error"
 )

@@ -207,6 +207,10 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 					Args:       e.AssistantEvent.PartialArgs,
 				})
 			}
+		case core.ProviderEventRateLimit:
+			if e.AssistantEvent.RateLimit != nil {
+				b.Publish(RateLimitUpdated{SessionID: sid, RunGen: gen, RateLimit: *e.AssistantEvent.RateLimit})
+			}
 		}
 
 	case core.AgentEventMessageEnd:

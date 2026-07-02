@@ -108,6 +108,27 @@ type ContextUpdateData struct {
 	ContextPercent int `json:"context_percent"`
 }
 
+// RateLimitData carries the provider's per-request rate-limit state: plan-window
+// utilization (as percentages, to match /api/usage) and whether this request
+// was served from extra usage.
+type RateLimitData struct {
+	Status              string `json:"status,omitempty"`
+	RepresentativeClaim string `json:"representative_claim,omitempty"`
+	OnOverage           bool   `json:"on_overage"`
+	FiveHourPct         int    `json:"five_hour_pct"`
+	SevenDayPct         int    `json:"seven_day_pct"`
+	OveragePct          int    `json:"overage_pct"`
+}
+
+// pctOf converts a [0,1] utilization fraction to a rounded percentage, or -1
+// when the fraction is unknown (negative sentinel from the parser).
+func pctOf(frac float64) int {
+	if frac < 0 {
+		return -1
+	}
+	return int(frac*100 + 0.5)
+}
+
 // SteerData is sent when the user steers a running agent.
 type SteerData struct {
 	Text string `json:"text"`

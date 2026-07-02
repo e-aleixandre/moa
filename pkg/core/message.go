@@ -120,6 +120,31 @@ type Usage struct {
 	TotalTokens int `json:"total_tokens"`
 }
 
+// RateLimit captures the unified rate-limit state a provider reports on each
+// response (Anthropic's anthropic-ratelimit-unified-* headers).
+//
+// Utilization fields are fractions in [0,1], or -1 when the corresponding header
+// was absent/invalid — callers must treat -1 as "unknown" and NOT overwrite a
+// known value with it (the endpoint is reverse-engineered and may change shape).
+//
+// It lets callers see, per request, how much of each plan window is used and
+// whether the request was served from pay-as-you-go "extra usage" — instantly,
+// without polling the account-global usage endpoint.
+type RateLimit struct {
+	Status              string  `json:"status,omitempty"`               // allowed / allowed_warning / rejected
+	RepresentativeClaim string  `json:"representative_claim,omitempty"` // window that currently binds: five_hour / seven_day / overage / ...
+	FiveHourUtil        float64 `json:"five_hour_util"`                 // [0,1], or -1 if unknown
+	SevenDayUtil        float64 `json:"seven_day_util"`                 // [0,1], or -1 if unknown
+	OverageStatus       string  `json:"overage_status,omitempty"`
+	OverageUtil         float64 `json:"overage_util"` // [0,1], or -1 if unknown
+}
+
+// OnOverage reports whether the request is currently being served from extra
+// usage — i.e. the binding rate-limit window is the overage bucket.
+func (r RateLimit) OnOverage() bool {
+	return r.RepresentativeClaim == "overage"
+}
+
 // EstimateTokens estimates the token count of a single message using
 // a chars/4 heuristic. Conservative (overestimates slightly).
 func EstimateTokens(m Message) int {

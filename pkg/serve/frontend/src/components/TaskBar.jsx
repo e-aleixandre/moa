@@ -1,4 +1,4 @@
-import { ClipboardList, Map, Shield, Gauge, Zap } from 'lucide-preact';
+import { ClipboardList, Map, Shield, Gauge, Zap, Flame } from 'lucide-preact';
 
 /**
  * TaskBar — single-line status bar above the input.
@@ -60,8 +60,9 @@ export function TaskBar({ session, usage }) {
   const showExtra = extra && extra.is_enabled;
   const extraOn = showExtra && (extra.used_credits ?? 0) > 0;
   const hasUsage = !!(fiveH || week || showExtra);
+  const onOverage = !!session.onOverage;
 
-  if (!hasPlan && !hasTasks && !hasContext && !hasUsage) return null;
+  if (!hasPlan && !hasTasks && !hasContext && !hasUsage && !onOverage) return null;
 
   const done = tasks.filter(t => t.status === 'done').length;
   const total = tasks.length;
@@ -80,6 +81,13 @@ export function TaskBar({ session, usage }) {
         <Shield />
         {permMode.toUpperCase()}
       </span>
+
+      {onOverage && (
+        <span class="task-bar-pill session-overage" title="Esta sesión se está sirviendo desde extra usage (pago por uso)">
+          <Flame />
+          en extra
+        </span>
+      )}
 
       {showExtra && (
         <span class={`task-bar-pill usage-extra ${extraOn ? 'on' : ''}`} title={extraTitle}>

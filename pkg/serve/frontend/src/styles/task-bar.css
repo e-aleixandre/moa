@@ -52,6 +52,10 @@
 .task-bar-pill.usage-extra { color: var(--subtext1); background: var(--surface0); }
 .task-bar-pill.usage-extra.on { color: var(--red); background: rgba(243, 139, 168, 0.18); }
 
+/* Per-session "on extra usage right now" flag — the loudest badge, shown only
+   while a request is actively being served from pay-as-you-go. */
+.task-bar-pill.session-overage { color: var(--base); background: var(--red); }
+
 .task-bar-pill.tasks {
   color: var(--subtext1);
   background: var(--surface0);

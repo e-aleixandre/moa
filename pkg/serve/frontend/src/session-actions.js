@@ -48,6 +48,7 @@ export async function loadSessions() {
         thinkingText: existing ? existing.thinkingText : null,
         subagentCount: existing ? existing.subagentCount : 0,
         autoVerifying: existing ? existing.autoVerifying : false,
+        onOverage: existing ? existing.onOverage : false,
         tasks: existing ? existing.tasks : [],
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),

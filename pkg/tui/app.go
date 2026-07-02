@@ -329,6 +329,21 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 	m.statusBar.UpdateUsageExtraSegment(used, snap.Extra.CurrencySymbol(), snap.Extra.IsEnabled)
 }
 
+// applyRateLimit refreshes the plan-quota segments instantly from a request's
+// rate-limit response headers and flags when the request was served from extra
+// usage. This is the fast, per-request path; the 60s poller (applyUsage) remains
+// the authoritative source for the extra-usage spend amount.
+func (m *appModel) applyRateLimit(rl core.RateLimit) {
+	// Refresh the quota segment only when both window utilizations are known
+	// (>= 0); a -1 means the header was absent, and we must not clobber the
+	// poller's good value with a fake 0%.
+	if rl.FiveHourUtil >= 0 && rl.SevenDayUtil >= 0 {
+		pct := func(f float64) int { return int(f*100 + 0.5) }
+		m.statusBar.UpdateUsageSegment(pct(rl.FiveHourUtil), pct(rl.SevenDayUtil))
+	}
+	m.statusBar.UpdateOverageSegment(rl.OnOverage())
+}
+
 // waitForBusEvent returns a Cmd that blocks until the next bus event.
 func (m appModel) waitForBusEvent() tea.Cmd {
 	ch := m.eventCh
@@ -1352,6 +1367,13 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	// --- Context ---
 	case bus.ContextUpdated:
 		m.statusBar.UpdateContextSegment(e.Percent)
+
+	// --- Rate limit / overage (per-request, from response headers) ---
+	case bus.RateLimitUpdated:
+		if e.RunGen != m.s.runGen {
+			return nil
+		}
+		m.applyRateLimit(e.RateLimit)
 
 	// --- Subagents ---
 	case bus.SubagentCountChanged:

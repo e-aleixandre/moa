@@ -1,7 +1,7 @@
 // ws-handlers.js — WebSocket event handlers and streaming delta batching
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
-import { store, updateSession, visibleSessionIds } from './store.js';
+import { store, setState, updateSession, visibleSessionIds } from './store.js';
 
 // --- Message normalization ---
 
@@ -535,6 +535,31 @@ export function handleWsConfigChange(id, data) {
 export function handleWsContextUpdate(id, data) {
   if (data.context_percent != null) {
     updateSession(id, { contextPercent: data.context_percent });
+  }
+}
+
+// handleWsRateLimit reflects a request's live rate-limit headers: a per-session
+// "on extra usage" flag, plus an instant refresh of the global plan-usage
+// utilizations (the 5h/weekly windows are account-wide) so the widget doesn't
+// lag the 60s poll. The extra-usage spend (€) stays sourced from the poller.
+export function handleWsRateLimit(id, data) {
+  updateSession(id, { onOverage: !!data.on_overage });
+
+  const u = store.get().usage;
+  if (u && u.available) {
+    let changed = false;
+    const usage = { ...u };
+    // Only apply a window when the header was present (pct >= 0); never overwrite
+    // a known value with an unknown one.
+    if (u.five_hour && data.five_hour_pct >= 0) {
+      usage.five_hour = { ...u.five_hour, utilization: data.five_hour_pct };
+      changed = true;
+    }
+    if (u.seven_day && data.seven_day_pct >= 0) {
+      usage.seven_day = { ...u.seven_day, utilization: data.seven_day_pct };
+      changed = true;
+    }
+    if (changed) setState({ usage });
   }
 }
 

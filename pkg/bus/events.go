@@ -203,6 +203,16 @@ type ContextUpdated struct {
 	Percent   int
 }
 
+// RateLimitUpdated is published after each assistant message with the provider's
+// reported rate-limit state (plan-window utilization + whether the request drew
+// on extra usage). Enables instant, per-session overage awareness without
+// waiting for the account-global usage poll.
+type RateLimitUpdated struct {
+	SessionID string
+	RunGen    uint64
+	RateLimit core.RateLimit
+}
+
 // TreeSynced is published by the TreeSyncer AFTER it has applied a tree mutation
 // (message append, compaction entry, or clear/re-sync) in response to RunEnded /
 // CompactionEnded / CommandExecuted. The tree-based persistence reactor

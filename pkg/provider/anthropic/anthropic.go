@@ -104,11 +104,20 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		return nil, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(errBody))
 	}
 
+	// Rate-limit state comes back in the response headers (available now, before
+	// the SSE body). Emit it up front as its own event so callers get instant,
+	// per-request plan-usage / overage awareness — and so it survives even if the
+	// stream later errors or is cancelled mid-flight.
+	rl := parseRateLimit(resp.Header)
+
 	ch := make(chan core.AssistantEvent, 64)
 
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
+		if rl != nil {
+			ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl}
+		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
 		a.consumeStream(ctx, body, ch, req.Tools, oauthMode)
 	}()
@@ -175,7 +184,7 @@ type streamState struct {
 	toolCallID   string
 	toolCallName string
 	requestTools []core.ToolSpec // original tool specs for reverse name mapping
-	isOAuth      bool           // whether this request used OAuth (for tool name mapping)
+	isOAuth      bool            // whether this request used OAuth (for tool name mapping)
 
 	// Partial JSON parsing for streaming tool call arguments.
 	partialParser jsonutil.PartialParser

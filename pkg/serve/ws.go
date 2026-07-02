@@ -111,6 +111,16 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
+	case bus.RateLimitUpdated:
+		rl := e.RateLimit
+		return Event{Type: "ratelimit", Data: RateLimitData{
+			Status:              rl.Status,
+			RepresentativeClaim: rl.RepresentativeClaim,
+			OnOverage:           rl.OnOverage(),
+			FiveHourPct:         pctOf(rl.FiveHourUtil),
+			SevenDayPct:         pctOf(rl.SevenDayUtil),
+			OveragePct:          pctOf(rl.OverageUtil),
+		}}, true
 	case bus.ConfigChanged:
 		return Event{Type: "config_change", Data: ConfigChangeData{
 			Model: e.Model, Thinking: e.Thinking,

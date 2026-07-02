@@ -154,6 +154,7 @@ const (
 	SegmentContext     = "context"
 	SegmentUsage       = "usage"       // plan quota (5h + weekly windows)
 	SegmentUsageExtra  = "usage_extra" // pay-as-you-go spend alert
+	SegmentOverage     = "overage"     // this session is drawing on extra usage NOW
 )
 
 // Segment priorities (lower = further left).
@@ -165,6 +166,7 @@ const (
 	PriorityPlan        = 40
 	PriorityTasks       = 45
 	PriorityUsageExtra  = 33 // prominent: near permissions, since it means real spend
+	PriorityOverage     = 34 // right after extra spend: "you're on extra right now"
 	PriorityCost        = 80
 	PriorityCache       = 85
 	PriorityUsage       = 87 // grouped with the other meters
@@ -339,4 +341,15 @@ func (sl *StatusLine) UpdateUsageExtraSegment(used float64, symbol string, enabl
 	}
 	text := statusLineKeyStyle.Render("extra ") + style.Render(fmt.Sprintf("%s%.2f", symbol, used))
 	sl.Set(SegmentUsageExtra, text, PriorityUsageExtra)
+}
+
+// UpdateOverageSegment flags that the current request was served from extra
+// usage (drawing on pay-as-you-go). Shown only while active, in red; removed
+// otherwise so it never clutters the normal state.
+func (sl *StatusLine) UpdateOverageSegment(onOverage bool) {
+	if !onOverage {
+		sl.Remove(SegmentOverage)
+		return
+	}
+	sl.Set(SegmentOverage, statusLineContextHighStyle.Render("⚡ en extra"), PriorityOverage)
 }
