@@ -60,6 +60,20 @@ export function syncConnections(visibleIds) {
   }
 }
 
+// reconnectAll tears down every live socket and reopens the wanted ones
+// immediately with a fresh backoff. Call it when the app returns to the
+// foreground or regains network: a socket may be silently half-open (no close
+// event ever fired), so the normal onclose→backoff path would never trigger and
+// the session would sit frozen until a manual reload.
+export function reconnectAll() {
+  const ids = [...wantedIds];
+  for (const [, entry] of connections) entry.ws.close();
+  connections.clear();
+  for (const [, timer] of pendingTimers) clearTimeout(timer);
+  pendingTimers.clear();
+  for (const id of ids) openWs(id, 1000);
+}
+
 function openWs(sessionId, initialBackoff) {
   pendingTimers.delete(sessionId);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';

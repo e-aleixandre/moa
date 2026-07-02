@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { store } from './store.js';
 import { loadSessions, startPolling, startUsagePolling, stopUsagePolling } from './session-actions.js';
+import { reconnectAll } from './api.js';
 import {
   setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex, openSession,
 } from './tile-actions.js';
@@ -48,6 +49,24 @@ function App() {
     registerServiceWorker();
     refreshPushState();
     return () => stopUsagePolling();
+  }, []);
+
+  // On returning to the foreground or regaining network, force an immediate
+  // reconnect + refresh. iOS drops the WebSocket when the PWA backgrounds and
+  // may leave it half-open, so without this the session sits frozen (and up to
+  // the full backoff behind) until a manual reload.
+  useEffect(() => {
+    const onForeground = () => {
+      if (document.visibilityState !== 'visible') return;
+      reconnectAll();
+      loadSessions();
+    };
+    document.addEventListener('visibilitychange', onForeground);
+    window.addEventListener('online', onForeground);
+    return () => {
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('online', onForeground);
+    };
   }, []);
 
   // Warm focus from a push tap: the SW postMessages an open-session request to

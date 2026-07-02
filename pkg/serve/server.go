@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
@@ -346,11 +347,26 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		})
 		defer editToolUnsub()
 
+		// Keepalive: ping periodically so a silently half-open connection (common
+		// on mobile network switches, where no close frame ever arrives) is
+		// detected. A failed ping returns from the handler, which decrements
+		// wsConns via defer — otherwise a zombie viewer would freeze the session
+		// AND suppress its "finished/errored" push (gated on wsConns == 0).
+		pingTicker := time.NewTicker(30 * time.Second)
+		defer pingTicker.Stop()
+
 		for {
 			select {
 			case evt := <-reactor.Events():
 				if err := wsWriteJSON(ctx, conn, evt); err != nil {
 					return
+				}
+			case <-pingTicker.C:
+				pingCtx, cancelPing := context.WithTimeout(ctx, 10*time.Second)
+				err := conn.Ping(pingCtx) //nolint:staticcheck
+				cancelPing()
+				if err != nil {
+					return // dead connection — defer releases wsConns
 				}
 			case <-reactor.Done():
 				conn.Close(websocket.StatusGoingAway, "session closed") //nolint:errcheck,staticcheck
