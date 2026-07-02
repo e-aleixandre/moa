@@ -152,6 +152,8 @@ const (
 	SegmentCost        = "cost"
 	SegmentCache       = "cache"
 	SegmentContext     = "context"
+	SegmentUsage       = "usage"       // plan quota (5h + weekly windows)
+	SegmentUsageExtra  = "usage_extra" // pay-as-you-go spend alert
 )
 
 // Segment priorities (lower = further left).
@@ -162,8 +164,10 @@ const (
 	PriorityPathScope   = 35
 	PriorityPlan        = 40
 	PriorityTasks       = 45
+	PriorityUsageExtra  = 33 // prominent: near permissions, since it means real spend
 	PriorityCost        = 80
 	PriorityCache       = 85
+	PriorityUsage       = 87 // grouped with the other meters
 	PriorityContext     = 90 // rightmost of the built-ins
 )
 
@@ -282,4 +286,57 @@ func (sl *StatusLine) UpdateContextSegment(pct int) {
 
 	text := statusLineKeyStyle.Render("context ") + style.Render(fmt.Sprintf("%d%%", pct))
 	sl.Set(SegmentContext, text, PriorityContext)
+}
+
+// usageStyle picks a color for a utilization percentage, matching the context
+// thresholds (green < 50 ≤ yellow < 80 ≤ red).
+func usageStyle(pct int) lipgloss.Style {
+	if pct >= 80 {
+		return statusLineContextHighStyle
+	}
+	if pct >= 50 {
+		return statusLineContextMedStyle
+	}
+	return statusLineContextLowStyle
+}
+
+// UpdateUsageSegment sets the plan quota segment (5h + weekly windows).
+// Pass -1 for a window that is not reported. Removed when neither is reported.
+func (sl *StatusLine) UpdateUsageSegment(fiveHPct, weekPct int) {
+	var parts []string
+	maxPct := -1
+	if fiveHPct >= 0 {
+		parts = append(parts, "5h "+usageStyle(fiveHPct).Render(fmt.Sprintf("%d%%", fiveHPct)))
+		if fiveHPct > maxPct {
+			maxPct = fiveHPct
+		}
+	}
+	if weekPct >= 0 {
+		parts = append(parts, "wk "+usageStyle(weekPct).Render(fmt.Sprintf("%d%%", weekPct)))
+		if weekPct > maxPct {
+			maxPct = weekPct
+		}
+	}
+	if len(parts) == 0 {
+		sl.Remove(SegmentUsage)
+		return
+	}
+	text := statusLineKeyStyle.Render("quota ") + strings.Join(parts, " ")
+	sl.Set(SegmentUsage, text, PriorityUsage)
+}
+
+// UpdateUsageExtraSegment sets the pay-as-you-go spend segment. used is in major
+// currency units and symbol is the currency symbol. Removed when extra usage is
+// disabled; shown muted at zero and in red once credits are spent.
+func (sl *StatusLine) UpdateUsageExtraSegment(used float64, symbol string, enabled bool) {
+	if !enabled {
+		sl.Remove(SegmentUsageExtra)
+		return
+	}
+	style := statusLineValueStyle
+	if used > 0 {
+		style = statusLineContextHighStyle
+	}
+	text := statusLineKeyStyle.Render("extra ") + style.Render(fmt.Sprintf("%s%.2f", symbol, used))
+	sl.Set(SegmentUsageExtra, text, PriorityUsageExtra)
 }

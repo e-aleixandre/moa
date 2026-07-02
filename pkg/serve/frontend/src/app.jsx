@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { store } from './store.js';
-import { loadSessions, startPolling } from './session-actions.js';
+import { loadSessions, startPolling, startUsagePolling, stopUsagePolling } from './session-actions.js';
 import {
   setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex,
 } from './tile-actions.js';
@@ -39,7 +39,9 @@ function App() {
       else autoFillTiles();
     });
     startPolling();
+    startUsagePolling();
     requestNotificationPermission();
+    return () => stopUsagePolling();
   }, []);
 
   useEffect(() => {

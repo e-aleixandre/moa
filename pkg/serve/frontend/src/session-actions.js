@@ -92,6 +92,29 @@ export function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
+let usageTimer = null;
+
+// loadUsage refreshes the global plan usage snapshot. Failures keep the
+// previous snapshot rather than clearing the widget.
+export async function loadUsage() {
+  try {
+    const usage = await api('GET', '/api/usage');
+    setState({ usage });
+  } catch (e) {
+    console.error('loadUsage failed:', e);
+  }
+}
+
+export function startUsagePolling() {
+  stopUsagePolling();
+  loadUsage();
+  usageTimer = setInterval(loadUsage, 60000);
+}
+
+export function stopUsagePolling() {
+  if (usageTimer) { clearInterval(usageTimer); usageTimer = null; }
+}
+
 export async function createSession(opts) {
   const sess = await api('POST', '/api/sessions', opts);
   await loadSessions();

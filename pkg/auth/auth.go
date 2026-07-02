@@ -229,6 +229,38 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 	}
 }
 
+// PeekOAuthToken returns the current OAuth access token for a provider WITHOUT
+// triggering a refresh. It is for read-only, best-effort callers (e.g. the plan
+// usage widget) that must never rotate the shared refresh token.
+//
+//   - isOAuth is true when an OAuth credential is in use for the provider.
+//   - valid is true only when a non-expired access token is available.
+//
+// When isOAuth is true but valid is false, the token has expired: the caller
+// should treat usage as temporarily unavailable rather than refresh, and let a
+// real API call renew the token on demand.
+func (s *Store) PeekOAuthToken(provider string) (token string, isOAuth, valid bool) {
+	// 1. Environment variable (never refreshed; treated as always valid).
+	if v := os.Getenv(envKeyForProvider(provider)); v != "" {
+		if IsOAuthToken(v) {
+			return v, true, true
+		}
+		return "", false, false
+	}
+
+	// 2. Stored credential — read only, never refresh.
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cred, ok := s.data[provider]
+	if !ok || cred.Type != "oauth" {
+		return "", false, false
+	}
+	if time.Now().UnixMilli() >= cred.Expires {
+		return "", true, false // OAuth in use, but the access token has expired.
+	}
+	return cred.Access, true, true
+}
+
 // GetAccountID returns the stored account ID for a provider (e.g., OpenAI chatgpt_account_id).
 func (s *Store) GetAccountID(provider string) string {
 	s.mu.RLock()

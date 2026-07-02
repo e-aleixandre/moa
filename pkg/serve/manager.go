@@ -13,6 +13,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/files"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/usage"
 )
 
 // SessionState describes the current state of a managed session.
@@ -127,6 +128,7 @@ type Manager struct {
 
 	providerFactory func(model core.Model) (core.Provider, error)
 	transcriber     core.Transcriber // nil when no speech-to-text is available
+	usagePoller     *usage.Poller    // nil when plan usage tracking is unavailable
 	defaultModel    core.Model
 	workspaceRoot   string
 	moaCfg          core.MoaConfig
@@ -148,6 +150,7 @@ type Manager struct {
 type ManagerConfig struct {
 	ProviderFactory func(model core.Model) (core.Provider, error)
 	Transcriber     core.Transcriber // optional; enables POST /api/transcribe
+	UsagePoller     *usage.Poller    // optional; enables GET /api/usage
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
@@ -162,6 +165,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		baseCtx:         ctx,
 		providerFactory: cfg.ProviderFactory,
 		transcriber:     cfg.Transcriber,
+		usagePoller:     cfg.UsagePoller,
 		defaultModel:    cfg.DefaultModel,
 		workspaceRoot:   cfg.WorkspaceRoot,
 		moaCfg:          cfg.MoaCfg,
@@ -297,7 +301,3 @@ type CommandResult struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
 }
-
-
-
-

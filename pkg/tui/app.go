@@ -20,6 +20,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/memory"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/usage"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
 
@@ -145,6 +146,9 @@ type appModel struct {
 	// Memory
 	memoryStore *memory.Store
 
+	// Plan usage (account-global; shared poller, refreshed on a timer)
+	usagePoller *usage.Poller
+
 	// Voice input
 	voice voiceRecorder
 
@@ -165,6 +169,7 @@ type Config struct {
 	PromptTemplates       []promptpkg.Template        // available prompt templates
 	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
 	MemoryStore           *memory.Store               // per-project memory store (nil = memory disabled)
+	UsagePoller           *usage.Poller               // plan usage poller (nil = usage tracking disabled)
 }
 
 // isStructuralBusEvent returns true for events that must not be dropped.
@@ -225,6 +230,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		promptTemplates:      cfg.PromptTemplates,
 		memoryStore:          cfg.MemoryStore,
+		usagePoller:          cfg.UsagePoller,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber},
 	}
 	m.filePicker.SetWorkDir(cfg.CWD)
@@ -272,8 +278,55 @@ func (m appModel) Init() tea.Cmd {
 	if m.sessionBrowser.active {
 		cmds = append(cmds, m.loadSessionBrowser())
 	}
+	if c := m.fetchUsageCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
 	// Initial session display on first WindowSizeMsg handled in Update.
 	return tea.Batch(cmds...)
+}
+
+const usagePollInterval = 60 * time.Second
+
+// usageMsg carries a refreshed plan usage snapshot from the poller.
+type usageMsg struct{ snap *usage.Snapshot }
+
+// usageTickMsg fires on the usage refresh interval.
+type usageTickMsg struct{}
+
+// fetchUsageCmd fetches the plan usage snapshot off the UI goroutine. Returns
+// nil when usage tracking is disabled (no poller).
+func (m appModel) fetchUsageCmd() tea.Cmd {
+	poller := m.usagePoller
+	if poller == nil {
+		return nil
+	}
+	ctx := m.baseCtx
+	return func() tea.Msg {
+		snap, _ := poller.Get(ctx)
+		return usageMsg{snap: snap}
+	}
+}
+
+// applyUsage updates the status-line usage segments from a snapshot. A nil
+// snapshot means usage is unavailable (no OAuth credential, or an error with no
+// cached snapshot to fall back on): clear the segments so stale data doesn't
+// linger, matching the web UI which hides the widget when usage is unavailable.
+func (m *appModel) applyUsage(snap *usage.Snapshot) {
+	if snap == nil {
+		m.statusBar.UpdateUsageSegment(-1, -1)
+		m.statusBar.UpdateUsageExtraSegment(0, "", false)
+		return
+	}
+	five, week := -1, -1
+	if snap.FiveHour != nil {
+		five = int(snap.FiveHour.Utilization + 0.5)
+	}
+	if snap.SevenDay != nil {
+		week = int(snap.SevenDay.Utilization + 0.5)
+	}
+	m.statusBar.UpdateUsageSegment(five, week)
+	used, _ := snap.Extra.UsedAmount()
+	m.statusBar.UpdateUsageExtraSegment(used, snap.Extra.CurrencySymbol(), snap.Extra.IsEnabled)
 }
 
 // waitForBusEvent returns a Cmd that blocks until the next bus event.
@@ -362,6 +415,13 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: msg.Err.Error()})
 		m.updateViewport()
 		return m, nil
+
+	case usageMsg:
+		m.applyUsage(msg.snap)
+		return m, tea.Tick(usagePollInterval, func(time.Time) tea.Msg { return usageTickMsg{} })
+
+	case usageTickMsg:
+		return m, m.fetchUsageCmd()
 
 	case renderTickMsg:
 		needsRefresh := false

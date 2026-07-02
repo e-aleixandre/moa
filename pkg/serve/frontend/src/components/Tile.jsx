@@ -11,7 +11,7 @@ import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { ModelPill } from './ModelPill.jsx';
 import { TaskBar } from './TaskBar.jsx';
 
-export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
+export function Tile({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
   const [dragOver, setDragOver] = useState(false);
   const tileRef = useRef(null);
   const needsAttention = session && (session.state === 'permission' || session.state === 'error');
@@ -150,7 +150,7 @@ export function Tile({ tileId, tileIndex, sessionId, session, isFocused }) {
 
       {session.untrustedMcp && <McpBanner sessionId={sessionId} />}
       <MessageList session={session} />
-      <TaskBar session={session} />
+      <TaskBar session={session} usage={usage} />
       <InputBar sessionId={sessionId} session={session} tileId={tileId} />
     </div>
   );

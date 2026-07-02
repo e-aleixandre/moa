@@ -70,6 +70,7 @@ function TileNode({ node, state, path, tileIndexMap }) {
         tileIndex={tileIndexMap.get(node.id) ?? 0}
         sessionId={node.sessionId}
         session={session}
+        usage={state.usage}
         isFocused={state.focusedTile === node.id}
       />
     );

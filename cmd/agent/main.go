@@ -448,6 +448,7 @@ func main() {
 			},
 			Transcriber:       transcriber,
 			MemoryStore:       sess.MemoryStore,
+			UsagePoller:       newAnthropicUsagePoller(authStore),
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(24))
 		if _, err := prog.Run(); err != nil {

@@ -20,6 +20,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/usage"
 )
 
 //go:embed static
@@ -48,6 +49,7 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
+	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
 
 	var staticHandler http.Handler
@@ -432,6 +434,35 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),
 		}
 		writeJSON(w, http.StatusOK, caps)
+	}
+}
+
+// usageResponse wraps a usage snapshot for the API. The embedded pointer is nil
+// (and its fields omitted) when plan usage tracking is unavailable.
+type usageResponse struct {
+	Available bool   `json:"available"`
+	Error     string `json:"error,omitempty"`
+	*usage.Snapshot
+}
+
+func handleUsage(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if mgr.usagePoller == nil {
+			writeJSON(w, http.StatusOK, usageResponse{Available: false})
+			return
+		}
+		snap, err := mgr.usagePoller.Get(r.Context())
+		if err != nil || snap == nil {
+			resp := usageResponse{Available: false}
+			if err != nil {
+				// Keep the client-facing error generic: the underlying error may
+				// embed the raw upstream response body, which we don't echo out.
+				resp.Error = "usage temporarily unavailable"
+			}
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		writeJSON(w, http.StatusOK, usageResponse{Available: true, Snapshot: snap})
 	}
 }
 

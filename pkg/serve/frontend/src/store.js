@@ -44,6 +44,8 @@ const initialFocused = initialIds.includes(persisted.focusedTile)
 let state = {
   sessions: {},
 
+  usage: null, // global plan usage snapshot from /api/usage (null until first poll)
+
   tileTree: initialTree,
   focusedTile: initialFocused,
   soundEnabled: persisted.soundEnabled || false,

@@ -65,7 +65,7 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
       {session.untrustedMcp && <McpBanner sessionId={state.activeSession} />}
 
       <MessageList session={session} />
-      <TaskBar session={session} />
+      <TaskBar session={session} usage={state.usage} />
       <InputBar sessionId={state.activeSession} session={session} />
     </div>
   );
