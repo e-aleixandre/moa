@@ -8,6 +8,12 @@ import (
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
 	// --- Anthropic ---
+	"claude-fable-5": {
+		ID: "claude-fable-5", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Fable 5", MaxInput: 1_000_000, MaxOutput: 131072,
+		// 90% prompt-cache discount on input applies (cache read ~= Input*0.1).
+		Pricing: &Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
+	},
 	"claude-opus-4-6": {
 		ID: "claude-opus-4-6", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Opus 4.6", MaxInput: 1_000_000, MaxOutput: 131072,
@@ -50,6 +56,13 @@ var knownModels = map[string]Model{
 		Name: "GPT-5.4 Mini", MaxInput: 400_000, MaxOutput: 128_000,
 		Pricing: &Pricing{Input: 0.75, Output: 4.5, CacheRead: 0.075},
 	},
+	"gpt-5.5": {
+		ID: "gpt-5.5", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.5", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (<=200K input) pricing shown here. Long-context
+		// (>200K input) prompts are billed at Input: 10, Output: 45, CacheRead: 1.
+		Pricing: &Pricing{Input: 5, Output: 30, CacheRead: 0.5},
+	},
 }
 
 // Short aliases → full model ID.
@@ -58,12 +71,14 @@ var modelAliases = map[string]string{
 	"sonnet": "claude-sonnet-4-6",
 	"opus":   "claude-opus-4-6",
 	"haiku":  "claude-haiku-4-5",
+	"fable":  "claude-fable-5",
 	// OpenAI
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
 	"codex-5.2":   "gpt-5.2-codex",
 	"gpt5":        "gpt-5.4",
 	"gpt5-mini":   "gpt-5.4-mini",
+	"gpt5.5":      "gpt-5.5",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
