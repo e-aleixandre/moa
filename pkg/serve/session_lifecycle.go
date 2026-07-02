@@ -387,10 +387,21 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	return sess, nil
 }
 
+// shutdownDrainBudget bounds how long Shutdown waits, in total across all
+// sessions, for active runs to observe the cancelled root context and settle
+// before flushing. Best-effort: if it expires we flush anyway.
+const shutdownDrainBudget = 5 * time.Second
+
 // Shutdown synchronously flushes every active session to disk. Call it after the
 // HTTP server has stopped accepting requests and before the process exits, so a
 // turn that finished just before shutdown is persisted even though the async
 // RunEnded→TreeSynced→save chain may not have drained.
+//
+// A SIGTERM cancels the root context, which cancels each in-flight run. Before
+// flushing we wait — bounded by shutdownDrainBudget across the whole process —
+// for active sessions to leave the running/permission state, so a snapshot
+// captures the complete final turn rather than a partial one. If the budget
+// expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))
@@ -400,6 +411,14 @@ func (m *Manager) Shutdown() {
 		}
 	}
 	m.mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownDrainBudget)
+	defer cancel()
+	for _, s := range sessions {
+		if !s.runtime.WaitSettled(ctx) {
+			slog.Warn("shutdown drain budget expired; flushing active session", "session", s.ID)
+		}
+	}
 
 	for _, s := range sessions {
 		if err := s.runtime.Flush(); err != nil {

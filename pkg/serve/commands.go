@@ -223,10 +223,20 @@ func cmdVerify(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, er
 		return nil, err
 	}
 
+	// Serialize: unlike the single-threaded TUI, two concurrent web POSTs can
+	// reach here at once. Reject the second so their AutoVerify events don't
+	// interleave and their verify processes don't clobber each other.
+	if !sess.verifyRunning.CompareAndSwap(false, true) {
+		return &CommandResult{OK: false, Message: "verify already running"}, nil
+	}
+	defer sess.verifyRunning.Store(false)
+
 	b := sess.runtime.Bus
 	b.Publish(bus.AutoVerifyStarted{SessionID: sess.ID})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Derive from the session context so a shutdown (which cancels it) cancels
+	// the verify subprocess instead of leaking it for up to five minutes.
+	ctx, cancel := context.WithTimeout(sess.infra.sessionCtx, 5*time.Minute)
 	defer cancel()
 
 	result, err := verify.Execute(ctx, sess.CWD)

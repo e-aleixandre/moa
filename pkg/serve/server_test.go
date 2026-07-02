@@ -967,6 +967,65 @@ func TestManagerShutdown_PersistsLastTurn(t *testing.T) {
 	}
 }
 
+// TestManagerShutdown_WaitsForActiveRun verifies Shutdown does not flush a
+// partial turn: when a run is still active, it waits for the run to settle
+// (leave StateRunning) before snapshotting, so the persisted turn is complete.
+func TestManagerShutdown_WaitsForActiveRun(t *testing.T) {
+	dir := t.TempDir()
+	sessionBase := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(delayedResponseHandler(150*time.Millisecond, "final answer"))
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
+		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:   dir,
+		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		SessionBaseDir:  sessionBase,
+	})
+
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.Send(sess.ID, "question"); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "run active", func() bool {
+		return sessState(sess) == StateRunning
+	})
+
+	start := time.Now()
+	mgr.Shutdown()
+	elapsed := time.Since(start)
+
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("Shutdown returned in %v; it did not wait for the active run to settle", elapsed)
+	}
+	if s := sessState(sess); s != StateIdle {
+		t.Fatalf("state after shutdown = %s, want idle", s)
+	}
+
+	saved, _, err := session.FindSession(sessionBase, sess.ID)
+	if err != nil {
+		t.Fatalf("session not on disk after Shutdown: %v", err)
+	}
+	found := false
+	for _, e := range saved.Entries {
+		if e.Type == session.EntryMessage && e.Message.Role == "assistant" {
+			for _, c := range e.Message.Content {
+				if strings.Contains(c.Text, "final answer") {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("persisted session missing the turn that was still running at shutdown")
+	}
+}
+
 func TestStaticAssets(t *testing.T) {
 	srv, _, cancel := newTestServer(t)
 	defer cancel()

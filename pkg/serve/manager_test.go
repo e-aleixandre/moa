@@ -59,6 +59,19 @@ func simpleResponseHandler(text string) mockHandler {
 	}
 }
 
+// delayedResponseHandler emits a full response after delay, unless ctx is
+// cancelled first. Used to hold a run in StateRunning for a bounded window.
+func delayedResponseHandler(delay time.Duration, text string) mockHandler {
+	return func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return simpleResponse(text), nil
+	}
+}
+
 func errorHandler(err error) mockHandler {
 	return func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
 		ch := make(chan core.AssistantEvent, 2)

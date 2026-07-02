@@ -574,8 +574,15 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.Tree == nil {
 			return fmt.Errorf("branching not available (no session tree)")
 		}
-		if sctx.State != nil && sctx.State.Current() == StateRunning {
-			return fmt.Errorf("cannot branch while agent is running")
+		// Branching mutates the tree's leaf and then rehydrates the agent via
+		// LoadState, which fails while a run is in flight (StateRunning) or a
+		// permission is pending (StatePermission) — both keep the agent's run
+		// cancel set. Reject any non-terminal state up front so we never move
+		// the leaf to a branch the agent can't actually adopt.
+		if sctx.State != nil {
+			if s := sctx.State.Current(); s != StateIdle && s != StateError {
+				return fmt.Errorf("cannot branch while agent is busy (%s)", s)
+			}
 		}
 		if err := sctx.Tree.Branch(cmd.EntryID); err != nil {
 			return err

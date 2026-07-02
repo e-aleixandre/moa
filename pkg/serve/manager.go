@@ -56,6 +56,10 @@ type ManagedSession struct {
 	wsConns    atomic.Int32
 	deleted    atomic.Bool
 	pushUnsubs []func()
+
+	// verifyRunning serializes the web /verify command: two concurrent POSTs
+	// must not run verify.Execute at once and interleave AutoVerify events.
+	verifyRunning atomic.Bool
 }
 
 // title returns the current session title under lock.

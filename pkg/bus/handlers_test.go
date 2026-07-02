@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 func TestHasSuccessfulEdits_True(t *testing.T) {
@@ -62,5 +63,72 @@ func TestHasSuccessfulEdits_SkipsAssistantMessages(t *testing.T) {
 	// tool_call messages have role "assistant", not "tool_result" — should be ignored.
 	if hasSuccessfulEdits(msgs) {
 		t.Error("expected false: assistant messages should be skipped")
+	}
+}
+
+// TestHandler_BranchTo_RejectsWhileNotIdle verifies BranchTo refuses to run
+// while a run is in flight (running) or a permission is pending, and — crucially
+// — does NOT mutate the tree's leaf. The permission case regressed: the old
+// guard only rejected StateRunning, so a pending permission moved the leaf
+// before LoadState failed, leaving the tree inconsistent.
+func TestHandler_BranchTo_RejectsWhileNotIdle(t *testing.T) {
+	for _, st := range []SessionState{StateRunning, StatePermission} {
+		t.Run(string(st), func(t *testing.T) {
+			b := NewLocalBus()
+			defer b.Close()
+			fa := &fakeAgent{}
+			sctx := newTestSessionContextWithState(b, fa)
+
+			// Two message entries so there is a valid branch target.
+			tree := session.NewTree()
+			firstID := tree.Append(session.Entry{
+				Type:    session.EntryMessage,
+				Message: core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("first")}}),
+			})
+			tree.Append(session.Entry{
+				Type:    session.EntryMessage,
+				Message: core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("answer")}}),
+			})
+			sctx.Tree = tree
+			RegisterHandlers(sctx)
+
+			leafBefore := tree.LeafID()
+			sctx.State.ForceState(st)
+
+			if err := b.Execute(BranchTo{EntryID: firstID}); err == nil {
+				t.Fatalf("expected BranchTo to be rejected in state %s", st)
+			}
+			if got := tree.LeafID(); got != leafBefore {
+				t.Fatalf("tree leaf changed despite rejected branch: %s → %s", leafBefore, got)
+			}
+		})
+	}
+}
+
+// TestHandler_BranchTo_AllowedWhenIdle confirms the guard still permits
+// branching from a terminal state.
+func TestHandler_BranchTo_AllowedWhenIdle(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+
+	tree := session.NewTree()
+	firstID := tree.Append(session.Entry{
+		Type:    session.EntryMessage,
+		Message: core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("first")}}),
+	})
+	tree.Append(session.Entry{
+		Type:    session.EntryMessage,
+		Message: core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("answer")}}),
+	})
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(BranchTo{EntryID: firstID}); err != nil {
+		t.Fatalf("BranchTo while idle: %v", err)
+	}
+	if got := tree.LeafID(); got != firstID {
+		t.Fatalf("leaf = %s, want %s", got, firstID)
 	}
 }

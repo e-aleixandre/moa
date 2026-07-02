@@ -278,6 +278,46 @@ func (r *SessionRuntime) Flush() error {
 	return p.Snapshot(msgs, epoch, meta)
 }
 
+// WaitSettled blocks until the session leaves the active states (running or
+// waiting on a permission) — meaning any in-flight run has observed its
+// context's cancellation and transitioned to idle/error — or ctx is done.
+//
+// It reads the state machine directly (the authoritative source) and is woken
+// by StateChanged events rather than busy-polling. Returns true if the session
+// settled, false if ctx expired while a run was still active. Used on shutdown
+// so Flush snapshots a complete turn instead of a partial one.
+func (r *SessionRuntime) WaitSettled(ctx context.Context) bool {
+	settled := func() bool {
+		s := r.State.Current()
+		return s != StateRunning && s != StatePermission
+	}
+	if settled() {
+		return true
+	}
+
+	woke := make(chan struct{}, 1)
+	unsub := r.Bus.Subscribe(func(StateChanged) {
+		select {
+		case woke <- struct{}{}:
+		default:
+		}
+	})
+	defer unsub()
+
+	// Re-check after subscribing: a transition may have landed between the
+	// first check and the subscription taking effect.
+	for {
+		if settled() {
+			return true
+		}
+		select {
+		case <-woke:
+		case <-ctx.Done():
+			return settled()
+		}
+	}
+}
+
 // SyncPlanMode rebuilds the system prompt and publishes PlanModeChanged
 // for the current plan mode state. Call after restoring plan mode from
 // persisted metadata (RestoreState/ApplyRestoredState happen before

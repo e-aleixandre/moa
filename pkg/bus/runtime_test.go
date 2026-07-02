@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -333,5 +334,71 @@ func TestSessionRuntime_Context(t *testing.T) {
 	}
 	if rt.Context().Bus != rt.Bus {
 		t.Fatal("Context().Bus != rt.Bus")
+	}
+}
+
+func newTestRuntime(t *testing.T) *SessionRuntime {
+	t.Helper()
+	fas := newFakeAgentSubscriber()
+	rt, err := NewSessionRuntime(RuntimeConfig{
+		Agent:      fas.fakeAgent,
+		Subscriber: &fas.fakeSubscriber,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	return rt
+}
+
+func TestWaitSettled_ReturnsWhenRunEnds(t *testing.T) {
+	rt := newTestRuntime(t)
+	if err := rt.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the run goroutine settling shortly after shutdown begins.
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		_ = rt.State.Transition(StateIdle)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	if !rt.WaitSettled(ctx) {
+		t.Fatal("WaitSettled = false, want true (run should have settled)")
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Fatalf("WaitSettled returned too early (%v); it did not wait for the transition", elapsed)
+	}
+	if s := rt.State.Current(); s != StateIdle {
+		t.Fatalf("state = %s, want idle", s)
+	}
+}
+
+func TestWaitSettled_ReturnsImmediatelyWhenIdle(t *testing.T) {
+	rt := newTestRuntime(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if !rt.WaitSettled(ctx) {
+		t.Fatal("WaitSettled = false for an already-idle session")
+	}
+}
+
+func TestWaitSettled_TimesOutWhileRunning(t *testing.T) {
+	rt := newTestRuntime(t)
+	if err := rt.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	if rt.WaitSettled(ctx) {
+		t.Fatal("WaitSettled = true, want false (run never settled)")
+	}
+	if s := rt.State.Current(); s != StateRunning {
+		t.Fatalf("state = %s, want running", s)
 	}
 }
