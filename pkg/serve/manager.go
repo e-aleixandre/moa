@@ -6,12 +6,14 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/files"
 	"github.com/ealeixandre/moa/pkg/mcp"
+	"github.com/ealeixandre/moa/pkg/push"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/usage"
 )
@@ -47,6 +49,20 @@ type ManagedSession struct {
 
 	// Serve-specific infrastructure (MCP, toolReg — not agent).
 	infra serveInfra
+
+	// Web Push: live count of WebSocket clients watching this session (gates
+	// non-blocking notifications), a "deleted" guard against late pushes, and
+	// the bus unsubscribe funcs registered by subscribePush.
+	wsConns    atomic.Int32
+	deleted    atomic.Bool
+	pushUnsubs []func()
+}
+
+// title returns the current session title under lock.
+func (s *ManagedSession) title() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Title
 }
 
 // serveInfra holds serve-layer infrastructure that doesn't belong in the bus.
@@ -127,8 +143,10 @@ type Manager struct {
 	baseCtx  context.Context
 
 	providerFactory func(model core.Model) (core.Provider, error)
-	transcriber     core.Transcriber // nil when no speech-to-text is available
-	usagePoller     *usage.Poller    // nil when plan usage tracking is unavailable
+	transcriber     core.Transcriber   // nil when no speech-to-text is available
+	usagePoller     *usage.Poller      // nil when plan usage tracking is unavailable
+	pushStore       *push.Store        // nil when Web Push is unavailable
+	pushDispatcher  *push.Dispatcher   // nil when Web Push is unavailable
 	defaultModel    core.Model
 	workspaceRoot   string
 	moaCfg          core.MoaConfig
@@ -151,6 +169,8 @@ type ManagerConfig struct {
 	ProviderFactory func(model core.Model) (core.Provider, error)
 	Transcriber     core.Transcriber // optional; enables POST /api/transcribe
 	UsagePoller     *usage.Poller    // optional; enables GET /api/usage
+	PushStore       *push.Store      // optional; enables Web Push
+	PushDispatcher  *push.Dispatcher // optional; enables Web Push
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
@@ -166,6 +186,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		providerFactory: cfg.ProviderFactory,
 		transcriber:     cfg.Transcriber,
 		usagePoller:     cfg.UsagePoller,
+		pushStore:       cfg.PushStore,
+		pushDispatcher:  cfg.PushDispatcher,
 		defaultModel:    cfg.DefaultModel,
 		workspaceRoot:   cfg.WorkspaceRoot,
 		moaCfg:          cfg.MoaCfg,

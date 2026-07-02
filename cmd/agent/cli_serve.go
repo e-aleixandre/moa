@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/auth"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
+	"github.com/ealeixandre/moa/pkg/push"
 	"github.com/ealeixandre/moa/pkg/serve"
 	"github.com/ealeixandre/moa/pkg/usage"
 )
@@ -54,6 +56,10 @@ func runServe(args []string) {
 		transcriber = openai.New(apiKey)
 	}
 
+	// Web Push (optional): VAPID keys + subscription store live in the moa
+	// config dir. Any failure degrades gracefully — serve runs without push.
+	pushStore, pushDispatcher := buildPush(filepath.Dir(auth.DefaultStorePath()))
+
 	mgr := serve.NewManager(ctx, serve.ManagerConfig{
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
 			build, err := buildProvider(model, authStore)
@@ -62,11 +68,13 @@ func runServe(args []string) {
 			}
 			return build.Provider, nil
 		},
-		Transcriber:   transcriber,
-		UsagePoller:   newAnthropicUsagePoller(authStore),
-		DefaultModel:  defaultModel,
-		WorkspaceRoot: cwd,
-		MoaCfg:        moaCfg,
+		Transcriber:    transcriber,
+		UsagePoller:    newAnthropicUsagePoller(authStore),
+		PushStore:      pushStore,
+		PushDispatcher: pushDispatcher,
+		DefaultModel:   defaultModel,
+		WorkspaceRoot:  cwd,
+		MoaCfg:         moaCfg,
 	})
 
 	srv := serve.NewServer(mgr)
@@ -86,6 +94,27 @@ func runServe(args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// pushSubscriber is the VAPID JWT "sub" claim — a contact URI for the push
+// service to reach the app operator. Must be a mailto: or https: URI.
+const pushSubscriber = "mailto:moa@ourown.studio"
+
+// buildPush loads (or generates) the VAPID key pair and subscription store from
+// the config dir and returns a store + dispatcher. On any error it logs and
+// returns (nil, nil) so serve keeps running without Web Push.
+func buildPush(cfgDir string) (*push.Store, *push.Dispatcher) {
+	vapid, err := push.LoadOrGenerateVAPID(filepath.Join(cfgDir, "vapid.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Web Push disabled: %v\n", err)
+		return nil, nil
+	}
+	store, err := push.NewStore(filepath.Join(cfgDir, "push_subscriptions.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Web Push disabled: %v\n", err)
+		return nil, nil
+	}
+	return store, push.NewDispatcher(store, vapid, pushSubscriber)
 }
 
 // errUsageTokenExpired signals the poller that an OAuth credential exists but

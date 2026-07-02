@@ -51,6 +51,9 @@ func NewServer(manager *Manager) http.Handler {
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
 	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
+	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
+	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
+	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
 
 	var staticHandler http.Handler
 	if dir := os.Getenv("MOA_SERVE_STATIC_DIR"); dir != "" {
@@ -314,6 +317,11 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+
+		// Track live viewers of this session — gates "run finished / errored"
+		// push notifications (see subscribePush): if a browser is watching, no push.
+		sess.wsConns.Add(1)
+		defer sess.wsConns.Add(-1)
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 

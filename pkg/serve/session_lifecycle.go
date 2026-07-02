@@ -232,6 +232,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		},
 	}
 
+	// Wire Web Push before the session can run (no-op if push is disabled).
+	m.subscribePush(sess)
+
 	m.mu.Lock()
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
@@ -266,6 +269,13 @@ func (m *Manager) Delete(id string) error {
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {
 		sess.persister.markDeleted()
+	}
+
+	// Stop Web Push subscribers BEFORE closing the runtime, so events drained
+	// during bus shutdown cannot notify for a session that no longer exists.
+	sess.deleted.Store(true)
+	for _, unsub := range sess.pushUnsubs {
+		unsub()
 	}
 
 	// Close MCP connections before context cancellation.
