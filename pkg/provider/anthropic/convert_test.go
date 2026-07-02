@@ -84,9 +84,9 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 	}
 }
 
-func TestBuildRequestBody_WithThinkingAdaptive46(t *testing.T) {
+func TestBuildRequestBody_WithThinkingAdaptive(t *testing.T) {
 	req := core.Request{
-		Model: core.Model{ID: "claude-sonnet-4-6"},
+		Model: core.Model{ID: "claude-sonnet-5"},
 		Messages: []core.Message{
 			core.NewUserMessage("Think hard"),
 		},

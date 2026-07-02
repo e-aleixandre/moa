@@ -108,6 +108,9 @@ func QueryTyped[Q any, R any](b EventBus, q Q) (R, error) {
 // LocalBus — in-process implementation
 // ---------------------------------------------------------------------------
 
+// subscriberBuffer bounds how many lossy (streaming-delta) events may queue
+// per subscriber before new ones are dropped. Lossless (structural) events are
+// never dropped and are not subject to this cap.
 const subscriberBuffer = 256
 
 // LocalBus is an in-process EventBus implementation.
@@ -136,16 +139,25 @@ func NewLocalBus() *LocalBus {
 	}
 }
 
-// subscriber is an async event handler with its own goroutine and buffer.
+// subscriber is an async event handler with its own goroutine and queue.
+// Events are delivered through an unbounded FIFO queue: lossless events are
+// always enqueued, while lossy (delta) events are dropped once the queue depth
+// reaches subscriberBuffer. A buffered notify channel wakes the goroutine.
+// This lets a slow subscriber (e.g. a remote WS client) fall behind on deltas
+// without losing structural events and without applying backpressure to the
+// publisher.
 type subscriber struct {
-	ch       chan any
+	mu     sync.Mutex
+	queue  []any         // FIFO of pending events
+	notify chan struct{} // buffered(1): signals the queue is non-empty
+
 	fn       reflect.Value
-	done     chan struct{}   // closed to signal drain-and-exit
-	exited   chan struct{}   // closed when goroutine returns
-	stopOnce sync.Once      // guards close(done) — safe for concurrent close/unsub
-	stopped  atomic.Bool    // fast check: true after stop() called
-	bus      *LocalBus      // back-reference for inflight tracking
-	isAll    bool           // true for SubscribeAll handlers (fn is func(any))
+	done     chan struct{} // closed to signal drain-and-exit
+	exited   chan struct{} // closed when goroutine returns
+	stopOnce sync.Once     // guards close(done) — safe for concurrent close/unsub
+	stopped  atomic.Bool   // fast check: true after stop() called
+	bus      *LocalBus     // back-reference for inflight tracking
+	isAll    bool          // true for SubscribeAll handlers (fn is func(any))
 }
 
 // stop signals the subscriber goroutine to drain and exit. Safe to call
@@ -190,7 +202,7 @@ func (b *LocalBus) Subscribe(handler any) func() {
 	}
 
 	sub := &subscriber{
-		ch:     make(chan any, subscriberBuffer),
+		notify: make(chan struct{}, 1),
 		fn:     reflect.ValueOf(handler),
 		done:   make(chan struct{}),
 		exited: make(chan struct{}),
@@ -235,7 +247,7 @@ func (b *LocalBus) SubscribeAll(handler func(any)) func() {
 	}
 
 	sub := &subscriber{
-		ch:     make(chan any, subscriberBuffer),
+		notify: make(chan struct{}, 1),
 		fn:     reflect.ValueOf(handler),
 		done:   make(chan struct{}),
 		exited: make(chan struct{}),
@@ -272,9 +284,12 @@ func (b *LocalBus) Publish(event any) {
 	}
 	et := reflect.TypeOf(event)
 
-	// Hold read lock during the entire enqueue loop. Non-blocking sends make
-	// this cheap. This ensures we never send to a subscriber whose goroutine
-	// has already exited (unsubscribe/close take write lock before stopping).
+	lossy := isLossyEvent(event)
+
+	// Hold read lock during the entire enqueue loop. enqueue never blocks (it
+	// takes only the subscriber's local mutex briefly), so this is cheap and
+	// cannot deadlock. The stopped check ensures we skip subscribers whose
+	// goroutine is shutting down (unsubscribe/close take the write lock first).
 	b.mu.RLock()
 
 	// SubscribeAll handlers first — guarantees they see events before typed subs.
@@ -283,26 +298,19 @@ func (b *LocalBus) Publish(event any) {
 			continue
 		}
 		b.inflight.Add(1)
-		select {
-		case sub.ch <- event:
-		default:
-			b.decrementInflight()
+		if !sub.enqueue(event, lossy) {
+			b.decrementInflight() // lossy event dropped under backpressure
 		}
 	}
 
 	// Typed subscribers.
-	subs := b.eventSubs[et]
-	for _, sub := range subs {
+	for _, sub := range b.eventSubs[et] {
 		if sub.stopped.Load() {
 			continue // skip subscribers in the process of shutting down
 		}
 		b.inflight.Add(1)
-		select {
-		case sub.ch <- event:
-			// enqueued
-		default:
-			// buffer full — drop event for this subscriber to avoid deadlock
-			b.decrementInflight()
+		if !sub.enqueue(event, lossy) {
+			b.decrementInflight() // lossy event dropped under backpressure
 		}
 	}
 	b.mu.RUnlock()
@@ -496,22 +504,54 @@ func (b *LocalBus) Close() {
 // subscriber internals
 // ---------------------------------------------------------------------------
 
+// enqueue appends an event to the subscriber's queue and wakes its goroutine.
+// Lossy events are dropped once the queue depth reaches subscriberBuffer;
+// lossless events are always enqueued. Returns false only when the event was
+// dropped. Never blocks.
+func (s *subscriber) enqueue(event any, lossy bool) bool {
+	s.mu.Lock()
+	if lossy && len(s.queue) >= subscriberBuffer {
+		s.mu.Unlock()
+		return false
+	}
+	s.queue = append(s.queue, event)
+	s.mu.Unlock()
+
+	// Wake the goroutine; a single pending signal is enough.
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+	return true
+}
+
 func (s *subscriber) loop() {
 	defer close(s.exited)
 	for {
 		select {
-		case event := <-s.ch:
-			s.process(event)
+		case <-s.notify:
+			s.drain()
 		case <-s.done:
-			// Drain remaining events in the channel.
-			for {
-				select {
-				case event := <-s.ch:
-					s.process(event)
-				default:
-					return
-				}
-			}
+			s.drain() // process everything queued before exiting
+			return
+		}
+	}
+}
+
+// drain processes all currently-queued events in FIFO order. Events enqueued
+// while draining are picked up on the next loop iteration.
+func (s *subscriber) drain() {
+	for {
+		s.mu.Lock()
+		if len(s.queue) == 0 {
+			s.mu.Unlock()
+			return
+		}
+		batch := s.queue
+		s.queue = nil
+		s.mu.Unlock()
+		for _, event := range batch {
+			s.process(event)
 		}
 	}
 }

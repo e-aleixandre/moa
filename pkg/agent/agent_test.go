@@ -1737,6 +1737,75 @@ func TestDefaultConvertToLLM_IgnoresSessionEvent(t *testing.T) {
 	}
 }
 
+// TestAgent_ConcurrentReadsDuringRun exercises the data race on a.state: the
+// loop appends messages during a run while external readers call Messages()/
+// CompactionEpoch(). Before the fix, the loop wrote a.state.Messages without
+// the lock the readers hold — run with -race to catch it.
+func TestAgent_ConcurrentReadsDuringRun(t *testing.T) {
+	noopTool := core.Tool{
+		Name:       "noop",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+
+	// A tool-call turn that streams slowly, widening the window in which the
+	// loop appends to a.state while readers are active. Args vary per turn so
+	// the doom-loop detector does not trip.
+	slowToolCall := func(n int) func(req core.Request) (<-chan core.AssistantEvent, error) {
+		return func(req core.Request) (<-chan core.AssistantEvent, error) {
+			ch := make(chan core.AssistantEvent, 10)
+			go func() {
+				defer close(ch)
+				msg := core.Message{
+					Role: "assistant",
+					Content: []core.Content{
+						core.TextContent("using tool"),
+						core.ToolCallContent(fmt.Sprintf("t%d", n), "noop", map[string]any{"i": n}),
+					},
+					StopReason: "tool_use",
+					Timestamp:  time.Now().Unix(),
+				}
+				ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+				time.Sleep(2 * time.Millisecond)
+				ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+			}()
+			return ch, nil
+		}
+	}
+
+	handlers := []func(req core.Request) (<-chan core.AssistantEvent, error){
+		slowToolCall(0), slowToolCall(1), slowToolCall(2), slowToolCall(3),
+		simpleTextResponse("done"),
+	}
+	ag := newTestAgent(NewMockProvider(handlers...), noopTool)
+
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = ag.Messages()
+					_ = ag.CompactionEpoch()
+				}
+			}
+		}()
+	}
+
+	if _, err := ag.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	close(stop)
+	readers.Wait()
+}
+
 // --- Helper types ---
 
 type testExtension struct {

@@ -213,6 +213,37 @@ func TestExtractFileOps_NoPath(t *testing.T) {
 	}
 }
 
+func TestExtractFileOps_MultiEditAndApplyPatch(t *testing.T) {
+	patch := "*** Begin Patch\n" +
+		"*** Add File: created.go\n" +
+		"+package main\n" +
+		"*** Update File: existing.go\n" +
+		"@@\n" +
+		"-old\n" +
+		"+new\n" +
+		"*** Delete File: gone.go\n" +
+		"*** End Patch\n"
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.ToolCallContent("c1", "multiedit", map[string]any{"path": "batch.go"}),
+			core.ToolCallContent("c2", "apply_patch", map[string]any{"patch": patch}),
+		}}},
+	}
+	ops := ExtractFileOps(msgs)
+
+	// multiedit (batch.go) + apply_patch add/update/delete (created/existing/gone).
+	modified := ops.Modified()
+	want := []string{"batch.go", "created.go", "existing.go", "gone.go"} // sorted
+	if len(modified) != len(want) {
+		t.Fatalf("Modified: expected %v, got %v", want, modified)
+	}
+	for i, w := range want {
+		if modified[i] != w {
+			t.Fatalf("Modified[%d]: expected %q, got %v", i, w, modified)
+		}
+	}
+}
+
 // --- mockProvider for GenerateSummary / Compact tests ---
 
 type mockProvider struct {

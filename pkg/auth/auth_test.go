@@ -3,7 +3,10 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestStore_SetGetRemove(t *testing.T) {
@@ -136,6 +139,63 @@ func TestStore_GetAPIKey_NoCredentials(t *testing.T) {
 	_, _, err := store.GetAPIKey("anthropic")
 	if err == nil {
 		t.Fatal("expected error for no credentials")
+	}
+}
+
+// TestStore_GetAPIKey_ConcurrentRefreshSingleFlight verifies that many
+// concurrent GetAPIKey calls with an expired OAuth token trigger exactly ONE
+// network refresh. Without single-flighting, each goroutine would refresh with
+// the same rotating refresh token and invalidate the others.
+func TestStore_GetAPIKey_ConcurrentRefreshSingleFlight(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewStore(filepath.Join(tmp, "auth.json"))
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// Expired OAuth credential.
+	if err := store.Set("anthropic", Credential{
+		Type:    "oauth",
+		Access:  "old-access",
+		Refresh: "refresh-0",
+		Expires: time.Now().UnixMilli() - 1000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int32
+	store.refresh = func(provider, refreshToken string) (*OAuthCredentials, error) {
+		atomic.AddInt32(&calls, 1)
+		time.Sleep(20 * time.Millisecond) // widen the overlap window
+		return &OAuthCredentials{
+			Access:  "new-access",
+			Refresh: "refresh-1",
+			Expires: time.Now().UnixMilli() + 3_600_000,
+		}, nil
+	}
+
+	const n = 8
+	var wg sync.WaitGroup
+	keys := make([]string, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			k, _, err := store.GetAPIKey("anthropic")
+			keys[i], errs[i] = k, err
+		}(i)
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("refresh called %d times, want exactly 1 (single-flight)", got)
+	}
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: %v", i, errs[i])
+		}
+		if keys[i] != "new-access" {
+			t.Fatalf("goroutine %d got %q, want new-access", i, keys[i])
+		}
 	}
 }
 

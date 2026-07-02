@@ -38,9 +38,14 @@ func IsOAuthToken(key string) bool {
 
 // Store manages credentials on disk.
 type Store struct {
-	path string
-	data map[string]Credential
-	mu   sync.RWMutex
+	path      string
+	data      map[string]Credential
+	mu        sync.RWMutex
+	refreshMu sync.Mutex // serializes OAuth token refresh (single-flight)
+
+	// refresh performs the network token refresh. It is a field so tests can
+	// substitute a fake; it defaults to refreshOAuthToken.
+	refresh func(provider, refreshToken string) (*OAuthCredentials, error)
 }
 
 // configDir returns the directory for storing credentials.
@@ -67,8 +72,9 @@ func NewStore(path string) *Store {
 		path = DefaultStorePath()
 	}
 	s := &Store{
-		path: path,
-		data: make(map[string]Credential),
+		path:    path,
+		data:    make(map[string]Credential),
+		refresh: refreshOAuthToken,
 	}
 	s.load()
 	return s
@@ -177,25 +183,45 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 		return cred.Key, false, nil
 
 	case "oauth":
-		// Check if token needs refresh
-		if time.Now().UnixMilli() >= cred.Expires {
-			refreshed, err := refreshOAuthToken(provider, cred.Refresh)
-			if err != nil {
-				return "", false, fmt.Errorf("token refresh failed: %w (run --login %s to re-authenticate)", err, provider)
-			}
-			cred = Credential{
-				Type:      "oauth",
-				Access:    refreshed.Access,
-				Refresh:   refreshed.Refresh,
-				Expires:   refreshed.Expires,
-				AccountID: refreshed.AccountID,
-			}
-			// Save refreshed token (ignore save errors — the token is still usable)
-			s.mu.Lock()
-			s.data[provider] = cred
-			_ = s.save()
-			s.mu.Unlock()
+		// Fast path: token still valid, no refresh needed.
+		if time.Now().UnixMilli() < cred.Expires {
+			return cred.Access, true, nil
 		}
+		// Token expired — refresh, but serialize refreshes. The provider
+		// rotates the refresh token on every use, so two concurrent refreshes
+		// (e.g. agent + subagent) sharing the same token would invalidate each
+		// other. refreshMu makes the refresh single-flight.
+		s.refreshMu.Lock()
+		defer s.refreshMu.Unlock()
+
+		// Re-read under the refresh lock: another goroutine may have already
+		// refreshed while we were blocked, in which case we reuse its token.
+		s.mu.RLock()
+		cred, ok = s.data[provider]
+		s.mu.RUnlock()
+		if !ok {
+			return "", false, fmt.Errorf("no credentials for provider %q", provider)
+		}
+		if time.Now().UnixMilli() < cred.Expires {
+			return cred.Access, true, nil
+		}
+
+		refreshed, err := s.refresh(provider, cred.Refresh)
+		if err != nil {
+			return "", false, fmt.Errorf("token refresh failed: %w (run --login %s to re-authenticate)", err, provider)
+		}
+		cred = Credential{
+			Type:      "oauth",
+			Access:    refreshed.Access,
+			Refresh:   refreshed.Refresh,
+			Expires:   refreshed.Expires,
+			AccountID: refreshed.AccountID,
+		}
+		// Save refreshed token (ignore save errors — the token is still usable)
+		s.mu.Lock()
+		s.data[provider] = cred
+		_ = s.save()
+		s.mu.Unlock()
 		return cred.Access, true, nil
 
 	default:

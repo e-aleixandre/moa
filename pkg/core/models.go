@@ -14,18 +14,18 @@ var knownModels = map[string]Model{
 		// 90% prompt-cache discount on input applies (cache read ~= Input*0.1).
 		Pricing: &Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
 	},
-	"claude-opus-4-6": {
-		ID: "claude-opus-4-6", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Opus 4.6", MaxInput: 1_000_000, MaxOutput: 131072,
+	"claude-opus-4-8": {
+		ID: "claude-opus-4-8", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Opus 4.8", MaxInput: 1_000_000, MaxOutput: 131072,
 		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25},
 	},
-	"claude-sonnet-4-6": {
-		ID: "claude-sonnet-4-6", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Sonnet 4.6", MaxInput: 1_000_000, MaxOutput: 65536,
+	"claude-sonnet-5": {
+		ID: "claude-sonnet-5", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Sonnet 5", MaxInput: 1_000_000, MaxOutput: 131072,
 		Pricing: &Pricing{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75},
 	},
-	"claude-haiku-4-5": {
-		ID: "claude-haiku-4-5", Provider: "anthropic", API: "anthropic-messages",
+	"claude-haiku-4-5-20251001": {
+		ID: "claude-haiku-4-5-20251001", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Haiku 4.5", MaxInput: 200_000, MaxOutput: 65536,
 		Pricing: &Pricing{Input: 1, Output: 5, CacheRead: 0.1, CacheWrite: 1.25},
 	},
@@ -46,16 +46,6 @@ var knownModels = map[string]Model{
 		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
 		Pricing: &Pricing{Input: 1.25, Output: 10, CacheRead: 0.125},
 	},
-	"gpt-5.4": {
-		ID: "gpt-5.4", Provider: "openai", API: "openai-chat",
-		Name: "GPT-5.4", MaxInput: 1_050_000, MaxOutput: 128_000,
-		Pricing: &Pricing{Input: 2.5, Output: 15, CacheRead: 0.25},
-	},
-	"gpt-5.4-mini": {
-		ID: "gpt-5.4-mini", Provider: "openai", API: "openai-chat",
-		Name: "GPT-5.4 Mini", MaxInput: 400_000, MaxOutput: 128_000,
-		Pricing: &Pricing{Input: 0.75, Output: 4.5, CacheRead: 0.075},
-	},
 	"gpt-5.5": {
 		ID: "gpt-5.5", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.5", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -63,20 +53,25 @@ var knownModels = map[string]Model{
 		// (>200K input) prompts are billed at Input: 10, Output: 45, CacheRead: 1.
 		Pricing: &Pricing{Input: 5, Output: 30, CacheRead: 0.5},
 	},
+	"gpt-5.4-mini": {
+		ID: "gpt-5.4-mini", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.4 Mini", MaxInput: 400_000, MaxOutput: 128_000,
+		Pricing: &Pricing{Input: 0.75, Output: 4.5, CacheRead: 0.075},
+	},
 }
 
 // Short aliases → full model ID.
 var modelAliases = map[string]string{
 	// Anthropic
-	"sonnet": "claude-sonnet-4-6",
-	"opus":   "claude-opus-4-6",
-	"haiku":  "claude-haiku-4-5",
+	"sonnet": "claude-sonnet-5",
+	"opus":   "claude-opus-4-8",
+	"haiku":  "claude-haiku-4-5-20251001",
 	"fable":  "claude-fable-5",
 	// OpenAI
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
 	"codex-5.2":   "gpt-5.2-codex",
-	"gpt5":        "gpt-5.4",
+	"gpt5":        "gpt-5.5",
 	"gpt5-mini":   "gpt-5.4-mini",
 	"gpt5.5":      "gpt-5.5",
 }

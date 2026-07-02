@@ -28,6 +28,17 @@ type Hooks interface {
 	FireObserver(event core.AgentEvent)
 }
 
+// appendState safely appends messages to the shared *state. The loop is the
+// only writer of *state during a run, but external readers (Agent.Messages,
+// Agent.CompactionEpoch) hold stateMu, so every write must take it too. The
+// critical section stays tiny and never calls back into the agent — holding
+// stateMu across a callback would risk deadlock.
+func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
+	cfg.stateMu.Lock()
+	cfg.state.Messages = append(cfg.state.Messages, msgs...)
+	cfg.stateMu.Unlock()
+}
+
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
 	provider     core.Provider
@@ -35,6 +46,7 @@ type loopConfig struct {
 	hooks        Hooks
 	emitter      *Emitter
 	state        *AgentState
+	stateMu      *sync.Mutex // guards writes to *state (shared with Agent.mu)
 	model        core.Model
 	systemPrompt string
 	streamOpts   core.StreamOptions
@@ -100,7 +112,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 	// Fire before_agent_start hooks (can inject messages)
 	injected := cfg.hooks.FireBeforeAgentStart(ctx)
-	cfg.state.Messages = append(cfg.state.Messages, injected...)
+	cfg.appendState(injected...)
 
 	turnCount := 0
 	inTurn := false // track open turn for cleanup
@@ -160,8 +172,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 						Type: core.AgentEventCompactionEnd, Error: err,
 					})
 				} else if result != nil {
+					cfg.stateMu.Lock()
 					cfg.state.Messages = compacted
 					cfg.state.CompactionEpoch++
+					cfg.stateMu.Unlock()
 					// Account for compaction LLM call cost.
 					if result.Usage != nil && cfg.maxBudget > 0 {
 						cfg.runCost += cfg.model.Pricing.Cost(*result.Usage)
@@ -225,7 +239,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		if err != nil {
 			// On cancellation, save partial content so it persists in session.
 			if assistantMsg != nil && ctx.Err() != nil {
-				cfg.state.Messages = append(cfg.state.Messages, core.WrapMessage(*assistantMsg))
+				cfg.appendState(core.WrapMessage(*assistantMsg))
 			}
 			loopErr = fmt.Errorf("stream: %w", err)
 			return loopErr
@@ -239,7 +253,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 			wrapped.Custom["compaction_epoch"] = cfg.state.CompactionEpoch
 		}
-		cfg.state.Messages = append(cfg.state.Messages, wrapped)
+		cfg.appendState(wrapped)
 
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
@@ -293,8 +307,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Inject steering messages between steps.
 		if steered := drainSteer(cfg.steerCh); len(steered) > 0 {
 			for _, msg := range steered {
-				cfg.state.Messages = append(cfg.state.Messages,
-					core.WrapMessage(core.NewUserMessage(msg)))
+				cfg.appendState(core.WrapMessage(core.NewUserMessage(msg)))
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
 			}
 		}
@@ -647,7 +660,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			IsError:    isError,
 			Rejected:   false,
 		})
-		cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(slots[i].tc, result, isError, false))
+		cfg.appendState(toolResultMessage(slots[i].tc, result, isError, false))
 	}
 }
 
@@ -725,7 +738,7 @@ func rejectToolCall(cfg *loopConfig, slot toolExecSlot) {
 		reason = "Tool call rejected"
 	}
 	result := core.ErrorResult(reason)
-	cfg.state.Messages = append(cfg.state.Messages, toolResultMessage(slot.tc, result, true, rejected))
+	cfg.appendState(toolResultMessage(slot.tc, result, true, rejected))
 	cfg.emitter.Emit(core.AgentEvent{
 		Type:       core.AgentEventToolExecEnd,
 		ToolCallID: slot.tc.ToolCallID,
@@ -746,7 +759,7 @@ func injectErrorToolResults(cfg *loopConfig, toolCalls []core.Content, errMsg st
 		msg := core.WrapMessage(core.NewToolResultMessage(
 			tc.ToolCallID, tc.ToolName, content, true,
 		))
-		cfg.state.Messages = append(cfg.state.Messages, msg)
+		cfg.appendState(msg)
 	}
 }
 
