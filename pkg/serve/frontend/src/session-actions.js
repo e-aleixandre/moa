@@ -237,6 +237,19 @@ export async function execCommand(id, command) {
   return api('POST', `/api/sessions/${id}/command`, { command });
 }
 
+// fetchBranchPoints returns the conversation's branch targets (user/assistant
+// turns) for the rewind picker.
+export async function fetchBranchPoints(id) {
+  return api('GET', `/api/sessions/${id}/branches`);
+}
+
+// branchTo rewinds the conversation to entryId, starting a new branch from that
+// point. The server publishes a CommandExecuted event that reloads the message
+// list over the WebSocket, so callers don't need to apply the result manually.
+export async function branchTo(id, entryId) {
+  return api('POST', `/api/sessions/${id}/branch`, { entry_id: entryId });
+}
+
 export async function execShell(id, command, silent) {
   const result = await api('POST', `/api/sessions/${id}/shell`, { command, silent });
   const output = (result.output || '').replace(/\n$/, '');

@@ -1,5 +1,5 @@
-import { useRef, useCallback } from 'preact/hooks';
-import { GitFork, ChevronDown, Plus } from 'lucide-preact';
+import { useRef, useCallback, useState } from 'preact/hooks';
+import { GitFork, ChevronDown, Plus, History } from 'lucide-preact';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
@@ -7,10 +7,13 @@ import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { NotificationSettings } from './NotificationSettings.jsx';
 import { ModelPill } from './ModelPill.jsx';
 import { TaskBar } from './TaskBar.jsx';
+import { RewindSheet } from './RewindSheet.jsx';
 
 export function ChatView({ state, onToggleOverview, onOpenPalette }) {
   const session = state.activeSession ? state.sessions[state.activeSession] : null;
   const touchStart = useRef(null);
+  const [rewindOpen, setRewindOpen] = useState(false);
+  const busy = !!session && (session.state === 'running' || session.state === 'permission');
 
   // Swipe-down on header → overview
   const onTouchStart = useCallback((e) => {
@@ -61,6 +64,14 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
         <ModelPill model={session.model} thinking={session.thinking} />
+        <button
+          class="chat-header-rewind"
+          onClick={() => setRewindOpen(true)}
+          disabled={busy}
+          title="Rewind conversation"
+        >
+          <History />
+        </button>
         <NotificationSettings state={state} />
         <SettingsDropdown sessionId={state.activeSession} session={session} />
       </div>
@@ -70,6 +81,12 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
       <MessageList session={session} />
       <TaskBar session={session} usage={state.usage} />
       <InputBar sessionId={state.activeSession} session={session} />
+
+      <RewindSheet
+        sessionId={state.activeSession}
+        open={rewindOpen}
+        onClose={() => setRewindOpen(false)}
+      />
     </div>
   );
 }

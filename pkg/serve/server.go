@@ -80,6 +80,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/branch", handleBranch(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/branches", handleListBranches(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
@@ -754,6 +755,18 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"messages": msgs,
 		})
+	}
+}
+
+func handleListBranches(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		points, _ := bus.QueryTyped[bus.GetBranchPoints, []bus.BranchPoint](sess.runtime.Bus, bus.GetBranchPoints{})
+		writeJSON(w, http.StatusOK, points)
 	}
 }
 

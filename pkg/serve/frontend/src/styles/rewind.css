@@ -1,0 +1,146 @@
+/* Rewind / branch picker — start a new conversation branch from an earlier turn */
+
+.chat-header-rewind {
+  background: none;
+  border: none;
+  color: var(--overlay1);
+  cursor: pointer;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+.chat-header-rewind:hover { color: var(--text); background: var(--surface0); }
+.chat-header-rewind:disabled { opacity: 0.4; cursor: default; }
+.chat-header-rewind .lucide { width: 14px; height: 14px; }
+
+.rewind-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 0;
+  backdrop-filter: blur(4px);
+}
+
+.rewind-sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 70vh;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: 0 -8px 48px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: rewind-in 0.14s ease-out;
+}
+
+@keyframes rewind-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.rewind-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--surface0);
+}
+
+.rewind-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.rewind-title .lucide { width: 16px; height: 16px; color: var(--overlay1); }
+
+.rewind-close {
+  background: none;
+  border: none;
+  color: var(--overlay1);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  border-radius: var(--radius-sm);
+}
+.rewind-close:hover { color: var(--text); background: var(--surface0); }
+.rewind-close .lucide { width: 16px; height: 16px; }
+
+.rewind-hint {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--overlay1);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.rewind-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.rewind-loading,
+.rewind-empty {
+  padding: 20px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--overlay0);
+}
+
+.rewind-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--duration) var(--ease);
+}
+.rewind-item:hover { background: var(--surface0); }
+.rewind-item:active { background: var(--surface1); }
+.rewind-item:disabled { opacity: 0.5; cursor: default; }
+.rewind-item.current { background: var(--green-dim); }
+
+.rewind-role { flex-shrink: 0; font-size: 15px; line-height: 1; }
+
+.rewind-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rewind-branches {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--overlay1);
+}
+.rewind-branches .lucide { width: 12px; height: 12px; }
+
+.rewind-current-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--green);
+}
