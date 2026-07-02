@@ -94,6 +94,11 @@ func runServe(args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// HTTP is down; synchronously flush every session to disk before exiting so a
+	// turn that finished just before shutdown is not lost with the async
+	// RunEnded→TreeSynced→save chain.
+	mgr.Shutdown()
 }
 
 // pushSubscriber is the VAPID JWT "sub" claim — a contact for the push service

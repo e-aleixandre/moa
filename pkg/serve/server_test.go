@@ -766,6 +766,57 @@ func TestDeleteEndpoint_SavedSession(t *testing.T) {
 	}
 }
 
+// TestManagerShutdown_PersistsLastTurn exercises the real shutdown path:
+// Manager.Shutdown → runtime.Flush → servePersister → FileStore. A turn that
+// completed just before shutdown must be on disk afterwards.
+func TestManagerShutdown_PersistsLastTurn(t *testing.T) {
+	dir := t.TempDir()
+	sessionBase := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(simpleResponseHandler("final answer"))
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
+		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:   dir,
+		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		SessionBaseDir:  sessionBase,
+	})
+
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.Send(sess.ID, "question"); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "idle after send", func() bool {
+		return sessState(sess) == StateIdle
+	})
+
+	// Flush synchronously — this is what runs on process shutdown.
+	mgr.Shutdown()
+
+	saved, _, err := session.FindSession(sessionBase, sess.ID)
+	if err != nil {
+		t.Fatalf("session not on disk after Shutdown: %v", err)
+	}
+	found := false
+	for _, e := range saved.Entries {
+		if e.Type == session.EntryMessage && e.Message.Role == "assistant" {
+			for _, c := range e.Message.Content {
+				if strings.Contains(c.Text, "final answer") {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("persisted session missing the assistant turn that completed before shutdown")
+	}
+}
+
 func TestStaticAssets(t *testing.T) {
 	srv, _, cancel := newTestServer(t)
 	defer cancel()

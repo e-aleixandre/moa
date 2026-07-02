@@ -260,6 +260,63 @@ func TestSessionRuntime_BridgeForwards(t *testing.T) {
 	}
 }
 
+// TestSessionRuntime_Flush_PersistsLastTurn demonstrates the lost-last-turn
+// shutdown fix: a turn that completed just before shutdown must reach disk even
+// if the async RunEnded→TreeSynced→save chain never ran. Here RunEnded is never
+// published, so the only path to disk is the synchronous Flush.
+func TestSessionRuntime_Flush_PersistsLastTurn(t *testing.T) {
+	fas := newFakeAgentSubscriber()
+	fp := &fakeTreePersister{}
+	rt, err := NewSessionRuntime(RuntimeConfig{
+		Agent:      fas.fakeAgent,
+		Subscriber: &fas.fakeSubscriber,
+		Persister:  fp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	// Simulate a turn that just completed: the agent gained messages but no
+	// RunEnded (and thus no TreeSynced→save) has fired yet.
+	if err := fas.LoadState([]core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hi")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("done")}}},
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if fp.treeSnapCount() != 0 {
+		t.Fatalf("expected no snapshot before Flush, got %d", fp.treeSnapCount())
+	}
+
+	// Flush must fold the turn into the tree and persist it synchronously.
+	if err := rt.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if fp.treeSnapCount() != 1 {
+		t.Fatalf("expected 1 snapshot after Flush, got %d", fp.treeSnapCount())
+	}
+	if got := len(fp.lastTree()); got != 2 {
+		t.Fatalf("persisted tree = %d entries, want 2 (last turn must be included)", got)
+	}
+}
+
+func TestSessionRuntime_Flush_NoPersister(t *testing.T) {
+	fas := newFakeAgentSubscriber()
+	rt, err := NewSessionRuntime(RuntimeConfig{
+		Agent:      fas.fakeAgent,
+		Subscriber: &fas.fakeSubscriber,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	if err := rt.Flush(); err != nil {
+		t.Fatalf("Flush with no persister should return nil, got %v", err)
+	}
+}
+
 func TestSessionRuntime_Context(t *testing.T) {
 	fas := newFakeAgentSubscriber()
 	rt, err := NewSessionRuntime(RuntimeConfig{

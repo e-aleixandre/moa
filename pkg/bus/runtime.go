@@ -64,6 +64,11 @@ type SessionRuntime struct {
 	unsub             func()
 	closeOnce         sync.Once
 	persisterAttached atomic.Bool
+
+	// persister is the attached persister, retained so Flush can persist
+	// synchronously (bypassing the async event chain) on shutdown.
+	persisterMu sync.Mutex
+	persister   SessionPersister
 }
 
 // NewSessionRuntime creates a fully wired session runtime.
@@ -190,6 +195,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	}
 
 	if cfg.Persister != nil {
+		rt.persister = cfg.Persister
 		RegisterPersistenceReactor(b, sctx, cfg.Persister)
 		rt.persisterAttached.Store(true)
 	}
@@ -234,7 +240,42 @@ func (r *SessionRuntime) AttachPersister(p SessionPersister) {
 	if !r.persisterAttached.CompareAndSwap(false, true) {
 		panic("bus: AttachPersister called more than once")
 	}
+	r.persisterMu.Lock()
+	r.persister = p
+	r.persisterMu.Unlock()
 	RegisterPersistenceReactor(r.Bus, r.sctx, p)
+}
+
+// Flush synchronously persists the current session state to disk, bypassing the
+// async RunEnded→TreeSynced→save event chain. It first folds any not-yet-synced
+// agent messages (the last or in-flight turn) into the tree, then snapshots
+// through the attached persister. No-op if no persister is attached.
+//
+// Used on server shutdown: the async chain may not drain before the process
+// exits, which would lose a turn that finished moments before. Flush is
+// idempotent and safe to call once activity has quiesced.
+func (r *SessionRuntime) Flush() error {
+	r.persisterMu.Lock()
+	p := r.persister
+	r.persisterMu.Unlock()
+	if p == nil {
+		return nil
+	}
+
+	// Fold the last/in-flight turn into the tree so the snapshot is complete.
+	// Idempotent: a no-op if the TreeSyncer already synced this turn.
+	if r.sctx.treeSyncer != nil {
+		r.sctx.treeSyncer.syncMessages()
+	}
+
+	meta := collectMetadata(r.sctx)
+	if tp, ok := p.(TreePersister); ok && r.sctx.Tree != nil {
+		entries, leafID := r.sctx.Tree.Snapshot()
+		return tp.SnapshotTree(entries, leafID, meta)
+	}
+	msgs := r.sctx.Agent.Messages()
+	epoch := r.sctx.Agent.CompactionEpoch()
+	return p.Snapshot(msgs, epoch, meta)
 }
 
 // SyncPlanMode rebuilds the system prompt and publishes PlanModeChanged

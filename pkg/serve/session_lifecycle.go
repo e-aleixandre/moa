@@ -387,6 +387,27 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	return sess, nil
 }
 
+// Shutdown synchronously flushes every active session to disk. Call it after the
+// HTTP server has stopped accepting requests and before the process exits, so a
+// turn that finished just before shutdown is persisted even though the async
+// RunEnded→TreeSynced→save chain may not have drained.
+func (m *Manager) Shutdown() {
+	m.mu.RLock()
+	sessions := make([]*ManagedSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s != nil { // skip nil placeholders held during ResumeSession
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, s := range sessions {
+		if err := s.runtime.Flush(); err != nil {
+			slog.Warn("shutdown flush failed", "session", s.ID, "error", err)
+		}
+	}
+}
+
 // reloadMCP reloads MCP servers for a session.
 func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 	// Phase 1: prepare (no mutation).
