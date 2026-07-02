@@ -5,19 +5,29 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/push"
 )
 
+// minRunForPush gates the "finished" notification: a run must take at least this
+// long to be worth a buzz. A quick answer shouldn't notify; a long run (where
+// you likely stepped away) still does. Blocking events (ask/permission) and
+// errors are never gated by duration.
+const minRunForPush = 60 * time.Second
+
 // subscribePush wires a session's bus to Web Push notifications following the
 // trigger policy in plans/pwa-web-push-plan.md §D3:
 //
 //   - ask_user / permission → always (blocking events; the agent is waiting on
 //     you, and missing one costs more than a redundant buzz).
-//   - run finished OK / errored → only when no browser is watching the session
-//     live (wsConns == 0), so interactive turns you're looking at don't buzz.
+//   - run finished OK → only when no browser is watching the session live
+//     (wsConns == 0) AND the run lasted at least minRunForPush, so quick answers
+//     and turns you're looking at don't buzz.
+//   - run errored → only when no browser is watching the session live.
 //
 // Errors dedupe to one source: success comes from RunEnded{Err==nil}, failure
 // from StateChanged("error") — never both, so an errored run notifies once.
@@ -48,13 +58,25 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 		}
 	}
 
+	// runStartNano records when the current run began so RunEnded can gate the
+	// "finished" push on duration. RunStarted and RunEnded are handled on
+	// separate subscriber goroutines, so the timestamp is shared atomically; in
+	// practice RunStarted is processed long before RunEnded (a run takes real
+	// time), and if the start is somehow unknown we fail open and notify.
+	var runStartNano atomic.Int64
+
 	sess.pushUnsubs = append(sess.pushUnsubs,
 		b.Subscribe(func(bus.AskUserRequested) { notify("moa necesita tu decisión") }),
 		b.Subscribe(func(bus.PermissionRequested) { notify("moa espera tu aprobación") }),
+		b.Subscribe(func(bus.RunStarted) { runStartNano.Store(time.Now().UnixNano()) }),
 		b.Subscribe(func(e bus.RunEnded) {
-			if e.Err == nil {
-				notifyIfAway("moa terminó")
+			if e.Err != nil {
+				return
 			}
+			if start := runStartNano.Load(); start != 0 && time.Since(time.Unix(0, start)) < minRunForPush {
+				return // quick answer — not worth a buzz
+			}
+			notifyIfAway("moa terminó")
 		}),
 		b.Subscribe(func(e bus.StateChanged) {
 			if e.State == string(bus.StateError) {
