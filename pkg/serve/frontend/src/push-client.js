@@ -43,13 +43,32 @@ function urlBase64ToUint8Array(base64) {
 }
 
 // withTimeout rejects if a step doesn't settle in time, so the enable flow can
-// never hang silently on 'busy' (iOS can leave serviceWorker.ready or subscribe
-// pending forever). The label names the failing step in the surfaced error.
+// never hang silently on 'busy' (on iOS the service-worker or subscribe step can
+// stay pending forever). The label names the failing step in the surfaced error.
 function withTimeout(promise, ms, label) {
   return Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout en «${label}»`)), ms)),
   ]);
+}
+
+// readyRegistration returns an active service-worker registration, registering
+// it on demand. We avoid navigator.serviceWorker.ready because on iOS it can
+// stay pending forever when the page isn't yet controlled by a worker. Instead
+// we register (or reuse) and wait for the worker to reach 'activated'.
+async function readyRegistration() {
+  let reg = await navigator.serviceWorker.getRegistration('/');
+  if (!reg) reg = await navigator.serviceWorker.register('/sw.js');
+  if (reg.active) return reg;
+  const worker = reg.installing || reg.waiting;
+  if (!worker) throw new Error('el service worker no arrancó');
+  await new Promise((resolve, reject) => {
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'activated') resolve();
+      else if (worker.state === 'redundant') reject(new Error('el service worker falló al instalar'));
+    });
+  });
+  return reg;
 }
 
 function bufToBase64Url(buf) {
@@ -80,7 +99,7 @@ export async function refreshPushState() {
   if (Notification.permission === 'denied') { setPushState('denied'); return; }
   if (Notification.permission === 'default') { setPushState('default'); return; }
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await readyRegistration();
     const sub = await reg.pushManager.getSubscription();
     setPushState(sub ? 'subscribed' : 'default');
   } catch (_) {
@@ -100,7 +119,7 @@ export async function enablePush() {
       return;
     }
     const { key } = await withTimeout(api('GET', '/api/push/vapid-public-key'), 10000, 'clave VAPID');
-    const reg = await withTimeout(navigator.serviceWorker.ready, 10000, 'service worker');
+    const reg = await withTimeout(readyRegistration(), 10000, 'service worker');
     let sub = await withTimeout(reg.pushManager.getSubscription(), 10000, 'suscripción actual');
     if (!sub) {
       sub = await withTimeout(reg.pushManager.subscribe({
@@ -122,7 +141,7 @@ export async function enablePush() {
 export async function disablePush() {
   setPushState('busy');
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await readyRegistration();
     const sub = await reg.pushManager.getSubscription();
     if (sub) {
       // Drop it server-side first, then locally. Ignore server errors so a stale
