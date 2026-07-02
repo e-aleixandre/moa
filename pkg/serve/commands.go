@@ -1,12 +1,15 @@
 package serve
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/verify"
 )
 
 // commandHandler executes a slash command for a session.
@@ -23,6 +26,7 @@ var commandRegistry = map[string]commandHandler{
 	"permissions": cmdPermissions,
 	"undo":        cmdUndo,
 	"path":        cmdPath,
+	"verify":      cmdVerify,
 }
 
 // ExecCommand executes a slash command in a session.
@@ -209,6 +213,46 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "⏪ Undo applied"}, nil
+}
+
+// cmdVerify runs the project's verification checks, mirroring the TUI's
+// manual /verify command. It reuses the core verify.Execute entry point and
+// publishes AutoVerify events so the web frontend paints the running spinner.
+func cmdVerify(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+	if err := requireIdle(sess); err != nil {
+		return nil, err
+	}
+
+	b := sess.runtime.Bus
+	b.Publish(bus.AutoVerifyStarted{SessionID: sess.ID})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	result, err := verify.Execute(ctx, sess.CWD)
+	if err != nil {
+		b.Publish(bus.AutoVerifyEnded{SessionID: sess.ID, Err: err})
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
+
+	if result.AllPass {
+		b.Publish(bus.AutoVerifyEnded{SessionID: sess.ID, AllPass: true})
+		return &CommandResult{OK: true, Message: fmt.Sprintf("✅ Verify: all %d checks passed", len(result.Checks))}, nil
+	}
+
+	b.Publish(bus.AutoVerifyEnded{SessionID: sess.ID, Summary: verify.FormatResult(result)})
+
+	passed := 0
+	var failed []string
+	for _, c := range result.Checks {
+		if c.Passed {
+			passed++
+		} else {
+			failed = append(failed, c.Name)
+		}
+	}
+	msg := fmt.Sprintf("❌ Verify: %d/%d checks passed — failed: %s", passed, len(result.Checks), strings.Join(failed, ", "))
+	return &CommandResult{OK: false, Message: msg}, nil
 }
 
 func cmdPath(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

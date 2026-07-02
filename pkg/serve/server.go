@@ -665,6 +665,7 @@ func handleListCommands() http.HandlerFunc {
 		"plan":        {Description: "Enter/exit plan mode", Args: "[exit]"},
 		"tasks":       {Description: "View/manage tasks", Args: "[done <id> | reset]"},
 		"undo":        {Description: "Undo last file change"},
+		"verify":      {Description: "Run verification checks"},
 	}
 
 	// Build the list from commandRegistry to stay in sync.

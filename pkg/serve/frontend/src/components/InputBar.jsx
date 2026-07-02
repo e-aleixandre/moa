@@ -42,6 +42,9 @@ const COMMANDS = [
   { name: 'permissions', desc: 'Set permission mode', args: '<yolo|ask|auto>' },
   { name: 'plan', desc: 'Enter/exit plan mode', args: '[exit]' },
   { name: 'tasks', desc: 'View/manage tasks', args: '[done <id> | reset]' },
+  { name: 'verify', desc: 'Run verification checks' },
+  { name: 'undo', desc: 'Undo last file change' },
+  { name: 'path', desc: 'Manage path access scope', args: '[list|add <dir>|rm <dir>|scope workspace|unrestricted]' },
 ];
 
 export function InputBar({ sessionId, session, tileId }) {
@@ -323,7 +326,15 @@ export function InputBar({ sessionId, session, tileId }) {
     if (text.startsWith('/')) {
       try {
         const result = await execCommand(sessionId, text);
-        if (result && !result.ok) {
+        if (text.startsWith('/verify') && result) {
+          // Verify ran — surface the pass/fail outcome (the spinner is driven
+          // by the AutoVerify WS events).
+          addToast({
+            title: result.ok ? 'Verify passed' : 'Verify failed',
+            detail: result.message,
+            type: result.ok ? 'done' : 'attention',
+          });
+        } else if (result && !result.ok) {
           addToast({ title: 'Command failed', detail: result.message, type: 'error' });
         }
       } catch (e) {
