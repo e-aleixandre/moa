@@ -77,7 +77,7 @@ func (d *Dispatcher) send(payload []byte, sub webpush.Subscription) {
 		slog.Warn("push: send failed", "error", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	// Read (and cap) the body so the push service's error reason is visible in
 	// logs; reading also drains it so the connection can be reused.
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

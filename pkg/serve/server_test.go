@@ -286,11 +286,11 @@ func TestWebSocket_Streaming(t *testing.T) {
 		}
 	}
 
-	if !(index["turn_start"] < index["message_start"] &&
-		index["message_start"] < index["text_delta"] &&
-		index["text_delta"] < index["message_end"] &&
-		index["message_end"] < index["turn_end"] &&
-		index["turn_end"] < index["run_end"]) {
+	if index["turn_start"] >= index["message_start"] ||
+		index["message_start"] >= index["text_delta"] ||
+		index["text_delta"] >= index["message_end"] ||
+		index["message_end"] >= index["turn_end"] ||
+		index["turn_end"] >= index["run_end"] {
 		t.Fatalf("unexpected stream order: %v", index)
 	}
 }

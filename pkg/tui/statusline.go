@@ -306,18 +306,11 @@ func usageStyle(pct int) lipgloss.Style {
 // Pass -1 for a window that is not reported. Removed when neither is reported.
 func (sl *StatusLine) UpdateUsageSegment(fiveHPct, weekPct int) {
 	var parts []string
-	maxPct := -1
 	if fiveHPct >= 0 {
 		parts = append(parts, "5h "+usageStyle(fiveHPct).Render(fmt.Sprintf("%d%%", fiveHPct)))
-		if fiveHPct > maxPct {
-			maxPct = fiveHPct
-		}
 	}
 	if weekPct >= 0 {
 		parts = append(parts, "wk "+usageStyle(weekPct).Render(fmt.Sprintf("%d%%", weekPct)))
-		if weekPct > maxPct {
-			maxPct = weekPct
-		}
 	}
 	if len(parts) == 0 {
 		sl.Remove(SegmentUsage)
