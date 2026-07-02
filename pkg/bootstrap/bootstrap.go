@@ -35,10 +35,10 @@ const DefaultReviewThinking = "medium"
 // SessionConfig configures a session build. Most fields have sensible defaults.
 type SessionConfig struct {
 	// Required.
-	CWD             string                                   // Working directory. Must exist and be a directory.
-	Model           core.Model                               // Resolved LLM model.
-	Provider        core.Provider                             // LLM provider for the primary model.
-	ProviderFactory func(core.Model) (core.Provider, error)  // Creates providers for subagents, plan review, etc.
+	CWD             string                                  // Working directory. Must exist and be a directory.
+	Model           core.Model                              // Resolved LLM model.
+	Provider        core.Provider                           // LLM provider for the primary model.
+	ProviderFactory func(core.Model) (core.Provider, error) // Creates providers for subagents, plan review, etc.
 
 	// Config overrides. When nil, loaded from disk via core.LoadMoaConfig(CWD).
 	MoaCfg *core.MoaConfig
@@ -86,23 +86,23 @@ type SessionConfig struct {
 
 // Session is a fully wired session ready for agent.Run/Send.
 type Session struct {
-	Agent       *agent.Agent
-	ToolReg     *core.Registry
-	TaskStore   *tasks.Store
-	PlanMode    *planmode.PlanMode
-	AskBridge   *askuser.Bridge
-	Gate        *permission.Gate
-	MCPManager  *mcp.Manager
-	PathPolicy  *tool.PathPolicy
-	AgentsMD    string
-	Skills      []skill.Skill
-	SkillsIndex string
+	Agent        *agent.Agent
+	ToolReg      *core.Registry
+	TaskStore    *tasks.Store
+	PlanMode     *planmode.PlanMode
+	AskBridge    *askuser.Bridge
+	Gate         *permission.Gate
+	MCPManager   *mcp.Manager
+	PathPolicy   *tool.PathPolicy
+	AgentsMD     string
+	Skills       []skill.Skill
+	SkillsIndex  string
 	SystemPrompt string
 	MemoryStore  *memory.Store
-	HasVerify   bool
-	Model       core.Model
-	MoaCfg      core.MoaConfig
-	CWD         string // workspace directory
+	HasVerify    bool
+	Model        core.Model
+	MoaCfg       core.MoaConfig
+	CWD          string // workspace directory
 
 	// UntrustedMCP is true when .mcp.json exists but CWD is not in TrustedMCPPaths.
 	UntrustedMCP bool
@@ -203,12 +203,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	fileTracker := tool.NewFileTracker()
 	toolReg := core.NewRegistry()
 	if err := tool.RegisterBuiltins(toolReg, tool.ToolConfig{
-		WorkspaceRoot:  cfg.CWD,
-		PathPolicy:     pathPolicy,
-		BashTimeout:    5 * time.Minute,
-		BraveAPIKey:    moaCfg.BraveAPIKey,
-		BeforeWrite:    cfg.BeforeWrite,
-		FileTracker:    fileTracker,
+		WorkspaceRoot: cfg.CWD,
+		PathPolicy:    pathPolicy,
+		BashTimeout:   5 * time.Minute,
+		BraveAPIKey:   moaCfg.BraveAPIKey,
+		BeforeWrite:   cfg.BeforeWrite,
+		FileTracker:   fileTracker,
 	}); err != nil {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}
@@ -235,21 +235,20 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// 5. AGENTS.md.
 	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, os.Getenv("AGENT_HOME"))
 
-	// 5b. Project memory.
+	// 5b. Memory (global + project). Only the index is injected into the prompt;
+	// full facts are read on demand via the memory tool.
 	var memStore *memory.Store
-	var memoryContent string
+	var memoryIndex string
 	if core.IsMemoryEnabled(moaCfg) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			slog.Warn("memory: cannot determine home directory", "error", err)
 		} else {
-			memStore = memory.New(filepath.Join(home, ".config", "moa", "projects"))
-			content, err := memStore.Load(cfg.CWD)
-			if err != nil {
-				slog.Warn("memory: failed to load", "error", err)
-			} else if content != "" {
-				memoryContent = memory.Truncate(content, 200)
+			memStore = memory.New(filepath.Join(home, ".config", "moa"), cfg.CWD)
+			if err := memStore.MigrateV1IfNeeded(); err != nil {
+				slog.Warn("memory: v1 migration failed", "error", err)
 			}
+			memoryIndex = memStore.FormatIndex(memStore.List())
 		}
 	}
 	if memStore != nil {
@@ -371,13 +370,13 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			}
 			return nil
 		},
-		ProviderFactory: cfg.ProviderFactory,
-		AgentsMD:        agentsMD,
-		ParentTools:     toolReg,
-		AppCtx:          cfg.Ctx,
-		WorkspaceRoot:   cfg.CWD,
-		SkillsIndex:     skillsIndex,
-		MemoryContent:   memoryContent,
+		ProviderFactory:  cfg.ProviderFactory,
+		AgentsMD:         agentsMD,
+		ParentTools:      toolReg,
+		AppCtx:           cfg.Ctx,
+		WorkspaceRoot:    cfg.CWD,
+		SkillsIndex:      skillsIndex,
+		MemoryIndex:      memoryIndex,
 		OnAsyncJobChange: cfg.OnAsyncJobChange,
 		OnAsyncComplete:  cfg.OnAsyncComplete,
 	}); err != nil {
@@ -425,12 +424,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	// 12. System prompt (after ALL tools registered).
 	systemPrompt := agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
-		AgentsMD:      agentsMD,
-		Tools:         toolReg.Specs(),
-		CWD:           cfg.CWD,
-		HasVerify:     hasVerify,
-		MemoryContent: memoryContent,
-		SkillsIndex:   skillsIndex,
+		AgentsMD:    agentsMD,
+		Tools:       toolReg.Specs(),
+		CWD:         cfg.CWD,
+		HasVerify:   hasVerify,
+		MemoryIndex: memoryIndex,
+		SkillsIndex: skillsIndex,
 	})
 	sess.SystemPrompt = systemPrompt
 

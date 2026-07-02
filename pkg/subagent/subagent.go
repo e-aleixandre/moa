@@ -43,7 +43,7 @@ type Config struct {
 	AppCtx                 context.Context
 	WorkspaceRoot          string // CWD passed to system prompt builder
 	SkillsIndex            string // pre-formatted skills index for system prompt
-	MemoryContent          string // cross-session memory content (already truncated)
+	MemoryIndex            string // pre-formatted memory index (one line per fact)
 
 	// OnAsyncComplete is called when an async subagent finishes (completed, failed, or cancelled).
 	// truncated is true when resultTail is only the last N lines of the full output.
@@ -139,7 +139,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if promptBuilder == nil {
 				promptBuilder = agentcontext.BuildSystemPrompt
 			}
-			systemPrompt := buildSystemPrompt(promptBuilder, cfg.AgentsMD, childReg.Specs(), cfg.WorkspaceRoot, cfg.SkillsIndex, cfg.MemoryContent)
+			systemPrompt := buildSystemPrompt(promptBuilder, cfg.AgentsMD, childReg.Specs(), cfg.WorkspaceRoot, cfg.SkillsIndex, cfg.MemoryIndex)
 
 			if getBool(params, "async") {
 				if err := ctx.Err(); err != nil {
@@ -297,11 +297,11 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 
 func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
 	return agent.New(agent.AgentConfig{
-		Provider:            provider,
-		Model:               model,
-		SystemPrompt:        systemPrompt,
-		ThinkingLevel:       thinkingLevel,
-		Tools:               childReg,
+		Provider:      provider,
+		Model:         model,
+		SystemPrompt:  systemPrompt,
+		ThinkingLevel: thinkingLevel,
+		Tools:         childReg,
 		// 0 = unlimited for all three guardrails, matching the parent agent's defaults.
 		PermissionCheck: func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			if fn := currentPermissionCheck(cfg); fn != nil {
@@ -409,14 +409,14 @@ func resolveThinking(defaultThinking string, params map[string]any) (string, *co
 	}
 }
 
-func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryContent string) string {
+func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryIndex string) string {
 	const preamble = "You are a focused subagent. Complete the delegated task thoroughly and report your findings concisely. Do not ask clarifying questions — work with what you have.\n\n"
 	return preamble + promptBuilder(agentcontext.SystemPromptOptions{
-		AgentsMD:      agentsMD,
-		Tools:         specs,
-		CWD:           cwd,
-		SkillsIndex:   skillsIndex,
-		MemoryContent: memoryContent,
+		AgentsMD:    agentsMD,
+		Tools:       specs,
+		CWD:         cwd,
+		SkillsIndex: skillsIndex,
+		MemoryIndex: memoryIndex,
 	})
 }
 

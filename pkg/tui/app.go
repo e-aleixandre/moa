@@ -17,7 +17,6 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
-	"github.com/ealeixandre/moa/pkg/memory"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/usage"
@@ -37,38 +36,38 @@ const (
 
 // state holds mutable data that must not be copied by Bubble Tea's value semantics.
 type state struct {
-	blocks           []messageBlock // conversation history, raw content
-	streamText       string         // current streaming assistant text
-	thinkingText     string         // current thinking text
-	streamCache      string         // cached glamour render of streamText (updated by renderTick)
-	textMaterialized bool           // text was already materialized into blocks by ToolCallStreaming
-	dirty            bool           // streamText changed since last render tick
-	viewportDirty    bool           // blocks changed, viewport needs refresh on next tick
-	running          bool           // agent is running (tick should continue)
-	streamState      streamState
-	activeTools      int                   // number of tool calls currently executing
-	showThinking     bool                  // toggle thinking visibility (Ctrl+T)
-	expanded         bool                  // toggle expanded tool results (Ctrl+E)
-	initialized      bool                  // first WindowSizeMsg processed
-	runGen           uint64                // set from bus.RunStarted; single source of truth is the bus
-	cleanupOnce      sync.Once             // idempotent cleanup
-	pendingStatus    string                // transient generic status shown in View(), never persisted
-	pendingTimeline  *pendingTimelineEvent // live timeline event shown in View() until next send
-	sessionCost      float64               // accumulated USD cost this session
-	sessionInput     int                   // accumulated input tokens (for cache %)
-	sessionCacheRead int                   // accumulated cache_read tokens
-	runStartMsgCount int                   // message count at start of current run (for delta cost)
-	asyncSubagents   int                   // running async subagent count (for status display)
-	transcript       bool                  // true when in transcript mode (Ctrl+O)
-	fullHistory      bool                  // true when Ctrl+E in transcript mode shows everything
-	runStartBlockIdx int                   // block index at start of current run (patch boundary)
-	pendingImage     []byte   // raw image bytes waiting to be sent with next message
-	pendingImageMime string   // mime type of pending image
-	queuedSteers     []string // steer messages waiting to be processed by the agent
-	chromeCache      string   // cached bottom chrome string (built once per frame)
-	chromeCacheDirty bool     // chrome needs rebuild
-	viewportCache      string // cached viewport.View() output
-	viewportCacheDirty bool   // viewport needs re-render
+	blocks             []messageBlock // conversation history, raw content
+	streamText         string         // current streaming assistant text
+	thinkingText       string         // current thinking text
+	streamCache        string         // cached glamour render of streamText (updated by renderTick)
+	textMaterialized   bool           // text was already materialized into blocks by ToolCallStreaming
+	dirty              bool           // streamText changed since last render tick
+	viewportDirty      bool           // blocks changed, viewport needs refresh on next tick
+	running            bool           // agent is running (tick should continue)
+	streamState        streamState
+	activeTools        int                   // number of tool calls currently executing
+	showThinking       bool                  // toggle thinking visibility (Ctrl+T)
+	expanded           bool                  // toggle expanded tool results (Ctrl+E)
+	initialized        bool                  // first WindowSizeMsg processed
+	runGen             uint64                // set from bus.RunStarted; single source of truth is the bus
+	cleanupOnce        sync.Once             // idempotent cleanup
+	pendingStatus      string                // transient generic status shown in View(), never persisted
+	pendingTimeline    *pendingTimelineEvent // live timeline event shown in View() until next send
+	sessionCost        float64               // accumulated USD cost this session
+	sessionInput       int                   // accumulated input tokens (for cache %)
+	sessionCacheRead   int                   // accumulated cache_read tokens
+	runStartMsgCount   int                   // message count at start of current run (for delta cost)
+	asyncSubagents     int                   // running async subagent count (for status display)
+	transcript         bool                  // true when in transcript mode (Ctrl+O)
+	fullHistory        bool                  // true when Ctrl+E in transcript mode shows everything
+	runStartBlockIdx   int                   // block index at start of current run (patch boundary)
+	pendingImage       []byte                // raw image bytes waiting to be sent with next message
+	pendingImageMime   string                // mime type of pending image
+	queuedSteers       []string              // steer messages waiting to be processed by the agent
+	chromeCache        string                // cached bottom chrome string (built once per frame)
+	chromeCacheDirty   bool                  // chrome needs rebuild
+	viewportCache      string                // cached viewport.View() output
+	viewportCacheDirty bool                  // viewport needs re-render
 }
 
 type pendingTimelineEvent struct {
@@ -80,7 +79,7 @@ type pendingTimelineEvent struct {
 type pickerPurpose int
 
 const (
-	pickerForModelSwitch  pickerPurpose = iota
+	pickerForModelSwitch pickerPurpose = iota
 	pickerForReviewConfig
 )
 
@@ -130,21 +129,18 @@ type appModel struct {
 	settingsMenu settingsMenu
 
 	// Plan mode (display-only state — all operations go through bus)
-	planMenu               planMenu
-	reviewGen              uint64
-	reviewStreamCh         chan planReviewStreamMsg
-	lastReviewResult       *planmode.ReviewResult
-	lastMenuVariant        planMenuVariant
-	pendingReviewFeedback  string
-	postReviewMenuPending  bool // set before FinishPlanReview to suppress PlanModeChanged→OpenPostSubmit
+	planMenu              planMenu
+	reviewGen             uint64
+	reviewStreamCh        chan planReviewStreamMsg
+	lastReviewResult      *planmode.ReviewResult
+	lastMenuVariant       planMenuVariant
+	pendingReviewFeedback string
+	postReviewMenuPending bool // set before FinishPlanReview to suppress PlanModeChanged→OpenPostSubmit
 	taskWidget            taskWidget
 	taskWidgetMode        tasks.WidgetMode // TUI-local display preference
 
 	// Prompt templates
 	promptTemplates []promptpkg.Template
-
-	// Memory
-	memoryStore *memory.Store
 
 	// Plan usage (account-global; shared poller, refreshed on a timer)
 	usagePoller *usage.Poller
@@ -159,17 +155,16 @@ type appModel struct {
 
 // Config configures the TUI. All fields are optional except Runtime.
 type Config struct {
-	Runtime               *bus.SessionRuntime         // required — the session bus runtime
-	SessionStore          session.SessionStore        // persistence backend (nil = no persistence)
-	Session               *session.Session            // session to resume (nil = fresh start)
-	StartInSessionBrowser bool                        // open the session browser before entering chat
-	CWD                   string                      // working directory for session metadata
-	PinnedModels          []string                    // model IDs pre-pinned for Ctrl+P cycling
-	OnPinnedModelsChange  func([]string) error        // called when the user changes pinned models
-	PromptTemplates       []promptpkg.Template        // available prompt templates
-	Transcriber           core.Transcriber            // speech-to-text for voice input (nil = disabled)
-	MemoryStore           *memory.Store               // per-project memory store (nil = memory disabled)
-	UsagePoller           *usage.Poller               // plan usage poller (nil = usage tracking disabled)
+	Runtime               *bus.SessionRuntime  // required — the session bus runtime
+	SessionStore          session.SessionStore // persistence backend (nil = no persistence)
+	Session               *session.Session     // session to resume (nil = fresh start)
+	StartInSessionBrowser bool                 // open the session browser before entering chat
+	CWD                   string               // working directory for session metadata
+	PinnedModels          []string             // model IDs pre-pinned for Ctrl+P cycling
+	OnPinnedModelsChange  func([]string) error // called when the user changes pinned models
+	PromptTemplates       []promptpkg.Template // available prompt templates
+	Transcriber           core.Transcriber     // speech-to-text for voice input (nil = disabled)
+	UsagePoller           *usage.Poller        // plan usage poller (nil = usage tracking disabled)
 }
 
 // isStructuralBusEvent returns true for events that must not be dropped.
@@ -229,7 +224,6 @@ func New(ctx context.Context, cfg Config) appModel {
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		promptTemplates:      cfg.PromptTemplates,
-		memoryStore:          cfg.MemoryStore,
 		usagePoller:          cfg.UsagePoller,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber},
 	}

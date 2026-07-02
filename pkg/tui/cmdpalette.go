@@ -23,7 +23,6 @@ var allCommands = []commandDef{
 	{Name: "permissions", Args: "<mode>", Desc: "View or set permission mode (yolo/ask/auto)"},
 	{Name: "path", Args: "[list|add|rm|scope]", Desc: "View or manage path access scope"},
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
-	{Name: "memory", Args: "[edit|clear|path]", Desc: "View or manage project memory"},
 	{Name: "undo", Desc: "Revert files changed in the last agent turn"},
 	{Name: "verify", Desc: "Run project verification checks"},
 	{Name: "prompt", Args: "<name>", Desc: "Insert a prompt template"},
@@ -37,11 +36,11 @@ const paletteMaxVisible = 6 // fixed visible height
 
 // cmdPalette shows a filterable command list when the user types "/".
 type cmdPalette struct {
-	active   bool
-	filter   string // text after "/" used to filter
-	matches  []commandDef
-	cursor   int
-	scroll   int // first visible index
+	active  bool
+	filter  string // text after "/" used to filter
+	matches []commandDef
+	cursor  int
+	scroll  int // first visible index
 }
 
 func (p *cmdPalette) Update(text string) {

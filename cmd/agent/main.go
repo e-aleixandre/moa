@@ -224,9 +224,9 @@ func main() {
 	cpStore := checkpoint.New(20)
 
 	sess, err := bootstrap.BuildSession(bootstrap.SessionConfig{
-		CWD:             cwd,
-		Model:           resolvedModel,
-		Provider:        providerBuild.Provider,
+		CWD:      cwd,
+		Model:    resolvedModel,
+		Provider: providerBuild.Provider,
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
 			build, err := buildProvider(model, authStore)
 			if err != nil {
@@ -446,9 +446,8 @@ func main() {
 					cfg.PinnedModels = ids
 				})
 			},
-			Transcriber:       transcriber,
-			MemoryStore:       sess.MemoryStore,
-			UsagePoller:       newAnthropicUsagePoller(authStore),
+			Transcriber: transcriber,
+			UsagePoller: newAnthropicUsagePoller(authStore),
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(24))
 		if _, err := prog.Run(); err != nil {
@@ -563,5 +562,3 @@ func (p *tuiPersister) SnapshotTree(entries []session.Entry, leafID string, meta
 	p.session.CompactionEpoch = 0
 	return p.store.Save(p.session)
 }
-
-

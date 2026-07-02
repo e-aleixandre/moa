@@ -131,7 +131,7 @@ func TestRegisterBuiltins(t *testing.T) {
 func TestRegisterBuiltins_WithMemory(t *testing.T) {
 	reg := core.NewRegistry()
 	tmp := t.TempDir()
-	store := memory.New(t.TempDir())
+	store := memory.New(t.TempDir(), tmp)
 	_ = RegisterBuiltins(reg, ToolConfig{WorkspaceRoot: tmp, MemoryStore: store})
 
 	if _, ok := reg.Get("memory"); !ok {
@@ -1064,5 +1064,3 @@ func TestRegisterSubset(t *testing.T) {
 		}
 	}
 }
-
-

@@ -170,20 +170,20 @@ func TestBuildSystemPrompt_EmptySkills(t *testing.T) {
 
 func TestBuildSystemPrompt_WithMemory(t *testing.T) {
 	prompt := BuildSystemPrompt(SystemPromptOptions{
-		AgentsMD:      "# Project",
-		CWD:           "/test",
-		MemoryContent: "- Always use Docker\n- Prefer PostgreSQL",
-		SkillsIndex:   "Some skills here",
+		AgentsMD:    "# Project",
+		CWD:         "/test",
+		MemoryIndex: "- project/uses-docker — always use Docker",
+		SkillsIndex: "Some skills here",
 	})
-	if !strings.Contains(prompt, "Project Memory") {
-		t.Error("expected Project Memory section")
+	if !strings.Contains(prompt, "## Memory") {
+		t.Error("expected Memory section")
 	}
-	if !strings.Contains(prompt, "Always use Docker") {
-		t.Error("expected memory content")
+	if !strings.Contains(prompt, "uses-docker") {
+		t.Error("expected memory index")
 	}
 	// Memory should be between AGENTS.md and skills
 	agentsIdx := strings.Index(prompt, "# Project")
-	memoryIdx := strings.Index(prompt, "Project Memory")
+	memoryIdx := strings.Index(prompt, "## Memory")
 	skillsIdx := strings.Index(prompt, "Some skills here")
 	if agentsIdx >= memoryIdx {
 		t.Error("memory should come after AGENTS.md")
@@ -195,7 +195,7 @@ func TestBuildSystemPrompt_WithMemory(t *testing.T) {
 
 func TestBuildSystemPrompt_EmptyMemory(t *testing.T) {
 	prompt := BuildSystemPrompt(SystemPromptOptions{CWD: "/test"})
-	if strings.Contains(prompt, "Project Memory") {
+	if strings.Contains(prompt, "## Memory") {
 		t.Error("empty memory should not appear in prompt")
 	}
 }
@@ -205,9 +205,7 @@ func TestBuildSystemPrompt_MemoryGuideline(t *testing.T) {
 		{Name: "memory", Description: "Memory tool"},
 	}
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
-	if !strings.Contains(prompt, "memory tool for future sessions") {
+	if !strings.Contains(prompt, "Save durable, non-obvious facts") {
 		t.Error("expected memory guideline when memory tool is available")
 	}
 }
-
-

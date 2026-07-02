@@ -10,69 +10,115 @@ import (
 	"github.com/ealeixandre/moa/pkg/memory"
 )
 
-// NewMemory creates the memory tool for reading/updating cross-session project memory.
+// NewMemory creates the memory tool for managing cross-session memory as typed,
+// single-fact files (list/read/write/delete).
 func NewMemory(cfg ToolConfig) core.Tool {
 	store := cfg.MemoryStore
-	root := cfg.WorkspaceRoot
-	lockPath := store.FilePath(root)
+	lockKey := "memory:" + store.ProjectDir()
 
 	return core.Tool{
 		Name:  "memory",
 		Label: "Memory",
-		Description: "Read or update persistent project memory. " +
-			"Use to save important learnings, corrections, and project-specific preferences that should persist across sessions. " +
-			"Memory is stored per-project and automatically loaded into context at the start of each session.",
+		Description: "Manage persistent memory as small, single-fact notes. Only the index (one line per " +
+			"fact) is in your context; read a fact's full text on demand. Each fact has a type that decides " +
+			"its scope: user/feedback are global (all projects); project/reference are scoped to this project. " +
+			"Save durable, non-obvious facts (user preferences, corrections, project constraints); update the " +
+			"existing fact instead of duplicating, and delete facts that become wrong. Refer to a fact by its " +
+			"canonical id from the index (e.g. \"project/uses-docker\" or \"global/prefers-tabs\").",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"action": {
 					"type": "string",
-					"enum": ["read", "update"],
-					"description": "read: return current memory content. update: replace memory with new content."
+					"enum": ["list", "read", "write", "delete"],
+					"description": "list: show the index of all facts. read: return one fact's full text. write: create/overwrite one fact. delete: remove one fact."
+				},
+				"id": {
+					"type": "string",
+					"description": "Canonical id for read/delete: \"project/<name>\", \"global/<name>\", or a bare \"<name>\" if unambiguous."
+				},
+				"name": {
+					"type": "string",
+					"description": "Fact name for write: kebab-case ascii (e.g. \"uses-docker\"). The file is named after it."
+				},
+				"description": {
+					"type": "string",
+					"description": "One-line hook shown in the index (for write). Required."
+				},
+				"type": {
+					"type": "string",
+					"enum": ["user", "feedback", "project", "reference"],
+					"description": "Fact type (for write). Decides scope: user/feedback → global, project/reference → this project."
 				},
 				"content": {
 					"type": "string",
-					"description": "New memory content (only for update action). Markdown format. Keep concise and actionable."
+					"description": "The full fact body in markdown (for write)."
 				}
 			},
 			"required": ["action"]
 		}`),
 		Effect: core.EffectWritePath,
 		LockKey: func(args map[string]any) string {
-			return lockPath
+			return lockKey
 		},
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
-			action := getString(params, "action", "")
+			switch getString(params, "action", "") {
+			case "list":
+				mems := store.List()
+				if len(mems) == 0 {
+					return core.TextResult("No memories saved yet."), nil
+				}
+				var sb strings.Builder
+				for _, m := range mems {
+					sb.WriteString("- ")
+					sb.WriteString(m.ID())
+					sb.WriteString(" (")
+					sb.WriteString(string(m.Type))
+					sb.WriteString(") — ")
+					sb.WriteString(m.Description)
+					sb.WriteString("\n")
+				}
+				return core.TextResult(sb.String()), nil
 
-			switch action {
 			case "read":
-				content, err := store.Load(root)
+				id := getString(params, "id", "")
+				if id == "" {
+					return core.ErrorResult("id is required for read (e.g. \"project/uses-docker\")"), nil
+				}
+				m, ok, err := store.Read(id)
 				if err != nil {
-					return core.ErrorResult(fmt.Sprintf("failed to read memory: %v", err)), nil
+					return core.ErrorResult(err.Error()), nil
 				}
-				if content == "" {
-					return core.TextResult("No memory saved for this project yet."), nil
+				if !ok {
+					return core.ErrorResult(fmt.Sprintf("memory %q not found", id)), nil
 				}
-				return core.TextResult(content), nil
+				return core.TextResult(m.Body), nil
 
-			case "update":
-				content := getString(params, "content", "")
-				if content == "" {
-					return core.ErrorResult("content is required for update action"), nil
+			case "write":
+				m := memory.Memory{
+					Name:        getString(params, "name", ""),
+					Description: getString(params, "description", ""),
+					Type:        memory.Type(getString(params, "type", "")),
+					Body:        getString(params, "content", ""),
 				}
-				if len(content) > memory.MaxSize {
-					return core.ErrorResult(fmt.Sprintf("content exceeds %dKB limit (%d bytes)", memory.MaxSize/1024, len(content))), nil
+				if err := store.Write(m); err != nil {
+					return core.ErrorResult(err.Error()), nil
 				}
+				m.Scope = memory.ScopeForType(m.Type)
+				return core.TextResult(fmt.Sprintf("Saved memory %q. Read it later with: read %s", m.Name, m.ID())), nil
 
-				if err := store.Save(root, content); err != nil {
-					return core.ErrorResult(fmt.Sprintf("failed to save memory: %v", err)), nil
+			case "delete":
+				id := getString(params, "id", "")
+				if id == "" {
+					return core.ErrorResult("id is required for delete (e.g. \"project/uses-docker\")"), nil
 				}
-
-				lineCount := strings.Count(content, "\n") + 1
-				return core.TextResult(fmt.Sprintf("Memory updated (%d lines). Will be loaded automatically in future sessions.", lineCount)), nil
+				if err := store.Delete(id); err != nil {
+					return core.ErrorResult(err.Error()), nil
+				}
+				return core.TextResult(fmt.Sprintf("Deleted memory %q.", id)), nil
 
 			default:
-				return core.ErrorResult(fmt.Sprintf("unknown action %q — use \"read\" or \"update\"", action)), nil
+				return core.ErrorResult(fmt.Sprintf("unknown action %q — use \"list\", \"read\", \"write\" or \"delete\"", getString(params, "action", ""))), nil
 			}
 		},
 	}

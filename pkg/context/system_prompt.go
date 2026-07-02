@@ -26,17 +26,17 @@ var toolSnippets = map[string]string{
 	"subagent_status": "Check the status of an async subagent job.",
 	"subagent_cancel": "Cancel a running async subagent job.",
 	"verify":          "Run project verification checks (build, test, lint) from .moa/verify.json.",
-	"memory":          "Read or update persistent project memory. Saves learnings and preferences across sessions.",
+	"memory":          "Manage cross-session memory as typed single-fact notes (list/read/write/delete). Only the index is in context; read facts on demand.",
 }
 
 // SystemPromptOptions configures system prompt generation.
 type SystemPromptOptions struct {
-	AgentsMD      string          // AGENTS.md content (concatenated from all levels)
-	Tools         []core.ToolSpec // registered tools
-	CWD           string          // working directory shown to the agent
-	HasVerify     bool            // .moa/verify.json was loaded
-	MemoryContent string          // cross-session memory (already truncated)
-	SkillsIndex   string          // pre-formatted skills index
+	AgentsMD    string          // AGENTS.md content (concatenated from all levels)
+	Tools       []core.ToolSpec // registered tools
+	CWD         string          // working directory shown to the agent
+	HasVerify   bool            // .moa/verify.json was loaded
+	MemoryIndex string          // pre-formatted memory index (one line per fact)
+	SkillsIndex string          // pre-formatted skills index
 }
 
 // BuildSystemPrompt constructs the system prompt from components.
@@ -127,7 +127,7 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 
 	// Memory
 	if toolSet["memory"] {
-		sb.WriteString("- When the user corrects you or teaches project-specific knowledge, save it with the memory tool for future sessions. Keep memories concise and actionable.\n")
+		sb.WriteString("- Save durable, non-obvious facts (user preferences, corrections, project constraints) with the memory tool. Update the existing fact instead of duplicating; delete facts that become wrong.\n")
 	}
 
 	// Always include these
@@ -144,11 +144,16 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 		sb.WriteString("\n\n")
 	}
 
-	// Project memory (cross-session)
-	if opts.MemoryContent != "" {
-		sb.WriteString("## Project Memory\n\n")
-		sb.WriteString("Learnings and preferences from previous sessions:\n\n")
-		sb.WriteString(opts.MemoryContent)
+	// Memory index (cross-session). Full facts are read on demand; frame the
+	// index by whether this agent actually has the memory tool.
+	if opts.MemoryIndex != "" {
+		sb.WriteString("## Memory\n\n")
+		if toolSet["memory"] {
+			sb.WriteString("Facts saved from earlier sessions (an index). Read a fact's full text with the memory tool (read action) when its line is relevant:\n\n")
+		} else {
+			sb.WriteString("Facts saved from earlier sessions (for context):\n\n")
+		}
+		sb.WriteString(opts.MemoryIndex)
 		sb.WriteString("\n\n")
 	}
 
