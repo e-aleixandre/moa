@@ -7,6 +7,7 @@ import {
 } from './tile-actions.js';
 import { inputBarRegistry } from './components/InputBar.jsx';
 import { requestNotificationPermission } from './notifications.js';
+import { registerServiceWorker } from './pwa.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
 import { TabBar } from './components/TabBar.jsx';
 import { TileTree } from './components/TileTree.jsx';
@@ -41,6 +42,7 @@ function App() {
     startPolling();
     startUsagePolling();
     requestNotificationPermission();
+    registerServiceWorker();
     return () => stopUsagePolling();
   }, []);
 
