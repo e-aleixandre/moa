@@ -6,14 +6,12 @@ export function AskUserCard({ ask, sessionId }) {
   const questions = ask.questions || [];
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState(() => questions.map(() => ''));
-  const [customBuf, setCustomBuf] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Reset internal state when the ask ID changes (new question batch).
   useEffect(() => {
     setCurrent(0);
     setAnswers(questions.map(() => ''));
-    setCustomBuf('');
     setSubmitting(false);
   }, [ask.id]);
 
@@ -26,34 +24,32 @@ export function AskUserCard({ ask, sessionId }) {
   const q = questions[current];
   const options = q.options || [];
 
+  // Each answer belongs to its own question: the custom input is bound directly
+  // to answers[current], so navigating between questions never bleeds one
+  // answer into another. The input shows the current answer only when it's a
+  // free-text answer (not one of the options — an option is shown via the
+  // highlighted button instead).
+  const customValue = options.includes(answers[current]) ? '' : answers[current];
+
+  const setAnswer = (val) => {
+    setAnswers(prev => {
+      const next = [...prev];
+      next[current] = val;
+      return next;
+    });
+  };
+
   const selectOption = (opt) => {
-    const next = [...answers];
-    next[current] = opt;
-    setAnswers(next);
-    setCustomBuf('');
+    setAnswer(opt);
     // Auto-advance to next question if not the last.
     if (current < questions.length - 1) {
       setCurrent(current + 1);
     }
   };
 
-  const commitCustom = () => {
-    const text = customBuf.trim();
-    if (!text) return false;
-    const next = [...answers];
-    next[current] = text;
-    setAnswers(next);
-    setCustomBuf('');
-    return true;
-  };
-
   const handleSubmit = async () => {
-    // Capture current custom input if needed.
-    const final = [...answers];
-    if (!final[current] && customBuf.trim()) {
-      final[current] = customBuf.trim();
-    }
-    // Check all questions answered.
+    const final = answers.map(a => a.trim());
+    // Jump to the first unanswered question instead of submitting.
     for (let i = 0; i < final.length; i++) {
       if (!final[i]) {
         setCurrent(i);
@@ -70,7 +66,7 @@ export function AskUserCard({ ask, sessionId }) {
   };
 
   const handleSkip = async () => {
-    const skipped = questions.map((_, i) => answers[i] || '(skipped)');
+    const skipped = questions.map((_, i) => answers[i].trim() || '(skipped)');
     setSubmitting(true);
     try {
       await resolveAskUser(sessionId, ask.id, skipped);
@@ -80,12 +76,7 @@ export function AskUserCard({ ask, sessionId }) {
     }
   };
 
-  const allAnswered = (() => {
-    for (let i = 0; i < questions.length; i++) {
-      if (!answers[i] && (i !== current || !customBuf.trim())) return false;
-    }
-    return true;
-  })();
+  const allAnswered = answers.every(a => a.trim());
 
   return (
     <div class="ask-user-card">
@@ -113,27 +104,17 @@ export function AskUserCard({ ask, sessionId }) {
 
       <div class="ask-user-custom">
         <input
+          key={current}
           type="text"
           placeholder="Type your own answer…"
-          value={customBuf}
-          onInput={(e) => setCustomBuf(e.target.value)}
+          value={customValue}
+          onInput={(e) => setAnswer(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
-              if (customBuf.trim()) {
-                commitCustom();
-                if (current >= questions.length - 1) {
-                  // Last question — submit all.
-                  handleSubmit();
-                } else {
-                  // Advance to next question.
-                  const next = [...answers];
-                  next[current] = customBuf.trim();
-                  setAnswers(next);
-                  setCustomBuf('');
-                  setCurrent(current + 1);
-                }
-              } else if (allAnswered) {
+              if (current < questions.length - 1) {
+                setCurrent(current + 1);
+              } else {
                 handleSubmit();
               }
             }
