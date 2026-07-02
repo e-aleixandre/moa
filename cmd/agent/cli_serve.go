@@ -27,12 +27,24 @@ func runServe(args []string) {
 	host := fs.String("host", "127.0.0.1", "Bind address (use 0.0.0.0 for remote access)")
 	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
 	allowedHosts := fs.String("allowed-hosts", "", "Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost and IP literals are always allowed; e.g. a Tailscale MagicDNS name)")
+	tokenFlag := fs.String("token", "", "Shared secret for opt-in auth. When set, requests must present a valid session cookie or ?token=<secret> in the URL (which sets the cookie). Overrides MOA_SERVE_TOKEN.")
 	_ = fs.Parse(args)
 
+	// Token: flag wins over env.
+	token := *tokenFlag
+	if token == "" {
+		token = os.Getenv("MOA_SERVE_TOKEN")
+	}
+
 	if *host != "127.0.0.1" && *host != "localhost" && *host != "::1" {
-		fmt.Fprintf(os.Stderr, "⚠️  WARNING: Binding to %s with NO authentication.\n", *host)
-		fmt.Fprintf(os.Stderr, "   Anyone with network access can control agents.\n")
-		fmt.Fprintf(os.Stderr, "   Use a reverse proxy + auth, or Tailscale, for remote access.\n\n")
+		if token == "" {
+			fmt.Fprintf(os.Stderr, "⚠️  WARNING: Binding to %s with NO authentication.\n", *host)
+			fmt.Fprintf(os.Stderr, "   Anyone with network access can control agents.\n")
+			fmt.Fprintf(os.Stderr, "   Use --token, a reverse proxy + auth, or Tailscale, for remote access.\n\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "🔒 Binding to %s with token authentication enabled.\n", *host)
+			fmt.Fprintf(os.Stderr, "   Visit http://%s:%d/?token=<secret> once to set the session cookie.\n\n", *host, *port)
+		}
 	}
 
 	defaultModel, _ := core.ResolveModel(*modelFlag)
@@ -79,7 +91,12 @@ func runServe(args []string) {
 		MoaCfg:         moaCfg,
 	})
 
-	srv := serve.NewServer(mgr, serve.WithAllowedHosts(splitCSV(*allowedHosts)))
+	// serve speaks plain HTTP (the security boundary is Tailscale), so the auth
+	// cookie must not be Secure or the browser would drop it over http://.
+	srv := serve.NewServer(mgr,
+		serve.WithAllowedHosts(splitCSV(*allowedHosts)),
+		serve.WithAuthToken(token, false),
+	)
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 	fmt.Printf("moa serve listening on http://%s\n", addr)

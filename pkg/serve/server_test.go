@@ -226,6 +226,109 @@ func TestServer_RejectsRebindingHost(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware(t *testing.T) {
+	const secret = "s3cr3t"
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := authMiddleware(secret, false, next)
+
+	t.Run("no credentials -> 401", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/sessions", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("got %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("bad token -> 401", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/?token=wrong", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("got %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("good token via query -> sets cookie and redirects", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/?token="+secret+"&foo=bar", nil))
+		if rec.Code != http.StatusFound {
+			t.Fatalf("got %d, want 302", rec.Code)
+		}
+		loc := rec.Header().Get("Location")
+		if strings.Contains(loc, "token") {
+			t.Fatalf("redirect location must strip token, got %q", loc)
+		}
+		if !strings.Contains(loc, "foo=bar") {
+			t.Fatalf("redirect should keep other params, got %q", loc)
+		}
+		var authCookie *http.Cookie
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == authCookieName {
+				authCookie = c
+			}
+		}
+		if authCookie == nil {
+			t.Fatal("expected auth cookie to be set")
+		}
+		if !authCookie.HttpOnly || authCookie.SameSite != http.SameSiteLaxMode || authCookie.Secure {
+			t.Fatalf("unexpected cookie attrs: HttpOnly=%v SameSite=%v Secure=%v", authCookie.HttpOnly, authCookie.SameSite, authCookie.Secure)
+		}
+		if authCookie.MaxAge != authCookieMaxAge {
+			t.Fatalf("cookie MaxAge = %d, want %d (persistent cookie for the installed PWA)", authCookie.MaxAge, authCookieMaxAge)
+		}
+
+		// Re-request with the cookie -> passes through.
+		req := httptest.NewRequest("GET", "/api/sessions", nil)
+		req.AddCookie(authCookie)
+		rec2 := httptest.NewRecorder()
+		h.ServeHTTP(rec2, req)
+		if rec2.Code != http.StatusOK {
+			t.Fatalf("cookie auth: got %d, want 200", rec2.Code)
+		}
+	})
+
+	t.Run("bad cookie -> 401", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/sessions", nil)
+		req.AddCookie(&http.Cookie{Name: authCookieName, Value: "nope"})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("got %d, want 401", rec.Code)
+		}
+	})
+}
+
+func TestServer_NoToken_NoAuthRequired(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("x")))
+	// No WithAuthToken -> auth disabled, behavior unchanged.
+	handler := NewServer(mgr)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
+	req.Host = "localhost"
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("no token configured should allow request, got %d", rec.Code)
+	}
+}
+
+func TestServer_WithToken_GuardsRoutes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("x")))
+	handler := NewServer(mgr, WithAuthToken("open-sesame", false))
+
+	// No credentials -> 401.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
+	req.Host = "localhost"
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", rec.Code)
+	}
+}
+
 func TestWebSocket_Init(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

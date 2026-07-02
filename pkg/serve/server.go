@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,8 @@ var staticFS embed.FS
 // serverOptions holds optional hardening configuration for NewServer.
 type serverOptions struct {
 	allowedHosts []string
+	token        string
+	secureCookie bool
 }
 
 // ServerOption configures optional NewServer behavior.
@@ -41,6 +44,16 @@ type ServerOption func(*serverOptions)
 // a Tailscale MagicDNS name.
 func WithAllowedHosts(hosts []string) ServerOption {
 	return func(o *serverOptions) { o.allowedHosts = hosts }
+}
+
+// WithAuthToken enables opt-in shared-token authentication. An empty token
+// leaves the server unauthenticated (current behavior). secureCookie marks the
+// session cookie Secure and should be true only when served over TLS.
+func WithAuthToken(token string, secureCookie bool) ServerOption {
+	return func(o *serverOptions) {
+		o.token = token
+		o.secureCookie = secureCookie
+	}
 }
 
 // NewServer returns an http.Handler wired to the given manager.
@@ -89,9 +102,64 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	}
 	mux.Handle("GET /", staticHandler)
 
+	handler := csrfMiddleware(mux)
+	// Token auth (when configured) sits under the Host check but above CSRF, so
+	// it also guards the WebSocket, push, and static routes via the cookie.
+	if o.token != "" {
+		handler = authMiddleware(o.token, o.secureCookie, handler)
+	}
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
-	return hostMiddleware(o.allowedHosts, csrfMiddleware(mux))
+	return hostMiddleware(o.allowedHosts, handler)
+}
+
+// authCookieName holds the shared token once a client has authenticated via
+// ?token=. It is HttpOnly so page scripts cannot read it.
+const authCookieName = "moa_auth"
+
+// authCookieMaxAge makes the auth cookie persistent rather than session-scoped:
+// the client is an installed mobile PWA, where session cookies evaporate often
+// and would force re-visiting ?token= constantly. 90 days keeps re-auth
+// acceptably sporadic.
+const authCookieMaxAge = int(90 * 24 * time.Hour / time.Second)
+
+// authMiddleware gates every request behind an opt-in shared token. A request
+// passes if it carries a valid auth cookie or a correct ?token=<secret> query
+// param. In the query case it sets an HttpOnly cookie and redirects to the same
+// URL without the param, so the token does not linger in history/logs and every
+// later request (WebSocket and push endpoints included) authenticates via the
+// cookie — no frontend changes needed. Anything else gets 401. The token is
+// compared in constant time.
+func authMiddleware(token string, secureCookie bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie(authCookieName); err == nil && tokenEqual(c.Value, token) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if tok := r.URL.Query().Get("token"); tok != "" && tokenEqual(tok, token) {
+			http.SetCookie(w, &http.Cookie{
+				Name:     authCookieName,
+				Value:    token,
+				Path:     "/",
+				MaxAge:   authCookieMaxAge,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   secureCookie,
+			})
+			// Redirect to the same URL without the token query param.
+			u := *r.URL
+			params := u.Query()
+			params.Del("token")
+			u.RawQuery = params.Encode()
+			http.Redirect(w, r, u.RequestURI(), http.StatusFound)
+			return
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+}
+
+func tokenEqual(got, want string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 // hostMiddleware rejects requests whose Host header is not allowed, defeating
