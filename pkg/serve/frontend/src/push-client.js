@@ -4,6 +4,7 @@
 // the "notifications" control.
 
 import { api } from './api.js';
+import { addToast } from './notifications.js';
 
 // Push state surfaced to the UI:
 //   'unsupported' — no SW / PushManager / Notification (e.g. iOS not installed)
@@ -41,6 +42,38 @@ function urlBase64ToUint8Array(base64) {
   return out;
 }
 
+// withTimeout rejects if a step doesn't settle in time, so the enable flow can
+// never hang silently on 'busy' (iOS can leave serviceWorker.ready or subscribe
+// pending forever). The label names the failing step in the surfaced error.
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout en «${label}»`)), ms)),
+  ]);
+}
+
+function bufToBase64Url(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Build the server payload explicitly from the subscription keys. Safer than
+// sub.toJSON(), which on iOS Safari has been observed to omit `keys` — the server
+// would then 400 and the browser would still hold a dangling subscription.
+function subscriptionPayload(sub) {
+  const p256dh = sub.getKey && sub.getKey('p256dh');
+  const auth = sub.getKey && sub.getKey('auth');
+  if (p256dh && auth) {
+    return {
+      endpoint: sub.endpoint,
+      keys: { p256dh: bufToBase64Url(p256dh), auth: bufToBase64Url(auth) },
+    };
+  }
+  return sub.toJSON();
+}
+
 // refreshPushState reconciles the UI with the browser's actual state on load.
 export async function refreshPushState() {
   if (!supported()) { setPushState('unsupported'); return; }
@@ -66,22 +99,23 @@ export async function enablePush() {
       setPushState(perm === 'denied' ? 'denied' : 'default');
       return;
     }
-    const { key } = await api('GET', '/api/push/vapid-public-key');
-    const reg = await navigator.serviceWorker.ready;
-    let sub = await reg.pushManager.getSubscription();
+    const { key } = await withTimeout(api('GET', '/api/push/vapid-public-key'), 10000, 'clave VAPID');
+    const reg = await withTimeout(navigator.serviceWorker.ready, 10000, 'service worker');
+    let sub = await withTimeout(reg.pushManager.getSubscription(), 10000, 'suscripción actual');
     if (!sub) {
-      sub = await reg.pushManager.subscribe({
+      sub = await withTimeout(reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(key),
-      });
+      }), 20000, 'suscribir');
     }
-    // sub.toJSON() → { endpoint, expirationTime, keys:{p256dh,auth} }; the extra
-    // field is ignored server-side (pkg/push expects endpoint + keys).
-    await api('POST', '/api/push/subscribe', sub.toJSON());
+    await withTimeout(api('POST', '/api/push/subscribe', subscriptionPayload(sub)), 10000, 'guardar en servidor');
     setPushState('subscribed');
   } catch (e) {
+    // Surface the failure instead of silently reporting success: a browser-side
+    // subscription can exist even when the server never stored it.
     console.error('[push] enable failed', e);
-    await refreshPushState();
+    addToast({ title: 'No se pudieron activar las notificaciones', detail: String((e && e.message) || e), type: 'attention' });
+    setPushState('default');
   }
 }
 

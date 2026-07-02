@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -85,10 +86,14 @@ func handlePushSubscribe(mgr *Manager) http.HandlerFunc {
 		limitBody(w, r, maxJSONBodySize)
 		var sub webpush.Subscription
 		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+			slog.Warn("push: subscribe decode failed", "error", err)
 			http.Error(w, "invalid subscription", http.StatusBadRequest)
 			return
 		}
 		if !strings.HasPrefix(sub.Endpoint, "https://") || sub.Keys.P256dh == "" || sub.Keys.Auth == "" {
+			slog.Warn("push: subscribe rejected",
+				"endpoint_https", strings.HasPrefix(sub.Endpoint, "https://"),
+				"has_p256dh", sub.Keys.P256dh != "", "has_auth", sub.Keys.Auth != "")
 			http.Error(w, "invalid subscription", http.StatusBadRequest)
 			return
 		}
@@ -96,6 +101,7 @@ func handlePushSubscribe(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "could not store subscription", http.StatusInternalServerError)
 			return
 		}
+		slog.Info("push: subscription stored", "total", mgr.pushStore.Len())
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
