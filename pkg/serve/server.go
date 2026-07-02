@@ -766,6 +766,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// wsWriteTimeout bounds a single WebSocket message write. A stalled client (its
+// receive buffer full) must not block the writer goroutine forever; on timeout
+// the write fails and the handler tears the connection down.
+const wsWriteTimeout = 30 * time.Second
+
 func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck
+	ctx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
+	defer cancel()
 	return wsjson.Write(ctx, conn, v)
 }

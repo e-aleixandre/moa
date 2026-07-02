@@ -84,7 +84,16 @@ func runServe(args []string) {
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 	fmt.Printf("moa serve listening on http://%s\n", addr)
 
-	httpServer := &http.Server{Addr: addr, Handler: srv}
+	// ReadHeaderTimeout and IdleTimeout bound slow-header and idle keep-alive
+	// connections. We deliberately leave ReadTimeout/WriteTimeout unset: a global
+	// write deadline would sever long-lived WebSocket connections. Per-message WS
+	// write deadlines live in pkg/serve/ws.go instead.
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
