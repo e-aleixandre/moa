@@ -18,6 +18,21 @@ function getHistory(id) {
 }
 const MAX_HISTORY = 100;
 
+// Per-session unsent draft, persisted to localStorage so a page reload (iOS
+// evicts backgrounded PWAs freely) doesn't lose what you were typing.
+const DRAFT_PREFIX = 'moa-draft-';
+function loadDraft(id) {
+  if (!id) return '';
+  try { return localStorage.getItem(DRAFT_PREFIX + id) || ''; } catch (_) { return ''; }
+}
+function saveDraft(id, text) {
+  if (!id) return;
+  try {
+    if (text) localStorage.setItem(DRAFT_PREFIX + id, text);
+    else localStorage.removeItem(DRAFT_PREFIX + id);
+  } catch (_) { /* ignore */ }
+}
+
 // Available commands for the suggestion popup.
 const COMMANDS = [
   { name: 'clear', desc: 'Clear conversation history' },
@@ -120,6 +135,15 @@ export function InputBar({ sessionId, session, tileId }) {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }, []);
+
+  // Restore the persisted draft when this input binds to a session (mount or
+  // session switch). The previous session's draft was already saved on input.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.value = loadDraft(sessionId);
+    autoResize();
+  }, [sessionId, autoResize]);
 
   const pushHistory = useCallback((text) => {
     if (!sessionId) return;
@@ -290,6 +314,7 @@ export function InputBar({ sessionId, session, tileId }) {
     if (!text) return;
     pushHistory(text);
     el.value = '';
+    saveDraft(sessionId, ''); // sent — drop the persisted draft
     setCmdSuggestions(null);
     setFileSuggestions(null);
     autoResize();
@@ -461,6 +486,7 @@ export function InputBar({ sessionId, session, tileId }) {
   const handleInput = (e) => {
     autoResize();
     updateSuggestions();
+    saveDraft(sessionId, e.target.value);
     // File suggestions with debounce.
     clearTimeout(fileDebounceRef.current);
     fileDebounceRef.current = setTimeout(updateFileSuggestions, 100);
