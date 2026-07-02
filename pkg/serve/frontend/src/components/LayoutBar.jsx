@@ -1,7 +1,8 @@
-import { Bell, BellOff, Search, PanelRight, PanelBottom } from 'lucide-preact';
-import { applyPreset, addPane, toggleSound } from '../tile-actions.js';
+import { Search, PanelRight, PanelBottom } from 'lucide-preact';
+import { applyPreset, addPane } from '../tile-actions.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { PRESETS } from '../layoutPresets.js';
+import { NotificationSettings } from './NotificationSettings.jsx';
 
 function LayoutPreview({ preset }) {
   return (
@@ -44,13 +45,7 @@ export function LayoutBar({ state, onOpenPalette }) {
         <PanelBottom />
       </button>
       <div class="layout-bar-spacer" />
-      <button
-        class={`sound-toggle ${state.soundEnabled ? 'on' : ''}`}
-        onClick={toggleSound}
-        title={state.soundEnabled ? 'Sound on' : 'Sound off'}
-      >
-        {state.soundEnabled ? <Bell /> : <BellOff />}
-      </button>
+      <NotificationSettings state={state} />
     </div>
   );
 }

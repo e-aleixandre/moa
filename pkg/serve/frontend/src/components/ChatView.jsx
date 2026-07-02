@@ -4,6 +4,7 @@ import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
+import { NotificationSettings } from './NotificationSettings.jsx';
 import { ModelPill } from './ModelPill.jsx';
 import { TaskBar } from './TaskBar.jsx';
 
@@ -32,6 +33,7 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
             <span class="chat-header-title">moa</span>
             <ChevronDown class="chat-header-chevron" />
           </button>
+          <NotificationSettings state={state} />
         </div>
         <div class="empty-state">
           <p>No active session</p>
@@ -59,6 +61,7 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}
         <ModelPill model={session.model} thinking={session.thinking} />
+        <NotificationSettings state={state} />
         <SettingsDropdown sessionId={state.activeSession} session={session} />
       </div>
 

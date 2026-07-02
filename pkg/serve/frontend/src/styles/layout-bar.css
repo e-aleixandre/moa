@@ -56,15 +56,3 @@
 .add-pane-btn .lucide { width: 14px; height: 14px; }
 
 .layout-bar-spacer { flex: 1; }
-
-.layout-bar .sound-toggle {
-  padding: 6px;
-  color: var(--overlay1);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.layout-bar .sound-toggle:hover { color: var(--subtext1); background: var(--surface0); }
-.layout-bar .sound-toggle.on { color: var(--peach); }
-.layout-bar .sound-toggle .lucide { width: 15px; height: 15px; }

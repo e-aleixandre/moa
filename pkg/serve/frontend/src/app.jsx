@@ -3,11 +3,11 @@ import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { store } from './store.js';
 import { loadSessions, startPolling, startUsagePolling, stopUsagePolling } from './session-actions.js';
 import {
-  setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex,
+  setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex, openSession,
 } from './tile-actions.js';
 import { inputBarRegistry } from './components/InputBar.jsx';
-import { requestNotificationPermission } from './notifications.js';
 import { registerServiceWorker } from './pwa.js';
+import { refreshPushState } from './push-client.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
 import { TabBar } from './components/TabBar.jsx';
 import { TileTree } from './components/TileTree.jsx';
@@ -36,14 +36,29 @@ function App() {
 
   useEffect(() => {
     loadSessions().then(() => {
-      if (store.get().isMobile) autoSelectMobile();
+      // A push notification tap can cold-start the app at /?session=<id>.
+      const wanted = new URLSearchParams(location.search).get('session');
+      if (wanted && openSession(wanted)) {
+        history.replaceState({}, '', location.pathname); // don't re-pin on refresh
+      } else if (store.get().isMobile) autoSelectMobile();
       else autoFillTiles();
     });
     startPolling();
     startUsagePolling();
-    requestNotificationPermission();
     registerServiceWorker();
+    refreshPushState();
     return () => stopUsagePolling();
+  }, []);
+
+  // Warm focus from a push tap: the SW postMessages an open-session request to
+  // the already-running window instead of navigating.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMsg = (e) => {
+      if (e.data?.type === 'open-session' && e.data.sessionId) openSession(e.data.sessionId);
+    };
+    navigator.serviceWorker.addEventListener('message', onMsg);
+    return () => navigator.serviceWorker.removeEventListener('message', onMsg);
   }, []);
 
   useEffect(() => {

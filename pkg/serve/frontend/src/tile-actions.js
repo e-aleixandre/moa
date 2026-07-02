@@ -120,6 +120,17 @@ export function setActiveSession(id) {
   afterVisibilityChange();
 }
 
+// openSession brings a session into view regardless of layout — used by push
+// notification routing (?session= on cold start, postMessage on warm focus).
+// Returns false if the session isn't loaded so the caller can fall back.
+export function openSession(id) {
+  const state = store.get();
+  if (!state.sessions[id]) return false;
+  if (state.isMobile) setActiveSession(id);
+  else assignToTile(state.focusedTile, id);
+  return true;
+}
+
 export function toggleSound() {
   const state = store.get();
   setState({ soundEnabled: !state.soundEnabled });

@@ -54,12 +54,6 @@ function playBeep() {
 }
 
 // Browser notifications
-export function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
-}
-
 function browserNotify(title, body) {
   if (!document.hidden) return;
   if ('Notification' in window && Notification.permission === 'granted') {
