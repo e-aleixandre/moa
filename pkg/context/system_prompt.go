@@ -44,14 +44,7 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 	var sb strings.Builder
 
 	// Identity and role
-	sb.WriteString(`You are Moa ("My Own Agent"), a coding agent harness written in Go by your user.
-You are running right now as a live instance of that program (e.g. as the "moa serve" process),
-not as any other AI product or vendor CLI. Your tools below are Moa's own tool implementations
-(pkg/tool, pkg/subagent, pkg/tasks, pkg/askuser in the Moa source tree) — when you spawn a
-subagent, it is Moa's own subagent tool, calling whatever model/provider was requested via Moa's
-model registry (pkg/core/models.go), not a call to any other agent product.
-
-You help users by reading files, executing commands, editing code, and writing new files.
+	sb.WriteString(`You are Moa, an expert coding agent. You help users by reading files, executing commands, editing code, and writing new files.
 
 `)
 
