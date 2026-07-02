@@ -179,6 +179,53 @@ func TestCSRF_MissingHeader(t *testing.T) {
 	}
 }
 
+func TestHostMiddleware(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := hostMiddleware([]string{"moa.tail1234.ts.net"}, next)
+
+	cases := []struct {
+		host string
+		want int
+	}{
+		{"localhost", 200},
+		{"localhost:8080", 200},
+		{"127.0.0.1", 200},
+		{"127.0.0.1:8080", 200},
+		{"[::1]", 200},
+		{"[::1]:8080", 200},
+		{"192.168.1.10:8080", 200},        // LAN IP literal — cannot be rebound
+		{"moa.tail1234.ts.net", 200},      // allowlisted host
+		{"MOA.tail1234.ts.net:8080", 200}, // case-insensitive, port ignored
+		{"evil.example.com", 403},         // DNS-rebinding attempt
+		{"evil.example.com:8080", 403},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = c.host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("host %q: got %d, want %d", c.host, rec.Code, c.want)
+		}
+	}
+}
+
+func TestServer_RejectsRebindingHost(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newMockProvider(simpleResponseHandler("x"))
+	mgr := newTestManager(t, ctx, prov)
+	handler := NewServer(mgr, WithAllowedHosts(nil))
+
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
+	req.Host = "attacker.example.com"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for rebinding host, got %d", rec.Code)
+	}
+}
+
 func TestWebSocket_Init(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

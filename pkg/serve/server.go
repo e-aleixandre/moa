@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,8 +28,28 @@ import (
 //go:embed static
 var staticFS embed.FS
 
+// serverOptions holds optional hardening configuration for NewServer.
+type serverOptions struct {
+	allowedHosts []string
+}
+
+// ServerOption configures optional NewServer behavior.
+type ServerOption func(*serverOptions)
+
+// WithAllowedHosts adds extra hostnames accepted by the anti DNS-rebinding Host
+// check (on top of localhost and any IP literal). Use it for named hosts such as
+// a Tailscale MagicDNS name.
+func WithAllowedHosts(hosts []string) ServerOption {
+	return func(o *serverOptions) { o.allowedHosts = hosts }
+}
+
 // NewServer returns an http.Handler wired to the given manager.
-func NewServer(manager *Manager) http.Handler {
+func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
+	var o serverOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/models", handleListModels())
@@ -68,7 +89,48 @@ func NewServer(manager *Manager) http.Handler {
 	}
 	mux.Handle("GET /", staticHandler)
 
-	return csrfMiddleware(mux)
+	// Host validation is the outermost middleware so it protects every route,
+	// including the WebSocket upgrade, against DNS rebinding.
+	return hostMiddleware(o.allowedHosts, csrfMiddleware(mux))
+}
+
+// hostMiddleware rejects requests whose Host header is not allowed, defeating
+// DNS-rebinding attacks (where a malicious page resolves an attacker domain to
+// 127.0.0.1 to reach a local server). Origin checks do not help here: for a
+// rebinding attack Origin and Host both belong to the attacker's domain.
+//
+// Always allowed: localhost and any IP literal (a fixed IP cannot be rebound).
+// Extra named hosts (e.g. a Tailscale MagicDNS name) come from --allowed-hosts.
+// The port is ignored when comparing.
+func hostMiddleware(allowedHosts []string, next http.Handler) http.Handler {
+	allowed := map[string]bool{"localhost": true}
+	for _, h := range allowedHosts {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			allowed[h] = true
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := hostnameOnly(r.Host)
+		if allowed[host] || net.ParseIP(host) != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, fmt.Sprintf("forbidden host %q: pass --allowed-hosts to permit it", host), http.StatusForbidden)
+	})
+}
+
+// hostnameOnly strips the port from a Host header value and lowercases it,
+// handling bracketed IPv6 literals with or without a port.
+func hostnameOnly(hostport string) string {
+	if hostport == "" {
+		return ""
+	}
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return strings.ToLower(h)
+	}
+	// No port present: may still be a bracketed IPv6 literal like "[::1]".
+	h := strings.TrimSuffix(strings.TrimPrefix(hostport, "["), "]")
+	return strings.ToLower(h)
 }
 
 func csrfMiddleware(next http.Handler) http.Handler {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,7 @@ func runServe(args []string) {
 	port := fs.Int("port", 8080, "HTTP port")
 	host := fs.String("host", "127.0.0.1", "Bind address (use 0.0.0.0 for remote access)")
 	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
+	allowedHosts := fs.String("allowed-hosts", "", "Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost and IP literals are always allowed; e.g. a Tailscale MagicDNS name)")
 	_ = fs.Parse(args)
 
 	if *host != "127.0.0.1" && *host != "localhost" && *host != "::1" {
@@ -77,7 +79,7 @@ func runServe(args []string) {
 		MoaCfg:         moaCfg,
 	})
 
-	srv := serve.NewServer(mgr)
+	srv := serve.NewServer(mgr, serve.WithAllowedHosts(splitCSV(*allowedHosts)))
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 	fmt.Printf("moa serve listening on http://%s\n", addr)
@@ -99,6 +101,17 @@ func runServe(args []string) {
 	// turn that finished just before shutdown is not lost with the async
 	// RunEnded→TreeSynced→save chain.
 	mgr.Shutdown()
+}
+
+// splitCSV splits a comma-separated flag value into trimmed, non-empty items.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // pushSubscriber is the VAPID JWT "sub" claim — a contact for the push service
