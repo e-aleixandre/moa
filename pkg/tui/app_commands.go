@@ -258,7 +258,7 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyBackspace:
 			if len(m.permPrompt.ruleBuf) > 0 {
-				m.permPrompt.ruleBuf = m.permPrompt.ruleBuf[:len(m.permPrompt.ruleBuf)-1]
+				m.permPrompt.ruleBuf = trimLastRune(m.permPrompt.ruleBuf)
 			} else {
 				m.permPrompt.ruleMode = false
 			}
@@ -290,7 +290,7 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyBackspace:
 			if len(m.permPrompt.amendBuf) > 0 {
-				m.permPrompt.amendBuf = m.permPrompt.amendBuf[:len(m.permPrompt.amendBuf)-1]
+				m.permPrompt.amendBuf = trimLastRune(m.permPrompt.amendBuf)
 			} else {
 				m.permPrompt.amending = false
 			}

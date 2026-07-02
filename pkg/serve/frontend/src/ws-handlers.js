@@ -133,6 +133,7 @@ const pendingTextDeltas = {};
 const pendingThinkingDeltas = {};
 const pendingToolDeltas = {};
 const pendingToolCallBuffers = {}; // sessionId → { toolCallId → { args } }
+const materializedTextDuringMessage = {};
 let flushScheduled = false;
 
 function scheduleFlush() {
@@ -200,6 +201,7 @@ export function handleWsInit(id, data) {
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
   delete pendingToolCallBuffers[id];
+  delete materializedTextDuringMessage[id];
   updateSession(id, {
     messages: normalizeHistory(data.messages || []),
     state: data.state || 'idle',
@@ -212,6 +214,17 @@ export function handleWsInit(id, data) {
     tasks: data.tasks || [],
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,
+  });
+}
+
+export function handleWsMessageStart(id) {
+  delete pendingTextDeltas[id];
+  delete pendingThinkingDeltas[id];
+  delete materializedTextDuringMessage[id];
+  if (!store.get().sessions[id]) return;
+  updateSession(id, {
+    streamingText: null,
+    thinkingText: null,
   });
 }
 
@@ -228,23 +241,50 @@ export function handleWsThinkingDelta(id, delta) {
 }
 
 export function handleWsMessageEnd(id, fullText) {
+  const pendingText = pendingTextDeltas[id] || '';
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   const sess = store.get().sessions[id];
-  if (!sess) return;
-  const msg = { role: 'assistant', content: [{ type: 'text', text: fullText }] };
-  updateSession(id, {
-    messages: [...sess.messages, msg],
+  if (!sess) {
+    delete materializedTextDuringMessage[id];
+    return;
+  }
+
+  // fullText is authoritative: it repairs deltas dropped under bus
+  // backpressure and clients that connected mid-message. When tool calls
+  // already materialized part of the text, derive the remaining tail from
+  // fullText (it concatenates all text blocks with no separator); if they
+  // diverge — a delta was lost before materializing — fall back to the
+  // streamed tail rather than duplicate text.
+  const streamed = (sess.streamingText || '') + pendingText;
+  const materialized = materializedTextDuringMessage[id] || '';
+  let assistantText;
+  if (!materialized) {
+    assistantText = fullText || streamed;
+  } else if (fullText && fullText.startsWith(materialized)) {
+    assistantText = fullText.slice(materialized.length);
+  } else {
+    assistantText = streamed;
+  }
+
+  const patch = {
     streamingText: null,
     thinkingText: null,
-  });
+  };
+  if (assistantText) {
+    const msg = { role: 'assistant', content: [{ type: 'text', text: assistantText }] };
+    patch.messages = [...sess.messages, msg];
+  }
+
+  delete materializedTextDuringMessage[id];
+  updateSession(id, patch);
 }
 
 export function handleWsToolCallStart(id, data) {
   const sess = store.get().sessions[id];
   if (!sess) return;
 
-  // Check if block already exists (tool_start arrived before tool_call_start due to reordering).
+  // Check if a fallback block already exists (for missed/reconnected streams).
   const existingIdx = (sess.messages || []).findIndex(
     m => m._type === 'tool_start' && m.tool_call_id === data.tool_call_id,
   );
@@ -262,14 +302,29 @@ export function handleWsToolCallStart(id, data) {
   }
 
   // Materialize streaming text before tool block (match TUI ordering).
+  const pendingText = pendingTextDeltas[id] || '';
+  const pendingThinking = pendingThinkingDeltas[id] || '';
+  delete pendingTextDeltas[id];
+  delete pendingThinkingDeltas[id];
+
   const messages = [...sess.messages];
   const patch = {};
-  if (sess.streamingText) {
+  const textToMaterialize = (sess.streamingText || '') + pendingText;
+  const thinkingToClear = (sess.thinkingText || '') + pendingThinking;
+  if (textToMaterialize) {
     messages.push({
       role: 'assistant',
-      content: [{ type: 'text', text: sess.streamingText }],
+      content: [{ type: 'text', text: textToMaterialize }],
     });
     patch.streamingText = null;
+    // Accumulate the materialized text (a message may materialize across several
+    // tool calls) so message_end can derive the remaining tail from fullText.
+    // Storing a boolean here would break that: startsWith/slice treat it as the
+    // string "true", disabling the repair and duplicating text that starts with
+    // "true".
+    materializedTextDuringMessage[id] = (materializedTextDuringMessage[id] || '') + textToMaterialize;
+  }
+  if (thinkingToClear) {
     patch.thinkingText = null;
   }
 
@@ -442,6 +497,22 @@ export function handleWsPermissionRequest(id, data) {
   }
 }
 
+// Another client (or a run abort) resolved the permission — clear the modal
+// so it doesn't hang on this client. Guard by id so a newer request survives.
+export function handleWsPermissionResolved(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !sess.pendingPerm) return;
+  if (data && data.id && sess.pendingPerm.id !== data.id) return;
+  updateSession(id, { pendingPerm: null });
+}
+
+export function handleWsAskResolved(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !sess.pendingAsk) return;
+  if (data && data.id && sess.pendingAsk.id !== data.id) return;
+  updateSession(id, { pendingAsk: null });
+}
+
 function flashSession(id, type) {
   updateSession(id, { flash: type });
   setTimeout(() => {
@@ -500,6 +571,7 @@ export function handleWsRunEnd(id) {
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
   delete pendingToolCallBuffers[id];
+  delete materializedTextDuringMessage[id];
 
   // Mark any generating tools as cancelled.
   const sess = store.get().sessions[id];

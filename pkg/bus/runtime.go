@@ -117,6 +117,9 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		GateConfig:       cfg.GateConfig,
 	}
 	sctx.SetGate(cfg.Gate)
+	// Let the approval manager stamp pending requests with the current run
+	// generation so ClearPending can spare a newer run's live approvals.
+	am.runGen = &sctx.RunGenAtomic
 
 	// Compose permission check: plan mode filter + gate check.
 	permCheck := func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {

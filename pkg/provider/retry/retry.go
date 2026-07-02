@@ -134,11 +134,14 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 		}
 
 		wait := backoff(attempt, p)
-		if ra := retryAfter(resp); ra > wait {
-			wait = ra
-		}
 		if wait > p.MaxDelay {
 			wait = p.MaxDelay
+		}
+		// Retry-After is a server directive — honor it in full even beyond
+		// MaxDelay. Capping it (e.g. a Retry-After: 60 clamped to 32s) would
+		// retry before the server is ready and earn another 429.
+		if ra := retryAfter(resp); ra > wait {
+			wait = ra
 		}
 
 		if notify != nil {

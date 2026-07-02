@@ -100,9 +100,11 @@ func TestEmitter_DrainTimeout(t *testing.T) {
 		select {} // block
 	})
 
-	// Fill with more events than buffer to ensure channel stays non-empty
+	// Fill past the buffer to ensure the channel stays non-empty. Use lossy
+	// events: structural ones would (correctly) block Emit against the wedged
+	// handler, which isn't what this test exercises.
 	for i := 0; i < 300; i++ {
-		e.Emit(core.AgentEvent{Type: core.AgentEventStart})
+		e.Emit(core.AgentEvent{Type: core.AgentEventMessageUpdate})
 	}
 
 	start := time.Now()
@@ -220,16 +222,17 @@ func TestEmitter_DroppedEventNotCounted(t *testing.T) {
 
 	// Send first event and wait for handler to start processing it.
 	// This ensures the handler holds 1 event while we fill the buffer.
-	e.Emit(core.AgentEvent{Type: core.AgentEventStart})
+	e.Emit(core.AgentEvent{Type: core.AgentEventMessageUpdate})
 	<-started
 
-	// Fill buffer completely (256 events in channel)
+	// Fill buffer completely (256 lossy events in channel)
 	for i := 0; i < subscriberBuffer; i++ {
-		e.Emit(core.AgentEvent{Type: core.AgentEventStart})
+		e.Emit(core.AgentEvent{Type: core.AgentEventMessageUpdate})
 	}
 
-	// This one gets dropped — buffer is full, handler is blocked
-	e.Emit(core.AgentEvent{Type: core.AgentEventStart})
+	// This one gets dropped — buffer is full, handler is blocked, and the
+	// event is lossy (only deltas may be dropped).
+	e.Emit(core.AgentEvent{Type: core.AgentEventMessageUpdate})
 
 	// Unblock handler
 	close(gate)
@@ -244,6 +247,53 @@ func TestEmitter_DroppedEventNotCounted(t *testing.T) {
 	// 1 in handler + 256 in buffer = 257 accepted; 1 dropped
 	if got := processed.Load(); got != int32(subscriberBuffer+1) {
 		t.Fatalf("expected %d events processed (1 dropped), got %d", subscriberBuffer+1, got)
+	}
+}
+
+func TestEmitter_StructuralEventNotDroppedUnderBackpressure(t *testing.T) {
+	e := NewEmitter(nil)
+	started := make(chan struct{}, 1)
+	gate := make(chan struct{})
+	var processed atomic.Int32
+
+	e.Subscribe(func(evt core.AgentEvent) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-gate
+		processed.Add(1)
+	})
+
+	// Occupy the handler, then fill the buffer with lossy events.
+	e.Emit(core.AgentEvent{Type: core.AgentEventMessageUpdate})
+	<-started
+	for i := 0; i < subscriberBuffer; i++ {
+		e.Emit(core.AgentEvent{Type: core.AgentEventMessageUpdate})
+	}
+
+	// A structural event must NOT be dropped: Emit blocks until room frees up.
+	emitReturned := make(chan struct{})
+	go func() {
+		e.Emit(core.AgentEvent{Type: core.AgentEventToolExecEnd})
+		close(emitReturned)
+	}()
+
+	// While the buffer is full, the structural Emit is still blocked.
+	select {
+	case <-emitReturned:
+		t.Fatal("structural Emit returned while buffer was full — event was dropped")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Draining the buffer lets the structural event through.
+	close(gate)
+	<-emitReturned
+	e.Drain(5 * time.Second)
+
+	// 1 held + 256 buffered + 1 structural = subscriberBuffer+2.
+	if got := processed.Load(); got != int32(subscriberBuffer+2) {
+		t.Fatalf("expected %d events processed (none dropped), got %d", subscriberBuffer+2, got)
 	}
 }
 

@@ -156,6 +156,21 @@ func TestAsk_DenyListBlocksBeforeAllow(t *testing.T) {
 	}
 }
 
+func TestDenyBlocksReadOnlyTools(t *testing.T) {
+	// A deny rule must override the read-only fast-path (e.g. hide secrets).
+	for _, mode := range []Mode{ModeAsk, ModeAuto} {
+		g := New(mode, Config{Deny: []string{"Read(*.env)"}})
+		d := g.Check(context.Background(), "read", map[string]any{"path": "secrets.env"})
+		if d == nil || !d.Block {
+			t.Errorf("mode %v: deny rule should block read of secrets.env", mode)
+		}
+		// A non-denied read is still auto-approved.
+		if d := g.Check(context.Background(), "read", map[string]any{"path": "main.go"}); d != nil {
+			t.Errorf("mode %v: non-denied read should be approved", mode)
+		}
+	}
+}
+
 func TestAsk_AddAllowAtRuntime(t *testing.T) {
 	g := New(ModeAsk, Config{})
 

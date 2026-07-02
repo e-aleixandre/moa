@@ -7,6 +7,15 @@ const marked = new Marked({
   gfm: true,
 });
 
+// Escape untrusted text before interpolating it into HTML attributes/markup.
+// The code fence info-string (lang) is attacker-controllable when the assistant
+// quotes file/web content, so it must never break out of the attribute.
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 // Customize renderer: wrap code blocks for CodeBlock component
 const renderer = {
   code({ text, lang }) {
@@ -16,12 +25,12 @@ const renderer = {
     } else {
       highlighted = hljs.highlightAuto(text).value;
     }
-    const langLabel = lang || '';
+    const langLabel = escapeHtml(lang || '');
     const langClass = langLabel ? ` lang-${langLabel}` : '';
     return `<div class="code-block${langClass}" data-lang="${langLabel}">
       <div class="code-block-header">
         <span class="code-block-lang">${langLabel}</span>
-        <button class="code-block-copy" onclick="window.__copyCode(this)">Copy</button>
+        <button class="code-block-copy" type="button">Copy</button>
       </div>
       <pre><code class="hljs">${highlighted}</code></pre>
     </div>`;
@@ -30,9 +39,11 @@ const renderer = {
 
 marked.use({ renderer });
 
-// Global copy handler
-window.__copyCode = function(btn) {
-  const pre = btn.closest('.code-block').querySelector('pre code');
+// Copy handler via event delegation, so code blocks carry no inline onclick —
+// that let DOMPurify's ADD_ATTR whitelist onclick on *any* element, turning
+// quoted assistant HTML into an XSS sink.
+function copyCode(btn) {
+  const pre = btn.closest('.code-block')?.querySelector('pre code');
   if (!pre) return;
   navigator.clipboard.writeText(pre.textContent).then(() => {
     btn.textContent = 'Copied!';
@@ -42,12 +53,19 @@ window.__copyCode = function(btn) {
       btn.classList.remove('copied');
     }, 2000);
   });
-};
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('.code-block-copy');
+    if (btn) copyCode(btn);
+  });
+}
 
 export function renderMarkdown(text) {
   const raw = marked.parse(text);
   return DOMPurify.sanitize(raw, {
     ADD_TAGS: ['div', 'button', 'span'],
-    ADD_ATTR: ['class', 'data-lang', 'onclick'],
+    ADD_ATTR: ['class', 'data-lang'],
   });
 }

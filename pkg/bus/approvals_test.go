@@ -179,6 +179,97 @@ func TestApprovalManager_StopBridge_AutoDenies(t *testing.T) {
 	}
 }
 
+func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
+	am, b := newTestApprovalManager(t)
+
+	permResp := make(chan permission.Response, 1)
+	askResp := make(chan []string, 1)
+	am.mu.Lock()
+	am.perms["p1"] = &PendingPermission{ID: "p1", ToolName: "write", RunGen: 1, response: permResp}
+	am.asks["a1"] = &PendingAsk{ID: "a1", Questions: []AskQuestion{{Text: "Name?"}}, RunGen: 1, response: askResp}
+	am.mu.Unlock()
+
+	gotPermResolved := make(chan PermissionResolved, 1)
+	gotAskResolved := make(chan AskUserResolved, 1)
+	b.Subscribe(func(e PermissionResolved) { gotPermResolved <- e })
+	b.Subscribe(func(e AskUserResolved) { gotAskResolved <- e })
+
+	am.ClearPending(1)
+
+	// Both pending requests must be auto-denied so the agent goroutines unblock.
+	select {
+	case resp := <-permResp:
+		if resp.Approved {
+			t.Fatal("expected permission denied")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("permission response never sent")
+	}
+	select {
+	case answers := <-askResp:
+		if answers != nil {
+			t.Fatalf("expected nil ask answers, got %v", answers)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ask response never sent")
+	}
+
+	// Resolved events must fire so reconnecting clients clear the modal.
+	select {
+	case <-gotPermResolved:
+	case <-time.After(time.Second):
+		t.Fatal("no PermissionResolved published")
+	}
+	select {
+	case <-gotAskResolved:
+	case <-time.After(time.Second):
+		t.Fatal("no AskUserResolved published")
+	}
+
+	// Nothing must remain pending.
+	if info := am.PendingInfo(); info.Permission != nil || info.Ask != nil {
+		t.Fatalf("expected no pending after clear, got %+v", info)
+	}
+}
+
+func TestApprovalManager_ClearPending_SparesNewerRun(t *testing.T) {
+	// A delayed RunEnded of an aborted run must not auto-deny a live approval
+	// that a newer, already-started run registered in the meantime.
+	am, _ := newTestApprovalManager(t)
+
+	oldResp := make(chan permission.Response, 1)
+	newResp := make(chan permission.Response, 1)
+	am.mu.Lock()
+	am.perms["old"] = &PendingPermission{ID: "old", ToolName: "write", RunGen: 1, response: oldResp}
+	am.perms["new"] = &PendingPermission{ID: "new", ToolName: "write", RunGen: 2, response: newResp}
+	am.mu.Unlock()
+
+	// The run that just ended is generation 1.
+	am.ClearPending(1)
+
+	// The old orphan is denied and gone.
+	select {
+	case resp := <-oldResp:
+		if resp.Approved {
+			t.Fatal("expected old permission denied")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("old permission response never sent")
+	}
+
+	// The newer run's approval must survive untouched — no response sent.
+	select {
+	case <-newResp:
+		t.Fatal("newer run's permission must not be auto-denied by an old RunEnded")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// It must still be pending and resolvable normally.
+	if info := am.PendingInfo(); info.Permission == nil || info.Permission.ID != "new" {
+		t.Fatalf("expected 'new' still pending, got %+v", info)
+	}
+}
+
 func TestApprovalManager_ResolveAskUser(t *testing.T) {
 	am, b := newTestApprovalManager(t)
 

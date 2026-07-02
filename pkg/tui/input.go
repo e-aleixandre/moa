@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/key"
@@ -11,6 +12,17 @@ import (
 )
 
 const maxHistory = 100
+
+// trimLastRune drops the final UTF-8 rune from s (not just the last byte), so
+// backspacing over a multibyte character like "á" doesn't leave invalid bytes
+// that render as garbage or corrupt the value sent onward.
+func trimLastRune(s string) string {
+	if s == "" {
+		return s
+	}
+	_, size := utf8.DecodeLastRuneInString(s)
+	return s[:len(s)-size]
+}
 
 // inputModel wraps textarea for user input with history navigation.
 type inputModel struct {

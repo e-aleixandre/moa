@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,47 @@ func TestUnifiedDiff_LineNumbers(t *testing.T) {
 	// Context lines should also have numbers.
 	if !strings.Contains(diff, "   2  line2") || !strings.Contains(diff, "   3  line3") {
 		t.Errorf("expected context lines with numbers, got:\n%s", diff)
+	}
+}
+
+func TestUnifiedDiff_LargeFileSingleEditIsCheap(t *testing.T) {
+	// Editing one line in a 30k-line file must not allocate an O(n*m) DP
+	// table (~7GB before the prefix/suffix trim). Prefix/suffix trimming
+	// leaves a 1-line middle region, so this returns instantly.
+	var oldB, newB strings.Builder
+	const nLines = 30000
+	for i := 0; i < nLines; i++ {
+		fmt.Fprintf(&oldB, "line %d\n", i)
+		if i == 15000 {
+			newB.WriteString("CHANGED\n")
+		} else {
+			fmt.Fprintf(&newB, "line %d\n", i)
+		}
+	}
+
+	diff := unifiedDiff(oldB.String(), newB.String(), 2)
+	if !strings.Contains(diff, "-line 15000") || !strings.Contains(diff, "+CHANGED") {
+		t.Errorf("expected the single change in the diff, got:\n%s", diff)
+	}
+	// The diff must be a small window, not the whole file.
+	if lines := strings.Count(diff, "\n"); lines > 50 {
+		t.Errorf("expected a compact diff, got %d lines", lines)
+	}
+}
+
+func TestLCS_HugeDifferingRegionFallsBackWithoutOOM(t *testing.T) {
+	// Two large, wholly-different blobs exceed the cell cap: lcs must return
+	// (no matches in the middle) instead of allocating a giant table.
+	a := make([]string, 3000)
+	b := make([]string, 3000)
+	for i := range a {
+		a[i] = fmt.Sprintf("a%d", i)
+		b[i] = fmt.Sprintf("b%d", i)
+	}
+	// 3000*3000 = 9M cells > maxLCSCells(4M) → fallback, no DP allocation.
+	got := lcs(a, b)
+	if len(got) != 0 {
+		t.Errorf("expected no common matches for disjoint blobs, got %d", len(got))
 	}
 }
 

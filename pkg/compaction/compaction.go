@@ -55,14 +55,24 @@ func FindCutPoint(msgs []core.AgentMessage, contextTokens, contextWindow int, se
 	for i := len(msgs) - 1; i >= 0; i-- {
 		accumulated += core.EstimateTokens(msgs[i].Message)
 		if accumulated >= targetKeep {
-			// Snap forward to a valid cut boundary.
+			// Snap forward to a valid cut boundary (start of a user/assistant
+			// turn or a summary). Never cut on a tool_result: that would keep
+			// it while summarizing the tool_use that produced it, leaving an
+			// orphan the provider rejects.
 			for j := i; j < len(msgs); j++ {
 				r := msgs[j].Role
 				if r == "user" || r == "assistant" || r == "compaction_summary" {
 					return j
 				}
 			}
-			return i
+			// Only trailing tool_results ahead — snap backward to the
+			// assistant that owns them so the pair stays on the kept side.
+			for j := i; j >= 0; j-- {
+				if msgs[j].Role == "assistant" {
+					return j
+				}
+			}
+			return 0
 		}
 	}
 	return 0

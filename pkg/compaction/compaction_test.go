@@ -72,6 +72,42 @@ func TestFindCutPoint_SnapsToValidBoundary(t *testing.T) {
 	}
 }
 
+func TestFindCutPoint_TrailingToolResultsNeverOrphan(t *testing.T) {
+	// Large tool_results at the very end (no user/assistant boundary ahead of
+	// the cut) must snap backward to the assistant that owns them, never
+	// leaving a tool_result orphaned from its tool_use.
+	toolResult := func(id string, tokens int) core.AgentMessage {
+		return core.AgentMessage{Message: core.Message{
+			Role:       "tool_result",
+			Content:    []core.Content{core.TextContent(strings.Repeat("x", tokens*4))},
+			ToolName:   "bash",
+			ToolCallID: id,
+		}}
+	}
+	assistantWithCalls := core.AgentMessage{Message: core.Message{
+		Role: "assistant",
+		Content: []core.Content{
+			core.ToolCallContent("c1", "bash", map[string]any{"command": "a"}),
+			core.ToolCallContent("c2", "bash", map[string]any{"command": "b"}),
+		},
+	}}
+	msgs := []core.AgentMessage{
+		makeMsg("user", "old", 5000),
+		assistantWithCalls,
+		toolResult("c1", 30000),
+		toolResult("c2", 30000),
+	}
+	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 16384, KeepRecent: 15000}
+	cut := FindCutPoint(msgs, 130000, 50000, settings)
+	if cut > 0 && msgs[cut].Role == "tool_result" {
+		t.Fatalf("cut at index %d is a tool_result — orphaned from its tool_use", cut)
+	}
+	// The kept slice must not start with a tool_result (Anthropic/OpenAI reject it).
+	if cut < len(msgs) && msgs[cut].Role == "tool_result" {
+		t.Fatalf("kept messages start with tool_result at %d", cut)
+	}
+}
+
 func TestFindCutPoint_Empty(t *testing.T) {
 	cut := FindCutPoint(nil, 0, 200_000, core.CompactionSettings{Enabled: true})
 	if cut != 0 {

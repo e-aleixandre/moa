@@ -18,3 +18,14 @@ func setProcGroup(cmd *exec.Cmd) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 	}
 }
+
+// killProcGroup force-kills the entire process group (SIGKILL), reaping any
+// grandchildren that ignored the SIGTERM sent on cancel. WaitDelay's own
+// force-kill only targets the main process, so a setsid grandchild survives it.
+// Safe to call after the main process has already exited.
+func killProcGroup(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+}

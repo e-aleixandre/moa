@@ -73,25 +73,55 @@ func (e *Emitter) Subscribe(fn func(core.AgentEvent)) func() {
 	}
 }
 
-// Emit sends an event to all active subscribers. Non-blocking.
-// Skips subscribers that are closed or have full buffers.
+// isLossyAgentEvent reports whether an event may be dropped under backpressure.
+// Only high-frequency streaming deltas are lossy; every structural event
+// (message_end, tool_execution_end, agent_end, …) MUST be delivered — dropping
+// one can strand the UI (e.g. a tool badge stuck on "running"). Mirrors the
+// bus's isLossyEvent.
+func isLossyAgentEvent(event core.AgentEvent) bool {
+	switch event.Type {
+	case core.AgentEventMessageUpdate, core.AgentEventToolExecUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Emit sends an event to all active subscribers. Lossy delta events are
+// dropped when a subscriber's buffer is full; structural events block until
+// there is room (or the subscriber is torn down) so they are never lost.
 func (e *Emitter) Emit(event core.AgentEvent) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	lossy := isLossyAgentEvent(event)
 	for _, sub := range e.subs {
 		if sub.closed.Load() {
 			continue
 		}
 		sub.inflight.Add(1)
+		if lossy {
+			select {
+			case sub.ch <- event:
+				// counted and enqueued
+			default:
+				// buffer full — rollback count, delta dropped
+				if sub.inflight.Add(-1) == 0 {
+					sub.signalIdle()
+				}
+				e.logger.Warn("subscriber buffer full, dropping delta", "type", event.Type)
+			}
+			continue
+		}
+		// Structural event: block until enqueued, or bail if the subscriber
+		// is torn down (done is closed before the unsub takes e.mu, so this
+		// never deadlocks against unsubscribe).
 		select {
 		case sub.ch <- event:
 			// counted and enqueued
-		default:
-			// buffer full — rollback count, event dropped
+		case <-sub.done:
 			if sub.inflight.Add(-1) == 0 {
 				sub.signalIdle()
 			}
-			e.logger.Warn("subscriber buffer full, dropping event", "type", event.Type)
 		}
 	}
 }

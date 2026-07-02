@@ -128,42 +128,72 @@ type lcsMatch struct {
 	oldIdx, newIdx int
 }
 
-// lcs finds the longest common subsequence of lines. O(n*m) but fine for
-// the typical edit sizes (single replacement in a file).
+// maxLCSCells caps the DP table size. A single edit in a large file leaves a
+// tiny differing region after prefix/suffix trimming, so this only trips when
+// two large, wholly-different blobs are compared — where we fall back to a
+// delete+insert block rather than allocate an O(n*m) table (30k×30k ≈ 7GB).
+const maxLCSCells = 4_000_000
+
+// lcs finds the longest common subsequence of lines. It trims the common
+// prefix and suffix first — those lines are trivially part of the LCS — so the
+// expensive O(n*m) DP runs only on the region that actually differs.
 func lcs(a, b []string) []lcsMatch {
 	n, m := len(a), len(b)
 	if n == 0 || m == 0 {
 		return nil
 	}
 
-	// DP table
-	dp := make([][]int, n+1)
-	for i := range dp {
-		dp[i] = make([]int, m+1)
+	var result []lcsMatch
+
+	// Common prefix.
+	lo := 0
+	for lo < n && lo < m && a[lo] == b[lo] {
+		result = append(result, lcsMatch{lo, lo})
+		lo++
 	}
-	for i := n - 1; i >= 0; i-- {
-		for j := m - 1; j >= 0; j-- {
-			if a[i] == b[j] {
-				dp[i][j] = dp[i+1][j+1] + 1
+	// Common suffix (collected in reverse, not overlapping the prefix).
+	hiA, hiB := n, m
+	var suffix []lcsMatch
+	for hiA > lo && hiB > lo && a[hiA-1] == b[hiB-1] {
+		hiA--
+		hiB--
+		suffix = append(suffix, lcsMatch{hiA, hiB})
+	}
+
+	// Middle region [lo,hiA) × [lo,hiB) — the only part needing the DP.
+	midN, midM := hiA-lo, hiB-lo
+	if midN > 0 && midM > 0 && int64(midN)*int64(midM) <= maxLCSCells {
+		dp := make([][]int, midN+1)
+		for i := range dp {
+			dp[i] = make([]int, midM+1)
+		}
+		for i := midN - 1; i >= 0; i-- {
+			for j := midM - 1; j >= 0; j-- {
+				if a[lo+i] == b[lo+j] {
+					dp[i][j] = dp[i+1][j+1] + 1
+				} else {
+					dp[i][j] = max(dp[i+1][j], dp[i][j+1])
+				}
+			}
+		}
+		i, j := 0, 0
+		for i < midN && j < midM {
+			if a[lo+i] == b[lo+j] {
+				result = append(result, lcsMatch{lo + i, lo + j})
+				i++
+				j++
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				i++
 			} else {
-				dp[i][j] = max(dp[i+1][j], dp[i][j+1])
+				j++
 			}
 		}
 	}
+	// A middle over the cell cap contributes no matches — it renders as a
+	// delete+insert block, which is correct if less compact.
 
-	// Backtrack
-	var result []lcsMatch
-	i, j := 0, 0
-	for i < n && j < m {
-		if a[i] == b[j] {
-			result = append(result, lcsMatch{i, j})
-			i++
-			j++
-		} else if dp[i+1][j] >= dp[i][j+1] {
-			i++
-		} else {
-			j++
-		}
+	for k := len(suffix) - 1; k >= 0; k-- {
+		result = append(result, suffix[k])
 	}
 	return result
 }

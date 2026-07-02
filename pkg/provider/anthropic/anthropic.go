@@ -272,6 +272,7 @@ func (a *Anthropic) handleContentBlockStart(data string, state *streamState) *co
 			Type string `json:"type"`
 			ID   string `json:"id,omitempty"`
 			Name string `json:"name,omitempty"`
+			Data string `json:"data,omitempty"` // redacted_thinking payload
 		} `json:"content_block"`
 	}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
@@ -322,7 +323,22 @@ func (a *Anthropic) handleContentBlockStart(data string, state *streamState) *co
 			ToolName:     toolName,
 		}
 
+	case "redacted_thinking":
+		// Preserve the encrypted block verbatim: Anthropic requires it be
+		// sent back in later turns that include tool use. Appending keeps our
+		// Content aligned with the API's block indices. No user-visible event.
+		state.message.Content = append(state.message.Content, core.Content{
+			Type:              "thinking",
+			Redacted:          true,
+			ThinkingSignature: payload.ContentBlock.Data,
+		})
+		return nil
+
 	default:
+		// Unknown block type: append an (empty) placeholder so subsequent
+		// deltas, which reference the API's block index, still line up with
+		// our Content slice. An empty thinking block is dropped on rebuild.
+		state.message.Content = append(state.message.Content, core.Content{Type: "thinking"})
 		return nil
 	}
 }

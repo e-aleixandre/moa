@@ -133,7 +133,7 @@ func (a *askPrompt) TypeRune(r rune) {
 // Backspace removes the last character from the free-text buffer.
 func (a *askPrompt) Backspace() {
 	if len(a.customBuf) > 0 {
-		a.customBuf = a.customBuf[:len(a.customBuf)-1]
+		a.customBuf = trimLastRune(a.customBuf)
 		if a.customBuf == "" && a.optionCount() > 0 {
 			a.cursor = 0
 		}

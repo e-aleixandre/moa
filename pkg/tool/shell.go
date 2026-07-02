@@ -2,9 +2,8 @@ package tool
 
 import (
 	"context"
-	"io"
+	"errors"
 	"os/exec"
-	"sync"
 	"time"
 )
 
@@ -59,45 +58,27 @@ func RunShell(ctx context.Context, cfg ShellConfig) ShellResult {
 	stderr.tailMax = half
 	// No SpillDir — verify checks don't need disk spill.
 
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return ShellResult{Stderr: err.Error(), ExitCode: -1, Elapsed: time.Since(start)}
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return ShellResult{Stderr: err.Error(), ExitCode: -1, Elapsed: time.Since(start)}
-	}
+	// Assign the buffers as io.Writers so os/exec owns the output copiers and
+	// Wait() waits for them to drain before closing the pipes. Reading a
+	// self-owned StdoutPipe concurrently with Wait() truncates output: with a
+	// pipe exec has no copier to wait for, so Wait closes the read end the
+	// instant the process is reaped, before our reader consumes the tail.
+	// WaitDelay still bounds the wait if a grandchild keeps the pipes open.
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
 		return ShellResult{Stderr: err.Error(), ExitCode: -1, Elapsed: time.Since(start)}
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	drain := func(r io.Reader, buf *headTailBuffer) {
-		defer wg.Done()
-		tmp := make([]byte, 4096)
-		for {
-			n, err := r.Read(tmp)
-			if n > 0 {
-				_, _ = buf.Write(tmp[:n])
-			}
-			if err != nil {
-				return
-			}
-		}
-	}
-	go drain(stdoutPipe, &stdout)
-	go drain(stderrPipe, &stderr)
-
-	wg.Wait()
-	err = cmd.Wait()
+	err := cmd.Wait()
 
 	elapsed := time.Since(start)
 
 	// Check context first — on timeout cmd.Wait may return an ExitError
 	// (SIGTERM exit) masking the real cause.
 	if ctx.Err() != nil {
+		killProcGroup(cmd) // reap grandchildren that ignored SIGTERM
 		stdout.Close()
 		stderr.Close()
 		return ShellResult{
@@ -114,6 +95,11 @@ func RunShell(ctx context.Context, cfg ShellConfig) ShellResult {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
+			// ErrWaitDelay: the main process exited but a child kept the pipes
+			// open past WaitDelay. Reap the group so no grandchild lingers.
+			if errors.Is(err, exec.ErrWaitDelay) {
+				killProcGroup(cmd)
+			}
 			stdout.Close()
 			stderr.Close()
 			return ShellResult{Stderr: err.Error(), ExitCode: -1, Elapsed: elapsed}

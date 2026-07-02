@@ -238,25 +238,26 @@ func TestWebSocket_Streaming(t *testing.T) {
 	resp := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", `{"text":"hello"}`)
 	resp.Body.Close() //nolint:errcheck
 
-	// Collect events. With the bus, event ordering across types is
-	// non-deterministic (separate subscriber goroutines), so we collect
-	// until we have all expected events or timeout.
+	// Collect events until we have the expected stream lifecycle.
 	gotTextDelta := false
+	gotMessageStart := false
 	gotMessageEnd := false
 	gotTurnStart := false
 	gotTurnEnd := false
 	gotRunEnd := false
+	eventIdx := 0
+	index := map[string]int{}
 	deadline := time.After(10 * time.Second)
 
 	allGot := func() bool {
-		return gotTextDelta && gotMessageEnd && gotTurnStart && gotTurnEnd && gotRunEnd
+		return gotTextDelta && gotMessageStart && gotMessageEnd && gotTurnStart && gotTurnEnd && gotRunEnd
 	}
 
 	for !allGot() {
 		select {
 		case <-deadline:
-			t.Fatalf("timed out (text_delta=%v message_end=%v turn_start=%v turn_end=%v run_end=%v)",
-				gotTextDelta, gotMessageEnd, gotTurnStart, gotTurnEnd, gotRunEnd)
+			t.Fatalf("timed out (message_start=%v text_delta=%v message_end=%v turn_start=%v turn_end=%v run_end=%v)",
+				gotMessageStart, gotTextDelta, gotMessageEnd, gotTurnStart, gotTurnEnd, gotRunEnd)
 		default:
 		}
 
@@ -264,8 +265,14 @@ func TestWebSocket_Streaming(t *testing.T) {
 		if err := wsjson.Read(wsCtx, conn, &evt); err != nil {
 			t.Fatalf("ws read error: %v", err)
 		}
+		if _, ok := index[evt.Type]; !ok {
+			index[evt.Type] = eventIdx
+		}
+		eventIdx++
 
 		switch evt.Type {
+		case "message_start":
+			gotMessageStart = true
 		case "text_delta":
 			gotTextDelta = true
 		case "message_end":
@@ -276,6 +283,111 @@ func TestWebSocket_Streaming(t *testing.T) {
 			gotTurnEnd = true
 		case "run_end":
 			gotRunEnd = true
+		}
+	}
+
+	if !(index["turn_start"] < index["message_start"] &&
+		index["message_start"] < index["text_delta"] &&
+		index["text_delta"] < index["message_end"] &&
+		index["message_end"] < index["turn_end"] &&
+		index["turn_end"] < index["run_end"]) {
+		t.Fatalf("unexpected stream order: %v", index)
+	}
+}
+
+func TestWebSocket_TextBeforeToolCallPreservesEventOrder(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	textThenToolHandler := func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 10)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role: "assistant",
+				Content: []core.Content{
+					core.TextContent("I'll check."),
+					core.ToolCallContent("tc-1", "bash", map[string]any{"command": "echo hi"}),
+				},
+				StopReason: "tool_use",
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "I'll check."}
+			ch <- core.AssistantEvent{
+				Type:       core.ProviderEventToolCallStart,
+				ToolCallID: "tc-1",
+				ToolName:   "bash",
+			}
+			ch <- core.AssistantEvent{
+				Type:        core.ProviderEventToolCallDelta,
+				ToolCallID:  "tc-1",
+				ToolName:    "bash",
+				PartialArgs: map[string]any{"command": "echo hi"},
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+
+	prov := newMockProvider(textThenToolHandler, simpleResponseHandler("done"))
+	mgr := newTestManager(t, ctx, prov)
+	httpSrv := httptest.NewServer(NewServer(mgr))
+	defer httpSrv.Close()
+
+	sess, _ := mgr.CreateSession(CreateOpts{})
+
+	wsCtx, wsCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer wsCancel()
+
+	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+
+	var init Event
+	if err := wsjson.Read(wsCtx, conn, &init); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", `{"text":"hello"}`)
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	}
+
+	want := []string{"message_start", "text_delta", "tool_call_start", "tool_call_delta", "message_end", "tool_start"}
+	seen := make(map[string]int)
+	eventIdx := 0
+	deadline := time.After(10 * time.Second)
+	for len(seen) < len(want) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for ordered events, seen=%v", seen)
+		default:
+		}
+
+		var evt Event
+		if err := wsjson.Read(wsCtx, conn, &evt); err != nil {
+			t.Fatalf("ws read error: %v", err)
+		}
+		for _, typ := range want {
+			if evt.Type == typ {
+				if _, ok := seen[typ]; !ok {
+					seen[typ] = eventIdx
+				}
+				break
+			}
+		}
+		eventIdx++
+	}
+
+	for i := 1; i < len(want); i++ {
+		prev := want[i-1]
+		curr := want[i]
+		if seen[prev] >= seen[curr] {
+			t.Fatalf("%s should arrive before %s, seen=%v", prev, curr, seen)
 		}
 	}
 }
@@ -351,8 +463,6 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 	gotRunEnd := false
 
 	// Read events until we have both run_end AND tool_end with rejected.
-	// With the bus architecture, event ordering across types is non-deterministic
-	// (separate subscriber goroutines), so run_end may arrive before tool_end.
 	deadline := time.After(10 * time.Second)
 	for !gotRunEnd || !seenRejected {
 		select {
@@ -411,9 +521,9 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 	if idxPermission == -1 {
 		t.Fatal("missing permission_request event")
 	}
-	// Note: with the bus architecture, cross-type event ordering is
-	// non-deterministic (separate subscriber goroutines). Both events
-	// must arrive, but their relative order is not guaranteed.
+	if idxToolStart > idxPermission {
+		t.Fatalf("tool_start should arrive before permission_request (tool_start=%d permission_request=%d)", idxToolStart, idxPermission)
+	}
 	if !seenRejected {
 		t.Fatal("expected tool_end with rejected=true after denial")
 	}

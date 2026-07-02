@@ -207,6 +207,39 @@ func TestMapEvents_MalformedJSON(t *testing.T) {
 	}
 }
 
+func TestMapEvents_RedactedThinkingKeepsIndexAlignment(t *testing.T) {
+	// A redacted_thinking block at index 0 must not shift the API's block
+	// indices out of sync with our Content slice: the text and tool args that
+	// follow it (indices 1 and 2) must survive.
+	data, err := os.ReadFile("../../../testdata/sse/redacted_thinking.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := mapSSEToEvents(t, string(data))
+	doneEvt := events[len(events)-1]
+	if doneEvt.Type != core.ProviderEventDone || doneEvt.Message == nil {
+		t.Fatalf("expected done event with message, got %q", doneEvt.Type)
+	}
+
+	msg := doneEvt.Message
+	if len(msg.Content) != 3 {
+		t.Fatalf("expected 3 content blocks (redacted, text, tool_call), got %d", len(msg.Content))
+	}
+
+	redacted := msg.Content[0]
+	if redacted.Type != "thinking" || !redacted.Redacted || redacted.ThinkingSignature != "EncryptedRedactedBlob==" {
+		t.Errorf("redacted block not preserved: %+v", redacted)
+	}
+	if txt := msg.Content[1]; txt.Type != "text" || txt.Text != "I'll check." {
+		t.Errorf("text lost/misaligned: %+v", txt)
+	}
+	tc := msg.Content[2]
+	if tc.Type != "tool_call" || tc.Arguments["path"] != "main.go" {
+		t.Errorf("tool args lost/misaligned: %+v", tc)
+	}
+}
+
 // --- helpers ---
 
 func mapSSEToEvents(t *testing.T, sseData string) []core.AssistantEvent {

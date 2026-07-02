@@ -33,6 +33,19 @@ type ApprovalManager struct {
 	bus       EventBus
 	state     *StateMachine
 	sid       string
+
+	// runGen reports the current run generation, used to stamp pending
+	// requests so ClearPending(gen) only clears orphans of the ended run and
+	// not a newer run's live approval. Nil in standalone tests → gen 0.
+	runGen *atomic.Uint64
+}
+
+// currentGen returns the run generation a newly registered request belongs to.
+func (am *ApprovalManager) currentGen() uint64 {
+	if am.runGen == nil {
+		return 0
+	}
+	return am.runGen.Load()
 }
 
 // PendingPermission tracks a single pending permission request.
@@ -41,6 +54,7 @@ type PendingPermission struct {
 	ToolName     string
 	Args         map[string]any
 	AllowPattern string
+	RunGen       uint64
 	response     chan<- permission.Response
 	resolved     bool
 }
@@ -49,6 +63,7 @@ type PendingPermission struct {
 type PendingAsk struct {
 	ID        string
 	Questions []AskQuestion
+	RunGen    uint64
 	response  chan<- []string
 	resolved  bool
 }
@@ -95,6 +110,7 @@ func (am *ApprovalManager) StartPermissionBridge(sessionCtx context.Context, gat
 					ToolName:     req.ToolName,
 					Args:         argsCopy,
 					AllowPattern: allowPattern,
+					RunGen:       am.currentGen(),
 					response:     req.Response,
 				}
 				am.mu.Unlock()
@@ -224,6 +240,7 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 				am.asks[id] = &PendingAsk{
 					ID:        id,
 					Questions: questions,
+					RunGen:    am.currentGen(),
 					response:  p.Response,
 				}
 				am.mu.Unlock()
@@ -269,6 +286,68 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string) error {
 
 	am.bus.Publish(AskUserResolved{SessionID: am.sid, ID: id})
 	return nil
+}
+
+// ClearPending auto-denies and removes still-pending permission/ask requests
+// orphaned by the ended run, publishing Resolved events so no stale modal
+// survives. Called when a run ends: a normal resolve already removed its entry
+// before the run finished, so this only fires for approvals orphaned by an
+// abort — which would otherwise reappear on every reconnect via PendingInfo.
+//
+// gen is the generation of the ended run. Only requests from that run or an
+// earlier one (RunGen <= gen) are cleared: if the user immediately re-sent a
+// prompt, a newer run may already have a live approval, and a delayed RunEnded
+// of the old run must not auto-deny it.
+func (am *ApprovalManager) ClearPending(gen uint64) {
+	am.mu.Lock()
+	var permResponses []chan<- permission.Response
+	var permIDs []string
+	for id, p := range am.perms {
+		if p.RunGen > gen {
+			continue // belongs to a newer run — leave it live
+		}
+		if !p.resolved {
+			p.resolved = true
+			permResponses = append(permResponses, p.response)
+			permIDs = append(permIDs, id)
+		}
+		delete(am.perms, id)
+	}
+	var askResponses []chan<- []string
+	var askIDs []string
+	for id, a := range am.asks {
+		if a.RunGen > gen {
+			continue // belongs to a newer run — leave it live
+		}
+		if !a.resolved {
+			a.resolved = true
+			askResponses = append(askResponses, a.response)
+			askIDs = append(askIDs, id)
+		}
+		delete(am.asks, id)
+	}
+	am.mu.Unlock()
+
+	// Unblock any goroutine still holding the response channel, then clear the
+	// UI. Channels are buffered(1), so the sends never block.
+	for _, resp := range permResponses {
+		select {
+		case resp <- permission.Response{Approved: false}:
+		default:
+		}
+	}
+	for _, resp := range askResponses {
+		select {
+		case resp <- nil:
+		default:
+		}
+	}
+	for _, id := range permIDs {
+		am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id})
+	}
+	for _, id := range askIDs {
+		am.bus.Publish(AskUserResolved{SessionID: am.sid, ID: id})
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -12,24 +12,35 @@ let pollTimer = null;
 
 export async function loadSessions() {
   try {
-    const state = store.get();
     const list = await api('GET', '/api/sessions');
+    // Read the store AFTER the round-trip: WS handlers may have updated
+    // sessions while the request was in flight, and rebuilding from a
+    // pre-await snapshot would silently revert those (lost messages, perms).
+    const state = store.get();
     const prev = state.sessions;
+    const visible = new Set(visibleSessionIds(state));
     const sessions = {};
     for (const info of list) {
       const existing = prev[info.id];
+      // A visible session has a live WS connection that owns its live-tracked
+      // fields (state, config, context, plan). This poll response may already
+      // be stale relative to WS events that arrived while the request was in
+      // flight, so keep the WS-tracked values rather than reverting them.
+      // Hidden sessions have no WS connection, so the poll is their only source
+      // of truth and must refresh those fields.
+      const wsOwns = existing && visible.has(info.id);
       sessions[info.id] = {
         id: info.id,
         title: info.title,
-        state: info.state,
-        model: info.model,
-        thinking: info.thinking || '',
+        state: wsOwns ? existing.state : info.state,
+        model: wsOwns ? existing.model : info.model,
+        thinking: wsOwns ? existing.thinking : (info.thinking || ''),
         cwd: info.cwd,
-        error: info.error || null,
+        error: wsOwns ? existing.error : (info.error || null),
         untrustedMcp: info.untrusted_mcp || false,
         messages: existing ? existing.messages : [],
-        contextPercent: info.context_percent ?? (existing ? existing.contextPercent : -1),
-        permissionMode: info.permission_mode || (existing ? existing.permissionMode : 'yolo'),
+        contextPercent: wsOwns ? existing.contextPercent : (info.context_percent ?? (existing ? existing.contextPercent : -1)),
+        permissionMode: wsOwns ? existing.permissionMode : (info.permission_mode || (existing ? existing.permissionMode : 'yolo')),
         pendingPerm: existing ? existing.pendingPerm : null,
         pendingAsk: existing ? existing.pendingAsk : null,
         pendingSteers: existing ? existing.pendingSteers : null,
@@ -38,8 +49,8 @@ export async function loadSessions() {
         subagentCount: existing ? existing.subagentCount : 0,
         autoVerifying: existing ? existing.autoVerifying : false,
         tasks: existing ? existing.tasks : [],
-        planMode: info.plan_mode || (existing ? existing.planMode : 'off'),
-        planFile: info.plan_file || (existing ? existing.planFile : null),
+        planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
+        planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
       };
     }
     // Detect attention transitions (hidden sessions only)
@@ -47,8 +58,7 @@ export async function loadSessions() {
       const prevSess = prev[id];
       if (prevSess && prevSess.state !== sess.state) {
         if (sess.state === 'permission' || sess.state === 'error') {
-          const visible = visibleSessionIds(state);
-          if (!visible.includes(id)) {
+          if (!visible.has(id)) {
             triggerAttention(sess, null, state.soundEnabled);
           }
         }
@@ -96,8 +106,10 @@ export async function createSession(opts) {
 }
 
 export async function deleteSession(id) {
-  const state = store.get();
   await api('DELETE', `/api/sessions/${id}`);
+  // Read the store after the await so concurrent WS updates to other
+  // sessions aren't clobbered by a stale pre-request snapshot.
+  const state = store.get();
   const sessions = { ...state.sessions };
   delete sessions[id];
   const tileTree = clearSession(state.tileTree, id);

@@ -149,6 +149,35 @@ func TestDo_RespectsRetryAfterHeader(t *testing.T) {
 	}
 }
 
+func TestDo_RetryAfterExceedsMaxDelay(t *testing.T) {
+	// A Retry-After longer than MaxDelay must be honored in full: capping it
+	// would retry too early and immediately earn another 429.
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(429)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	// MaxDelay (50ms) is far below the Retry-After (1s).
+	policy := Policy{MaxRetries: 3, BaseDelay: 10 * time.Millisecond, MaxDelay: 50 * time.Millisecond}
+	start := time.Now()
+	resp, err := Do(context.Background(), srv.Client(), func() (*http.Request, error) {
+		return http.NewRequest("GET", srv.URL, nil)
+	}, policy, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if elapsed := time.Since(start); elapsed < 900*time.Millisecond {
+		t.Errorf("Retry-After should override MaxDelay; waited only %v", elapsed)
+	}
+}
+
 func TestDo_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)

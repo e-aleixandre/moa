@@ -673,6 +673,15 @@ func RegisterHandlers(sctx *SessionContext) {
 	b.Subscribe(func(e CommandExecuted) { publishContextUpdate() })
 	b.Subscribe(func(e ConfigChanged) { publishContextUpdate() })
 
+	// Clear approvals orphaned by an aborted run so no stale modal lingers.
+	// Pass the ended run's generation so a newer run's live approval (from an
+	// immediately re-sent prompt) is spared.
+	b.Subscribe(func(e RunEnded) {
+		if sctx.Approvals != nil {
+			sctx.Approvals.ClearPending(e.RunGen)
+		}
+	})
+
 	// --- Auto-verify ---
 	// After a run that edited files, optionally run verify and re-send failures to agent.
 	b.Subscribe(func(e RunEnded) {

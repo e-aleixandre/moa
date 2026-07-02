@@ -4,6 +4,22 @@ import (
 	"testing"
 )
 
+func TestTrimLastRune(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"abc", "ab"},
+		{"sí", "s"},          // multibyte: "í" is 2 bytes
+		{"café", "caf"},      // "é" is 2 bytes
+		{"emoji😀", "emoji"}, // "😀" is 4 bytes
+		{"ñ", ""},
+	}
+	for _, c := range cases {
+		if got := trimLastRune(c.in); got != c.want {
+			t.Errorf("trimLastRune(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestParseCommand(t *testing.T) {
 	tests := []struct {
 		input string

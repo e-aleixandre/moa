@@ -171,8 +171,8 @@ func (g *Gate) AddRule(rule string) {
 // approval. Returns nil to approve, or a blocking ToolCallDecision to reject.
 // Called from the agent loop goroutine.
 //
-// ask mode: readOnly → deny globs → allow globs → ask user
-// auto mode: readOnly → AI evaluator (rules) → ask user (fallback)
+// ask mode: deny globs → readOnly → allow globs → ask user
+// auto mode: deny globs → readOnly → AI evaluator (rules) → ask user (fallback)
 func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 	g.mu.RLock()
 	mode := g.mode
@@ -186,24 +186,23 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 		return nil
 	}
 
+	// Deny globs take priority in every non-yolo mode — including for
+	// read-only tools, so rules like Read(*.env) actually block.
+	if matchPolicy(deny, name, args, true) {
+		return &core.ToolCallDecision{Block: true, Reason: "denied by policy", Kind: core.ToolCallDecisionKindPermission}
+	}
+
 	if readOnly[name] {
 		return nil
 	}
 
 	switch mode {
 	case ModeAsk:
-		if matchPolicy(deny, name, args) {
-			return &core.ToolCallDecision{Block: true, Reason: "denied by policy", Kind: core.ToolCallDecisionKindPermission}
-		}
-		if matchPolicy(allow, name, args) {
+		if matchPolicy(allow, name, args, false) {
 			return nil
 		}
 
 	case ModeAuto:
-		// Deny globs take priority (same as ask mode).
-		if matchPolicy(deny, name, args) {
-			return &core.ToolCallDecision{Block: true, Reason: "denied by policy", Kind: core.ToolCallDecisionKindPermission}
-		}
 		if evaluator != nil {
 			switch evaluator.Evaluate(ctx, name, args, rules) {
 			case DecisionApprove:

@@ -2,9 +2,11 @@
 
 import {
   handleWsInit, handleWsTextDelta, handleWsThinkingDelta,
+  handleWsMessageStart,
   handleWsMessageEnd, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd,
   handleWsToolCallStart, handleWsToolCallDelta,
   handleWsStateChange, handleWsPermissionRequest,
+  handleWsPermissionResolved, handleWsAskResolved,
   handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
@@ -103,6 +105,9 @@ function routeEvent(sessionId, evt) {
     case 'thinking_delta':
       handleWsThinkingDelta(sessionId, evt.data.delta);
       break;
+    case 'message_start':
+      handleWsMessageStart(sessionId);
+      break;
     case 'message_end':
       handleWsMessageEnd(sessionId, evt.data.text);
       break;
@@ -129,6 +134,12 @@ function routeEvent(sessionId, evt) {
       break;
     case 'ask_user':
       handleWsAskUser(sessionId, evt.data);
+      break;
+    case 'permission_resolved':
+      handleWsPermissionResolved(sessionId, evt.data);
+      break;
+    case 'ask_resolved':
+      handleWsAskResolved(sessionId, evt.data);
       break;
     case 'config_change':
       handleWsConfigChange(sessionId, evt.data);

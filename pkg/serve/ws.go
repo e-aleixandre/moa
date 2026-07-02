@@ -12,13 +12,10 @@ import (
 // wsReactor bridges typed bus events to a per-WebSocket Event channel.
 // Safe to use from multiple goroutines. Cleanup is idempotent.
 //
-// Ordering: each bus event type has its own subscriber goroutine, all writing
-// to the shared ch. Cross-type ordering is NOT guaranteed — e.g. tool_start
-// and permission_request may arrive in any order. Within a single event type,
-// ordering is preserved. Frontends must be resilient to cross-type reordering.
-//
-// TODO: to restore strict agent-event ordering, subscribe to a single
-// "agent event batch" bus event type and translate in one goroutine.
+// Ordering: the reactor uses one SubscribeAll handler so events are translated
+// and sent in the same order they were published on the session bus. This is
+// important for streaming UI state: text_delta, tool_call_start, message_end,
+// tool_end, state_change, and run_end must not overtake one another.
 type wsReactor struct {
 	ch     chan Event
 	done   chan struct{} // closed on cleanup; guards sends to ch
@@ -54,127 +51,11 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 		}
 	}
 
-	// Subscribe to all bus event types.
-	r.unsubs = append(r.unsubs,
-		b.Subscribe(func(e bus.StateChanged) {
-			send(Event{Type: "state_change", Data: StateChangeData{
-				State: e.State, Error: e.Error,
-			}})
-		}),
-		b.Subscribe(func(e bus.TurnStarted) {
-			send(Event{Type: "turn_start"})
-		}),
-		b.Subscribe(func(e bus.TurnEnded) {
-			send(Event{Type: "turn_end"})
-		}),
-		b.Subscribe(func(e bus.MessageStarted) {
-			send(Event{Type: "message_start"})
-		}),
-		b.Subscribe(func(e bus.TextDelta) {
-			send(Event{Type: "text_delta", Data: DeltaData{Delta: e.Delta}})
-		}),
-		b.Subscribe(func(e bus.ThinkingDelta) {
-			send(Event{Type: "thinking_delta", Data: DeltaData{Delta: e.Delta}})
-		}),
-		b.Subscribe(func(e bus.MessageEnded) {
-			send(Event{Type: "message_end", Data: MessageEndData{Text: e.FullText}})
-		}),
-		b.Subscribe(func(e bus.ToolCallStreaming) {
-			send(Event{Type: "tool_call_start", Data: ToolCallStreamingData{
-				ToolCallID: e.ToolCallID, ToolName: e.ToolName,
-			}})
-		}),
-		b.Subscribe(func(e bus.ToolCallDelta) {
-			send(Event{Type: "tool_call_delta", Data: ToolCallDeltaData{
-				ToolCallID: e.ToolCallID, Args: e.Args,
-			}})
-		}),
-		b.Subscribe(func(e bus.ToolExecStarted) {
-			send(Event{Type: "tool_start", Data: ToolStartData{
-				ToolCallID: e.ToolCallID, ToolName: e.ToolName, Args: e.Args,
-			}})
-		}),
-		b.Subscribe(func(e bus.ToolExecUpdate) {
-			send(Event{Type: "tool_update", Data: ToolUpdateData{
-				ToolCallID: e.ToolCallID, Delta: e.Delta,
-			}})
-		}),
-		b.Subscribe(func(e bus.ToolExecEnded) {
-			send(Event{Type: "tool_end", Data: ToolEndData{
-				ToolCallID: e.ToolCallID, ToolName: e.ToolName,
-				IsError: e.IsError, Rejected: e.Rejected, Result: e.Result,
-			}})
-		}),
-		b.Subscribe(func(e bus.TasksUpdated) {
-			send(Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}})
-		}),
-		b.Subscribe(func(e bus.RunEnded) {
-			send(Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}})
-		}),
-		b.Subscribe(func(e bus.ContextUpdated) {
-			send(Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}})
-		}),
-		b.Subscribe(func(e bus.ConfigChanged) {
-			send(Event{Type: "config_change", Data: ConfigChangeData{
-				Model: e.Model, Thinking: e.Thinking,
-				PermissionMode: e.PermissionMode, PathScope: e.PathScope,
-			}})
-		}),
-		b.Subscribe(func(e bus.PlanModeChanged) {
-			send(Event{Type: "plan_mode", Data: PlanModeData{
-				Mode: e.Mode, PlanFile: e.PlanFile,
-			}})
-		}),
-		b.Subscribe(func(e bus.CommandExecuted) {
-			send(Event{Type: "command", Data: CommandData{
-				Command: e.Command, Messages: e.Messages,
-			}})
-		}),
-		b.Subscribe(func(e bus.Steered) {
-			send(Event{Type: "steer", Data: SteerData{Text: e.Text}})
-		}),
-		b.Subscribe(func(e bus.AutoVerifyStarted) {
-			send(Event{Type: "auto_verify_start"})
-		}),
-		b.Subscribe(func(e bus.AutoVerifyEnded) {
-			data := map[string]any{"all_pass": e.AllPass, "summary": e.Summary}
-			if e.Err != nil {
-				data["error"] = e.Err.Error()
-			}
-			send(Event{Type: "auto_verify_end", Data: data})
-		}),
-		b.Subscribe(func(e bus.PermissionRequested) {
-			send(Event{Type: "permission_request", Data: PermissionData{
-				ID: e.ID, ToolName: e.ToolName, Args: e.Args,
-				AllowPattern: e.AllowPattern,
-			}})
-		}),
-		b.Subscribe(func(e bus.PermissionResolved) {
-			send(Event{Type: "permission_resolved", Data: map[string]any{"id": e.ID}})
-		}),
-		b.Subscribe(func(e bus.AskUserRequested) {
-			send(Event{Type: "ask_user", Data: map[string]any{
-				"id": e.ID, "questions": e.Questions,
-			}})
-		}),
-		b.Subscribe(func(e bus.AskUserResolved) {
-			send(Event{Type: "ask_resolved", Data: map[string]any{"id": e.ID}})
-		}),
-		b.Subscribe(func(e bus.SubagentCountChanged) {
-			send(Event{Type: "subagent_count", Data: SubagentCountData{Count: e.Count}})
-		}),
-		b.Subscribe(func(e bus.SubagentCompleted) {
-			send(Event{Type: "subagent_complete", Data: SubagentCompleteData{
-				JobID: e.JobID, Task: e.Task, Status: e.Status, Text: e.Text,
-			}})
-		}),
-		b.Subscribe(func(e bus.CompactionStarted) {
-			send(Event{Type: "compaction_start"})
-		}),
-		b.Subscribe(func(e bus.CompactionEnded) {
-			send(Event{Type: "compaction_end"})
-		}),
-	)
+	r.unsubs = append(r.unsubs, b.SubscribeAll(func(event any) {
+		if wsEvent, ok := wsEventFromBus(event); ok {
+			send(wsEvent)
+		}
+	}))
 
 	// Watch session context cancellation.
 	go func() {
@@ -183,6 +64,102 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 	}()
 
 	return r
+}
+
+func wsEventFromBus(event any) (Event, bool) {
+	switch e := event.(type) {
+	case bus.StateChanged:
+		return Event{Type: "state_change", Data: StateChangeData{
+			State: e.State, Error: e.Error,
+		}}, true
+	case bus.TurnStarted:
+		return Event{Type: "turn_start"}, true
+	case bus.TurnEnded:
+		return Event{Type: "turn_end"}, true
+	case bus.MessageStarted:
+		return Event{Type: "message_start"}, true
+	case bus.TextDelta:
+		return Event{Type: "text_delta", Data: DeltaData{Delta: e.Delta}}, true
+	case bus.ThinkingDelta:
+		return Event{Type: "thinking_delta", Data: DeltaData{Delta: e.Delta}}, true
+	case bus.MessageEnded:
+		return Event{Type: "message_end", Data: MessageEndData{Text: e.FullText}}, true
+	case bus.ToolCallStreaming:
+		return Event{Type: "tool_call_start", Data: ToolCallStreamingData{
+			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
+		}}, true
+	case bus.ToolCallDelta:
+		return Event{Type: "tool_call_delta", Data: ToolCallDeltaData{
+			ToolCallID: e.ToolCallID, Args: e.Args,
+		}}, true
+	case bus.ToolExecStarted:
+		return Event{Type: "tool_start", Data: ToolStartData{
+			ToolCallID: e.ToolCallID, ToolName: e.ToolName, Args: e.Args,
+		}}, true
+	case bus.ToolExecUpdate:
+		return Event{Type: "tool_update", Data: ToolUpdateData{
+			ToolCallID: e.ToolCallID, Delta: e.Delta,
+		}}, true
+	case bus.ToolExecEnded:
+		return Event{Type: "tool_end", Data: ToolEndData{
+			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
+			IsError: e.IsError, Rejected: e.Rejected, Result: e.Result,
+		}}, true
+	case bus.TasksUpdated:
+		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
+	case bus.RunEnded:
+		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}}, true
+	case bus.ContextUpdated:
+		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
+	case bus.ConfigChanged:
+		return Event{Type: "config_change", Data: ConfigChangeData{
+			Model: e.Model, Thinking: e.Thinking,
+			PermissionMode: e.PermissionMode, PathScope: e.PathScope,
+		}}, true
+	case bus.PlanModeChanged:
+		return Event{Type: "plan_mode", Data: PlanModeData{
+			Mode: e.Mode, PlanFile: e.PlanFile,
+		}}, true
+	case bus.CommandExecuted:
+		return Event{Type: "command", Data: CommandData{
+			Command: e.Command, Messages: e.Messages,
+		}}, true
+	case bus.Steered:
+		return Event{Type: "steer", Data: SteerData{Text: e.Text}}, true
+	case bus.AutoVerifyStarted:
+		return Event{Type: "auto_verify_start"}, true
+	case bus.AutoVerifyEnded:
+		data := map[string]any{"all_pass": e.AllPass, "summary": e.Summary}
+		if e.Err != nil {
+			data["error"] = e.Err.Error()
+		}
+		return Event{Type: "auto_verify_end", Data: data}, true
+	case bus.PermissionRequested:
+		return Event{Type: "permission_request", Data: PermissionData{
+			ID: e.ID, ToolName: e.ToolName, Args: e.Args,
+			AllowPattern: e.AllowPattern,
+		}}, true
+	case bus.PermissionResolved:
+		return Event{Type: "permission_resolved", Data: map[string]any{"id": e.ID}}, true
+	case bus.AskUserRequested:
+		return Event{Type: "ask_user", Data: map[string]any{
+			"id": e.ID, "questions": e.Questions,
+		}}, true
+	case bus.AskUserResolved:
+		return Event{Type: "ask_resolved", Data: map[string]any{"id": e.ID}}, true
+	case bus.SubagentCountChanged:
+		return Event{Type: "subagent_count", Data: SubagentCountData{Count: e.Count}}, true
+	case bus.SubagentCompleted:
+		return Event{Type: "subagent_complete", Data: SubagentCompleteData{
+			JobID: e.JobID, Task: e.Task, Status: e.Status, Text: e.Text,
+		}}, true
+	case bus.CompactionStarted:
+		return Event{Type: "compaction_start"}, true
+	case bus.CompactionEnded:
+		return Event{Type: "compaction_end"}, true
+	default:
+		return Event{}, false
+	}
 }
 
 // Events returns the read-only channel for the WS writer loop.
