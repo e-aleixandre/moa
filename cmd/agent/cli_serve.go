@@ -96,9 +96,12 @@ func runServe(args []string) {
 	}
 }
 
-// pushSubscriber is the VAPID JWT "sub" claim — a contact URI for the push
-// service to reach the app operator. Must be a mailto: or https: URI.
-const pushSubscriber = "mailto:moa@ourown.studio"
+// pushSubscriber is the VAPID JWT "sub" claim — a contact for the push service
+// to reach the app operator. Pass a BARE email (or an https: URL): webpush-go
+// prepends "mailto:" itself for non-https values, so a "mailto:" prefix here
+// would produce an invalid "mailto:mailto:…" sub and Apple rejects it with
+// BadJwtToken.
+const pushSubscriber = "moa@ourown.studio"
 
 // buildPush loads (or generates) the VAPID key pair and subscription store from
 // the config dir and returns a store + dispatcher. On any error it logs and
