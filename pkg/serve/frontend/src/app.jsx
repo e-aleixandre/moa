@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { store } from './store.js';
-import { loadSessions, startPolling, startUsagePolling, stopUsagePolling } from './session-actions.js';
+import { loadSessions, startPolling, stopPolling, startUsagePolling, stopUsagePolling } from './session-actions.js';
 import { reconnectAll } from './api.js';
 import {
   setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex, openSession,
@@ -51,21 +51,31 @@ function App() {
     return () => stopUsagePolling();
   }, []);
 
-  // On returning to the foreground or regaining network, force an immediate
-  // reconnect + refresh. iOS drops the WebSocket when the PWA backgrounds and
-  // may leave it half-open, so without this the session sits frozen (and up to
-  // the full backoff behind) until a manual reload.
+  // Foreground/background lifecycle. On return to the foreground (or regained
+  // network): force an immediate reconnect + refresh — iOS drops the WebSocket
+  // when the PWA backgrounds and may leave it half-open, so the session would
+  // otherwise sit frozen (and up to the full backoff behind) until a manual
+  // reload. While hidden: pause the poll (nothing to refresh; saves battery).
   useEffect(() => {
-    const onForeground = () => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        reconnectAll();
+        loadSessions();
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+    const onOnline = () => {
       if (document.visibilityState !== 'visible') return;
       reconnectAll();
       loadSessions();
     };
-    document.addEventListener('visibilitychange', onForeground);
-    window.addEventListener('online', onForeground);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
     return () => {
-      document.removeEventListener('visibilitychange', onForeground);
-      window.removeEventListener('online', onForeground);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
     };
   }, []);
 

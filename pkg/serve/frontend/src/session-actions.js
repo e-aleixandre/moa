@@ -86,7 +86,12 @@ export async function loadSessions() {
 
 export function startPolling() {
   stopPolling();
-  pollTimer = setInterval(loadSessions, 3000);
+  // On mobile only one session is visible (and WS-backed); the poll just keeps
+  // the list and hidden sessions fresh, and push covers anything urgent — so a
+  // slower cadence saves battery/data. The foreground handler refreshes on
+  // return, so a stale gap while backgrounded doesn't matter.
+  const interval = store.get().isMobile ? 15000 : 3000;
+  pollTimer = setInterval(loadSessions, interval);
 }
 
 export function stopPolling() {
