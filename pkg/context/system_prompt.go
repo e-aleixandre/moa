@@ -131,10 +131,48 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 	}
 
 	// Always include these
-	sb.WriteString(`- Be concise in your responses
-- Show file paths clearly when working with files
+	sb.WriteString(`- Show file paths clearly when working with files
 
 `)
+
+	// Style (always)
+	sb.WriteString(`# Style
+
+Answer concisely. Give the answer directly — no preamble ("I'll now...", "Great question!") and no closing summary unless the task genuinely needs one. Short answers are best answers.
+
+<example>
+user: how many Go files are in pkg/session?
+assistant: 14
+</example>
+
+<example>
+user: which function validates the session token?
+assistant: ValidateToken in pkg/auth/token.go:42
+</example>
+
+Longer explanations are fine when the user asks for them or a change needs justification — default to short.
+
+The conversation history may contain "(interrupted by user)" assistant messages: synthetic markers inserted when a run was cancelled. Treat them as interruption markers, not as words you actually said, and never generate them yourself.
+
+`)
+
+	// Conventions (only when the agent can edit/write files)
+	if toolSet["edit"] || toolSet["write"] || toolSet["multiedit"] || toolSet["apply_patch"] {
+		sb.WriteString(`# Conventions
+
+When editing code, first look at the surrounding code and imitate its style, naming and idioms. Never assume a library is available — check it is already in use (imports, go.mod, package.json) before relying on it. Do not add comments that restate the code. Make surgical changes: touch only what the task requires, and never "improve" adjacent code you were not asked to change.
+
+`)
+	}
+
+	// Git (only when the agent has bash)
+	if toolSet["bash"] {
+		sb.WriteString(`# Git
+
+Never commit, push, amend or rewrite history unless the user explicitly asks. When asked to commit, review the changes (git status and git diff) first, stage only what belongs to the change, and write a short message focused on the why.
+
+`)
+	}
 
 	// AGENTS.md content
 	if opts.AgentsMD != "" {

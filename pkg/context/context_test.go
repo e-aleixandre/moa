@@ -200,6 +200,61 @@ func TestBuildSystemPrompt_EmptyMemory(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_Sections_FullToolSet(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "bash", Description: "Execute commands"},
+		{Name: "read", Description: "Read files"},
+		{Name: "edit", Description: "Edit files"},
+		{Name: "write", Description: "Write files"},
+	}
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
+
+	for _, want := range []string{"# Style", "# Conventions", "# Git", "(interrupted by user)"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected prompt to contain %q", want)
+		}
+	}
+	if strings.Contains(prompt, "Be concise in your responses") {
+		t.Error("expected the old 'Be concise' guideline to be removed")
+	}
+}
+
+func TestBuildSystemPrompt_Sections_ReadOnlyToolSet(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "read", Description: "Read files"},
+		{Name: "grep", Description: "Search files"},
+	}
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
+
+	if !strings.Contains(prompt, "# Style") {
+		t.Error("expected Style section always")
+	}
+	if strings.Contains(prompt, "# Conventions") {
+		t.Error("expected no Conventions section without edit/write tools")
+	}
+	if strings.Contains(prompt, "# Git") {
+		t.Error("expected no Git section without bash")
+	}
+}
+
+func TestBuildSystemPrompt_SectionsBeforeProjectContext(t *testing.T) {
+	tools := []core.ToolSpec{
+		{Name: "bash", Description: "Execute commands"},
+		{Name: "edit", Description: "Edit files"},
+	}
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test", AgentsMD: "# Project: test"})
+
+	projectIdx := strings.Index(prompt, "# Project Context")
+	if projectIdx < 0 {
+		t.Fatal("expected Project Context section")
+	}
+	for _, sec := range []string{"# Style", "# Conventions", "# Git"} {
+		if idx := strings.Index(prompt, sec); idx < 0 || idx >= projectIdx {
+			t.Errorf("expected %q to appear before Project Context", sec)
+		}
+	}
+}
+
 func TestBuildSystemPrompt_MemoryGuideline(t *testing.T) {
 	tools := []core.ToolSpec{
 		{Name: "memory", Description: "Memory tool"},
