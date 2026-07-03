@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ealeixandre/moa/pkg/bus"
 )
 
@@ -64,13 +65,11 @@ func (p *branchPicker) Render(width int) string {
 		}
 
 		label := e.Label
-		maxLabel := width - len(prefix) - len(marker) - len(branches) - 20
+		maxLabel := width - lipgloss.Width(prefix) - lipgloss.Width(marker) - lipgloss.Width(branches) - 20
 		if maxLabel < 20 {
 			maxLabel = 20
 		}
-		if len(label) > maxLabel {
-			label = label[:maxLabel] + "…"
-		}
+		label = truncateDisplay(label, maxLabel+1)
 		role := "💬"
 		if e.Role == "assistant" {
 			role = "🤖"

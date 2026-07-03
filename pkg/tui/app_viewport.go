@@ -284,9 +284,7 @@ func (m appModel) renderQueuedSteers() string {
 	last := m.s.queuedSteers[n-1]
 
 	// Truncate long messages to one line.
-	if len(last) > 60 {
-		last = last[:57] + "…"
-	}
+	last = truncateDisplay(last, 58)
 
 	tag := badge.Render("queued")
 	if n > 1 {

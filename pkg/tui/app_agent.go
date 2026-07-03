@@ -13,10 +13,7 @@ import (
 
 // truncateLabel creates a short label for checkpoint identification.
 func truncateLabel(s string) string {
-	if len(s) > 60 {
-		return s[:60] + "…"
-	}
-	return s
+	return truncateDisplay(s, 60)
 }
 
 func extractToolNote(resultText string, rejected bool) string {

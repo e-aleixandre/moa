@@ -354,13 +354,7 @@ func shortSessionID(id string) string {
 }
 
 func truncateLine(s string, width int) string {
-	if width <= 0 || len(s) <= width {
-		return s
-	}
-	if width == 1 {
-		return "…"
-	}
-	return s[:width-1] + "…"
+	return truncateDisplay(s, width)
 }
 
 

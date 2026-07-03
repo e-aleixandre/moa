@@ -246,10 +246,7 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 	case "request_review":
 		action = "🔍 code review"
 		if summary, ok := stringArg(block.ToolArgs, "summary"); ok {
-			if len(summary) > 80 {
-				summary = summary[:77] + "..."
-			}
-			target = summary
+			target = truncateDisplay(summary, 80)
 		}
 		body = block.ToolResult
 		tail = true
@@ -534,10 +531,7 @@ func formatAskUserBlock(block messageBlock) (target, body string) {
 		}
 
 		if i == 0 {
-			target = text
-			if len(target) > 80 {
-				target = target[:77] + "…"
-			}
+			target = truncateDisplay(text, 78)
 		}
 	}
 	return target, sb.String()
@@ -595,15 +589,9 @@ func sortedArgSummary(args map[string]any) string {
 
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
-		s := fmt.Sprintf("%v", args[key])
-		if len(s) > 80 {
-			s = s[:77] + "…"
-		}
+		s := truncateDisplay(fmt.Sprintf("%v", args[key]), 78)
 		parts = append(parts, fmt.Sprintf("%s=%s", key, s))
 	}
-	result := strings.Join(parts, " ")
-	if len(result) > 200 {
-		result = result[:197] + "…"
-	}
+	result := truncateDisplay(strings.Join(parts, " "), 198)
 	return result
 }

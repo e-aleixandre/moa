@@ -108,10 +108,7 @@ func (SplitLayout) RenderToolBlock(block ToolBlockData, width int, theme Theme) 
 		actionWidth := lipgloss.Width(actionStr) + lipgloss.Width(pad)
 		available := width - actionWidth - badgeWidth - 2
 		if available > 3 {
-			t := block.Target
-			if lipgloss.Width(t) > available {
-				t = truncateToWidth(t, available-1) + "…"
-			}
+			t := truncateDisplay(block.Target, available)
 			targetStr = bgS.Render(" ") + targetStyle.Render(t)
 		}
 	}
@@ -238,16 +235,4 @@ func (SplitLayout) RenderLiveNotice(text string, width int, theme Theme) string 
 		text = truncateVisible(text, width)
 	}
 	return lipgloss.NewStyle().Foreground(theme.Overlay1).Render(text)
-}
-
-// truncateToWidth truncates a string to maxWidth visible characters.
-func truncateToWidth(s string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	if len(runes) <= maxWidth {
-		return s
-	}
-	return string(runes[:maxWidth])
 }
