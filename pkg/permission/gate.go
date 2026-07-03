@@ -182,7 +182,19 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 	evaluator := g.evaluator
 	g.mu.RUnlock()
 
+	// Anti prompt-injection trust gate: a shell command that downloads and
+	// executes remote code (e.g. `curl … | sh`) always requires an explicit
+	// user confirmation, overriding yolo, allow globs, readOnly and the auto
+	// evaluator. Heuristic mitigation, not a sandbox — see dangerous.go. An
+	// explicit deny glob still wins (blocks outright) in non-yolo modes, so it
+	// is checked first there; yolo already skips deny, so we route straight to
+	// the user without changing that.
+	dangerous := isShellTool(name) && IsDangerousCommand(primaryArg(name, args))
+
 	if mode == ModeYolo {
+		if dangerous {
+			return g.askUser(ctx, name, args)
+		}
 		return nil
 	}
 
@@ -190,6 +202,10 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 	// read-only tools, so rules like Read(*.env) actually block.
 	if matchPolicy(deny, name, args, true) {
 		return &core.ToolCallDecision{Block: true, Reason: "denied by policy", Kind: core.ToolCallDecisionKindPermission}
+	}
+
+	if dangerous {
+		return g.askUser(ctx, name, args)
 	}
 
 	if readOnly[name] {
