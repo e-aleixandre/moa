@@ -77,7 +77,7 @@ func NewWrite(cfg ToolConfig) core.Tool {
 				}
 			}
 
-			if err := os.WriteFile(resolved, []byte(content), 0o644); err != nil {
+			if err := atomicWriteFile(resolved, []byte(content), fileModeOr(resolved, 0o644)); err != nil {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
 			}
 

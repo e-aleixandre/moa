@@ -68,14 +68,9 @@ Format:
 					if err := os.MkdirAll(dir, 0o755); err != nil {
 						return core.ErrorResult(fmt.Sprintf("mkdir %s: %v", dir, err)), nil
 					}
-					// Write to temp file + rename for atomicity
-					tmpFile := s.path + ".moa-patch-tmp"
-					if err := os.WriteFile(tmpFile, []byte(s.content), 0o644); err != nil {
+					// Write atomically, preserving the existing file's mode.
+					if err := atomicWriteFile(s.path, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
 						return core.ErrorResult(fmt.Sprintf("write %s: %v", s.path, err)), nil
-					}
-					if err := os.Rename(tmpFile, s.path); err != nil {
-						_ = os.Remove(tmpFile) // cleanup
-						return core.ErrorResult(fmt.Sprintf("rename %s: %v", s.path, err)), nil
 					}
 
 				case actionDelete:
@@ -94,13 +89,9 @@ Format:
 					if err := os.MkdirAll(dir, 0o755); err != nil {
 						return core.ErrorResult(fmt.Sprintf("mkdir %s: %v", dir, err)), nil
 					}
-					tmpFile := s.moveTo + ".moa-patch-tmp"
-					if err := os.WriteFile(tmpFile, []byte(s.content), 0o644); err != nil {
+					// Preserve the original file's mode (moveTo doesn't exist yet).
+					if err := atomicWriteFile(s.moveTo, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
 						return core.ErrorResult(fmt.Sprintf("write %s: %v", s.moveTo, err)), nil
-					}
-					if err := os.Rename(tmpFile, s.moveTo); err != nil {
-						_ = os.Remove(tmpFile)
-						return core.ErrorResult(fmt.Sprintf("rename %s: %v", s.moveTo, err)), nil
 					}
 					// Remove old file
 					if cfg.BeforeWrite != nil {
