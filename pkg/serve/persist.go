@@ -81,6 +81,26 @@ func (sp *servePersister) SnapshotTree(entries []session.Entry, leafID string, m
 	return nil
 }
 
+// saveTitle persists a title change made out-of-band (e.g. background
+// auto-titling) that would otherwise not land on disk until the next snapshot.
+// The last snapshot's messages are reused, so this is safe to call any time.
+//
+// The write happens under the lock so it serializes with markDeleted: once a
+// session is deleted this becomes a no-op and can never resurrect its file.
+func (sp *servePersister) saveTitle(title, source string) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.persisted == nil || sp.store == nil {
+		return
+	}
+	sp.persisted.Title = title
+	sp.persisted.TitleSource = source
+	snapshot := *sp.persisted
+	if err := sp.store.Save(&snapshot); err != nil {
+		slog.Warn("session title save failed", "error", err)
+	}
+}
+
 // markDeleted prevents future Snapshot calls from writing to disk.
 func (sp *servePersister) markDeleted() {
 	sp.mu.Lock()

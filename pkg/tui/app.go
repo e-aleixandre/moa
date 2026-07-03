@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ealeixandre/moa/pkg/autotitle"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -115,6 +116,11 @@ type appModel struct {
 	session      *session.Session
 	cwd          string
 
+	// Auto-titling: one-shot cheap LLM call to name the session after the
+	// first run. nil factory disables it.
+	providerFactory func(core.Model) (core.Provider, error)
+	autoTitled      bool
+
 	// Display
 	modelName string
 
@@ -155,16 +161,17 @@ type appModel struct {
 
 // Config configures the TUI. All fields are optional except Runtime.
 type Config struct {
-	Runtime               *bus.SessionRuntime  // required — the session bus runtime
-	SessionStore          session.SessionStore // persistence backend (nil = no persistence)
-	Session               *session.Session     // session to resume (nil = fresh start)
-	StartInSessionBrowser bool                 // open the session browser before entering chat
-	CWD                   string               // working directory for session metadata
-	PinnedModels          []string             // model IDs pre-pinned for Ctrl+P cycling
-	OnPinnedModelsChange  func([]string) error // called when the user changes pinned models
-	PromptTemplates       []promptpkg.Template // available prompt templates
-	Transcriber           core.Transcriber     // speech-to-text for voice input (nil = disabled)
-	UsagePoller           *usage.Poller        // plan usage poller (nil = usage tracking disabled)
+	Runtime               *bus.SessionRuntime                     // required — the session bus runtime
+	SessionStore          session.SessionStore                    // persistence backend (nil = no persistence)
+	Session               *session.Session                        // session to resume (nil = fresh start)
+	StartInSessionBrowser bool                                    // open the session browser before entering chat
+	CWD                   string                                  // working directory for session metadata
+	PinnedModels          []string                                // model IDs pre-pinned for Ctrl+P cycling
+	OnPinnedModelsChange  func([]string) error                    // called when the user changes pinned models
+	PromptTemplates       []promptpkg.Template                    // available prompt templates
+	Transcriber           core.Transcriber                        // speech-to-text for voice input (nil = disabled)
+	UsagePoller           *usage.Poller                           // plan usage poller (nil = usage tracking disabled)
+	ProviderFactory       func(core.Model) (core.Provider, error) // one-shot LLM calls (auto-titling); nil disables
 }
 
 // isStructuralBusEvent returns true for events that must not be dropped.
@@ -220,6 +227,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		statusBar:            NewStatusLine(statusLineStyle),
 		sessionStore:         cfg.SessionStore,
 		session:              cfg.Session,
+		providerFactory:      cfg.ProviderFactory,
 		cwd:                  cfg.CWD,
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
@@ -431,6 +439,16 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case usageTickMsg:
 		return m, m.fetchUsageCmd()
+
+	case autoTitleMsg:
+		if msg.title != "" && m.session != nil {
+			m.session.SetAutoTitle(msg.title, 80)
+			if m.sessionStore != nil {
+				_ = m.sessionStore.Save(m.session)
+			}
+			m.updateViewport()
+		}
+		return m, nil
 
 	case renderTickMsg:
 		needsRefresh := false
@@ -1544,7 +1562,36 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 
 	m.refreshTaskDisplay()
 	m.updateViewport()
+
+	if cmd := m.maybeAutoTitle(msgs, e.Err); cmd != nil {
+		return []tea.Cmd{cmd}
+	}
 	return nil
+}
+
+// autoTitleMsg carries a background-generated session title.
+type autoTitleMsg struct{ title string }
+
+// maybeAutoTitle kicks off a one-shot background title generation after the
+// first successful run, unless the session was manually renamed. Returns nil
+// when titling doesn't apply.
+func (m *appModel) maybeAutoTitle(msgs []core.AgentMessage, runErr error) tea.Cmd {
+	if runErr != nil || m.autoTitled || m.providerFactory == nil || m.session == nil {
+		return nil
+	}
+	if m.session.TitleIsManual() || len(msgs) == 0 {
+		return nil
+	}
+	m.autoTitled = true
+	factory := m.providerFactory
+	ctx := m.baseCtx
+	return func() tea.Msg {
+		title, err := autotitle.Generate(ctx, factory, msgs)
+		if err != nil {
+			return autoTitleMsg{} // empty → ignored
+		}
+		return autoTitleMsg{title: title}
+	}
 }
 
 // --- Helpers ---

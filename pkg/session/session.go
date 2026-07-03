@@ -8,6 +8,7 @@ package session
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -47,12 +48,15 @@ const SessionVersion = 2
 // so the readSummary partial-read optimization (4KB prefix) still works.
 type Session struct {
 	// Header fields — read by partial-read list optimization
-	ID       string         `json:"id"`
-	Version  int            `json:"version"`
-	Created  time.Time      `json:"created"`
-	Updated  time.Time      `json:"updated"`
-	Title    string         `json:"title"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ID      string    `json:"id"`
+	Version int       `json:"version"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
+	Title   string    `json:"title"`
+	// TitleSource records how Title was set: "manual" (user renamed) or "auto"
+	// (derived / LLM-generated). Empty is legacy and treated as auto.
+	TitleSource string         `json:"title_source,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 
 	// V2: entry-based tree log
 	LeafID  string  `json:"leaf_id,omitempty"`
@@ -66,11 +70,12 @@ type Session struct {
 // Summary is a lightweight session descriptor without messages.
 // Used for listing sessions without loading full conversation data.
 type Summary struct {
-	ID       string         `json:"id"`
-	Created  time.Time      `json:"created"`
-	Updated  time.Time      `json:"updated"`
-	Title    string         `json:"title"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ID          string         `json:"id"`
+	Created     time.Time      `json:"created"`
+	Updated     time.Time      `json:"updated"`
+	Title       string         `json:"title"`
+	TitleSource string         `json:"title_source,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // RuntimeMetadata keys used for persisting session configuration.
@@ -140,15 +145,54 @@ func (s *Session) PathMeta() (scope string, allowedPaths []string) {
 	return
 }
 
+// Title source values. Empty (legacy) is treated as auto.
+const (
+	TitleSourceAuto   = "auto"
+	TitleSourceManual = "manual"
+)
+
+// truncateTitle caps a title to maxLen runes, appending an ellipsis when it
+// was longer.
+func truncateTitle(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen]) + "…"
+	}
+	return s
+}
+
 // SetTitle sets the session title from a user message.
 // Only sets if title is empty (first message). Truncates to maxLen.
 func (s *Session) SetTitle(text string, maxLen int) {
 	if s.Title != "" || text == "" {
 		return
 	}
-	runes := []rune(text)
-	if len(runes) > maxLen {
-		text = string(runes[:maxLen]) + "…"
+	s.Title = truncateTitle(text, maxLen)
+}
+
+// TitleIsManual reports whether the user explicitly renamed the session.
+// A legacy empty source counts as auto.
+func (s *Session) TitleIsManual() bool {
+	return s.TitleSource == TitleSourceManual
+}
+
+// SetAutoTitle applies an auto-generated title, unless the user has manually
+// renamed the session. Empty/whitespace titles are ignored.
+func (s *Session) SetAutoTitle(title string, maxLen int) {
+	if s.TitleIsManual() {
+		return
 	}
-	s.Title = text
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return
+	}
+	s.Title = truncateTitle(title, maxLen)
+	s.TitleSource = TitleSourceAuto
+}
+
+// Rename sets a user-chosen title and marks it manual so auto-titling never
+// overwrites it.
+func (s *Session) Rename(title string, maxLen int) {
+	s.Title = truncateTitle(strings.TrimSpace(title), maxLen)
+	s.TitleSource = TitleSourceManual
 }

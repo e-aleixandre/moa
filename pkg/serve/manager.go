@@ -37,9 +37,10 @@ type ManagedSession struct {
 	Created time.Time `json:"created"`
 
 	// Mutable under mu.
-	mu      sync.Mutex
-	Title   string
-	Updated time.Time
+	mu          sync.Mutex
+	Title       string
+	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
+	Updated     time.Time
 
 	// Bus runtime — owns all session state.
 	runtime *bus.SessionRuntime
@@ -55,6 +56,7 @@ type ManagedSession struct {
 	// the bus unsubscribe funcs registered by subscribePush.
 	wsConns    atomic.Int32
 	deleted    atomic.Bool
+	autoTitled atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
 	pushUnsubs []func()
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
@@ -147,10 +149,10 @@ type Manager struct {
 	baseCtx  context.Context
 
 	providerFactory func(model core.Model) (core.Provider, error)
-	transcriber     core.Transcriber   // nil when no speech-to-text is available
-	usagePoller     *usage.Poller      // nil when plan usage tracking is unavailable
-	pushStore       *push.Store        // nil when Web Push is unavailable
-	pushDispatcher  *push.Dispatcher   // nil when Web Push is unavailable
+	transcriber     core.Transcriber // nil when no speech-to-text is available
+	usagePoller     *usage.Poller    // nil when plan usage tracking is unavailable
+	pushStore       *push.Store      // nil when Web Push is unavailable
+	pushDispatcher  *push.Dispatcher // nil when Web Push is unavailable
 	defaultModel    core.Model
 	workspaceRoot   string
 	moaCfg          core.MoaConfig

@@ -35,6 +35,14 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		cwd = m.workspaceRoot
 	}
 
+	// A title chosen explicitly at creation is treated as manual, so auto-titling
+	// won't overwrite it. (The web never sets one — titles come from the first
+	// message — so this only affects programmatic callers.)
+	titleSource := ""
+	if opts.Title != "" {
+		titleSource = session.TitleSourceManual
+	}
+
 	// Resolve ID + persistence first.
 	var persisted *session.Session
 	var store *session.FileStore
@@ -43,13 +51,18 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		store = s
 		persisted = store.Create()
 		persisted.Title = opts.Title
+		persisted.TitleSource = titleSource
 		id = persisted.ID
 	}
 	if id == "" {
 		id = newID()
 	}
 
-	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, nil)
+	var bopts *buildOpts
+	if titleSource != "" {
+		bopts = &buildOpts{titleSource: titleSource}
+	}
+	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +100,7 @@ type buildOpts struct {
 	initialMessages        []core.AgentMessage
 	initialCompactionEpoch int
 	initialThinking        string // applied via SetThinking after construction
+	titleSource            string // how the resumed title was set (session.TitleSource*)
 
 	// V2 session tree
 	initialEntries []session.Entry
@@ -231,9 +245,19 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			UntrustedMCP:  bs.UntrustedMCP,
 		},
 	}
+	if opts != nil {
+		sess.TitleSource = opts.titleSource
+		// A resumed session with prior history has already lived past its first
+		// run, so don't re-generate its title.
+		if len(opts.initialMessages) > 0 || len(opts.initialEntries) > 0 {
+			sess.autoTitled.Store(true)
+		}
+	}
 
-	// Wire Web Push before the session can run (no-op if push is disabled).
+	// Wire Web Push and auto-titling before the session can run (no-ops if the
+	// respective feature is unavailable).
 	m.subscribePush(sess)
+	m.subscribeAutoTitle(sess)
 
 	m.mu.Lock()
 	m.sessions[sess.ID] = sess
@@ -338,6 +362,7 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		initialThinking:        savedThinking,
 		initialEntries:         saved.Entries,
 		initialLeafID:          saved.LeafID,
+		titleSource:            saved.TitleSource,
 	})
 	if err != nil {
 		cleanup()
@@ -496,4 +521,3 @@ func modelDisplayName(m core.Model) string {
 	}
 	return m.ID
 }
-

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 type mockHandler func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error)
 
 type mockProvider struct {
-	calls    int
+	calls    atomic.Int32 // atomic: background auto-titling may call Stream concurrently
 	handlers []mockHandler
 }
 
@@ -26,8 +27,7 @@ func newMockProvider(handlers ...mockHandler) *mockProvider {
 }
 
 func (m *mockProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-	idx := m.calls
-	m.calls++
+	idx := int(m.calls.Add(1) - 1)
 	if idx >= len(m.handlers) {
 		return simpleResponse("done"), nil
 	}
@@ -352,7 +352,11 @@ func TestSend_AutoTitle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	prov := newMockProvider(simpleResponseHandler("reply"))
+	// First call answers the run; the second answers the auto-title request.
+	prov := newMockProvider(
+		simpleResponseHandler("reply"),
+		simpleResponseHandler("Auth module refactor"),
+	)
 	mgr := newTestManager(t, ctx, prov)
 
 	sess, _ := mgr.CreateSession(CreateOpts{})
@@ -362,16 +366,13 @@ func TestSend_AutoTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pollUntil(t, 5*time.Second, "run complete", func() bool {
-		return sessState(sess) == StateIdle
+	// After the first run, auto-titling replaces the crude first-message title
+	// with the LLM-generated one.
+	pollUntil(t, 5*time.Second, "auto-title generated", func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.Title == "Auth module refactor"
 	})
-
-	sess.mu.Lock()
-	title := sess.Title
-	sess.mu.Unlock()
-	if title != "Refactoriza el módulo de auth" {
-		t.Fatalf("expected auto-title, got %q", title)
-	}
 }
 
 func TestCreateSession_WithCWD(t *testing.T) {

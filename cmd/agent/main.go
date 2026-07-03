@@ -446,8 +446,9 @@ func main() {
 					cfg.PinnedModels = ids
 				})
 			},
-			Transcriber: transcriber,
-			UsagePoller: newAnthropicUsagePoller(authStore),
+			Transcriber:     transcriber,
+			UsagePoller:     newAnthropicUsagePoller(authStore),
+			ProviderFactory: providerFactory,
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(24))
 		if _, err := prog.Run(); err != nil {
