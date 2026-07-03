@@ -442,6 +442,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		Model:               cfg.Model,
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       cfg.ThinkingLevel,
+		CacheTTL:            core.GetCacheTTL(moaCfg),
 		Tools:               toolReg,
 		WorkspaceRoot:       cfg.CWD,
 		MaxTurns:            maxTurns,

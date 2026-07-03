@@ -54,6 +54,7 @@ type MoaConfig struct {
 	MaxRunDurationStr    string            `json:"max_run_duration,omitempty"`        // Max run duration as Go duration string (e.g. "30m"). Empty = unlimited.
 	MemoryEnabled        *bool             `json:"memory_enabled,omitempty"`         // nil = true (enabled by default)
 	AutoVerify           *bool             `json:"auto_verify,omitempty"`            // nil = false (disabled by default)
+	CacheTTL             string            `json:"cache_ttl,omitempty"`              // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
 }
 
 // IsMemoryEnabled returns whether cross-session memory is enabled.
@@ -69,6 +70,16 @@ func IsMemoryEnabled(cfg MoaConfig) bool {
 // Default is false when AutoVerify is nil (not configured).
 func IsAutoVerifyEnabled(cfg MoaConfig) bool {
 	return cfg.AutoVerify != nil && *cfg.AutoVerify
+}
+
+// GetCacheTTL returns the prompt-cache TTL for the interactive agent. Only "1h"
+// is honored; anything else (including empty or a typo) yields "" — the
+// Anthropic default of 5 minutes. Subagents and one-shot calls never use this.
+func GetCacheTTL(cfg MoaConfig) string {
+	if cfg.CacheTTL == "1h" {
+		return "1h"
+	}
+	return ""
 }
 
 // GetMaxRunDuration parses MaxRunDurationStr into a time.Duration.
@@ -177,6 +188,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		PlanReviewThinking: mergeScalar(base.PlanReviewThinking, override.PlanReviewThinking),
 		CodeReviewModel:    mergeScalar(base.CodeReviewModel, override.CodeReviewModel),
 		CodeReviewThinking: mergeScalar(base.CodeReviewThinking, override.CodeReviewThinking),
+		CacheTTL:           mergeScalar(base.CacheTTL, override.CacheTTL),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {

@@ -129,7 +129,7 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 	// 1. Last system block (system prompt is identical turn-to-turn)
 	// 2. Last tool definition (tool specs are identical turn-to-turn)
 	// 3. Last content block of the last user message (caches conversation history)
-	addCacheBreakpoints(&ar)
+	addCacheBreakpoints(&ar, req.Options.CacheRetention)
 
 	return json.Marshal(ar)
 }
@@ -371,19 +371,25 @@ func resolveThinking(req core.Request) *thinkingConfig {
 	}
 }
 
-var cacheControl = map[string]string{"type": "ephemeral"}
-
 // addCacheBreakpoints marks the last system block, last tool, and last user
-// message content block with cache_control for Anthropic prompt caching.
-func addCacheBreakpoints(ar *anthropicRequest) {
+// message content block with cache_control for Anthropic prompt caching. ttl is
+// the cache retention: "1h" for the extended window (2x write cost), or "" for
+// the default 5-minute ephemeral cache. The three breakpoints share one map
+// value; it is never mutated after assignment, so sharing the reference is safe.
+func addCacheBreakpoints(ar *anthropicRequest, ttl string) {
+	cc := map[string]any{"type": "ephemeral"}
+	if ttl == "1h" {
+		cc["ttl"] = "1h"
+	}
+
 	// 1. Last system block
 	if blocks, ok := ar.System.([]map[string]any); ok && len(blocks) > 0 {
-		blocks[len(blocks)-1]["cache_control"] = cacheControl
+		blocks[len(blocks)-1]["cache_control"] = cc
 	}
 
 	// 2. Last tool
 	if len(ar.Tools) > 0 {
-		ar.Tools[len(ar.Tools)-1]["cache_control"] = cacheControl
+		ar.Tools[len(ar.Tools)-1]["cache_control"] = cc
 	}
 
 	// 3. Last content block of the final user message (caches conversation history).
@@ -392,7 +398,7 @@ func addCacheBreakpoints(ar *anthropicRequest) {
 		if ar.Messages[i]["role"] == "user" {
 			if content, ok := ar.Messages[i]["content"].([]any); ok && len(content) > 0 {
 				if block, ok := content[len(content)-1].(map[string]any); ok {
-					block["cache_control"] = cacheControl
+					block["cache_control"] = cc
 				}
 			}
 			break
