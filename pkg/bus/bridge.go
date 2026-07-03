@@ -8,6 +8,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -33,6 +34,7 @@ type AgentController interface {
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
+	SetCompactAt(tokens int) error
 	Reset() error
 	Compact(ctx context.Context) (*core.CompactionPayload, error)
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
@@ -47,6 +49,7 @@ type AgentController interface {
 	Model() core.Model
 	SystemPrompt() string
 	ThinkingLevel() string
+	CompactAt() int
 	CompactionEpoch() int
 	IsRunning() bool
 }
@@ -65,18 +68,29 @@ type SessionContext struct {
 	SessionCtx context.Context // session lifetime context; cancelled on destroy
 	Bus        EventBus
 	Agent      AgentController
-	State      *StateMachine      // may be nil for backward compat
-	Approvals  *ApprovalManager   // manages pending permissions/asks; may be nil
-	Tree       *session.Tree      // session entry tree; may be nil during migration
+	State      *StateMachine    // may be nil for backward compat
+	Approvals  *ApprovalManager // manages pending permissions/asks; may be nil
+	Tree       *session.Tree    // session entry tree; may be nil during migration
 
-	PlanMode    *planmode.PlanMode  // may be nil
-	TaskStore   *tasks.Store        // may be nil
-	Checkpoints *checkpoint.Store   // may be nil
-	PathPolicy  *tool.PathPolicy    // may be nil
-	AskBridge   *askuser.Bridge     // may be nil
+	PlanMode    *planmode.PlanMode // may be nil
+	Goal        *goal.Goal         // may be nil
+	TaskStore   *tasks.Store       // may be nil
+	Checkpoints *checkpoint.Store  // may be nil
+	PathPolicy  *tool.PathPolicy   // may be nil
+	AskBridge   *askuser.Bridge    // may be nil
 
 	ProviderFactory  func(core.Model) (core.Provider, error)
 	BaseSystemPrompt string
+
+	// goalPrevCompactAt is the CompactAt threshold captured when goal mode
+	// started, restored when it ends. Written by EnterGoal before any goal run,
+	// read by stopGoal afterward.
+	goalPrevCompactAt int
+
+	// goalLastCommit is the HEAD commit hash seen at the previous goal iteration.
+	// The driver uses it to tell a productive iteration (new commit) from a
+	// stalled one. Baselined by EnterGoal; updated each iteration by the driver.
+	goalLastCommit string
 
 	// GateConfig is used to reconstruct a Gate when switching from yolo
 	// to ask/auto. Preserves allow/deny patterns, rules, headless, etc.

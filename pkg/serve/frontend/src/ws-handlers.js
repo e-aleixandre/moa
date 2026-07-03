@@ -214,6 +214,10 @@ export function handleWsInit(id, data) {
     tasks: data.tasks || [],
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,
+    goalActive: !!data.goal_active,
+    goalObjective: data.goal_active ? (data.goal_objective || '') : null,
+    goalIteration: data.goal_iteration || 0,
+    goalStalled: data.goal_stalled || 0,
   });
 }
 
@@ -692,6 +696,37 @@ function parseSubagentNotification(text) {
     }
   }
   return null;
+}
+
+export function handleWsGoalChange(id, data) {
+  updateSession(id, {
+    goalActive: !!data.active,
+    goalObjective: data.active ? (data.objective || '') : null,
+    goalIteration: data.iteration || 0,
+    goalStalled: data.stalled || 0,
+  });
+}
+
+export function handleWsGoalIteration(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  const verdict = data.satisfied ? 'satisfied' : 'not done yet';
+  let text = `🎯 Goal iteration ${data.iteration} — ${verdict}`;
+  if (data.feedback && data.feedback.trim()) text += `\n${data.feedback}`;
+  updateSession(id, {
+    messages: [...sess.messages, { _type: 'system', text }],
+    goalIteration: data.iteration || sess.goalIteration || 0,
+  });
+}
+
+export function handleWsGoalEnd(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  updateSession(id, {
+    goalActive: false,
+    goalObjective: null,
+    messages: [...sess.messages, { _type: 'system', text: `🎯 Goal ended: ${data.reason || ''}` }],
+  });
 }
 
 export function handleWsAutoVerifyStart(id) {

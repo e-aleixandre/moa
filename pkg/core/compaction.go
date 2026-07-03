@@ -3,8 +3,9 @@ package core
 // CompactionSettings controls automatic context compaction.
 type CompactionSettings struct {
 	Enabled       bool `json:"enabled"`
-	ReserveTokens int  `json:"reserve_tokens"` // keep free for model output + thinking
-	KeepRecent    int  `json:"keep_recent"`    // tokens of recent context to keep verbatim
+	ReserveTokens int  `json:"reserve_tokens"`       // keep free for model output + thinking
+	KeepRecent    int  `json:"keep_recent"`          // tokens of recent context to keep verbatim
+	CompactAt     int  `json:"compact_at,omitempty"` // soft threshold in tokens; 0 = use the model window
 }
 
 // DefaultCompactionSettings provides sensible defaults.
@@ -21,6 +22,17 @@ type CompactionPayload struct {
 	TokensAfter   int      `json:"tokens_after"`
 	ReadFiles     []string `json:"read_files,omitempty"`
 	ModifiedFiles []string `json:"modified_files,omitempty"`
+}
+
+// EffectiveWindow returns the context window to use for compaction decisions.
+// When CompactAt is set (>0) it caps the model's real window so compaction fires
+// earlier; it is clamped to maxInput, so an over-large value harmlessly degrades
+// to plain overflow protection rather than disabling compaction.
+func (s CompactionSettings) EffectiveWindow(maxInput int) int {
+	if s.CompactAt > 0 && s.CompactAt < maxInput {
+		return s.CompactAt
+	}
+	return maxInput
 }
 
 // ShouldCompact returns true if context tokens exceed the safe threshold.

@@ -9,6 +9,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -20,12 +21,13 @@ import (
 type RuntimeConfig struct {
 	SessionID        string
 	Ctx              context.Context
-	Bus              EventBus        // optional pre-created bus; if nil, a new LocalBus is created
+	Bus              EventBus // optional pre-created bus; if nil, a new LocalBus is created
 	Agent            AgentController
 	Subscriber       AgentSubscriber // nil = use Agent if it implements AgentSubscriber
 	TaskStore        *tasks.Store
 	Checkpoints      *checkpoint.Store
 	PlanMode         *planmode.PlanMode
+	Goal             *goal.Goal
 	Gate             *permission.Gate
 	PathPolicy       *tool.PathPolicy
 	AskBridge        *askuser.Bridge
@@ -112,6 +114,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		TaskStore:        cfg.TaskStore,
 		Checkpoints:      cfg.Checkpoints,
 		PlanMode:         cfg.PlanMode,
+		Goal:             cfg.Goal,
 		PathPolicy:       cfg.PathPolicy,
 		AskBridge:        cfg.AskBridge,
 		ProviderFactory:  cfg.ProviderFactory,
@@ -179,6 +182,14 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 				Mode:      string(mode),
 				PlanFile:  sctx.PlanMode.PlanFilePath(),
 			})
+		})
+	}
+
+	// Goal mode: rebuild system prompt (inject/remove directive) and announce.
+	if cfg.Goal != nil {
+		cfg.Goal.SetOnChange(func(active bool) {
+			rebuildSystemPrompt(sctx)
+			sctx.Bus.Publish(goalChangedEvent(sctx.SessionID, cfg.Goal.Info()))
 		})
 	}
 

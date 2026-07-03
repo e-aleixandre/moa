@@ -1,6 +1,10 @@
 package bus
 
-import "github.com/ealeixandre/moa/pkg/core"
+import (
+	"time"
+
+	"github.com/ealeixandre/moa/pkg/core"
+)
 
 // ---------------------------------------------------------------------------
 // Agent interaction
@@ -126,6 +130,27 @@ type ContinueRefining struct{ SessionID string }
 
 // FinishPlanReview completes the review phase and transitions to ready.
 type FinishPlanReview struct{ SessionID string }
+
+// ---------------------------------------------------------------------------
+// Goal mode
+// ---------------------------------------------------------------------------
+
+// EnterGoal starts an autonomous maker→verifier loop toward Objective. The
+// handler lowers the compaction threshold (CompactAt), injects the goal
+// directive into the system prompt, and kicks the first iteration.
+type EnterGoal struct {
+	SessionID     string
+	Objective     string
+	CompactAt     int           // soft compaction threshold in tokens; 0 = leave unchanged
+	VerifierSpec  string        // model spec for the verifier; "" = default (haiku)
+	MaxIterations int           // 0 = unlimited
+	MaxStalled    int           // 0 = default
+	Timeout       time.Duration // 0 = no wall-clock deadline
+	StatePath     string        // "" = default (.moa/goal/STATE.md)
+}
+
+// ExitGoal stops goal mode (removes the directive and restores compaction).
+type ExitGoal struct{ SessionID string }
 
 // ---------------------------------------------------------------------------
 // Tasks

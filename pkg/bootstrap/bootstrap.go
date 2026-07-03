@@ -18,6 +18,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/askuser"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/memory"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -90,6 +91,7 @@ type Session struct {
 	ToolReg      *core.Registry
 	TaskStore    *tasks.Store
 	PlanMode     *planmode.PlanMode
+	Goal         *goal.Goal
 	AskBridge    *askuser.Bridge
 	Gate         *permission.Gate
 	MCPManager   *mcp.Manager
@@ -421,6 +423,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		},
 	})
 	sess.PlanMode = pm
+	sess.Goal = goal.New()
 
 	// 12. System prompt (after ALL tools registered).
 	systemPrompt := agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{

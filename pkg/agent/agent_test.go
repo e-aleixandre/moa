@@ -1157,6 +1157,75 @@ func TestReset_WhileRunning_ReturnsError(t *testing.T) {
 	t.Fatal("Reset never returned 'cannot reset while agent is running'")
 }
 
+func TestSetCompactAt_StoresValue(t *testing.T) {
+	ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+
+	if err := ag.SetCompactAt(260_000); err != nil {
+		t.Fatalf("SetCompactAt failed: %v", err)
+	}
+	if got := ag.config.Compaction.CompactAt; got != 260_000 {
+		t.Fatalf("expected CompactAt=260000, got %d", got)
+	}
+	// 0 restores default (window-based) behavior.
+	if err := ag.SetCompactAt(0); err != nil {
+		t.Fatalf("SetCompactAt(0) failed: %v", err)
+	}
+	if got := ag.config.Compaction.CompactAt; got != 0 {
+		t.Fatalf("expected CompactAt=0, got %d", got)
+	}
+}
+
+func TestSetCompactAt_CopyOnWrite(t *testing.T) {
+	// A shared settings pointer must not be mutated in place.
+	shared := core.DefaultCompactionSettings
+	ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+	ag.config.Compaction = &shared
+
+	if err := ag.SetCompactAt(123_456); err != nil {
+		t.Fatalf("SetCompactAt failed: %v", err)
+	}
+	if shared.CompactAt != 0 {
+		t.Fatal("shared settings were mutated in place; expected copy-on-write")
+	}
+	if ag.config.Compaction.CompactAt != 123_456 {
+		t.Fatal("agent settings did not pick up the new value")
+	}
+}
+
+func TestSetCompactAt_WhileRunning_ReturnsError(t *testing.T) {
+	blockingProvider := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 1)
+		go func() {
+			defer close(ch)
+			select {} // block forever
+		}()
+		return ch, nil
+	}
+	ag := newTestAgent(NewMockProvider(blockingProvider))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ag.Send(ctx, "will block") //nolint: errcheck
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := ag.SetCompactAt(260_000); err != nil {
+			cancel()
+			<-done
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	t.Fatal("SetCompactAt never rejected while running")
+}
+
 func TestSend_WhileRunning_ReturnsError(t *testing.T) {
 	// Use a signal channel so we know the provider was called (agent is running).
 	providerCalled := make(chan struct{})

@@ -20,6 +20,7 @@ var allCommands = []commandDef{
 	{Name: "thinking", Args: "<level>", Desc: "Set thinking level (off/low/medium/high/xhigh)"},
 	{Name: "compact", Desc: "Force context compaction"},
 	{Name: "plan", Desc: "Toggle plan mode (plan-then-execute workflow)"},
+	{Name: "goal", Args: "<objective> [flags]|stop|status", Desc: "Autonomous maker→verifier loop toward an objective"},
 	{Name: "permissions", Args: "<mode>", Desc: "View or set permission mode (yolo/ask/auto)"},
 	{Name: "path", Args: "[list|add|rm|scope]", Desc: "View or manage path access scope"},
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},

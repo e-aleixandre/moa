@@ -247,6 +247,33 @@ type PlanModeChanged struct {
 }
 
 // ---------------------------------------------------------------------------
+// Goal mode
+// ---------------------------------------------------------------------------
+
+// GoalChanged is published when goal mode activates or deactivates.
+type GoalChanged struct {
+	SessionID string
+	Active    bool
+	Objective string
+	Iteration int
+	Stalled   int
+}
+
+// GoalIterationEnded is published after the verifier judges an iteration.
+type GoalIterationEnded struct {
+	SessionID string
+	Iteration int
+	Satisfied bool
+	Feedback  string
+}
+
+// GoalEnded is published when the loop stops (objective met or a backstop hit).
+type GoalEnded struct {
+	SessionID string
+	Reason    string
+}
+
+// ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
 

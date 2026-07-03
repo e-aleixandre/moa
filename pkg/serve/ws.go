@@ -130,6 +130,17 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "plan_mode", Data: PlanModeData{
 			Mode: e.Mode, PlanFile: e.PlanFile,
 		}}, true
+	case bus.GoalChanged:
+		return Event{Type: "goal_change", Data: GoalChangeData{
+			Active: e.Active, Objective: e.Objective,
+			Iteration: e.Iteration, Stalled: e.Stalled,
+		}}, true
+	case bus.GoalIterationEnded:
+		return Event{Type: "goal_iteration", Data: GoalIterationData{
+			Iteration: e.Iteration, Satisfied: e.Satisfied, Feedback: e.Feedback,
+		}}, true
+	case bus.GoalEnded:
+		return Event{Type: "goal_end", Data: GoalEndData{Reason: e.Reason}}, true
 	case bus.CommandExecuted:
 		return Event{Type: "command", Data: CommandData{
 			Command: e.Command, Messages: e.Messages,
@@ -209,6 +220,7 @@ func buildInitData(sess *ManagedSession) InitData {
 	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
 	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
+	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
 
 	data := InitData{
 		Messages:       msgs,
@@ -236,6 +248,12 @@ func buildInitData(sess *ManagedSession) InitData {
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile
+	}
+	if goalInfo.Active {
+		data.GoalActive = true
+		data.GoalObjective = goalInfo.Objective
+		data.GoalIteration = goalInfo.Iteration
+		data.GoalStalled = goalInfo.Stalled
 	}
 
 	return data

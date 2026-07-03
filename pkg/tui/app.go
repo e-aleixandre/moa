@@ -45,6 +45,7 @@ type state struct {
 	dirty              bool           // streamText changed since last render tick
 	viewportDirty      bool           // blocks changed, viewport needs refresh on next tick
 	running            bool           // agent is running (tick should continue)
+	goalActive         bool           // goal mode is on (autonomous relaunches count as running)
 	streamState        streamState
 	activeTools        int                   // number of tool calls currently executing
 	showThinking       bool                  // toggle thinking visibility (Ctrl+T)
@@ -1314,6 +1315,11 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	// --- Run lifecycle ---
 	case bus.RunStarted:
 		m.s.runGen = e.RunGen
+		// Goal iterations are relaunched autonomously by the bus driver, not by
+		// the TUI, so reflect the run locally when one starts.
+		if m.s.goalActive && !m.s.running {
+			m.prepareRun("goal")
+		}
 
 	case bus.RunEnded:
 		if e.RunGen != m.s.runGen {
@@ -1371,6 +1377,16 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	// --- Plan mode ---
 	case bus.PlanModeChanged:
 		return m.handlePlanModeChanged(e)
+
+	// --- Goal mode ---
+	case bus.GoalChanged:
+		return m.handleGoalChanged(e)
+
+	case bus.GoalIterationEnded:
+		return m.handleGoalIterationEnded(e)
+
+	case bus.GoalEnded:
+		return m.handleGoalEnded(e)
 
 	// --- Tasks ---
 	case bus.TasksUpdated:

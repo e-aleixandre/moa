@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
@@ -22,6 +23,7 @@ var commandRegistry = map[string]commandHandler{
 	"model":       cmdModel,
 	"thinking":    cmdThinking,
 	"plan":        cmdPlan,
+	"goal":        cmdGoal,
 	"tasks":       cmdTasks,
 	"permissions": cmdPermissions,
 	"undo":        cmdUndo,
@@ -135,6 +137,52 @@ func cmdPlan(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 	}
 
 	return &CommandResult{OK: true, Message: "plan mode: " + planInfo.Mode}, nil
+}
+
+func cmdGoal(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
+	b := sess.runtime.Bus
+
+	if len(args) == 0 || args[0] == "status" {
+		info, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
+		if !info.Active {
+			return &CommandResult{OK: true, Message: "no goal active — start one with /goal <objective>"}, nil
+		}
+		msg := fmt.Sprintf("goal active: %s (iteration %d", info.Objective, info.Iteration)
+		if info.MaxIterations > 0 {
+			msg += fmt.Sprintf("/%d", info.MaxIterations)
+		}
+		if info.Stalled > 0 {
+			msg += fmt.Sprintf(", stalled %d", info.Stalled)
+		}
+		return &CommandResult{OK: true, Message: msg + ")"}, nil
+	}
+
+	if args[0] == "stop" {
+		if err := b.Execute(bus.ExitGoal{}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		return &CommandResult{OK: true, Message: "goal stopped"}, nil
+	}
+
+	// Anything else is the objective (plus optional knobs) to start.
+	if err := requireIdle(sess); err != nil {
+		return nil, err
+	}
+	gc, err := goal.ParseCommand(strings.Join(args, " "))
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error() + " — usage: /goal <objective> " + goal.FlagsUsage}, nil
+	}
+	if err := b.Execute(bus.EnterGoal{
+		Objective:     gc.Objective,
+		CompactAt:     gc.CompactAt,
+		VerifierSpec:  gc.VerifierSpec,
+		MaxIterations: gc.MaxIterations,
+		MaxStalled:    gc.MaxStalled,
+		Timeout:       gc.Timeout,
+	}); err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
+	return &CommandResult{OK: true, Message: "goal started: " + gc.Objective}, nil
 }
 
 func cmdTasks(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

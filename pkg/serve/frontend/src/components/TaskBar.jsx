@@ -1,4 +1,4 @@
-import { ClipboardList, Map, Shield, Gauge, Zap, Flame } from 'lucide-preact';
+import { ClipboardList, Map, Shield, Gauge, Zap, Flame, Target } from 'lucide-preact';
 
 /**
  * TaskBar — single-line status bar above the input.
@@ -48,6 +48,7 @@ export function TaskBar({ session, usage }) {
   const tasks = session.tasks || [];
   const planMode = session.planMode;
   const hasPlan = planMode && planMode !== 'off';
+  const goalActive = !!session.goalActive;
   const hasTasks = tasks.length > 0;
   const contextPct = session.contextPercent ?? -1;
   const permMode = session.permissionMode || 'yolo';
@@ -62,7 +63,7 @@ export function TaskBar({ session, usage }) {
   const hasUsage = !!(fiveH || week || showExtra);
   const onOverage = !!session.onOverage;
 
-  if (!hasPlan && !hasTasks && !hasContext && !hasUsage && !onOverage) return null;
+  if (!hasPlan && !goalActive && !hasTasks && !hasContext && !hasUsage && !onOverage) return null;
 
   const done = tasks.filter(t => t.status === 'done').length;
   const total = tasks.length;
@@ -126,6 +127,13 @@ export function TaskBar({ session, usage }) {
         <span class={`task-bar-pill plan-${planMode}`}>
           <Map />
           {planMode}
+        </span>
+      )}
+
+      {goalActive && (
+        <span class="task-bar-pill goal" title={session.goalObjective || 'Goal active'}>
+          <Target />
+          goal{session.goalIteration ? ` ${session.goalIteration}` : ''}
         </span>
       )}
 

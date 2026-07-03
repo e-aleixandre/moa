@@ -36,6 +36,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	if cmd == "path" || strings.HasPrefix(cmd, "path ") {
 		return m.handlePathCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "path")))
 	}
+	if cmd == "goal" || strings.HasPrefix(cmd, "goal ") {
+		return m.handleGoalCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "goal")))
+	}
 
 	switch cmd {
 	case "model", "models":

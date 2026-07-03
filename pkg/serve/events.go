@@ -27,6 +27,10 @@ type InitData struct {
 	Tasks             any                 `json:"tasks,omitempty"`
 	PlanMode          string              `json:"plan_mode,omitempty"`
 	PlanFile          string              `json:"plan_file,omitempty"`
+	GoalActive        bool                `json:"goal_active,omitempty"`
+	GoalObjective     string              `json:"goal_objective,omitempty"`
+	GoalIteration     int                 `json:"goal_iteration,omitempty"`
+	GoalStalled       int                 `json:"goal_stalled,omitempty"`
 }
 
 // PermissionData is a pending permission request.
@@ -138,6 +142,26 @@ type SteerData struct {
 type PlanModeData struct {
 	Mode     string `json:"mode"`
 	PlanFile string `json:"plan_file,omitempty"`
+}
+
+// GoalChangeData is sent when goal mode activates or deactivates.
+type GoalChangeData struct {
+	Active    bool   `json:"active"`
+	Objective string `json:"objective,omitempty"`
+	Iteration int    `json:"iteration"`
+	Stalled   int    `json:"stalled"`
+}
+
+// GoalIterationData is sent after the verifier judges a goal iteration.
+type GoalIterationData struct {
+	Iteration int    `json:"iteration"`
+	Satisfied bool   `json:"satisfied"`
+	Feedback  string `json:"feedback,omitempty"`
+}
+
+// GoalEndData is sent when a goal loop ends.
+type GoalEndData struct {
+	Reason string `json:"reason"`
 }
 
 // CommandData is sent when a slash command is executed.

@@ -42,6 +42,9 @@ type fakeAgent struct {
 
 	setThinkingErr error
 
+	systemPrompt string
+	compactAt    int
+
 	// Send behavior
 	sendCalled  bool
 	sendPrompt  string
@@ -167,11 +170,29 @@ func (f *fakeAgent) SetPermissionCheck(fn func(ctx context.Context, name string,
 }
 
 func (f *fakeAgent) SetSystemPrompt(prompt string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.systemPrompt = prompt
 	return nil
 }
 
 func (f *fakeAgent) SystemPrompt() string {
-	return ""
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.systemPrompt
+}
+
+func (f *fakeAgent) SetCompactAt(tokens int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compactAt = tokens
+	return nil
+}
+
+func (f *fakeAgent) CompactAt() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.compactAt
 }
 
 func (f *fakeAgent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {

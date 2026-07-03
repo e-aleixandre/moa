@@ -44,6 +44,20 @@ type PlanModeInfo struct {
 	ReviewThinkingLevel string // thinking level for plan review
 }
 
+// GetGoal returns the current goal-mode state.
+// Handler returns: GoalInfo
+type GetGoal struct{ SessionID string }
+
+// GoalInfo is the result of GetGoal.
+type GoalInfo struct {
+	Active        bool
+	Objective     string
+	Iteration     int
+	Stalled       int
+	MaxIterations int
+	MaxStalled    int
+}
+
 // GetCompactionEpoch returns the current compaction epoch counter.
 // Handler returns: int
 type GetCompactionEpoch struct{ SessionID string }
@@ -94,9 +108,9 @@ type GetBranchPoints struct{ SessionID string }
 // BranchPoint describes a possible branch target in the conversation.
 type BranchPoint struct {
 	EntryID       string `json:"entry_id"`
-	Label         string `json:"label"`          // first line of message
-	Role          string `json:"role"`           // user/assistant
+	Label         string `json:"label"` // first line of message
+	Role          string `json:"role"`  // user/assistant
 	Timestamp     int64  `json:"timestamp"`
-	BranchCount   int    `json:"branch_count"`   // number of children
+	BranchCount   int    `json:"branch_count"` // number of children
 	IsCurrentPath bool   `json:"is_current_path"`
 }

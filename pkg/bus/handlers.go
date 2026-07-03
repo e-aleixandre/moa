@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -18,24 +20,31 @@ import (
 	"github.com/ealeixandre/moa/pkg/verify"
 )
 
-// rebuildSystemPrompt updates the agent's system prompt based on the current
-// plan mode state. Called by plan mode handlers after state transitions.
+// rebuildSystemPrompt recomposes the agent's system prompt from the base prompt
+// plus any active mode fragments (plan mode, goal mode). Called after any mode
+// transition. Plan mode and goal mode are independent — a session may have
+// either, both, or neither. No-op if neither mode is present.
 func rebuildSystemPrompt(sctx *SessionContext) {
-	if sctx.PlanMode == nil {
+	if sctx.PlanMode == nil && sctx.Goal == nil {
 		return
 	}
 	prompt := sctx.BaseSystemPrompt
-	mode := sctx.PlanMode.Mode()
-	planFile := sctx.PlanMode.PlanFilePath()
-	if mode == planmode.ModePlanning {
-		if p := planmode.PlanningPrompt(planFile); p != "" {
-			prompt += "\n\n" + p
+	if sctx.PlanMode != nil {
+		mode := sctx.PlanMode.Mode()
+		planFile := sctx.PlanMode.PlanFilePath()
+		if mode == planmode.ModePlanning {
+			if p := planmode.PlanningPrompt(planFile); p != "" {
+				prompt += "\n\n" + p
+			}
+		}
+		if mode == planmode.ModeExecuting {
+			if p := planmode.ExecutionPrompt(planFile); p != "" {
+				prompt += "\n\n" + p
+			}
 		}
 	}
-	if mode == planmode.ModeExecuting {
-		if p := planmode.ExecutionPrompt(planFile); p != "" {
-			prompt += "\n\n" + p
-		}
+	if sctx.Goal != nil && sctx.Goal.Active() {
+		prompt += "\n\n" + goal.GoalDirective(sctx.Goal.Info())
 	}
 	_ = sctx.Agent.SetSystemPrompt(prompt)
 }
@@ -244,6 +253,21 @@ func RegisterHandlers(sctx *SessionContext) {
 			ReviewModelID:       rc.Model.ID,
 			ReviewModelName:     reviewName,
 			ReviewThinkingLevel: rc.ThinkingLevel,
+		}, nil
+	})
+
+	b.OnQuery(func(q GetGoal) (GoalInfo, error) {
+		if sctx.Goal == nil {
+			return GoalInfo{}, nil
+		}
+		info := sctx.Goal.Info()
+		return GoalInfo{
+			Active:        info.Active,
+			Objective:     info.Objective,
+			Iteration:     info.Iteration,
+			Stalled:       info.Stalled,
+			MaxIterations: info.MaxIterations,
+			MaxStalled:    info.MaxStalled,
 		}, nil
 	})
 
@@ -509,6 +533,70 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	// -------------------------------------------------------------------
+	// Goal mode
+	// -------------------------------------------------------------------
+
+	b.OnCommand(func(cmd EnterGoal) error {
+		if sctx.Goal == nil {
+			return fmt.Errorf("goal mode not available")
+		}
+		if sctx.Goal.Active() {
+			return fmt.Errorf("already in goal mode")
+		}
+		if strings.TrimSpace(cmd.Objective) == "" {
+			return fmt.Errorf("goal objective is required")
+		}
+		if sctx.State != nil && sctx.State.Current() == StateRunning {
+			return fmt.Errorf("cannot start a goal while the agent is running")
+		}
+		// Lower the compaction threshold for the duration of the goal, remembering
+		// the previous value so we can restore it (not blindly reset to 0) on exit.
+		sctx.goalPrevCompactAt = sctx.Agent.CompactAt()
+		if cmd.CompactAt > 0 {
+			if err := sctx.Agent.SetCompactAt(cmd.CompactAt); err != nil {
+				return err
+			}
+		}
+		// Enter() creates STATE.md and fires onChange → rebuilds the system
+		// prompt (injecting the directive) and publishes GoalChanged.
+		if err := sctx.Goal.Enter(goal.Options{
+			Objective:     cmd.Objective,
+			StatePath:     cmd.StatePath,
+			VerifierSpec:  cmd.VerifierSpec,
+			MaxIterations: cmd.MaxIterations,
+			MaxStalled:    cmd.MaxStalled,
+			Timeout:       cmd.Timeout,
+		}); err != nil {
+			if cmd.CompactAt > 0 {
+				_ = sctx.Agent.SetCompactAt(sctx.goalPrevCompactAt) // roll back on failure
+			}
+			return err
+		}
+		// Baseline the commit so the driver's progress check has a reference for
+		// the first iteration (progress = new edits or a new commit).
+		if sctx.CWD != "" {
+			sctx.goalLastCommit = runGit(sctx.SessionCtx, sctx.CWD, "rev-parse", "HEAD")
+		}
+		// Kick the first iteration. The driver takes over from RunEnded on.
+		return sctx.Bus.Execute(SendPrompt{
+			SessionID: sctx.SessionID,
+			Text:      goalFirstKick(sctx.Goal.Info()),
+			Custom:    map[string]any{"source": "goal"},
+		})
+	})
+
+	b.OnCommand(func(cmd ExitGoal) error {
+		if sctx.Goal == nil {
+			return fmt.Errorf("goal mode not available")
+		}
+		if !sctx.Goal.Active() {
+			return fmt.Errorf("not in goal mode")
+		}
+		stopGoal(sctx, "stopped by user")
+		return nil
+	})
+
+	// -------------------------------------------------------------------
 	// Path policy
 	// -------------------------------------------------------------------
 
@@ -717,6 +805,11 @@ func RegisterHandlers(sctx *SessionContext) {
 		if !sctx.AutoVerify || sctx.CWD == "" {
 			return
 		}
+		// Goal mode owns the run→verify→relaunch loop; stand down so the two
+		// reactors don't both re-send prompts on the same RunEnded.
+		if sctx.Goal != nil && sctx.Goal.Active() {
+			return
+		}
 		if e.Err != nil || !e.HadEdits {
 			return
 		}
@@ -778,6 +871,195 @@ func RegisterHandlers(sctx *SessionContext) {
 			}
 		}()
 	})
+
+	// --- Goal driver ---
+	// When the maker stops in goal mode, a cheap separate verifier judges the
+	// objective and the loop either ends (finite success or a backstop) or
+	// relaunches the maker with feedback. Modeled on the auto-verify reactor.
+	var goalVerifyCancel atomic.Pointer[context.CancelFunc]
+	b.Subscribe(func(e RunEnded) {
+		if sctx.Goal == nil || !sctx.Goal.Active() {
+			return
+		}
+		// An errored/aborted run doesn't consume an iteration — leave the loop
+		// paused so a user can inspect and resume.
+		if e.Err != nil {
+			return
+		}
+
+		startRunGen := e.RunGen
+		info := sctx.Goal.Info()
+
+		// Backstops that don't depend on the verdict — checked before spending
+		// a verifier call.
+		it := sctx.Goal.BeginIteration()
+		if info.MaxIterations > 0 && it > info.MaxIterations {
+			stopGoal(sctx, fmt.Sprintf("reached max iterations (%d)", info.MaxIterations))
+			return
+		}
+		if !info.Deadline.IsZero() && time.Now().After(info.Deadline) {
+			stopGoal(sctx, "reached time limit")
+			return
+		}
+
+		go func() {
+			ctx, cancel := context.WithTimeout(sctx.SessionCtx, 2*time.Minute)
+			defer cancel()
+			goalVerifyCancel.Store(&cancel)
+			defer goalVerifyCancel.CompareAndSwap(&cancel, nil)
+
+			evidence := buildGoalEvidence(ctx, sctx.CWD, e.FinalText)
+			verdict, err := goal.Verify(ctx, sctx.ProviderFactory, info.VerifierSpec, info.Objective, evidence)
+
+			// Discard if a newer run started while we were verifying.
+			if sctx.RunGenAtomic.Load() != startRunGen {
+				return
+			}
+			// The goal may have been stopped (user ExitGoal, a backstop) while the
+			// verifier was in flight. Don't judge or relaunch a goal that's over.
+			if !sctx.Goal.Active() {
+				return
+			}
+			if err != nil {
+				// Treat a verifier failure as an unsatisfied iteration so a
+				// persistent error still trips the stalled backstop instead of
+				// looping forever.
+				verdict = goal.Verdict{Satisfied: false, Feedback: "verifier error: " + err.Error()}
+			}
+
+			sctx.Bus.Publish(GoalIterationEnded{
+				SessionID: sctx.SessionID,
+				Iteration: it,
+				Satisfied: verdict.Satisfied,
+				Feedback:  verdict.Feedback,
+			})
+
+			if verdict.Satisfied {
+				stopGoal(sctx, "objective met")
+				return
+			}
+
+			// Not satisfied — relaunch, but guard against a spin loop. "Stalled"
+			// means the iteration made no forward progress (no file edits and no
+			// new commit), NOT merely that the global objective isn't finished: a
+			// long goal is legitimately "not done" for many productive iterations.
+			var commit string
+			if sctx.CWD != "" {
+				commit = runGit(ctx, sctx.CWD, "rev-parse", "HEAD")
+			}
+			progressed := e.HadEdits || (commit != "" && commit != sctx.goalLastCommit)
+			sctx.goalLastCommit = commit
+			if progressed {
+				sctx.Goal.ResetStalled()
+			} else {
+				stalled := sctx.Goal.IncStalled()
+				if info.MaxStalled > 0 && stalled >= info.MaxStalled {
+					stopGoal(sctx, fmt.Sprintf("no progress after %d attempts", stalled))
+					return
+				}
+			}
+			goalRelaunch(sctx, "Not done yet.\n\n"+verdict.Feedback+"\n\nContinue.")
+		}()
+	})
+}
+
+// stopGoal ends goal mode: it exits the Goal (which removes the directive via
+// onChange), restores the previous compaction threshold, and announces the
+// reason.
+//
+// Config mutations (system prompt, CompactAt) are rejected while a run is live —
+// which happens when the user runs /goal stop mid-turn. In that case we defer
+// the restore to the run's RunEnded, at which point the agent is idle again and
+// the mutations succeed. Otherwise the directive and lowered threshold would
+// leak into subsequent normal turns.
+func stopGoal(sctx *SessionContext, reason string) {
+	prev := sctx.goalPrevCompactAt
+	sctx.Goal.Exit() // marks inactive; onChange rebuilds the prompt (may no-op if running)
+	if err := sctx.Agent.SetCompactAt(prev); err != nil {
+		var unsub func()
+		unsub = sctx.Bus.Subscribe(func(e RunEnded) {
+			_ = sctx.Agent.SetCompactAt(prev)
+			rebuildSystemPrompt(sctx) // re-apply now that the goal directive is gone
+			unsub()
+		})
+	}
+	sctx.Bus.Publish(GoalEnded{SessionID: sctx.SessionID, Reason: reason})
+}
+
+// goalRelaunch sends the next iteration's prompt if the agent is idle/error.
+// Drops it if the goal is no longer active or a run is already in flight (a
+// newer user turn took over).
+func goalRelaunch(sctx *SessionContext, text string) {
+	if sctx.Goal == nil || !sctx.Goal.Active() {
+		return
+	}
+	if sctx.State != nil {
+		if current := sctx.State.Current(); current != StateIdle && current != StateError {
+			return
+		}
+	}
+	_ = sctx.Bus.Execute(SendPrompt{
+		SessionID: sctx.SessionID,
+		Text:      text,
+		Custom:    map[string]any{"source": "goal"},
+	})
+}
+
+// goalChangedEvent builds a GoalChanged event from a goal Info snapshot.
+func goalChangedEvent(sessionID string, info goal.Info) GoalChanged {
+	return GoalChanged{
+		SessionID: sessionID,
+		Active:    info.Active,
+		Objective: info.Objective,
+		Iteration: info.Iteration,
+		Stalled:   info.Stalled,
+	}
+}
+
+func goalFirstKick(info goal.Info) string {
+	return fmt.Sprintf("Start the goal. Read %s, then work the objective: %s", info.StatePath, info.Objective)
+}
+
+// buildGoalEvidence assembles the verifier's evidence: the maker's final text
+// plus the current git state (diff stat + last commit), so the verifier can see
+// whether work was actually committed. Kept short and best-effort.
+func buildGoalEvidence(ctx context.Context, cwd, finalText string) string {
+	var b strings.Builder
+	if strings.TrimSpace(finalText) != "" {
+		b.WriteString("WORKER'S FINAL MESSAGE:\n")
+		b.WriteString(finalText)
+		b.WriteString("\n\n")
+	}
+	if cwd != "" {
+		if out := runGit(ctx, cwd, "status", "--short"); out != "" {
+			b.WriteString("UNCOMMITTED CHANGES (git status --short):\n")
+			b.WriteString(out)
+			b.WriteString("\n")
+		}
+		if out := runGit(ctx, cwd, "log", "-1", "--format=%h %s"); out != "" {
+			b.WriteString("LAST COMMIT:\n")
+			b.WriteString(out)
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// runGit runs a read-only git command in dir and returns trimmed, length-capped
+// stdout. Returns "" on any error (not a git repo, git missing, etc.).
+func runGit(ctx context.Context, dir string, args ...string) string {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(out))
+	const maxLen = 4000
+	if len(s) > maxLen {
+		s = s[:maxLen] + "\n…(truncated)"
+	}
+	return s
 }
 
 // startRun is the shared implementation for SendPrompt and SendPromptWithContent.

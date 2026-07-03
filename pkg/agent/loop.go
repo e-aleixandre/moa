@@ -159,12 +159,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			estimate := core.EstimateContextTokens(
 				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
-			if core.ShouldCompact(estimate.Tokens, cfg.model.MaxInput, *cfg.compaction) {
+			window := cfg.compaction.EffectiveWindow(cfg.model.MaxInput)
+			if core.ShouldCompact(estimate.Tokens, window, *cfg.compaction) {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
 
 				result, compacted, err := compaction.Compact(
 					ctx, cfg.provider, cfg.model, cfg.streamOpts,
-					cfg.state.Messages, estimate.Tokens, cfg.model.MaxInput, *cfg.compaction,
+					cfg.state.Messages, estimate.Tokens, window, *cfg.compaction,
 				)
 				if err != nil {
 					// Non-fatal: log and continue with full context.

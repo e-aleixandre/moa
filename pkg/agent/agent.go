@@ -339,6 +339,38 @@ func (a *Agent) SetThinkingLevel(level string) error {
 	return nil
 }
 
+// SetCompactAt sets the soft compaction threshold in tokens. When >0, the agent
+// compacts once context exceeds this many tokens (clamped to the model window),
+// instead of waiting for the full window. 0 restores the default (window-based)
+// behavior. Returns error if the agent is currently running.
+func (a *Agent) SetCompactAt(tokens int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot reconfigure while agent is running")
+	}
+	// Copy-on-write: the loop shares this pointer, and it may be shared across
+	// agents, so replace it rather than mutating in place.
+	settings := core.DefaultCompactionSettings
+	if a.config.Compaction != nil {
+		settings = *a.config.Compaction
+	}
+	settings.CompactAt = tokens
+	a.config.Compaction = &settings
+	return nil
+}
+
+// CompactAt returns the current soft compaction threshold in tokens (0 = the
+// default window-based behavior).
+func (a *Agent) CompactAt() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.config.Compaction == nil {
+		return 0
+	}
+	return a.config.Compaction.CompactAt
+}
+
 // SetPermissionCheck swaps the permission check function at runtime.
 // nil disables permission checks. Returns error if the agent is running.
 func (a *Agent) SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error {
@@ -477,7 +509,7 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel}
 	result, compacted, err := compaction.Compact(
 		ctx, provider, model, streamOpts,
-		msgs, estimate.Tokens, model.MaxInput, *settings,
+		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings,
 	)
 	if err != nil {
 		return nil, err
