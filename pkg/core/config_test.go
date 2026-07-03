@@ -108,6 +108,66 @@ func TestSaveGlobalConfig_PreservesOtherFields(t *testing.T) {
 	}
 }
 
+func TestSaveProjectConfig_RoundTrip(t *testing.T) {
+	cwd := t.TempDir()
+
+	if err := SaveProjectConfig(cwd, func(cfg *MoaConfig) {
+		cfg.Permissions.Allow = append(cfg.Permissions.Allow, "Bash(git:*)")
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig: %v", err)
+	}
+
+	// Re-read through the public loader; project Allow must appear.
+	got := LoadMoaConfig(cwd)
+	if !slices.Contains(got.Permissions.Allow, "Bash(git:*)") {
+		t.Fatalf("Permissions.Allow = %v, want to contain Bash(git:*)", got.Permissions.Allow)
+	}
+}
+
+func TestSaveProjectConfig_CreatesDir(t *testing.T) {
+	cwd := t.TempDir()
+	// .moa does not exist yet.
+	if err := SaveProjectConfig(cwd, func(cfg *MoaConfig) {
+		cfg.Permissions.Allow = []string{"edit"}
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig: %v", err)
+	}
+
+	cfgPath := filepath.Join(cwd, ".moa", "config.json")
+	got := loadConfigFile(cfgPath)
+	if !slices.Equal(got.Permissions.Allow, []string{"edit"}) {
+		t.Fatalf("Permissions.Allow = %v, want [edit]", got.Permissions.Allow)
+	}
+}
+
+func TestSaveProjectConfig_PreservesOtherFields(t *testing.T) {
+	cwd := t.TempDir()
+
+	// Seed the project config with a mode and an existing allow entry.
+	if err := SaveProjectConfig(cwd, func(cfg *MoaConfig) {
+		cfg.Permissions.Mode = "ask"
+		cfg.Permissions.Allow = []string{"Bash(npm:*)"}
+	}); err != nil {
+		t.Fatalf("seed SaveProjectConfig: %v", err)
+	}
+
+	// A later save appends only a new allow pattern.
+	if err := SaveProjectConfig(cwd, func(cfg *MoaConfig) {
+		cfg.Permissions.Allow = append(cfg.Permissions.Allow, "Bash(git:*)")
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig: %v", err)
+	}
+
+	got := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
+	if got.Permissions.Mode != "ask" {
+		t.Fatalf("Permissions.Mode = %q, want ask", got.Permissions.Mode)
+	}
+	want := []string{"Bash(npm:*)", "Bash(git:*)"}
+	if !slices.Equal(got.Permissions.Allow, want) {
+		t.Fatalf("Permissions.Allow = %v, want %v", got.Permissions.Allow, want)
+	}
+}
+
 func TestMergeConfigs_PinnedModelsFromGlobalOnly(t *testing.T) {
 	global := MoaConfig{PinnedModels: []string{"claude-sonnet-4-5"}}
 	project := MoaConfig{PinnedModels: []string{"gpt-4o"}} // should be ignored

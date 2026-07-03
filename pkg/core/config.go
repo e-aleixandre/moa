@@ -206,6 +206,19 @@ func SaveGlobalConfig(update func(*MoaConfig)) error {
 	if path == "" {
 		return fmt.Errorf("cannot determine home directory")
 	}
+	return saveConfigFile(path, update)
+}
+
+// SaveProjectConfig reads the current project config, applies update, and writes
+// it back atomically. Creates <cwd>/.moa/ if it doesn't exist.
+func SaveProjectConfig(cwd string, update func(*MoaConfig)) error {
+	return saveConfigFile(filepath.Join(cwd, ".moa", "config.json"), update)
+}
+
+// saveConfigFile is the read-modify-write primitive shared by SaveGlobalConfig
+// and SaveProjectConfig. It re-reads path from disk, applies update, and writes
+// the result back atomically (temp file → rename), creating parent dirs.
+func saveConfigFile(path string, update func(*MoaConfig)) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}

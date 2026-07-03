@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1694,6 +1695,108 @@ func TestHandler_ResolvePermission(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
 	}
+}
+
+func TestHandler_ResolvePermission_PersistsAllow(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.CWD = t.TempDir()
+	am := NewApprovalManager(b, sctx.State, "test-session")
+	sctx.Approvals = am
+	RegisterHandlers(sctx)
+
+	cfgPath := filepath.Join(sctx.CWD, ".moa", "config.json")
+
+	resolve := func(id, allow string) {
+		respCh := make(chan permission.Response, 1)
+		am.mu.Lock()
+		am.perms[id] = &PendingPermission{ID: id, ToolName: "bash", response: respCh}
+		am.mu.Unlock()
+		sctx.State.ForceState(StatePermission)
+		if err := b.Execute(ResolvePermission{
+			PermissionID: id, Approved: true, AllowPattern: allow,
+		}); err != nil {
+			t.Fatalf("resolve %s: %v", id, err)
+		}
+		<-respCh
+	}
+
+	// First resolve with an allow pattern persists it.
+	resolve("p1", "Bash(git:*)")
+	merged := core.LoadMoaConfig(sctx.CWD)
+	if !contains(merged.Permissions.Allow, "Bash(git:*)") {
+		t.Fatalf("Permissions.Allow = %v, want to contain Bash(git:*)", merged.Permissions.Allow)
+	}
+
+	// Resolving again with the same pattern does not duplicate it.
+	resolve("p2", "Bash(git:*)")
+	allow := loadProjectAllow(t, cfgPath)
+	if n := countOccurrences(allow, "Bash(git:*)"); n != 1 {
+		t.Fatalf("Bash(git:*) appears %d times, want 1: %v", n, allow)
+	}
+}
+
+func TestHandler_ResolvePermission_NoAllowNoFile(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.CWD = t.TempDir()
+	am := NewApprovalManager(b, sctx.State, "test-session")
+	sctx.Approvals = am
+	RegisterHandlers(sctx)
+
+	respCh := make(chan permission.Response, 1)
+	am.mu.Lock()
+	am.perms["p1"] = &PendingPermission{ID: "p1", ToolName: "bash", response: respCh}
+	am.mu.Unlock()
+	sctx.State.ForceState(StatePermission)
+
+	// Approved but with no allow pattern → must not write a config file.
+	if err := b.Execute(ResolvePermission{PermissionID: "p1", Approved: true}); err != nil {
+		t.Fatal(err)
+	}
+	<-respCh
+
+	cfgPath := filepath.Join(sctx.CWD, ".moa", "config.json")
+	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no config file, stat err = %v", err)
+	}
+}
+
+func contains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(s []string, v string) int {
+	n := 0
+	for _, x := range s {
+		if x == v {
+			n++
+		}
+	}
+	return n
+}
+
+// loadProjectAllow reads the raw project config allow list (no global merge).
+func loadProjectAllow(t *testing.T, cfgPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var cfg core.MoaConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	return cfg.Permissions.Allow
 }
 
 func TestHandler_ResolveAskUser(t *testing.T) {

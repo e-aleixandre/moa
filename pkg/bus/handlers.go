@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -397,7 +398,22 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.Approvals == nil {
 			return fmt.Errorf("approvals not available")
 		}
-		return sctx.Approvals.ResolvePermission(cmd.PermissionID, cmd.Approved, cmd.Feedback, cmd.AllowPattern)
+		if err := sctx.Approvals.ResolvePermission(cmd.PermissionID, cmd.Approved, cmd.Feedback, cmd.AllowPattern); err != nil {
+			return err
+		}
+		// Persist "always allow" patterns to project config so they survive a
+		// restart. The Gate already applied the pattern in memory; this is
+		// best-effort — a save failure must not fail the resolution.
+		if pattern := strings.TrimSpace(cmd.AllowPattern); pattern != "" && sctx.CWD != "" {
+			if err := core.SaveProjectConfig(sctx.CWD, func(c *core.MoaConfig) {
+				if !slices.Contains(c.Permissions.Allow, pattern) {
+					c.Permissions.Allow = append(c.Permissions.Allow, pattern)
+				}
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to persist allow pattern %q: %v\n", pattern, err)
+			}
+		}
+		return nil
 	})
 
 	b.OnCommand(func(cmd AddPermissionRule) error {
