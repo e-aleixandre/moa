@@ -1064,3 +1064,85 @@ func TestRegisterSubset(t *testing.T) {
 		}
 	}
 }
+
+// --- truncateLinesHeadTail tests ---
+
+func TestTruncateLinesHeadTail_ShortPassthrough(t *testing.T) {
+	s := "a\nb\nc"
+	if got := truncateLinesHeadTail(s, 10, ""); got != s {
+		t.Errorf("short output should pass through unchanged, got %q", got)
+	}
+}
+
+func TestTruncateLinesHeadTail_KeepsHeadAndTail(t *testing.T) {
+	lines := make([]string, 10)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d", i)
+	}
+	s := strings.Join(lines, "\n")
+
+	got := truncateLinesHeadTail(s, 4, "") // half=2, omitted=6
+	if !strings.Contains(got, "line-00") {
+		t.Error("should keep first line")
+	}
+	if !strings.Contains(got, "line-09") {
+		t.Error("should keep last line")
+	}
+	if !strings.Contains(got, "6 lines truncated") {
+		t.Errorf("should report 6 omitted lines, got %q", got)
+	}
+	if strings.Contains(got, "line-05") {
+		t.Errorf("middle line should be dropped, got %q", got)
+	}
+}
+
+func TestTruncateLinesHeadTail_SpillPathInNotice(t *testing.T) {
+	lines := make([]string, 10)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d", i)
+	}
+	s := strings.Join(lines, "\n")
+
+	got := truncateLinesHeadTail(s, 4, "/tmp/spill.txt")
+	if !strings.Contains(got, "/tmp/spill.txt") {
+		t.Errorf("notice should reference spill path, got %q", got)
+	}
+	if !strings.Contains(got, "full output at") {
+		t.Errorf("notice should mention full output location, got %q", got)
+	}
+}
+
+// TestGrep_HeadTailTruncation verifies grep output exceeding the line limit
+// keeps both the head AND the tail of the matches (not head-only). With the
+// old head-only truncation the notice sat at the very end with nothing after
+// it; this test fails on that behavior and passes on head+tail.
+func TestGrep_HeadTailTruncation(t *testing.T) {
+	tmp := t.TempDir()
+	// 300 files, each with one matching line → >100 matches regardless of
+	// whether rg (capped at 100 matches/file) or grep is used.
+	for i := 0; i < 300; i++ {
+		name := filepath.Join(tmp, fmt.Sprintf("f%04d.txt", i))
+		if err := os.WriteFile(name, []byte("needle here\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	grep := NewGrep(ToolConfig{WorkspaceRoot: tmp})
+	result, err := grep.Execute(context.Background(), map[string]any{"pattern": "needle"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("expected successful grep, got error: %q", result.Content[0].Text)
+	}
+	out := result.Content[0].Text
+	if !strings.Contains(out, "lines truncated") {
+		t.Fatalf("expected head-tail truncation notice, got: %q", out)
+	}
+	// Head+tail: matching lines must appear AFTER the notice (old head-only
+	// truncation placed the notice at the very end with nothing after it).
+	idx := strings.Index(out, "lines truncated")
+	if !strings.Contains(out[idx:], "needle") {
+		t.Fatalf("expected matching lines after the truncation notice (tail preserved), got: %q", out)
+	}
+}

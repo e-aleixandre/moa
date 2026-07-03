@@ -264,6 +264,27 @@ func truncateLines(s string, maxLines int) string {
 	return strings.Join(lines[:maxLines], "\n") + "\n\n[output truncated]"
 }
 
+// truncateLinesHeadTail truncates text to maxLines lines keeping the first and
+// last maxLines/2, with a notice in between. If spillPath is non-empty it is
+// referenced in the notice so the model can read the full output from disk.
+func truncateLinesHeadTail(s string, maxLines int, spillPath string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	half := maxLines / 2
+	omitted := len(lines) - 2*half
+	head := strings.Join(lines[:half], "\n")
+	tail := strings.Join(lines[len(lines)-half:], "\n")
+	var notice string
+	if spillPath != "" {
+		notice = fmt.Sprintf("\n\n[... %d lines truncated — full output at %s ...]\n\n", omitted, spillPath)
+	} else {
+		notice = fmt.Sprintf("\n\n[... %d lines truncated ...]\n\n", omitted)
+	}
+	return head + notice + tail
+}
+
 const (
 	maxOutputBytes = 50 * 1024  // 50KB
 	maxOutputLines = 2000

@@ -82,7 +82,7 @@ func NewFind(cfg ToolConfig) core.Tool {
 			}
 
 			// Truncate by lines
-			output = truncateLines(output, 1000)
+			output = truncateLinesHeadTail(output, 1000, stdout.SpillPath)
 
 			return core.TextResult(output), nil
 		},

@@ -87,7 +87,7 @@ func NewGrep(cfg ToolConfig) core.Tool {
 			}
 
 			// Truncate by lines
-			output = truncateLines(output, 100)
+			output = truncateLinesHeadTail(output, 100, stdout.SpillPath)
 
 			return core.TextResult(output), nil
 		},
