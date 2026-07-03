@@ -573,13 +573,10 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 	}
 
 	prov := newMockProvider(toolCallHandler, simpleResponseHandler("done"))
-	mgr := NewManager(ctx, ManagerConfig{
-		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
-		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
-		WorkspaceRoot:   workspace,
-		MoaCfg:          core.MoaConfig{DisableSandbox: true},
-		SessionBaseDir:  t.TempDir(),
-	})
+	// Use the shared helper so its t.Cleanup shuts sessions down (and drains the
+	// async persistence reactors) before t.TempDir removal — otherwise a pending
+	// autosave races RemoveAll and flakes under -race ("directory not empty").
+	mgr := newTestManagerWithRoot(t, ctx, prov, workspace)
 
 	httpSrv := httptest.NewServer(NewServer(mgr))
 	defer httpSrv.Close()
