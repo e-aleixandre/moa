@@ -120,3 +120,22 @@ func TestGetInt_WholeFloat(t *testing.T) {
 		t.Fatalf("expected 3, got %d", got)
 	}
 }
+
+func TestSummarizeArgsIsDeterministic(t *testing.T) {
+	args := map[string]any{
+		"zeta":  1,
+		"alpha": "a",
+		"mid":   true,
+		"beta":  3.5,
+	}
+	first := SummarizeArgs(args)
+	for i := 0; i < 20; i++ {
+		if got := SummarizeArgs(args); got != first {
+			t.Fatalf("SummarizeArgs non-deterministic: %q vs %q", got, first)
+		}
+	}
+	want := "alpha=a beta=3.5 mid=true zeta=1"
+	if first != want {
+		t.Fatalf("SummarizeArgs = %q, want %q", first, want)
+	}
+}

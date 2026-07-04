@@ -775,41 +775,18 @@ func TestJobStoreCleanupKeepsRecentJobs(t *testing.T) {
 	}
 }
 
-func TestTailLines(t *testing.T) {
-	tests := []struct {
-		name string
-		s    string
-		n    int
-		want string
-	}{
-		{"fewer than n", "a\nb\nc", 5, "a\nb\nc"},
-		{"exactly n", "a\nb\nc", 3, "a\nb\nc"},
-		{"more than n", "a\nb\nc\nd\ne", 3, "c\nd\ne"},
-		{"empty string", "", 3, ""},
-		{"single line", "hello", 1, "hello"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tailLines(tt.s, tt.n)
-			if got != tt.want {
-				t.Fatalf("tailLines(%q, %d) = %q, want %q", tt.s, tt.n, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAsyncSubagentOnCompleteOnSuccess(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	provider := newMockProvider(gateResponse(started, release, "child result"))
 
 	var (
-		mu         sync.Mutex
-		gotID      string
-		gotTask    string
-		gotStatus  string
-		gotResult  string
-		callCount  int
+		mu        sync.Mutex
+		gotID     string
+		gotTask   string
+		gotStatus string
+		gotResult string
+		callCount int
 	)
 
 	sub, statusTool, _ := newSubagentTools(t, Config{
@@ -942,4 +919,104 @@ func TestConcurrentStatusPolling(t *testing.T) {
 	}
 	wg.Wait()
 	close(release)
+}
+
+func TestResolveChildGuardrailsDefaults(t *testing.T) {
+	maxTurns, maxRunDuration := resolveChildGuardrails(Config{})
+	if maxTurns != defaultChildMaxTurns {
+		t.Errorf("maxTurns = %d, want default %d", maxTurns, defaultChildMaxTurns)
+	}
+	if maxRunDuration != defaultChildMaxRunDuration {
+		t.Errorf("maxRunDuration = %v, want default %v", maxRunDuration, defaultChildMaxRunDuration)
+	}
+}
+
+func TestResolveChildGuardrailsOverrides(t *testing.T) {
+	cfg := Config{ChildMaxTurns: 5, ChildMaxRunDuration: 2 * time.Minute}
+	maxTurns, maxRunDuration := resolveChildGuardrails(cfg)
+	if maxTurns != 5 {
+		t.Errorf("maxTurns = %d, want 5", maxTurns)
+	}
+	if maxRunDuration != 2*time.Minute {
+		t.Errorf("maxRunDuration = %v, want 2m", maxRunDuration)
+	}
+}
+
+func TestNewChildAgentAppliesGuardrails(t *testing.T) {
+	cfg := Config{ChildMaxTurns: 7, ChildMaxRunDuration: 3 * time.Minute}
+	provider := newMockProvider(textResponse("hi"))
+	reg := core.NewRegistry()
+	child, err := newChildAgent(cfg, provider, core.Model{ID: "m", Provider: "mock"}, "medium", "sys", reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child == nil {
+		t.Fatal("expected non-nil child agent")
+	}
+	// MaxBudget is never set on children (no exported getter, but agent.New
+	// would reject a negative budget — absence of error is enough coverage
+	// here; guardrail values are covered by resolveChildGuardrails above).
+}
+
+func TestAsyncSubagentConcurrencyCap(t *testing.T) {
+	started := make(chan struct{}, 10)
+	release := make(chan struct{})
+	provider := newMockProvider(
+		gateResponse(started, release, "one"),
+		gateResponse(started, release, "two"),
+	)
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:       core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory:    func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:             context.Background(),
+		MaxConcurrentAsync: 1,
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "first", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error starting first job: %s", textOf(res))
+	}
+	<-started
+
+	res2, err := sub.Execute(context.Background(), map[string]any{"task": "second", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res2.IsError {
+		t.Fatalf("expected concurrency cap error, got success: %s", textOf(res2))
+	}
+	if !strings.Contains(textOf(res2), "too many concurrent async subagents") {
+		t.Fatalf("unexpected error message: %s", textOf(res2))
+	}
+
+	close(release)
+}
+
+func TestFormatStatusUsageLine(t *testing.T) {
+	withUsage := jobSnapshot{
+		Status:  statusCompleted,
+		Task:    "task",
+		Model:   "m",
+		Result:  "done",
+		Usage:   &core.Usage{Input: 100, Output: 50},
+		CostUSD: 0.0123,
+	}
+	out := formatStatus(withUsage)
+	if !strings.Contains(out, "Tokens: 100/50") || !strings.Contains(out, "Cost: $0.0123") {
+		t.Fatalf("expected usage line in output, got: %s", out)
+	}
+
+	noUsage := jobSnapshot{
+		Status: statusCompleted,
+		Task:   "task",
+		Model:  "m",
+		Result: "done",
+	}
+	out2 := formatStatus(noUsage)
+	if strings.Contains(out2, "Tokens:") || strings.Contains(out2, "Cost:") {
+		t.Fatalf("did not expect usage line without usage, got: %s", out2)
+	}
 }

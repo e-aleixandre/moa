@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -182,9 +183,14 @@ func SummarizeArgs(args map[string]any) string {
 	if len(args) == 0 {
 		return ""
 	}
-	var parts []string
-	for k, v := range args {
-		s := fmt.Sprintf("%v", v)
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		s := fmt.Sprintf("%v", args[k])
 		if len(s) > 80 {
 			s = s[:77] + "..."
 		}

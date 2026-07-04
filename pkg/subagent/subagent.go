@@ -21,6 +21,19 @@ const (
 	// asyncResultTailLines is how many trailing lines of a completed async
 	// subagent result are included in the notification to the parent.
 	asyncResultTailLines = 50
+
+	// defaultChildMaxTurns is the fallback per-child turn limit used when
+	// Config.ChildMaxTurns is not set. Deliberately low and independent of
+	// the parent's own MaxTurns: children are leaf workers with focused tasks.
+	defaultChildMaxTurns = 30
+
+	// defaultChildMaxRunDuration is the fallback per-child wall-clock budget
+	// used when Config.ChildMaxRunDuration is not set.
+	defaultChildMaxRunDuration = 10 * time.Minute
+
+	// defaultMaxConcurrentAsync is the fallback cap on simultaneously running
+	// async subagent jobs, used when Config.MaxConcurrentAsync is not set.
+	defaultMaxConcurrentAsync = 5
 )
 
 // excludedTools prevents recursive subagent spawning.
@@ -30,6 +43,7 @@ var excludedTools = map[string]bool{
 	"subagent_status": true,
 	"subagent_cancel": true,
 	"memory":          true,
+	"ask_user":        true,
 }
 
 type Config struct {
@@ -70,6 +84,18 @@ type Config struct {
 	// with its final status and aggregated usage/cost (cost computed with the
 	// CHILD's model pricing, which may differ from the parent's).
 	OnChildEnd func(jobID, status string, usage *core.Usage, costUSD float64)
+
+	// ChildMaxTurns caps the number of turns a child agent may take. 0 (or
+	// negative) falls back to defaultChildMaxTurns.
+	ChildMaxTurns int
+
+	// ChildMaxRunDuration caps how long a child agent may run. 0 (or
+	// negative) falls back to defaultChildMaxRunDuration.
+	ChildMaxRunDuration time.Duration
+
+	// MaxConcurrentAsync caps how many async subagent jobs may run at once.
+	// 0 (or negative) falls back to defaultMaxConcurrentAsync.
+	MaxConcurrentAsync int
 }
 
 // RegisterAll registers the subagent tools on reg and returns a handle onto
@@ -164,6 +190,13 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if getBool(params, "async") {
 				if err := ctx.Err(); err != nil {
 					return core.ErrorResult(err.Error()), nil
+				}
+				maxConcurrent := cfg.MaxConcurrentAsync
+				if maxConcurrent <= 0 {
+					maxConcurrent = defaultMaxConcurrentAsync
+				}
+				if running := jobs.runningCount(); running >= maxConcurrent {
+					return core.ErrorResult(fmt.Sprintf("too many concurrent async subagents (%d running, max %d); wait or cancel one with subagent_cancel", running, maxConcurrent)), nil
 				}
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 				job := jobs.create(task, model.ID, jobCancel)
@@ -285,6 +318,8 @@ func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider c
 
 	msgs, err := child.Run(ctx, task)
 	jobs.setMessages(j.id, msgs)
+	usage, cost := childUsage(msgs), childCost(model, msgs)
+	jobs.setUsage(j.id, usage, cost)
 	if err != nil {
 		status := statusFailed
 		if errors.Is(err, context.Canceled) {
@@ -294,13 +329,13 @@ func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider c
 			jobs.setFailed(j.id, err.Error())
 		}
 		if cfg.OnChildEnd != nil {
-			cfg.OnChildEnd(j.id, status, childUsage(msgs), childCost(model, msgs))
+			cfg.OnChildEnd(j.id, status, usage, cost)
 		}
 		return core.ErrorResult(err.Error()), nil
 	}
 	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
 	if cfg.OnChildEnd != nil {
-		cfg.OnChildEnd(j.id, statusCompleted, childUsage(msgs), childCost(model, msgs))
+		cfg.OnChildEnd(j.id, statusCompleted, usage, cost)
 	}
 	return core.TextResult(core.ExtractFinalAssistantText(msgs)), nil
 }
@@ -349,6 +384,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 	msgs, err := child.Run(jobCtx, task)
 	finalMsgs = msgs
 	jobs.setMessages(j.id, msgs)
+	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs))
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			jobs.setCancelled(j.id)
@@ -409,22 +445,44 @@ func childCost(model core.Model, msgs []core.AgentMessage) float64 {
 	return cost
 }
 
+// resolveChildGuardrails applies defaults for the child's own turn/duration
+// limits, independent of the parent's guardrails and with no budget ($)
+// limit (children never get a MaxBudget).
+func resolveChildGuardrails(cfg Config) (maxTurns int, maxRunDuration time.Duration) {
+	maxTurns = cfg.ChildMaxTurns
+	if maxTurns <= 0 {
+		maxTurns = defaultChildMaxTurns
+	}
+	maxRunDuration = cfg.ChildMaxRunDuration
+	if maxRunDuration <= 0 {
+		maxRunDuration = defaultChildMaxRunDuration
+	}
+	return maxTurns, maxRunDuration
+}
+
 func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
+	maxTurns, maxRunDuration := resolveChildGuardrails(cfg)
 	return agent.New(agent.AgentConfig{
-		Provider:      provider,
-		Model:         model,
-		SystemPrompt:  systemPrompt,
-		ThinkingLevel: thinkingLevel,
-		Tools:         childReg,
-		// 0 = unlimited for all three guardrails, matching the parent agent's defaults.
+		Provider:       provider,
+		Model:          model,
+		SystemPrompt:   systemPrompt,
+		ThinkingLevel:  thinkingLevel,
+		Tools:          childReg,
+		MaxTurns:       maxTurns,
+		MaxRunDuration: maxRunDuration,
+		// No MaxBudget: children have no $ guardrail of their own (they run under
+		// the parent's own budget, if any).
 		PermissionCheck: func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			if fn := currentPermissionCheck(cfg); fn != nil {
 				return fn(ctx, name, args)
 			}
 			return nil
 		},
-		// Subagents run short, focused tasks — compaction adds complexity
-		// without benefit. If maxTurns increases significantly, revisit.
+		// Compaction off is safe as long as MaxTurns stays low (<=30, the
+		// default): a short, focused child is unlikely to blow its context
+		// before exhausting turns, so compaction would only add complexity
+		// without benefit. If ChildMaxTurns is raised significantly above the
+		// default, revisit and enable compaction for the child too.
 		Compaction: &core.CompactionSettings{Enabled: false},
 	})
 }
@@ -513,14 +571,11 @@ func resolveThinking(defaultThinking string, params map[string]any) (string, *co
 	if strings.TrimSpace(thinking) == "" {
 		return defaultThinking, nil
 	}
-	switch thinking {
-	default:
-		if core.IsValidThinkingLevel(thinking) {
-			return thinking, nil
-		}
-		res := core.ErrorResult("invalid thinking level: " + thinking)
-		return "", &res
+	if core.IsValidThinkingLevel(thinking) {
+		return thinking, nil
 	}
+	res := core.ErrorResult("invalid thinking level: " + thinking)
+	return "", &res
 }
 
 func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryIndex string) string {
@@ -581,6 +636,10 @@ func formatStatus(snap jobSnapshot) string {
 		sb.WriteString(snap.Task)
 		sb.WriteString("\nModel: ")
 		sb.WriteString(snap.Model)
+		if line, ok := formatUsageLine(snap); ok {
+			sb.WriteString("\n")
+			sb.WriteString(line)
+		}
 		if len(snap.Progress) > 0 {
 			sb.WriteString("\nRecent activity:")
 			for _, line := range snap.Progress {
@@ -589,6 +648,10 @@ func formatStatus(snap jobSnapshot) string {
 			}
 		}
 	case statusCompleted:
+		if line, ok := formatUsageLine(snap); ok {
+			sb.WriteString("\n")
+			sb.WriteString(line)
+		}
 		sb.WriteString("\n\nResult:\n")
 		sb.WriteString(snap.Result)
 	case statusFailed:
@@ -597,6 +660,16 @@ func formatStatus(snap jobSnapshot) string {
 	}
 
 	return sb.String()
+}
+
+// formatUsageLine renders "Tokens: <in>/<out>  Cost: $X.XXXX" for a job
+// snapshot that has usage recorded. Returns ok=false when there is nothing
+// to show (no usage captured yet).
+func formatUsageLine(snap jobSnapshot) (string, bool) {
+	if snap.Usage == nil {
+		return "", false
+	}
+	return fmt.Sprintf("Tokens: %d/%d  Cost: $%.4f", snap.Usage.Input, snap.Usage.Output, snap.CostUSD), true
 }
 
 func currentModel(cfg Config) core.Model {
@@ -618,15 +691,6 @@ func currentPermissionCheck(cfg Config) func(context.Context, string, map[string
 		return cfg.CurrentPermissionCheck()
 	}
 	return nil
-}
-
-// tailLines returns the last n lines of s.
-func tailLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) <= n {
-		return s
-	}
-	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 // tailLinesWithFlag returns the last n lines and whether truncation occurred.

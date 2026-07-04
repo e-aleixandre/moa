@@ -370,15 +370,17 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			}
 			return nil
 		},
-		ProviderFactory:  cfg.ProviderFactory,
-		AgentsMD:         agentsMD,
-		ParentTools:      toolReg,
-		AppCtx:           cfg.Ctx,
-		WorkspaceRoot:    cfg.CWD,
-		SkillsIndex:      skillsIndex,
-		MemoryIndex:      memoryIndex,
-		OnAsyncJobChange: cfg.OnAsyncJobChange,
-		OnAsyncComplete:  cfg.OnAsyncComplete,
+		ProviderFactory:     cfg.ProviderFactory,
+		AgentsMD:            agentsMD,
+		ParentTools:         toolReg,
+		AppCtx:              cfg.Ctx,
+		WorkspaceRoot:       cfg.CWD,
+		SkillsIndex:         skillsIndex,
+		MemoryIndex:         memoryIndex,
+		OnAsyncJobChange:    cfg.OnAsyncJobChange,
+		OnAsyncComplete:     cfg.OnAsyncComplete,
+		ChildMaxTurns:       moaCfg.SubagentMaxTurns,
+		ChildMaxRunDuration: core.GetSubagentMaxRunDuration(moaCfg),
 		// OnChildStart/OnChildEvent/OnChildEnd are left nil here: bootstrap has
 		// no bus reference to wire them into (see how OnAsyncComplete/
 		// OnAsyncJobChange are instead cabled by the CALLERS — cmd/agent's
@@ -484,10 +486,9 @@ func resolveReviewConfig(fallbackModel core.Model, modelSpec, thinkingSpec strin
 }
 
 // FormatSubagentNotification produces the text injected into the agent's
-// conversation when an async subagent completes. Shared between CLI and serve.
-// FormatSubagentNotification produces the text injected into the agent's
-// conversation when an async subagent completes. The truncated flag indicates
-// that resultTail is only a portion of the full output.
+// conversation when an async subagent completes. Shared between CLI and
+// serve. The truncated flag indicates that resultTail is only a portion of
+// the full output.
 func FormatSubagentNotification(jobID, task, status, resultTail string, truncated bool) string {
 	switch status {
 	case "completed":

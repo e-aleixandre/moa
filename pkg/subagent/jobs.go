@@ -39,6 +39,8 @@ type job struct {
 	finishedAt time.Time
 	sync       bool // true when this job runs synchronously (blocking the parent tool call)
 	messages   []core.AgentMessage
+	usage      *core.Usage
+	costUSD    float64
 }
 
 type jobSnapshot struct {
@@ -51,6 +53,8 @@ type jobSnapshot struct {
 	Progress   []string
 	FinishedAt time.Time
 	Sync       bool
+	Usage      *core.Usage
+	CostUSD    float64
 }
 
 type jobStore struct {
@@ -133,6 +137,8 @@ func snapshotLocked(j *job) jobSnapshot {
 		Progress:   progress,
 		FinishedAt: j.finishedAt,
 		Sync:       j.sync,
+		Usage:      j.usage,
+		CostUSD:    j.costUSD,
 	}
 }
 
@@ -167,6 +173,20 @@ func (s *jobStore) messages(id string) []core.AgentMessage {
 		copied[i] = session.DeepCopyMessage(m)
 	}
 	return copied
+}
+
+// setUsage records the child's aggregated usage/cost on the job, so that
+// subagent_status can surface tokens/cost while the job is still running or
+// after it completes.
+func (s *jobStore) setUsage(id string, usage *core.Usage, costUSD float64) {
+	j, ok := s.get(id)
+	if !ok {
+		return
+	}
+	j.mu.Lock()
+	j.usage = usage
+	j.costUSD = costUSD
+	j.mu.Unlock()
 }
 
 func (s *jobStore) addProgress(id, line string) {
