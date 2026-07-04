@@ -76,9 +76,12 @@ func (m *appModel) applySubagentInner(jobID string, inner any) {
 		t.streamText += e.Delta
 
 	case bus.MessageEnded:
-		text := t.streamText
+		// FullText is authoritative: streaming deltas are lossy (may be dropped
+		// under backpressure), so prefer FullText whenever the server provides
+		// it, falling back to the accumulated stream only if it's empty.
+		text := e.FullText
 		if text == "" {
-			text = e.FullText
+			text = t.streamText
 		}
 		if text != "" {
 			t.blocks = append(t.blocks, messageBlock{Type: "assistant", Raw: text})

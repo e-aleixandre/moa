@@ -499,6 +499,23 @@ func (m *Manager) Shutdown() {
 		if err := s.runtime.Flush(); err != nil {
 			slog.Warn("shutdown flush failed", "session", s.ID, "error", err)
 		}
+		s.flushLiveSubagentTranscripts()
+	}
+}
+
+// flushLiveSubagentTranscripts persists the transcript of every still-live
+// subagent job, so an async agent that was mid-run at shutdown isn't lost.
+// Their messages are already accumulated incrementally (see setMessages on
+// message_end), so this captures the best-available snapshot.
+func (s *ManagedSession) flushLiveSubagentTranscripts() {
+	if s.subagents == nil {
+		return
+	}
+	for _, info := range s.subagents.Snapshot() {
+		if info.Status != "running" && info.Status != "cancelling" {
+			continue // finished ones were already persisted on OnSubagentEnd
+		}
+		s.persistSubagentTranscript(info.JobID, info.Status, nil, 0)
 	}
 }
 
