@@ -20,6 +20,31 @@ func TestBuildPrompt_RuneBoundary(t *testing.T) {
 	}
 }
 
+func TestWrapPrompt_FramesAsData(t *testing.T) {
+	got := wrapPrompt("User: hola\nAssistant: hey")
+	if !strings.Contains(got, "<conversation>") || !strings.Contains(got, "</conversation>") {
+		t.Errorf("wrapPrompt must delimit the transcript, got:\n%s", got)
+	}
+	if !strings.Contains(got, "User: hola") {
+		t.Errorf("wrapPrompt must include the transcript, got:\n%s", got)
+	}
+}
+
+func TestIsNoConcreteTask(t *testing.T) {
+	// The NONE sentinel (any case, after clean strips punctuation) means the
+	// greeting-only session keeps its first-message title instead of a bad one.
+	for _, s := range []string{"NONE", "none", "None."} {
+		if !isNoConcreteTask(clean(s)) {
+			t.Errorf("isNoConcreteTask(clean(%q)) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"Fix login bug", "None of your business"} {
+		if isNoConcreteTask(clean(s)) {
+			t.Errorf("isNoConcreteTask(clean(%q)) = true, want false", s)
+		}
+	}
+}
+
 func TestCheapModelSpecFor(t *testing.T) {
 	// OpenAI sessions must title with an OpenAI model — never ship the
 	// transcript to a different vendor (Anthropic) just for a title.
