@@ -36,26 +36,27 @@ func CanonicalizePath(path string) (string, error) {
 // files at three levels: global (~/.config/moa/config.json), project (<cwd>/.moa/config.json),
 // and session (flags). Merged with OR for booleans, concatenation for slices.
 type MoaConfig struct {
-	DisableSandbox         bool                 `json:"disable_sandbox"`                     // Deprecated: use PathScope. YOLO mode: allow any file path
-	AllowedPaths           []string             `json:"allowed_paths"`                       // Additional directories accessible outside workspace
-	PathScope              string               `json:"path_scope"`                          // "workspace", "unrestricted", or "" (derive from permission mode)
-	Permissions            PermissionsConfig    `json:"permissions"`                         // Tool execution permission policy
-	PinnedModels           []string             `json:"pinned_models"`                       // Model IDs pinned for Ctrl+P cycling
-	BraveAPIKey            string               `json:"brave_api_key"`                       // Brave Search API key for web_search tool
-	MCPServers             map[string]MCPServer `json:"mcp_servers"`                         // MCP tool server connections
-	TrustedMCPPaths        []string             `json:"trusted_mcp_paths"`                   // Project paths trusted for .mcp.json auto-load
-	PlanReviewModel        string               `json:"plan_review_model"`                   // Model for plan reviewer (default: current model)
-	PlanReviewThinking     string               `json:"plan_review_thinking"`                // Thinking level for plan reviewer (default: "low")
-	CodeReviewModel        string               `json:"code_review_model,omitempty"`         // Model for code reviewer (default: plan review model)
-	CodeReviewThinking     string               `json:"code_review_thinking,omitempty"`      // Thinking level for code reviewer (default: plan review thinking)
-	MaxBudget              float64              `json:"max_budget"`                          // Max USD per agent run. 0 = unlimited.
-	MaxTurns               int                  `json:"max_turns,omitempty"`                 // Max agent turns per run. 0 = unlimited.
-	MaxToolCallsPerTurn    int                  `json:"max_tool_calls_per_turn,omitempty"`   // Max tool calls per turn. 0 = unlimited.
-	MaxRunDurationStr      string               `json:"max_run_duration,omitempty"`          // Max run duration as Go duration string (e.g. "30m"). Empty = unlimited.
-	MemoryEnabled          *bool                `json:"memory_enabled,omitempty"`            // nil = true (enabled by default)
-	AutoVerify             *bool                `json:"auto_verify,omitempty"`               // nil = false (disabled by default)
-	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`        // Max turns per subagent run. 0 = use package default.
-	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"` // Max subagent run duration as Go duration string. Empty = use package default.
+	DisableSandbox         bool                 `json:"disable_sandbox"`                         // Deprecated: use PathScope. YOLO mode: allow any file path
+	AllowedPaths           []string             `json:"allowed_paths"`                           // Additional directories accessible outside workspace
+	PathScope              string               `json:"path_scope"`                              // "workspace", "unrestricted", or "" (derive from permission mode)
+	Permissions            PermissionsConfig    `json:"permissions"`                             // Tool execution permission policy
+	PinnedModels           []string             `json:"pinned_models"`                           // Model IDs pinned for Ctrl+P cycling
+	BraveAPIKey            string               `json:"brave_api_key"`                           // Brave Search API key for web_search tool
+	MCPServers             map[string]MCPServer `json:"mcp_servers"`                             // MCP tool server connections
+	TrustedMCPPaths        []string             `json:"trusted_mcp_paths"`                       // Project paths trusted for .mcp.json auto-load
+	PlanReviewModel        string               `json:"plan_review_model"`                       // Model for plan reviewer (default: current model)
+	PlanReviewThinking     string               `json:"plan_review_thinking"`                    // Thinking level for plan reviewer (default: "low")
+	CodeReviewModel        string               `json:"code_review_model,omitempty"`             // Model for code reviewer (default: plan review model)
+	CodeReviewThinking     string               `json:"code_review_thinking,omitempty"`          // Thinking level for code reviewer (default: plan review thinking)
+	MaxBudget              float64              `json:"max_budget"`                              // Max USD per agent run. 0 = unlimited.
+	MaxTurns               int                  `json:"max_turns,omitempty"`                     // Max agent turns per run. 0 = unlimited.
+	MaxToolCallsPerTurn    int                  `json:"max_tool_calls_per_turn,omitempty"`       // Max tool calls per turn. 0 = unlimited.
+	MaxRunDurationStr      string               `json:"max_run_duration,omitempty"`              // Max run duration as Go duration string (e.g. "30m"). Empty = unlimited.
+	MemoryEnabled          *bool                `json:"memory_enabled,omitempty"`                // nil = true (enabled by default)
+	AutoVerify             *bool                `json:"auto_verify,omitempty"`                   // nil = false (disabled by default)
+	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`            // Max turns per subagent run. 0 = use package default.
+	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"`     // Max subagent run duration as Go duration string. Empty = use package default.
+	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
 }
 
 // IsMemoryEnabled returns whether cross-session memory is enabled.
@@ -213,6 +214,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	}
 	merged.SubagentMaxTurns = mergeScalar(base.SubagentMaxTurns, override.SubagentMaxTurns)
 	merged.SubagentMaxRunDuration = mergeScalar(base.SubagentMaxRunDuration, override.SubagentMaxRunDuration)
+	merged.SubagentMaxConcurrent = mergeScalar(base.SubagentMaxConcurrent, override.SubagentMaxConcurrent)
 	return merged
 }
 

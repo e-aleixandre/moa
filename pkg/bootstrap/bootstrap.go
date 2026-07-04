@@ -395,6 +395,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		OnAsyncComplete:     cfg.OnAsyncComplete,
 		ChildMaxTurns:       moaCfg.SubagentMaxTurns,
 		ChildMaxRunDuration: core.GetSubagentMaxRunDuration(moaCfg),
+		MaxConcurrentAsync:  moaCfg.SubagentMaxConcurrent,
 		OnChildStart:        cfg.OnSubagentStart,
 		OnChildEvent:        cfg.OnSubagentEvent,
 		OnChildEnd:          cfg.OnSubagentEnd,

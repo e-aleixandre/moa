@@ -61,3 +61,27 @@ func TestJobStore_SnapshotLocked_DoesNotIncludeMessages(t *testing.T) {
 	// exercised here only to document intent (snapshot must stay cheap).
 	_ = snap
 }
+
+func TestJobStore_RunningCount_ExcludesSync(t *testing.T) {
+	s := newJobStore()
+	s.create("async1", "m", func() {})    // async, running
+	s.create("async2", "m", func() {})    // async, running
+	s.createSync("sync1", "m", func() {}) // sync, running
+
+	if got := s.runningCount(); got != 2 {
+		t.Fatalf("runningCount = %d, want 2 (sync excluded)", got)
+	}
+}
+
+func TestJobs_Cancel_ReportsExistence(t *testing.T) {
+	s := newJobStore()
+	j := s.create("task", "m", func() {})
+	handle := &Jobs{store: s}
+
+	if !handle.Cancel(j.id) {
+		t.Fatal("Cancel(existing) = false, want true")
+	}
+	if handle.Cancel("sa-does-not-exist") {
+		t.Fatal("Cancel(missing) = true, want false")
+	}
+}

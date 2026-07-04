@@ -102,7 +102,9 @@ func (m *Manager) CancelSubagent(sessionID, jobID string) error {
 	if sess.subagents == nil {
 		return ErrNotFound
 	}
-	sess.subagents.Cancel(jobID)
+	if !sess.subagents.Cancel(jobID) {
+		return ErrNotFound
+	}
 	return nil
 }
 

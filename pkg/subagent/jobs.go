@@ -297,13 +297,17 @@ func (s *jobStore) delete(id string) {
 	s.mu.Unlock()
 }
 
+// runningCount returns the number of live (running/cancelling) ASYNC jobs.
+// Sync jobs are excluded: they block the parent tool call and shouldn't count
+// against the async concurrency cap, nor against the "N agents working" async
+// counter shown in the UI.
 func (s *jobStore) runningCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	count := 0
 	for _, j := range s.jobs {
 		j.mu.Lock()
-		running := j.status == statusRunning || j.status == statusCancelling
+		running := (j.status == statusRunning || j.status == statusCancelling) && !j.sync
 		j.mu.Unlock()
 		if running {
 			count++
@@ -381,13 +385,19 @@ func (j *Jobs) Messages(jobID string) []core.AgentMessage {
 	return j.store.messages(jobID)
 }
 
-// Cancel requests cancellation of a running job. No-op for unknown/finished jobs.
-func (j *Jobs) Cancel(jobID string) {
+// Cancel requests cancellation of a running job. Returns false if no job with
+// that ID is tracked (so callers can surface a 404); returns true if the job
+// exists, whether or not it was still running (idempotent for finished jobs).
+func (j *Jobs) Cancel(jobID string) bool {
 	if j == nil || j.store == nil {
-		return
+		return false
+	}
+	if _, ok := j.store.get(jobID); !ok {
+		return false
 	}
 	jb, _, requested := j.store.requestCancel(jobID)
 	if requested && jb != nil {
 		jb.cancel()
 	}
+	return true
 }

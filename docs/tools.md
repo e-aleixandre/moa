@@ -84,7 +84,7 @@ the parent's numbers, and have **no** budget/`$` cap of their own):
 | --- | --- | --- |
 | Max turns | 30 | `subagent_max_turns` |
 | Max run duration | 10m | `subagent_max_run_duration` (Go duration, e.g. `"15m"`) |
-| Max concurrent async jobs | 5 | — |
+| Max concurrent async jobs | 5 | `subagent_max_concurrent_async` |
 
 Context compaction is disabled for children (they run short, focused tasks);
 raising `subagent_max_turns` substantially may warrant enabling it.
