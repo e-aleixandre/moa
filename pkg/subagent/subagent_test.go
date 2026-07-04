@@ -1020,3 +1020,66 @@ func TestFormatStatusUsageLine(t *testing.T) {
 		t.Fatalf("did not expect usage line without usage, got: %s", out2)
 	}
 }
+
+// TestSubagentTranscriptAccumulatesMidRun verifies that the job's stored
+// messages grow as the child completes messages (via message_end), so a
+// reconnecting client can fetch the transcript-so-far mid-run, rather than
+// only after the child finishes. See P1 #3.
+func TestSubagentTranscriptAccumulatesMidRun(t *testing.T) {
+	releaseTool := make(chan struct{})
+	releaseFinal := make(chan struct{})
+	// Turn 1: child calls a tool (gated). Turn 2: child answers (gated).
+	provider := newMockProvider(
+		gatedToolCallResponse(releaseTool, "tc-1", "noop", map[string]any{}),
+		gateResponse(nil, releaseFinal, "all done"),
+	)
+
+	noop := core.Tool{
+		Name:        "noop",
+		Description: "does nothing",
+		Execute: func(ctx context.Context, args map[string]any, _ func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+
+	reg := core.NewRegistry()
+	_ = reg.Register(noop)
+	jobs := newJobStore()
+	sub := newSubagent(Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		ParentTools:     reg,
+	}, jobs)
+
+	res, err := sub.Execute(context.Background(), map[string]any{
+		"task": "do it", "async": true, "tools": []any{"noop"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+
+	// Let turn 1 (tool call) complete → child records the assistant tool-call
+	// message plus the tool result, so messages() should become non-empty
+	// before the whole job finishes.
+	close(releaseTool)
+	waitFor(t, 2*time.Second, func() bool {
+		return len(jobs.messages(jobID)) > 0
+	})
+	midCount := len(jobs.messages(jobID))
+	if midCount == 0 {
+		t.Fatal("expected transcript to accumulate mid-run, got 0 messages")
+	}
+
+	// Finish turn 2.
+	close(releaseFinal)
+	waitFor(t, 2*time.Second, func() bool {
+		snap, ok := jobs.snapshot(jobID)
+		return ok && snap.Status == statusCompleted
+	})
+	finalCount := len(jobs.messages(jobID))
+	if finalCount < midCount {
+		t.Fatalf("final transcript (%d) smaller than mid-run (%d)", finalCount, midCount)
+	}
+}

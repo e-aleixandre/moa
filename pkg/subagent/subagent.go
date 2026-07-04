@@ -309,6 +309,9 @@ func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider c
 	unsub := child.Subscribe(func(e core.AgentEvent) {
 		forwardSyncEvent(e, onUpdate)
 		forwardChildEvent(cfg, j.id, e)
+		if e.Type == core.AgentEventMessageEnd {
+			jobs.setMessages(j.id, child.Messages())
+		}
 	})
 	defer unsub()
 
@@ -374,6 +377,9 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 	unsub := child.Subscribe(func(e core.AgentEvent) {
 		forwardAsyncEvent(jobs, j.id, e)
 		forwardChildEvent(cfg, j.id, e)
+		if e.Type == core.AgentEventMessageEnd {
+			jobs.setMessages(j.id, child.Messages())
+		}
 	})
 	defer unsub()
 
