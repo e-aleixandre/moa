@@ -3,6 +3,7 @@ package session
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -98,5 +99,35 @@ func TestSubagentStore_DirLayout(t *testing.T) {
 	want := filepath.Join("/base/proj", "sessABC.subagents")
 	if s.Dir() != want {
 		t.Fatalf("Dir() = %q, want %q", s.Dir(), want)
+	}
+}
+
+func TestSubagentStore_RejectsUnsafeJobID(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	bad := []string{"", "../evil", "a/b", `a\b`, "..", "foo/../bar"}
+	for _, id := range bad {
+		if err := s.Save(sampleTranscript(id)); err == nil {
+			t.Errorf("Save(%q) should have failed", id)
+		}
+		if _, err := s.Load(id); err == nil {
+			t.Errorf("Load(%q) should have failed", id)
+		}
+	}
+}
+
+func TestSubagentStore_ListSortedNewestFirst(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	older := sampleTranscript("sa-old")
+	older.FinishedAt = time.Unix(1000, 0)
+	newer := sampleTranscript("sa-new")
+	newer.FinishedAt = time.Unix(2000, 0)
+	_ = s.Save(older)
+	_ = s.Save(newer)
+	list, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 2 || list[0].JobID != "sa-new" {
+		t.Fatalf("expected newest-first, got %+v", list)
 	}
 }

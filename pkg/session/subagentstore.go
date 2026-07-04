@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -45,8 +47,8 @@ func (s *SubagentStore) Dir() string { return s.dir }
 
 // Save atomically writes one transcript to <jobID>.json.
 func (s *SubagentStore) Save(t SubagentTranscript) error {
-	if t.JobID == "" {
-		return fmt.Errorf("session: subagent transcript missing job_id")
+	if err := validJobID(t.JobID); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(s.dir, 0700); err != nil {
 		return fmt.Errorf("session: subagent mkdir: %w", err)
@@ -69,6 +71,9 @@ func (s *SubagentStore) Save(t SubagentTranscript) error {
 
 // Load reads one transcript by jobID. Returns ErrNotFound (wrapped) if absent.
 func (s *SubagentStore) Load(jobID string) (*SubagentTranscript, error) {
+	if err := validJobID(jobID); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(s.dir, jobID+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -106,7 +111,22 @@ func (s *SubagentStore) List() ([]SubagentTranscript, error) {
 		}
 		out = append(out, *t)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].FinishedAt.After(out[j].FinishedAt)
+	})
 	return out, nil
+}
+
+// validJobID rejects empty or unsafe job IDs (path traversal / separators)
+// before they're used to build a filesystem path.
+func validJobID(jobID string) error {
+	if jobID == "" {
+		return fmt.Errorf("session: subagent transcript missing job_id")
+	}
+	if jobID != filepath.Base(jobID) || strings.ContainsAny(jobID, `/\`) || strings.Contains(jobID, "..") {
+		return fmt.Errorf("session: invalid subagent job_id %q", jobID)
+	}
+	return nil
 }
 
 // Remove deletes the entire side directory (used when the parent session is

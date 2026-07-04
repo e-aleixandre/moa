@@ -1,6 +1,7 @@
 // session-actions.js — API-backed session operations
 
 import { api } from './api.js';
+import { normalizeHistory } from './ws-handlers.js';
 import { triggerAttention } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
@@ -177,6 +178,41 @@ export async function cancelRun(id) {
 
 export async function cancelSubagent(id, jobId) {
   await api('POST', `/api/sessions/${id}/subagents/${jobId}/cancel`);
+}
+
+// openPersistedSubagent loads a finished subagent's transcript from disk and
+// opens it in the SubagentView. Used when clicking a subagent card in the chat
+// after the live tray entry is gone.
+export async function openPersistedSubagent(id, jobId) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  // If we still have it live in memory, just open it.
+  if (sess.subagents && sess.subagents[jobId]) {
+    updateSession(id, { viewingSubagent: jobId });
+    return;
+  }
+  const t = await api('GET', `/api/sessions/${id}/subagents/${jobId}`);
+  if (!t) return;
+  const usage = (t.cost_usd || (t.usage && (t.usage.input || t.usage.output)))
+    ? {
+        inputTokens: (t.usage && t.usage.input) || 0,
+        outputTokens: (t.usage && t.usage.output) || 0,
+        costUSD: t.cost_usd || 0,
+      }
+    : null;
+  const subs = { ...(store.get().sessions[id].subagents || {}) };
+  subs[jobId] = {
+    jobId,
+    task: t.task || '',
+    model: t.model || '',
+    status: t.status || 'completed',
+    async: !!t.async,
+    messages: normalizeHistory(t.messages || []),
+    streamingText: null,
+    thinkingText: null,
+    usage,
+  };
+  updateSession(id, { subagents: subs, viewingSubagent: jobId });
 }
 
 export async function resolvePermission(sessionId, permId, approved, opts = {}) {

@@ -1,11 +1,13 @@
 package serve
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 // ReconfigureSession changes the model and/or thinking level of a session.
@@ -102,4 +104,41 @@ func (m *Manager) CancelSubagent(sessionID, jobID string) error {
 	}
 	sess.subagents.Cancel(jobID)
 	return nil
+}
+
+// subagentStoreFor returns the persisted-transcript store for an active
+// session, or nil if the session isn't active / persistence is unavailable.
+func (m *Manager) subagentStoreFor(sessionID string) *session.SubagentStore {
+	sess, ok := m.Get(sessionID)
+	if !ok || sess.persister == nil {
+		return nil
+	}
+	return sess.persister.subagentStore(sessionID)
+}
+
+// ListSubagentTranscripts returns the persisted subagent transcripts for a
+// session (newest-finished first). Returns ErrNotFound if the session isn't
+// active or has no persistence.
+func (m *Manager) ListSubagentTranscripts(sessionID string) ([]session.SubagentTranscript, error) {
+	store := m.subagentStoreFor(sessionID)
+	if store == nil {
+		return nil, ErrNotFound
+	}
+	return store.List()
+}
+
+// GetSubagentTranscript loads one persisted transcript by jobID.
+func (m *Manager) GetSubagentTranscript(sessionID, jobID string) (*session.SubagentTranscript, error) {
+	store := m.subagentStoreFor(sessionID)
+	if store == nil {
+		return nil, ErrNotFound
+	}
+	t, err := store.Load(jobID)
+	if err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return t, nil
 }

@@ -139,6 +139,7 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status string, usage *
 			t.Task = info.Task
 			t.Model = info.Model
 			t.Async = info.Async
+			t.StartedAt = info.StartedAt
 			break
 		}
 	}

@@ -36,6 +36,7 @@ type job struct {
 	progLen    int
 	cancel     context.CancelFunc
 	done       chan struct{}
+	startedAt  time.Time
 	finishedAt time.Time
 	sync       bool // true when this job runs synchronously (blocking the parent tool call)
 	messages   []core.AgentMessage
@@ -51,6 +52,7 @@ type jobSnapshot struct {
 	Result     string
 	Error      string
 	Progress   []string
+	StartedAt  time.Time
 	FinishedAt time.Time
 	Sync       bool
 	Usage      *core.Usage
@@ -81,13 +83,14 @@ func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync
 	for {
 		id := randomJobID()
 		j := &job{
-			id:     id,
-			task:   task,
-			model:  model,
-			status: statusRunning,
-			cancel: cancel,
-			done:   make(chan struct{}),
-			sync:   sync,
+			id:        id,
+			task:      task,
+			model:     model,
+			status:    statusRunning,
+			cancel:    cancel,
+			done:      make(chan struct{}),
+			startedAt: time.Now(),
+			sync:      sync,
 		}
 
 		s.mu.Lock()
@@ -135,6 +138,7 @@ func snapshotLocked(j *job) jobSnapshot {
 		Result:     j.result,
 		Error:      j.err,
 		Progress:   progress,
+		StartedAt:  j.startedAt,
 		FinishedAt: j.finishedAt,
 		Sync:       j.sync,
 		Usage:      j.usage,
@@ -323,11 +327,13 @@ func randomJobID() string {
 
 // JobInfo describes a live (or recently finished) subagent job.
 type JobInfo struct {
-	JobID  string
-	Task   string
-	Model  string
-	Status string
-	Async  bool
+	JobID      string
+	Task       string
+	Model      string
+	Status     string
+	Async      bool
+	StartedAt  time.Time
+	FinishedAt time.Time
 }
 
 // Jobs is a handle onto the subagent job store, returned by RegisterAll.
@@ -355,11 +361,13 @@ func (j *Jobs) Snapshot() []JobInfo {
 			continue
 		}
 		infos = append(infos, JobInfo{
-			JobID:  snap.ID,
-			Task:   snap.Task,
-			Model:  snap.Model,
-			Status: snap.Status,
-			Async:  !snap.Sync,
+			JobID:      snap.ID,
+			Task:       snap.Task,
+			Model:      snap.Model,
+			Status:     snap.Status,
+			Async:      !snap.Sync,
+			StartedAt:  snap.StartedAt,
+			FinishedAt: snap.FinishedAt,
 		})
 	}
 	return infos

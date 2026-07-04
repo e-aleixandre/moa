@@ -1,14 +1,26 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
-import { Check, X, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
+import { Check, X, Loader2, Maximize2, Minimize2, GitFork } from 'lucide-preact';
 import { toolVerb, toolPath, toolPreview, splitPreview, splitPreviewTail } from '../util/format.js';
 import { AskUserPreview } from './AskUserPreview.jsx';
+import { openPersistedSubagent } from '../session-actions.js';
 
-export function ToolCall({ tool }) {
+export function ToolCall({ tool, sessionId }) {
   const [expanded, setExpanded] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
 
   const { verb, cls: verbCls } = toolVerb(tool.tool_name);
   const path = toolPath(tool.tool_name, tool.args);
+
+  // Subagent cards (tool_call_id "subagent-<jobID>") can be reopened as a
+  // navigable sub-conversation, loading the persisted transcript from disk.
+  const subagentJobId = (tool.tool_name === 'subagent' && typeof tool.tool_call_id === 'string'
+    && tool.tool_call_id.startsWith('subagent-'))
+    ? tool.tool_call_id.slice('subagent-'.length)
+    : null;
+  const openSub = (e) => {
+    e.stopPropagation();
+    if (sessionId && subagentJobId) openPersistedSubagent(sessionId, subagentJobId).catch(() => {});
+  };
 
   const isGenerating = tool.status === 'generating';
   const isRunning = tool.status === 'running' || isGenerating;
@@ -47,6 +59,11 @@ export function ToolCall({ tool }) {
           {!isAskUser && fullText && (
             <button class="tool-call-expand" title="Expand" onClick={(e) => { e.stopPropagation(); setModalOpen(true); }}>
               <Maximize2 />
+            </button>
+          )}
+          {subagentJobId && (
+            <button class="tool-call-expand" title="View sub-conversation" onClick={openSub}>
+              <GitFork />
             </button>
           )}
           <span class={`tool-call-tag ${statusCls}`}>

@@ -1083,3 +1083,65 @@ func TestStaticDirOverride(t *testing.T) {
 		t.Fatalf("expected %q, got %q", testContent, string(body))
 	}
 }
+
+func TestSubagentTranscriptEndpoints(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a persisted transcript directly into the session's side store.
+	store := mgr.subagentStoreFor(sess.ID)
+	if store == nil {
+		t.Fatal("expected a subagent store for active session")
+	}
+	tr := session.SubagentTranscript{
+		JobID:   "sa-test1",
+		Task:    "investigate",
+		Model:   "haiku",
+		Status:  "completed",
+		Async:   true,
+		CostUSD: 0.01,
+		Usage:   &core.Usage{Input: 50, Output: 20},
+		Messages: []core.AgentMessage{
+			{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("done")}}},
+		},
+	}
+	if err := store.Save(tr); err != nil {
+		t.Fatalf("save transcript: %v", err)
+	}
+
+	// LIST
+	resp := apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", resp.StatusCode)
+	}
+	var list []map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&list)
+	resp.Body.Close()
+	if len(list) != 1 || list[0]["job_id"] != "sa-test1" {
+		t.Fatalf("unexpected list: %+v", list)
+	}
+
+	// GET one (with messages)
+	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/sa-test1", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get status = %d", resp.StatusCode)
+	}
+	var got session.SubagentTranscript
+	_ = json.NewDecoder(resp.Body).Decode(&got)
+	resp.Body.Close()
+	if got.JobID != "sa-test1" || len(got.Messages) != 1 {
+		t.Fatalf("unexpected transcript: %+v", got)
+	}
+
+	// GET missing → 404
+	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/nope", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing get status = %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
+}

@@ -43,7 +43,7 @@ export function MessageList({ session }) {
     <div class="messages" ref={containerRef} onScroll={checkScroll} style="position:relative">
       {messages.map((msg, i) => {
         if (msg._type === 'tool_start') {
-          return <ToolCall key={msg.tool_call_id || i} tool={msg} />;
+          return <ToolCall key={msg.tool_call_id || i} tool={msg} sessionId={session.id} />;
         }
         if (msg._type === 'system') {
           return <div key={i} class="msg-system">{msg.text}</div>;

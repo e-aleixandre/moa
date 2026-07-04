@@ -76,6 +76,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleListSubagents(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleGetSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
@@ -592,6 +594,49 @@ func handleCancelSubagent(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+}
+
+// handleListSubagents returns the persisted subagent transcripts for a session
+// (metadata only — messages omitted to keep the list light).
+func handleListSubagents(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		list, err := mgr.ListSubagentTranscripts(r.PathValue("id"))
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			out := make([]map[string]any, 0, len(list))
+			for _, t := range list {
+				m := map[string]any{
+					"job_id": t.JobID, "task": t.Task, "model": t.Model,
+					"status": t.Status, "async": t.Async, "cost_usd": t.CostUSD,
+				}
+				if t.Usage != nil {
+					m["input_tokens"] = t.Usage.Input
+					m["output_tokens"] = t.Usage.Output
+				}
+				out = append(out, m)
+			}
+			writeJSON(w, http.StatusOK, out)
+		}
+	}
+}
+
+// handleGetSubagent returns one persisted subagent transcript (with messages).
+func handleGetSubagent(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		t, err := mgr.GetSubagentTranscript(r.PathValue("id"), r.PathValue("jobID"))
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			writeJSON(w, http.StatusOK, t)
 		}
 	}
 }
