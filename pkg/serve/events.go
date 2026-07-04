@@ -27,6 +27,19 @@ type InitData struct {
 	Tasks             any                 `json:"tasks,omitempty"`
 	PlanMode          string              `json:"plan_mode,omitempty"`
 	PlanFile          string              `json:"plan_file,omitempty"`
+	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
+}
+
+// SubagentInitData describes one live subagent job for reconnecting clients
+// (WS init snapshot), so a client that connects mid-run sees the agent tray
+// and its accumulated transcript instead of starting empty.
+type SubagentInitData struct {
+	JobID    string              `json:"job_id"`
+	Task     string              `json:"task"`
+	Model    string              `json:"model"`
+	Status   string              `json:"status"`
+	Async    bool                `json:"async"`
+	Messages []core.AgentMessage `json:"messages"`
 }
 
 // PermissionData is a pending permission request.
@@ -165,4 +178,30 @@ type SubagentCompleteData struct {
 	Task   string `json:"task"`
 	Status string `json:"status"`
 	Text   string `json:"text"`
+}
+
+// SubagentStartData is sent when a subagent (sync or async) begins.
+type SubagentStartData struct {
+	JobID string `json:"job_id"`
+	Task  string `json:"task"`
+	Model string `json:"model"`
+	Async bool   `json:"async"`
+}
+
+// SubagentEndData is sent when a subagent finishes, carrying its usage/cost.
+type SubagentEndData struct {
+	JobID        string  `json:"job_id"`
+	Status       string  `json:"status"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
+// SubagentEventData wraps a single translated bus event from a subagent
+// child, namespaced by JobID. Event is produced by re-applying
+// wsEventFromBus to the inner (already-typed) bus event — same shape as a
+// top-level WS event.
+type SubagentEventData struct {
+	JobID string `json:"job_id"`
+	Event *Event `json:"event"`
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/push"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/usage"
 )
 
@@ -44,6 +45,10 @@ type ManagedSession struct {
 
 	// Bus runtime — owns all session state.
 	runtime *bus.SessionRuntime
+
+	// subagents is the handle onto the subagent job store (bootstrap.Session.Subagents),
+	// used to answer the GetSubagents query and future cancellation from the UI.
+	subagents *subagent.Jobs
 
 	// Serve-specific persistence.
 	persister *servePersister

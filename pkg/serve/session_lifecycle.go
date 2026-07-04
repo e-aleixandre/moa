@@ -185,6 +185,27 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				}
 			}
 		},
+		OnSubagentStart: func(jobID, task, model string, async bool) {
+			if s := sess; s != nil {
+				s.runtime.Bus.Publish(bus.SubagentStarted{
+					SessionID: s.ID, JobID: jobID, Task: task, Model: model, Async: async,
+				})
+			}
+		},
+		OnSubagentEvent: func(jobID string, inner any) {
+			if s := sess; s != nil {
+				s.runtime.Bus.Publish(bus.SubagentEvent{
+					SessionID: s.ID, JobID: jobID, Inner: inner,
+				})
+			}
+		},
+		OnSubagentEnd: func(jobID, status string, usage *core.Usage, costUSD float64) {
+			if s := sess; s != nil {
+				s.runtime.Bus.Publish(bus.SubagentEnded{
+					SessionID: s.ID, JobID: jobID, Status: status, Usage: usage, CostUSD: costUSD,
+				})
+			}
+		},
 	})
 	if err != nil {
 		sessionCancel()
@@ -221,6 +242,31 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return nil, err
 	}
 
+	// GetSubagents answers the WS init snapshot query (reconnect): live
+	// (running/cancelling) subagent jobs plus their transcript so far. bus
+	// itself doesn't know about pkg/subagent, so this handler is registered
+	// here, from the frontend that owns the *subagent.Jobs handle.
+	rt.Bus.OnQuery(func(q bus.GetSubagents) ([]bus.SubagentSnapshot, error) {
+		if bs.Subagents == nil {
+			return nil, nil
+		}
+		var out []bus.SubagentSnapshot
+		for _, info := range bs.Subagents.Snapshot() {
+			if info.Status != "running" && info.Status != "cancelling" {
+				continue
+			}
+			out = append(out, bus.SubagentSnapshot{
+				JobID:    info.JobID,
+				Task:     info.Task,
+				Model:    info.Model,
+				Status:   info.Status,
+				Async:    info.Async,
+				Messages: bs.Subagents.Messages(info.JobID),
+			})
+		}
+		return out, nil
+	})
+
 	// Apply thinking level if restoring.
 	if opts != nil && opts.initialThinking != "" {
 		_ = rt.Bus.Execute(bus.SetThinking{Level: opts.initialThinking})
@@ -231,12 +277,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// the system prompt automatically.
 
 	sess = &ManagedSession{
-		ID:      id,
-		Title:   title,
-		CWD:     cwd,
-		Created: time.Now(),
-		Updated: time.Now(),
-		runtime: rt,
+		ID:        id,
+		Title:     title,
+		CWD:       cwd,
+		Created:   time.Now(),
+		Updated:   time.Now(),
+		runtime:   rt,
+		subagents: bs.Subagents,
 		infra: serveInfra{
 			sessionCtx:    sessionCtx,
 			sessionCancel: sessionCancel,

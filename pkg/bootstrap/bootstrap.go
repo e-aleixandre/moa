@@ -82,6 +82,15 @@ type SessionConfig struct {
 	// Subagent callbacks. All optional (nil = no-op).
 	OnAsyncJobChange func(count int)
 	OnAsyncComplete  func(jobID, task, status, resultTail string, truncated bool)
+
+	// OnSubagentStart/OnSubagentEvent/OnSubagentEnd are the rich, per-child
+	// streaming sinks (subagent.Config.OnChildStart/OnChildEvent/OnChildEnd).
+	// The caller wires these into its own bus (see cmd/agent's preBus,
+	// pkg/serve's session_lifecycle closure) since bootstrap has no bus
+	// reference of its own. All optional (nil = no-op).
+	OnSubagentStart func(jobID, task, model string, async bool)
+	OnSubagentEvent func(jobID string, inner any)
+	OnSubagentEnd   func(jobID, status string, usage *core.Usage, costUSD float64)
 }
 
 // Session is a fully wired session ready for agent.Run/Send.
@@ -115,6 +124,11 @@ type Session struct {
 	// agentHolder stores the atomic agent pointer for subagent closures.
 	// Set by BuildSession; updated internally on reconfiguration.
 	agentHolder atomic.Pointer[agent.Agent]
+
+	// Subagents is the handle onto the subagent job store, returned by
+	// subagent.RegisterAll. Used for the init snapshot (reconnect), the agent
+	// tray, and cancellation.
+	Subagents *subagent.Jobs
 }
 
 // BuildSession wires up a complete agent session. The returned Session
@@ -347,7 +361,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 
 	// 10. Subagents.
-	if _, err := subagent.RegisterAll(toolReg, subagent.Config{
+	subagentJobs, err := subagent.RegisterAll(toolReg, subagent.Config{
 		DefaultModel: cfg.Model,
 		CurrentModel: func() core.Model {
 			if a := sess.agentHolder.Load(); a != nil {
@@ -381,17 +395,17 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		OnAsyncComplete:     cfg.OnAsyncComplete,
 		ChildMaxTurns:       moaCfg.SubagentMaxTurns,
 		ChildMaxRunDuration: core.GetSubagentMaxRunDuration(moaCfg),
-		// OnChildStart/OnChildEvent/OnChildEnd are left nil here: bootstrap has
-		// no bus reference to wire them into (see how OnAsyncComplete/
-		// OnAsyncJobChange are instead cabled by the CALLERS — cmd/agent's
-		// preBus, pkg/serve's session_lifecycle closure — which do have a bus).
-		// TODO(task-3): wire to bus
-	}); err != nil {
+		OnChildStart:        cfg.OnSubagentStart,
+		OnChildEvent:        cfg.OnSubagentEvent,
+		OnChildEnd:          cfg.OnSubagentEnd,
+	})
+	if err != nil {
 		if mcpMgr != nil {
 			mcpMgr.Close()
 		}
 		return nil, fmt.Errorf("bootstrap: subagent registration: %w", err)
 	}
+	sess.Subagents = subagentJobs
 
 	// 11. Plan mode.
 	planSessionDir := cfg.PlanSessionDir

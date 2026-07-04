@@ -1,5 +1,7 @@
 package bus
 
+import "github.com/ealeixandre/moa/pkg/core"
+
 // ---------------------------------------------------------------------------
 // Query types
 //
@@ -91,12 +93,31 @@ type GetDisplayMessages struct{ SessionID string }
 // Handler returns: []BranchPoint
 type GetBranchPoints struct{ SessionID string }
 
+// GetSubagents returns a snapshot of currently live subagent jobs (running or
+// cancelling), including their accumulated transcript. Used to populate the
+// agent tray and reconnect clients mid-run. Bus itself does not know about
+// pkg/subagent — the handler is registered by the frontend (serve/TUI) that
+// owns the *subagent.Jobs handle.
+// Handler returns: []SubagentSnapshot
+type GetSubagents struct{ SessionID string }
+
+// SubagentSnapshot describes one live subagent job, including its transcript
+// so far. Result element type for GetSubagents.
+type SubagentSnapshot struct {
+	JobID    string
+	Task     string
+	Model    string
+	Status   string
+	Async    bool
+	Messages []core.AgentMessage
+}
+
 // BranchPoint describes a possible branch target in the conversation.
 type BranchPoint struct {
 	EntryID       string `json:"entry_id"`
-	Label         string `json:"label"`          // first line of message
-	Role          string `json:"role"`           // user/assistant
+	Label         string `json:"label"` // first line of message
+	Role          string `json:"role"`  // user/assistant
 	Timestamp     int64  `json:"timestamp"`
-	BranchCount   int    `json:"branch_count"`   // number of children
+	BranchCount   int    `json:"branch_count"` // number of children
 	IsCurrentPath bool   `json:"is_current_path"`
 }

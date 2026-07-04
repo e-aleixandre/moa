@@ -163,6 +163,28 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "subagent_complete", Data: SubagentCompleteData{
 			JobID: e.JobID, Task: e.Task, Status: e.Status, Text: e.Text,
 		}}, true
+	case bus.SubagentStarted:
+		return Event{Type: "subagent_start", Data: SubagentStartData{
+			JobID: e.JobID, Task: e.Task, Model: e.Model, Async: e.Async,
+		}}, true
+	case bus.SubagentEnded:
+		var inputTok, outputTok int
+		if e.Usage != nil {
+			inputTok = e.Usage.Input
+			outputTok = e.Usage.Output
+		}
+		return Event{Type: "subagent_end", Data: SubagentEndData{
+			JobID: e.JobID, Status: e.Status,
+			InputTokens: inputTok, OutputTokens: outputTok, CostUSD: e.CostUSD,
+		}}, true
+	case bus.SubagentEvent:
+		inner, ok := wsEventFromBus(e.Inner)
+		if !ok {
+			return Event{}, false
+		}
+		return Event{Type: "subagent_event", Data: SubagentEventData{
+			JobID: e.JobID, Event: &inner,
+		}}, true
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
 	case bus.CompactionEnded:
@@ -209,6 +231,7 @@ func buildInitData(sess *ManagedSession) InitData {
 	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
 	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
+	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
 
 	data := InitData{
 		Messages:       msgs,
@@ -217,6 +240,20 @@ func buildInitData(sess *ManagedSession) InitData {
 		PermissionMode: permMode,
 		Tasks:          taskList,
 		PathScope:      pathInfo.Scope,
+	}
+
+	if len(subagents) > 0 {
+		data.Subagents = make([]SubagentInitData, len(subagents))
+		for i, sa := range subagents {
+			data.Subagents[i] = SubagentInitData{
+				JobID:    sa.JobID,
+				Task:     sa.Task,
+				Model:    sa.Model,
+				Status:   sa.Status,
+				Async:    sa.Async,
+				Messages: sa.Messages,
+			}
+		}
 	}
 
 	if pending.Permission != nil {
