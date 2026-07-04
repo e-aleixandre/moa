@@ -30,6 +30,8 @@ const verifierSystemPrompt = `You are a strict verifier in an autonomous coding 
 
 Be skeptical. If the evidence does not clearly demonstrate the objective is complete, it is NOT satisfied — do not give the benefit of the doubt.
 
+Judge the actual DIFF, not the worker's self-description: a final message claiming success is NOT evidence on its own. If the EVIDENCE includes AUTOMATED CHECKS and any check failed (or they were "not run" when the objective needs them), the objective is NOT satisfied.
+
 Reply with ONLY a JSON object, no prose and no markdown fences:
 {"satisfied": <true|false>, "feedback": "<if not satisfied: what concretely is missing or wrong, so the worker can fix it next; if satisfied: a brief confirmation>"}`
 

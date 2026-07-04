@@ -24,13 +24,27 @@ type CompactionPayload struct {
 	ModifiedFiles []string `json:"modified_files,omitempty"`
 }
 
+// compactionTailMargin is the extra headroom (≈2× the summary-message estimate)
+// the effective window must leave above ReserveTokens + KeepRecent so that, after
+// a compaction, the retained tail sits BELOW the threshold. Without it a very low
+// CompactAt lands in a degenerate band where post-compaction context still
+// exceeds the threshold and compaction retriggers every single turn.
+const compactionTailMargin = 4000
+
 // EffectiveWindow returns the context window to use for compaction decisions.
 // When CompactAt is set (>0) it caps the model's real window so compaction fires
 // earlier; it is clamped to maxInput, so an over-large value harmlessly degrades
-// to plain overflow protection rather than disabling compaction.
+// to plain overflow protection rather than disabling compaction. It is also
+// floored so a too-low CompactAt can't cause per-turn compaction thrash.
 func (s CompactionSettings) EffectiveWindow(maxInput int) int {
 	if s.CompactAt > 0 && s.CompactAt < maxInput {
-		return s.CompactAt
+		eff := s.CompactAt
+		if floor := s.ReserveTokens + s.KeepRecent + compactionTailMargin; eff < floor {
+			eff = floor
+		}
+		if eff < maxInput {
+			return eff
+		}
 	}
 	return maxInput
 }

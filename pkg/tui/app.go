@@ -972,6 +972,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Alt+Up: pull queued steers back into the input for editing/cancelling.
 			combined := strings.Join(m.s.queuedSteers, "\n")
 			m.s.queuedSteers = nil
+			// The steers were already sent to the agent's channel; cancel the
+			// not-yet-delivered ones so re-submitting the edited text doesn't
+			// deliver both the originals and the edit.
+			_ = m.runtime.Bus.Execute(bus.CancelSteer{})
 			current := m.input.textarea.Value()
 			if current != "" {
 				combined = current + "\n" + combined
@@ -1316,9 +1320,13 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	case bus.RunStarted:
 		m.s.runGen = e.RunGen
 		// Goal iterations are relaunched autonomously by the bus driver, not by
-		// the TUI, so reflect the run locally when one starts.
+		// the TUI, so reflect the run locally when one starts — and seed the
+		// render loop (spinner + viewport flush). The TUI-initiated send path
+		// (launchAgentSend) seeds renderTick itself; this autonomous path would
+		// otherwise leave the viewport frozen until RunEnded.
 		if m.s.goalActive && !m.s.running {
 			m.prepareRun("goal")
+			return []tea.Cmd{renderTick(), m.status.spinner.Tick}
 		}
 
 	case bus.RunEnded:
@@ -1601,8 +1609,9 @@ func (m *appModel) maybeAutoTitle(msgs []core.AgentMessage, runErr error) tea.Cm
 	m.autoTitled = true
 	factory := m.providerFactory
 	ctx := m.baseCtx
+	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
 	return func() tea.Msg {
-		title, err := autotitle.Generate(ctx, factory, msgs)
+		title, err := autotitle.Generate(ctx, factory, sessionModel, msgs)
 		if err != nil {
 			return autoTitleMsg{} // empty → ignored
 		}

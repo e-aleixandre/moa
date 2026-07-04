@@ -18,6 +18,33 @@ func IsMCPPathTrusted(cfg MoaConfig, path string) bool {
 	return false
 }
 
+// IsProjectPathTrusted reports whether path is trusted to auto-load its
+// repo-local .moa/config.json and .moa/tools/*. Repo-local config can escalate
+// permissions and register shell-executing tools, so — like .mcp.json — it is
+// only honored for directories the user has explicitly trusted.
+//
+// Paths are compared after canonicalization (abs + symlink-resolved) so a dir
+// trusted via one spelling still matches when a caller later canonicalizes cwd
+// (e.g. the serve path resolves /var → /private/var on macOS).
+func IsProjectPathTrusted(cfg MoaConfig, path string) bool {
+	target := canonicalOrRaw(path)
+	for _, p := range cfg.TrustedProjectPaths {
+		if p == path || canonicalOrRaw(p) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalOrRaw canonicalizes path, falling back to the raw value if that
+// fails (e.g. the directory no longer exists).
+func canonicalOrRaw(path string) string {
+	if c, err := CanonicalizePath(path); err == nil {
+		return c
+	}
+	return path
+}
+
 // CanonicalizePath returns a clean, absolute, symlink-resolved path.
 // Falls back to Abs+Clean if EvalSymlinks fails (e.g., broken symlinks).
 func CanonicalizePath(path string) (string, error) {
@@ -44,6 +71,7 @@ type MoaConfig struct {
 	BraveAPIKey     string            `json:"brave_api_key"`    // Brave Search API key for web_search tool
 	MCPServers      map[string]MCPServer `json:"mcp_servers"`   // MCP tool server connections
 	TrustedMCPPaths    []string          `json:"trusted_mcp_paths"`    // Project paths trusted for .mcp.json auto-load
+	TrustedProjectPaths []string         `json:"trusted_project_paths"` // Project paths trusted for .moa/config.json + .moa/tools/* auto-load
 	PlanReviewModel    string            `json:"plan_review_model"`    // Model for plan reviewer (default: current model)
 	PlanReviewThinking string            `json:"plan_review_thinking"` // Thinking level for plan reviewer (default: "low")
 	CodeReviewModel    string            `json:"code_review_model,omitempty"`    // Model for code reviewer (default: plan review model)
@@ -118,8 +146,17 @@ type PermissionsConfig struct {
 // separately in main.go behind a trust gate.
 func LoadMoaConfig(cwd string) MoaConfig {
 	global := loadConfigFile(globalConfigPath())
-	project := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
-	merged := mergeConfigs(global, project)
+
+	// The repo-local .moa/config.json can escalate permissions (mode, allow/deny,
+	// disable_sandbox) and comes from whatever repo the user happens to be in, so
+	// it is only merged for explicitly-trusted directories — mirroring the
+	// .mcp.json trust gate. Untrusted dirs get global config only. The interactive
+	// trust prompt (CLI) is the sole path that adds a dir to TrustedProjectPaths.
+	merged := global
+	if IsProjectPathTrusted(global, cwd) {
+		project := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
+		merged = mergeConfigs(global, project)
+	}
 
 	// Load global .mcp.json (always trusted).
 	globalDir := filepath.Dir(globalConfigPath())
@@ -175,7 +212,8 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		PathScope:       mergeScalar(base.PathScope, override.PathScope),
 		PinnedModels:    base.PinnedModels, // global-only preference; project level ignored
 		MCPServers:      MergeMCPServers(base.MCPServers, override.MCPServers),
-		TrustedMCPPaths: base.TrustedMCPPaths, // global-only; persisted via SaveGlobalConfig
+		TrustedMCPPaths:     base.TrustedMCPPaths,     // global-only; persisted via SaveGlobalConfig
+		TrustedProjectPaths: base.TrustedProjectPaths, // global-only; persisted via SaveGlobalConfig
 		Permissions: PermissionsConfig{
 			Mode:  mergeScalar(base.Permissions.Mode, override.Permissions.Mode),
 			Model: mergeScalar(base.Permissions.Model, override.Permissions.Model),
@@ -290,12 +328,22 @@ func MergeMCPServers(maps ...map[string]MCPServer) map[string]MCPServer {
 }
 
 // ResolvePathScope determines the effective path scope from config values.
+//
+// permMode is expected to be already resolved by the caller: bootstrap defaults
+// an unset permission mode to "yolo" (moa's out-of-the-box posture for a
+// single-user local tool) BEFORE calling this, so in normal operation the
+// empty-mode branch below is never hit and the effective default scope is
+// "unrestricted". The empty-mode → "workspace" branch is only a conservative
+// fallback for direct callers that pass an unresolved mode; it does NOT reflect
+// the CLI default.
+//
 // Priority:
 //  1. Explicit pathScope ("workspace" or "unrestricted") — use as-is
 //  2. Legacy disableSandbox: true → "unrestricted"
 //  3. Derive from permission mode:
 //     - "yolo" or "ask" → "unrestricted"
-//     - "auto" or "" → "workspace"
+//     - "auto" → "workspace"
+//     - "" (unresolved) → "workspace" (conservative fallback; see note above)
 func ResolvePathScope(pathScope string, disableSandbox bool, permMode string) string {
 	if pathScope == "workspace" || pathScope == "unrestricted" {
 		return pathScope

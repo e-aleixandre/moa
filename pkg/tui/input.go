@@ -232,6 +232,7 @@ var knownCommands = func() map[string]bool {
 	// Aliases not in allCommands.
 	m["quit"] = true
 	m["models"] = true
+	m["back"] = true // alias for /branch
 	return m
 }()
 

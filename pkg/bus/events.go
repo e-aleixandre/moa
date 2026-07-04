@@ -193,8 +193,9 @@ type RunEnded struct {
 	SessionID string
 	RunGen    uint64
 	FinalText string
-	Err       error // non-nil for real errors (not cancellation)
-	HadEdits  bool  // true if edit/write/multiedit/apply_patch completed successfully
+	Err       error   // non-nil for real errors (not cancellation)
+	HadEdits  bool    // true if edit/write/multiedit/apply_patch completed successfully
+	Cost      float64 // USD cost of this run (0 if the model has no pricing)
 }
 
 // ContextUpdated is published when the context window usage percentage changes.

@@ -149,6 +149,17 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 	ts.lastSyncCount = len(msgs)
 }
 
+// Reset re-points the syncer at a new tree and sync baseline. Used when the
+// runtime loads a different session in place (TUI session switch), where the
+// cached tree pointer and lastSyncCount would otherwise still reference the
+// previous session.
+func (ts *TreeSyncer) Reset(tree *session.Tree, syncCount int) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.tree = tree
+	ts.lastSyncCount = syncCount
+}
+
 // findEntryByMessage finds the tree entry ID for a given agent message.
 // Searches the current path backwards (most recent first) for a message
 // matching by role + timestamp.

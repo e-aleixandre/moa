@@ -101,7 +101,9 @@ func (m *appModel) handleGoalIterationEnded(e bus.GoalIterationEnded) []tea.Cmd 
 		m.statusBar.UpdateGoalSegment(fmt.Sprintf("iter %d", e.Iteration))
 	}
 	m.s.viewportDirty = true
-	return nil
+	// Seed one render tick: goal events can land while the agent is idle (the
+	// verifier runs between iterations), when the render loop isn't re-arming.
+	return []tea.Cmd{renderTick()}
 }
 
 func (m *appModel) handleGoalEnded(e bus.GoalEnded) []tea.Cmd {
@@ -109,5 +111,7 @@ func (m *appModel) handleGoalEnded(e bus.GoalEnded) []tea.Cmd {
 	m.statusBar.UpdateGoalSegment("")
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "🎯 Goal ended: " + e.Reason})
 	m.s.viewportDirty = true
-	return nil
+	// Seed one render tick: goal events can land while the agent is idle (the
+	// verifier runs between iterations), when the render loop isn't re-arming.
+	return []tea.Cmd{renderTick()}
 }

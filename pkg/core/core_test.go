@@ -385,6 +385,23 @@ func TestEffectiveWindow(t *testing.T) {
 	}
 }
 
+func TestEffectiveWindow_FloorsThrashBand(t *testing.T) {
+	// A CompactAt in the degenerate band [Reserve, Reserve+KeepRecent] would leave
+	// the threshold so low that the post-compaction tail still exceeds it →
+	// compaction every turn. EffectiveWindow must floor it.
+	s := CompactionSettings{ReserveTokens: 16384, KeepRecent: 20000, CompactAt: 30000}
+	floor := 16384 + 20000 + compactionTailMargin
+	got := s.EffectiveWindow(1_000_000)
+	if got != floor {
+		t.Fatalf("thrash-band CompactAt should floor to %d, got %d", floor, got)
+	}
+	// The retained tail (KeepRecent + ~summary) must sit below the threshold.
+	threshold := got - s.ReserveTokens
+	if retained := s.KeepRecent + 2000; retained >= threshold {
+		t.Fatalf("retained tail %d must be < threshold %d to avoid thrash", retained, threshold)
+	}
+}
+
 func TestEffectiveWindow_DrivesShouldCompact(t *testing.T) {
 	s := CompactionSettings{Enabled: true, ReserveTokens: 16384, KeepRecent: 20000, CompactAt: 260_000}
 	// 300K tokens on a 1M model: no compaction by the raw window, but the soft

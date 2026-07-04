@@ -88,6 +88,22 @@ func (s *Store) load() {
 	_ = json.Unmarshal(data, &s.data)
 }
 
+// loadFromDisk reads the credential file into a fresh map without mutating the
+// in-memory store. Used before an OAuth refresh to pick up a token that a
+// sibling process (e.g. serve + CLI) may have already rotated. The atomic
+// rename in save() guarantees we read either the old or new complete file.
+func (s *Store) loadFromDisk() (map[string]Credential, error) {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]Credential)
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (s *Store) save() error {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -206,6 +222,25 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 			return cred.Access, true, nil
 		}
 
+		// Re-read from disk under the refresh lock: a sibling process (serve +
+		// CLI share ~/.config/moa/auth.json) may have already refreshed and
+		// rotated the token. Refreshing with our stale in-memory refresh token
+		// would be rejected by the provider and force a needless re-login, so
+		// adopt the on-disk credential — and reuse it directly if still valid.
+		// (Residual gap: two processes refreshing in the exact same instant
+		// still race; a true fix needs a cross-process file lock.)
+		if disk, derr := s.loadFromDisk(); derr == nil {
+			if dc, ok := disk[provider]; ok && dc.Type == "oauth" && dc.Refresh != "" {
+				s.mu.Lock()
+				s.data[provider] = dc
+				s.mu.Unlock()
+				cred = dc
+				if time.Now().UnixMilli() < cred.Expires {
+					return cred.Access, true, nil
+				}
+			}
+		}
+
 		refreshed, err := s.refresh(provider, cred.Refresh)
 		if err != nil {
 			return "", false, fmt.Errorf("token refresh failed: %w (run --login %s to re-authenticate)", err, provider)
@@ -217,11 +252,16 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 			Expires:   refreshed.Expires,
 			AccountID: refreshed.AccountID,
 		}
-		// Save refreshed token (ignore save errors — the token is still usable)
+		// Persist the rotated token. A failed save is not silent: the provider
+		// already invalidated the previous refresh token, so a stale on-disk
+		// copy will force a re-login on the next start — warn so it is visible.
 		s.mu.Lock()
 		s.data[provider] = cred
-		_ = s.save()
+		saveErr := s.save()
 		s.mu.Unlock()
+		if saveErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not persist refreshed %s token: %v (next start may require re-login)\n", provider, saveErr)
+		}
 		return cred.Access, true, nil
 
 	default:

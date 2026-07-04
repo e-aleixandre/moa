@@ -6,7 +6,7 @@
 |------|---------|-------------|
 | `-p` | | Prompt text, or `@file` to read from file |
 | `-model` | `sonnet` | Model alias or `provider/model-id` |
-| `-thinking` | `medium` | `off`, `minimal`, `low`, `medium`, `high` |
+| `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` |
 | `-max-turns` | 0 (unlimited) | Max agent turns per run |
 | `-max-budget` | 0 (unlimited) | Max USD spend per run |
 | `-yolo` | false | Disable sandbox and all permissions |
@@ -33,16 +33,17 @@ See [Web UI](./serve.md) for details.
 
 | Alias | Resolves to |
 |-------|------------|
-| `sonnet` | `claude-sonnet-4-6` |
-| `opus` | `claude-opus-4-6` |
-| `haiku` | `claude-haiku-4-5` |
+| `sonnet` | `claude-sonnet-5` |
+| `opus` | `claude-opus-4-8` |
+| `haiku` | `claude-haiku-4-5-20251001` |
+| `fable` | `claude-fable-5` |
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
-| `gpt5` | `gpt-5.4` |
+| `gpt5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-4-6`) or provider-prefixed IDs (`anthropic/claude-sonnet-4-6`). Unknown IDs are accepted but context-window management is disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Unknown IDs are accepted but context-window management is disabled for them.
 
 ## Examples
 

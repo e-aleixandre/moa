@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -35,6 +36,7 @@ type voiceRecorder struct {
 	transcriber core.Transcriber
 	cancel      context.CancelFunc // cancels the recording process
 	tmpFile     string             // path to temp audio file
+	done        chan struct{}      // closed when the recorder process has exited (WAV finalized)
 }
 
 // available returns true if voice input can be used (transcriber + recording tool).
@@ -86,6 +88,9 @@ func (v *voiceRecorder) startRecording(parentCtx context.Context) tea.Cmd {
 
 	path := v.tmpFile
 
+	v.done = make(chan struct{})
+	done := v.done
+
 	return func() tea.Msg {
 		var cmd *exec.Cmd
 		switch recCmd {
@@ -117,6 +122,7 @@ func (v *voiceRecorder) startRecording(parentCtx context.Context) tea.Cmd {
 		if err := cmd.Start(); err != nil {
 			cancel()
 			_ = os.Remove(path) // cleanup temp file on start failure
+			close(done)
 			return voiceResultMsg{Err: fmt.Errorf("starting recorder: %w", err)}
 		}
 
@@ -124,6 +130,7 @@ func (v *voiceRecorder) startRecording(parentCtx context.Context) tea.Cmd {
 		// We don't return voiceStartMsg here because the Cmd must block
 		// until recording is done. Instead we use a separate signal.
 		_ = cmd.Wait() // blocks until cancel() kills the process
+		close(done)    // recorder exited → WAV header/length flushed
 
 		return nil // stopAndTranscribe handles the result
 	}
@@ -145,9 +152,20 @@ func (v *voiceRecorder) stopAndTranscribe() tea.Cmd {
 	v.state = voiceTranscribing
 	path := v.tmpFile
 	transcriber := v.transcriber
+	done := v.done
 
 	return func() tea.Msg {
 		defer os.Remove(path) //nolint:errcheck
+
+		// Wait for the recorder process to exit before reading: sox/arecord write
+		// the RIFF chunk length on close, so reading too early yields a truncated
+		// WAV. Cap the wait so a stuck recorder can't hang transcription.
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+			}
+		}
 
 		f, err := os.Open(path)
 		if err != nil {

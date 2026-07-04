@@ -10,13 +10,13 @@ Type `/` to open the command palette, or type a command directly:
 |---------|-------------|
 | `/model <spec>` | Switch model (or open model picker with no args) |
 | `/models` | Open model picker and manage pinned models |
-| `/thinking <level>` | Set thinking level (`off`/`minimal`/`low`/`medium`/`high`) |
+| `/thinking <level>` | Set thinking level (`off`/`low`/`medium`/`high`/`xhigh`) |
 | `/permissions <mode>` | Set permission mode (`yolo`/`ask`/`auto`) |
 | `/path [list\|add\|rm\|scope]` | View or manage path access scope |
 | `/plan` | Toggle plan mode |
+| `/goal <objective> [flags]\|stop\|status` | Autonomous maker→verifier loop toward an objective |
 | `/tasks [done\|reset\|show]` | View or manage implementation tasks |
-| `/memory [edit\|clear\|path]` | View or manage project memory |
-| `/undo` | Revert files changed in the last agent turn |
+| `/undo` | Revert files written/edited by the last agent turn (not bash, MCP, or subagent changes); skips any file changed since then to avoid clobbering it |
 | `/verify` | Run project verification checks |
 | `/prompt <name>` | Insert a prompt template |
 | `/compact` | Force context compaction |
@@ -38,6 +38,8 @@ Type `/` to open the command palette, or type a command directly:
 | `Ctrl+E` | Expand/collapse tool output |
 | `Ctrl+O` | Toggle transcript mode |
 | `Ctrl+R` | Toggle voice recording |
+| `Ctrl+V` | Paste image from clipboard |
+| `Alt+Up` | Recall queued steer messages back into the input |
 | `PgUp` / `PgDn` | Scroll |
 | `Ctrl+C` | Clear input / abort run / quit |
 | `Ctrl+D` | Quit |

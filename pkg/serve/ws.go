@@ -57,10 +57,17 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 		}
 	}))
 
-	// Watch session context cancellation.
+	// Watch session context cancellation. Also select on r.done so this goroutine
+	// exits when the reactor is cleaned up early (slow-consumer drop, or a WS
+	// reconnect replacing it) instead of leaking until the whole session ends —
+	// each mobile reconnect (30s keepalive anticipates flaps) would otherwise
+	// strand a goroutine plus its 512-slot channel.
 	go func() {
-		<-sessionCtx.Done()
-		r.cleanup()
+		select {
+		case <-sessionCtx.Done():
+			r.cleanup()
+		case <-r.done:
+		}
 	}()
 
 	return r

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -196,6 +197,48 @@ func TestStore_GetAPIKey_ConcurrentRefreshSingleFlight(t *testing.T) {
 		if keys[i] != "new-access" {
 			t.Fatalf("goroutine %d got %q, want new-access", i, keys[i])
 		}
+	}
+}
+
+// TestStore_GetAPIKey_AdoptsSiblingRefreshedToken pins M8: when our in-memory
+// OAuth token is expired but a sibling process (serve + CLI share auth.json)
+// already refreshed and wrote a fresh token to disk, GetAPIKey must adopt the
+// on-disk token instead of refreshing with its own stale refresh token (which
+// the provider already rotated → needless re-login).
+func TestStore_GetAPIKey_AdoptsSiblingRefreshedToken(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "auth.json")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// Our process: an expired OAuth credential in memory.
+	store := NewStore(path)
+	if err := store.Set("anthropic", Credential{
+		Type: "oauth", Access: "old-access", Refresh: "refresh-stale",
+		Expires: time.Now().UnixMilli() - 1000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A sibling process refreshes and writes a fresh, valid token to disk.
+	sibling := NewStore(path)
+	if err := sibling.Set("anthropic", Credential{
+		Type: "oauth", Access: "sibling-access", Refresh: "refresh-fresh",
+		Expires: time.Now().UnixMilli() + 3_600_000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	store.refresh = func(string, string) (*OAuthCredentials, error) {
+		t.Error("refresh called: should have adopted the sibling's fresh disk token")
+		return nil, fmt.Errorf("must not refresh")
+	}
+
+	key, isOAuth, err := store.GetAPIKey("anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isOAuth || key != "sibling-access" {
+		t.Fatalf("got key=%q isOAuth=%v, want sibling-access/true", key, isOAuth)
 	}
 }
 

@@ -25,6 +25,7 @@ var allCommands = []commandDef{
 	{Name: "path", Args: "[list|add|rm|scope]", Desc: "View or manage path access scope"},
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
 	{Name: "undo", Desc: "Revert files changed in the last agent turn"},
+	{Name: "branch", Desc: "Rewind to an earlier point and start a new conversation branch"},
 	{Name: "verify", Desc: "Run project verification checks"},
 	{Name: "prompt", Args: "<name>", Desc: "Insert a prompt template"},
 	{Name: "voice", Desc: "Toggle voice recording (Ctrl+R)"},

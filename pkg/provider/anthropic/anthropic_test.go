@@ -240,6 +240,41 @@ func TestMapEvents_RedactedThinkingKeepsIndexAlignment(t *testing.T) {
 	}
 }
 
+func TestContentBlockStop_ToolJSON(t *testing.T) {
+	a := New("test-key")
+
+	newState := func(accum string) *streamState {
+		return &streamState{
+			blockType:  "tool_use",
+			contentIdx: 0,
+			// Simulate a prior partial parse having set truncated args.
+			message: core.Message{Content: []core.Content{{
+				Type:      "tool_call",
+				ToolName:  "write",
+				Arguments: map[string]any{"path": "x.go", "content": "trunc"},
+			}}},
+			jsonAccum: accum,
+		}
+	}
+
+	// Truncated (invalid) authoritative JSON: the partial args must be discarded
+	// so the tool can't run with corrupt input.
+	st := newState(`{"path":"x.go","content":"truncat`)
+	if evt := a.handleContentBlockStop(st); evt == nil || evt.Type != core.ProviderEventToolCallEnd {
+		t.Fatalf("expected tool_call_end, got %+v", evt)
+	}
+	if st.message.Content[0].Arguments != nil {
+		t.Fatalf("truncated tool args must be cleared, got %v", st.message.Content[0].Arguments)
+	}
+
+	// Valid authoritative JSON: args are set from the final parse.
+	st = newState(`{"path":"x.go","content":"done"}`)
+	a.handleContentBlockStop(st)
+	if got := st.message.Content[0].Arguments["content"]; got != "done" {
+		t.Fatalf("valid tool args should parse, content=%v", got)
+	}
+}
+
 // --- helpers ---
 
 func mapSSEToEvents(t *testing.T, sseData string) []core.AssistantEvent {

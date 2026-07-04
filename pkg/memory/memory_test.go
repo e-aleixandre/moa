@@ -102,6 +102,33 @@ func TestReadNotFound(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsTraversal(t *testing.T) {
+	// A project dir under a temp root, with a sentinel .md one level up that
+	// a "../" id would otherwise reach via Read (leak) or Delete (destroy).
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "proj")
+	if err := os.MkdirAll(projectDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(root, "secret.md")
+	if err := os.WriteFile(sentinel, []byte("top secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{projectDir: projectDir, globalDir: filepath.Join(root, "global")}
+
+	for _, id := range []string{"../secret", "project/../secret", "project/../../etc/passwd", "/etc/passwd"} {
+		if _, _, err := s.Read(id); err == nil {
+			t.Errorf("Read(%q) should be rejected", id)
+		}
+		if err := s.Delete(id); err == nil {
+			t.Errorf("Delete(%q) should be rejected", id)
+		}
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("sentinel must survive traversal attempts: %v", err)
+	}
+}
+
 func TestScopeCollisionIsAmbiguous(t *testing.T) {
 	s := newStore(t)
 	// Same name in both scopes: user→global, reference→project.

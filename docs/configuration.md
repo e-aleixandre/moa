@@ -14,11 +14,11 @@ CLI flags override both at runtime. Project config extends global config; some f
   "permissions": {
     "mode": "ask",
     "allow": ["Bash(git:*)", "read"],
-    "deny": ["Bash(rm -rf:*)"],
+    "deny": ["Bash(curl:*)", "Read(**/.env)"],
     "model": "haiku",
     "rules": ["Deny writes outside repository"]
   },
-  "pinned_models": ["claude-sonnet-4-6", "gpt-5.3-codex"],
+  "pinned_models": ["claude-sonnet-5", "gpt-5.3-codex"],
   "max_budget": 2.00,
   "max_turns": 100,
   "brave_api_key": "...",
@@ -44,7 +44,9 @@ CLI flags override both at runtime. Project config extends global config; some f
 | `permissions.model` | string | Model for `auto` mode evaluator |
 | `permissions.rules` | []string | Natural-language rules for the evaluator |
 
-**Pattern format**: `Tool(argPattern)` — e.g. `Bash(npm:*)`, `Write(*.go)`, `Edit(pkg/*)`. Case-insensitive tool names, glob-like arguments.
+**Pattern format**: `Tool(argPattern)` — e.g. `Bash(npm:*)`, `Write(*.go)`, `Edit(pkg/*)`. Case-insensitive tool names, glob-like arguments. Arg scoping now applies to `grep`/`find`/`ls`/`multiedit` (matched on their `path`), `fetch_content` (on its `url`), and `apply_patch` (matched against every file the patch touches).
+
+> **Bash deny is not a security boundary.** `Bash(...)` rules match the *literal command string* by prefix/glob. A rule like `Bash(rm -rf:*)` does **not** reliably block recursive deletes — it is trivially evaded by flag reordering (`rm -fr`, `rm -r -f`), absolute paths (`/bin/rm -rf`), a leading space, or shell aliases. Use `deny` to reduce accidents, not to contain an adversarial command. For real containment use `mode: ask`/`auto` (a human or model approves each call) and the path sandbox (`path_scope`).
 
 ### Paths & sandbox
 
@@ -70,6 +72,7 @@ CLI flags override both at runtime. Project config extends global config; some f
 | `memory_enabled` | bool | `true` | Cross-session project memory |
 | `auto_verify` | bool | `false` | Run verification checks automatically after changes |
 | `brave_api_key` | string | | Enables the `web_search` tool |
+| `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
 
 ### Models
 
@@ -103,6 +106,14 @@ Project-specific files live in `<cwd>/.moa/`:
 | `verify.json` | Verification commands for the `verify` tool |
 | `tools/*.json` | Custom [script tools](./tools.md#custom-script-tools) |
 | `prompts/` | Project prompt templates (override global `~/.config/moa/prompts/`) |
+
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)) |
+| `MOA_CONFIG_DIR` | Overrides where the auth/credential store lives (default `~/.config/moa`). Useful for containers or custom deployments |
+| `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 
 ## `AGENTS.md`
 

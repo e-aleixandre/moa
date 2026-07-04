@@ -31,6 +31,7 @@ type Options struct {
 	MaxIterations int           // 0 = unlimited
 	MaxStalled    int           // 0 = DefaultMaxStalled
 	Timeout       time.Duration // 0 = no wall-clock deadline
+	TotalBudget   float64       // cumulative USD ceiling across all iterations; 0 = unlimited
 }
 
 // Info is an immutable snapshot for readers (UI, prompt builder, driver checks).
@@ -44,6 +45,8 @@ type Info struct {
 	MaxIterations int
 	MaxStalled    int
 	Deadline      time.Time
+	TotalBudget   float64 // cumulative USD ceiling (0 = unlimited)
+	Spent         float64 // cumulative USD spent so far
 }
 
 // Goal holds goal-mode runtime state. All exported methods are safe for
@@ -55,6 +58,7 @@ type Goal struct {
 	deadline  time.Time
 	iteration int
 	stalled   int
+	spent     float64
 
 	// onChange fires after Enter/Exit (for TUI/serve status + system-prompt
 	// rebuild). Called with the mutex released.
@@ -97,6 +101,8 @@ func (g *Goal) snapshot() Info {
 		MaxIterations: g.opts.MaxIterations,
 		MaxStalled:    g.opts.MaxStalled,
 		Deadline:      g.deadline,
+		TotalBudget:   g.opts.TotalBudget,
+		Spent:         g.spent,
 	}
 }
 
@@ -123,6 +129,7 @@ func (g *Goal) Enter(opts Options) error {
 	g.opts = opts
 	g.iteration = 0
 	g.stalled = 0
+	g.spent = 0
 	if opts.Timeout > 0 {
 		g.deadline = time.Now().Add(opts.Timeout)
 	} else {
@@ -160,6 +167,24 @@ func (g *Goal) BeginIteration() int {
 	defer g.mu.Unlock()
 	g.iteration++
 	return g.iteration
+}
+
+// AddSpent adds a run's USD cost to the cumulative total and returns the new
+// total. The driver calls it when the maker stops, before the budget backstop.
+func (g *Goal) AddSpent(cost float64) float64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if cost > 0 {
+		g.spent += cost
+	}
+	return g.spent
+}
+
+// Spent returns the cumulative USD spent across iterations.
+func (g *Goal) Spent() float64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.spent
 }
 
 // ResetStalled clears the stalled counter (a satisfied iteration).

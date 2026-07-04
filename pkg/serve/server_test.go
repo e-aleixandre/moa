@@ -564,11 +564,20 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 		return ch, nil
 	}
 
+	// Isolate the global config and trust the workspace so its repo-local
+	// .moa/config.json (mode:ask) is honored — the C1 trust gate ignores
+	// untrusted repo config.
+	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workspace, ".moa"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(workspace, ".moa", "config.json"), []byte(`{"permissions":{"mode":"ask"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
+		c.TrustedProjectPaths = append(c.TrustedProjectPaths, workspace)
+	}); err != nil {
 		t.Fatal(err)
 	}
 

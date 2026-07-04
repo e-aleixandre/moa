@@ -25,6 +25,42 @@ type Snapshot struct {
 	Path    string      // absolute resolved path
 	Content []byte      // original content; nil means file didn't exist (created by agent)
 	Perm    fs.FileMode // original permissions
+
+	// post* fingerprint the file as the agent left it (recorded at Commit) so
+	// Undo can detect a later external edit and refuse to clobber it.
+	postExists  bool
+	postSize    int64
+	postModTime time.Time
+}
+
+// recordPostWrite fingerprints the file as the agent left it. Called by Commit,
+// after the turn's writes have completed.
+func (s *Snapshot) recordPostWrite() {
+	if info, err := os.Stat(s.Path); err == nil {
+		s.postExists = true
+		s.postSize = info.Size()
+		s.postModTime = info.ModTime()
+	} else {
+		s.postExists = false // agent deleted it, or it never got written
+	}
+}
+
+// ModifiedSinceCapture reports whether the file diverged from the state the
+// agent left it in (recorded at Commit). A true result means an external edit
+// happened after the agent's turn, so Undo must not overwrite it.
+func (s Snapshot) ModifiedSinceCapture() bool {
+	info, err := os.Stat(s.Path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Currently absent: divergent only if the agent had left a file here.
+			return s.postExists
+		}
+		return true // can't tell → treat as modified, err on not clobbering
+	}
+	if !s.postExists {
+		return true // agent left no file here, but one exists now → external
+	}
+	return info.Size() != s.postSize || !info.ModTime().Equal(s.postModTime)
 }
 
 // Checkpoint groups all snapshots from one agent turn.
@@ -142,6 +178,7 @@ func (s *Store) Commit() {
 		Files:     make([]Snapshot, 0, len(s.active.captured)),
 	}
 	for _, snap := range s.active.captured {
+		snap.recordPostWrite()
 		cp.Files = append(cp.Files, snap)
 	}
 

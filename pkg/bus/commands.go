@@ -30,6 +30,12 @@ type SteerAgent struct {
 	Text      string
 }
 
+// CancelSteer drops steer messages still queued (not yet delivered) for the
+// running agent. Pairs with the TUI pulling queued steers back for editing.
+type CancelSteer struct {
+	SessionID string
+}
+
 // AppendToConversation adds a message to the conversation without running the agent.
 type AppendToConversation struct {
 	SessionID string

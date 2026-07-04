@@ -45,7 +45,8 @@ func (m *Manager) generateAutoTitle(sess *ManagedSession) {
 	}
 
 	// Tie generation to the session context so deleting the session aborts it.
-	title, err := autotitle.Generate(sess.infra.sessionCtx, m.providerFactory, msgs)
+	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+	title, err := autotitle.Generate(sess.infra.sessionCtx, m.providerFactory, sessionModel, msgs)
 	if err != nil {
 		slog.Debug("autotitle: generation failed", "session", sess.ID, "error", err)
 		return

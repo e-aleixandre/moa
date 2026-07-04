@@ -2,7 +2,10 @@ package bus
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +167,61 @@ func TestGoalDriver_MaxIterations_Stops(t *testing.T) {
 	}
 }
 
+func TestGoalDriver_BudgetCeiling_Stops(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	// Unsatisfied verdict: the loop would relaunch forever if not for the budget.
+	sctx := newGoalDriverContext(b, fa, `{"satisfied":false,"feedback":"keep going"}`)
+	RegisterHandlers(sctx)
+
+	endedCh := make(chan GoalEnded, 4)
+	b.Subscribe(func(e GoalEnded) { endedCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{TotalBudget: 5.0})
+
+	// A run whose cost reaches the total budget stops the loop before relaunch.
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "spent it all", Cost: 5.0})
+
+	ended := drainChan(endedCh, b, t)
+	if !strings.Contains(ended.Reason, "budget") {
+		t.Fatalf("expected a budget stop reason, got %q", ended.Reason)
+	}
+	if sctx.Goal.Active() {
+		t.Fatal("goal should stop when the cumulative budget is reached")
+	}
+}
+
+func TestGoalDriver_BudgetCapsNextIteration(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newGoalDriverContext(b, fa, `{"satisfied":false,"feedback":"more"}`)
+	RegisterHandlers(sctx)
+
+	iterCh := make(chan GoalIterationEnded, 4)
+	b.Subscribe(func(e GoalIterationEnded) { iterCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{TotalBudget: 10.0})
+
+	// A partial-cost run leaves budget: the next iteration is capped at the
+	// remaining pool (10 - 3 = 7) so cumulative spend can't exceed the total.
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "partial", Cost: 3.0})
+
+	_ = drainChan(iterCh, b, t) // wait for the verdict to be processed
+	// Generous deadline: the relaunch's SetMaxBudget runs async after the
+	// verdict, and this test can be starved under full-suite parallel load.
+	deadline := time.After(5 * time.Second)
+	for fa.MaxBudget() != 7.0 {
+		select {
+		case <-deadline:
+			t.Fatalf("next-iteration budget = %v, want 7.0 (remaining)", fa.MaxBudget())
+		default:
+			b.Drain(50 * time.Millisecond)
+		}
+	}
+}
+
 func TestGoalDriver_IgnoresErroredRun(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -184,6 +242,39 @@ func TestGoalDriver_IgnoresErroredRun(t *testing.T) {
 	}
 	if got := sctx.Goal.Info().Iteration; got != 0 {
 		t.Fatalf("an errored run must not consume an iteration, got %d", got)
+	}
+}
+
+func TestBuildGoalEvidence_IncludesDiffAndChecks(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@t.t")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "init")
+	// A working-tree change the verifier must see.
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("MODIFIED CONTENT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := buildGoalEvidence(context.Background(), dir, "I changed the file")
+	if !strings.Contains(ev, "DIFF vs HEAD") || !strings.Contains(ev, "MODIFIED CONTENT") {
+		t.Fatalf("evidence should contain the real diff, got:\n%s", ev)
+	}
+	// No .moa/verify.json → checks reported as "not run", not silently omitted.
+	if !strings.Contains(ev, "AUTOMATED CHECKS: not run") {
+		t.Fatalf("evidence should note that checks were not run, got:\n%s", ev)
 	}
 }
 

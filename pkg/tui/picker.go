@@ -77,8 +77,13 @@ func (p *pickerModel) ToggleScoped() {
 	}
 }
 
-// Selected returns the highlighted model.
+// Selected returns the highlighted model, or a zero Model if the picker is
+// empty or the cursor is out of range (guards against a panic when opened with
+// no models).
 func (p *pickerModel) Selected() core.Model {
+	if p.cursor < 0 || p.cursor >= len(p.entries) {
+		return core.Model{}
+	}
 	return p.entries[p.cursor].model
 }
 

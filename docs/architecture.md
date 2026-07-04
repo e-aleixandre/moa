@@ -29,6 +29,8 @@
 | `pkg/skill/` | Skill file loading |
 | `pkg/prompt/` | Prompt template discovery and loading |
 | `pkg/askuser/` | `ask_user` tool bridge to UI |
+| `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`) |
+| `pkg/autotitle/` | Generates short session titles from the conversation via a cheap LLM call |
 
 ### Providers
 
@@ -53,12 +55,14 @@
 |---------|------|
 | `pkg/auth/` | Credential store + OAuth flows |
 | `pkg/session/` | Session persistence (file-backed, atomic writes) |
-| `pkg/extension/` | Extension host + typed hooks |
+| `pkg/extension/` | Extension host + typed hooks (internal; fired every turn but no user-facing loader/config to register extensions yet) |
 | `pkg/mcp/` | MCP manager — stdio tool-server integration |
 | `pkg/git/` | Git context detection |
 | `pkg/clipboard/` | Clipboard integration (platform-specific) |
 | `pkg/files/` | File utilities |
 | `pkg/jsonutil/` | JSON parsing utilities |
+| `pkg/push/` | Web Push notifications (VAPID keys, subscription store, dispatch) |
+| `pkg/usage/` | Polls Anthropic's undocumented endpoint for Claude subscription plan usage |
 
 ## Execution model
 

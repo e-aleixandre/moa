@@ -184,6 +184,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	if cfg.PermissionMode != "" {
 		permMode = permission.Mode(cfg.PermissionMode)
 	}
+	// moa's default posture is yolo (unrestricted): a single-user local tool.
+	// An unset mode resolves to yolo here BEFORE ResolvePathScope, so the
+	// effective default path scope is unrestricted (see ResolvePathScope's note).
 	if permMode == "" {
 		permMode = permission.ModeYolo
 	}
@@ -215,9 +218,14 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}
 
-	// 2b. Script tools from .moa/tools/*.json.
-	if err := tool.RegisterScriptTools(toolReg, cfg.CWD); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: script tools: %v\n", err)
+	// 2b. Script tools from .moa/tools/*.json. These run `bash -c <command>` from
+	// the repo, so — like .mcp.json and repo-local config — they are only loaded
+	// for directories the user has explicitly trusted. Untrusted repos cannot
+	// register shell-executing tools that auto-run at the first prompt.
+	if core.IsProjectPathTrusted(moaCfg, cfg.CWD) {
+		if err := tool.RegisterScriptTools(toolReg, cfg.CWD); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: script tools: %v\n", err)
+		}
 	}
 
 	// 3. Task store — always available.
@@ -235,7 +243,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 
 	// 5. AGENTS.md.
-	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, os.Getenv("AGENT_HOME"))
+	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, "")
 
 	// 5b. Memory (global + project). Only the index is injected into the prompt;
 	// full facts are read on demand via the memory tool.

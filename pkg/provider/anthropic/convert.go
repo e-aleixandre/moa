@@ -364,7 +364,11 @@ func resolveThinking(req core.Request) *thinkingConfig {
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 4096}
 	case "medium":
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 10000}
-	case "high":
+	case "high", "xhigh":
+		// Manual-thinking models (Haiku 4.5, Fable) expose no tier above "high",
+		// so "xhigh" caps here — mirroring resolveEffort, which caps non-Opus
+		// "xhigh" at "high". Never fall through to default: that would return nil
+		// and silently disable thinking when the *maximum* level was requested.
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 32000}
 	default:
 		return nil // "off", "none", or empty

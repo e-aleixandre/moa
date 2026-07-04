@@ -35,11 +35,15 @@ type event struct {
 	Delta    string          `json:"delta,omitempty"`
 	Response *struct {
 		ID     string `json:"id"`
+		Model  string `json:"model"`
 		Status string `json:"status"`
 		Usage  *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-			TotalTokens  int `json:"total_tokens"`
+			InputTokens        int `json:"input_tokens"`
+			OutputTokens       int `json:"output_tokens"`
+			TotalTokens        int `json:"total_tokens"`
+			InputTokensDetails *struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"input_tokens_details"`
 		} `json:"usage"`
 		Error *struct {
 			Message string `json:"message"`
@@ -314,13 +318,32 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		if ev.Response != nil {
 			state.message.StopReason = mapStatus(ev.Response.Status)
 			if ev.Response.Usage != nil {
+				u := ev.Response.Usage
+				// Responses API input_tokens INCLUDES cached tokens; the cost
+				// model bills Input and CacheRead as separate buckets (cache
+				// reads are ~10x cheaper), so split them out. Without this the
+				// whole prompt is billed at full input price — up to ~10x the
+				// real cost on cache-heavy runs, tripping max_budget early.
+				cached := 0
+				if u.InputTokensDetails != nil {
+					cached = u.InputTokensDetails.CachedTokens
+				}
+				nonCached := u.InputTokens - cached
+				if nonCached < 0 {
+					nonCached = 0
+				}
 				state.message.Usage = &core.Usage{
-					Input:       ev.Response.Usage.InputTokens,
-					Output:      ev.Response.Usage.OutputTokens,
-					TotalTokens: ev.Response.Usage.TotalTokens,
+					Input:       nonCached,
+					Output:      u.OutputTokens,
+					CacheRead:   cached,
+					TotalTokens: u.TotalTokens,
 				}
 			}
-			state.message.Model = ev.Response.ID
+			// Response.Model is the actual model used (e.g. "gpt-5.5"); Response.ID
+			// is "resp_..." and would poison per-model cost attribution/ResolveModel.
+			if ev.Response.Model != "" {
+				state.message.Model = ev.Response.Model
+			}
 		}
 		// If any tool calls, stop reason should be tool_use.
 		for _, c := range state.message.Content {

@@ -134,7 +134,7 @@ func (b *sessionBrowser) BackspaceFilter() bool {
 		return false
 	}
 	oldID := b.SelectedID()
-	b.filter = b.filter[:len(b.filter)-1]
+	b.filter = trimLastRune(b.filter) // byte-slice would split multibyte runes (ñ, accents)
 	b.rebuildMatches()
 	return oldID != b.SelectedID()
 }

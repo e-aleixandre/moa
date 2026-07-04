@@ -103,7 +103,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	}
 	mux.Handle("GET /", staticHandler)
 
-	handler := csrfMiddleware(mux)
+	handler := csrfMiddleware(bodyTimeoutMiddleware(mux))
 	// Token auth (when configured) sits under the Host check but above CSRF, so
 	// it also guards the WebSocket, push, and static routes via the cookie.
 	if o.token != "" {
@@ -112,6 +112,23 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
 	return hostMiddleware(o.allowedHosts, handler)
+}
+
+// bodyTimeoutMiddleware bounds how long a request body may take to arrive,
+// closing the slowloris-on-body hole: headers pass ReadHeaderTimeout, then the
+// body is dribbled to pin a goroutine indefinitely. WebSocket upgrades are
+// exempt — they are long-lived and manage their own deadlines — so this does not
+// sever them, which a global http.Server.ReadTimeout would. The deadline governs
+// only reads from the client, so streaming (SSE) responses are unaffected.
+func bodyTimeoutMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			// Best-effort: SetReadDeadline is unsupported on a few ResponseWriter
+			// wrappers; ignore the error and proceed without a deadline.
+			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authCookieName holds the shared token once a client has authenticated via

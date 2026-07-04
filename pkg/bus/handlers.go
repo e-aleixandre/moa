@@ -71,6 +71,11 @@ func RegisterHandlers(sctx *SessionContext) {
 		return nil
 	})
 
+	b.OnCommand(func(cmd CancelSteer) error {
+		sctx.Agent.CancelSteer()
+		return nil
+	})
+
 	b.OnCommand(func(cmd SwitchModel) error {
 		if sctx.ProviderFactory == nil {
 			return fmt.Errorf("model switching unavailable: provider factory not configured")
@@ -153,8 +158,15 @@ func RegisterHandlers(sctx *SessionContext) {
 		if err != nil {
 			return err
 		}
-		var restoreErrs []string
+		var restoreErrs, skipped []string
 		for _, snap := range cp.Files {
+			// Refuse to clobber a file changed after the agent's turn (by the
+			// user, bash, MCP, a subagent…) — restoring would silently discard
+			// that work. Leave it untouched and report it instead.
+			if snap.ModifiedSinceCapture() {
+				skipped = append(skipped, filepath.Base(snap.Path))
+				continue
+			}
 			if snap.Content == nil {
 				// File was created by the agent — delete it.
 				if rmErr := os.Remove(snap.Path); rmErr != nil && !os.IsNotExist(rmErr) {
@@ -171,6 +183,10 @@ func RegisterHandlers(sctx *SessionContext) {
 			// Push checkpoint back so undo can be retried.
 			sctx.Checkpoints.Repush(cp)
 			return fmt.Errorf("partial restore: %s", strings.Join(restoreErrs, "; "))
+		}
+		if len(skipped) > 0 {
+			return fmt.Errorf("skipped %d file(s) changed since the agent edited them (left untouched to avoid discarding your edits): %s",
+				len(skipped), strings.Join(skipped, ", "))
 		}
 		return nil
 	})
@@ -557,6 +573,10 @@ func RegisterHandlers(sctx *SessionContext) {
 				return err
 			}
 		}
+		// Interpret the configured per-run MaxBudget as the goal's TOTAL budget:
+		// the driver caps each iteration at the remaining pool so the loop's
+		// cumulative spend can't exceed it (an unbounded N×budget otherwise).
+		sctx.goalPrevMaxBudget = sctx.Agent.MaxBudget()
 		// Enter() creates STATE.md and fires onChange → rebuilds the system
 		// prompt (injecting the directive) and publishes GoalChanged.
 		if err := sctx.Goal.Enter(goal.Options{
@@ -566,6 +586,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			MaxIterations: cmd.MaxIterations,
 			MaxStalled:    cmd.MaxStalled,
 			Timeout:       cmd.Timeout,
+			TotalBudget:   sctx.goalPrevMaxBudget,
 		}); err != nil {
 			if cmd.CompactAt > 0 {
 				_ = sctx.Agent.SetCompactAt(sctx.goalPrevCompactAt) // roll back on failure
@@ -881,6 +902,18 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.Goal == nil || !sctx.Goal.Active() {
 			return
 		}
+
+		// Accumulate this run's cost and enforce the cumulative-budget ceiling
+		// first: a budget-exhausted run aborts with e.Err set, so this must run
+		// before the error early-return below (else the loop would just pause with
+		// the budget already blown).
+		spent := sctx.Goal.AddSpent(e.Cost)
+		info := sctx.Goal.Info()
+		if info.TotalBudget > 0 && spent >= info.TotalBudget {
+			stopGoal(sctx, fmt.Sprintf("reached budget ($%.2f of $%.2f)", spent, info.TotalBudget))
+			return
+		}
+
 		// An errored/aborted run doesn't consume an iteration — leave the loop
 		// paused so a user can inspect and resume.
 		if e.Err != nil {
@@ -888,7 +921,6 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 
 		startRunGen := e.RunGen
-		info := sctx.Goal.Info()
 
 		// Backstops that don't depend on the verdict — checked before spending
 		// a verifier call.
@@ -958,6 +990,15 @@ func RegisterHandlers(sctx *SessionContext) {
 					return
 				}
 			}
+			// Cap the next iteration at the remaining budget so the loop's total
+			// spend stays under the ceiling (the agent resets per-run cost each
+			// run). spent < TotalBudget here — the equal-or-over case stopped above.
+			if info.TotalBudget > 0 {
+				remaining := info.TotalBudget - sctx.Goal.Spent()
+				if err := sctx.Agent.SetMaxBudget(remaining); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: goal budget cap: %v\n", err)
+				}
+			}
 			goalRelaunch(sctx, "Not done yet.\n\n"+verdict.Feedback+"\n\nContinue.")
 		}()
 	})
@@ -974,11 +1015,18 @@ func RegisterHandlers(sctx *SessionContext) {
 // leak into subsequent normal turns.
 func stopGoal(sctx *SessionContext, reason string) {
 	prev := sctx.goalPrevCompactAt
+	prevBudget := sctx.goalPrevMaxBudget
 	sctx.Goal.Exit() // marks inactive; onChange rebuilds the prompt (may no-op if running)
-	if err := sctx.Agent.SetCompactAt(prev); err != nil {
+	// Restore the per-run budget the driver lowered each iteration, alongside the
+	// compaction threshold. Both are rejected while a run is live, so defer to
+	// RunEnded in that case (e.g. /goal stop mid-turn).
+	compactErr := sctx.Agent.SetCompactAt(prev)
+	budgetErr := sctx.Agent.SetMaxBudget(prevBudget)
+	if compactErr != nil || budgetErr != nil {
 		var unsub func()
 		unsub = sctx.Bus.Subscribe(func(e RunEnded) {
 			_ = sctx.Agent.SetCompactAt(prev)
+			_ = sctx.Agent.SetMaxBudget(prevBudget)
 			rebuildSystemPrompt(sctx) // re-apply now that the goal directive is gone
 			unsub()
 		})
@@ -1039,6 +1087,24 @@ func buildGoalEvidence(ctx context.Context, cwd, finalText string) string {
 		if out := runGit(ctx, cwd, "log", "-1", "--format=%h %s"); out != "" {
 			b.WriteString("LAST COMMIT:\n")
 			b.WriteString(out)
+			b.WriteString("\n")
+		}
+		// The actual change content, not just file names — so the verifier can
+		// judge whether the diff really implements the objective instead of
+		// trusting the worker's self-report.
+		if out := runGit(ctx, cwd, "diff", "HEAD"); out != "" {
+			b.WriteString("\nDIFF vs HEAD (working tree + staged):\n")
+			b.WriteString(out)
+			b.WriteString("\n")
+		}
+		// Objective evidence: actually run the project's checks (build/tests).
+		// A worker claiming "all tests pass" no longer settles it — the verifier
+		// sees the real result. Absent a verify config, say so plainly.
+		if res, err := verify.Execute(ctx, cwd); err != nil {
+			b.WriteString("\nAUTOMATED CHECKS: not run (" + err.Error() + ")\n")
+		} else {
+			b.WriteString("\nAUTOMATED CHECKS (build/tests):\n")
+			b.WriteString(verify.FormatResult(res))
 			b.WriteString("\n")
 		}
 	}
@@ -1119,13 +1185,21 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			}
 		}
 
-		// Extract final text and detect edits from NEW messages.
+		// Extract final text, edits, and cost from NEW messages.
 		var finalText string
 		var hadEdits bool
+		var runCost float64
 		if len(msgs) > msgsBefore {
 			newMsgs := msgs[msgsBefore:]
 			finalText = extractFinalAssistantText(newMsgs)
 			hadEdits = hasSuccessfulEdits(newMsgs)
+			if pricing := sctx.Agent.Model().Pricing; pricing != nil {
+				for _, m := range newMsgs {
+					if m.Usage != nil {
+						runCost += pricing.Cost(*m.Usage)
+					}
+				}
+			}
 		}
 
 		// Publish run result.
@@ -1139,6 +1213,7 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			FinalText: finalText,
 			Err:       runErr,
 			HadEdits:  hadEdits,
+			Cost:      runCost,
 		})
 	}()
 	return nil

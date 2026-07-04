@@ -158,6 +158,20 @@ func TestBuildRequestBody_WithThinkingManualLegacy(t *testing.T) {
 	}
 }
 
+func TestResolveThinking_XHighNotDisabled(t *testing.T) {
+	// Regression: "xhigh" (the max UI level) fell through to default and returned
+	// nil on manual-thinking models (Haiku 4.5, Fable) — disabling thinking
+	// entirely, strictly less than "high". It must enable at least "high".
+	high := resolveThinking(core.Request{Options: core.StreamOptions{ThinkingLevel: "high"}})
+	xhigh := resolveThinking(core.Request{Options: core.StreamOptions{ThinkingLevel: "xhigh"}})
+	if high == nil || xhigh == nil {
+		t.Fatalf("high and xhigh must both enable thinking: high=%v xhigh=%v", high, xhigh)
+	}
+	if xhigh.BudgetTokens < high.BudgetTokens {
+		t.Fatalf("xhigh budget (%d) must be >= high budget (%d)", xhigh.BudgetTokens, high.BudgetTokens)
+	}
+}
+
 func TestConvertMessages_ToolResult(t *testing.T) {
 	msgs := []core.Message{
 		core.NewUserMessage("Read the file"),

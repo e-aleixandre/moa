@@ -42,6 +42,39 @@ func TestEnter_ActivatesAndCreatesStateFile(t *testing.T) {
 	}
 }
 
+func TestBudgetAccumulation(t *testing.T) {
+	dir := t.TempDir()
+	g := New()
+	if err := g.Enter(Options{
+		Objective:   "x",
+		StatePath:   filepath.Join(dir, "STATE.md"),
+		TotalBudget: 5.0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if info := g.Info(); info.TotalBudget != 5.0 || info.Spent != 0 {
+		t.Fatalf("fresh goal: TotalBudget=%v Spent=%v", info.TotalBudget, info.Spent)
+	}
+	if got := g.AddSpent(1.5); got != 1.5 {
+		t.Fatalf("AddSpent returned %v, want 1.5", got)
+	}
+	g.AddSpent(2.0)
+	g.AddSpent(-1) // negative cost ignored
+	if got := g.Spent(); got != 3.5 {
+		t.Fatalf("Spent=%v, want 3.5", got)
+	}
+	if info := g.Info(); info.Spent != 3.5 {
+		t.Fatalf("Info.Spent=%v, want 3.5", info.Spent)
+	}
+	// Re-entering resets the accumulator.
+	if err := g.Enter(Options{Objective: "y", StatePath: filepath.Join(dir, "STATE2.md"), TotalBudget: 5.0}); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Spent(); got != 0 {
+		t.Fatalf("Spent after re-enter=%v, want 0", got)
+	}
+}
+
 func TestEnter_PreservesExistingStateFile(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "STATE.md")

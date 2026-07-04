@@ -31,10 +31,12 @@ type AgentController interface {
 	// Commands
 	Abort()
 	Steer(msg string)
+	CancelSteer()
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
 	SetCompactAt(tokens int) error
+	SetMaxBudget(v float64) error
 	Reset() error
 	Compact(ctx context.Context) (*core.CompactionPayload, error)
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
@@ -50,6 +52,7 @@ type AgentController interface {
 	SystemPrompt() string
 	ThinkingLevel() string
 	CompactAt() int
+	MaxBudget() float64
 	CompactionEpoch() int
 	IsRunning() bool
 }
@@ -86,6 +89,12 @@ type SessionContext struct {
 	// started, restored when it ends. Written by EnterGoal before any goal run,
 	// read by stopGoal afterward.
 	goalPrevCompactAt int
+
+	// goalPrevMaxBudget is the per-run MaxBudget captured when goal mode started.
+	// The driver lowers the per-run budget to the remaining total each iteration
+	// so the loop's cumulative cost can't exceed the configured budget; stopGoal
+	// restores this value.
+	goalPrevMaxBudget float64
 
 	// goalLastCommit is the HEAD commit hash seen at the previous goal iteration.
 	// The driver uses it to tell a productive iteration (new commit) from a

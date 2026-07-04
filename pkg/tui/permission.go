@@ -180,12 +180,7 @@ func permissionSummary(toolName string, args map[string]any) string {
 			return path
 		}
 	}
-	if len(args) == 0 {
-		return ""
-	}
-	var parts []string
-	for k, v := range args {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-	}
-	return strings.Join(parts, " ")
+	// Deterministic key order: iterating the map directly reorders the summary
+	// line on every repaint while the user is deciding.
+	return sortedArgSummary(args)
 }

@@ -352,3 +352,59 @@ func (r *SessionRuntime) SyncPlanMode() {
 func (r *SessionRuntime) Context() *SessionContext {
 	return r.sctx
 }
+
+// LoadSession swaps the runtime to a different persisted session in place: it
+// rebuilds the tree from the session's entries (or an empty tree for a new/v1
+// session), loads the derived state into the agent, re-points the tree syncer
+// at the new tree, and rebinds the persister (if it supports SessionRebinder)
+// so future snapshots write under this session. The agent must be idle.
+//
+// This is the in-place equivalent of constructing a runtime with InitialEntries,
+// used by the TUI which keeps one long-lived runtime across session switches.
+func (r *SessionRuntime) LoadSession(sess *session.Session) error {
+	if s := r.State.Current(); s == StateRunning || s == StatePermission {
+		return fmt.Errorf("bus: cannot load a session while the agent is busy (%s)", s)
+	}
+
+	tree, msgs, epoch, err := sessionState(sess)
+	if err != nil {
+		return fmt.Errorf("bus: LoadSession: %w", err)
+	}
+	if err := r.sctx.Agent.LoadState(msgs, epoch); err != nil {
+		return fmt.Errorf("bus: LoadSession LoadState: %w", err)
+	}
+	r.sctx.Tree = tree
+	if r.sctx.treeSyncer != nil {
+		r.sctx.treeSyncer.Reset(tree, len(msgs))
+	}
+
+	// Re-point the persister at the new session so subsequent saves write there
+	// instead of clobbering the previous session under its old ID.
+	r.persisterMu.Lock()
+	p := r.persister
+	r.persisterMu.Unlock()
+	if rb, ok := p.(SessionRebinder); ok {
+		rb.RebindSession(sess)
+	}
+	return nil
+}
+
+// sessionState derives the tree + agent state to load for a session snapshot.
+// A v2 session (SessionVersion + entries) rebuilds the tree and derives messages
+// via BuildContext; anything else (new or v1) yields an empty tree plus the flat
+// v1 messages (nil for a brand-new session, which resets the agent).
+func sessionState(sess *session.Session) (*session.Tree, []core.AgentMessage, int, error) {
+	if sess != nil && sess.Version >= session.SessionVersion && len(sess.Entries) > 0 {
+		tree, err := session.NewTreeFromEntries(sess.Entries, sess.LeafID)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		msgs, epoch := tree.BuildContext()
+		return tree, msgs, epoch, nil
+	}
+	tree := session.NewTree()
+	if sess != nil {
+		return tree, sess.Messages, sess.CompactionEpoch, nil
+	}
+	return tree, nil, 0, nil
+}

@@ -260,7 +260,7 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 	if err := sess.runtime.Bus.Execute(bus.UndoLastChange{}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
-	return &CommandResult{OK: true, Message: "⏪ Undo applied"}, nil
+	return &CommandResult{OK: true, Message: "⏪ Undo: reverted file edits from the last turn (bash/MCP/subagent changes are not tracked)"}, nil
 }
 
 // cmdVerify runs the project's verification checks, mirroring the TUI's

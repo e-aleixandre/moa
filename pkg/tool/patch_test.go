@@ -141,6 +141,52 @@ func TestPatch_MoveFile(t *testing.T) {
 	}
 }
 
+func TestPatch_MoveClobberCheckpointsDestination(t *testing.T) {
+	dir := t.TempDir()
+	oldFile := filepath.Join(dir, "old.go")
+	dstFile := filepath.Join(dir, "dst.go")
+	_ = os.WriteFile(oldFile, []byte("package old\n\nfunc Foo() {}\n"), 0o644)
+	_ = os.WriteFile(dstFile, []byte("package dst // will be clobbered\n"), 0o644)
+
+	ft := NewFileTracker()
+	ft.MarkRead(oldFile)
+
+	var checkpointed []string
+	tool := NewApplyPatch(ToolConfig{
+		WorkspaceRoot:  dir,
+		FileTracker:    ft,
+		DisableSandbox: true,
+		BeforeWrite: func(path string) error {
+			checkpointed = append(checkpointed, path)
+			return nil
+		},
+	})
+
+	patch := `*** Begin Patch
+*** Update File: old.go
+*** Move to: dst.go
+@@ package old
+-package old
++package new
+*** End Patch`
+
+	result, err := tool.Execute(nil, map[string]any{"patch": patch}, nil)
+	if err != nil || result.IsError {
+		t.Fatalf("unexpected: err=%v result=%v", err, result.Content)
+	}
+
+	// The clobbered destination must be checkpointed so /undo can restore it.
+	found := false
+	for _, p := range checkpointed {
+		if p == dstFile {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("destination %s not checkpointed before clobber; got %v", dstFile, checkpointed)
+	}
+}
+
 func TestPatch_MultiFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	file1 := filepath.Join(dir, "a.go")
@@ -177,6 +223,64 @@ func TestPatch_MultiFileAtomic(t *testing.T) {
 	}
 	if !strings.Contains(string(d2), "package bb") {
 		t.Errorf("b.go not updated: %s", string(d2))
+	}
+}
+
+// TestPatch_MidApplyFailureRollsBack pins M1: if applying a multi-file patch
+// fails partway through Phase B, already-written files must be restored to
+// their pre-patch content so apply_patch never leaves a half-applied change.
+func TestPatch_MidApplyFailureRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	file1 := filepath.Join(dir, "a.go")
+	file2 := filepath.Join(dir, "b.go")
+	orig1 := "package a\n"
+	orig2 := "package b\n"
+	_ = os.WriteFile(file1, []byte(orig1), 0o644)
+	_ = os.WriteFile(file2, []byte(orig2), 0o644)
+
+	ft := NewFileTracker()
+	ft.MarkRead(file1)
+	ft.MarkRead(file2)
+
+	// Fail the checkpoint of the second file so Phase B aborts after the first
+	// file is already written to disk.
+	tool := NewApplyPatch(ToolConfig{
+		WorkspaceRoot:  dir,
+		FileTracker:    ft,
+		DisableSandbox: true,
+		BeforeWrite: func(path string) error {
+			if path == file2 {
+				return os.ErrPermission
+			}
+			return nil
+		},
+	})
+
+	patch := `*** Begin Patch
+*** Update File: a.go
+-package a
++package aa
+*** Update File: b.go
+-package b
++package bb
+*** End Patch`
+
+	result, err := tool.Execute(nil, map[string]any{"patch": patch}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected an error result when Phase B fails midway")
+	}
+
+	// Both files must be back to their original content — no half-applied state.
+	d1, _ := os.ReadFile(file1)
+	d2, _ := os.ReadFile(file2)
+	if string(d1) != orig1 {
+		t.Errorf("a.go was not rolled back: got %q, want %q", string(d1), orig1)
+	}
+	if string(d2) != orig2 {
+		t.Errorf("b.go should be untouched: got %q, want %q", string(d2), orig2)
 	}
 }
 

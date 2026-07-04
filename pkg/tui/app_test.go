@@ -719,6 +719,42 @@ func TestClear_ResetsState(t *testing.T) {
 	}
 }
 
+// --- Test: /clear starts a fresh session and leaves the previous one on disk ---
+
+func TestClearCommand_StartsFreshSessionAndKeepsPreviousOnDisk(t *testing.T) {
+	ag, err := agent.New(agent.AgentConfig{
+		Provider: staticProvider{text: "ok"},
+		Model:    core.Model{ID: "claude-sonnet-4-6", Provider: "anthropic", Name: "Claude Sonnet 4.6", MaxInput: 200_000},
+	})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	rt := newTestRuntime(t, ag)
+
+	store, err := session.NewFileStore(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	prev := store.Create()
+	if err := store.Save(prev); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	m := New(context.Background(), Config{Runtime: rt, SessionStore: store, Session: prev})
+	m.width = 80
+	m.height = 24
+
+	result, _ := m.handleCommand("clear")
+	rm := result.(appModel)
+
+	if rm.session == nil || rm.session.ID == prev.ID {
+		t.Fatalf("expected a new session distinct from %q, got %+v", prev.ID, rm.session)
+	}
+	if _, err := store.Load(prev.ID); err != nil {
+		t.Fatalf("previous session should still exist on disk: %v", err)
+	}
+}
+
 // --- Test: handleBusEvent tool events ---
 
 func TestHandleBusEvent_ToolStart_AppendsBlock(t *testing.T) {
@@ -1840,5 +1876,13 @@ func TestParseSubagentNotification(t *testing.T) {
 				t.Errorf("result = %q, want %q", result, tt.wantResult)
 			}
 		})
+	}
+}
+
+func TestHandleModelSwitch_UnknownModel_ReportsAndStops(t *testing.T) {
+	m := newTestModel()
+	_, _ = m.handleModelSwitch("totally-unknown-model-xyz")
+	if !strings.Contains(m.s.pendingStatus, "Unknown model") {
+		t.Fatalf("expected honest unknown-model status, got %q", m.s.pendingStatus)
 	}
 }

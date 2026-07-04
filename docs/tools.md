@@ -20,6 +20,7 @@ Always registered:
 | `subagent` | Spawn a child agent (sync or async) |
 | `subagent_status` | Poll async subagent jobs |
 | `subagent_cancel` | Cancel a running async subagent |
+| `tasks` | Track implementation tasks (used most heavily during plan mode, but always available) |
 
 Conditionally registered:
 
@@ -27,8 +28,8 @@ Conditionally registered:
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | TUI or web UI is active (not headless) |
-| `tasks` | Plan mode is active |
 | `verify` | `.moa/verify.json` exists |
+| `load_skill` | At least one skill is discovered in `.moa/skills/` or `~/.config/moa/skills/` |
 
 ## Tool selection guidance
 

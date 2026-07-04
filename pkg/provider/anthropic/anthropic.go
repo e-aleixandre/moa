@@ -450,6 +450,15 @@ func (a *Anthropic) handleContentBlockStop(state *streamState) *core.AssistantEv
 			var args map[string]any
 			if err := json.Unmarshal([]byte(state.jsonAccum), &args); err == nil {
 				state.message.Content[idx].Arguments = args
+			} else {
+				// The authoritative JSON didn't parse — typically truncated by
+				// max_tokens mid-stream. The incremental partial parser may have
+				// left a TRUNCATED Arguments map (e.g. a half-written `content`
+				// string for a write); discard it so the tool runs on corrupt
+				// input is impossible. With nil args ValidateToolCall rejects the
+				// call and the model gets a clean error to retry, instead of a
+				// silently corrupted file.
+				state.message.Content[idx].Arguments = nil
 			}
 		}
 		state.jsonAccum = ""

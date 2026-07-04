@@ -343,6 +343,58 @@ func TestLoop_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestAbort_DiscardsQueuedSteer(t *testing.T) {
+	// A steer queued for a run that is then aborted must NOT survive into the
+	// next run. Before the fix it stayed in the buffered channel and got
+	// injected as a stale user turn on the following Send.
+	providerCalled := make(chan struct{})
+	var once sync.Once
+	slow := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		once.Do(func() { close(providerCalled) })
+		ch := make(chan core.AssistantEvent, 1)
+		go func() { defer close(ch); select {} }() // block until ctx cancelled
+		return ch, nil
+	}
+	provider := NewMockProvider(slow, simpleTextResponse("second-run reply"))
+	ag := newTestAgent(provider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); ag.Run(ctx, "first") }() //nolint: errcheck
+
+	<-providerCalled
+	ag.Steer("stale steer that should be discarded")
+	cancel()
+	<-done
+
+	msgs, err := ag.Send(context.Background(), "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if strings.Contains(c.Text, "stale steer") {
+				t.Fatalf("stale steer leaked into next run: %+v", msgs)
+			}
+		}
+	}
+}
+
+func TestAgent_CancelSteer_DrainsQueuedSteers(t *testing.T) {
+	ag := newTestAgent(NewMockProvider())
+
+	ag.Steer("uno")
+	ag.Steer("dos")
+	if len(ag.steerCh) != 2 {
+		t.Fatalf("expected 2 queued steers, got %d", len(ag.steerCh))
+	}
+
+	ag.CancelSteer()
+	if len(ag.steerCh) != 0 {
+		t.Fatalf("expected 0 queued steers after CancelSteer, got %d", len(ag.steerCh))
+	}
+}
+
 func TestLoop_ToolCallBlocked(t *testing.T) {
 	bashTool := core.Tool{
 		Name:       "bash",
@@ -1273,6 +1325,67 @@ func TestSend_WhileRunning_ReturnsError(t *testing.T) {
 	<-done
 }
 
+func TestCompact_SerializesAgainstRun(t *testing.T) {
+	// Regression for the Compact()-vs-run race: Compact used to release the
+	// mutex during the (seconds-long) summarization LLM call without claiming
+	// the running slot, so a concurrent Send() would start a run whose appended
+	// messages got stomped by the stale pre-compaction snapshot. Now Compact
+	// holds the slot for its whole duration, so a concurrent run is refused.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	blocking := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		close(started) // compaction has reached the LLM call
+		<-release      // hold the slot open
+		return simpleTextResponse("SUMMARY")(req)
+	}
+
+	ag, err := New(AgentConfig{
+		Provider:            NewMockProvider(blocking),
+		Model:               core.Model{ID: "test-model", Provider: "mock", MaxInput: 100},
+		SystemPrompt:        "test",
+		Tools:               core.NewRegistry(),
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+		Compaction:          &core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed enough messages to force a cut point > 0 so Compact reaches Stream.
+	for i := 0; i < 30; i++ {
+		ag.state.Messages = append(ag.state.Messages,
+			core.WrapMessage(core.NewUserMessage(fmt.Sprintf("message number %d", i))))
+	}
+
+	compactErr := make(chan error, 1)
+	go func() { _, e := ag.Compact(context.Background()); compactErr <- e }()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("compaction never reached the provider")
+	}
+
+	// While compaction holds the slot, a run must be refused — not corrupt state.
+	if _, err := ag.Send(context.Background(), "concurrent"); err == nil ||
+		err.Error() != "agent is already running" {
+		close(release)
+		<-compactErr
+		t.Fatalf("expected 'agent is already running' during compaction, got: %v", err)
+	}
+
+	close(release)
+	if err := <-compactErr; err != nil {
+		t.Fatalf("compaction failed: %v", err)
+	}
+	// The compacted transcript replaced the seeded messages; no orphan/stomp.
+	if got := len(ag.state.Messages); got == 0 {
+		t.Fatal("compaction produced no messages")
+	}
+}
+
 func TestRun_AfterSend_Resets(t *testing.T) {
 	provider := NewMockProvider(
 		simpleTextResponse("Send response"),
@@ -1618,6 +1731,36 @@ func TestReconfigure_SwapModel(t *testing.T) {
 	// Should have messages from both turns.
 	if len(msgs) < 4 {
 		t.Fatalf("expected at least 4 messages, got %d", len(msgs))
+	}
+}
+
+func TestSetModel_RejectsUnpricedModelWhenBudgetSet(t *testing.T) {
+	// New() enforces MaxBudget>0 ⇒ Pricing!=nil; the setters must too, else
+	// switching to an unpriced model silently disables the cost guardrail.
+	priced := core.Model{ID: "priced", Provider: "mock", Pricing: &core.Pricing{Input: 1, Output: 1}}
+	ag, err := New(AgentConfig{
+		Provider:  NewMockProvider(simpleTextResponse("ok")),
+		Model:     priced,
+		MaxBudget: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unpriced := core.Model{ID: "unpriced", Provider: "mock"}
+	if err := ag.SetModel(nil, unpriced); err == nil {
+		t.Error("SetModel to unpriced model should be rejected while MaxBudget is set")
+	}
+	if err := ag.Reconfigure(nil, unpriced, "medium"); err == nil {
+		t.Error("Reconfigure to unpriced model should be rejected while MaxBudget is set")
+	}
+	if ag.Model().ID != "priced" {
+		t.Fatalf("model must be unchanged after rejected switch, got %s", ag.Model().ID)
+	}
+	// A priced model still switches fine.
+	priced2 := core.Model{ID: "priced2", Provider: "mock", Pricing: &core.Pricing{Input: 2, Output: 2}}
+	if err := ag.SetModel(nil, priced2); err != nil {
+		t.Fatalf("SetModel to priced model should succeed: %v", err)
 	}
 }
 

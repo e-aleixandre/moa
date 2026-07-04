@@ -271,6 +271,9 @@ func (s *Store) MigrateV1IfNeeded() error {
 // surface a clean "not found").
 func (s *Store) resolve(id string) (path string, scope Scope, err error) {
 	if scopeStr, name, ok := strings.Cut(id, "/"); ok {
+		if !ValidName(name) {
+			return "", 0, fmt.Errorf("invalid name %q: use kebab-case ascii [a-z0-9-]", name)
+		}
 		switch scopeStr {
 		case "project":
 			return filepath.Join(s.projectDir, name+".md"), ScopeProject, nil
@@ -279,6 +282,9 @@ func (s *Store) resolve(id string) (path string, scope Scope, err error) {
 		default:
 			return "", 0, fmt.Errorf("invalid scope %q: use \"project/%s\" or \"global/%s\"", scopeStr, name, name)
 		}
+	}
+	if !ValidName(id) {
+		return "", 0, fmt.Errorf("invalid name %q: use kebab-case ascii [a-z0-9-]", id)
 	}
 	pPath := filepath.Join(s.projectDir, id+".md")
 	gPath := filepath.Join(s.globalDir, id+".md")

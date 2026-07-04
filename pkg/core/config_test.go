@@ -109,6 +109,8 @@ func TestSaveGlobalConfig_PreservesOtherFields(t *testing.T) {
 }
 
 func TestSaveProjectConfig_RoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	cwd := t.TempDir()
 
 	if err := SaveProjectConfig(cwd, func(cfg *MoaConfig) {
@@ -117,10 +119,20 @@ func TestSaveProjectConfig_RoundTrip(t *testing.T) {
 		t.Fatalf("SaveProjectConfig: %v", err)
 	}
 
-	// Re-read through the public loader; project Allow must appear.
+	// Untrusted dir: the repo-local config must NOT be merged (C1 trust gate).
+	if got := LoadMoaConfig(cwd); slices.Contains(got.Permissions.Allow, "Bash(git:*)") {
+		t.Fatalf("untrusted project Allow leaked into config: %v", got.Permissions.Allow)
+	}
+
+	// Once the dir is trusted, the project config applies.
+	if err := SaveGlobalConfig(func(cfg *MoaConfig) {
+		cfg.TrustedProjectPaths = append(cfg.TrustedProjectPaths, cwd)
+	}); err != nil {
+		t.Fatalf("SaveGlobalConfig: %v", err)
+	}
 	got := LoadMoaConfig(cwd)
 	if !slices.Contains(got.Permissions.Allow, "Bash(git:*)") {
-		t.Fatalf("Permissions.Allow = %v, want to contain Bash(git:*)", got.Permissions.Allow)
+		t.Fatalf("trusted project Allow = %v, want to contain Bash(git:*)", got.Permissions.Allow)
 	}
 }
 
@@ -294,6 +306,32 @@ func TestIsMCPPathTrusted(t *testing.T) {
 	}
 	if IsMCPPathTrusted(MoaConfig{}, "/a/b") {
 		t.Fatal("expected empty config to trust nothing")
+	}
+}
+
+func TestIsProjectPathTrusted(t *testing.T) {
+	// Exact match.
+	cfg := MoaConfig{TrustedProjectPaths: []string{"/a/b"}}
+	if !IsProjectPathTrusted(cfg, "/a/b") {
+		t.Fatal("expected /a/b to be trusted")
+	}
+	if IsProjectPathTrusted(cfg, "/x/y") {
+		t.Fatal("expected /x/y to not be trusted")
+	}
+	if IsProjectPathTrusted(MoaConfig{}, "/a/b") {
+		t.Fatal("expected empty config to trust nothing")
+	}
+
+	// Symlink/spelling-insensitive: a dir trusted via one path matches a
+	// canonicalized query for the same dir (guards the serve /var→/private/var case).
+	dir := t.TempDir()
+	canon, err := CanonicalizePath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trusted := MoaConfig{TrustedProjectPaths: []string{dir}}
+	if !IsProjectPathTrusted(trusted, canon) {
+		t.Fatalf("trusted %q should match canonical %q", dir, canon)
 	}
 }
 
