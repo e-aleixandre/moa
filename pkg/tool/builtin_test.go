@@ -717,6 +717,39 @@ func TestHeadTailBuffer_HeadPlusTail(t *testing.T) {
 	}
 }
 
+func TestTruncateOutput_RuneBoundary(t *testing.T) {
+	// "café" is 5 bytes (é = 0xC3 0xA9); a 4-byte cut lands mid-rune.
+	got := truncateOutput("café", 4)
+	if !utf8.ValidString(got) {
+		t.Errorf("truncateOutput must not split a rune, got invalid UTF-8: %q", got)
+	}
+	if !strings.HasPrefix(got, "caf") {
+		t.Errorf("expected head preserved, got %q", got)
+	}
+}
+
+func TestHeadTailBuffer_UTF8Boundaries(t *testing.T) {
+	var b headTailBuffer
+	// Odd byte budgets over 2-byte runes force a cut mid-rune at both the head
+	// end and the circular tail start.
+	b.headMax = 5
+	b.tailMax = 5
+	if _, err := b.Write([]byte(strings.Repeat("é", 20))); err != nil {
+		t.Fatal(err)
+	}
+	b.Close()
+	defer func() {
+		if b.SpillPath != "" {
+			_ = os.Remove(b.SpillPath)
+		}
+	}()
+
+	out := b.String()
+	if !utf8.ValidString(out) {
+		t.Errorf("String() must not emit a broken rune, got invalid UTF-8: %q", out)
+	}
+}
+
 func TestHeadTailBuffer_TailWraps(t *testing.T) {
 	var b headTailBuffer
 	b.headMax = 5

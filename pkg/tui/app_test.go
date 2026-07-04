@@ -1913,3 +1913,31 @@ func TestHandleModelSwitch_UnknownModel_ReportsAndStops(t *testing.T) {
 		t.Fatalf("expected honest unknown-model status, got %q", m.s.pendingStatus)
 	}
 }
+
+// T-L2: Ctrl+C must dismiss overlays instead of being swallowed.
+
+func TestSettingsMenu_CtrlCCloses(t *testing.T) {
+	m := newTestModel()
+	m.settingsMenu.Open([]settingsEntry{{key: "Model", value: "x"}})
+	m.input.SetEnabled(false)
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	rm := updated.(appModel)
+	if rm.settingsMenu.active {
+		t.Error("Ctrl+C should close the settings menu")
+	}
+	if !rm.input.enabled {
+		t.Error("closing settings should re-enable input")
+	}
+}
+
+func TestAskPrompt_CtrlCCancels(t *testing.T) {
+	m := newSwitchTestApp(t)
+	m.askPrompt.ShowFromBus("ask-1", []bus.AskQuestion{{Text: "Q?", Options: []string{"a", "b"}}})
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	rm := updated.(appModel)
+	if rm.askPrompt.active {
+		t.Error("Ctrl+C should cancel the ask prompt")
+	}
+}

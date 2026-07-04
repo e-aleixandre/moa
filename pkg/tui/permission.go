@@ -110,8 +110,8 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 	// Tool summary
 	if summary != "" {
 		maxW := width - 6
-		if maxW > 0 && lipgloss.Width(summary) > maxW {
-			summary = summary[:maxW-1] + "…"
+		if maxW > 0 {
+			summary = truncateDisplay(summary, maxW)
 		}
 		lines = append(lines, body.Render("  "+summary))
 	}

@@ -213,7 +213,7 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyBackspace:
 		m.askPrompt.Backspace()
 		return m, nil
-	case tea.KeyEsc:
+	case tea.KeyEsc, tea.KeyCtrlC:
 		askID := m.askPrompt.askID
 		// Send empty answers (one per question) so the tool doesn't hang.
 		emptyAnswers := make([]string, len(m.askPrompt.questions))
@@ -940,7 +940,7 @@ func (m appModel) handleSettingsKey(key string) (tea.Model, tea.Cmd) {
 		return m.applySettingsCycle()
 	case "left", "h":
 		return m.applySettingsCycleReverse()
-	case "esc", "q":
+	case "esc", "q", "ctrl+c":
 		m.settingsMenu.Close()
 		m.input.SetEnabled(true)
 	}

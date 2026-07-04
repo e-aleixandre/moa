@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -134,6 +135,10 @@ func buildPrompt(msgs []core.AgentMessage) string {
 		}
 		if b.Len()+len(text) > maxChars {
 			text = text[:max(0, maxChars-b.Len())]
+			// Don't split a multibyte rune at the budget boundary.
+			for len(text) > 0 && !utf8.ValidString(text) {
+				text = text[:len(text)-1]
+			}
 		}
 		fmt.Fprintf(&b, "%s: %s\n", role, strings.TrimSpace(text))
 		if b.Len() >= maxChars {

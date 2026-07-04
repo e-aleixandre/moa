@@ -1,6 +1,24 @@
 package autotitle
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"github.com/ealeixandre/moa/pkg/core"
+)
+
+func TestBuildPrompt_RuneBoundary(t *testing.T) {
+	// A single user message longer than the 4000-char budget, built from 2-byte
+	// runes so the byte-budget cut lands mid-rune.
+	long := strings.Repeat("é", 3000) // 6000 bytes
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent(long)}}},
+	}
+	if got := buildPrompt(msgs); !utf8.ValidString(got) {
+		t.Errorf("buildPrompt must not split a rune at the budget boundary, got invalid UTF-8")
+	}
+}
 
 func TestCheapModelSpecFor(t *testing.T) {
 	// OpenAI sessions must title with an OpenAI model — never ship the

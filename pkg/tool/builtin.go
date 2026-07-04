@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/memory"
@@ -252,7 +253,8 @@ func truncateOutput(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
 	}
-	return s[:maxBytes] + "\n\n[output truncated]"
+	// Trim back to a rune boundary so the cut doesn't emit a broken rune.
+	return safeUTF8Truncate(s[:maxBytes]) + "\n\n[output truncated]"
 }
 
 // truncateLines truncates text to maxLines lines, appending a notice if truncated.
@@ -413,9 +415,16 @@ func (b *headTailBuffer) String() string {
 		return b.head.String()
 	}
 	var sb strings.Builder
-	sb.Write(b.head.Bytes())
+	// The head may end mid-rune (filled up to headMax bytes) — trim the partial
+	// trailing rune so we don't emit a broken rune at the head/notice boundary.
+	sb.WriteString(safeUTF8Truncate(b.head.String()))
 
 	tailData := b.tailString()
+	// The tail is a circular byte buffer starting at an arbitrary offset, so it
+	// may begin mid-rune — drop leading continuation bytes.
+	for len(tailData) > 0 && !utf8.RuneStart(tailData[0]) {
+		tailData = tailData[1:]
+	}
 	omitted := b.totalBytes - b.head.Len() - len(tailData)
 	if omitted < 0 {
 		omitted = 0
