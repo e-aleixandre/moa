@@ -207,11 +207,11 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	}
 }
 
-// Send delivers a user message to a session.
+// Send delivers a user message (with optional attachments) to a session.
 // If idle: starts a new agent run via bus.
-// If running/permission: steers the running agent.
+// If running/permission: steers the running agent (attachments not allowed there).
 // Returns the action taken: "send" or "steer".
-func (m *Manager) Send(sessionID, text string) (string, error) {
+func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", ErrNotFound
@@ -219,15 +219,22 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 
 	state := sess.runtime.State.Current()
 	if state == bus.StateRunning || state == bus.StatePermission {
+		if len(atts) > 0 {
+			return "", ErrAttachmentsWhileRunning
+		}
 		// Steer the running agent.
 		_ = sess.runtime.Bus.Execute(bus.SteerAgent{Text: text})
 		return "steer", nil
 	}
 
-	// Set title on first message.
+	// Set title on first message: from the text, or from the first
+	// attachment's name if the text is empty.
 	sess.mu.Lock()
 	if sess.Title == "" {
 		title := text
+		if title == "" && len(atts) > 0 {
+			title = atts[0].Name
+		}
 		if len(title) > maxTitleLength {
 			title = title[:maxTitleLength] + "…"
 		}
@@ -236,7 +243,21 @@ func (m *Manager) Send(sessionID, text string) (string, error) {
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
 
-	if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
+	if len(atts) == 0 {
+		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
+			return "", err
+		}
+		return "send", nil
+	}
+
+	content, err := buildAttachmentContent(atts)
+	if err != nil {
+		return "", err
+	}
+	if text != "" {
+		content = append(content, core.TextContent(text))
+	}
+	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{Content: content}); err != nil {
 		return "", err
 	}
 	return "send", nil

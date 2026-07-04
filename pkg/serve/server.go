@@ -310,22 +310,27 @@ func handleDeleteSession(mgr *Manager) http.HandlerFunc {
 
 func handleSend(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limitBody(w, r, maxJSONBodySize)
+		limitBody(w, r, maxSendBodySize)
 		var body struct {
-			Text string `json:"text"`
+			Text        string       `json:"text"`
+			Attachments []Attachment `json:"attachments"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if body.Text == "" {
+		if body.Text == "" && len(body.Attachments) == 0 {
 			http.Error(w, "text required", http.StatusBadRequest)
 			return
 		}
-		action, err := mgr.Send(r.PathValue("id"), body.Text)
+		action, err := mgr.Send(r.PathValue("id"), body.Text, body.Attachments)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, ErrAttachmentsWhileRunning):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, ErrBadAttachment):
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
@@ -857,6 +862,10 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 }
 
 const maxJSONBodySize = 1 << 20
+
+// maxSendBodySize bounds POST /api/sessions/{id}/send, which may carry base64
+// attachments inline (see attachments.go) — much larger than other JSON bodies.
+const maxSendBodySize = 25 << 20
 
 func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)

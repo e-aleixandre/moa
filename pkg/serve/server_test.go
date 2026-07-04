@@ -845,7 +845,7 @@ func TestCancelEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	sess, _ := mgr.CreateSession(CreateOpts{CWD: dir})
-	_, _ = mgr.Send(sess.ID, "block")
+	_, _ = mgr.Send(sess.ID, "block", nil)
 
 	pollUntil(t, 2*time.Second, "running", func() bool {
 		sess.mu.Lock()
@@ -944,7 +944,7 @@ func TestManagerShutdown_PersistsLastTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.Send(sess.ID, "question"); err != nil {
+	if _, err := mgr.Send(sess.ID, "question", nil); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 5*time.Second, "idle after send", func() bool {
@@ -995,7 +995,7 @@ func TestManagerShutdown_WaitsForActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.Send(sess.ID, "question"); err != nil {
+	if _, err := mgr.Send(sess.ID, "question", nil); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, time.Second, "run active", func() bool {

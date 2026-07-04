@@ -9,10 +9,18 @@
   gap: 14px;
 }
 
-/* User bubble */
-.msg-user {
+/* Wraps a user message's content blocks (text/image/attachment chip) */
+.msg-user-group {
   align-self: flex-end;
   max-width: 82%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* User bubble */
+.msg-user {
   background: var(--peach-dim);
   border: 1px solid var(--peach-med);
   border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
@@ -22,6 +30,40 @@
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.55;
+}
+
+/* Attached image thumbnail in the chat history */
+.msg-image {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--peach-med);
+  object-fit: contain;
+}
+
+/* Collapsed text-attachment chip (<attachment name="...">) */
+.msg-attachment {
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  font-size: 13px;
+  max-width: 100%;
+}
+.msg-attachment summary {
+  cursor: pointer;
+  color: var(--subtext1);
+  list-style: none;
+}
+.msg-attachment pre {
+  margin-top: 8px;
+  max-height: 300px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--subtext0);
 }
 
 /* Assistant prose */

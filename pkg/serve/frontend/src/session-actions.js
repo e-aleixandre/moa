@@ -147,16 +147,43 @@ export async function deleteSession(id) {
   afterVisibilityChange();
 }
 
-export async function sendMessage(id, text) {
+// attachmentToContent converts a client-side attachment into the same content
+// block shape the server builds (see pkg/serve/attachments.go), so the
+// optimistic echo below renders identically to what comes back after a reload.
+function attachmentToContent(a) {
+  if (a.isImage) {
+    return { type: 'image', data: a.data, mime_type: a.mime };
+  }
+  const name = a.name.replaceAll('"', '\\"');
+  const text = base64ToUtf8(a.data);
+  return { type: 'text', text: `<attachment name="${name}">\n${text}\n</attachment>` };
+}
+
+function base64ToUtf8(b64) {
+  try {
+    const binary = atob(b64);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (_) {
+    return '';
+  }
+}
+
+export async function sendMessage(id, text, attachments = []) {
   const state = store.get();
   const sess = state.sessions[id];
   if (!sess) return;
 
   const isIdle = sess.state === 'idle' || sess.state === 'error';
+  let optimisticMsg = null;
   if (isIdle) {
-    const userMsg = { role: 'user', content: [{ type: 'text', text }] };
+    // Attachment blocks first, text last — matches the order the server sends
+    // to the agent (see Manager.Send).
+    const content = attachments.map(attachmentToContent);
+    if (text) content.push({ type: 'text', text });
+    optimisticMsg = { role: 'user', content };
     updateSession(id, {
-      messages: [...sess.messages, userMsg],
+      messages: [...sess.messages, optimisticMsg],
       state: 'running',
       streamingText: null,
       thinkingText: null,
@@ -167,8 +194,30 @@ export async function sendMessage(id, text) {
     updateSession(id, { pendingSteers: [...steers, text] });
   }
 
-  const res = await api('POST', `/api/sessions/${id}/send`, { text });
-  return res?.action || 'send';
+  try {
+    const res = await api('POST', `/api/sessions/${id}/send`, {
+      text,
+      attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
+    });
+    return res?.action || 'send';
+  } catch (e) {
+    // Roll back the optimistic echo so a rejected send (e.g. 400 on a bad
+    // attachment) doesn't leave a phantom message stuck in "running". Remove
+    // exactly the message we appended (by reference), leaving any events that
+    // arrived meanwhile untouched.
+    if (optimisticMsg) {
+      const cur = store.get().sessions[id];
+      if (cur) {
+        updateSession(id, {
+          messages: cur.messages.filter((m) => m !== optimisticMsg),
+          state: 'idle',
+          streamingText: null,
+          thinkingText: null,
+        });
+      }
+    }
+    throw e;
+  }
 }
 
 export async function cancelRun(id) {

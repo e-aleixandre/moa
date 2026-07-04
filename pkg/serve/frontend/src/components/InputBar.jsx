@@ -1,11 +1,14 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
-import { SendHorizonal, Mic, MicOff, Loader2 } from 'lucide-preact';
+import { SendHorizonal, Mic, MicOff, Loader2, Paperclip, X } from 'lucide-preact';
 import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addPermissionRule } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';
 import { store, updateSession } from '../store.js';
 import { FileSuggestions } from './FileSuggestions.jsx';
+import { processFile } from '../util/attachments.js';
+
+const MAX_ATTACHMENTS = 8;
 
 // Global registry: tileId → { toggleVoice }. Used by keyboard shortcuts.
 export const inputBarRegistry = new Map();
@@ -61,6 +64,8 @@ export function InputBar({ sessionId, session, tileId }) {
   const fileAbortRef = useRef(null);
   const fileDebounceRef = useRef(null);
   const feedbackRef = useRef(null);
+  const attachInputRef = useRef(null);
+  const [attachments, setAttachments] = useState([]);
 
   const permissionActive = sessionState === 'permission' && !!session?.pendingPerm;
   const [permFeedbackOpen, setPermFeedbackOpen] = useState(false);
@@ -298,6 +303,53 @@ export function InputBar({ sessionId, session, tileId }) {
     el.selectionStart = el.selectionEnd = el.value.length;
   }, [sessionId, autoResize]);
 
+  // --- Attachments ---
+  const addFiles = useCallback(async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    const room = MAX_ATTACHMENTS - attachments.length;
+    if (room <= 0) {
+      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'attention' });
+      return;
+    }
+    const toProcess = files.slice(0, room);
+    if (files.length > toProcess.length) {
+      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'attention' });
+    }
+
+    const results = [];
+    for (const file of toProcess) {
+      try {
+        results.push(await processFile(file));
+      } catch (e) {
+        addToast({ title: 'Attachment error', detail: e.message, type: 'error' });
+      }
+    }
+    if (results.length > 0) setAttachments((prev) => [...prev, ...results]);
+  }, [attachments.length]);
+
+  const removeAttachment = useCallback((idx) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  const handleAttachClick = () => {
+    if (busy) return;
+    attachInputRef.current?.click();
+  };
+
+  const handleAttachChange = (e) => {
+    addFiles(e.target.files);
+    e.target.value = ''; // allow re-selecting the same file
+  };
+
+  const handlePaste = (e) => {
+    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0) return;
+    e.preventDefault();
+    addFiles(files);
+  };
+
   const acceptSuggestion = useCallback((cmd) => {
     const el = textareaRef.current;
     if (!el) return;
@@ -315,12 +367,22 @@ export function InputBar({ sessionId, session, tileId }) {
   const handleSendInner = async (el) => {
     if (!el || !sessionId) return;
     const text = el.value.trim();
-    if (!text) return;
-    pushHistory(text);
+    const atts = attachments;
+    if (!text && atts.length === 0) return;
+
+    // Commands and shell escapes are text-only; attaching files to them
+    // doesn't make sense (the server would reject/ignore them anyway).
+    if ((text.startsWith('/') || text.startsWith('!')) && atts.length > 0) {
+      addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments first, or send them in a separate message', type: 'attention' });
+      return;
+    }
+
+    if (text) pushHistory(text);
     el.value = '';
     saveDraft(sessionId, ''); // sent — drop the persisted draft
     setCmdSuggestions(null);
     setFileSuggestions(null);
+    setAttachments([]);
     autoResize();
 
     // Detect slash commands.
@@ -363,9 +425,12 @@ export function InputBar({ sessionId, session, tileId }) {
     }
 
     try {
-      await sendMessage(sessionId, text);
+      await sendMessage(sessionId, text, atts);
     } catch (e) {
       console.error('Send failed:', e);
+      // The optimistic echo was already rolled back in sendMessage; surface
+      // the reason (e.g. a 400 for a rejected attachment) so it's not silent.
+      addToast({ title: 'Message not sent', detail: String(e.message || e), type: 'error' });
     }
   };
 
@@ -658,6 +723,37 @@ export function InputBar({ sessionId, session, tileId }) {
               <span class="input-steer-badge">queued · click to edit</span>
             </button>
           )}
+          {attachments.length > 0 && (
+            <div class="attachment-preview-strip">
+              {attachments.map((a, i) => (
+                <div class="attachment-chip" key={i}>
+                  {a.isImage
+                    ? <img src={`data:${a.mime};base64,${a.data}`} alt={a.name} />
+                    : <span class="attachment-chip-name">📎 {a.name} <span class="attachment-chip-size">({Math.max(1, Math.round(a.size / 1024))} kB)</span></span>
+                  }
+                  <button class="attachment-chip-remove" onClick={() => removeAttachment(i)} title="Remove">
+                    <X />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <input
+            ref={attachInputRef}
+            type="file"
+            multiple
+            hidden
+            accept="image/*,.txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.html,.css,.js,.ts,.jsx,.tsx,.go,.py,.sh,.sql,.toml"
+            onChange={handleAttachChange}
+          />
+          <button
+            class="input-attach"
+            onClick={handleAttachClick}
+            disabled={busy}
+            title="Attach files"
+          >
+            <Paperclip />
+          </button>
           <div class="input-wrap">
             {cmdSuggestions && (
               <div class="cmd-suggestions">
@@ -689,6 +785,7 @@ export function InputBar({ sessionId, session, tileId }) {
               rows="1"
               onInput={handleInput}
               onKeyDown={handleKey}
+              onPaste={handlePaste}
             />
             {canTranscribe && (
               <button

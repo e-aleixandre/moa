@@ -184,7 +184,7 @@ func TestSend_StateTransitions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = mgr.Send(sess.ID, "hello")
+	_, err = mgr.Send(sess.ID, "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestSend_Error(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = mgr.Send(sess.ID, "hello")
+	_, err = mgr.Send(sess.ID, "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestSend_Error(t *testing.T) {
 	}
 
 	// Session should still be usable.
-	_, err = mgr.Send(sess.ID, "retry")
+	_, err = mgr.Send(sess.ID, "retry", nil)
 	if err != nil {
 		t.Fatalf("expected session to accept new message after error, got: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestSend_WhileBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = mgr.Send(sess.ID, "first")
+	_, err = mgr.Send(sess.ID, "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestSend_WhileBusy(t *testing.T) {
 		return sessState(sess) == StateRunning
 	})
 
-	action, err := mgr.Send(sess.ID, "second")
+	action, err := mgr.Send(sess.ID, "second", nil)
 	if err != nil {
 		t.Fatalf("expected steer, got error: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestDelete_WhileRunning(t *testing.T) {
 	}
 	id := sess.ID
 
-	_, err = mgr.Send(id, "hello")
+	_, err = mgr.Send(id, "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestSend_AutoTitle(t *testing.T) {
 
 	sess, _ := mgr.CreateSession(CreateOpts{})
 
-	_, err := mgr.Send(sess.ID, "Refactoriza el módulo de auth")
+	_, err := mgr.Send(sess.ID, "Refactoriza el módulo de auth", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestDelete_CancelsSessionContext(t *testing.T) {
 	id := sess.ID
 	sessCtx := sess.infra.sessionCtx
 
-	_, err = mgr.Send(id, "hello")
+	_, err = mgr.Send(id, "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +497,7 @@ func TestAutoSave_AfterRun(t *testing.T) {
 		t.Fatal("expected persister to be attached")
 	}
 
-	_, err = mgr.Send(sess.ID, "hello")
+	_, err = mgr.Send(sess.ID, "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -764,7 +764,7 @@ func TestCancel_WhileRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mgr.Send(sess.ID, "block"); err != nil {
+	if _, err := mgr.Send(sess.ID, "block", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -813,7 +813,7 @@ func TestExecCommand_Clear(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _ = mgr.Send(sess.ID, "hi")
+	_, _ = mgr.Send(sess.ID, "hi", nil)
 	pollUntil(t, 5*time.Second, "run complete", func() bool {
 		return sessState(sess) == StateIdle
 	})
