@@ -34,6 +34,12 @@
 
 .agent-tray-icon { width: 15px; height: 15px; }
 .agent-tray-count { flex: 1; text-align: left; }
+.agent-tray-cost {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--green);
+  margin-right: 6px;
+}
 .agent-tray-handle .lucide { width: 16px; height: 16px; }
 
 .agent-tray-list {
@@ -132,3 +138,4 @@
   text-overflow: ellipsis;
 }
 .subagent-view-meta { font-size: 11px; color: var(--overlay1); margin-top: 1px; }
+.subagent-view-cost { color: var(--green); font-variant-numeric: tabular-nums; }

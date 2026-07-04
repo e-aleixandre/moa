@@ -19,6 +19,8 @@ type subagentTranscript struct {
 	async      bool
 	blocks     []messageBlock
 	streamText string // current streaming assistant text (not yet materialized)
+	costUSD    float64
+	tokens     int // input+output tokens, populated on end
 }
 
 // ensureSubagent returns the transcript for jobID, creating it if absent.
@@ -52,6 +54,10 @@ func (m *appModel) handleSubagentEnded(e bus.SubagentEnded) {
 		t.status = "completed"
 	}
 	t.streamText = ""
+	t.costUSD = e.CostUSD
+	if e.Usage != nil {
+		t.tokens = e.Usage.Input + e.Usage.Output
+	}
 	if m.s.viewingSubagent == e.JobID {
 		m.s.viewportDirty = true
 	}
@@ -298,7 +304,11 @@ func (m *appModel) renderSubagentViewportContent() string {
 	if task == "" {
 		task = "(no task description)"
 	}
-	header := pickerHeaderStyle.Render(fmt.Sprintf("◂ Subagent: %s (%s) — Ctrl+G to return", task, t.status))
+	statusText := t.status
+	if t.costUSD > 0 || t.tokens > 0 {
+		statusText += fmt.Sprintf(" · $%.4f · %d tok", t.costUSD, t.tokens)
+	}
+	header := pickerHeaderStyle.Render(fmt.Sprintf("◂ Subagent: %s (%s) — Ctrl+G to return", task, statusText))
 
 	parts := []string{header}
 	for i := range t.blocks {

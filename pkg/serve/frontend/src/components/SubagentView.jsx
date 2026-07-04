@@ -24,6 +24,11 @@ export function SubagentView({ sessionId, session }) {
       ? 'cancelling…'
       : sa.status;
 
+  const u = sa.usage;
+  const costLabel = u && (u.costUSD || u.inputTokens || u.outputTokens)
+    ? `$${(u.costUSD || 0).toFixed(4)} · ${((u.inputTokens || 0) + (u.outputTokens || 0)).toLocaleString()} tok`
+    : null;
+
   // MessageList takes a session-shaped object; the subagent state already has
   // messages/streamingText/thinkingText, so pass it directly.
   const subSession = {
@@ -44,6 +49,7 @@ export function SubagentView({ sessionId, session }) {
           <div class="subagent-view-task">{sa.task || jobId}</div>
           <div class="subagent-view-meta">
             {sa.model || 'model'} · {statusLabel}
+            {costLabel && <span class="subagent-view-cost"> · {costLabel}</span>}
           </div>
         </div>
       </div>

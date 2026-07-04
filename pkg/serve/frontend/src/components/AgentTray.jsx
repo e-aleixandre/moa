@@ -12,6 +12,21 @@ function liveSubagents(session) {
   );
 }
 
+// subagentTotals aggregates cost/tokens across ALL subagents of the session
+// (including finished ones), so the user sees how much subagents have spent,
+// kept separate from the main session's own cost.
+function subagentTotals(session) {
+  const map = session?.subagents || {};
+  let costUSD = 0, tokens = 0;
+  for (const sa of Object.values(map)) {
+    if (sa.usage) {
+      costUSD += sa.usage.costUSD || 0;
+      tokens += (sa.usage.inputTokens || 0) + (sa.usage.outputTokens || 0);
+    }
+  }
+  return { costUSD, tokens };
+}
+
 // AgentTray is a slide-up panel anchored above the InputBar. Collapsed it's a
 // thin bar showing how many agents are working; drag up (or tap) to expand the
 // list. Tapping an agent opens its sub-conversation (session.viewingSubagent).
@@ -20,6 +35,7 @@ export function AgentTray({ sessionId, session }) {
   const dragStart = useRef(null);
 
   const live = liveSubagents(session);
+  const totals = subagentTotals(session);
 
   const onTouchStart = useCallback((e) => {
     dragStart.current = { y: e.touches[0].clientY };
@@ -59,6 +75,11 @@ export function AgentTray({ sessionId, session }) {
         <span class="agent-tray-count">
           {live.length} {live.length === 1 ? 'agent' : 'agents'} working
         </span>
+        {totals.costUSD > 0 && (
+          <span class="agent-tray-cost" title="Total spent by subagents this session">
+            ${totals.costUSD.toFixed(4)}
+          </span>
+        )}
         {expanded ? <ChevronDown /> : <ChevronUp />}
       </button>
 
