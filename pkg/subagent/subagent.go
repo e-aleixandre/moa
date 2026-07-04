@@ -338,6 +338,7 @@ func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider c
 		}
 		return core.ErrorResult(err.Error()), nil
 	}
+	jobs.setChildAgent(j.id, child)
 	unsub := child.Subscribe(func(e core.AgentEvent) {
 		forwardSyncEvent(e, onUpdate)
 		forwardChildEvent(cfg, j.id, e)
@@ -409,6 +410,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 		jobs.setFailed(j.id, err.Error())
 		return
 	}
+	jobs.setChildAgent(j.id, child)
 	unsub := child.Subscribe(func(e core.AgentEvent) {
 		forwardAsyncEvent(jobs, j.id, e)
 		forwardChildEvent(cfg, j.id, e)

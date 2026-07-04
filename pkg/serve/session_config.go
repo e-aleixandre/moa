@@ -108,6 +108,24 @@ func (m *Manager) CancelSubagent(sessionID, jobID string) error {
 	return nil
 }
 
+// SteerSubagent queues a message for inter-step delivery to the running child
+// agent of a subagent job. Returns ErrNotFound if the session or job doesn't
+// exist. The bool reports whether the message was actually queued (false if the
+// job has no live child agent yet or has already finished).
+func (m *Manager) SteerSubagent(sessionID, jobID, text string) (bool, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return false, ErrNotFound
+	}
+	if sess.subagents == nil {
+		return false, ErrNotFound
+	}
+	if !sess.subagents.Has(jobID) {
+		return false, ErrNotFound
+	}
+	return sess.subagents.Steer(jobID, text), nil
+}
+
 // subagentStoreFor returns the persisted-transcript store for an active
 // session, or nil if the session isn't active / persistence is unavailable.
 func (m *Manager) subagentStoreFor(sessionID string) *session.SubagentStore {

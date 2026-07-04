@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
 )
@@ -39,6 +40,7 @@ type job struct {
 	startedAt  time.Time
 	finishedAt time.Time
 	sync       bool // true when this job runs synchronously (blocking the parent tool call)
+	childAgent *agent.Agent
 	messages   []core.AgentMessage
 	usage      *core.Usage
 	costUSD    float64
@@ -101,6 +103,22 @@ func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync
 		}
 		s.mu.Unlock()
 	}
+}
+
+func (s *jobStore) setChildAgent(id string, a *agent.Agent) {
+	j, ok := s.get(id)
+	if !ok {
+		return
+	}
+	j.mu.Lock()
+	j.childAgent = a
+	j.mu.Unlock()
+}
+
+func (j *job) getChildAgent() *agent.Agent {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.childAgent
 }
 
 func (s *jobStore) get(id string) (*job, bool) {
@@ -399,5 +417,34 @@ func (j *Jobs) Cancel(jobID string) bool {
 	if requested && jb != nil {
 		jb.cancel()
 	}
+	return true
+}
+
+// Has reports whether a job with jobID is currently tracked.
+func (j *Jobs) Has(jobID string) bool {
+	if j == nil || j.store == nil {
+		return false
+	}
+	_, ok := j.store.get(jobID)
+	return ok
+}
+
+// Steer queues a message for inter-step delivery to the running child agent
+// of jobID. Returns false if no job with that ID is tracked, or if the job
+// has no live child agent yet (e.g. still initializing) or has already
+// finished. Non-blocking; safe to call concurrently.
+func (j *Jobs) Steer(jobID string, text string) bool {
+	if j == nil || j.store == nil {
+		return false
+	}
+	jb, ok := j.store.get(jobID)
+	if !ok {
+		return false
+	}
+	child := jb.getChildAgent()
+	if child == nil {
+		return false
+	}
+	child.Steer(text)
 	return true
 }
