@@ -48,6 +48,11 @@ export async function loadSessions() {
         streamingText: existing ? existing.streamingText : null,
         thinkingText: existing ? existing.thinkingText : null,
         subagentCount: existing ? existing.subagentCount : 0,
+        // Live subagent transcripts are WS-only state (fed by subagent_start/
+        // event/end); the poll response knows nothing about them, so always
+        // carry them over or the agent tray vanishes on every poll tick.
+        subagents: existing ? existing.subagents : {},
+        viewingSubagent: existing ? existing.viewingSubagent : null,
         autoVerifying: existing ? existing.autoVerifying : false,
         onOverage: existing ? existing.onOverage : false,
         tasks: existing ? existing.tasks : [],
