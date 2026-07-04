@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/agent"
@@ -21,6 +22,15 @@ const (
 	// subagent result are included in the notification to the parent.
 	asyncResultTailLines = 50
 )
+
+// syncChildCounter yields unique agent IDs for synchronous subagents, which
+// have no job ID. The "sync-" prefix keeps them distinct from async job IDs
+// (random hex) and from the root agent ("").
+var syncChildCounter atomic.Uint64
+
+func nextSyncChildID() string {
+	return fmt.Sprintf("sync-%d", syncChildCounter.Add(1))
+}
 
 // excludedTools prevents recursive subagent spawning.
 // Subagents are leaf workers, not orchestrators.
@@ -44,6 +54,11 @@ type Config struct {
 	WorkspaceRoot          string // CWD passed to system prompt builder
 	SkillsIndex            string // pre-formatted skills index for system prompt
 	MemoryIndex            string // pre-formatted memory index (one line per fact)
+
+	// BashState, when non-nil, is the per-agent persistent shell state. The
+	// subagent seeds an isolated copy for the child (subshell semantics) and
+	// drops it when the child finishes. nil = no shell-state isolation.
+	BashState *tool.BashState
 
 	// OnAsyncComplete is called when an async subagent finishes (completed, failed, or cancelled).
 	// truncated is true when resultTail is only the last N lines of the full output.
@@ -147,6 +162,13 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				}
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 				job := jobs.create(task, model.ID, jobCancel)
+				// Isolate the child's shell state: seed a copy from the parent
+				// (read from the spawning ctx) and tag the child ctx with its
+				// job ID. runAsyncJob drops the snapshot when it finishes.
+				if cfg.BashState != nil {
+					cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
+					jobCtx = core.WithAgentID(jobCtx, job.id)
+				}
 				if cfg.OnAsyncJobChange != nil {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
@@ -154,7 +176,17 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_status to check progress, subagent_cancel to stop."), nil
 			}
 
-			return runSync(ctx, cfg, provider, model, thinkingLevel, systemPrompt, childReg, task, onUpdate)
+			// Isolate the child's shell state (subshell semantics): seed a copy
+			// from the parent, tag the child ctx with an ephemeral ID, and drop
+			// the snapshot when the sync run returns.
+			childCtx := ctx
+			if cfg.BashState != nil {
+				childID := nextSyncChildID()
+				cfg.BashState.Seed(childID, core.AgentIDFromContext(ctx))
+				defer cfg.BashState.Drop(childID)
+				childCtx = core.WithAgentID(ctx, childID)
+			}
+			return runSync(childCtx, cfg, provider, model, thinkingLevel, systemPrompt, childReg, task, onUpdate)
 		},
 	}
 }
@@ -259,6 +291,9 @@ func runSync(ctx context.Context, cfg Config, provider core.Provider, model core
 func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string) {
 	defer j.cancel()
 	defer close(j.done)
+	if cfg.BashState != nil {
+		defer cfg.BashState.Drop(j.id)
+	}
 	defer func() {
 		if cfg.OnAsyncComplete != nil {
 			snap, ok := jobs.snapshot(j.id)

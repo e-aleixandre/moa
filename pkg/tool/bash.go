@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,10 +33,14 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 
 // NewBash creates the bash tool.
 func NewBash(cfg ToolConfig) core.Tool {
+	description := "Execute a bash command. Returns stdout, stderr, and exit code. Output is truncated to 50KB."
+	if cfg.BashState != nil {
+		description = "Execute a bash command. Working directory and exported environment variables persist across calls (cd, export, venv activation carry over). Returns stdout, stderr, and exit code. Output is truncated to 50KB."
+	}
 	return core.Tool{
 		Name:        "bash",
 		Label:       "Bash",
-		Description: "Execute a bash command. Returns stdout, stderr, and exit code. Output is truncated to 50KB.",
+		Description: description,
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -60,9 +66,31 @@ func NewBash(cfg ToolConfig) core.Tool {
 				return core.ErrorResult("command is required"), nil
 			}
 
-			cwd := getString(params, "cwd", cfg.WorkspaceRoot)
+			// Persisted shell state (nil = stateless, byte-identical to before).
+			// The default cwd becomes the persisted cwd (validated) when present;
+			// an explicit cwd param still overrides it. persistedEnv, when set,
+			// is applied to cmd.Env below.
+			var agentID string
+			var persistedEnv []string
+			defaultCwd := cfg.WorkspaceRoot
+			if cfg.BashState != nil {
+				agentID = core.AgentIDFromContext(ctx)
+				var persistedCwd string
+				persistedCwd, persistedEnv = cfg.BashState.Snapshot(agentID)
+				if persistedCwd != "" {
+					if fi, err := os.Stat(persistedCwd); err == nil && fi.IsDir() {
+						if cfg.WorkspaceRoot == "" {
+							defaultCwd = persistedCwd
+						} else if validated, err := safePath(cfg, persistedCwd); err == nil {
+							defaultCwd = validated
+						}
+					}
+				}
+			}
+
+			cwd := getString(params, "cwd", defaultCwd)
 			if cwd == "" {
-				cwd = cfg.WorkspaceRoot
+				cwd = defaultCwd
 			}
 			if cfg.WorkspaceRoot != "" {
 				validCwd, err := safePath(cfg, cwd)
@@ -83,8 +111,35 @@ func NewBash(cfg ToolConfig) core.Tool {
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			cmd := exec.CommandContext(ctx, "bash", "-c", command)
+			// When persisting state, prepend an EXIT trap that dumps the final
+			// cwd and exported env to temp files, then re-apply them on the next
+			// call via cmd.Dir/Env. The trap runs on `exit N` and normal
+			// completion but NOT on death by signal (timeout/kill), so a killed
+			// command never corrupts the snapshot. Paths come from MkdirTemp and
+			// are %q-quoted, and the model's command sits on its own line — no
+			// injection surface. `builtin pwd` / `command env` can't be shadowed
+			// by a same-name function the command defines (which would corrupt
+			// the capture). Startup/control vars (BASH_ENV, BASH_FUNC_*) are
+			// stripped from the persisted env in parseNullSepEnv so a persisted
+			// export can't run code on the next call before the trap installs.
+			runCommand := command
+			var cwdFile, envFile string
+			if cfg.BashState != nil {
+				if stateDir, err := os.MkdirTemp("", "moa-bash-state-"); err == nil {
+					defer func() { _ = os.RemoveAll(stateDir) }()
+					cwdFile = filepath.Join(stateDir, "cwd")
+					envFile = filepath.Join(stateDir, "env")
+					runCommand = fmt.Sprintf("trap '{ builtin pwd > %q; command env -0 > %q; } 2>/dev/null' EXIT\n%s",
+						cwdFile, envFile, command)
+				}
+				// MkdirTemp failure => run without persistence this call (best effort).
+			}
+
+			cmd := exec.CommandContext(ctx, "bash", "-c", runCommand)
 			cmd.Dir = cwd
+			if persistedEnv != nil {
+				cmd.Env = persistedEnv
+			}
 			setProcGroup(cmd)
 			// If the process doesn't exit within 5s of cancel signal, Go force-kills.
 			cmd.WaitDelay = 5 * time.Second
@@ -144,6 +199,13 @@ func NewBash(cfg ToolConfig) core.Tool {
 			stdout.Close()
 			stderr.Close()
 
+			// Capture the new cwd+env. Only reachable when the command did NOT
+			// time out and Wait returned success or an ExitError (the trap ran),
+			// so `exit N` still updates state. cwd+env update atomically.
+			if cfg.BashState != nil && cwdFile != "" {
+				captureShellState(cfg.BashState, agentID, cwdFile, envFile)
+			}
+
 			out := stdout.String()
 			errOut := stderr.String()
 
@@ -172,6 +234,28 @@ func NewBash(cfg ToolConfig) core.Tool {
 			return core.TextResult(result.String()), nil
 		},
 	}
+}
+
+// captureShellState reads the cwd/env dumped by the EXIT trap and updates the
+// agent's snapshot. It is a no-op unless both a non-empty cwd and a non-empty,
+// within-cap env were captured — cwd and env are always persisted together, so
+// a missing or truncated file leaves the prior snapshot intact.
+func captureShellState(st *BashState, agentID, cwdFile, envFile string) {
+	cwdRaw, err := os.ReadFile(cwdFile)
+	if err != nil {
+		return
+	}
+	// Strip only the single terminator `pwd` writes, not every trailing
+	// newline — a directory whose name legitimately ends in "\n" must survive.
+	newCwd := strings.TrimSuffix(string(cwdRaw), "\n")
+	if newCwd == "" {
+		return
+	}
+	envRaw, err := os.ReadFile(envFile)
+	if err != nil || len(envRaw) == 0 || len(envRaw) > maxEnvCapture {
+		return
+	}
+	st.Update(agentID, newCwd, parseNullSepEnv(envRaw))
 }
 
 func secondsToDuration(s int) time.Duration {

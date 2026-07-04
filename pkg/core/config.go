@@ -82,6 +82,7 @@ type MoaConfig struct {
 	MaxRunDurationStr    string            `json:"max_run_duration,omitempty"`        // Max run duration as Go duration string (e.g. "30m"). Empty = unlimited.
 	MemoryEnabled        *bool             `json:"memory_enabled,omitempty"`         // nil = true (enabled by default)
 	AutoVerify           *bool             `json:"auto_verify,omitempty"`            // nil = false (disabled by default)
+	PersistentShell      *bool             `json:"persistent_shell,omitempty"`       // nil = true (enabled by default)
 	CacheTTL             string            `json:"cache_ttl,omitempty"`              // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
 }
 
@@ -98,6 +99,15 @@ func IsMemoryEnabled(cfg MoaConfig) bool {
 // Default is false when AutoVerify is nil (not configured).
 func IsAutoVerifyEnabled(cfg MoaConfig) bool {
 	return cfg.AutoVerify != nil && *cfg.AutoVerify
+}
+
+// IsPersistentShellEnabled returns whether the bash tool persists cwd and
+// exported env across calls. Default is true when PersistentShell is nil.
+func IsPersistentShellEnabled(cfg MoaConfig) bool {
+	if cfg.PersistentShell != nil {
+		return *cfg.PersistentShell
+	}
+	return true
 }
 
 // GetCacheTTL returns the prompt-cache TTL for the interactive agent. Only "1h"
@@ -245,6 +255,12 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.AutoVerify = override.AutoVerify
 	} else {
 		merged.AutoVerify = base.AutoVerify
+	}
+	// PersistentShell: project overrides global (explicit wins).
+	if override.PersistentShell != nil {
+		merged.PersistentShell = override.PersistentShell
+	} else {
+		merged.PersistentShell = base.PersistentShell
 	}
 	return merged
 }

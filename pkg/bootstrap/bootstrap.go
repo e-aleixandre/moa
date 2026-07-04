@@ -206,6 +206,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	pathPolicy := tool.NewPathPolicy(cfg.CWD, allAllowed, isUnrestricted)
 
 	fileTracker := tool.NewFileTracker()
+	var bashState *tool.BashState
+	if core.IsPersistentShellEnabled(moaCfg) {
+		bashState = tool.NewBashState()
+	}
 	toolReg := core.NewRegistry()
 	if err := tool.RegisterBuiltins(toolReg, tool.ToolConfig{
 		WorkspaceRoot: cfg.CWD,
@@ -214,6 +218,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		BraveAPIKey:   moaCfg.BraveAPIKey,
 		BeforeWrite:   cfg.BeforeWrite,
 		FileTracker:   fileTracker,
+		BashState:     bashState,
 	}); err != nil {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}
@@ -387,6 +392,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		WorkspaceRoot:    cfg.CWD,
 		SkillsIndex:      skillsIndex,
 		MemoryIndex:      memoryIndex,
+		BashState:        bashState,
 		OnAsyncJobChange: cfg.OnAsyncJobChange,
 		OnAsyncComplete:  cfg.OnAsyncComplete,
 	}); err != nil {

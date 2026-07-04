@@ -38,6 +38,11 @@ type ToolConfig struct {
 	// the read tool marks files as read and the edit tool warns when
 	// editing files that haven't been read. nil = no tracking.
 	FileTracker *FileTracker
+
+	// BashState, when non-nil, makes the bash tool persist cwd and exported
+	// env across calls (captured via an EXIT trap, re-applied via cmd.Dir/Env).
+	// nil = stateless behavior (previous default).
+	BashState *BashState
 }
 
 // Defaults fills in zero-value fields with defaults.

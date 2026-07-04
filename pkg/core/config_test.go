@@ -597,3 +597,43 @@ func TestMergeConfigs_AutoVerify_NilFallsThrough(t *testing.T) {
 		t.Error("global true should persist when project has no override")
 	}
 }
+
+func TestIsPersistentShellEnabled_Default(t *testing.T) {
+	if !IsPersistentShellEnabled(MoaConfig{}) {
+		t.Error("expected persistent shell enabled by default (nil)")
+	}
+}
+
+func TestIsPersistentShellEnabled_ExplicitTrue(t *testing.T) {
+	v := true
+	if !IsPersistentShellEnabled(MoaConfig{PersistentShell: &v}) {
+		t.Error("expected persistent shell enabled when explicitly true")
+	}
+}
+
+func TestIsPersistentShellEnabled_ExplicitFalse(t *testing.T) {
+	v := false
+	if IsPersistentShellEnabled(MoaConfig{PersistentShell: &v}) {
+		t.Error("expected persistent shell disabled when explicitly false")
+	}
+}
+
+func TestMergeConfigs_PersistentShell_ProjectOverride(t *testing.T) {
+	v := false
+	base := MoaConfig{}                      // nil = default true
+	project := MoaConfig{PersistentShell: &v} // explicitly false
+	merged := mergeConfigs(base, project)
+	if IsPersistentShellEnabled(merged) {
+		t.Error("project false should override global nil")
+	}
+}
+
+func TestMergeConfigs_PersistentShell_NilFallsThrough(t *testing.T) {
+	v := false
+	base := MoaConfig{PersistentShell: &v}
+	project := MoaConfig{} // nil
+	merged := mergeConfigs(base, project)
+	if IsPersistentShellEnabled(merged) {
+		t.Error("global false should persist when project has no override")
+	}
+}
