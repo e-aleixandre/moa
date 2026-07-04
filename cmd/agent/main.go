@@ -263,6 +263,21 @@ func main() {
 				Text:   agentText,
 			})
 		},
+		OnSubagentStart: func(jobID, task, model string, async bool) {
+			preBus.Publish(bus.SubagentStarted{
+				JobID: jobID, Task: task, Model: model, Async: async,
+			})
+		},
+		OnSubagentEvent: func(jobID string, inner any) {
+			preBus.Publish(bus.SubagentEvent{
+				JobID: jobID, Inner: inner,
+			})
+		},
+		OnSubagentEnd: func(jobID, status string, usage *core.Usage, costUSD float64) {
+			preBus.Publish(bus.SubagentEnded{
+				JobID: jobID, Status: status, Usage: usage, CostUSD: costUSD,
+			})
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
