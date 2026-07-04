@@ -75,6 +75,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
@@ -570,6 +571,20 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 func handleCancel(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := mgr.Cancel(r.PathValue("id"))
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+}
+
+func handleCancelSubagent(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := mgr.CancelSubagent(r.PathValue("id"), r.PathValue("jobID"))
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)

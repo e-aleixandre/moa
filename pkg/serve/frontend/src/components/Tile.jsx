@@ -6,6 +6,8 @@ import { formatShortcut } from '../hooks/useHotkeys.js';
 import { useTouchDrag, registerDropTarget } from '../hooks/useTouchDrag.js';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
+import { AgentTray } from './AgentTray.jsx';
+import { SubagentView } from './SubagentView.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { ModelPill } from './ModelPill.jsx';
@@ -149,8 +151,11 @@ export function Tile({ tileId, tileIndex, sessionId, session, usage, isFocused }
       </div>
 
       {session.untrustedMcp && <McpBanner sessionId={sessionId} />}
-      <MessageList session={session} />
+      {session.viewingSubagent
+        ? <SubagentView sessionId={sessionId} session={session} />
+        : <MessageList session={session} />}
       <TaskBar session={session} usage={usage} />
+      <AgentTray sessionId={sessionId} session={session} />
       <InputBar sessionId={sessionId} session={session} tileId={tileId} />
     </div>
   );

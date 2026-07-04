@@ -16,5 +16,6 @@
 @import './settings.css';
 @import './palette.css';
 @import './rewind.css';
+@import './agent-tray.css';
 @import './toast.css';
 @import './mobile.css';

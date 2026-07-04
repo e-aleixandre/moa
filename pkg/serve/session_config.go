@@ -89,3 +89,17 @@ func (m *Manager) Cancel(sessionID string) error {
 
 	return sess.runtime.Bus.Execute(bus.AbortRun{})
 }
+
+// CancelSubagent requests cancellation of a single (async) subagent job
+// belonging to a session, without aborting the parent run.
+func (m *Manager) CancelSubagent(sessionID, jobID string) error {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return ErrNotFound
+	}
+	if sess.subagents == nil {
+		return ErrNotFound
+	}
+	sess.subagents.Cancel(jobID)
+	return nil
+}

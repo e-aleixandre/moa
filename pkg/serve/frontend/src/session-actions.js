@@ -175,6 +175,10 @@ export async function cancelRun(id) {
   await api('POST', `/api/sessions/${id}/cancel`);
 }
 
+export async function cancelSubagent(id, jobId) {
+  await api('POST', `/api/sessions/${id}/subagents/${jobId}/cancel`);
+}
+
 export async function resolvePermission(sessionId, permId, approved, opts = {}) {
   await api('POST', `/api/sessions/${sessionId}/permission`, {
     id: permId,

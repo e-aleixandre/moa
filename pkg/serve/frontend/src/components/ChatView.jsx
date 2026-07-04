@@ -2,6 +2,8 @@ import { useRef, useCallback, useState } from 'preact/hooks';
 import { GitFork, ChevronDown, Plus, History } from 'lucide-preact';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
+import { AgentTray } from './AgentTray.jsx';
+import { SubagentView } from './SubagentView.jsx';
 import { McpBanner } from './McpBanner.jsx';
 import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { NotificationSettings } from './NotificationSettings.jsx';
@@ -78,8 +80,11 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
 
       {session.untrustedMcp && <McpBanner sessionId={state.activeSession} />}
 
-      <MessageList session={session} />
+      {session.viewingSubagent
+        ? <SubagentView sessionId={state.activeSession} session={session} />
+        : <MessageList session={session} />}
       <TaskBar session={session} usage={state.usage} />
+      <AgentTray sessionId={state.activeSession} session={session} />
       <InputBar sessionId={state.activeSession} session={session} />
 
       <RewindSheet
