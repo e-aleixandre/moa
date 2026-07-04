@@ -2,6 +2,7 @@
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
+import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 
 // --- Message normalization ---
 
@@ -214,8 +215,32 @@ export function handleWsInit(id, data) {
     tasks: data.tasks || [],
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,
+    subagents: initSubagents(data.subagents),
   });
 }
+
+// initSubagents builds the session.subagents map from a WS init snapshot
+// (live subagents + their transcript so far), normalizing each transcript the
+// same way the main conversation history is normalized.
+function initSubagents(raw) {
+  const out = {};
+  for (const sa of (raw || [])) {
+    if (!sa || !sa.job_id) continue;
+    out[sa.job_id] = {
+      jobId: sa.job_id,
+      task: sa.task || '',
+      model: sa.model || '',
+      status: sa.status || 'running',
+      async: !!sa.async,
+      messages: normalizeHistory(sa.messages || []),
+      streamingText: null,
+      thinkingText: null,
+      usage: null,
+    };
+  }
+  return out;
+}
+
 
 export function handleWsMessageStart(id) {
   delete pendingTextDeltas[id];
@@ -589,6 +614,124 @@ export function handleWsSubagentComplete(id, data) {
     result: data.text || '',
   });
   updateSession(id, { messages });
+}
+
+// --- Live subagent sub-conversations (agent tray) ---
+//
+// Each subagent's transcript lives at session.subagents[jobId] and is fed by
+// the SAME pure conversation reducer as the main chat, so it renders
+// identically. Streaming deltas are batched per (sessionId:jobId) via rAF,
+// mirroring flushDeltas for the main conversation.
+
+const subagentBuffers = {};      // "sessionId:jobId" → reducer buffers
+const pendingSubagentEvents = {}; // sessionId → [{ jobId, evt }]
+let subagentFlushScheduled = false;
+
+function subBufKey(id, jobId) { return id + ':' + jobId; }
+
+function getSubBuffers(id, jobId) {
+  const k = subBufKey(id, jobId);
+  if (!subagentBuffers[k]) subagentBuffers[k] = newBuffers();
+  return subagentBuffers[k];
+}
+
+function scheduleSubagentFlush() {
+  if (subagentFlushScheduled) return;
+  subagentFlushScheduled = true;
+  requestAnimationFrame(flushSubagentEvents);
+}
+
+function flushSubagentEvents() {
+  subagentFlushScheduled = false;
+  const ids = Object.keys(pendingSubagentEvents);
+  for (const id of ids) {
+    const queue = pendingSubagentEvents[id];
+    delete pendingSubagentEvents[id];
+    const sess = store.get().sessions[id];
+    if (!sess) continue;
+    const subs = { ...(sess.subagents || {}) };
+    let changed = false;
+    for (const { jobId, evt } of queue) {
+      const existing = subs[jobId] || {
+        jobId, task: '', model: '', status: 'running', async: true,
+        messages: [], streamingText: null, thinkingText: null, usage: null,
+      };
+      // Shallow clone the mutable transcript fields before reducing.
+      const target = {
+        messages: existing.messages || [],
+        streamingText: existing.streamingText ?? null,
+        thinkingText: existing.thinkingText ?? null,
+      };
+      applyNestedEvent(target, getSubBuffers(id, jobId), evt);
+      subs[jobId] = {
+        ...existing,
+        messages: target.messages,
+        streamingText: target.streamingText,
+        thinkingText: target.thinkingText,
+      };
+      changed = true;
+    }
+    if (changed) updateSession(id, { subagents: subs });
+  }
+}
+
+export function handleWsSubagentStart(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  const jobId = data.job_id;
+  if (!jobId) return;
+  const subs = { ...(sess.subagents || {}) };
+  const existing = subs[jobId];
+  subs[jobId] = {
+    jobId,
+    task: data.task || (existing && existing.task) || '',
+    model: data.model || (existing && existing.model) || '',
+    status: 'running',
+    async: data.async ?? (existing ? existing.async : true),
+    messages: (existing && existing.messages) || [],
+    streamingText: (existing && existing.streamingText) ?? null,
+    thinkingText: (existing && existing.thinkingText) ?? null,
+    usage: (existing && existing.usage) || null,
+  };
+  updateSession(id, { subagents: subs });
+}
+
+export function handleWsSubagentEvent(id, data) {
+  if (!store.get().sessions[id]) return;
+  const jobId = data.job_id;
+  const evt = data.event;
+  if (!jobId || !evt) return;
+  if (!pendingSubagentEvents[id]) pendingSubagentEvents[id] = [];
+  pendingSubagentEvents[id].push({ jobId, evt });
+  scheduleSubagentFlush();
+}
+
+export function handleWsSubagentEnd(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  const jobId = data.job_id;
+  if (!jobId) return;
+  // Flush any queued events for this subagent first so the final transcript
+  // is complete before we mark it ended.
+  flushSubagentEvents();
+  const after = store.get().sessions[id];
+  if (!after) return;
+  const subs = { ...(after.subagents || {}) };
+  const existing = subs[jobId];
+  if (!existing) return;
+  subs[jobId] = {
+    ...existing,
+    status: data.status || 'completed',
+    streamingText: null,
+    thinkingText: null,
+    usage: {
+      inputTokens: data.input_tokens || 0,
+      outputTokens: data.output_tokens || 0,
+      costUSD: data.cost_usd || 0,
+    },
+  };
+  delete subagentBuffers[subBufKey(id, jobId)];
+  updateSession(id, { subagents: subs });
 }
 
 export function handleWsRunEnd(id) {
