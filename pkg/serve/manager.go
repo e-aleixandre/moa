@@ -4,6 +4,7 @@ package serve
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -111,6 +112,39 @@ const (
 func (s *ManagedSession) History() []core.AgentMessage {
 	msgs, _ := bus.QueryTyped[bus.GetMessages, []core.AgentMessage](s.runtime.Bus, bus.GetMessages{})
 	return msgs
+}
+
+// persistSubagentTranscript writes a finished subagent's transcript to the
+// side store so it survives restarts and can be reopened. Best-effort: logged
+// and dropped on error. Metadata (task/model/async/messages) comes from the
+// live Jobs handle, which still holds the job at OnChildEnd time.
+func (s *ManagedSession) persistSubagentTranscript(jobID, status string, usage *core.Usage, costUSD float64) {
+	if s.persister == nil || s.subagents == nil {
+		return
+	}
+	store := s.persister.subagentStore(s.ID)
+	if store == nil {
+		return
+	}
+	t := session.SubagentTranscript{
+		JobID:      jobID,
+		Status:     status,
+		Usage:      usage,
+		CostUSD:    costUSD,
+		FinishedAt: time.Now(),
+		Messages:   s.subagents.Messages(jobID),
+	}
+	for _, info := range s.subagents.Snapshot() {
+		if info.JobID == jobID {
+			t.Task = info.Task
+			t.Model = info.Model
+			t.Async = info.Async
+			break
+		}
+	}
+	if err := store.Save(t); err != nil {
+		slog.Warn("subagent transcript save failed", "session", s.ID, "job", jobID, "error", err)
+	}
 }
 
 // info returns the session info via bus queries.

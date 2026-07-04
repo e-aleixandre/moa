@@ -57,6 +57,51 @@ subagent(task: "...", model?: "...", thinking?: "...", tools?: [...], async?: bo
 
 Async flow: call with `async: true` → get a job ID → poll with `subagent_status` → optionally `subagent_cancel`.
 
+### Live sub-conversations
+
+A subagent is a full agent with its own streaming conversation, not just a
+black box that returns text. While one runs, its activity (thinking, tool
+calls, output) streams to the UI as it happens:
+
+- **Web:** an *agent tray* appears above the input bar showing how many agents
+  are working. Drag it up (or tap) to expand the list, then tap an agent to
+  open its sub-conversation — rendered exactly like the main chat, updating
+  live. A back arrow (or `Ctrl+G`) returns to the parent conversation. Async
+  agents can be cancelled from the tray. The tray only lists *live* agents;
+  finished ones drop off.
+- **TUI:** press `Ctrl+G` to pick a live subagent and view its transcript in
+  streaming; `Ctrl+G` or `Esc` returns.
+
+The parent agent still receives the subagent's final text as the tool result,
+so its own context is unchanged — the streaming view is purely for the user.
+
+### Guardrails
+
+Child agents run with their own, independent limits (they do **not** inherit
+the parent's numbers, and have **no** budget/`$` cap of their own):
+
+| Limit | Default | Config key (`config.json`) |
+| --- | --- | --- |
+| Max turns | 30 | `subagent_max_turns` |
+| Max run duration | 10m | `subagent_max_run_duration` (Go duration, e.g. `"15m"`) |
+| Max concurrent async jobs | 5 | — |
+
+Context compaction is disabled for children (they run short, focused tasks);
+raising `subagent_max_turns` substantially may warrant enabling it.
+
+Children cannot spawn their own subagents, use `memory`, or call `ask_user`.
+
+### Cost & persistence
+
+`subagent_status` reports a running/finished job's token usage and cost
+(computed with the *child* model's pricing, which may differ from the parent).
+The web UI shows each agent's cost separately from the session total.
+
+Finished subagent transcripts are persisted to a side directory next to the
+parent session (`<session-id>.subagents/<job-id>.json`), so they survive
+restarts and can be reopened. They are removed when the parent session is
+deleted.
+
 ## Custom script tools
 
 Define tools as JSON files in `.moa/tools/`:

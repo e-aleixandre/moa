@@ -384,6 +384,8 @@ func DeleteByID(baseDir, id string) error {
 		}
 		path := filepath.Join(baseDir, e.Name(), id+".json")
 		if err := os.Remove(path); err == nil {
+			// Also remove the subagent transcript side directory, if any.
+			_ = os.RemoveAll(filepath.Join(baseDir, e.Name(), id+".subagents"))
 			return nil
 		}
 	}

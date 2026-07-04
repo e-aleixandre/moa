@@ -204,6 +204,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				s.runtime.Bus.Publish(bus.SubagentEnded{
 					SessionID: s.ID, JobID: jobID, Status: status, Usage: usage, CostUSD: costUSD,
 				})
+				s.persistSubagentTranscript(jobID, status, usage, costUSD)
 			}
 		},
 	})
@@ -367,6 +368,8 @@ func (m *Manager) Delete(id string) error {
 		sess.persister.mu.Unlock()
 		if store != nil {
 			_ = store.Delete(id)
+			// Remove the side directory of persisted subagent transcripts.
+			_ = session.NewSubagentStore(store.Dir(), id).Remove()
 		}
 	}
 	m.invalidateSavedCache()

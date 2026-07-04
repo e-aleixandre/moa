@@ -107,3 +107,14 @@ func (sp *servePersister) markDeleted() {
 	sp.deleted = true
 	sp.mu.Unlock()
 }
+
+// subagentStore returns a side store for persisting subagent transcripts next
+// to this session's file, or nil if persistence is unavailable/deleted.
+func (sp *servePersister) subagentStore(sessionID string) *session.SubagentStore {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.store == nil {
+		return nil
+	}
+	return session.NewSubagentStore(sp.store.Dir(), sessionID)
+}
