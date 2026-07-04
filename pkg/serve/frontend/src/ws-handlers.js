@@ -3,6 +3,7 @@
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
+import { truncateText } from './util/format.js';
 
 // --- Message normalization ---
 
@@ -598,10 +599,14 @@ export function handleWsSubagentCount(id, count) {
 
 export function handleWsSubagentComplete(id, data) {
   const statusIcon = data.status === 'completed' ? '✓' : data.status === 'failed' ? '✗' : '⊘';
+  // Keep the toast short: `task` is the full delegated prompt (often long,
+  // multi-paragraph), and the full output is already available below as an
+  // expandable subagent card in the chat, so the toast is just a heads-up.
+  const taskLine = (data.task || data.job_id || '').split('\n')[0];
   addToast({
     sessionId: id,
     title: `Subagent ${statusIcon} ${data.status}`,
-    detail: data.task || data.job_id,
+    detail: truncateText(taskLine, 140),
     type: data.status === 'completed' ? 'done' : 'attention',
   });
 

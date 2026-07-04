@@ -36,7 +36,16 @@
 
 .toast-body { flex: 1; min-width: 0; }
 .toast-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
-.toast-detail { font-size: 12px; color: var(--overlay1); }
+.toast-detail {
+  font-size: 12px;
+  color: var(--overlay1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
 
 .toast-dismiss {
   flex-shrink: 0;
