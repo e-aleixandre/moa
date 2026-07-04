@@ -14,6 +14,7 @@ import {
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalEnd,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
+  handleWsCompactionStart, handleWsCompactionEnd,
 } from './ws-handlers.js';
 
 const HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
@@ -210,6 +211,12 @@ function routeEvent(sessionId, evt) {
       break;
     case 'auto_verify_end':
       handleWsAutoVerifyEnd(sessionId, evt.data);
+      break;
+    case 'compaction_start':
+      handleWsCompactionStart(sessionId);
+      break;
+    case 'compaction_end':
+      handleWsCompactionEnd(sessionId);
       break;
   }
 }

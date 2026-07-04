@@ -619,7 +619,9 @@ export function InputBar({ sessionId, session, tileId }) {
 
   // Derive activity label from session state.
   let activityLabel = null;
-  if (session?.autoVerifying) {
+  if (session?.compacting) {
+    activityLabel = 'Compacting context…';
+  } else if (session?.autoVerifying) {
     activityLabel = 'Running auto-verify…';
   } else if (busy) {
     if (session?.thinkingText) activityLabel = 'Thinking…';
@@ -703,7 +705,7 @@ export function InputBar({ sessionId, session, tileId }) {
         </div>
       ) : (
         <>
-          {(busy || session?.autoVerifying) && activityLabel && (
+          {(busy || session?.autoVerifying || session?.compacting) && activityLabel && (
             <div class="input-activity">
               <Loader2 class="input-activity-spinner" />
               <span class="input-activity-label">{activityLabel}</span>
@@ -714,7 +716,7 @@ export function InputBar({ sessionId, session, tileId }) {
               )}
             </div>
           )}
-          {!busy && pendingSteers && pendingSteers.length > 0 && (
+          {pendingSteers && pendingSteers.length > 0 && (
             <button class="input-steers" onClick={handleDequeueSteers} title="Click or Alt+↑ to edit queued messages">
               {pendingSteers.length === 1
                 ? <span class="input-steer-text">{pendingSteers[0]}</span>

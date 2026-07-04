@@ -879,3 +879,11 @@ export function handleWsAutoVerifyStart(id) {
 export function handleWsAutoVerifyEnd(id, data) {
   updateSession(id, { autoVerifying: false });
 }
+
+export function handleWsCompactionStart(id) {
+  updateSession(id, { compacting: true });
+}
+
+export function handleWsCompactionEnd(id) {
+  updateSession(id, { compacting: false });
+}

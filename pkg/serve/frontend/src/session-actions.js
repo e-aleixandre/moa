@@ -54,6 +54,7 @@ export async function loadSessions() {
         subagents: existing ? existing.subagents : {},
         viewingSubagent: existing ? existing.viewingSubagent : null,
         autoVerifying: existing ? existing.autoVerifying : false,
+        compacting: existing ? existing.compacting : false,
         onOverage: existing ? existing.onOverage : false,
         tasks: existing ? existing.tasks : [],
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
