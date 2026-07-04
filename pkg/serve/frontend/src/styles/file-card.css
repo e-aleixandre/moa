@@ -41,16 +41,31 @@
   justify-content: center;
   width: 44px;
   height: 44px;
+  border: none;
   border-radius: var(--radius-md);
   background: var(--surface0);
   color: var(--text);
   flex-shrink: 0;
+  cursor: pointer;
+  font: inherit;
   transition: background 0.15s ease;
 }
 .file-card-download:hover {
   background: var(--surface1);
 }
+.file-card-download:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
 .file-card-download .lucide {
   width: 18px;
   height: 18px;
+}
+.file-card-download .lucide.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
