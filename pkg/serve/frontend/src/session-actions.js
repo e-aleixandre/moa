@@ -235,6 +235,13 @@ export async function cancelSubagent(id, jobId) {
   await api('POST', `/api/sessions/${id}/subagents/${jobId}/cancel`);
 }
 
+// steerSubagent sends a message to a live subagent's child agent. Returns the
+// server response ({ queued: bool }); there's no WS echo for this (parity with
+// cancelSubagent), so the caller shows optimistic visual feedback.
+export async function steerSubagent(id, jobId, text) {
+  return api('POST', `/api/sessions/${id}/subagents/${jobId}/steer`, { text });
+}
+
 // openPersistedSubagent loads a finished subagent's transcript from disk and
 // opens it in the SubagentView. Used when clicking a subagent card in the chat
 // after the live tray entry is gone.

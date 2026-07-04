@@ -4,8 +4,8 @@ import { updateSession } from '../store.js';
 
 // SubagentView shows one subagent's live sub-conversation, rendered with the
 // SAME MessageList as the main chat. A back button returns to the parent
-// conversation. The parent's InputBar stays active underneath (the
-// sub-conversation is read-only).
+// conversation. The InputBar underneath detects this view and steers messages
+// to this subagent (see InputBar's subagentMode) instead of the main agent.
 export function SubagentView({ sessionId, session }) {
   const jobId = session?.viewingSubagent;
   const sa = jobId ? (session.subagents || {})[jobId] : null;

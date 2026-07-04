@@ -36,6 +36,12 @@
   background: var(--mauve);
   color: var(--base);
 }
+.input-steers-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .input-steer-text {
   flex: 1;
   overflow: hidden;

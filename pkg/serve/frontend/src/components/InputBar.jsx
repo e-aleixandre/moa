@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
 import { SendHorizonal, Mic, MicOff, Loader2, Paperclip, X } from 'lucide-preact';
-import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addPermissionRule } from '../session-actions.js';
+import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addPermissionRule, steerSubagent } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';
@@ -56,6 +56,17 @@ export function InputBar({ sessionId, session, tileId }) {
   const sessionState = session?.state;
   const pendingSteers = session?.pendingSteers;
   const busy = sessionState === 'running';
+  // When viewing a subagent, the input targets that subagent instead of the
+  // main agent. `steerJobId` is set iff a live subagent view is open.
+  const steerJobId = session?.viewingSubagent || null;
+  const steerSub = steerJobId ? (session?.subagents || {})[steerJobId] : null;
+  const subagentMode = !!steerSub;
+  // Optimistic list of messages sent to the current subagent (no WS echo).
+  const [subagentPending, setSubagentPending] = useState([]);
+  // Reset the optimistic queue whenever the targeted subagent changes / closes.
+  useEffect(() => {
+    setSubagentPending([]);
+  }, [steerJobId]);
   const [canTranscribe, setCanTranscribe] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
@@ -384,6 +395,26 @@ export function InputBar({ sessionId, session, tileId }) {
     setFileSuggestions(null);
     setAttachments([]);
     autoResize();
+
+    // Subagent mode: steer the subagent instead of the main agent. Slash
+    // commands / shell escapes / attachments don't apply here — send raw text.
+    if (subagentMode) {
+      if (!text) return;
+      setSubagentPending((prev) => [...prev, text]);
+      try {
+        const res = await steerSubagent(sessionId, steerJobId, text);
+        if (res && res.queued === false) {
+          addToast({ title: 'Message not delivered', detail: 'The subagent is not accepting messages right now (still starting or already finished).', type: 'attention' });
+        }
+      } catch (e) {
+        setSubagentPending((prev) => {
+          const idx = prev.lastIndexOf(text);
+          return idx === -1 ? prev : prev.filter((_, i) => i !== idx);
+        });
+        addToast({ title: 'Message not sent', detail: String(e.message || e), type: 'error' });
+      }
+      return;
+    }
 
     // Detect slash commands.
     if (text.startsWith('/')) {
@@ -716,7 +747,7 @@ export function InputBar({ sessionId, session, tileId }) {
               )}
             </div>
           )}
-          {pendingSteers && pendingSteers.length > 0 && (
+          {!subagentMode && pendingSteers && pendingSteers.length > 0 && (
             <button class="input-steers" onClick={handleDequeueSteers} title="Click or Alt+↑ to edit queued messages">
               {pendingSteers.length === 1
                 ? <span class="input-steer-text">{pendingSteers[0]}</span>
@@ -724,6 +755,21 @@ export function InputBar({ sessionId, session, tileId }) {
               }
               <span class="input-steer-badge">queued · click to edit</span>
             </button>
+          )}
+          {subagentMode && subagentPending.length > 0 && (
+            <div class="input-steers-list">
+              {subagentPending.map((msg, i) => (
+                <button
+                  key={i}
+                  class="input-steers"
+                  onClick={() => setSubagentPending((prev) => prev.filter((_, j) => j !== i))}
+                  title="Sent to subagent · click to dismiss"
+                >
+                  <span class="input-steer-text">{msg}</span>
+                  <span class="input-steer-badge">sent to subagent</span>
+                </button>
+              ))}
+            </div>
           )}
           {attachments.length > 0 && (
             <div class="attachment-preview-strip">
@@ -783,7 +829,7 @@ export function InputBar({ sessionId, session, tileId }) {
             )}
             <textarea
               ref={textareaRef}
-              placeholder={busy ? 'Steer the agent…' : 'Send a message…'}
+              placeholder={subagentMode ? 'Message subagent…' : busy ? 'Steer the agent…' : 'Send a message…'}
               rows="1"
               onInput={handleInput}
               onKeyDown={handleKey}
