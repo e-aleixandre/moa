@@ -347,7 +347,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 
 	// 10. Subagents.
-	if err := subagent.RegisterAll(toolReg, subagent.Config{
+	if _, err := subagent.RegisterAll(toolReg, subagent.Config{
 		DefaultModel: cfg.Model,
 		CurrentModel: func() core.Model {
 			if a := sess.agentHolder.Load(); a != nil {
@@ -379,6 +379,11 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MemoryIndex:      memoryIndex,
 		OnAsyncJobChange: cfg.OnAsyncJobChange,
 		OnAsyncComplete:  cfg.OnAsyncComplete,
+		// OnChildStart/OnChildEvent/OnChildEnd are left nil here: bootstrap has
+		// no bus reference to wire them into (see how OnAsyncComplete/
+		// OnAsyncJobChange are instead cabled by the CALLERS — cmd/agent's
+		// preBus, pkg/serve's session_lifecycle closure — which do have a bus).
+		// TODO(task-3): wire to bus
 	}); err != nil {
 		if mcpMgr != nil {
 			mcpMgr.Close()

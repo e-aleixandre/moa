@@ -8,6 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 const (
@@ -34,6 +37,8 @@ type job struct {
 	cancel     context.CancelFunc
 	done       chan struct{}
 	finishedAt time.Time
+	sync       bool // true when this job runs synchronously (blocking the parent tool call)
+	messages   []core.AgentMessage
 }
 
 type jobSnapshot struct {
@@ -45,6 +50,7 @@ type jobSnapshot struct {
 	Error      string
 	Progress   []string
 	FinishedAt time.Time
+	Sync       bool
 }
 
 type jobStore struct {
@@ -57,6 +63,17 @@ func newJobStore() *jobStore {
 }
 
 func (s *jobStore) create(task, model string, cancel context.CancelFunc) *job {
+	return s.createJob(task, model, cancel, false)
+}
+
+// createSync creates a job for a synchronous subagent run (sync=true), so
+// that live-agent tracking (bandeja, subagent_status, count) has a single
+// source of truth across sync and async subagents.
+func (s *jobStore) createSync(task, model string, cancel context.CancelFunc) *job {
+	return s.createJob(task, model, cancel, true)
+}
+
+func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync bool) *job {
 	for {
 		id := randomJobID()
 		j := &job{
@@ -66,6 +83,7 @@ func (s *jobStore) create(task, model string, cancel context.CancelFunc) *job {
 			status: statusRunning,
 			cancel: cancel,
 			done:   make(chan struct{}),
+			sync:   sync,
 		}
 
 		s.mu.Lock()
@@ -114,7 +132,41 @@ func snapshotLocked(j *job) jobSnapshot {
 		Error:      j.err,
 		Progress:   progress,
 		FinishedAt: j.finishedAt,
+		Sync:       j.sync,
 	}
+}
+
+// setMessages stores a defensive deep copy of the child's message list.
+// Kept separate from snapshotLocked so that subagent_status (called
+// frequently while polling) never copies the full transcript.
+func (s *jobStore) setMessages(id string, msgs []core.AgentMessage) {
+	j, ok := s.get(id)
+	if !ok {
+		return
+	}
+	copied := make([]core.AgentMessage, len(msgs))
+	for i, m := range msgs {
+		copied[i] = session.DeepCopyMessage(m)
+	}
+	j.mu.Lock()
+	j.messages = copied
+	j.mu.Unlock()
+}
+
+// messages returns a defensive deep copy of the stored message list for id.
+func (s *jobStore) messages(id string) []core.AgentMessage {
+	j, ok := s.get(id)
+	if !ok {
+		return nil
+	}
+	j.mu.Lock()
+	src := j.messages
+	j.mu.Unlock()
+	copied := make([]core.AgentMessage, len(src))
+	for i, m := range src {
+		copied[i] = session.DeepCopyMessage(m)
+	}
+	return copied
 }
 
 func (s *jobStore) addProgress(id, line string) {
@@ -211,6 +263,16 @@ func (s *jobStore) cleanup(olderThan time.Duration) {
 	}
 }
 
+// delete immediately removes a job from the store, regardless of TTL. Used
+// for synchronous subagents once their (blocking) tool call has returned:
+// they have no async status to poll, so there is no reason to keep them
+// around consuming memory until the TTL cleanup sweep.
+func (s *jobStore) delete(id string) {
+	s.mu.Lock()
+	delete(s.jobs, id)
+	s.mu.Unlock()
+}
+
 func (s *jobStore) runningCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -232,4 +294,72 @@ func randomJobID() string {
 		return fmt.Sprintf("sa-fallback-%d", fallbackJobCounter.Add(1))
 	}
 	return "sa-" + hex.EncodeToString(b[:])
+}
+
+// ---------------------------------------------------------------------------
+// Jobs — exported handle for external consumers (bandeja, init snapshot,
+// cancellation). Wraps the package-private jobStore.
+// ---------------------------------------------------------------------------
+
+// JobInfo describes a live (or recently finished) subagent job.
+type JobInfo struct {
+	JobID  string
+	Task   string
+	Model  string
+	Status string
+	Async  bool
+}
+
+// Jobs is a handle onto the subagent job store, returned by RegisterAll.
+type Jobs struct {
+	store *jobStore
+}
+
+// Snapshot lists all jobs currently tracked (live and recently finished,
+// subject to the store's TTL cleanup).
+func (j *Jobs) Snapshot() []JobInfo {
+	if j == nil || j.store == nil {
+		return nil
+	}
+	j.store.mu.RLock()
+	ids := make([]string, 0, len(j.store.jobs))
+	for id := range j.store.jobs {
+		ids = append(ids, id)
+	}
+	j.store.mu.RUnlock()
+
+	infos := make([]JobInfo, 0, len(ids))
+	for _, id := range ids {
+		snap, ok := j.store.snapshot(id)
+		if !ok {
+			continue
+		}
+		infos = append(infos, JobInfo{
+			JobID:  snap.ID,
+			Task:   snap.Task,
+			Model:  snap.Model,
+			Status: snap.Status,
+			Async:  !snap.Sync,
+		})
+	}
+	return infos
+}
+
+// Messages returns a defensive deep copy of the stored transcript for jobID.
+func (j *Jobs) Messages(jobID string) []core.AgentMessage {
+	if j == nil || j.store == nil {
+		return nil
+	}
+	return j.store.messages(jobID)
+}
+
+// Cancel requests cancellation of a running job. No-op for unknown/finished jobs.
+func (j *Jobs) Cancel(jobID string) {
+	if j == nil || j.store == nil {
+		return
+	}
+	jb, _, requested := j.store.requestCancel(jobID)
+	if requested && jb != nil {
+		jb.cancel()
+	}
 }

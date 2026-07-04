@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/agent"
+	"github.com/ealeixandre/moa/pkg/bus"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tool"
@@ -52,11 +53,30 @@ type Config struct {
 	// OnAsyncJobChange is called when an async job starts or finishes.
 	// count is the current number of running jobs.
 	OnAsyncJobChange func(count int)
+
+	// OnChildStart is called right before a child agent (sync or async) begins
+	// running, with its jobID/task/model and whether it's async.
+	OnChildStart func(jobID, task, model string, async bool)
+
+	// OnChildEvent is called for each typed bus event produced by translating
+	// the child's core.AgentEvent stream (via bus.TranslateAgentEvent). inner
+	// is already a concrete bus.* type (e.g. bus.TextDelta), never a raw
+	// core.AgentEvent — pkg/subagent imports pkg/bus directly (no import
+	// cycle: pkg/bus does not import pkg/subagent), so translation happens
+	// here rather than at the call site.
+	OnChildEvent func(jobID string, inner any)
+
+	// OnChildEnd is called once when a child agent (sync or async) finishes,
+	// with its final status and aggregated usage/cost (cost computed with the
+	// CHILD's model pricing, which may differ from the parent's).
+	OnChildEnd func(jobID, status string, usage *core.Usage, costUSD float64)
 }
 
-func RegisterAll(reg *core.Registry, cfg Config) error {
+// RegisterAll registers the subagent tools on reg and returns a handle onto
+// the job store (for external consumers: init snapshot, tray UI, cancellation).
+func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 	if cfg.AppCtx == nil {
-		return errors.New("subagent: AppCtx is required")
+		return nil, errors.New("subagent: AppCtx is required")
 	}
 	jobs := newJobStore()
 	for _, t := range []core.Tool{
@@ -65,10 +85,10 @@ func RegisterAll(reg *core.Registry, cfg Config) error {
 		newSubagentCancel(jobs),
 	} {
 		if err := reg.Register(t); err != nil {
-			return fmt.Errorf("subagent: %w", err)
+			return nil, fmt.Errorf("subagent: %w", err)
 		}
 	}
-	return nil
+	return &Jobs{store: jobs}, nil
 }
 
 func newSubagent(cfg Config, jobs *jobStore) core.Tool {
@@ -154,7 +174,10 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_status to check progress, subagent_cancel to stop."), nil
 			}
 
-			return runSync(ctx, cfg, provider, model, thinkingLevel, systemPrompt, childReg, task, onUpdate)
+			jobCtx, jobCancel := context.WithCancel(ctx)
+			job := jobs.createSync(task, model.ID, jobCancel)
+			defer jobCancel()
+			return runSync(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, systemPrompt, childReg, task, onUpdate)
 		},
 	}
 }
@@ -239,19 +262,45 @@ func newSubagentCancel(jobs *jobStore) core.Tool {
 	}
 }
 
-func runSync(ctx context.Context, cfg Config, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string, onUpdate func(core.Result)) (core.Result, error) {
+func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string, onUpdate func(core.Result)) (core.Result, error) {
+	defer jobs.delete(j.id)
+
 	child, err := newChildAgent(cfg, provider, model, thinkingLevel, systemPrompt, childReg)
 	if err != nil {
+		jobs.setFailed(j.id, err.Error())
+		if cfg.OnChildEnd != nil {
+			cfg.OnChildEnd(j.id, statusFailed, nil, 0)
+		}
 		return core.ErrorResult(err.Error()), nil
 	}
 	unsub := child.Subscribe(func(e core.AgentEvent) {
 		forwardSyncEvent(e, onUpdate)
+		forwardChildEvent(cfg, j.id, e)
 	})
 	defer unsub()
 
+	if cfg.OnChildStart != nil {
+		cfg.OnChildStart(j.id, task, model.ID, false)
+	}
+
 	msgs, err := child.Run(ctx, task)
+	jobs.setMessages(j.id, msgs)
 	if err != nil {
+		status := statusFailed
+		if errors.Is(err, context.Canceled) {
+			status = statusCancelled
+			jobs.setCancelled(j.id)
+		} else {
+			jobs.setFailed(j.id, err.Error())
+		}
+		if cfg.OnChildEnd != nil {
+			cfg.OnChildEnd(j.id, status, childUsage(msgs), childCost(model, msgs))
+		}
 		return core.ErrorResult(err.Error()), nil
+	}
+	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
+	if cfg.OnChildEnd != nil {
+		cfg.OnChildEnd(j.id, statusCompleted, childUsage(msgs), childCost(model, msgs))
 	}
 	return core.TextResult(core.ExtractFinalAssistantText(msgs)), nil
 }
@@ -259,6 +308,7 @@ func runSync(ctx context.Context, cfg Config, provider core.Provider, model core
 func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string) {
 	defer j.cancel()
 	defer close(j.done)
+	var finalMsgs []core.AgentMessage
 	defer func() {
 		if cfg.OnAsyncComplete != nil {
 			snap, ok := jobs.snapshot(j.id)
@@ -271,6 +321,14 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())
 		}
+		if cfg.OnChildEnd != nil {
+			snap, ok := jobs.snapshot(j.id)
+			status := statusFailed
+			if ok {
+				status = snap.Status
+			}
+			cfg.OnChildEnd(j.id, status, childUsage(finalMsgs), childCost(model, finalMsgs))
+		}
 	}()
 
 	child, err := newChildAgent(cfg, provider, model, thinkingLevel, systemPrompt, childReg)
@@ -280,10 +338,17 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 	}
 	unsub := child.Subscribe(func(e core.AgentEvent) {
 		forwardAsyncEvent(jobs, j.id, e)
+		forwardChildEvent(cfg, j.id, e)
 	})
 	defer unsub()
 
+	if cfg.OnChildStart != nil {
+		cfg.OnChildStart(j.id, task, model.ID, true)
+	}
+
 	msgs, err := child.Run(jobCtx, task)
+	finalMsgs = msgs
+	jobs.setMessages(j.id, msgs)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			jobs.setCancelled(j.id)
@@ -293,6 +358,55 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 		return
 	}
 	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
+}
+
+// forwardChildEvent translates a child's core.AgentEvent into typed bus
+// event(s) (via bus.TranslateAgentEvent, the same translation used for the
+// main session) and forwards each to cfg.OnChildEvent, namespaced by jobID.
+// taskStore is always nil here: subagent children have no task list of their
+// own to diff against.
+func forwardChildEvent(cfg Config, jobID string, e core.AgentEvent) {
+	if cfg.OnChildEvent == nil {
+		return
+	}
+	for _, inner := range bus.TranslateAgentEvent(jobID, 0, e, nil) {
+		cfg.OnChildEvent(jobID, inner)
+	}
+}
+
+// childUsage sums Usage across a child's assistant messages.
+func childUsage(msgs []core.AgentMessage) *core.Usage {
+	var total core.Usage
+	found := false
+	for _, m := range msgs {
+		if m.Role == "assistant" && m.Usage != nil {
+			found = true
+			total.Input += m.Usage.Input
+			total.Output += m.Usage.Output
+			total.CacheRead += m.Usage.CacheRead
+			total.CacheWrite += m.Usage.CacheWrite
+			total.TotalTokens += m.Usage.TotalTokens
+		}
+	}
+	if !found {
+		return nil
+	}
+	return &total
+}
+
+// childCost computes the USD cost of a child's usage using the CHILD's model
+// pricing (which may differ from the parent's).
+func childCost(model core.Model, msgs []core.AgentMessage) float64 {
+	if model.Pricing == nil {
+		return 0
+	}
+	var cost float64
+	for _, m := range msgs {
+		if m.Role == "assistant" && m.Usage != nil {
+			cost += model.Pricing.Cost(*m.Usage)
+		}
+	}
+	return cost
 }
 
 func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
@@ -426,13 +540,13 @@ func forwardSyncEvent(e core.AgentEvent, onUpdate func(core.Result)) {
 	}
 	switch e.Type {
 	case core.AgentEventToolExecStart:
-		onUpdate(core.TextResult("[subagent] Running " + e.ToolName + ": " + tool.SummarizeArgs(e.Args)))
+		onUpdate(core.TextResult("\n[subagent] Running " + e.ToolName + ": " + tool.SummarizeArgs(e.Args) + "\n"))
 	case core.AgentEventToolExecEnd:
 		prefix := "✓"
 		if e.IsError {
 			prefix = "✗"
 		}
-		onUpdate(core.TextResult("[subagent] " + prefix + " " + e.ToolName))
+		onUpdate(core.TextResult("\n[subagent] " + prefix + " " + e.ToolName + "\n"))
 	case core.AgentEventMessageUpdate:
 		if e.AssistantEvent == nil {
 			return

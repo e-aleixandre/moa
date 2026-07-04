@@ -65,15 +65,15 @@ type SessionContext struct {
 	SessionCtx context.Context // session lifetime context; cancelled on destroy
 	Bus        EventBus
 	Agent      AgentController
-	State      *StateMachine      // may be nil for backward compat
-	Approvals  *ApprovalManager   // manages pending permissions/asks; may be nil
-	Tree       *session.Tree      // session entry tree; may be nil during migration
+	State      *StateMachine    // may be nil for backward compat
+	Approvals  *ApprovalManager // manages pending permissions/asks; may be nil
+	Tree       *session.Tree    // session entry tree; may be nil during migration
 
-	PlanMode    *planmode.PlanMode  // may be nil
-	TaskStore   *tasks.Store        // may be nil
-	Checkpoints *checkpoint.Store   // may be nil
-	PathPolicy  *tool.PathPolicy    // may be nil
-	AskBridge   *askuser.Bridge     // may be nil
+	PlanMode    *planmode.PlanMode // may be nil
+	TaskStore   *tasks.Store       // may be nil
+	Checkpoints *checkpoint.Store  // may be nil
+	PathPolicy  *tool.PathPolicy   // may be nil
+	AskBridge   *askuser.Bridge    // may be nil
 
 	ProviderFactory  func(core.Model) (core.Provider, error)
 	BaseSystemPrompt string
@@ -163,61 +163,85 @@ func Bridge(sctx *SessionContext, subscriber AgentSubscriber) func() {
 	})
 }
 
-// bridgeEvent translates a single core.AgentEvent into typed bus event(s).
+// bridgeEvent translates a single core.AgentEvent into typed bus event(s) and
+// publishes them on sctx.Bus. Special-cases the steer filter (which needs
+// sctx.SteerFilter, not just data) — everything else defers to
+// TranslateAgentEvent.
 func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
+	if e.Type == core.AgentEventSteer && sctx.SteerFilter != nil && !sctx.SteerFilter(e.Text) {
+		return
+	}
 	sid := sctx.SessionID
 	gen := sctx.RunGenAtomic.Load()
-	b := sctx.Bus
+	for _, ev := range TranslateAgentEvent(sid, gen, e, sctx.TaskStore) {
+		sctx.Bus.Publish(ev)
+	}
+}
 
+// TranslateAgentEvent translates a single core.AgentEvent into 0..n typed bus
+// events. It is a pure function (no publishing) so it can be reused both by
+// the session Bridge and by the subagent event sink (namespaced per jobID).
+//
+// taskStore may be nil; when nil, the TasksUpdated side event for the "tasks"
+// tool is skipped (used by callers, e.g. subagent children, that have no
+// meaningful task store).
+//
+// Note: this does NOT apply SessionContext.SteerFilter — callers that care
+// about filtering steer events (the session Bridge) must do so themselves
+// before/around calling this function.
+func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *tasks.Store) []any {
 	switch e.Type {
 	case core.AgentEventStart:
-		b.Publish(AgentStarted{SessionID: sid, RunGen: gen})
+		return []any{AgentStarted{SessionID: sid, RunGen: gen}}
 
 	case core.AgentEventEnd:
-		b.Publish(AgentEnded{SessionID: sid, RunGen: gen, Messages: e.Messages})
+		return []any{AgentEnded{SessionID: sid, RunGen: gen, Messages: e.Messages}}
 
 	case core.AgentEventError:
-		b.Publish(AgentError{SessionID: sid, RunGen: gen, Err: e.Error})
+		return []any{AgentError{SessionID: sid, RunGen: gen, Err: e.Error}}
 
 	case core.AgentEventTurnStart:
-		b.Publish(TurnStarted{SessionID: sid, RunGen: gen})
+		return []any{TurnStarted{SessionID: sid, RunGen: gen}}
 
 	case core.AgentEventTurnEnd:
-		b.Publish(TurnEnded{SessionID: sid, RunGen: gen})
+		return []any{TurnEnded{SessionID: sid, RunGen: gen}}
 
 	case core.AgentEventMessageStart:
-		b.Publish(MessageStarted{SessionID: sid, RunGen: gen, Message: e.Message})
+		return []any{MessageStarted{SessionID: sid, RunGen: gen, Message: e.Message}}
 
 	case core.AgentEventMessageUpdate:
 		if e.AssistantEvent == nil {
-			return
+			return nil
 		}
 		switch e.AssistantEvent.Type {
 		case core.ProviderEventTextDelta:
-			b.Publish(TextDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta})
+			return []any{TextDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta}}
 		case core.ProviderEventThinkingDelta:
-			b.Publish(ThinkingDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta})
+			return []any{ThinkingDelta{SessionID: sid, RunGen: gen, Delta: e.AssistantEvent.Delta}}
 		case core.ProviderEventToolCallStart:
-			b.Publish(ToolCallStreaming{
+			return []any{ToolCallStreaming{
 				SessionID:  sid,
 				RunGen:     gen,
 				ToolCallID: e.AssistantEvent.ToolCallID,
 				ToolName:   e.AssistantEvent.ToolName,
-			})
+			}}
 		case core.ProviderEventToolCallDelta:
 			if e.AssistantEvent.PartialArgs != nil {
-				b.Publish(ToolCallDelta{
+				return []any{ToolCallDelta{
 					SessionID:  sid,
 					RunGen:     gen,
 					ToolCallID: e.AssistantEvent.ToolCallID,
 					Args:       e.AssistantEvent.PartialArgs,
-				})
+				}}
 			}
+			return nil
 		case core.ProviderEventRateLimit:
 			if e.AssistantEvent.RateLimit != nil {
-				b.Publish(RateLimitUpdated{SessionID: sid, RunGen: gen, RateLimit: *e.AssistantEvent.RateLimit})
+				return []any{RateLimitUpdated{SessionID: sid, RunGen: gen, RateLimit: *e.AssistantEvent.RateLimit}}
 			}
+			return nil
 		}
+		return nil
 
 	case core.AgentEventMessageEnd:
 		var fullText string
@@ -226,16 +250,16 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 				fullText += c.Text
 			}
 		}
-		b.Publish(MessageEnded{SessionID: sid, RunGen: gen, Message: e.Message, FullText: fullText})
+		return []any{MessageEnded{SessionID: sid, RunGen: gen, Message: e.Message, FullText: fullText}}
 
 	case core.AgentEventToolExecStart:
-		b.Publish(ToolExecStarted{
+		return []any{ToolExecStarted{
 			SessionID:  sid,
 			RunGen:     gen,
 			ToolCallID: e.ToolCallID,
 			ToolName:   e.ToolName,
 			Args:       e.Args,
-		})
+		}}
 
 	case core.AgentEventToolExecUpdate:
 		var delta string
@@ -246,14 +270,15 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 				}
 			}
 		}
-		if delta != "" {
-			b.Publish(ToolExecUpdate{
-				SessionID:  sid,
-				RunGen:     gen,
-				ToolCallID: e.ToolCallID,
-				Delta:      delta,
-			})
+		if delta == "" {
+			return nil
 		}
+		return []any{ToolExecUpdate{
+			SessionID:  sid,
+			RunGen:     gen,
+			ToolCallID: e.ToolCallID,
+			Delta:      delta,
+		}}
 
 	case core.AgentEventToolExecEnd:
 		var resultText string
@@ -264,7 +289,7 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 				}
 			}
 		}
-		b.Publish(ToolExecEnded{
+		events := []any{ToolExecEnded{
 			SessionID:  sid,
 			RunGen:     gen,
 			ToolCallID: e.ToolCallID,
@@ -272,30 +297,29 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 			Result:     resultText,
 			IsError:    e.IsError,
 			Rejected:   e.Rejected,
-		})
+		}}
 		// Emit task update on tool_end only (matches serve and TUI behavior).
-		if e.ToolName == "tasks" && sctx.TaskStore != nil {
-			b.Publish(TasksUpdated{
+		if e.ToolName == "tasks" && taskStore != nil {
+			events = append(events, TasksUpdated{
 				SessionID: sid,
-				Tasks:     sctx.TaskStore.Tasks(),
+				Tasks:     taskStore.Tasks(),
 			})
 		}
+		return events
 
 	case core.AgentEventSteer:
-		if sctx.SteerFilter != nil && !sctx.SteerFilter(e.Text) {
-			return
-		}
-		b.Publish(Steered{SessionID: sid, RunGen: gen, Text: e.Text})
+		return []any{Steered{SessionID: sid, RunGen: gen, Text: e.Text}}
 
 	case core.AgentEventCompactionStart:
-		b.Publish(CompactionStarted{SessionID: sid, RunGen: gen})
+		return []any{CompactionStarted{SessionID: sid, RunGen: gen}}
 
 	case core.AgentEventCompactionEnd:
-		b.Publish(CompactionEnded{
+		return []any{CompactionEnded{
 			SessionID: sid,
 			RunGen:    gen,
 			Payload:   e.Compaction,
 			Err:       e.Error,
-		})
+		}}
 	}
+	return nil
 }

@@ -275,6 +275,35 @@ type SubagentCompleted struct {
 	Text      string
 }
 
+// SubagentStarted announces the start of a subagent (sync or async).
+type SubagentStarted struct {
+	SessionID string
+	JobID     string
+	Task      string
+	Model     string
+	Async     bool
+}
+
+// SubagentEvent transports a single already-typed bus event from a subagent
+// child, namespaced by JobID. Inner is a bus.TextDelta / bus.ToolExecStarted /
+// etc, produced by TranslateAgentEvent — never a raw core.AgentEvent.
+type SubagentEvent struct {
+	SessionID string
+	JobID     string
+	Inner     any
+}
+
+// SubagentEnded announces a subagent's completion (completed/failed/cancelled)
+// along with its aggregated usage and precomputed cost (using the CHILD
+// model's pricing, since it may differ from the parent's).
+type SubagentEnded struct {
+	SessionID string
+	JobID     string
+	Status    string
+	Usage     *core.Usage
+	CostUSD   float64
+}
+
 // ---------------------------------------------------------------------------
 // Permission
 // ---------------------------------------------------------------------------
@@ -350,6 +379,9 @@ type AutoVerifyEnded struct {
 // structural and MUST be delivered — dropping one (e.g. a StateChanged) can
 // leave a UI wedged in "running". Mirrors the TUI's isStructuralBusEvent.
 func isLossyEvent(event any) bool {
+	if se, ok := event.(SubagentEvent); ok {
+		return isLossyEvent(se.Inner)
+	}
 	switch event.(type) {
 	case TextDelta, ThinkingDelta, ToolExecUpdate, ToolCallDelta:
 		return true

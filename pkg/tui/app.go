@@ -177,6 +177,9 @@ type Config struct {
 // isStructuralBusEvent returns true for events that must not be dropped.
 // Only text/thinking deltas and tool exec updates are lossy — everything else is structural.
 func isStructuralBusEvent(event any) bool {
+	if se, ok := event.(bus.SubagentEvent); ok {
+		return isStructuralBusEvent(se.Inner)
+	}
 	switch event.(type) {
 	case bus.TextDelta, bus.ThinkingDelta, bus.ToolExecUpdate, bus.ToolCallDelta:
 		return false
