@@ -210,3 +210,18 @@ func TestFormatAnswers_Multiple(t *testing.T) {
 		t.Errorf("unexpected format: %s", text)
 	}
 }
+
+func TestFormatAnswers_ShortSlice(t *testing.T) {
+	// An aborted prompt can resolve with fewer answers than questions (or none).
+	// formatAnswers must render blanks instead of panicking on an out-of-range index.
+	questions := []Question{{Text: "DB?"}, {Text: "Port?"}}
+	result := formatAnswers(questions, nil)
+	text := result.Content[0].Text
+	if !strings.Contains(text, "Q: DB?\nA: ") || !strings.Contains(text, "Q: Port?\nA: ") {
+		t.Errorf("expected blank answers, got %q", text)
+	}
+	// Single-question path with no answers must not panic either.
+	if got := formatAnswers([]Question{{Text: "x"}}, nil).Content[0].Text; got != "" {
+		t.Errorf("single-question empty answers = %q, want \"\"", got)
+	}
+}

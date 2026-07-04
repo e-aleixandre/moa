@@ -40,9 +40,15 @@ func (itr *IdleTimeoutReader) Read(p []byte) (int, error) {
 		err error
 	}
 
+	// The goroutine reads into its own buffer, never the caller's p. On timeout
+	// we return while the underlying Read is still in flight; if it later writes
+	// to p, the caller has already moved on — a data race. Copying into p only
+	// on the non-timed-out branch keeps the caller's buffer untouched after we
+	// give up.
 	ch := make(chan result, 1)
+	buf := make([]byte, len(p))
 	go func() {
-		n, err := itr.r.Read(p)
+		n, err := itr.r.Read(buf)
 		ch <- result{n, err}
 	}()
 
@@ -57,6 +63,7 @@ func (itr *IdleTimeoutReader) Read(p []byte) (int, error) {
 
 	select {
 	case res := <-ch:
+		copy(p, buf[:res.n])
 		return res.n, res.err
 	case <-itr.timer.C:
 		return 0, ErrIdleTimeout

@@ -127,15 +127,23 @@ func parseQuestions(params map[string]any) ([]Question, error) {
 }
 
 func formatAnswers(questions []Question, answers []string) core.Result {
+	// answers may be shorter than questions (e.g. an aborted prompt resolves
+	// with an empty slice) — never index past its length.
+	answerAt := func(i int) string {
+		if i < len(answers) {
+			return answers[i]
+		}
+		return ""
+	}
 	if len(questions) == 1 {
-		return core.TextResult(answers[0])
+		return core.TextResult(answerAt(0))
 	}
 	var sb strings.Builder
 	for i, q := range questions {
 		if i > 0 {
 			sb.WriteString("\n")
 		}
-		fmt.Fprintf(&sb, "Q: %s\nA: %s", q.Text, answers[i])
+		fmt.Fprintf(&sb, "Q: %s\nA: %s", q.Text, answerAt(i))
 	}
 	return core.TextResult(sb.String())
 }

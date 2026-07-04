@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -136,7 +137,12 @@ func sanitizeToolName(s string) string {
 	}
 	result := b.String()
 	if len(result) > 64 {
-		result = result[:64]
+		// A blind [:64] cut can collapse two distinct long names into the same
+		// tool, silently shadowing one. Keep a short hash of the full name so
+		// the truncated form stays unique (55 + "_" + 8 hex = 64 chars).
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(result))
+		result = fmt.Sprintf("%s_%08x", result[:55], h.Sum32())
 	}
 	if result == "" {
 		result = "unnamed"
