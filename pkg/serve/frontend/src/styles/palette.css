@@ -190,6 +190,18 @@
   background: rgba(203, 166, 247, 0.1);
 }
 
+.palette-valid-badge {
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.palette-valid-yes { color: var(--green); }
+.palette-valid-no { color: var(--red); }
+
+/* Drill-down subdirectory items */
+.palette-dir .palette-item-cwd-full { color: var(--overlay0); }
+
 .palette-empty {
   padding: 24px;
   text-align: center;
