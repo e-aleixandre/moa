@@ -171,6 +171,36 @@ func TestFetch_ContextCancel(t *testing.T) {
 	}
 }
 
+func TestFetchDialControl_BlocksLinkLocalAndMetadata(t *testing.T) {
+	blocked := []string{"169.254.169.254:80", "169.254.0.1:443", "[fe80::1]:80"}
+	for _, addr := range blocked {
+		if err := fetchDialControl("tcp", addr, nil); err == nil {
+			t.Errorf("expected %s to be blocked", addr)
+		}
+	}
+	// Minimal filter: public, loopback and private addresses stay allowed.
+	allowed := []string{"93.184.216.34:80", "127.0.0.1:8080", "10.0.0.1:80", "192.168.1.2:3000"}
+	for _, addr := range allowed {
+		if err := fetchDialControl("tcp", addr, nil); err != nil {
+			t.Errorf("expected %s to be allowed, got %v", addr, err)
+		}
+	}
+}
+
+// TestFetchClient_NoProxy guards against reintroducing http.ProxyFromEnvironment
+// on fetchClient's transport: honoring a proxy would route requests through it,
+// hiding the real destination IP from fetchDialControl and defeating the SSRF
+// (link-local/metadata) block.
+func TestFetchClient_NoProxy(t *testing.T) {
+	transport, ok := fetchClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("fetchClient.Transport is %T, want *http.Transport", fetchClient.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Error("fetchClient's transport must not use a proxy (would bypass fetchDialControl's IP check)")
+	}
+}
+
 func TestExtractContent_Fallback(t *testing.T) {
 	// Minimal HTML that readability can't extract an article from
 	html := `<html><body><p>Short</p></body></html>`

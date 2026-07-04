@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'preact/hooks';
-import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft } from 'lucide-preact';
+import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft, ChevronRight } from 'lucide-preact';
 import { store, sessionsByGroup, isSessionInTile } from '../store.js';
 import { assignToTile } from '../tile-actions.js';
 import { resumeSession, createSession } from '../session-actions.js';
@@ -22,6 +22,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
   const [serverCwd, setServerCwd] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [creating, setCreating] = useState(false);
+  const [fsInfo, setFsInfo] = useState(null);
   const inputRef = useRef(null);
   const listRef = useRef(null);
 
@@ -54,6 +55,27 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [mode]);
+
+  // Fetch fs completion info (existence + subdirs) for path-like create-mode
+  // queries, debounced. Cancelled on cleanup so stale responses can't clobber
+  // a newer query's result.
+  useEffect(() => {
+    // Use the raw (non-lowercased) text: filesystem paths are case-sensitive
+    // on the server, so validation must match exactly what will be created.
+    const path = query.trim();
+    if (mode !== 'create' || !path || !(path.startsWith('/') || path.startsWith('~'))) {
+      setFsInfo(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetch('/api/fs/complete?path=' + encodeURIComponent(path), { headers: { 'X-Moa-Request': '1' } })
+        .then(r => r.json())
+        .then(data => { if (!cancelled) setFsInfo(data); })
+        .catch(() => { if (!cancelled) setFsInfo(null); });
+    }, 150);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query, mode]);
 
   // Collect unique cwds from all sessions, sorted by frequency
   const recentProjects = useMemo(() => {
@@ -126,17 +148,28 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
       result.push({ type: 'project', cwd, label });
     }
 
-    // If query looks like a path and doesn't match anything, offer it as custom
-    if (q && (q.startsWith('/') || q.startsWith('~'))) {
-      const alreadyListed = result.some(r => r.cwd.toLowerCase() === q);
+    // If query looks like a path, offer it as a validated create item, plus
+    // drill-down items for its matching subdirectories. Use the raw text (not
+    // lowercased q): paths are case-sensitive on the server.
+    const path = query.trim();
+    if (path && (path.startsWith('/') || path.startsWith('~'))) {
+      const alreadyListed = result.some(r => r.cwd.toLowerCase() === path.toLowerCase());
       if (!alreadyListed) {
-        const label = q.split('/').pop() || q;
-        result.push({ type: 'project', cwd: q, label, isCustom: true });
+        const label = path.split('/').pop() || path;
+        const valid = fsInfo ? !!fsInfo.isDir : undefined;
+        result.push({ type: 'project', cwd: path, label, isCustom: true, valid });
+      }
+
+      if (fsInfo && fsInfo.entries) {
+        const dir = dirOf(path);
+        for (const name of fsInfo.entries) {
+          result.push({ type: 'project', cwd: joinPath(dir, name), label: name, drill: true });
+        }
       }
     }
 
     return result;
-  }, [mode, query, serverCwd, recentProjects]);
+  }, [mode, query, serverCwd, recentProjects, fsInfo]);
 
   const items = mode === 'search' ? searchItems : createItems;
 
@@ -171,6 +204,13 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
 
   const handleSelectCreate = useCallback(async (item) => {
     if (creating) return;
+    if (item.drill) {
+      // Drill down into the subdirectory instead of creating a session.
+      setQuery(item.cwd + '/');
+      setSelectedIdx(0);
+      return;
+    }
+    if (item.isCustom && item.valid === false) return; // known-invalid path — the ✗ explains why; unknown (loading/error) still tries, server validates
     setCreating(true);
     try {
       const opts = { cwd: item.cwd };
@@ -277,7 +317,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
           {mode === 'create' && createItems.map((item, i) => (
             <div
               key={item.cwd}
-              class={`palette-item palette-project ${i === selectedIdx ? 'selected' : ''} ${creating ? 'creating' : ''}`}
+              class={`palette-item palette-project ${item.drill ? 'palette-dir' : ''} ${i === selectedIdx ? 'selected' : ''} ${creating ? 'creating' : ''}`}
               onClick={() => handleSelect(item)}
               onMouseEnter={() => setSelectedIdx(i)}
             >
@@ -286,9 +326,13 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
                 {item.label}
                 {item.isDefault && <span class="palette-default-tag">server cwd</span>}
                 {item.isCustom && <span class="palette-custom-tag">custom path</span>}
+                {item.isCustom && item.valid === true && <span class="palette-valid-badge palette-valid-yes">✓</span>}
+                {item.isCustom && item.valid === false && <span class="palette-valid-badge palette-valid-no">✗</span>}
               </span>
               <span class="palette-item-cwd palette-item-cwd-full">{item.cwd}</span>
-              {i === selectedIdx && <CornerDownLeft class="palette-enter-hint" />}
+              {item.drill
+                ? <ChevronRight class="palette-item-icon" />
+                : (i === selectedIdx && <CornerDownLeft class="palette-enter-hint" />)}
             </div>
           ))}
           {items.length === 0 && (
@@ -308,4 +352,17 @@ function fuzzyMatch(query, haystack) {
     if (haystack[i] === query[qi]) qi++;
   }
   return qi === query.length;
+}
+
+// dirOf returns the directory prefix of a typed path (including the trailing
+// slash), for building drill-down child paths. No filesystem normalization —
+// the server canonicalizes.
+function dirOf(path) {
+  if (path.endsWith('/')) return path;
+  const idx = path.lastIndexOf('/');
+  return idx >= 0 ? path.slice(0, idx + 1) : '';
+}
+
+function joinPath(dir, name) {
+  return dir + name;
 }

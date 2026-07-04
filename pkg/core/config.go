@@ -18,6 +18,33 @@ func IsMCPPathTrusted(cfg MoaConfig, path string) bool {
 	return false
 }
 
+// IsProjectPathTrusted reports whether path is trusted to auto-load its
+// repo-local .moa/config.json and .moa/tools/*. Repo-local config can escalate
+// permissions and register shell-executing tools, so — like .mcp.json — it is
+// only honored for directories the user has explicitly trusted.
+//
+// Paths are compared after canonicalization (abs + symlink-resolved) so a dir
+// trusted via one spelling still matches when a caller later canonicalizes cwd
+// (e.g. the serve path resolves /var → /private/var on macOS).
+func IsProjectPathTrusted(cfg MoaConfig, path string) bool {
+	target := canonicalOrRaw(path)
+	for _, p := range cfg.TrustedProjectPaths {
+		if p == path || canonicalOrRaw(p) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalOrRaw canonicalizes path, falling back to the raw value if that
+// fails (e.g. the directory no longer exists).
+func canonicalOrRaw(path string) string {
+	if c, err := CanonicalizePath(path); err == nil {
+		return c
+	}
+	return path
+}
+
 // CanonicalizePath returns a clean, absolute, symlink-resolved path.
 // Falls back to Abs+Clean if EvalSymlinks fails (e.g., broken symlinks).
 func CanonicalizePath(path string) (string, error) {
@@ -44,6 +71,7 @@ type MoaConfig struct {
 	BraveAPIKey            string               `json:"brave_api_key"`                           // Brave Search API key for web_search tool
 	MCPServers             map[string]MCPServer `json:"mcp_servers"`                             // MCP tool server connections
 	TrustedMCPPaths        []string             `json:"trusted_mcp_paths"`                       // Project paths trusted for .mcp.json auto-load
+	TrustedProjectPaths    []string             `json:"trusted_project_paths"`                   // Project paths trusted for .moa/config.json + .moa/tools/* auto-load
 	PlanReviewModel        string               `json:"plan_review_model"`                       // Model for plan reviewer (default: current model)
 	PlanReviewThinking     string               `json:"plan_review_thinking"`                    // Thinking level for plan reviewer (default: "low")
 	CodeReviewModel        string               `json:"code_review_model,omitempty"`             // Model for code reviewer (default: plan review model)
@@ -54,6 +82,8 @@ type MoaConfig struct {
 	MaxRunDurationStr      string               `json:"max_run_duration,omitempty"`              // Max run duration as Go duration string (e.g. "30m"). Empty = unlimited.
 	MemoryEnabled          *bool                `json:"memory_enabled,omitempty"`                // nil = true (enabled by default)
 	AutoVerify             *bool                `json:"auto_verify,omitempty"`                   // nil = false (disabled by default)
+	PersistentShell        *bool                `json:"persistent_shell,omitempty"`              // nil = true (enabled by default)
+	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
 	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`            // Max turns per subagent run. 0 = use package default.
 	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"`     // Max subagent run duration as Go duration string. Empty = use package default.
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
@@ -72,6 +102,25 @@ func IsMemoryEnabled(cfg MoaConfig) bool {
 // Default is false when AutoVerify is nil (not configured).
 func IsAutoVerifyEnabled(cfg MoaConfig) bool {
 	return cfg.AutoVerify != nil && *cfg.AutoVerify
+}
+
+// IsPersistentShellEnabled returns whether the bash tool persists cwd and
+// exported env across calls. Default is true when PersistentShell is nil.
+func IsPersistentShellEnabled(cfg MoaConfig) bool {
+	if cfg.PersistentShell != nil {
+		return *cfg.PersistentShell
+	}
+	return true
+}
+
+// GetCacheTTL returns the prompt-cache TTL for the interactive agent. Only "1h"
+// is honored; anything else (including empty or a typo) yields "" — the
+// Anthropic default of 5 minutes. Subagents and one-shot calls never use this.
+func GetCacheTTL(cfg MoaConfig) string {
+	if cfg.CacheTTL == "1h" {
+		return "1h"
+	}
+	return ""
 }
 
 // GetMaxRunDuration parses MaxRunDurationStr into a time.Duration.
@@ -123,8 +172,17 @@ type PermissionsConfig struct {
 // separately in main.go behind a trust gate.
 func LoadMoaConfig(cwd string) MoaConfig {
 	global := loadConfigFile(globalConfigPath())
-	project := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
-	merged := mergeConfigs(global, project)
+
+	// The repo-local .moa/config.json can escalate permissions (mode, allow/deny,
+	// disable_sandbox) and comes from whatever repo the user happens to be in, so
+	// it is only merged for explicitly-trusted directories — mirroring the
+	// .mcp.json trust gate. Untrusted dirs get global config only. The interactive
+	// trust prompt (CLI) is the sole path that adds a dir to TrustedProjectPaths.
+	merged := global
+	if IsProjectPathTrusted(global, cwd) {
+		project := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
+		merged = mergeConfigs(global, project)
+	}
 
 	// Load global .mcp.json (always trusted).
 	globalDir := filepath.Dir(globalConfigPath())
@@ -175,12 +233,13 @@ func mergeScalar[T comparable](base, override T) T {
 
 func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged := MoaConfig{
-		DisableSandbox:  base.DisableSandbox || override.DisableSandbox,
-		AllowedPaths:    append(base.AllowedPaths, override.AllowedPaths...),
-		PathScope:       mergeScalar(base.PathScope, override.PathScope),
-		PinnedModels:    base.PinnedModels, // global-only preference; project level ignored
-		MCPServers:      MergeMCPServers(base.MCPServers, override.MCPServers),
-		TrustedMCPPaths: base.TrustedMCPPaths, // global-only; persisted via SaveGlobalConfig
+		DisableSandbox:      base.DisableSandbox || override.DisableSandbox,
+		AllowedPaths:        append(base.AllowedPaths, override.AllowedPaths...),
+		PathScope:           mergeScalar(base.PathScope, override.PathScope),
+		PinnedModels:        base.PinnedModels, // global-only preference; project level ignored
+		MCPServers:          MergeMCPServers(base.MCPServers, override.MCPServers),
+		TrustedMCPPaths:     base.TrustedMCPPaths,     // global-only; persisted via SaveGlobalConfig
+		TrustedProjectPaths: base.TrustedProjectPaths, // global-only; persisted via SaveGlobalConfig
 		Permissions: PermissionsConfig{
 			Mode:  mergeScalar(base.Permissions.Mode, override.Permissions.Mode),
 			Model: mergeScalar(base.Permissions.Model, override.Permissions.Model),
@@ -193,6 +252,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		PlanReviewThinking: mergeScalar(base.PlanReviewThinking, override.PlanReviewThinking),
 		CodeReviewModel:    mergeScalar(base.CodeReviewModel, override.CodeReviewModel),
 		CodeReviewThinking: mergeScalar(base.CodeReviewThinking, override.CodeReviewThinking),
+		CacheTTL:           mergeScalar(base.CacheTTL, override.CacheTTL),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {
@@ -211,6 +271,12 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.AutoVerify = override.AutoVerify
 	} else {
 		merged.AutoVerify = base.AutoVerify
+	}
+	// PersistentShell: project overrides global (explicit wins).
+	if override.PersistentShell != nil {
+		merged.PersistentShell = override.PersistentShell
+	} else {
+		merged.PersistentShell = base.PersistentShell
 	}
 	merged.SubagentMaxTurns = mergeScalar(base.SubagentMaxTurns, override.SubagentMaxTurns)
 	merged.SubagentMaxRunDuration = mergeScalar(base.SubagentMaxRunDuration, override.SubagentMaxRunDuration)
@@ -297,12 +363,22 @@ func MergeMCPServers(maps ...map[string]MCPServer) map[string]MCPServer {
 }
 
 // ResolvePathScope determines the effective path scope from config values.
+//
+// permMode is expected to be already resolved by the caller: bootstrap defaults
+// an unset permission mode to "yolo" (moa's out-of-the-box posture for a
+// single-user local tool) BEFORE calling this, so in normal operation the
+// empty-mode branch below is never hit and the effective default scope is
+// "unrestricted". The empty-mode → "workspace" branch is only a conservative
+// fallback for direct callers that pass an unresolved mode; it does NOT reflect
+// the CLI default.
+//
 // Priority:
 //  1. Explicit pathScope ("workspace" or "unrestricted") — use as-is
 //  2. Legacy disableSandbox: true → "unrestricted"
 //  3. Derive from permission mode:
 //     - "yolo" or "ask" → "unrestricted"
-//     - "auto" or "" → "workspace"
+//     - "auto" → "workspace"
+//     - "" (unresolved) → "workspace" (conservative fallback; see note above)
 func ResolvePathScope(pathScope string, disableSandbox bool, permMode string) string {
 	if pathScope == "workspace" || pathScope == "unrestricted" {
 		return pathScope

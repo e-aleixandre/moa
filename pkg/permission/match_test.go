@@ -211,3 +211,71 @@ func TestGenerateAllowPattern_OtherTool(t *testing.T) {
 		t.Errorf("expected write, got %s", pat)
 	}
 }
+
+// TestMatchPolicy_ArgScopedRulesOnNonBashTools pins A2: arg-scoped deny/allow
+// rules must now match grep/find/ls/multiedit (path) and fetch_content (url),
+// which previously always returned an empty primaryArg and so never matched.
+func TestMatchPolicy_ArgScopedRulesOnNonBashTools(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+		tool    string
+		args    map[string]any
+		isDeny  bool
+		want    bool
+	}{
+		{"grep path deny", "grep(**/.env)", "grep", map[string]any{"path": "backend/.env"}, true, true},
+		{"find path deny", "find(secrets/**)", "find", map[string]any{"path": "secrets/keys"}, true, true},
+		{"ls path deny", "ls(/etc/*)", "ls", map[string]any{"path": "/etc/passwd"}, true, true},
+		{"multiedit path deny", "multiedit(secrets/**)", "multiedit", map[string]any{"path": "secrets/db.go"}, true, true},
+		// URL globbing across '/' is not expressible with filepath.Match (host
+		// substring rules belong to M3's SSRF filter); wiring the url still makes
+		// exact-match rules work.
+		{"fetch url exact deny", "fetch_content(http://169.254.169.254/latest)", "fetch_content", map[string]any{"url": "http://169.254.169.254/latest"}, true, true},
+		{"grep unrelated path", "grep(**/.env)", "grep", map[string]any{"path": "src/main.go"}, true, false},
+		{"multiedit allow covers", "multiedit(pkg/**)", "multiedit", map[string]any{"path": "pkg/a.go"}, false, true},
+		{"send_file path deny", "send_file(*.env)", "send_file", map[string]any{"path": "secrets.env"}, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchPolicy([]string{tc.pattern}, tc.tool, tc.args, tc.isDeny)
+			if got != tc.want {
+				t.Errorf("matchPolicy(%q, %s, %v, deny=%v) = %v, want %v",
+					tc.pattern, tc.tool, tc.args, tc.isDeny, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPrimaryArg_SendFile pins that send_file is path-scoped like read/write/etc,
+// so deny/allow rules matching its "path" arg (e.g. send_file(*.env)) apply.
+func TestPrimaryArg_SendFile(t *testing.T) {
+	got := primaryArg("send_file", map[string]any{"path": "/x/y.env"})
+	if got != "/x/y.env" {
+		t.Errorf("primaryArg(send_file) = %q, want /x/y.env", got)
+	}
+}
+
+// TestMatchPolicy_ApplyPatchMultiPath pins A2's multi-file semantics: deny blocks
+// if ANY embedded path is forbidden; allow auto-approves only if EVERY path is
+// covered (so a patch can't smuggle a write to an unlisted path under an allow).
+func TestMatchPolicy_ApplyPatchMultiPath(t *testing.T) {
+	patch := "*** Begin Patch\n" +
+		"*** Update File: pkg/a.go\n@@\n-x\n+y\n" +
+		"*** Add File: secrets/token\n+abc\n" +
+		"*** End Patch"
+	args := map[string]any{"patch": patch}
+
+	// Deny on secrets/** blocks the whole patch even though pkg/a.go is fine.
+	if !matchPolicy([]string{"apply_patch(secrets/**)"}, "apply_patch", args, true) {
+		t.Error("deny should block a patch that touches any forbidden path")
+	}
+	// Allow covering only pkg/** must NOT auto-approve: secrets/token is uncovered.
+	if matchPolicy([]string{"apply_patch(pkg/**)"}, "apply_patch", args, false) {
+		t.Error("allow must not auto-approve when a touched path is uncovered")
+	}
+	// Allow covering both paths auto-approves.
+	if !matchPolicy([]string{"apply_patch(pkg/**)", "apply_patch(secrets/**)"}, "apply_patch", args, false) {
+		t.Error("allow covering every touched path should auto-approve")
+	}
+}

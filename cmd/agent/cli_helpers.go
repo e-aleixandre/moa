@@ -200,3 +200,58 @@ func loadProjectMCPServers(cfg *core.MoaConfig, cwd, promptContent string) {
 	}
 	cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
 }
+
+// promptProjectConfigTrust gates the repo-local .moa/config.json and
+// .moa/tools/* behind a per-directory trust decision, mirroring the .mcp.json
+// flow. Repo-local config can escalate permissions and script tools run
+// `bash -c`, so an untrusted clone must not silently apply them at the first
+// prompt. On first interactive encounter it prompts and persists trust; once
+// trusted it reloads the config so this session picks up the project values.
+// Must run before loadProjectMCPServers so a reload does not drop project MCP.
+func promptProjectConfigTrust(cfg *core.MoaConfig, cwd, promptContent string) {
+	hasConfig := false
+	if _, err := os.Stat(filepath.Join(cwd, ".moa", "config.json")); err == nil {
+		hasConfig = true
+	}
+	toolFiles, _ := filepath.Glob(filepath.Join(cwd, ".moa", "tools", "*.json"))
+	hasTools := len(toolFiles) > 0
+	if !hasConfig && !hasTools {
+		return // nothing repo-local to trust
+	}
+	if core.IsProjectPathTrusted(*cfg, cwd) {
+		return // already trusted; LoadMoaConfig merged config, bootstrap loads tools
+	}
+
+	// Non-interactive (headless, piped prompt): keep the safe default of ignoring
+	// repo-local config/tools rather than blindly trusting them.
+	if promptContent != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+
+	var what string
+	switch {
+	case hasConfig && hasTools:
+		what = ".moa/config.json and .moa/tools/*"
+	case hasConfig:
+		what = ".moa/config.json"
+	default:
+		what = ".moa/tools/*"
+	}
+	fmt.Fprintf(os.Stderr, "Project %s found in %s.\n"+
+		"These can change permissions and run shell commands. Trust this directory? [y/N] ", what, cwd)
+	var answer string
+	_, _ = fmt.Scanln(&answer)
+	if !strings.HasPrefix(strings.ToLower(answer), "y") {
+		return
+	}
+
+	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
+		c.TrustedProjectPaths = append(c.TrustedProjectPaths, cwd)
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not persist project trust: %v\n", err)
+	}
+
+	// Reload now that the dir is trusted so this session applies the project
+	// config; bootstrap will register the script tools.
+	*cfg = core.LoadMoaConfig(cwd)
+}

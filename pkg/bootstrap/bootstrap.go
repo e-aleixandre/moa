@@ -18,6 +18,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/askuser"
 	agentcontext "github.com/ealeixandre/moa/pkg/context"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/memory"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -99,6 +100,7 @@ type Session struct {
 	ToolReg      *core.Registry
 	TaskStore    *tasks.Store
 	PlanMode     *planmode.PlanMode
+	Goal         *goal.Goal
 	AskBridge    *askuser.Bridge
 	Gate         *permission.Gate
 	MCPManager   *mcp.Manager
@@ -196,6 +198,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	if cfg.PermissionMode != "" {
 		permMode = permission.Mode(cfg.PermissionMode)
 	}
+	// moa's default posture is yolo (unrestricted): a single-user local tool.
+	// An unset mode resolves to yolo here BEFORE ResolvePathScope, so the
+	// effective default path scope is unrestricted (see ResolvePathScope's note).
 	if permMode == "" {
 		permMode = permission.ModeYolo
 	}
@@ -215,6 +220,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	pathPolicy := tool.NewPathPolicy(cfg.CWD, allAllowed, isUnrestricted)
 
 	fileTracker := tool.NewFileTracker()
+	var bashState *tool.BashState
+	if core.IsPersistentShellEnabled(moaCfg) {
+		bashState = tool.NewBashState()
+	}
 	toolReg := core.NewRegistry()
 	if err := tool.RegisterBuiltins(toolReg, tool.ToolConfig{
 		WorkspaceRoot: cfg.CWD,
@@ -223,13 +232,19 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		BraveAPIKey:   moaCfg.BraveAPIKey,
 		BeforeWrite:   cfg.BeforeWrite,
 		FileTracker:   fileTracker,
+		BashState:     bashState,
 	}); err != nil {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}
 
-	// 2b. Script tools from .moa/tools/*.json.
-	if err := tool.RegisterScriptTools(toolReg, cfg.CWD); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: script tools: %v\n", err)
+	// 2b. Script tools from .moa/tools/*.json. These run `bash -c <command>` from
+	// the repo, so — like .mcp.json and repo-local config — they are only loaded
+	// for directories the user has explicitly trusted. Untrusted repos cannot
+	// register shell-executing tools that auto-run at the first prompt.
+	if core.IsProjectPathTrusted(moaCfg, cfg.CWD) {
+		if err := tool.RegisterScriptTools(toolReg, cfg.CWD); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: script tools: %v\n", err)
+		}
 	}
 
 	// 3. Task store — always available.
@@ -247,7 +262,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 
 	// 5. AGENTS.md.
-	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, os.Getenv("AGENT_HOME"))
+	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, "")
 
 	// 5b. Memory (global + project). Only the index is injected into the prompt;
 	// full facts are read on demand via the memory tool.
@@ -391,6 +406,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		WorkspaceRoot:       cfg.CWD,
 		SkillsIndex:         skillsIndex,
 		MemoryIndex:         memoryIndex,
+		BashState:           bashState,
 		OnAsyncJobChange:    cfg.OnAsyncJobChange,
 		OnAsyncComplete:     cfg.OnAsyncComplete,
 		ChildMaxTurns:       moaCfg.SubagentMaxTurns,
@@ -443,6 +459,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		},
 	})
 	sess.PlanMode = pm
+	sess.Goal = goal.New()
 
 	// 12. System prompt (after ALL tools registered).
 	systemPrompt := agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
@@ -461,6 +478,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		Model:               cfg.Model,
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       cfg.ThinkingLevel,
+		CacheTTL:            core.GetCacheTTL(moaCfg),
 		Tools:               toolReg,
 		WorkspaceRoot:       cfg.CWD,
 		MaxTurns:            maxTurns,

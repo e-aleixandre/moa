@@ -11,6 +11,7 @@ import {
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
+  handleWsGoalChange, handleWsGoalIteration, handleWsGoalEnd,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
 } from './ws-handlers.js';
@@ -185,6 +186,15 @@ function routeEvent(sessionId, evt) {
       break;
     case 'plan_mode':
       handleWsPlanMode(sessionId, evt.data);
+      break;
+    case 'goal_change':
+      handleWsGoalChange(sessionId, evt.data);
+      break;
+    case 'goal_iteration':
+      handleWsGoalIteration(sessionId, evt.data);
+      break;
+    case 'goal_end':
+      handleWsGoalEnd(sessionId, evt.data);
       break;
     case 'steer':
       handleWsSteer(sessionId, evt.data);

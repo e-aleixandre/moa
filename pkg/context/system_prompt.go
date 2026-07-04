@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/git"
@@ -57,7 +58,12 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 				// Custom/unknown tool — use original description, truncated
 				desc = t.Description
 				if len(desc) > 200 {
-					desc = desc[:197] + "..."
+					desc = desc[:197]
+					// Don't split a multibyte rune at the byte cut.
+					for len(desc) > 0 && !utf8.ValidString(desc) {
+						desc = desc[:len(desc)-1]
+					}
+					desc += "..."
 				}
 			}
 			fmt.Fprintf(&sb, "- %s: %s\n", t.Name, desc)

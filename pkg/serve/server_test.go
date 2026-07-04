@@ -564,6 +564,10 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 		return ch, nil
 	}
 
+	// Isolate the global config and trust the workspace so its repo-local
+	// .moa/config.json (mode:ask) is honored — the C1 trust gate ignores
+	// untrusted repo config.
+	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workspace, ".moa"), 0o755); err != nil {
 		t.Fatal(err)
@@ -571,15 +575,17 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 	if err := os.WriteFile(filepath.Join(workspace, ".moa", "config.json"), []byte(`{"permissions":{"mode":"ask"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
+		c.TrustedProjectPaths = append(c.TrustedProjectPaths, workspace)
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	prov := newMockProvider(toolCallHandler, simpleResponseHandler("done"))
-	mgr := NewManager(ctx, ManagerConfig{
-		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
-		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
-		WorkspaceRoot:   workspace,
-		MoaCfg:          core.MoaConfig{DisableSandbox: true},
-		SessionBaseDir:  t.TempDir(),
-	})
+	// Use the shared helper so its t.Cleanup shuts sessions down (and drains the
+	// async persistence reactors) before t.TempDir removal — otherwise a pending
+	// autosave races RemoveAll and flakes under -race ("directory not empty").
+	mgr := newTestManagerWithRoot(t, ctx, prov, workspace)
 
 	httpSrv := httptest.NewServer(NewServer(mgr))
 	defer httpSrv.Close()
@@ -839,7 +845,7 @@ func TestCancelEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	sess, _ := mgr.CreateSession(CreateOpts{CWD: dir})
-	_, _ = mgr.Send(sess.ID, "block")
+	_, _ = mgr.Send(sess.ID, "block", nil)
 
 	pollUntil(t, 2*time.Second, "running", func() bool {
 		sess.mu.Lock()
@@ -938,7 +944,7 @@ func TestManagerShutdown_PersistsLastTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.Send(sess.ID, "question"); err != nil {
+	if _, err := mgr.Send(sess.ID, "question", nil); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 5*time.Second, "idle after send", func() bool {
@@ -989,7 +995,7 @@ func TestManagerShutdown_WaitsForActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.Send(sess.ID, "question"); err != nil {
+	if _, err := mgr.Send(sess.ID, "question", nil); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, time.Second, "run active", func() bool {

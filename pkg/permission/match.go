@@ -22,14 +22,47 @@ import (
 // it (a broader match only denies more), so the chaining guard is skipped for
 // deny lists.
 func matchPolicy(patterns []string, toolName string, args map[string]any, isDeny bool) bool {
-	primary := primaryArg(toolName, args)
+	primaries := primaryArgs(toolName, args)
 
-	for _, pat := range patterns {
-		if matchPattern(pat, toolName, primary, isDeny) {
-			return true
+	// Tools with no matchable argument: only bare tool-name patterns apply.
+	if len(primaries) == 0 {
+		for _, pat := range patterns {
+			if matchPattern(pat, toolName, "", isDeny) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if isDeny {
+		// Any forbidden target blocks the whole call. For a multi-file tool
+		// (apply_patch) that means a single denied path stops the entire patch.
+		for _, pat := range patterns {
+			for _, p := range primaries {
+				if matchPattern(pat, toolName, p, true) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Allow: auto-approve only when EVERY target is covered by some pattern —
+	// otherwise a multi-file patch touching one allowed path would smuggle in
+	// writes to unlisted paths. For single-arg tools this is the same as before.
+	for _, p := range primaries {
+		covered := false
+		for _, pat := range patterns {
+			if matchPattern(pat, toolName, p, false) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // matchPattern checks a single pattern against a tool call.
@@ -123,7 +156,8 @@ func parsePattern(pattern string) (tool, argPat string, hasArg bool) {
 	return tool, rest, true
 }
 
-// primaryArg extracts the most relevant argument for matching.
+// primaryArg extracts the single most relevant argument for matching. Multi-path
+// tools (apply_patch) have no single primary arg — use primaryArgs for matching.
 func primaryArg(toolName string, args map[string]any) string {
 	if args == nil {
 		return ""
@@ -133,12 +167,54 @@ func primaryArg(toolName string, args map[string]any) string {
 		if cmd, ok := args["command"].(string); ok {
 			return cmd
 		}
-	case "write", "edit", "read":
+	// Path-scoped tools: the file/dir they operate on. Without these entries
+	// primaryArg returned "" and no arg-scoped deny/allow rule could match them.
+	case "write", "edit", "read", "grep", "find", "ls", "multiedit", "send_file":
 		if path, ok := args["path"].(string); ok {
 			return path
 		}
+	case "fetch_content":
+		if u, ok := args["url"].(string); ok {
+			return u
+		}
 	}
 	return ""
+}
+
+// primaryArgs returns every argument a deny/allow rule can match against. Most
+// tools have exactly one (see primaryArg); apply_patch touches multiple files,
+// so each target path embedded in the patch is returned for path scoping.
+func primaryArgs(toolName string, args map[string]any) []string {
+	if strings.EqualFold(toolName, "apply_patch") {
+		return patchTargetPaths(args)
+	}
+	if p := primaryArg(toolName, args); p != "" {
+		return []string{p}
+	}
+	return nil
+}
+
+// patchTargetPaths extracts every file path an apply_patch call would touch by
+// scanning the *** Begin Patch markers. A single primaryArg cannot represent a
+// multi-file patch, so deny/allow path rules need the full set.
+func patchTargetPaths(args map[string]any) []string {
+	text, ok := args["patch"].(string)
+	if !ok {
+		return nil
+	}
+	markers := []string{"*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"}
+	var paths []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		for _, m := range markers {
+			if strings.HasPrefix(line, m) {
+				if p := strings.TrimSpace(strings.TrimPrefix(line, m)); p != "" {
+					paths = append(paths, p)
+				}
+			}
+		}
+	}
+	return paths
 }
 
 // GenerateAllowPattern creates an allow pattern for the "always allow" shortcut.

@@ -32,7 +32,7 @@ la otra atrás: eso genera divergencia y deuda.
 ## Convenciones
 
 - Cambios quirúrgicos: toca solo lo necesario, no refactorices lo que no está roto.
-- La ruta `serve` NO tiene auth propia; el límite de seguridad es Tailscale. Nunca exponer el puerto a Internet.
+- La ruta `serve` no tiene auth por defecto; el límite de seguridad recomendado sigue siendo Tailscale/localhost. Existe auth opt-in con `--token`/`MOA_SERVE_TOKEN` (cookie de sesión + check de `Host` anti-rebinding + CSRF por header) — ver `docs/serve.md#security`. Nunca exponer el puerto a Internet sin `--token`.
 - Al añadir un evento/estado que el frontend debe ver, sigue el patrón existente end-to-end
   (`ContextUpdated`: evento en `pkg/bus` → reactor en `handlers.go` → traducción en `pkg/serve/ws.go` →
   `case` en `frontend/src/api.js` → handler en `ws-handlers.js` → componente). Para datos **globales**

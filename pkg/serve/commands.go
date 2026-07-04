@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
@@ -22,6 +23,7 @@ var commandRegistry = map[string]commandHandler{
 	"model":       cmdModel,
 	"thinking":    cmdThinking,
 	"plan":        cmdPlan,
+	"goal":        cmdGoal,
 	"tasks":       cmdTasks,
 	"permissions": cmdPermissions,
 	"undo":        cmdUndo,
@@ -60,14 +62,18 @@ func requireIdle(sess *ManagedSession) error {
 	return nil
 }
 
-func cmdClear(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+func cmdClear(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if err := sess.runtime.Bus.Execute(bus.ClearSession{}); err != nil {
-		return &CommandResult{OK: false, Message: err.Error()}, nil
+	// "clear context" must not destroy data: start a fresh session and leave the
+	// previous one intact on disk (recoverable from the session list), matching
+	// the TUI. The frontend switches the tile to NewSessionID.
+	newSess, err := m.CreateSession(CreateOpts{CWD: sess.CWD})
+	if err != nil {
+		return &CommandResult{OK: false, Message: "could not start a new conversation: " + err.Error()}, nil
 	}
-	return &CommandResult{OK: true, Message: "conversation cleared"}, nil
+	return &CommandResult{OK: true, Message: "started a new conversation", NewSessionID: newSess.ID}, nil
 }
 
 func cmdCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
@@ -135,6 +141,52 @@ func cmdPlan(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 	}
 
 	return &CommandResult{OK: true, Message: "plan mode: " + planInfo.Mode}, nil
+}
+
+func cmdGoal(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
+	b := sess.runtime.Bus
+
+	if len(args) == 0 || args[0] == "status" {
+		info, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
+		if !info.Active {
+			return &CommandResult{OK: true, Message: "no goal active — start one with /goal <objective>"}, nil
+		}
+		msg := fmt.Sprintf("goal active: %s (iteration %d", info.Objective, info.Iteration)
+		if info.MaxIterations > 0 {
+			msg += fmt.Sprintf("/%d", info.MaxIterations)
+		}
+		if info.Stalled > 0 {
+			msg += fmt.Sprintf(", stalled %d", info.Stalled)
+		}
+		return &CommandResult{OK: true, Message: msg + ")"}, nil
+	}
+
+	if args[0] == "stop" {
+		if err := b.Execute(bus.ExitGoal{}); err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		return &CommandResult{OK: true, Message: "goal stopped"}, nil
+	}
+
+	// Anything else is the objective (plus optional knobs) to start.
+	if err := requireIdle(sess); err != nil {
+		return nil, err
+	}
+	gc, err := goal.ParseCommand(strings.Join(args, " "))
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error() + " — usage: /goal <objective> " + goal.FlagsUsage}, nil
+	}
+	if err := b.Execute(bus.EnterGoal{
+		Objective:     gc.Objective,
+		CompactAt:     gc.CompactAt,
+		VerifierSpec:  gc.VerifierSpec,
+		MaxIterations: gc.MaxIterations,
+		MaxStalled:    gc.MaxStalled,
+		Timeout:       gc.Timeout,
+	}); err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
+	return &CommandResult{OK: true, Message: "goal started: " + gc.Objective}, nil
 }
 
 func cmdTasks(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
@@ -212,7 +264,7 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 	if err := sess.runtime.Bus.Execute(bus.UndoLastChange{}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
-	return &CommandResult{OK: true, Message: "⏪ Undo applied"}, nil
+	return &CommandResult{OK: true, Message: "⏪ Undo: reverted file edits from the last turn (bash/MCP/subagent changes are not tracked)"}, nil
 }
 
 // cmdVerify runs the project's verification checks, mirroring the TUI's

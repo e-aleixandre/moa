@@ -39,6 +39,7 @@ func (s *Session) RuntimeConfig() bus.RuntimeConfig {
 		Agent:            s.Agent,
 		TaskStore:        s.TaskStore,
 		PlanMode:         s.PlanMode,
+		Goal:             s.Goal,
 		Gate:             s.Gate,
 		PathPolicy:       s.PathPolicy,
 		AskBridge:        s.AskBridge,

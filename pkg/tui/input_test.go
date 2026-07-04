@@ -1,8 +1,30 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 )
+
+// T-A4: cursor byte offset must be correct with double-width runes and soft-wrap.
+
+func TestCursorByteOffset_WideRunes(t *testing.T) {
+	m := newInput()
+	m.textarea.SetValue("日本語x") // 3 three-byte CJK runes + 1 ASCII byte
+	m.textarea.SetCursor(3)        // cursor after the 3 wide runes, before 'x'
+	if got := m.CursorByteOffset(); got != 9 {
+		t.Errorf("CursorByteOffset() = %d, want 9 (3 wide runes × 3 bytes)", got)
+	}
+}
+
+func TestCursorByteOffset_SoftWrap(t *testing.T) {
+	m := newInput()
+	m.textarea.SetWidth(10)
+	m.textarea.SetValue(strings.Repeat("a", 25)) // one logical line wrapped across visual rows
+	m.textarea.SetCursor(20)                      // rune column 20 within the logical line
+	if got := m.CursorByteOffset(); got != 20 {
+		t.Errorf("CursorByteOffset() = %d, want 20", got)
+	}
+}
 
 func TestTrimLastRune(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -42,6 +64,8 @@ func TestParseCommand(t *testing.T) {
 		{"/tasks show all", "tasks show all", true},
 		{"/tasks reset", "tasks reset", true},
 		{"/verify", "verify", true},
+		{"/branch", "branch", true},
+		{"/back", "back", true},
 		{"/unknown", "", false},
 		{"not a command", "", false},
 		{"/etc/passwd", "", false},

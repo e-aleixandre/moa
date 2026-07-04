@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/memory"
@@ -37,6 +38,11 @@ type ToolConfig struct {
 	// the read tool marks files as read and the edit tool warns when
 	// editing files that haven't been read. nil = no tracking.
 	FileTracker *FileTracker
+
+	// BashState, when non-nil, makes the bash tool persist cwd and exported
+	// env across calls (captured via an EXIT trap, re-applied via cmd.Dir/Env).
+	// nil = stateless behavior (previous default).
+	BashState *BashState
 }
 
 // Defaults fills in zero-value fields with defaults.
@@ -111,6 +117,11 @@ func suggestDir(absPath string) string {
 	}
 	return dir
 }
+
+// SafePath resolves path against cfg's workspace/PathPolicy, exactly as the
+// built-in file tools do. Exposed so out-of-package tools (e.g. serve's
+// send_file) enforce the same path boundary as read.
+func SafePath(cfg ToolConfig, path string) (string, error) { return safePath(cfg, path) }
 
 func safePath(cfg ToolConfig, path string) (string, error) {
 	root := cfg.WorkspaceRoot
@@ -252,7 +263,8 @@ func truncateOutput(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
 	}
-	return s[:maxBytes] + "\n\n[output truncated]"
+	// Trim back to a rune boundary so the cut doesn't emit a broken rune.
+	return safeUTF8Truncate(s[:maxBytes]) + "\n\n[output truncated]"
 }
 
 // truncateLines truncates text to maxLines lines, appending a notice if truncated.
@@ -413,9 +425,16 @@ func (b *headTailBuffer) String() string {
 		return b.head.String()
 	}
 	var sb strings.Builder
-	sb.Write(b.head.Bytes())
+	// The head may end mid-rune (filled up to headMax bytes) — trim the partial
+	// trailing rune so we don't emit a broken rune at the head/notice boundary.
+	sb.WriteString(safeUTF8Truncate(b.head.String()))
 
 	tailData := b.tailString()
+	// The tail is a circular byte buffer starting at an arbitrary offset, so it
+	// may begin mid-rune — drop leading continuation bytes.
+	for len(tailData) > 0 && !utf8.RuneStart(tailData[0]) {
+		tailData = tailData[1:]
+	}
 	omitted := b.totalBytes - b.head.Len() - len(tailData)
 	if omitted < 0 {
 		omitted = 0

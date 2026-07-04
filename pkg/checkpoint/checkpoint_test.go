@@ -213,6 +213,63 @@ func TestCommit_NoFiles(t *testing.T) {
 	}
 }
 
+func TestSnapshot_ModifiedSinceCapture_DetectsExternalEdit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+	writeFile(t, path, []byte("original"))
+
+	s := New(20)
+	s.Begin("turn")
+	if err := s.Capture(path); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, []byte("agent-written")) // agent's own edit
+	s.Commit()
+
+	cp, err := s.Undo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := cp.Files[0]
+	if snap.ModifiedSinceCapture() {
+		t.Error("expected file left untouched by agent to not be flagged as modified")
+	}
+
+	// Different size guarantees detection regardless of mtime resolution.
+	writeFile(t, path, []byte("an external edit with a different length"))
+	if !snap.ModifiedSinceCapture() {
+		t.Error("expected external edit after agent's turn to be flagged as modified")
+	}
+}
+
+func TestSnapshot_ModifiedSinceCapture_AgentCreatedFileUntouched(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "new.txt")
+
+	s := New(20)
+	s.Begin("turn")
+	if err := s.Capture(path); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, []byte("created by agent"))
+	s.Commit()
+
+	cp, err := s.Undo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := cp.Files[0]
+	if snap.ModifiedSinceCapture() {
+		t.Error("expected agent-created file to not be flagged as modified")
+	}
+
+	// Different size guarantees detection regardless of mtime resolution.
+	writeFile(t, path, []byte("an external edit with a different length"))
+	if !snap.ModifiedSinceCapture() {
+		t.Error("expected external edit after agent created the file to be flagged as modified")
+	}
+}
+
 func TestDiscard(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.txt")

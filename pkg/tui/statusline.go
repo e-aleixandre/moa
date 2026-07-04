@@ -148,6 +148,7 @@ const (
 	SegmentPermissions = "permissions"
 	SegmentPathScope   = "pathscope"
 	SegmentPlan        = "plan"
+	SegmentGoal        = "goal"
 	SegmentTasks       = "tasks"
 	SegmentCost        = "cost"
 	SegmentCache       = "cache"
@@ -164,6 +165,7 @@ const (
 	PriorityPermissions = 30
 	PriorityPathScope   = 35
 	PriorityPlan        = 40
+	PriorityGoal        = 42
 	PriorityTasks       = 45
 	PriorityUsageExtra  = 33 // prominent: near permissions, since it means real spend
 	PriorityOverage     = 34 // right after extra spend: "you're on extra right now"
@@ -230,6 +232,16 @@ func (sl *StatusLine) UpdatePlanSegment(mode string) {
 	}
 	text := statusLineKeyStyle.Render("plan ") + statusLineValueStyle.Render(mode)
 	sl.Set(SegmentPlan, text, PriorityPlan)
+}
+
+// UpdateGoalSegment sets the goal-mode segment. Pass "" to remove.
+func (sl *StatusLine) UpdateGoalSegment(label string) {
+	if label == "" {
+		sl.Remove(SegmentGoal)
+		return
+	}
+	text := statusLineKeyStyle.Render("goal ") + statusLineValueStyle.Render(label)
+	sl.Set(SegmentGoal, text, PriorityGoal)
 }
 
 // UpdateCostSegment sets the session cost segment.

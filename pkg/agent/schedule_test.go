@@ -168,6 +168,38 @@ func TestSchedule_TwoWritesSamePath_Sequential(t *testing.T) {
 	<-done
 }
 
+func TestSchedule_ReadWaitsForSamePathWriter(t *testing.T) {
+	b1, b2 := newBarrier(), newBarrier()
+	reg := core.NewRegistry()
+	_ = reg.Register(core.Tool{
+		Name: "w", Effect: core.EffectWritePath,
+		LockKey: func(args map[string]any) string { return "/a.go" },
+		Execute: b1.execute,
+	})
+	_ = reg.Register(core.Tool{
+		Name: "r", Effect: core.EffectReadOnly,
+		LockKey: func(args map[string]any) string { return "/a.go" },
+		Execute: b2.execute,
+	})
+
+	cfg := makeCfg(reg)
+	calls := []core.Content{
+		makeToolCall("1", "w", nil),
+		makeToolCall("2", "r", nil),
+	}
+
+	done := runExecuteTools(context.Background(), cfg, calls)
+
+	assertStarted(t, b1, "w")
+	assertNotStarted(t, b2, "r (debe esperar al writer)")
+
+	b1.release()
+	assertStarted(t, b2, "r tras el writer")
+
+	b2.release()
+	<-done
+}
+
 func TestSchedule_TwoWritesDifferentPaths_Parallel(t *testing.T) {
 	b1, b2 := newBarrier(), newBarrier()
 	reg := core.NewRegistry()

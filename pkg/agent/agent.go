@@ -57,7 +57,8 @@ type AgentConfig struct {
 	Model         core.Model
 	SystemPrompt  string
 	ThinkingLevel string
-	MaxTokens     int // Max output tokens per LLM call. 0 = provider default.
+	CacheTTL      string // Prompt-cache TTL: "" (5m default) or "1h". Interactive agent only.
+	MaxTokens     int    // Max output tokens per LLM call. 0 = provider default.
 	Tools         *core.Registry
 	Extensions    []extension.Extension
 	WorkspaceRoot string
@@ -213,6 +214,7 @@ func (a *Agent) Reset() error {
 	if a.cancel != nil {
 		return fmt.Errorf("cannot reset while agent is running")
 	}
+	drainSteer(a.steerCh) // drop steers queued for the old conversation
 	a.state = AgentState{}
 	return nil
 }
@@ -280,6 +282,11 @@ func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLe
 	if a.cancel != nil {
 		return fmt.Errorf("cannot reconfigure while agent is running")
 	}
+	// Preserve New()'s invariant: a live MaxBudget requires pricing, else the
+	// cost guardrail silently stops accumulating and never trips.
+	if a.config.MaxBudget > 0 && model.Pricing == nil {
+		return fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
+	}
 
 	oldProvider := a.config.Model.Provider
 	oldModel := a.config.Model.ID
@@ -310,6 +317,9 @@ func (a *Agent) SetModel(provider core.Provider, model core.Model) error {
 	if a.cancel != nil {
 		return fmt.Errorf("cannot reconfigure while agent is running")
 	}
+	if a.config.MaxBudget > 0 && model.Pricing == nil {
+		return fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
+	}
 
 	oldProvider := a.config.Model.Provider
 	oldModel := a.config.Model.ID
@@ -339,6 +349,38 @@ func (a *Agent) SetThinkingLevel(level string) error {
 	return nil
 }
 
+// SetCompactAt sets the soft compaction threshold in tokens. When >0, the agent
+// compacts once context exceeds this many tokens (clamped to the model window),
+// instead of waiting for the full window. 0 restores the default (window-based)
+// behavior. Returns error if the agent is currently running.
+func (a *Agent) SetCompactAt(tokens int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot reconfigure while agent is running")
+	}
+	// Copy-on-write: the loop shares this pointer, and it may be shared across
+	// agents, so replace it rather than mutating in place.
+	settings := core.DefaultCompactionSettings
+	if a.config.Compaction != nil {
+		settings = *a.config.Compaction
+	}
+	settings.CompactAt = tokens
+	a.config.Compaction = &settings
+	return nil
+}
+
+// CompactAt returns the current soft compaction threshold in tokens (0 = the
+// default window-based behavior).
+func (a *Agent) CompactAt() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.config.Compaction == nil {
+		return 0
+	}
+	return a.config.Compaction.CompactAt
+}
+
 // SetPermissionCheck swaps the permission check function at runtime.
 // nil disables permission checks. Returns error if the agent is running.
 func (a *Agent) SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error {
@@ -356,6 +398,32 @@ func (a *Agent) Model() core.Model {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.config.Model
+}
+
+// MaxBudget returns the current per-run budget ceiling in USD (0 = unlimited).
+func (a *Agent) MaxBudget() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.MaxBudget
+}
+
+// SetMaxBudget changes the per-run budget ceiling. Goal mode uses this to cap
+// each iteration at the remaining total budget. Validated like New(): a positive
+// budget requires model pricing. Returns an error if the agent is running.
+func (a *Agent) SetMaxBudget(v float64) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot change budget while agent is running")
+	}
+	if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return fmt.Errorf("MaxBudget must be >= 0 and finite, got %f", v)
+	}
+	if v > 0 && a.config.Model.Pricing == nil {
+		return fmt.Errorf("MaxBudget requires model pricing")
+	}
+	a.config.MaxBudget = v
+	return nil
 }
 
 // ThinkingLevel returns the current thinking level.
@@ -461,7 +529,23 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 	provider := a.config.Provider
 	settings := a.config.Compaction
 	epoch := a.state.CompactionEpoch
+
+	// Claim the running slot for the whole operation. The compaction LLM call
+	// below takes seconds and runs with the mutex released; without holding the
+	// slot, a concurrent Send()/Run() would pass its own `a.cancel == nil` check,
+	// start a run, and have its appended messages stomped when we write back the
+	// stale snapshot. Setting a.cancel makes execute() return "already running"
+	// and serializes against other Compact() calls.
+	ctx, a.cancel = context.WithCancel(ctx)
+	cancel := a.cancel
 	a.mu.Unlock()
+
+	defer func() {
+		cancel()
+		a.mu.Lock()
+		a.cancel = nil
+		a.mu.Unlock()
+	}()
 
 	if settings == nil {
 		defaults := core.DefaultCompactionSettings
@@ -477,7 +561,7 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel}
 	result, compacted, err := compaction.Compact(
 		ctx, provider, model, streamOpts,
-		msgs, estimate.Tokens, model.MaxInput, *settings,
+		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings,
 	)
 	if err != nil {
 		return nil, err
@@ -508,6 +592,14 @@ func (a *Agent) Steer(msg string) {
 	case a.steerCh <- msg:
 	default:
 	}
+}
+
+// CancelSteer drops all steer messages still queued for inter-step delivery.
+// Used when the user pulls queued steers back into the input to edit them, so
+// the agent doesn't also deliver the originals (double-delivery). Safe to call
+// while running; already-delivered steers cannot be recalled.
+func (a *Agent) CancelSteer() {
+	drainSteer(a.steerCh)
 }
 
 // Enqueue queues a message for post-turn delivery. It will be processed
@@ -570,7 +662,8 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 
 	// Build stream options
 	streamOpts := core.StreamOptions{
-		ThinkingLevel: a.config.ThinkingLevel,
+		ThinkingLevel:  a.config.ThinkingLevel,
+		CacheRetention: a.config.CacheTTL,
 	}
 	if a.config.MaxTokens > 0 {
 		mt := a.config.MaxTokens
@@ -617,6 +710,14 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 			a.mu.Unlock()
 			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
 		}
+	}
+
+	// On abort, discard any steer messages still queued for the now-cancelled
+	// run. Left in the buffered channel they would be drained by the next
+	// Send/Run and injected as a stale user turn — possibly into a different
+	// conversation after Reset.
+	if err != nil {
+		drainSteer(a.steerCh)
 	}
 
 	// On abort: if the last message is a user message with no assistant reply,

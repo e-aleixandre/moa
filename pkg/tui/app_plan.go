@@ -131,7 +131,11 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		return m.sendMessage("Execute the plan saved at " + info.PlanFile + ". Read the plan file first, then create tasks and begin implementing.")
 
 	case planActionReview:
-		_ = b.Execute(bus.StartPlanReview{})
+		if err := b.Execute(bus.StartPlanReview{}); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			m.updateViewport()
+			return m, nil
+		}
 		m.input.SetEnabled(false)
 		m.status.SetText("reviewing plan...")
 		// Build review args for the tool block display.
@@ -297,6 +301,11 @@ func (m appModel) handlePlanReviewResult(msg planReviewResultMsg) (tea.Model, te
 	}
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{})
 	if planInfo.Mode != "reviewing" {
+		// Review came back but we're no longer reviewing (plan mode exited or the
+		// review never started). Release the UI so the input isn't stuck disabled
+		// and renderTick stops re-arming on a dangling reviewStreamCh.
+		m.input.SetEnabled(true)
+		m.reviewStreamCh = nil
 		return m, nil
 	}
 	// Set flag BEFORE FinishPlanReview so that the resulting PlanModeChanged("ready")

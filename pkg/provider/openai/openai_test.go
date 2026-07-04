@@ -81,6 +81,49 @@ func TestStream_TextResponse(t *testing.T) {
 	}
 }
 
+func TestStream_UsageSplitsCachedAndModel(t *testing.T) {
+	// Responses API input_tokens (100) INCLUDES cached (80). We must record
+	// Input=20 (non-cached) + CacheRead=80, and Model from response.model
+	// ("gpt-5.5") — not response.id ("resp_9").
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		_, _ = fmt.Fprint(w,
+			sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_9","role":"assistant","content":[{"type":"output_text","text":""}],"status":"in_progress"}}`)+
+				sseEvent(`{"type":"response.output_text.delta","delta":"ok"}`)+
+				sseEvent(`{"type":"response.output_item.done","item":{"type":"message","id":"msg_9","role":"assistant","content":[{"type":"output_text","text":"ok"}],"status":"completed"}}`)+
+				sseEvent(`{"type":"response.completed","response":{"id":"resp_9","model":"gpt-5.5","status":"completed","usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":80}}}}`),
+		)
+	}))
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.5"},
+		Messages: []core.Message{core.NewUserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var finalMsg *core.Message
+	for event := range ch {
+		if event.Type == core.ProviderEventDone {
+			finalMsg = event.Message
+		}
+	}
+	if finalMsg == nil || finalMsg.Usage == nil {
+		t.Fatal("expected final message with usage")
+	}
+	if finalMsg.Usage.Input != 20 || finalMsg.Usage.CacheRead != 80 {
+		t.Fatalf("expected Input=20 CacheRead=80, got Input=%d CacheRead=%d",
+			finalMsg.Usage.Input, finalMsg.Usage.CacheRead)
+	}
+	if finalMsg.Model != "gpt-5.5" {
+		t.Fatalf("expected Model=gpt-5.5, got %q", finalMsg.Model)
+	}
+}
+
 func TestStream_ToolCallResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

@@ -8,12 +8,24 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
-// DefaultModelSpec is the cheap, fast model used for title generation.
+// DefaultModelSpec is the cheap, fast model used for title generation when the
+// session's provider has no cheaper same-vendor option (Anthropic).
 const DefaultModelSpec = "haiku"
+
+// cheapModelSpecFor returns a cheap title-generation model on the SAME provider
+// as the session, so an OpenAI session's transcript isn't shipped to Anthropic
+// (a different vendor) just to make a title. Falls back to the Anthropic default.
+func cheapModelSpecFor(provider string) string {
+	if provider == "openai" {
+		return "gpt-5.4-mini"
+	}
+	return DefaultModelSpec
+}
 
 // MaxTitleLen caps the generated title length (in runes).
 const MaxTitleLen = 60
@@ -40,7 +52,7 @@ type ProviderFactory func(core.Model) (core.Provider, error)
 // conversation messages. It uses a cheap model (DefaultModelSpec) and returns
 // the cleaned title. Returns an error if the model can't be resolved, the
 // provider can't be built, or the call produces no usable text.
-func Generate(ctx context.Context, factory ProviderFactory, msgs []core.AgentMessage) (string, error) {
+func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Model, msgs []core.AgentMessage) (string, error) {
 	if factory == nil {
 		return "", fmt.Errorf("autotitle: nil provider factory")
 	}
@@ -49,9 +61,10 @@ func Generate(ctx context.Context, factory ProviderFactory, msgs []core.AgentMes
 		return "", fmt.Errorf("autotitle: no conversation content")
 	}
 
-	model, ok := core.ResolveModel(DefaultModelSpec)
+	spec := cheapModelSpecFor(sessionModel.Provider)
+	model, ok := core.ResolveModel(spec)
 	if !ok {
-		return "", fmt.Errorf("autotitle: cannot resolve model %q", DefaultModelSpec)
+		return "", fmt.Errorf("autotitle: cannot resolve model %q", spec)
 	}
 	prov, err := factory(model)
 	if err != nil {
@@ -122,6 +135,10 @@ func buildPrompt(msgs []core.AgentMessage) string {
 		}
 		if b.Len()+len(text) > maxChars {
 			text = text[:max(0, maxChars-b.Len())]
+			// Don't split a multibyte rune at the budget boundary.
+			for len(text) > 0 && !utf8.ValidString(text) {
+				text = text[:len(text)-1]
+			}
 		}
 		fmt.Fprintf(&b, "%s: %s\n", role, strings.TrimSpace(text))
 		if b.Len() >= maxChars {

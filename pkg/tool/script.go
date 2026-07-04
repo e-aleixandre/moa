@@ -117,8 +117,17 @@ func newScriptTool(d ScriptDef, cwd string) core.Tool {
 				cmd = exec.CommandContext(cmdCtx, "bash", "-c", d.Command)
 			}
 			cmd.Dir = cwd
+			// Run in its own process group with a bounded post-kill wait, like the
+			// bash tool: on timeout, kill the whole tree (not just the parent) so
+			// grandchildren don't linger, and cap how long CombinedOutput blocks
+			// past the deadline if a grandchild holds the pipes open.
+			setProcGroup(cmd)
+			cmd.WaitDelay = 5 * time.Second
 
 			out, err := cmd.CombinedOutput()
+			if cmdCtx.Err() == context.DeadlineExceeded {
+				killProcGroup(cmd) // reap any grandchildren that ignored SIGTERM
+			}
 			output := string(out)
 			if len(output) > 50000 {
 				// Truncate at rune boundaries to avoid producing invalid UTF-8.

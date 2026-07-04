@@ -244,7 +244,7 @@ func TestEstimateTokens_ToolResult(t *testing.T) {
 
 func TestEstimateContextTokens_NoUsage(t *testing.T) {
 	msgs := []AgentMessage{
-		WrapMessage(NewUserMessage("hello world")),          // 11 chars → 3
+		WrapMessage(NewUserMessage("hello world")),                                            // 11 chars → 3
 		WrapMessage(Message{Role: "assistant", Content: []Content{TextContent("hi there!")}}), // 9 chars → 3
 	}
 	est := EstimateContextTokens(msgs, "system prompt here", nil, 0)
@@ -363,6 +363,54 @@ func TestShouldCompact_ReserveExceedsWindow(t *testing.T) {
 	s := CompactionSettings{Enabled: true, ReserveTokens: 300_000}
 	if ShouldCompact(100_000, 200_000, s) {
 		t.Fatal("reserve >= window should return false")
+	}
+}
+
+func TestEffectiveWindow(t *testing.T) {
+	// CompactAt unset → full model window.
+	if got := (CompactionSettings{}).EffectiveWindow(1_000_000); got != 1_000_000 {
+		t.Fatalf("CompactAt=0 should use maxInput, got %d", got)
+	}
+	// CompactAt below the window → caps to CompactAt.
+	if got := (CompactionSettings{CompactAt: 260_000}).EffectiveWindow(1_000_000); got != 260_000 {
+		t.Fatalf("CompactAt<maxInput should cap, got %d", got)
+	}
+	// CompactAt above the window → clamps to maxInput (never exceeds it).
+	if got := (CompactionSettings{CompactAt: 260_000}).EffectiveWindow(200_000); got != 200_000 {
+		t.Fatalf("CompactAt>maxInput should clamp to maxInput, got %d", got)
+	}
+	// CompactAt equal to the window → maxInput.
+	if got := (CompactionSettings{CompactAt: 200_000}).EffectiveWindow(200_000); got != 200_000 {
+		t.Fatalf("CompactAt==maxInput should use maxInput, got %d", got)
+	}
+}
+
+func TestEffectiveWindow_FloorsThrashBand(t *testing.T) {
+	// A CompactAt in the degenerate band [Reserve, Reserve+KeepRecent] would leave
+	// the threshold so low that the post-compaction tail still exceeds it →
+	// compaction every turn. EffectiveWindow must floor it.
+	s := CompactionSettings{ReserveTokens: 16384, KeepRecent: 20000, CompactAt: 30000}
+	floor := 16384 + 20000 + compactionTailMargin
+	got := s.EffectiveWindow(1_000_000)
+	if got != floor {
+		t.Fatalf("thrash-band CompactAt should floor to %d, got %d", floor, got)
+	}
+	// The retained tail (KeepRecent + ~summary) must sit below the threshold.
+	threshold := got - s.ReserveTokens
+	if retained := s.KeepRecent + 2000; retained >= threshold {
+		t.Fatalf("retained tail %d must be < threshold %d to avoid thrash", retained, threshold)
+	}
+}
+
+func TestEffectiveWindow_DrivesShouldCompact(t *testing.T) {
+	s := CompactionSettings{Enabled: true, ReserveTokens: 16384, KeepRecent: 20000, CompactAt: 260_000}
+	// 300K tokens on a 1M model: no compaction by the raw window, but the soft
+	// threshold (260K) fires.
+	if ShouldCompact(300_000, 1_000_000, s) {
+		t.Fatal("raw 1M window should not trigger at 300K")
+	}
+	if !ShouldCompact(300_000, s.EffectiveWindow(1_000_000), s) {
+		t.Fatal("soft 260K threshold should trigger at 300K")
 	}
 }
 

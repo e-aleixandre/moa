@@ -159,12 +159,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			estimate := core.EstimateContextTokens(
 				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
-			if core.ShouldCompact(estimate.Tokens, cfg.model.MaxInput, *cfg.compaction) {
+			window := cfg.compaction.EffectiveWindow(cfg.model.MaxInput)
+			if core.ShouldCompact(estimate.Tokens, window, *cfg.compaction) {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
 
 				result, compacted, err := compaction.Compact(
 					ctx, cfg.provider, cfg.model, cfg.streamOpts,
-					cfg.state.Messages, estimate.Tokens, cfg.model.MaxInput, *cfg.compaction,
+					cfg.state.Messages, estimate.Tokens, window, *cfg.compaction,
 				)
 				if err != nil {
 					// Non-fatal: log and continue with full context.
@@ -364,14 +365,25 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 						partialThinking += event.Delta
 					case core.ProviderEventDone:
 						if event.Message != nil {
-							return event.Message, nil
+							// Capture the complete message but keep draining; do not
+							// early-return. finalMsg is preferred below over the
+							// truncated partial.
+							finalMsg = event.Message
 						}
 					}
 				case <-drainTimer.C:
 					break drain
 				}
 			}
-			// Build a partial message from accumulated deltas.
+			// A cancelled turn always returns ctx.Err() so the caller stops and
+			// does NOT execute tool calls. Prefer the complete message if one
+			// was received — either via the normal path before cancellation or
+			// during the drain above; the top-level select is a race, so relying
+			// on which branch consumed the final Done would be non-deterministic.
+			if finalMsg != nil {
+				return finalMsg, ctx.Err()
+			}
+			// Otherwise fall back to a partial message from accumulated deltas.
 			if partialText != "" || partialThinking != "" {
 				partial := &core.Message{Role: "assistant"}
 				if partialThinking != "" {
@@ -589,11 +601,38 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 
 		switch effect {
 		case core.EffectReadOnly:
+			// A read targeting a specific path (LockKey set) must not run
+			// concurrently with a writer or shell touching that same path, or it
+			// could observe a half-written file. It chains on the path like a
+			// writer; path-less reads still run fully in parallel.
+			var rKey string
+			if t.LockKey != nil {
+				rKey = t.LockKey(slots[i].tc.Arguments)
+			}
+			if rKey == "" {
+				allDone.Add(1)
+				go func(idx int) {
+					defer allDone.Done()
+					slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+				}(i)
+				break
+			}
+			done := make(chan struct{})
+			waitForPath := pathDone[rKey]
+			waitForShell := lastShell
+			pathDone[rKey] = done
 			allDone.Add(1)
-			go func(idx int) {
+			go func(idx int, wPath, wShell <-chan struct{}) {
 				defer allDone.Done()
+				defer close(done)
+				if wPath != nil {
+					<-wPath
+				}
+				if wShell != nil {
+					<-wShell
+				}
 				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
-			}(i)
+			}(i, waitForPath, waitForShell)
 
 		case core.EffectWritePath:
 			done := make(chan struct{})

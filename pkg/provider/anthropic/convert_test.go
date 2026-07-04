@@ -158,6 +158,20 @@ func TestBuildRequestBody_WithThinkingManualLegacy(t *testing.T) {
 	}
 }
 
+func TestResolveThinking_XHighNotDisabled(t *testing.T) {
+	// Regression: "xhigh" (the max UI level) fell through to default and returned
+	// nil on manual-thinking models (Haiku 4.5, Fable) — disabling thinking
+	// entirely, strictly less than "high". It must enable at least "high".
+	high := resolveThinking(core.Request{Options: core.StreamOptions{ThinkingLevel: "high"}})
+	xhigh := resolveThinking(core.Request{Options: core.StreamOptions{ThinkingLevel: "xhigh"}})
+	if high == nil || xhigh == nil {
+		t.Fatalf("high and xhigh must both enable thinking: high=%v xhigh=%v", high, xhigh)
+	}
+	if xhigh.BudgetTokens < high.BudgetTokens {
+		t.Fatalf("xhigh budget (%d) must be >= high budget (%d)", xhigh.BudgetTokens, high.BudgetTokens)
+	}
+}
+
 func TestConvertMessages_ToolResult(t *testing.T) {
 	msgs := []core.Message{
 		core.NewUserMessage("Read the file"),
@@ -412,6 +426,54 @@ func TestCacheBreakpoints_SystemAndTools(t *testing.T) {
 	firstTool := tools[0].(map[string]any)
 	if firstTool["cache_control"] != nil {
 		t.Error("first tool should not have cache_control")
+	}
+}
+
+func TestCacheBreakpoints_TTL(t *testing.T) {
+	newReq := func(retention string) core.Request {
+		return core.Request{
+			Model:    core.Model{ID: "claude-sonnet-4-6"},
+			System:   "You are helpful.",
+			Messages: []core.Message{core.NewUserMessage("Hello")},
+			Tools: []core.ToolSpec{
+				{Name: "bash", Description: "Run commands", Parameters: json.RawMessage(`{"type":"object"}`)},
+			},
+			Options: core.StreamOptions{CacheRetention: retention},
+		}
+	}
+
+	// cacheControlOf extracts the cache_control map from the last system block.
+	cacheControlOf := func(t *testing.T, data []byte) map[string]any {
+		t.Helper()
+		var body map[string]any
+		if err := json.Unmarshal(data, &body); err != nil {
+			t.Fatal(err)
+		}
+		system := body["system"].([]any)
+		lastSys := system[len(system)-1].(map[string]any)
+		cc, ok := lastSys["cache_control"].(map[string]any)
+		if !ok {
+			t.Fatal("last system block should have cache_control")
+		}
+		return cc
+	}
+
+	// 1h retention → ttl set to "1h".
+	data, err := buildRequestBody(newReq("1h"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc := cacheControlOf(t, data); cc["ttl"] != "1h" {
+		t.Errorf("1h retention: cache_control ttl = %v, want 1h", cc["ttl"])
+	}
+
+	// Default (empty) → no ttl key, plain 5-minute ephemeral cache.
+	data, err = buildRequestBody(newReq(""), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc := cacheControlOf(t, data); cc["ttl"] != nil {
+		t.Errorf("default retention: cache_control should have no ttl, got %v", cc["ttl"])
 	}
 }
 

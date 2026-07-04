@@ -46,6 +46,20 @@ type PlanModeInfo struct {
 	ReviewThinkingLevel string // thinking level for plan review
 }
 
+// GetGoal returns the current goal-mode state.
+// Handler returns: GoalInfo
+type GetGoal struct{ SessionID string }
+
+// GoalInfo is the result of GetGoal.
+type GoalInfo struct {
+	Active        bool
+	Objective     string
+	Iteration     int
+	Stalled       int
+	MaxIterations int
+	MaxStalled    int
+}
+
 // GetCompactionEpoch returns the current compaction epoch counter.
 // Handler returns: int
 type GetCompactionEpoch struct{ SessionID string }

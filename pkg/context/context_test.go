@@ -5,9 +5,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
+
+func TestBuildSystemPrompt_CustomToolDescRuneBoundary(t *testing.T) {
+	// A custom tool (name unknown to toolSnippets) with a long multibyte
+	// description exercises the 200-byte truncation path.
+	tools := []core.ToolSpec{
+		{Name: "customtool", Description: strings.Repeat("é", 300)},
+	}
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
+	if !utf8.ValidString(prompt) {
+		t.Errorf("truncated tool description must not split a rune, got invalid UTF-8")
+	}
+}
 
 func TestLoadAgentsMD_Global(t *testing.T) {
 	globalDir := t.TempDir()

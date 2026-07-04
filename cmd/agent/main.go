@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"runtime/pprof"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -79,7 +80,7 @@ func main() {
 
 	p := flag.String("p", "", "Prompt text or @file to read prompt from file")
 	modelFlag := flag.String("model", "sonnet", "Model: alias (sonnet, opus, codex) or provider/model-id")
-	thinking := flag.String("thinking", "medium", "Thinking level: off, minimal, low, medium, high")
+	thinking := flag.String("thinking", "medium", "Thinking level: off, low, medium, high, xhigh")
 	maxTurns := flag.Int("max-turns", 0, "Maximum agent turns (0 = unlimited, default from config.json)")
 	maxBudget := flag.Float64("max-budget", -1, "Max USD spend per run (0 = unlimited, default: from config)")
 	continueFlag := flag.Bool("continue", false, "Resume the most recent session")
@@ -186,6 +187,10 @@ func main() {
 
 	// Load config (pre-bootstrap) for MCP trust prompt — CLI-specific interactive flow.
 	moaCfg := core.LoadMoaConfig(cwd)
+	// Gate repo-local .moa/config.json + .moa/tools/* behind a trust prompt
+	// (before the MCP prompt: a trust grant reloads config, which would otherwise
+	// drop the project MCP servers merged just below).
+	promptProjectConfigTrust(&moaCfg, cwd, promptContent)
 	loadProjectMCPServers(&moaCfg, cwd, promptContent)
 
 	// Resolve budget: flag wins (including explicit 0), else config.
@@ -413,7 +418,10 @@ func main() {
 		}
 
 		// Attach persister BEFORE bus restore so state changes are persisted.
-		if sessionStore != nil && persistedSess != nil {
+		// Attach even in browser mode (persistedSess may be nil): the persister
+		// is nil-safe until the first session is opened, at which point
+		// LoadSession rebinds it via SessionRebinder.
+		if sessionStore != nil {
 			rt.AttachPersister(&tuiPersister{store: sessionStore, session: persistedSess})
 		}
 
@@ -555,13 +563,27 @@ func main() {
 	}
 }
 
-// tuiPersister implements bus.SessionPersister and bus.TreePersister for TUI mode.
+// tuiPersister implements bus.SessionPersister, bus.TreePersister and
+// bus.SessionRebinder for TUI mode. The target session is swappable so a single
+// long-lived runtime can switch sessions (see SessionRuntime.LoadSession).
 type tuiPersister struct {
 	store   session.SessionStore
+	mu      sync.Mutex
 	session *session.Session
 }
 
+func (p *tuiPersister) RebindSession(sess *session.Session) {
+	p.mu.Lock()
+	p.session = sess
+	p.mu.Unlock()
+}
+
 func (p *tuiPersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[string]any) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.session == nil {
+		return nil // no active session yet (browser mode before first open)
+	}
 	p.session.Messages = msgs
 	p.session.CompactionEpoch = epoch
 	p.session.Metadata = meta
@@ -569,6 +591,11 @@ func (p *tuiPersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[st
 }
 
 func (p *tuiPersister) SnapshotTree(entries []session.Entry, leafID string, meta map[string]any) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.session == nil {
+		return nil // no active session yet (browser mode before first open)
+	}
 	p.session.Version = session.SessionVersion
 	p.session.Entries = entries
 	p.session.LeafID = leafID

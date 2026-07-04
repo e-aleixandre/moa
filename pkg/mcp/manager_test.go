@@ -45,6 +45,20 @@ func TestSanitizeToolName_TooLong(t *testing.T) {
 	}
 }
 
+func TestSanitizeToolName_TooLongNoCollision(t *testing.T) {
+	// Two distinct names sharing a >64-char prefix must not collapse into the
+	// same tool (which would silently shadow one of them).
+	a := strings.Repeat("a", 70) + "_one"
+	b := strings.Repeat("a", 70) + "_two"
+	ga, gb := sanitizeToolName(a), sanitizeToolName(b)
+	if len(ga) != 64 || len(gb) != 64 {
+		t.Fatalf("lengths = %d, %d, want 64", len(ga), len(gb))
+	}
+	if ga == gb {
+		t.Errorf("distinct long names collided: both -> %q", ga)
+	}
+}
+
 func TestSanitizeToolName_Empty(t *testing.T) {
 	if got := sanitizeToolName(""); got != "unnamed" {
 		t.Errorf("sanitizeToolName(\"\") = %q, want \"unnamed\"", got)

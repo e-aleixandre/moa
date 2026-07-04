@@ -52,59 +52,125 @@ Format:
 				return core.ErrorResult(err.Error()), nil
 			}
 
-			// Phase B: Apply all staged changes
+			// Phase B: apply all staged changes with all-or-nothing semantics.
+			// Phase A guaranteed the patch computes cleanly, so any failure here
+			// is a filesystem I/O error. We snapshot every touched path before
+			// first writing it and, on failure, restore the filesystem to its
+			// pre-patch state — apply_patch must never leave a half-applied
+			// multi-file change on disk. (Directories created by MkdirAll are
+			// left in place; empty leftover dirs are harmless and removing them
+			// risks deleting pre-existing ones.)
+			type fileSnap struct {
+				existed bool
+				content []byte
+				mode    os.FileMode
+			}
+			snapshots := make(map[string]fileSnap)
+			snapshot := func(p string) error {
+				if _, ok := snapshots[p]; ok {
+					return nil
+				}
+				data, err := os.ReadFile(p)
+				if err != nil {
+					if os.IsNotExist(err) {
+						snapshots[p] = fileSnap{existed: false}
+						return nil
+					}
+					return err
+				}
+				snapshots[p] = fileSnap{existed: true, content: data, mode: fileModeOr(p, 0o644)}
+				return nil
+			}
+			rollback := func() {
+				for p, s := range snapshots {
+					if s.existed {
+						_ = atomicWriteFile(p, s.content, s.mode)
+					} else {
+						_ = os.Remove(p)
+					}
+				}
+			}
+
 			var summary []string
-			for _, s := range staged {
-				if cfg.BeforeWrite != nil && s.action != actionDelete {
-					if err := cfg.BeforeWrite(s.path); err != nil {
-						return core.ErrorResult(fmt.Sprintf("checkpoint %s: %v", s.path, err)), nil
+			apply := func() error {
+				for _, s := range staged {
+					if err := snapshot(s.path); err != nil {
+						return fmt.Errorf("snapshot %s: %v", s.path, err)
 					}
-				}
-
-				switch s.action {
-				case actionAdd, actionUpdate:
-					// Ensure parent directory exists
-					dir := filepath.Dir(s.path)
-					if err := os.MkdirAll(dir, 0o755); err != nil {
-						return core.ErrorResult(fmt.Sprintf("mkdir %s: %v", dir, err)), nil
-					}
-					// Write atomically, preserving the existing file's mode.
-					if err := atomicWriteFile(s.path, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
-						return core.ErrorResult(fmt.Sprintf("write %s: %v", s.path, err)), nil
-					}
-
-				case actionDelete:
-					if cfg.BeforeWrite != nil {
-						if err := cfg.BeforeWrite(s.path); err != nil {
-							return core.ErrorResult(fmt.Sprintf("checkpoint %s: %v", s.path, err)), nil
+					if s.action == actionMove {
+						if err := snapshot(s.moveTo); err != nil {
+							return fmt.Errorf("snapshot %s: %v", s.moveTo, err)
 						}
 					}
-					if err := os.Remove(s.path); err != nil {
-						return core.ErrorResult(fmt.Sprintf("delete %s: %v", s.path, err)), nil
-					}
 
-				case actionMove:
-					// Write new file
-					dir := filepath.Dir(s.moveTo)
-					if err := os.MkdirAll(dir, 0o755); err != nil {
-						return core.ErrorResult(fmt.Sprintf("mkdir %s: %v", dir, err)), nil
-					}
-					// Preserve the original file's mode (moveTo doesn't exist yet).
-					if err := atomicWriteFile(s.moveTo, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
-						return core.ErrorResult(fmt.Sprintf("write %s: %v", s.moveTo, err)), nil
-					}
-					// Remove old file
-					if cfg.BeforeWrite != nil {
+					if cfg.BeforeWrite != nil && s.action != actionDelete {
 						if err := cfg.BeforeWrite(s.path); err != nil {
-							return core.ErrorResult(fmt.Sprintf("checkpoint %s: %v", s.path, err)), nil
+							return fmt.Errorf("checkpoint %s: %v", s.path, err)
 						}
 					}
-					if err := os.Remove(s.path); err != nil {
-						return core.ErrorResult(fmt.Sprintf("delete old %s: %v", s.path, err)), nil
-					}
-				}
 
-				summary = append(summary, s.label)
+					switch s.action {
+					case actionAdd, actionUpdate:
+						// Ensure parent directory exists
+						dir := filepath.Dir(s.path)
+						if err := os.MkdirAll(dir, 0o755); err != nil {
+							return fmt.Errorf("mkdir %s: %v", dir, err)
+						}
+						// Write atomically, preserving the existing file's mode.
+						if err := atomicWriteFile(s.path, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
+							return fmt.Errorf("write %s: %v", s.path, err)
+						}
+
+					case actionDelete:
+						if cfg.BeforeWrite != nil {
+							if err := cfg.BeforeWrite(s.path); err != nil {
+								return fmt.Errorf("checkpoint %s: %v", s.path, err)
+							}
+						}
+						if err := os.Remove(s.path); err != nil {
+							return fmt.Errorf("delete %s: %v", s.path, err)
+						}
+
+					case actionMove:
+						// Write new file
+						dir := filepath.Dir(s.moveTo)
+						if err := os.MkdirAll(dir, 0o755); err != nil {
+							return fmt.Errorf("mkdir %s: %v", dir, err)
+						}
+						// If the destination already exists, checkpoint it before
+						// clobbering — a move is not validated to target a free path,
+						// so without this an overwritten file has no snapshot and
+						// /undo cannot restore it (parallels actionAdd/actionUpdate).
+						if cfg.BeforeWrite != nil {
+							if _, err := os.Stat(s.moveTo); err == nil {
+								if err := cfg.BeforeWrite(s.moveTo); err != nil {
+									return fmt.Errorf("checkpoint %s: %v", s.moveTo, err)
+								}
+							}
+						}
+						// Preserve the original file's mode.
+						if err := atomicWriteFile(s.moveTo, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
+							return fmt.Errorf("write %s: %v", s.moveTo, err)
+						}
+						// Remove old file
+						if cfg.BeforeWrite != nil {
+							if err := cfg.BeforeWrite(s.path); err != nil {
+								return fmt.Errorf("checkpoint %s: %v", s.path, err)
+							}
+						}
+						if err := os.Remove(s.path); err != nil {
+							return fmt.Errorf("delete old %s: %v", s.path, err)
+						}
+					}
+
+					summary = append(summary, s.label)
+				}
+				return nil
+			}
+
+			if err := apply(); err != nil {
+				rollback()
+				return core.ErrorResult(err.Error()), nil
 			}
 
 			result := strings.Join(summary, "\n")

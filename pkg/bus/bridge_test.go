@@ -42,6 +42,10 @@ type fakeAgent struct {
 
 	setThinkingErr error
 
+	systemPrompt string
+	compactAt    int
+	maxBudget    float64
+
 	// Send behavior
 	sendCalled  bool
 	sendPrompt  string
@@ -62,6 +66,8 @@ func (f *fakeAgent) Steer(msg string) {
 	defer f.mu.Unlock()
 	f.steered = msg
 }
+
+func (f *fakeAgent) CancelSteer() {}
 
 func (f *fakeAgent) Model() core.Model {
 	f.mu.Lock()
@@ -167,11 +173,42 @@ func (f *fakeAgent) SetPermissionCheck(fn func(ctx context.Context, name string,
 }
 
 func (f *fakeAgent) SetSystemPrompt(prompt string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.systemPrompt = prompt
 	return nil
 }
 
 func (f *fakeAgent) SystemPrompt() string {
-	return ""
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.systemPrompt
+}
+
+func (f *fakeAgent) SetCompactAt(tokens int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compactAt = tokens
+	return nil
+}
+
+func (f *fakeAgent) CompactAt() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.compactAt
+}
+
+func (f *fakeAgent) SetMaxBudget(v float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.maxBudget = v
+	return nil
+}
+
+func (f *fakeAgent) MaxBudget() float64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.maxBudget
 }
 
 func (f *fakeAgent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
@@ -843,12 +880,13 @@ func TestHandler_UndoLastChange(t *testing.T) {
 	if err := store.Capture(filePath); err != nil {
 		t.Fatal(err)
 	}
-	store.Commit()
 
-	// Overwrite the file to simulate agent modification.
+	// Overwrite the file to simulate the agent's write, then commit — matching
+	// the real Capture-then-write-then-Commit order used by the write/edit tools.
 	if err := os.WriteFile(filePath, []byte("modified"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	store.Commit()
 
 	sctx.Checkpoints = store
 	RegisterHandlers(sctx)
@@ -1723,11 +1761,12 @@ func TestHandler_ResolvePermission_PersistsAllow(t *testing.T) {
 		<-respCh
 	}
 
-	// First resolve with an allow pattern persists it.
+	// First resolve with an allow pattern persists it to the project config file.
+	// (Read the file directly, not via LoadMoaConfig: the C1 trust gate would not
+	// merge this untrusted temp dir's config — persistence is what we assert here.)
 	resolve("p1", "Bash(git:*)")
-	merged := core.LoadMoaConfig(sctx.CWD)
-	if !contains(merged.Permissions.Allow, "Bash(git:*)") {
-		t.Fatalf("Permissions.Allow = %v, want to contain Bash(git:*)", merged.Permissions.Allow)
+	if allow := loadProjectAllow(t, cfgPath); !contains(allow, "Bash(git:*)") {
+		t.Fatalf("Permissions.Allow = %v, want to contain Bash(git:*)", allow)
 	}
 
 	// Resolving again with the same pattern does not duplicate it.

@@ -3,6 +3,7 @@
 ## Requirements
 
 - Go 1.25+
+- Node.js/npm (only to build the embedded web UI frontend via `make build`)
 - At least one provider key: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 
 ## Build

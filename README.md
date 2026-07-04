@@ -52,5 +52,5 @@ moa serve               # web UI at http://127.0.0.1:8080
 ```bash
 make build        # compile binary
 make test         # run all tests
-make serve        # build + start web UI
+make serve        # build + start web UI (http://127.0.0.1:8899)
 ```

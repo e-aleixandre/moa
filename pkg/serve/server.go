@@ -66,6 +66,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/models", handleListModels())
+	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
@@ -85,6 +86,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/branch", handleBranch(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/branches", handleListBranches(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
@@ -106,7 +108,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	}
 	mux.Handle("GET /", staticHandler)
 
-	handler := csrfMiddleware(mux)
+	handler := csrfMiddleware(bodyTimeoutMiddleware(mux))
 	// Token auth (when configured) sits under the Host check but above CSRF, so
 	// it also guards the WebSocket, push, and static routes via the cookie.
 	if o.token != "" {
@@ -115,6 +117,23 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
 	return hostMiddleware(o.allowedHosts, handler)
+}
+
+// bodyTimeoutMiddleware bounds how long a request body may take to arrive,
+// closing the slowloris-on-body hole: headers pass ReadHeaderTimeout, then the
+// body is dribbled to pin a goroutine indefinitely. WebSocket upgrades are
+// exempt — they are long-lived and manage their own deadlines — so this does not
+// sever them, which a global http.Server.ReadTimeout would. The deadline governs
+// only reads from the client, so streaming (SSE) responses are unaffected.
+func bodyTimeoutMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			// Best-effort: SetReadDeadline is unsupported on a few ResponseWriter
+			// wrappers; ignore the error and proceed without a deadline.
+			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authCookieName holds the shared token once a client has authenticated via
@@ -294,22 +313,27 @@ func handleDeleteSession(mgr *Manager) http.HandlerFunc {
 
 func handleSend(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limitBody(w, r, maxJSONBodySize)
+		limitBody(w, r, maxSendBodySize)
 		var body struct {
-			Text string `json:"text"`
+			Text        string       `json:"text"`
+			Attachments []Attachment `json:"attachments"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if body.Text == "" {
+		if body.Text == "" && len(body.Attachments) == 0 {
 			http.Error(w, "text required", http.StatusBadRequest)
 			return
 		}
-		action, err := mgr.Send(r.PathValue("id"), body.Text)
+		action, err := mgr.Send(r.PathValue("id"), body.Text, body.Attachments)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, ErrAttachmentsWhileRunning):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, ErrBadAttachment):
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
@@ -724,6 +748,7 @@ func handleListCommands() http.HandlerFunc {
 		"permissions": {Description: "Set permission mode", Args: "<yolo|ask|auto>"},
 		"path":        {Description: "Manage path access scope", Args: "[list|add <dir>|rm <dir>|scope workspace|unrestricted]"},
 		"plan":        {Description: "Enter/exit plan mode", Args: "[exit]"},
+		"goal":        {Description: "Autonomous maker→verifier loop toward an objective", Args: "<objective> [flags]|stop|status"},
 		"tasks":       {Description: "View/manage tasks", Args: "[done <id> | reset]"},
 		"undo":        {Description: "Undo last file change"},
 		"verify":      {Description: "Run verification checks"},
@@ -897,6 +922,10 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 }
 
 const maxJSONBodySize = 1 << 20
+
+// maxSendBodySize bounds POST /api/sessions/{id}/send, which may carry base64
+// attachments inline (see attachments.go) — much larger than other JSON bodies.
+const maxSendBodySize = 25 << 20
 
 func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)

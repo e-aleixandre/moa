@@ -27,6 +27,7 @@ export function toolVerb(name) {
   if (n === 'fetch_content')                 return { verb: 'fetch',  cls: 'fetch' };
   if (n === 'web_search')                    return { verb: 'search', cls: 'search' };
   if (n === 'ask_user')                      return { verb: '❓ questions', cls: 'ask-user' };
+  if (n === 'send_file')                     return { verb: '📤 send', cls: 'send-file' };
   if (n === 'subagent')                      return { verb: '⚡ subagent', cls: 'subagent' };
   return { verb: name, cls: '' };
 }
@@ -40,6 +41,10 @@ export function toolPath(name, args) {
 
   if (n === 'read' || n === 'write' || n === 'edit' || n === 'ls')
     return a.path || '';
+  if (n === 'send_file') {
+    const p = a.path || '';
+    return p.length > 80 ? p.split('/').pop() : p;
+  }
   if (n === 'bash')
     return shortenCmd(a.command || '');
   if (n === 'grep' || n === 'find')
@@ -95,6 +100,10 @@ export function toolPreview(name, args, result, status) {
 
   // ask_user is rendered by AskUserPreview component — skip here.
   if (n === 'ask_user') return null;
+
+  // send_file is rendered by FileCard component — skip only on success so
+  // errors (e.g. file not found) still show the raw message.
+  if (n === 'send_file' && status === 'done') return null;
 
   // For everything else, show the result
   if (result) return { text: result, kind: 'output' };

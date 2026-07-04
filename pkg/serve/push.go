@@ -41,28 +41,27 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 	}
 	b := sess.runtime.Bus
 
-	// notify shows title (the short action) plus body (the specifics: the
-	// question asked, the tool awaiting approval, the final line, the error).
-	// Empty body falls back to the session title so the notification is never
-	// blank. Payloads are E2E-encrypted to the user's own device, so carrying
-	// the actual content exposes nothing to the push service.
-	notify := func(title, body string) {
+	// notify shows the action as the Title; the Body is only ever the session
+	// title (the "which session"), never the specifics. Notifications land on
+	// the device lock screen and in the OS notification history, so — per the
+	// push.Notification contract — they must not carry prompts, tool
+	// args/commands, paths, diffs, final text or error detail. E2E encryption
+	// hides the payload from the push service but NOT from the lock screen, so
+	// the content is dropped here; open the app to see it.
+	notify := func(title string) {
 		if sess.deleted.Load() {
 			return
 		}
-		if strings.TrimSpace(body) == "" {
-			body = sess.title()
-		}
 		m.pushDispatcher.Notify(push.Notification{
 			Title:     title,
-			Body:      body,
+			Body:      sess.title(),
 			SessionID: sess.ID,
 			Tag:       sess.ID, // coalesce same-session notifications on the device
 		})
 	}
-	notifyIfAway := func(title, body string) {
+	notifyIfAway := func(title string) {
 		if sess.wsConns.Load() == 0 {
-			notify(title, body)
+			notify(title)
 		}
 	}
 
@@ -74,15 +73,11 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 	var runStartNano atomic.Int64
 
 	sess.pushUnsubs = append(sess.pushUnsubs,
-		b.Subscribe(func(e bus.AskUserRequested) {
-			body := ""
-			if len(e.Questions) > 0 {
-				body = pushSummary(e.Questions[0].Text, 140)
-			}
-			notify("moa necesita tu decisión", body)
+		b.Subscribe(func(bus.AskUserRequested) {
+			notify("moa necesita tu decisión")
 		}),
-		b.Subscribe(func(e bus.PermissionRequested) {
-			notify("moa espera tu aprobación", permissionSummary(e.ToolName, e.Args))
+		b.Subscribe(func(bus.PermissionRequested) {
+			notify("moa espera tu aprobación")
 		}),
 		b.Subscribe(func(bus.RunStarted) { runStartNano.Store(time.Now().UnixNano()) }),
 		b.Subscribe(func(e bus.RunEnded) {
@@ -92,39 +87,14 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 			if start := runStartNano.Load(); start != 0 && time.Since(time.Unix(0, start)) < minRunForPush {
 				return // quick answer — not worth a buzz
 			}
-			notifyIfAway("moa terminó", pushSummary(e.FinalText, 140))
+			notifyIfAway("moa terminó")
 		}),
 		b.Subscribe(func(e bus.StateChanged) {
 			if e.State == string(bus.StateError) {
-				notifyIfAway("moa falló", pushSummary(e.Error, 140))
+				notifyIfAway("moa falló")
 			}
 		}),
 	)
-}
-
-// pushSummary condenses text for a notification body: the first non-empty line,
-// trimmed and truncated (on a rune boundary) with an ellipsis.
-func pushSummary(s string, max int) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = strings.TrimSpace(s[:i])
-	}
-	if r := []rune(s); len(r) > max {
-		return strings.TrimSpace(string(r[:max])) + "…"
-	}
-	return s
-}
-
-// permissionSummary describes what a tool wants to do: the tool name plus its
-// most telling string argument (command, path, …), so the notification says
-// "bash: rm -rf build/" instead of a generic "awaiting approval".
-func permissionSummary(toolName string, args map[string]any) string {
-	for _, k := range []string{"command", "file_path", "path", "pattern", "url"} {
-		if v, ok := args[k].(string); ok && strings.TrimSpace(v) != "" {
-			return toolName + ": " + pushSummary(v, 100)
-		}
-	}
-	return toolName
 }
 
 // handlePushVAPIDKey returns the server's VAPID public key so the browser can

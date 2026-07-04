@@ -62,10 +62,17 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 		}
 	}))
 
-	// Watch session context cancellation.
+	// Watch session context cancellation. Also select on r.done so this goroutine
+	// exits when the reactor is cleaned up early (slow-consumer drop, or a WS
+	// reconnect replacing it) instead of leaking until the whole session ends —
+	// each mobile reconnect (30s keepalive anticipates flaps) would otherwise
+	// strand a goroutine plus its 512-slot channel.
 	go func() {
-		<-sessionCtx.Done()
-		r.cleanup()
+		select {
+		case <-sessionCtx.Done():
+			r.cleanup()
+		case <-r.done:
+		}
 	}()
 
 	return r
@@ -135,6 +142,17 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "plan_mode", Data: PlanModeData{
 			Mode: e.Mode, PlanFile: e.PlanFile,
 		}}, true
+	case bus.GoalChanged:
+		return Event{Type: "goal_change", Data: GoalChangeData{
+			Active: e.Active, Objective: e.Objective,
+			Iteration: e.Iteration, Stalled: e.Stalled,
+		}}, true
+	case bus.GoalIterationEnded:
+		return Event{Type: "goal_iteration", Data: GoalIterationData{
+			Iteration: e.Iteration, Satisfied: e.Satisfied, Feedback: e.Feedback,
+		}}, true
+	case bus.GoalEnded:
+		return Event{Type: "goal_end", Data: GoalEndData{Reason: e.Reason}}, true
 	case bus.CommandExecuted:
 		return Event{Type: "command", Data: CommandData{
 			Command: e.Command, Messages: e.Messages,
@@ -258,6 +276,7 @@ func buildInitData(sess *ManagedSession) InitData {
 	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
+	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
 
 	data := InitData{
 		Messages:       msgs,
@@ -299,6 +318,12 @@ func buildInitData(sess *ManagedSession) InitData {
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile
+	}
+	if goalInfo.Active {
+		data.GoalActive = true
+		data.GoalObjective = goalInfo.Objective
+		data.GoalIteration = goalInfo.Iteration
+		data.GoalStalled = goalInfo.Stalled
 	}
 
 	return data

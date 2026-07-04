@@ -15,16 +15,14 @@ const agentsMDFile = "AGENTS.md"
 //  2. Walk: root → ... → cwd/..   (ancestor directories, root first, deepest last)
 //  3. cwd/AGENTS.md               (project-local, highest priority)
 //
-// agentHome defaults to $AGENT_HOME, then ~/.config/agent.
+// agentHome defaults to $MOA_CONFIG_DIR, then ~/.config/moa.
 // Duplicate paths are deduplicated.
 func LoadAgentsMD(cwd, agentHome string) (string, error) {
 	if agentHome == "" {
-		agentHome = os.Getenv("AGENT_HOME")
-	}
-	if agentHome == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			agentHome = filepath.Join(home, ".config", "agent")
+		if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
+			agentHome = dir
+		} else if home, err := os.UserHomeDir(); err == nil {
+			agentHome = filepath.Join(home, ".config", "moa")
 		}
 	}
 

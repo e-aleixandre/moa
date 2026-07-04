@@ -309,6 +309,9 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 		tail = true
 	}
 
+	body = sanitizeTerminalOutput(body)
+	target = sanitizeTerminalOutput(target)
+
 	if body != "" && maxLines > 0 {
 		if tail {
 			header, body = truncateBlockTextTail(body, maxLines)

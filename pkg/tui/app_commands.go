@@ -36,6 +36,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	if cmd == "path" || strings.HasPrefix(cmd, "path ") {
 		return m.handlePathCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "path")))
 	}
+	if cmd == "goal" || strings.HasPrefix(cmd, "goal ") {
+		return m.handleGoalCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "goal")))
+	}
 
 	switch cmd {
 	case "model", "models":
@@ -64,10 +67,20 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "clear":
-		if err := m.runtime.Bus.Execute(bus.ClearSession{}); err != nil {
+		if m.s.running {
 			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: err.Error(),
+				Type: "error", Raw: "Cannot clear while agent is running",
 			})
+			return m, nil
+		}
+		// With a session store, start a FRESH session and leave the previous one
+		// intact on disk (recoverable via the session browser) — "clear context"
+		// must not destroy data. Without a store, reset the in-memory conversation.
+		if m.sessionStore != nil {
+			return m.activateSession(m.newSession())
+		}
+		if err := m.runtime.Bus.Execute(bus.ClearSession{}); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
 			return m, nil
 		}
 		m.s.blocks = m.s.blocks[:0]
@@ -84,10 +97,6 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.statusBar.UpdateCostSegment(0)
 		m.statusBar.UpdateCacheSegment(0)
 		m.s.expanded = false
-		if m.sessionStore != nil && m.session != nil {
-			_ = m.sessionStore.Delete(m.session.ID)
-			m.session = m.newSession()
-		}
 		m.updateViewport()
 		return m, nil
 
@@ -155,7 +164,7 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "⏪ Undo completed"})
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "⏪ Undo: reverted file edits from the last turn (bash, MCP and subagent changes are not tracked)"})
 		m.updateViewport()
 		return m, nil
 
@@ -204,7 +213,7 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyBackspace:
 		m.askPrompt.Backspace()
 		return m, nil
-	case tea.KeyEsc:
+	case tea.KeyEsc, tea.KeyCtrlC:
 		askID := m.askPrompt.askID
 		// Send empty answers (one per question) so the tool doesn't hang.
 		emptyAnswers := make([]string, len(m.askPrompt.questions))
@@ -617,9 +626,11 @@ func (m appModel) handleModelSwitch(spec string) (tea.Model, tea.Cmd) {
 
 	newModel, known := core.ResolveModel(spec)
 	if !known {
-		m.s.pendingStatus = fmt.Sprintf("⚠ Unknown model %q — context management disabled", spec)
+		// An unknown model can't be used via the TUI (SwitchModel rejects it),
+		// so report it honestly and stop instead of implying the switch proceeded.
+		m.s.pendingStatus = fmt.Sprintf("✗ Unknown model %q", spec)
+		return m, nil
 	}
-
 	return m.switchToModel(newModel)
 }
 
@@ -790,16 +801,20 @@ func (m appModel) newSession() *session.Session {
 }
 
 func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
-	// TODO: In full implementation, switchRuntime would create a new runtime.
-	// For now, use bus commands to load the session state.
 	if sess == nil {
 		sess = m.newSession()
-		_ = m.runtime.Bus.Execute(bus.ClearSession{})
-	} else if len(sess.Messages) > 0 {
-		// Load messages into agent via bus. This is temporary —
-		// full session switching creates a new runtime.
-		// For now, we approximate with ClearSession + metadata restore.
-		_ = m.runtime.Bus.Execute(bus.ClearSession{})
+	}
+	// Load the target session's history into the agent runtime and re-point the
+	// persister at it, so the model resumes with full context and future turns
+	// persist under this session (not the previous one, which would create a
+	// ghost session). Replaces the old ClearSession approach that wiped the
+	// agent and left it amnesiac.
+	if sess != nil {
+		if err := m.runtime.LoadSession(sess); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "could not load session: " + err.Error()})
+			m.updateViewport()
+			return m, nil
+		}
 	}
 
 	m.session = sess
@@ -925,7 +940,7 @@ func (m appModel) handleSettingsKey(key string) (tea.Model, tea.Cmd) {
 		return m.applySettingsCycle()
 	case "left", "h":
 		return m.applySettingsCycleReverse()
-	case "esc", "q":
+	case "esc", "q", "ctrl+c":
 		m.settingsMenu.Close()
 		m.input.SetEnabled(true)
 	}

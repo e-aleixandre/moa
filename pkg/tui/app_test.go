@@ -144,6 +144,33 @@ func TestActivateSession_ClosesBrowserAndRebuildsBlocks(t *testing.T) {
 	}
 }
 
+// TestActivateSession_LoadSessionErrorKeepsCurrentSession guards against
+// switching the UI to a new session while the runtime/persister stay on the
+// old one when LoadSession fails (e.g. a corrupt v2 session, or switching
+// while the agent is busy) — that mismatch used to be silent data-loss risk.
+func TestActivateSession_LoadSessionErrorKeepsCurrentSession(t *testing.T) {
+	m := newSwitchTestApp(t)
+	prevSess := &session.Session{ID: "prev-session"}
+	m.session = prevSess
+
+	// Force the runtime into StateRunning so LoadSession refuses to load,
+	// mirroring "switch session while the agent is busy".
+	if err := m.runtime.State.Transition(bus.StateRunning); err != nil {
+		t.Fatalf("Transition(StateRunning): %v", err)
+	}
+
+	newSess := &session.Session{ID: "new-session"}
+	result, _ := m.activateSession(newSess)
+	rm := result.(appModel)
+
+	if rm.session != prevSess {
+		t.Fatalf("session changed despite LoadSession error: got %v, want %v", rm.session, prevSess)
+	}
+	if len(rm.s.blocks) == 0 || rm.s.blocks[len(rm.s.blocks)-1].Type != "error" {
+		t.Fatalf("expected an error block to be appended, got blocks: %+v", rm.s.blocks)
+	}
+}
+
 func TestSessionBrowser_FilterSelectsMatchingSession(t *testing.T) {
 	b := newSessionBrowser()
 	b.Open()
@@ -716,6 +743,42 @@ func TestClear_ResetsState(t *testing.T) {
 	}
 	if m.s.streamCache != "" {
 		t.Errorf("streamCache = %q, want empty", m.s.streamCache)
+	}
+}
+
+// --- Test: /clear starts a fresh session and leaves the previous one on disk ---
+
+func TestClearCommand_StartsFreshSessionAndKeepsPreviousOnDisk(t *testing.T) {
+	ag, err := agent.New(agent.AgentConfig{
+		Provider: staticProvider{text: "ok"},
+		Model:    core.Model{ID: "claude-sonnet-4-6", Provider: "anthropic", Name: "Claude Sonnet 4.6", MaxInput: 200_000},
+	})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	rt := newTestRuntime(t, ag)
+
+	store, err := session.NewFileStore(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	prev := store.Create()
+	if err := store.Save(prev); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	m := New(context.Background(), Config{Runtime: rt, SessionStore: store, Session: prev})
+	m.width = 80
+	m.height = 24
+
+	result, _ := m.handleCommand("clear")
+	rm := result.(appModel)
+
+	if rm.session == nil || rm.session.ID == prev.ID {
+		t.Fatalf("expected a new session distinct from %q, got %+v", prev.ID, rm.session)
+	}
+	if _, err := store.Load(prev.ID); err != nil {
+		t.Fatalf("previous session should still exist on disk: %v", err)
 	}
 }
 
@@ -1840,5 +1903,41 @@ func TestParseSubagentNotification(t *testing.T) {
 				t.Errorf("result = %q, want %q", result, tt.wantResult)
 			}
 		})
+	}
+}
+
+func TestHandleModelSwitch_UnknownModel_ReportsAndStops(t *testing.T) {
+	m := newTestModel()
+	_, _ = m.handleModelSwitch("totally-unknown-model-xyz")
+	if !strings.Contains(m.s.pendingStatus, "Unknown model") {
+		t.Fatalf("expected honest unknown-model status, got %q", m.s.pendingStatus)
+	}
+}
+
+// T-L2: Ctrl+C must dismiss overlays instead of being swallowed.
+
+func TestSettingsMenu_CtrlCCloses(t *testing.T) {
+	m := newTestModel()
+	m.settingsMenu.Open([]settingsEntry{{key: "Model", value: "x"}})
+	m.input.SetEnabled(false)
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	rm := updated.(appModel)
+	if rm.settingsMenu.active {
+		t.Error("Ctrl+C should close the settings menu")
+	}
+	if !rm.input.enabled {
+		t.Error("closing settings should re-enable input")
+	}
+}
+
+func TestAskPrompt_CtrlCCancels(t *testing.T) {
+	m := newSwitchTestApp(t)
+	m.askPrompt.ShowFromBus("ask-1", []bus.AskQuestion{{Text: "Q?", Options: []string{"a", "b"}}})
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	rm := updated.(appModel)
+	if rm.askPrompt.active {
+		t.Error("Ctrl+C should cancel the ask prompt")
 	}
 }

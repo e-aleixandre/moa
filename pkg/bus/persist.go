@@ -25,6 +25,14 @@ type TreePersister interface {
 	SnapshotTree(entries []session.Entry, leafID string, metadata map[string]any) error
 }
 
+// SessionRebinder is an optional SessionPersister capability: re-point it at a
+// different session so subsequent snapshots write there. A single long-lived
+// runtime (the TUI) uses it to switch sessions without re-registering the
+// persistence reactor.
+type SessionRebinder interface {
+	RebindSession(sess *session.Session)
+}
+
 // collectMetadata gathers all session metadata for persistence.
 // Uses the same map[string]any format as session.Session.Metadata
 // (the existing persistence format — no schema change).

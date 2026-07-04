@@ -110,8 +110,8 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 	// Tool summary
 	if summary != "" {
 		maxW := width - 6
-		if maxW > 0 && lipgloss.Width(summary) > maxW {
-			summary = summary[:maxW-1] + "…"
+		if maxW > 0 {
+			summary = truncateDisplay(summary, maxW)
 		}
 		lines = append(lines, body.Render("  "+summary))
 	}
@@ -180,12 +180,7 @@ func permissionSummary(toolName string, args map[string]any) string {
 			return path
 		}
 	}
-	if len(args) == 0 {
-		return ""
-	}
-	var parts []string
-	for k, v := range args {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-	}
-	return strings.Join(parts, " ")
+	// Deterministic key order: iterating the map directly reorders the summary
+	// line on every repaint while the user is deciding.
+	return sortedArgSummary(args)
 }

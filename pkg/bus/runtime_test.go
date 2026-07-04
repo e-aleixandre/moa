@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 // fakeAgentSubscriber wraps fakeAgent to also implement AgentSubscriber.
@@ -384,6 +385,62 @@ func TestWaitSettled_ReturnsImmediatelyWhenIdle(t *testing.T) {
 	defer cancel()
 	if !rt.WaitSettled(ctx) {
 		t.Fatal("WaitSettled = false for an already-idle session")
+	}
+}
+
+// rebindablePersister is a fake SessionPersister that also implements
+// SessionRebinder, for testing LoadSession's rebind behavior.
+type rebindablePersister struct {
+	snapshots int
+	rebindTo  *session.Session
+}
+
+func (p *rebindablePersister) Snapshot(_ []core.AgentMessage, _ int, _ map[string]any) error {
+	p.snapshots++
+	return nil
+}
+func (p *rebindablePersister) RebindSession(sess *session.Session) { p.rebindTo = sess }
+
+func TestSessionRuntime_LoadSession_RestoresHistoryAndRebindsPersister(t *testing.T) {
+	fas := newFakeAgentSubscriber()
+	persister := &rebindablePersister{}
+	rt, err := NewSessionRuntime(RuntimeConfig{
+		Agent:      fas.fakeAgent,
+		Subscriber: &fas.fakeSubscriber,
+		Persister:  persister,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	// Agent starts empty.
+	if len(fas.Messages()) != 0 {
+		t.Fatalf("expected empty agent, got %d messages", len(fas.Messages()))
+	}
+
+	// Build a v2 session with two message entries.
+	tree := session.NewTree()
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hola")}}}})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("qué tal")}}}})
+	entries, leafID := tree.Snapshot()
+	sess := &session.Session{ID: "s2", Version: session.SessionVersion, Entries: entries, LeafID: leafID}
+
+	if err := rt.LoadSession(sess); err != nil {
+		t.Fatal(err)
+	}
+
+	// Agent history is now loaded (not amnesiac).
+	if got := len(fas.Messages()); got != 2 {
+		t.Fatalf("expected 2 messages loaded into agent, got %d", got)
+	}
+	// Persister was re-pointed at the new session.
+	if persister.rebindTo != sess {
+		t.Fatalf("expected persister rebound to sess, got %v", persister.rebindTo)
+	}
+	// The runtime's tree reflects the loaded session.
+	if got := len(rt.Context().Tree.AllMessages()); got != 2 {
+		t.Fatalf("expected tree with 2 messages, got %d", got)
 	}
 }
 

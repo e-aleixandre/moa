@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	readability "github.com/go-shiori/go-readability"
@@ -18,6 +20,57 @@ import (
 )
 
 const maxFetchBytes = 5 * 1024 * 1024 // 5 MB
+
+// fetchDialControl blocks connections to link-local / cloud-metadata addresses
+// (169.254.0.0/16 and fe80::/10 — the latter covers 169.254.169.254, the AWS/
+// GCP/Azure metadata endpoint). It runs AFTER DNS resolution on every dial,
+// including each redirect hop, so a hostname that resolves to a blocked IP is
+// rejected too. Minimal by design (M3): loopback and private ranges stay
+// reachable so fetch_content can still hit local dev servers.
+func fetchDialControl(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	if ip := net.ParseIP(host); ip != nil &&
+		(ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+		return fmt.Errorf("blocked link-local/metadata address: %s", ip)
+	}
+	return nil
+}
+
+// fetchClient is used by fetch_content instead of http.DefaultClient so every
+// connection (and redirect hop) passes through fetchDialControl, and redirects
+// are re-validated (scheme + hop cap).
+//
+// Proxy is intentionally left unset (nil): honoring HTTP_PROXY/HTTPS_PROXY
+// would route the request through the proxy, so fetchDialControl would only
+// ever see the proxy's (public) IP and never the real destination — silently
+// defeating the link-local/metadata block. Dialing direct keeps the SSRF
+// guard effective.
+var fetchClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Control:   fetchDialControl,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+			return fmt.Errorf("blocked redirect to non-http(s) URL: %s", req.URL.Scheme)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	},
+}
 
 // NewFetch creates the fetch_content tool.
 func NewFetch(cfg ToolConfig) core.Tool {
@@ -63,7 +116,7 @@ func NewFetch(cfg ToolConfig) core.Tool {
 			req.Header.Set("User-Agent", "Moa/1.0 (coding agent)")
 			req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := fetchClient.Do(req)
 			if err != nil {
 				if ctx.Err() != nil {
 					return core.Result{}, ctx.Err()
