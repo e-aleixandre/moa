@@ -34,7 +34,9 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 	}
 
 	// Helper: try-send with done-channel guard (prevents send-on-closed panic).
-	// On overflow, triggers cleanup (disconnects slow consumer).
+	// On overflow, structural events disconnect the slow consumer; lossy events
+	// (streaming deltas, including those wrapped in subagent_event) are dropped
+	// instead, so a slow client can't be disconnected just by a burst of deltas.
 	send := func(e Event) {
 		select {
 		case <-r.done:
@@ -47,6 +49,9 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 			return
 		default:
 			// buffer full — slow consumer
+			if isLossyWsEvent(e) {
+				return // drop this delta, keep the connection
+			}
 			r.cleanup()
 		}
 	}
@@ -192,6 +197,27 @@ func wsEventFromBus(event any) (Event, bool) {
 	default:
 		return Event{}, false
 	}
+}
+
+// wsLossyEventTypes are streaming deltas that may be dropped under backpressure
+// without corrupting UI state (the authoritative message_end/tool_end follows).
+var wsLossyEventTypes = map[string]bool{
+	"text_delta":      true,
+	"thinking_delta":  true,
+	"tool_update":     true,
+	"tool_call_delta": true,
+}
+
+// isLossyWsEvent reports whether e can be safely dropped on channel overflow.
+// A subagent_event is lossy iff the event it wraps is lossy.
+func isLossyWsEvent(e Event) bool {
+	if e.Type == "subagent_event" {
+		if d, ok := e.Data.(SubagentEventData); ok && d.Event != nil {
+			return isLossyWsEvent(*d.Event)
+		}
+		return false
+	}
+	return wsLossyEventTypes[e.Type]
 }
 
 // Events returns the read-only channel for the WS writer loop.

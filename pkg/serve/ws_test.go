@@ -108,3 +108,47 @@ func TestWsEventFromBus_SubagentEvent_NonTranslatable(t *testing.T) {
 		t.Fatal("expected ok=false for a non-translatable inner event")
 	}
 }
+
+func TestIsLossyWsEvent(t *testing.T) {
+	cases := []struct {
+		name  string
+		event Event
+		want  bool
+	}{
+		{"text_delta", Event{Type: "text_delta"}, true},
+		{"thinking_delta", Event{Type: "thinking_delta"}, true},
+		{"tool_update", Event{Type: "tool_update"}, true},
+		{"tool_call_delta", Event{Type: "tool_call_delta"}, true},
+		{"message_end structural", Event{Type: "message_end"}, false},
+		{"tool_end structural", Event{Type: "tool_end"}, false},
+		{"run_end structural", Event{Type: "run_end"}, false},
+		{"subagent_start structural", Event{Type: "subagent_start"}, false},
+		{"subagent_end structural", Event{Type: "subagent_end"}, false},
+		{
+			"subagent_event wrapping text_delta is lossy",
+			Event{Type: "subagent_event", Data: SubagentEventData{
+				JobID: "sa-1", Event: &Event{Type: "text_delta"},
+			}},
+			true,
+		},
+		{
+			"subagent_event wrapping message_end is structural",
+			Event{Type: "subagent_event", Data: SubagentEventData{
+				JobID: "sa-1", Event: &Event{Type: "message_end"},
+			}},
+			false,
+		},
+		{
+			"subagent_event with nil inner is structural",
+			Event{Type: "subagent_event", Data: SubagentEventData{JobID: "sa-1"}},
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isLossyWsEvent(tc.event); got != tc.want {
+				t.Fatalf("isLossyWsEvent(%q) = %v, want %v", tc.event.Type, got, tc.want)
+			}
+		})
+	}
+}
