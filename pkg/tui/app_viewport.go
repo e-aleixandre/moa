@@ -115,6 +115,10 @@ func (m *appModel) buildBottomChrome() string {
 		if pv := m.branchPicker.Render(m.width); pv != "" {
 			parts = append(parts, pv)
 		}
+	} else if m.subagentPicker.active {
+		if pv := m.subagentPicker.View(m.width); pv != "" {
+			parts = append(parts, pv)
+		}
 	} else if m.planMenu.active {
 		if pv := m.planMenu.View(m.width, ActiveTheme); pv != "" {
 			parts = append(parts, pv)
@@ -145,6 +149,12 @@ func (m *appModel) buildBottomChrome() string {
 
 // renderViewportContent renders blocks for the viewport (last N turns + streaming).
 func (m *appModel) renderViewportContent() string {
+	if m.s.viewingSubagent != "" {
+		if content := m.renderSubagentViewportContent(); content != "" {
+			return content
+		}
+	}
+
 	blocks := m.visibleBlocks()
 
 	var parts []string
@@ -198,7 +208,7 @@ func (m *appModel) renderTranscriptBlocks(fullHistory bool) string {
 // recomputeInputEnabled sets input enabled/disabled based on current state.
 // Used when exiting transcript mode to avoid unconditionally enabling input.
 func (m *appModel) recomputeInputEnabled() {
-	enabled := !m.s.running && !m.permPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active && !m.branchPicker.active
+	enabled := !m.s.running && !m.permPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active && !m.branchPicker.active && !m.subagentPicker.active
 	m.input.SetEnabled(enabled)
 }
 

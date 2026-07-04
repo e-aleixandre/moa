@@ -46,29 +46,31 @@ type state struct {
 	viewportDirty      bool           // blocks changed, viewport needs refresh on next tick
 	running            bool           // agent is running (tick should continue)
 	streamState        streamState
-	activeTools        int                   // number of tool calls currently executing
-	showThinking       bool                  // toggle thinking visibility (Ctrl+T)
-	expanded           bool                  // toggle expanded tool results (Ctrl+E)
-	initialized        bool                  // first WindowSizeMsg processed
-	runGen             uint64                // set from bus.RunStarted; single source of truth is the bus
-	cleanupOnce        sync.Once             // idempotent cleanup
-	pendingStatus      string                // transient generic status shown in View(), never persisted
-	pendingTimeline    *pendingTimelineEvent // live timeline event shown in View() until next send
-	sessionCost        float64               // accumulated USD cost this session
-	sessionInput       int                   // accumulated input tokens (for cache %)
-	sessionCacheRead   int                   // accumulated cache_read tokens
-	runStartMsgCount   int                   // message count at start of current run (for delta cost)
-	asyncSubagents     int                   // running async subagent count (for status display)
-	transcript         bool                  // true when in transcript mode (Ctrl+O)
-	fullHistory        bool                  // true when Ctrl+E in transcript mode shows everything
-	runStartBlockIdx   int                   // block index at start of current run (patch boundary)
-	pendingImage       []byte                // raw image bytes waiting to be sent with next message
-	pendingImageMime   string                // mime type of pending image
-	queuedSteers       []string              // steer messages waiting to be processed by the agent
-	chromeCache        string                // cached bottom chrome string (built once per frame)
-	chromeCacheDirty   bool                  // chrome needs rebuild
-	viewportCache      string                // cached viewport.View() output
-	viewportCacheDirty bool                  // viewport needs re-render
+	activeTools        int                            // number of tool calls currently executing
+	showThinking       bool                           // toggle thinking visibility (Ctrl+T)
+	expanded           bool                           // toggle expanded tool results (Ctrl+E)
+	initialized        bool                           // first WindowSizeMsg processed
+	runGen             uint64                         // set from bus.RunStarted; single source of truth is the bus
+	cleanupOnce        sync.Once                      // idempotent cleanup
+	pendingStatus      string                         // transient generic status shown in View(), never persisted
+	pendingTimeline    *pendingTimelineEvent          // live timeline event shown in View() until next send
+	sessionCost        float64                        // accumulated USD cost this session
+	sessionInput       int                            // accumulated input tokens (for cache %)
+	sessionCacheRead   int                            // accumulated cache_read tokens
+	runStartMsgCount   int                            // message count at start of current run (for delta cost)
+	asyncSubagents     int                            // running async subagent count (for status display)
+	transcript         bool                           // true when in transcript mode (Ctrl+O)
+	fullHistory        bool                           // true when Ctrl+E in transcript mode shows everything
+	runStartBlockIdx   int                            // block index at start of current run (patch boundary)
+	pendingImage       []byte                         // raw image bytes waiting to be sent with next message
+	pendingImageMime   string                         // mime type of pending image
+	queuedSteers       []string                       // steer messages waiting to be processed by the agent
+	chromeCache        string                         // cached bottom chrome string (built once per frame)
+	chromeCacheDirty   bool                           // chrome needs rebuild
+	viewportCache      string                         // cached viewport.View() output
+	viewportCacheDirty bool                           // viewport needs re-render
+	subagents          map[string]*subagentTranscript // live/completed subagent sub-conversations, by jobID
+	viewingSubagent    string                         // jobID currently displayed instead of the main conversation ("" = main)
 }
 
 type pendingTimelineEvent struct {
@@ -104,6 +106,7 @@ type appModel struct {
 	pickerPurpose  pickerPurpose
 	thinkingPicker thinkingPicker
 	branchPicker   branchPicker
+	subagentPicker subagentPicker
 	cmdPalette     cmdPalette
 	filePicker     filePicker
 	permPrompt     permissionPrompt
@@ -683,6 +686,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleBranchPickerKey(msg)
 	}
 
+	if m.subagentPicker.active {
+		return m.handleSubagentPickerKey(msg)
+	}
+
 	if m.settingsMenu.active {
 		return m.handleSettingsKey(msg.String())
 	}
@@ -830,6 +837,9 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.checkClipboardImage()
+
+	case tea.KeyCtrlG:
+		return m.handleCtrlG()
 
 	case tea.KeyCtrlO:
 		if m.s.transcript {
@@ -1393,6 +1403,15 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	// --- Subagents ---
 	case bus.SubagentCountChanged:
 		m.s.asyncSubagents = e.Count
+
+	case bus.SubagentStarted:
+		m.handleSubagentStarted(e)
+
+	case bus.SubagentEvent:
+		m.applySubagentInner(e.JobID, e.Inner)
+
+	case bus.SubagentEnded:
+		m.handleSubagentEnded(e)
 
 	case bus.SubagentCompleted:
 		return m.handleSubagentCompleted(e)
