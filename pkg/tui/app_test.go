@@ -144,6 +144,33 @@ func TestActivateSession_ClosesBrowserAndRebuildsBlocks(t *testing.T) {
 	}
 }
 
+// TestActivateSession_LoadSessionErrorKeepsCurrentSession guards against
+// switching the UI to a new session while the runtime/persister stay on the
+// old one when LoadSession fails (e.g. a corrupt v2 session, or switching
+// while the agent is busy) — that mismatch used to be silent data-loss risk.
+func TestActivateSession_LoadSessionErrorKeepsCurrentSession(t *testing.T) {
+	m := newSwitchTestApp(t)
+	prevSess := &session.Session{ID: "prev-session"}
+	m.session = prevSess
+
+	// Force the runtime into StateRunning so LoadSession refuses to load,
+	// mirroring "switch session while the agent is busy".
+	if err := m.runtime.State.Transition(bus.StateRunning); err != nil {
+		t.Fatalf("Transition(StateRunning): %v", err)
+	}
+
+	newSess := &session.Session{ID: "new-session"}
+	result, _ := m.activateSession(newSess)
+	rm := result.(appModel)
+
+	if rm.session != prevSess {
+		t.Fatalf("session changed despite LoadSession error: got %v, want %v", rm.session, prevSess)
+	}
+	if len(rm.s.blocks) == 0 || rm.s.blocks[len(rm.s.blocks)-1].Type != "error" {
+		t.Fatalf("expected an error block to be appended, got blocks: %+v", rm.s.blocks)
+	}
+}
+
 func TestSessionBrowser_FilterSelectsMatchingSession(t *testing.T) {
 	b := newSessionBrowser()
 	b.Open()

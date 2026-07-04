@@ -812,6 +812,8 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	if sess != nil {
 		if err := m.runtime.LoadSession(sess); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "could not load session: " + err.Error()})
+			m.updateViewport()
+			return m, nil
 		}
 	}
 

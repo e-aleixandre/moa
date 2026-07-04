@@ -42,9 +42,14 @@ func fetchDialControl(_, address string, _ syscall.RawConn) error {
 // fetchClient is used by fetch_content instead of http.DefaultClient so every
 // connection (and redirect hop) passes through fetchDialControl, and redirects
 // are re-validated (scheme + hop cap).
+//
+// Proxy is intentionally left unset (nil): honoring HTTP_PROXY/HTTPS_PROXY
+// would route the request through the proxy, so fetchDialControl would only
+// ever see the proxy's (public) IP and never the real destination — silently
+// defeating the link-local/metadata block. Dialing direct keeps the SSRF
+// guard effective.
 var fetchClient = &http.Client{
 	Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,

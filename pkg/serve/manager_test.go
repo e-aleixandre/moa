@@ -829,8 +829,20 @@ func TestExecCommand_Clear(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("expected OK, got: %s", result.Message)
 	}
-	if len(sess.History()) != 0 {
-		t.Fatalf("expected 0 messages after clear, got %d", len(sess.History()))
+	// /clear must not destroy data: it starts a new session (returned via
+	// NewSessionID) and leaves the original session's history intact.
+	if result.NewSessionID == "" || result.NewSessionID == sess.ID {
+		t.Fatalf("expected a new session ID, got %q", result.NewSessionID)
+	}
+	if len(sess.History()) == 0 {
+		t.Fatal("expected original session's messages to survive /clear")
+	}
+	newSess, ok := mgr.Get(result.NewSessionID)
+	if !ok {
+		t.Fatal("new session should exist after /clear")
+	}
+	if len(newSess.History()) != 0 {
+		t.Fatalf("expected 0 messages in the new session, got %d", len(newSess.History()))
 	}
 }
 

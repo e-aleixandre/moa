@@ -34,6 +34,11 @@ func sanitizeTerminalOutput(s string) string {
 				i++ // invalid byte, drop it
 				continue
 			}
+			if r >= 0x80 && r <= 0x9f {
+				// C1 control code points (e.g. CSI encoded in UTF-8) — drop the introducer.
+				i += size
+				continue
+			}
 			b.WriteString(s[i : i+size])
 			i += size
 		}

@@ -187,6 +187,20 @@ func TestFetchDialControl_BlocksLinkLocalAndMetadata(t *testing.T) {
 	}
 }
 
+// TestFetchClient_NoProxy guards against reintroducing http.ProxyFromEnvironment
+// on fetchClient's transport: honoring a proxy would route requests through it,
+// hiding the real destination IP from fetchDialControl and defeating the SSRF
+// (link-local/metadata) block.
+func TestFetchClient_NoProxy(t *testing.T) {
+	transport, ok := fetchClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("fetchClient.Transport is %T, want *http.Transport", fetchClient.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Error("fetchClient's transport must not use a proxy (would bypass fetchDialControl's IP check)")
+	}
+}
+
 func TestExtractContent_Fallback(t *testing.T) {
 	// Minimal HTML that readability can't extract an article from
 	html := `<html><body><p>Short</p></body></html>`

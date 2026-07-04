@@ -62,14 +62,18 @@ func requireIdle(sess *ManagedSession) error {
 	return nil
 }
 
-func cmdClear(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+func cmdClear(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if err := sess.runtime.Bus.Execute(bus.ClearSession{}); err != nil {
-		return &CommandResult{OK: false, Message: err.Error()}, nil
+	// "clear context" must not destroy data: start a fresh session and leave the
+	// previous one intact on disk (recoverable from the session list), matching
+	// the TUI. The frontend switches the tile to NewSessionID.
+	newSess, err := m.CreateSession(CreateOpts{CWD: sess.CWD})
+	if err != nil {
+		return &CommandResult{OK: false, Message: "could not start a new conversation: " + err.Error()}, nil
 	}
-	return &CommandResult{OK: true, Message: "conversation cleared"}, nil
+	return &CommandResult{OK: true, Message: "started a new conversation", NewSessionID: newSess.ID}, nil
 }
 
 func cmdCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {

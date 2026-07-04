@@ -21,6 +21,42 @@ func writeVerifyConfig(t *testing.T, dir, body string) {
 	}
 }
 
+// TestCmdClear_StartsNewSessionKeepsOld verifies /clear gives the web the same
+// semantics as the TUI: it starts a fresh session instead of wiping the
+// current one in place, so the previous conversation stays recoverable on
+// disk (and in the Manager) instead of being destroyed.
+func TestCmdClear_StartsNewSessionKeepsOld(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(), dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.ExecCommand(sess.ID, "/clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("expected OK, got: %s", res.Message)
+	}
+	if res.NewSessionID == "" {
+		t.Fatal("expected a non-empty NewSessionID")
+	}
+	if res.NewSessionID == sess.ID {
+		t.Fatal("NewSessionID should differ from the original session ID")
+	}
+	if _, ok := mgr.Get(sess.ID); !ok {
+		t.Fatal("original session should still exist after /clear")
+	}
+	if _, ok := mgr.Get(res.NewSessionID); !ok {
+		t.Fatal("new session should exist after /clear")
+	}
+}
+
 func TestCmdVerify_AllPass(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

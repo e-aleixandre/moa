@@ -326,6 +326,7 @@ func (m *Manager) FileScanner() *files.Scanner {
 
 // CommandResult is the response from executing a slash command.
 type CommandResult struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+	OK           bool   `json:"ok"`
+	Message      string `json:"message"`
+	NewSessionID string `json:"newSessionId,omitempty"`
 }

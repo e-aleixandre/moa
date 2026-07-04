@@ -15,6 +15,8 @@ func TestSanitizeTerminalOutput(t *testing.T) {
 		{"BEL + backspace", "a\x07b\x08c", "abc"},
 		{"newline/tab preserved", "a\nb\tc", "a\nb\tc"},
 		{"UTF-8 accented/CJK preserved", "café ñ 日本", "café ñ 日本"},
+		{"C1 CSI encoded as UTF-8 dropped", "a\u009b2Jb", "a2Jb"},
+		{"C1 NEL encoded as UTF-8 dropped", "x\u0085y", "xy"},
 		{"DCS", "\x1bP1;2q@@@\x1b\\end", "end"},
 		{"OSC terminated by ST", "\x1b]0;t\x1b\\z", "z"},
 	}

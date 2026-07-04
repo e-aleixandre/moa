@@ -234,7 +234,17 @@ export async function trustMcp(id) {
 }
 
 export async function execCommand(id, command) {
-  return api('POST', `/api/sessions/${id}/command`, { command });
+  const res = await api('POST', `/api/sessions/${id}/command`, { command });
+  if (res && res.newSessionId) {
+    await loadSessions();
+    const state = store.get();
+    if (state.isMobile) {
+      setActiveSession(res.newSessionId);
+    } else {
+      assignToTile(state.focusedTile, res.newSessionId);
+    }
+  }
+  return res;
 }
 
 // fetchBranchPoints returns the conversation's branch targets (user/assistant
