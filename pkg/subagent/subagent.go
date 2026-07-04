@@ -24,9 +24,11 @@ const (
 	asyncResultTailLines = 50
 
 	// defaultChildMaxTurns is the fallback per-child turn limit used when
-	// Config.ChildMaxTurns is not set. Deliberately low and independent of
-	// the parent's own MaxTurns: children are leaf workers with focused tasks.
-	defaultChildMaxTurns = 30
+	// Config.ChildMaxTurns is not set. Independent of the parent's own
+	// MaxTurns. Was 30, which was too tight for non-trivial delegated tasks
+	// (exploration + multi-file edits + build/test verification routinely
+	// exceeded it, killing the subagent mid-task with no partial result).
+	defaultChildMaxTurns = 100
 
 	// defaultChildMaxRunDuration is the fallback per-child wall-clock budget
 	// used when Config.ChildMaxRunDuration is not set.
@@ -521,12 +523,16 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 			}
 			return nil
 		},
-		// Compaction off is safe as long as MaxTurns stays low (<=30, the
-		// default): a short, focused child is unlikely to blow its context
-		// before exhausting turns, so compaction would only add complexity
-		// without benefit. If ChildMaxTurns is raised significantly above the
-		// default, revisit and enable compaction for the child too.
-		Compaction: &core.CompactionSettings{Enabled: false},
+		// Compaction was off when the child's turn budget was low (<=30):
+		// a short, focused child was unlikely to blow its context before
+		// exhausting turns. Now that defaultChildMaxTurns is 100, a child on
+		// a long task could realistically hit the context window first, so
+		// compaction is enabled with the same defaults as the main session.
+		Compaction: &core.CompactionSettings{
+			Enabled:       true,
+			ReserveTokens: core.DefaultCompactionSettings.ReserveTokens,
+			KeepRecent:    core.DefaultCompactionSettings.KeepRecent,
+		},
 	})
 }
 
