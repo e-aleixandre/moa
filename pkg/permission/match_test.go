@@ -234,6 +234,7 @@ func TestMatchPolicy_ArgScopedRulesOnNonBashTools(t *testing.T) {
 		{"fetch url exact deny", "fetch_content(http://169.254.169.254/latest)", "fetch_content", map[string]any{"url": "http://169.254.169.254/latest"}, true, true},
 		{"grep unrelated path", "grep(**/.env)", "grep", map[string]any{"path": "src/main.go"}, true, false},
 		{"multiedit allow covers", "multiedit(pkg/**)", "multiedit", map[string]any{"path": "pkg/a.go"}, false, true},
+		{"send_file path deny", "send_file(*.env)", "send_file", map[string]any{"path": "secrets.env"}, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -243,6 +244,15 @@ func TestMatchPolicy_ArgScopedRulesOnNonBashTools(t *testing.T) {
 					tc.pattern, tc.tool, tc.args, tc.isDeny, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestPrimaryArg_SendFile pins that send_file is path-scoped like read/write/etc,
+// so deny/allow rules matching its "path" arg (e.g. send_file(*.env)) apply.
+func TestPrimaryArg_SendFile(t *testing.T) {
+	got := primaryArg("send_file", map[string]any{"path": "/x/y.env"})
+	if got != "/x/y.env" {
+		t.Errorf("primaryArg(send_file) = %q, want /x/y.env", got)
 	}
 }
 

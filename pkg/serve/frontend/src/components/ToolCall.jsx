@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 import { Check, X, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
 import { toolVerb, toolPath, toolPreview, splitPreview, splitPreviewTail } from '../util/format.js';
 import { AskUserPreview } from './AskUserPreview.jsx';
+import { FileCard } from './FileCard.jsx';
 
 export function ToolCall({ tool }) {
   const [expanded, setExpanded] = useState(false);
@@ -19,6 +20,7 @@ export function ToolCall({ tool }) {
   const statusLabel = isGenerating ? 'generating' : isRunning ? 'running' : isRejected ? 'rejected' : isError ? 'error' : 'done';
 
   const isAskUser = tool.tool_name === 'ask_user';
+  const isSendFile = tool.tool_name === 'send_file';
 
   // For running tools with streaming, show the live output
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
@@ -57,6 +59,10 @@ export function ToolCall({ tool }) {
 
         {isAskUser && !isRunning && (
           <AskUserPreview args={tool.args} result={tool.result} />
+        )}
+
+        {isSendFile && (
+          <FileCard result={tool.result} status={tool.status} />
         )}
 
         {!isAskUser && previewData && previewData.visible && (

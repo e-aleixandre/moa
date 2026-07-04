@@ -1,0 +1,56 @@
+/* File download card (send_file tool result) */
+
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--mantle);
+  padding: 10px 14px;
+  border-top: 1px solid rgba(69,71,90,0.5);
+}
+
+.file-card-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--peach);
+  flex-shrink: 0;
+}
+
+.file-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-card-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-card-size {
+  font-size: 11px;
+  color: var(--subtext1);
+}
+
+.file-card-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--surface0);
+  color: var(--text);
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+.file-card-download:hover {
+  background: var(--surface1);
+}
+.file-card-download .lucide {
+  width: 18px;
+  height: 18px;
+}

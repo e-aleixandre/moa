@@ -113,6 +113,11 @@ func suggestDir(absPath string) string {
 	return dir
 }
 
+// SafePath resolves path against cfg's workspace/PathPolicy, exactly as the
+// built-in file tools do. Exposed so out-of-package tools (e.g. serve's
+// send_file) enforce the same path boundary as read.
+func SafePath(cfg ToolConfig, path string) (string, error) { return safePath(cfg, path) }
+
 func safePath(cfg ToolConfig, path string) (string, error) {
 	root := cfg.WorkspaceRoot
 

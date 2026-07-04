@@ -51,6 +51,10 @@ type ManagedSession struct {
 	// Serve-specific infrastructure (MCP, toolReg — not agent).
 	infra serveInfra
 
+	// sharedFiles holds files the agent explicitly shared via send_file.
+	// Allowlist for GET /api/sessions/{id}/files/{fileID}. In-memory only.
+	sharedFiles *sharedFiles
+
 	// Web Push: live count of WebSocket clients watching this session (gates
 	// non-blocking notifications), a "deleted" guard against late pushes, and
 	// the bus unsubscribe funcs registered by subscribePush.

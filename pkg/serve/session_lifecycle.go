@@ -19,6 +19,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // CreateOpts configures a new session.
@@ -191,6 +192,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return nil, err
 	}
 
+	shared := newSharedFiles()
+	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, shared))
+
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.
 	rcfg := bs.RuntimeConfig()
 	rcfg.SessionID = id
@@ -244,6 +248,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			mcpMgr:        bs.MCPManager,
 			UntrustedMCP:  bs.UntrustedMCP,
 		},
+		sharedFiles: shared,
 	}
 	if opts != nil {
 		sess.TitleSource = opts.titleSource

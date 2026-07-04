@@ -169,7 +169,7 @@ func primaryArg(toolName string, args map[string]any) string {
 		}
 	// Path-scoped tools: the file/dir they operate on. Without these entries
 	// primaryArg returned "" and no arg-scoped deny/allow rule could match them.
-	case "write", "edit", "read", "grep", "find", "ls", "multiedit":
+	case "write", "edit", "read", "grep", "find", "ls", "multiedit", "send_file":
 		if path, ok := args["path"].(string); ok {
 			return path
 		}
