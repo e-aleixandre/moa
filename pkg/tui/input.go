@@ -170,7 +170,12 @@ func (m inputModel) View() string {
 func (m *inputModel) CursorByteOffset() int {
 	val := m.textarea.Value()
 	row := m.textarea.Line()
-	col := m.textarea.LineInfo().CharOffset
+	// col is the cursor's rune column within the logical line. Derive it from
+	// StartColumn+ColumnOffset (== the textarea's internal cursor column) rather
+	// than CharOffset: CharOffset is display cells relative to the wrapped visual
+	// sub-line, so it misplaces the cursor with soft-wrap and double-width runes.
+	li := m.textarea.LineInfo()
+	col := li.StartColumn + li.ColumnOffset
 
 	// Walk through lines to find the start of the cursor row.
 	offset := 0
