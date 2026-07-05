@@ -330,7 +330,7 @@ func TestBuildAttachmentContent_TextHeader(t *testing.T) {
 	atts := []Attachment{
 		{Name: `report "final".csv`, Mime: "text/csv", Data: b64([]byte("a,b\n1,2"))},
 	}
-	content, err := buildAttachmentContent(atts, "abcdef0123456789", pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, "abcdef0123456789", pp, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestBuildAttachmentContent_LargeTextToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "big.txt", Mime: "text/plain", Data: b64(big)}}
 
 	sessionID := "0123456789abcdef"
-	content, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestBuildAttachmentContent_Collision(t *testing.T) {
 	}
 
 	sessionID := "fedcba9876543210"
-	content, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
 	}
 
 	sessionID := "aaaaaaaaaaaaaaaa"
-	content, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestPDF_NativeWhenSupported(t *testing.T) {
 	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
 
 	sessionID := "fedcba9876543210"
-	content, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestPDF_FallbackToDiskWhenUnsupported(t *testing.T) {
 	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
 
 	sessionID := "0123fedcba987654"
-	content, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,7 @@ func TestMimeMismatch_ImageGoesToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "fake.png", Mime: "image/png", Data: b64([]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d})}}
 
 	sessionID := "aabbccdd11223344"
-	content, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +658,7 @@ func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "notreally.pdf", Mime: "application/pdf", Data: b64([]byte("this is not a pdf at all"))}}
 
 	sessionID := "ddccbbaa44332211"
-	content, err := buildAttachmentContent(atts, sessionID, pp, true, 0) // supportsDocuments=true
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0) // supportsDocuments=true
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,7 +687,7 @@ func TestPDF_SessionNativeBudgetFallsBackToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "x.pdf", Mime: "application/pdf", Data: b64(pdf)}}
 
 	// Simulate history already at the session budget.
-	content, err := buildAttachmentContent(atts, sessionID, pp, true, maxSessionNativeDocBytes)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, maxSessionNativeDocBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +699,7 @@ func TestPDF_SessionNativeBudgetFallsBackToDisk(t *testing.T) {
 	}
 
 	// With no prior history, the same PDF goes native.
-	content2, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
+	content2, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +747,7 @@ func TestPDF_NativeBudgetFallsBackToDisk(t *testing.T) {
 		copy(b, []byte("%PDF-1.7\n"))
 		return Attachment{Name: "big.pdf", Mime: "application/pdf", Data: b64(b)}
 	}
-	content, err := buildAttachmentContent([]Attachment{mk(), mk()}, sessionID, pp, true, 0)
+	content, _, err := buildAttachmentContent([]Attachment{mk(), mk()}, sessionID, pp, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -780,7 +780,7 @@ func TestBuildAttachmentContent_RollbackOnError(t *testing.T) {
 	// first was written.
 	tooBig := Attachment{Name: "big.bin", Mime: "application/octet-stream", Data: b64(make([]byte, maxAttachmentFileBytes+1))}
 
-	_, err := buildAttachmentContent([]Attachment{good, tooBig}, sessionID, pp, false, 0)
+	_, _, err := buildAttachmentContent([]Attachment{good, tooBig}, sessionID, pp, false, 0)
 	if err == nil {
 		t.Fatal("expected error for oversized attachment")
 	}

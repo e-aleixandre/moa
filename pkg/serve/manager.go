@@ -5,6 +5,7 @@ package serve
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -313,7 +314,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 	// /send requests to the same idle session.
 	sess.attachMu.Lock()
 	priorNativeDoc := countNativeDocBytes(sess.History())
-	content, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs, priorNativeDoc)
+	content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs, priorNativeDoc)
 	sess.attachMu.Unlock()
 	if err != nil {
 		return "", err
@@ -322,6 +323,11 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 		content = append(content, core.TextContent(text))
 	}
 	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{Content: content}); err != nil {
+		// The message never entered the conversation — roll back any files
+		// written for it so they don't orphan and count against the quota.
+		for _, p := range writtenFiles {
+			_ = os.Remove(p)
+		}
 		return "", err
 	}
 	return "send", nil

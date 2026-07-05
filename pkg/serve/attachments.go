@@ -64,12 +64,18 @@ var allowedImageMimes = map[string]bool{
 	"image/webp": true,
 }
 
-// pdfFallbackNote is appended when a PDF is saved to disk because the active
+// pdfUnsupportedNote is appended when a PDF is saved to disk because the active
 // provider can't accept native documents.
-const pdfFallbackNote = "Nota: el modelo actual no soporta documentos PDF nativos, así que este\n" +
+const pdfUnsupportedNote = "Nota: el modelo actual no soporta documentos PDF nativos, así que este\n" +
 	"PDF no se envió directamente — está disponible en la ruta de arriba para\n" +
 	"que lo proceses si hace falta (p.ej. con alguna herramienta de extracción\n" +
 	"de texto si está disponible en el sistema)."
+
+// pdfSizeFallbackNote is appended when a native-eligible PDF is saved to disk
+// because it exceeds the per-file or native-document budget instead.
+const pdfSizeFallbackNote = "Nota: este PDF supera el límite para envío nativo al modelo, así que se\n" +
+	"guardó en disco — está disponible en la ruta de arriba para que lo proceses\n" +
+	"si hace falta."
 
 // mimeMismatchNote is appended when an attachment's declared MIME (image/PDF)
 // does not match its actual bytes, so it is saved to disk instead of being
@@ -129,9 +135,9 @@ func bytesLookLikePDF(data []byte) bool {
 // attachment directory on disk and referenced by path instead. PDFs go
 // native as a "document" block when supportsDocuments is true and the file
 // is small enough; otherwise they fall back to the same on-disk mechanism.
-func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool, priorNativeDocBytes int64) (result []core.Content, retErr error) {
+func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool, priorNativeDocBytes int64) (result []core.Content, writtenFiles []string, retErr error) {
 	if len(atts) > maxAttachments {
-		return nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
+		return nil, nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
 	}
 
 	var (
@@ -147,8 +153,8 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 
 	// On any error return after partial success, remove the files written
 	// during THIS call so a failed /send does not leave orphan files counting
-	// against the session quota (the path-allowlist entry is idempotent and
-	// harmless, so it is intentionally left in place).
+	// against the session quota. On success the paths are returned to the caller
+	// so it can also roll them back if a downstream step (Bus.Execute) fails.
 	defer func() {
 		if retErr != nil {
 			for _, p := range writtenPaths {
@@ -203,12 +209,12 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 	for _, a := range atts {
 		decoded, err := base64.StdEncoding.DecodeString(a.Data)
 		if err != nil {
-			return nil, fmt.Errorf("%w: attachment %q: invalid base64", ErrBadAttachment, a.Name)
+			return nil, nil, fmt.Errorf("%w: attachment %q: invalid base64", ErrBadAttachment, a.Name)
 		}
 
 		requestBytes += int64(len(decoded))
 		if requestBytes > maxRequestBytes {
-			return nil, fmt.Errorf("%w: attachments exceed %d MB total", ErrBadAttachment, maxRequestBytes>>20)
+			return nil, nil, fmt.Errorf("%w: attachments exceed %d MB total", ErrBadAttachment, maxRequestBytes>>20)
 		}
 
 		if allowedImageMimes[a.Mime] {
@@ -217,13 +223,13 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			if !bytesLookLikeImage(decoded, a.Mime) {
 				block, derr := toDisk(a, decoded, mimeMismatchNote)
 				if derr != nil {
-					return nil, derr
+					return nil, nil, derr
 				}
 				content = append(content, block)
 				continue
 			}
 			if len(decoded) > maxImageBytes {
-				return nil, fmt.Errorf("%w: attachment %q: image exceeds %d MB", ErrBadAttachment, a.Name, maxImageBytes>>20)
+				return nil, nil, fmt.Errorf("%w: attachment %q: image exceeds %d MB", ErrBadAttachment, a.Name, maxImageBytes>>20)
 			}
 			content = append(content, core.ImageContent(a.Data, a.Mime))
 			continue
@@ -247,13 +253,20 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 				nativeDocBytes += int64(len(decoded))
 				continue
 			}
-			note := pdfFallbackNote
-			if !isPDF {
+			// Choose an accurate fallback note based on WHY it isn't native.
+			var note string
+			switch {
+			case !isPDF:
 				note = mimeMismatchNote
+			case !supportsDocuments:
+				note = pdfUnsupportedNote
+			default:
+				// Native-eligible but too large or over the native budget.
+				note = pdfSizeFallbackNote
 			}
 			block, err := toDisk(a, decoded, note)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			content = append(content, block)
 			continue
@@ -275,11 +288,11 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		// To disk.
 		block, err := toDisk(a, decoded, "")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		content = append(content, block)
 	}
-	return content, nil
+	return content, writtenPaths, nil
 }
 
 // countNativeDocBytes returns the total decoded byte size of native "document"
