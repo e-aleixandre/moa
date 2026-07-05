@@ -1127,7 +1127,7 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 	}
 	var list []map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&list)
-	resp.Body.Close()
+	resp.Body.Close() //nolint:errcheck
 	if len(list) != 1 || list[0]["job_id"] != "sa-test1" {
 		t.Fatalf("unexpected list: %+v", list)
 	}
@@ -1139,7 +1139,7 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 	}
 	var got session.SubagentTranscript
 	_ = json.NewDecoder(resp.Body).Decode(&got)
-	resp.Body.Close()
+	resp.Body.Close() //nolint:errcheck
 	if got.JobID != "sa-test1" || len(got.Messages) != 1 {
 		t.Fatalf("unexpected transcript: %+v", got)
 	}
@@ -1149,5 +1149,5 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing get status = %d, want 404", resp.StatusCode)
 	}
-	resp.Body.Close()
+	resp.Body.Close() //nolint:errcheck
 }
