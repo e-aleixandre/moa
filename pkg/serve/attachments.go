@@ -40,6 +40,13 @@ const (
 	maxRequestBytes        = 64 << 20  // aggregate decoded bytes per request
 	maxSessionDiskBytes    = 200 << 20 // aggregate on-disk bytes per session
 	maxInlineTextAggregate = 512 << 10 // aggregate inline text per message
+	// maxNativeDocBytes bounds the total bytes of native PDF "document" blocks
+	// in ONE message. Native documents (unlike to-disk files) are embedded in
+	// the conversation as base64 and re-sent every turn, so an unbounded native
+	// PDF payload would inflate persistence/memory/request size across turns.
+	// A single message is capped here; larger PDFs fall back to disk (which is
+	// governed by the per-session disk quota instead).
+	maxNativeDocBytes = 24 << 20 // 24 MB of native PDF per message
 )
 
 var allowedImageMimes = map[string]bool{
@@ -86,20 +93,25 @@ func bytesLookLikeImage(data []byte, declaredMime string) bool {
 	}
 }
 
-// bytesLookLikePDF reports whether data begins with the PDF magic header.
-// A leading BOM/whitespace is tolerated within the first few bytes, matching
-// how lenient PDF readers behave.
+// bytesLookLikePDF reports whether data begins with the PDF magic header
+// "%PDF-". A short run of leading whitespace or a UTF-8/UTF-16 BOM is tolerated
+// (some producers prepend those), but the magic must appear at the START —
+// finding "%PDF-" anywhere in the file is NOT sufficient (an arbitrary binary
+// could contain that sequence and would then be mis-sent as a native document).
 func bytesLookLikePDF(data []byte) bool {
-	// Fast path: exact "%PDF-" prefix.
-	if bytes.HasPrefix(data, []byte("%PDF-")) {
-		return true
+	// Strip a leading BOM if present.
+	switch {
+	case bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}): // UTF-8 BOM
+		data = data[3:]
+	case bytes.HasPrefix(data, []byte{0xFE, 0xFF}), bytes.HasPrefix(data, []byte{0xFF, 0xFE}): // UTF-16 BOM
+		data = data[2:]
 	}
-	// Tolerate a few leading bytes (some producers prepend whitespace/BOM).
-	head := data
-	if len(head) > 1024 {
-		head = head[:1024]
+	// Skip a small amount of leading ASCII whitespace.
+	i := 0
+	for i < len(data) && i < 8 && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n' || data[i] == '\f' || data[i] == 0x00) {
+		i++
 	}
-	return bytes.Contains(head, []byte("%PDF-"))
+	return bytes.HasPrefix(data[i:], []byte("%PDF-"))
 }
 
 // buildAttachmentContent validates and converts uploaded attachments into
@@ -117,6 +129,7 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 	var (
 		requestBytes    int64
 		inlineTextBytes int
+		nativeDocBytes  int64 // total bytes of native PDF blocks this message
 
 		sessionDir       string
 		pathAdded        bool
@@ -209,14 +222,20 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		}
 
 		if a.Mime == "application/pdf" {
-			// Only send natively if the bytes are actually a PDF (%PDF- magic).
+			// Only send natively if the bytes are actually a PDF (%PDF- magic),
+			// the provider supports documents, the file fits the per-file cap,
+			// AND adding it stays within the per-message native-doc budget
+			// (native PDFs are re-sent every turn, so they can't be unbounded).
 			isPDF := bytesLookLikePDF(decoded)
-			if isPDF && supportsDocuments && len(decoded) <= maxAttachmentFileBytes {
+			if isPDF && supportsDocuments &&
+				len(decoded) <= maxAttachmentFileBytes &&
+				nativeDocBytes+int64(len(decoded)) <= maxNativeDocBytes {
 				filename := safeBase(a.Name)
 				if filename == "" {
 					filename = "document.pdf"
 				}
 				content = append(content, core.DocumentContent(a.Data, a.Mime, filename))
+				nativeDocBytes += int64(len(decoded))
 				continue
 			}
 			note := pdfFallbackNote

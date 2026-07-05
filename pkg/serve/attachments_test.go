@@ -673,6 +673,63 @@ func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
 	}
 }
 
+// TestBytesLookLikePDF verifies the magic check is prefix-anchored: "%PDF-"
+// must be at the start (after an optional BOM/whitespace), not anywhere in the
+// file, so an arbitrary binary containing "%PDF-" is not mis-sent as a document.
+func TestBytesLookLikePDF(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{"real prefix", []byte("%PDF-1.7\nstuff"), true},
+		{"leading whitespace", append([]byte("  \n"), []byte("%PDF-1.4")...), true},
+		{"utf8 bom", append([]byte{0xEF, 0xBB, 0xBF}, []byte("%PDF-1.5")...), true},
+		{"magic in middle only", append(bytes.Repeat([]byte{0x00}, 40), []byte("%PDF-1.4")...), false},
+		{"no magic", []byte("just some text"), false},
+		{"empty", nil, false},
+	}
+	for _, c := range cases {
+		if got := bytesLookLikePDF(c.data); got != c.want {
+			t.Errorf("bytesLookLikePDF(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestPDF_NativeBudgetFallsBackToDisk verifies that once the per-message native
+// PDF budget is exhausted, further PDFs fall back to disk instead of being
+// embedded natively (which would be re-sent unbounded every turn).
+func TestPDF_NativeBudgetFallsBackToDisk(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+	sessionID := "beefbeefbeef0000"
+
+	// Build a valid-ish PDF just over half the native budget, so the first goes
+	// native and the second exceeds the aggregate and must fall back to disk.
+	half := maxNativeDocBytes/2 + 1024
+	mk := func() Attachment {
+		b := make([]byte, half)
+		copy(b, []byte("%PDF-1.7\n"))
+		return Attachment{Name: "big.pdf", Mime: "application/pdf", Data: b64(b)}
+	}
+	content, err := buildAttachmentContent([]Attachment{mk(), mk()}, sessionID, pp, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(content))
+	}
+	if content[0].Type != "document" {
+		t.Fatalf("expected first PDF native (document), got %q", content[0].Type)
+	}
+	if content[1].Type != "text" {
+		t.Fatalf("expected second PDF to fall back to disk (text), got %q", content[1].Type)
+	}
+	if !strings.Contains(content[1].Text, "guardado en:") {
+		t.Fatalf("expected disk advisory for the overflow PDF, got %q", content[1].Text)
+	}
+}
+
 // TestBuildAttachmentContent_RollbackOnError verifies that when a later
 // attachment in the same call fails (here: exceeds the per-file cap), the
 // files already written to disk during THIS call are rolled back — a failed
