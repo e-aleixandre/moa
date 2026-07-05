@@ -150,6 +150,32 @@ func TestEnsureBaseDir_Symlink(t *testing.T) {
 	}
 }
 
+// TestEnsureBaseDir_GroupWritableTightened verifies a pre-existing base dir
+// with lax (group/other) permissions is tightened to 0700 rather than trusted.
+func TestEnsureBaseDir_GroupWritableTightened(t *testing.T) {
+	tmp := t.TempDir()
+	base := filepath.Join(tmp, "moabase")
+	if err := os.MkdirAll(base, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(base, 0o777); err != nil { // group/other-writable
+		t.Fatal(err)
+	}
+	t.Setenv("MOA_ATTACHMENTS_DIR", base)
+
+	got, err := ensureBaseDir()
+	if err != nil {
+		t.Fatalf("expected ensureBaseDir to tighten perms, got error: %v", err)
+	}
+	info, err := os.Lstat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("base dir still group/other-accessible after ensureBaseDir: mode %o", info.Mode().Perm())
+	}
+}
+
 func TestEnsureSessionAttachDir_Creates(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("MOA_ATTACHMENTS_DIR", tmp)

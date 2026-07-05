@@ -33,8 +33,10 @@ func sessionAttachDir(id string) (string, error) {
 	return filepath.Join(attachmentsBaseDir(), id), nil
 }
 
-// ensureBaseDir creates the attachments base directory if needed, refusing
-// to operate through a symlink.
+// ensureBaseDir creates the attachments base directory if needed, refusing to
+// operate through a symlink, a non-directory, a dir not owned by the current
+// user, or one with group/other write bits. This hardens against the default
+// base (/tmp/moa) being pre-created by another local process with lax perms.
 func ensureBaseDir() (string, error) {
 	base := attachmentsBaseDir()
 	info, err := os.Lstat(base)
@@ -43,9 +45,15 @@ func ensureBaseDir() (string, error) {
 			if err := os.MkdirAll(base, 0o700); err != nil {
 				return "", err
 			}
-			return base, nil
+			// Re-stat what we created and validate it below (a racing actor
+			// could have won the create; validation catches an unsafe result).
+			info, err = os.Lstat(base)
+			if err != nil {
+				return "", err
+			}
+		} else {
+			return "", err
 		}
-		return "", err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("attachments base dir %q is a symlink", base)
@@ -53,7 +61,24 @@ func ensureBaseDir() (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("attachments base dir %q is not a directory", base)
 	}
-	_ = os.Chmod(base, 0o700)
+	// Reject a base dir owned by a different user (another local account could
+	// tamper with attachment storage). Ownership can't be fixed by chmod.
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		if int(st.Uid) != os.Getuid() {
+			return "", fmt.Errorf("attachments base dir %q is not owned by the current user", base)
+		}
+	}
+	// Tighten to 0700, then verify the perms actually took — this closes a
+	// pre-created-with-lax-perms base dir (group/other access) rather than
+	// silently trusting it.
+	if err := os.Chmod(base, 0o700); err != nil {
+		return "", fmt.Errorf("attachments base dir %q: cannot secure permissions: %w", base, err)
+	}
+	if info2, serr := os.Lstat(base); serr != nil {
+		return "", serr
+	} else if info2.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("attachments base dir %q still has group/other access after chmod (mode %o)", base, info2.Mode().Perm())
+	}
 	return base, nil
 }
 
