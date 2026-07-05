@@ -530,6 +530,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compactResultMsg:
 		m.s.running = false
 		m.input.SetEnabled(true)
+		m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 		m.status.SetText("")
 		if msg.Err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{

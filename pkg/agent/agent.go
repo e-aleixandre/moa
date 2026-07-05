@@ -602,6 +602,14 @@ func (a *Agent) CancelSteer() {
 	drainSteer(a.steerCh)
 }
 
+// DrainSteers removes and returns all steer messages still queued for
+// inter-step delivery. Used to hand queued messages to a new run when the
+// operation that accepted them (e.g. a manual compaction) finishes without
+// running the agent loop, which would otherwise leave them undelivered.
+func (a *Agent) DrainSteers() []string {
+	return drainSteer(a.steerCh)
+}
+
 // Enqueue queues a message for post-turn delivery. It will be processed
 // after the current agent turn completes, triggering a new turn.
 // Safe to call at any time.

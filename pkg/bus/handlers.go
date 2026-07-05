@@ -129,11 +129,41 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd CompactSession) error {
+		// A manual compact occupies the agent's run slot for seconds, so it
+		// must occupy the session too: transition to running so frontends
+		// switch the input to queue mode (steer) and Manager.Send/requireIdle
+		// treat the session as busy instead of racing a concurrent run.
+		if sctx.State != nil {
+			if err := sctx.State.Transition(StateRunning); err != nil {
+				return fmt.Errorf("cannot compact: %w", err)
+			}
+		}
 		// Emit CompactionStarted/Ended explicitly (agent.Compact doesn't emit lifecycle events).
 		sctx.Bus.Publish(CompactionStarted{SessionID: sctx.SessionID})
-		result, err := sctx.Agent.Compact(sctx.SessionCtx)
+		result, err := func() (p *core.CompactionPayload, e error) {
+			// Recover panics so the state machine can never be left stuck in
+			// running by a crashing Compact.
+			defer func() {
+				if r := recover(); r != nil {
+					e = fmt.Errorf("compaction panic: %v", r)
+				}
+			}()
+			return sctx.Agent.Compact(sctx.SessionCtx)
+		}()
+		// Settle the state BEFORE publishing results, mirroring startRun:
+		// reactors observing CompactionEnded must see idle/error, not running.
+		if sctx.State != nil {
+			if err != nil {
+				_ = sctx.State.TransitionWithError(StateError, err.Error())
+			} else {
+				_ = sctx.State.Transition(StateIdle)
+			}
+		}
 		if err != nil {
 			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
+			// A message queued during the failed compact must still be
+			// delivered (Error→Running is a valid transition).
+			deliverQueuedSteers(sctx)
 			return err
 		}
 		// Signal compaction ended (with or without payload).
@@ -147,6 +177,9 @@ func RegisterHandlers(sctx *SessionContext) {
 			Command:   "compact",
 			Messages:  sctx.Agent.Messages(),
 		})
+		// Messages sent while the compact held the session busy were queued as
+		// steers, but no run is coming to drain them — start one now.
+		deliverQueuedSteers(sctx)
 		return nil
 	})
 
@@ -1146,6 +1179,38 @@ func stopGoal(sctx *SessionContext, reason string) {
 		})
 	}
 	sctx.Bus.Publish(GoalEnded{SessionID: sctx.SessionID, Reason: reason})
+}
+
+// deliverQueuedSteers drains steer messages that were queued while a non-run
+// operation (manual compaction) held the session busy, and starts a run to
+// process them. A normal run drains its steers between steps, but a compact
+// never runs the agent loop — without this, queued messages would sit in the
+// agent's steer buffer until some unrelated future run picked them up.
+func deliverQueuedSteers(sctx *SessionContext) {
+	queued := sctx.Agent.DrainSteers()
+	if len(queued) == 0 {
+		return
+	}
+	// Announce the dequeue so frontends move the text from their "queued"
+	// strip into the transcript: the agent loop never saw these steers, so no
+	// Steered event was (or will be) emitted for them.
+	for _, q := range queued {
+		sctx.Bus.Publish(Steered{
+			SessionID: sctx.SessionID,
+			RunGen:    sctx.RunGenAtomic.Load(),
+			Text:      q,
+		})
+	}
+	if err := sctx.Bus.Execute(SendPrompt{
+		SessionID: sctx.SessionID,
+		Text:      strings.Join(queued, "\n"),
+	}); err != nil {
+		// A concurrent run won the race for the run slot — hand the messages
+		// back to the steer buffer so that run delivers them between steps.
+		for _, q := range queued {
+			sctx.Agent.Steer(q)
+		}
+	}
 }
 
 // goalRelaunch sends the next iteration's prompt if the agent is idle/error.

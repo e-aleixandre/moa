@@ -107,8 +107,11 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			})
 			return m, nil
 		}
+		// A compact behaves like a run: the input stays enabled in queue
+		// (steer) mode so a message typed meanwhile is delivered when the
+		// compaction finishes instead of being lost.
 		m.s.running = true
-		m.input.SetEnabled(false)
+		m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
 		m.status.SetText("compacting context...")
 		b := m.runtime.Bus
 		return m, func() tea.Msg {

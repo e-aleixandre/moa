@@ -32,6 +32,7 @@ type AgentController interface {
 	Abort()
 	Steer(msg string)
 	CancelSteer()
+	DrainSteers() []string
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error

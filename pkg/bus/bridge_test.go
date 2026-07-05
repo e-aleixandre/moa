@@ -35,6 +35,7 @@ type fakeAgent struct {
 	resetCalled     bool
 	compactCalled   bool
 	compactErr      error
+	compactHook     func()
 
 	setModelProvider core.Provider
 	setModelModel    core.Model
@@ -53,6 +54,7 @@ type fakeAgent struct {
 	sendErr     error
 	sendDelay   time.Duration // simulates slow agent
 	sendContent []core.Content
+	steerQueue  []string
 }
 
 func (f *fakeAgent) Abort() {
@@ -65,9 +67,18 @@ func (f *fakeAgent) Steer(msg string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.steered = msg
+	f.steerQueue = append(f.steerQueue, msg)
 }
 
 func (f *fakeAgent) CancelSteer() {}
+
+func (f *fakeAgent) DrainSteers() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	q := f.steerQueue
+	f.steerQueue = nil
+	return q
+}
 
 func (f *fakeAgent) Model() core.Model {
 	f.mu.Lock()
@@ -133,8 +144,16 @@ func (f *fakeAgent) Reset() error {
 
 func (f *fakeAgent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.compactCalled = true
+	hook := f.compactHook
+	f.mu.Unlock()
+	// Let a test observe state / queue a steer while compaction is "in flight",
+	// mirroring a user message arriving mid-compaction.
+	if hook != nil {
+		hook()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return nil, f.compactErr
 }
 
@@ -859,6 +878,80 @@ func TestHandler_CompactSession_Error(t *testing.T) {
 	err := b.Execute(CompactSession{})
 	if err == nil || err.Error() != "no context" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A manual compact must occupy the session (StateRunning) for its whole
+// duration so frontends switch the input to queue mode and Manager.Send steers
+// instead of racing a concurrent run. It must settle back to idle afterwards.
+func TestHandler_CompactSession_OccupiesSession(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	var during SessionState
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	fa.compactHook = func() { during = sctx.State.Current() }
+	RegisterHandlers(sctx)
+
+	if got := sctx.State.Current(); got != StateIdle {
+		t.Fatalf("pre-compact state = %q, want idle", got)
+	}
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatal(err)
+	}
+	if during != StateRunning {
+		t.Fatalf("state during compaction = %q, want running", during)
+	}
+	if got := sctx.State.Current(); got != StateIdle {
+		t.Fatalf("post-compact state = %q, want idle", got)
+	}
+}
+
+// On a compaction error the session must settle to error (not stay stuck in
+// running), so the input becomes usable again.
+func TestHandler_CompactSession_ErrorSettlesState(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{compactErr: errors.New("boom")}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	_ = b.Execute(CompactSession{})
+	if got := sctx.State.Current(); got != StateError {
+		t.Fatalf("post-error state = %q, want error", got)
+	}
+}
+
+// A message sent while a compact holds the session busy is queued as a steer;
+// since the compact never runs the agent loop, the handler must drain the
+// queued steers and start a run to deliver them when compaction finishes.
+func TestHandler_CompactSession_DeliversQueuedSteers(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	// Simulate a user message arriving mid-compaction: it gets queued as a steer.
+	fa.compactHook = func() { fa.Steer("queued while compacting") }
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatal(err)
+	}
+	// deliverQueuedSteers issues a SendPrompt, which startRun runs the agent
+	// with asynchronously — poll until Send receives the queued text.
+	deadline := time.After(2 * time.Second)
+	for {
+		if fa.wasSendCalled() {
+			if got := fa.getSendPrompt(); got != "queued while compacting" {
+				t.Fatalf("delivered prompt = %q", got)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("queued steer was never delivered as a run after compaction")
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 
