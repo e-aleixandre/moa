@@ -122,7 +122,8 @@ export function InputBar({ sessionId, session, tileId }) {
   // Push-to-talk gesture state. `voiceLocked` means the user slid up while
   // holding to lock recording hands-free (Telegram-style); then a tap stops.
   const [voiceLocked, setVoiceLocked] = useState(false);
-  const holdRef = useRef(null); // { startY, moved, longPress, pointerId } while pressing
+  const holdRef = useRef(null); // { startY, longPress, locked, pointerId, el, timer, onWinUp, onWinCancel } while pressing
+  const pointerDrivenRef = useRef(false); // true between pointerdown and the click it synthesizes (mouse), to suppress duplicate send
 
   useEffect(() => {
     if (!permissionActive) {
@@ -163,72 +164,91 @@ export function InputBar({ sessionId, session, tileId }) {
     else { startVoice(); }
   }, [voiceSupported, recording, startVoice, stopVoice, notifyNoVoice]);
 
+  // recordingRef mirrors `recording` so the pointer handlers read a fresh value
+  // without needing it in their dependency arrays (and without stale closures).
+  const recordingRef = useRef(recording);
+  recordingRef.current = recording;
+
+  // endHold tears down the active hold gesture (timer, pointer capture, window
+  // fallback listeners). Safe to call multiple times.
+  const endHold = useCallback((e) => {
+    const h = holdRef.current;
+    if (!h) return;
+    holdRef.current = null;
+    clearTimeout(h.timer);
+    if (h.onWinUp) {
+      window.removeEventListener('pointerup', h.onWinUp);
+      window.removeEventListener('pointercancel', h.onWinCancel);
+    }
+    const el = e?.currentTarget || h.el;
+    try { el?.releasePointerCapture?.(h.pointerId); } catch (_) { /* ignore */ }
+    return h;
+  }, []);
+
+  const finishHold = useCallback((h) => {
+    if (!h) return; // already handled (e.g. by the element handler)
+    // h.longPress: recording was (or is being) started by this hold.
+    if (h.longPress) {
+      if (h.locked) return; // locked: keep recording; a later tap stops.
+      stopVoice();          // plain hold-and-release → stop + transcribe.
+      return;
+    }
+    // Not a hold → a tap.
+    if (recordingRef.current) {
+      setVoiceLocked(false);
+      stopVoice();          // tap while (locked-)recording → stop + transcribe.
+      return;
+    }
+    handleSendRef.current(); // idle tap → send.
+  }, [stopVoice]);
+
   const onSendPointerDown = useCallback((e) => {
-    // Only left/primary button or touch.
-    if (e.button != null && e.button !== 0) return;
-    // If already recording (locked), a tap stops+transcribes; don't start a
-    // new hold gesture.
-    if (recording) return;
-    if (!voiceSupported) return; // no mic → button is send-only, handled onClick
+    if (e.button != null && e.button !== 0) return; // primary/touch only
+    if (recordingRef.current) return; // locked+recording → tap handled on up
+    if (!voiceSupported) return;      // no mic → send-only (onClick)
 
-    const y = e.clientY ?? 0;
-    holdRef.current = { startY: y, moved: false, longPress: false, pointerId: e.pointerId };
-    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) { /* ignore */ }
+    const el = e.currentTarget;
+    const h = { startY: e.clientY ?? 0, longPress: false, locked: false, pointerId: e.pointerId, el };
+    holdRef.current = h;
+    try { el.setPointerCapture?.(e.pointerId); } catch (_) { /* ignore */ }
 
-    holdRef.current.timer = setTimeout(() => {
-      if (!holdRef.current) return;
-      holdRef.current.longPress = true;
+    // Fallback: if pointer capture isn't honored and the up/cancel lands off
+    // the button, still finish the gesture from the window. No click is
+    // synthesized in that path, so clear the suppression flag ourselves.
+    h.onWinUp = () => { pointerDrivenRef.current = false; const hh = endHold(); finishHold(hh); };
+    h.onWinCancel = () => { pointerDrivenRef.current = false; const hh = endHold(); if (hh && hh.longPress && !hh.locked) cancelVoice(); };
+    window.addEventListener('pointerup', h.onWinUp);
+    window.addEventListener('pointercancel', h.onWinCancel);
+
+    h.timer = setTimeout(() => {
+      if (holdRef.current !== h) return;
+      h.longPress = true;
       startVoice();
     }, HOLD_MS);
-  }, [recording, voiceSupported, startVoice]);
+  }, [voiceSupported, startVoice, endHold, finishHold, cancelVoice]);
 
   const onSendPointerMove = useCallback((e) => {
     const h = holdRef.current;
-    if (!h || !h.longPress) return;
+    if (!h || !h.longPress || h.locked) return;
     const dy = h.startY - (e.clientY ?? 0);
-    if (dy >= LOCK_SLIDE_PX && !voiceLocked) {
-      setVoiceLocked(true);
+    if (dy >= LOCK_SLIDE_PX) {
+      h.locked = true;      // gesture source of truth (not React state)
+      setVoiceLocked(true); // visual only
     }
-  }, [voiceLocked]);
+  }, []);
 
   const onSendPointerUp = useCallback((e) => {
-    const h = holdRef.current;
-    holdRef.current = null;
-    if (h) {
-      clearTimeout(h.timer);
-      try { e.currentTarget.releasePointerCapture?.(h.pointerId); } catch (_) { /* ignore */ }
-    }
+    const h = endHold(e);
+    if (h) finishHold(h);
+  }, [endHold, finishHold]);
 
-    // Was this a recording hold?
-    if (h && h.longPress) {
-      if (voiceLocked) {
-        // Locked: keep recording, release finger. A later tap stops.
-        return;
-      }
-      // Plain hold-and-release → stop + transcribe.
-      stopVoice();
-      return;
-    }
+  const onSendPointerCancel = useCallback((e) => {
+    const h = endHold(e);
+    if (h && h.longPress && !h.locked) cancelVoice();
+  }, [endHold, cancelVoice]);
 
-    // Not a hold → it's a tap.
-    if (recording) {
-      // Tapping while (locked-)recording stops + transcribes.
-      setVoiceLocked(false);
-      stopVoice();
-      return;
-    }
-    // Idle tap → send.
-    handleSendRef.current();
-  }, [voiceLocked, recording, stopVoice]);
-
-  const onSendPointerCancel = useCallback(() => {
-    const h = holdRef.current;
-    holdRef.current = null;
-    if (h) clearTimeout(h.timer);
-    if (h && h.longPress && !voiceLocked) {
-      cancelVoice(); // gesture aborted → discard
-    }
-  }, [voiceLocked, cancelVoice]);
+  // Tear down any dangling gesture on unmount.
+  useEffect(() => () => { endHold(); }, [endHold]);
 
   // Register in global map so keyboard shortcuts can trigger voice toggle
   useEffect(() => {
@@ -950,6 +970,7 @@ export function InputBar({ sessionId, session, tileId }) {
             const cls = [
               'input-send',
               busy ? 'steer' : '',
+              gesture ? 'gesture' : '',
               recording ? 'recording' : '',
               voiceLocked ? 'locked' : '',
               transcribing ? 'transcribing' : '',
@@ -962,11 +983,19 @@ export function InputBar({ sessionId, session, tileId }) {
               : busy ? 'Steer' : 'Send';
 
             const gestureProps = gesture ? {
-              onPointerDown: onSendPointerDown,
+              onPointerDown: (e) => { pointerDrivenRef.current = true; onSendPointerDown(e); },
               onPointerMove: onSendPointerMove,
               onPointerUp: onSendPointerUp,
               onPointerCancel: onSendPointerCancel,
               onContextMenu: (e) => e.preventDefault(),
+              // Keyboard activation (Enter/Space) fires click with no preceding
+              // pointer sequence — send in that case. Mouse taps also fire click
+              // after pointerup, which already handled them; the ref suppresses
+              // that duplicate.
+              onClick: () => {
+                if (pointerDrivenRef.current) { pointerDrivenRef.current = false; return; }
+                if (!recording) handleSendRef.current();
+              },
             } : {
               onClick: handleSend,
             };

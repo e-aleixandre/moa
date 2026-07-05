@@ -218,6 +218,15 @@
   box-shadow: 0 2px 8px rgba(203,166,247,0.25);
 }
 
+/* Push-to-talk: the gesture (hold to record, slide up to lock) needs the
+   button to swallow touch scrolling/selection whenever it's active, not just
+   while recording. */
+.input-send.gesture {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Push-to-talk: when the button acts as a mic (empty input), give it a
    neutral surface so it reads as "record" rather than "send". It's the same
    big 42px target as send, so it's easy to hit. */
@@ -225,9 +234,6 @@
   background: var(--surface0);
   color: var(--subtext1);
   box-shadow: none;
-  touch-action: none; /* let the slide-up-to-lock gesture work without scrolling */
-  -webkit-user-select: none;
-  user-select: none;
 }
 .input-send.mic-mode:hover { background: var(--surface1); opacity: 1; }
 
@@ -237,7 +243,6 @@
   color: var(--crust);
   box-shadow: 0 2px 12px rgba(243,139,168,0.35);
   animation: mic-pulse 1.5s ease-in-out infinite;
-  touch-action: none;
 }
 .input-send.recording.locked {
   /* Locked (hands-free) recording: solid, not pulsing, shows a stop square. */
