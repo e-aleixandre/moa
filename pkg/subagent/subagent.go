@@ -262,7 +262,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 				jobCtx = core.WithAgentID(jobCtx, job.id)
 			}
-			go linker(ctx, jobCtx, jobCancel, job)
+			go linker(ctx, jobCancel, job)
 			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate)
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
@@ -353,12 +353,29 @@ func newSubagentCancel(jobs *jobStore) core.Tool {
 // the job has not been promoted (or already finished). Once promoted, the
 // child is deliberately decoupled from the parent's context so it survives
 // the parent tool call returning.
-func linker(parentCtx, jobCtx context.Context, jobCancel context.CancelFunc, j *job) {
+//
+// The re-check after parentCtx.Done() is essential: when the parent tool call
+// returns right after a promotion, its ctx is cancelled AND j.promoted is
+// closed at nearly the same time. A plain select would pick a ready case
+// pseudo-randomly and could call jobCancel() on an already-promoted (or
+// already-finished) child, killing it. So on parentCtx.Done() we cancel only
+// if the job is still neither promoted nor done.
+func linker(parentCtx context.Context, jobCancel context.CancelFunc, j *job) {
 	select {
-	case <-parentCtx.Done():
-		jobCancel()
 	case <-j.promoted:
+		return
 	case <-j.done:
+		return
+	case <-parentCtx.Done():
+		if j.isPromoted() {
+			return
+		}
+		select {
+		case <-j.done:
+			return
+		default:
+			jobCancel()
+		}
 	}
 }
 

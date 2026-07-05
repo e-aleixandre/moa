@@ -1482,6 +1482,57 @@ func TestSyncSubagentSurvivesParentCtxCancellationAfterPromotion(t *testing.T) {
 	})
 }
 
+// TestSyncSubagentPromoteRacesParentCtxCancel stresses the linker's decision
+// when promotion and the parent's context cancellation happen concurrently:
+// once promoted, the child must never be killed by the parent tool call
+// returning (which cancels the parent ctx). Runs many iterations to shake out
+// the pseudo-random select ordering the linker must guard against.
+func TestSyncSubagentPromoteRacesParentCtxCancel(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		provider := newMockProvider(gateResponse(started, release, "survived"))
+
+		completed := make(chan string, 1)
+		sub, _, _, jobs := newSubagentToolsWithStore(t, Config{
+			DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+			ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+			AppCtx:          context.Background(),
+			OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+				completed <- status
+			},
+		})
+
+		parentCtx, cancelParent := context.WithCancel(context.Background())
+		resultCh := make(chan core.Result, 1)
+		go func() {
+			res, _ := sub.Execute(parentCtx, map[string]any{"task": "do it"}, nil)
+			resultCh <- res
+		}()
+
+		<-started
+		jobID := onlyJobID(t, jobs)
+		if err := jobs.promote(jobID); err != nil {
+			t.Fatalf("iter %d: promote() error = %v", i, err)
+		}
+		// Cancel the parent ctx as close to the promotion as possible — this
+		// is what the parent tool call returning does.
+		cancelParent()
+		<-resultCh
+
+		// Let the child run to completion; it must NOT have been cancelled.
+		close(release)
+		select {
+		case st := <-completed:
+			if st != statusCompleted {
+				t.Fatalf("iter %d: child finished with status %q, want completed (promotion should have decoupled it from the parent ctx)", i, st)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iter %d: timeout — promoted child likely killed by parent ctx cancellation", i)
+		}
+	}
+}
+
 func TestSyncSubagentPromoteVsFinishRaceDeliversExactlyOnce(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		provider := newMockProvider(textResponse("race result"))

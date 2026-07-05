@@ -39,10 +39,20 @@ func (m *appModel) ensureSubagent(jobID string) *subagentTranscript {
 // handleSubagentStarted records a new subagent job.
 func (m *appModel) handleSubagentStarted(e bus.SubagentStarted) {
 	t := m.ensureSubagent(e.JobID)
-	t.task = e.Task
-	t.model = e.Model
+	if e.Task != "" {
+		t.task = e.Task
+	}
+	if e.Model != "" {
+		t.model = e.Model
+	}
 	t.async = e.Async
-	t.status = "running"
+	// Race: promoting a subagent right as it finishes can deliver this
+	// SubagentStarted (Async:true, echoing the promotion) AFTER the
+	// SubagentEnded that already marked it terminal. Never downgrade a
+	// terminal status back to "running" — only a live/absent job may.
+	if t.status != "completed" && t.status != "failed" && t.status != "cancelled" {
+		t.status = "running"
+	}
 }
 
 // handleSubagentEnded finalizes a transcript's status.

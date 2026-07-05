@@ -112,6 +112,30 @@ func TestHandleSubagentStartedAndEnded(t *testing.T) {
 	}
 }
 
+// TestHandleSubagentStarted_DoesNotResurrectTerminal covers the promote/finish
+// race: a promotion's SubagentStarted(Async:true) can arrive AFTER the
+// SubagentEnded that already marked the job terminal. It must not flip the job
+// back to "running".
+func TestHandleSubagentStarted_DoesNotResurrectTerminal(t *testing.T) {
+	m := &appModel{s: &state{}}
+
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "j1", Task: "t", Model: "m", Async: false})
+	m.handleSubagentEnded(bus.SubagentEnded{JobID: "j1", Status: "completed"})
+	// Late promotion echo.
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "j1", Async: true})
+
+	tr := m.s.subagents["j1"]
+	if tr.status != "completed" {
+		t.Errorf("status = %q, want completed (must not resurrect to running)", tr.status)
+	}
+	if !tr.async {
+		t.Errorf("async = false, want true (flag should still update)")
+	}
+	if m.hasLiveSubagents() {
+		t.Errorf("hasLiveSubagents() = true, want false for a completed job")
+	}
+}
+
 func TestSubagentPicker_OnlyListsLiveEntries(t *testing.T) {
 	subs := map[string]*subagentTranscript{
 		"running1":  {jobID: "running1", task: "task A", status: "running"},
