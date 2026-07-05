@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
-import { SendHorizonal, Mic, MicOff, Loader2, Paperclip, X } from 'lucide-preact';
+import { SendHorizonal, Mic, MicOff, Square, Loader2, Paperclip, X } from 'lucide-preact';
 import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addPermissionRule, steerSubagent } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
@@ -77,6 +77,8 @@ export function InputBar({ sessionId, session, tileId }) {
   const feedbackRef = useRef(null);
   const attachInputRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
+  // Whether the textarea currently has content — drives Send vs Mic icon.
+  const [hasText, setHasText] = useState(false);
 
   const permissionActive = sessionState === 'permission' && !!session?.pendingPerm;
   const [permFeedbackOpen, setPermFeedbackOpen] = useState(false);
@@ -111,7 +113,16 @@ export function InputBar({ sessionId, session, tileId }) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }, [permissionActive, permFeedbackOpen]);
 
-  const { recording, transcribing, toggle: toggleVoice, supported: voiceSupported } = useVoice(insertAtCursor);
+  const onVoiceError = useCallback((msg) => {
+    addToast({ title: 'Voice input', detail: msg, type: 'error' });
+  }, []);
+
+  const { recording, transcribing, start: startVoice, stop: stopVoice, cancel: cancelVoice, supported: voiceSupported } = useVoice(insertAtCursor, onVoiceError);
+
+  // Push-to-talk gesture state. `voiceLocked` means the user slid up while
+  // holding to lock recording hands-free (Telegram-style); then a tap stops.
+  const [voiceLocked, setVoiceLocked] = useState(false);
+  const holdRef = useRef(null); // { startY, moved, longPress, pointerId } while pressing
 
   useEffect(() => {
     if (!permissionActive) {
@@ -129,25 +140,103 @@ export function InputBar({ sessionId, session, tileId }) {
     setPermError('');
   }, [permissionActive, session?.pendingPerm?.id]);
 
-  const handleMicClick = useCallback(() => {
-    if (voiceSupported) {
-      toggleVoice();
-    } else {
-      addToast({
-        title: 'Voice input requires HTTPS',
-        detail: 'Serve moa behind HTTPS (e.g. Tailscale, Caddy, or mkcert) to enable microphone access.',
-        type: 'attention',
-      });
+  // --- Push-to-talk gesture ---
+  // Tap the main button = send. Press-and-hold = record while held; release to
+  // stop+transcribe. Slide up past a threshold while holding = lock recording
+  // (hands-free); then a tap stops. Recordings shorter than ~400ms are dropped
+  // by useVoice so an accidental tap doesn't fire a transcription.
+  const LOCK_SLIDE_PX = 48;
+  const HOLD_MS = 180; // press longer than this = intentional hold (record)
+
+  const notifyNoVoice = useCallback(() => {
+    addToast({
+      title: 'Voice input requires HTTPS',
+      detail: 'Serve moa behind HTTPS (e.g. Tailscale, Caddy, or mkcert) to enable microphone access.',
+      type: 'attention',
+    });
+  }, []);
+
+  // Keyboard shortcut / external toggle (Cmd+.). Uses simple toggle semantics.
+  const handleMicToggle = useCallback(() => {
+    if (!voiceSupported) { notifyNoVoice(); return; }
+    if (recording) { setVoiceLocked(false); stopVoice(); }
+    else { startVoice(); }
+  }, [voiceSupported, recording, startVoice, stopVoice, notifyNoVoice]);
+
+  const onSendPointerDown = useCallback((e) => {
+    // Only left/primary button or touch.
+    if (e.button != null && e.button !== 0) return;
+    // If already recording (locked), a tap stops+transcribes; don't start a
+    // new hold gesture.
+    if (recording) return;
+    if (!voiceSupported) return; // no mic → button is send-only, handled onClick
+
+    const y = e.clientY ?? 0;
+    holdRef.current = { startY: y, moved: false, longPress: false, pointerId: e.pointerId };
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) { /* ignore */ }
+
+    holdRef.current.timer = setTimeout(() => {
+      if (!holdRef.current) return;
+      holdRef.current.longPress = true;
+      startVoice();
+    }, HOLD_MS);
+  }, [recording, voiceSupported, startVoice]);
+
+  const onSendPointerMove = useCallback((e) => {
+    const h = holdRef.current;
+    if (!h || !h.longPress) return;
+    const dy = h.startY - (e.clientY ?? 0);
+    if (dy >= LOCK_SLIDE_PX && !voiceLocked) {
+      setVoiceLocked(true);
     }
-  }, [voiceSupported, toggleVoice]);
+  }, [voiceLocked]);
+
+  const onSendPointerUp = useCallback((e) => {
+    const h = holdRef.current;
+    holdRef.current = null;
+    if (h) {
+      clearTimeout(h.timer);
+      try { e.currentTarget.releasePointerCapture?.(h.pointerId); } catch (_) { /* ignore */ }
+    }
+
+    // Was this a recording hold?
+    if (h && h.longPress) {
+      if (voiceLocked) {
+        // Locked: keep recording, release finger. A later tap stops.
+        return;
+      }
+      // Plain hold-and-release → stop + transcribe.
+      stopVoice();
+      return;
+    }
+
+    // Not a hold → it's a tap.
+    if (recording) {
+      // Tapping while (locked-)recording stops + transcribes.
+      setVoiceLocked(false);
+      stopVoice();
+      return;
+    }
+    // Idle tap → send.
+    handleSendRef.current();
+  }, [voiceLocked, recording, stopVoice]);
+
+  const onSendPointerCancel = useCallback(() => {
+    const h = holdRef.current;
+    holdRef.current = null;
+    if (h) clearTimeout(h.timer);
+    if (h && h.longPress && !voiceLocked) {
+      cancelVoice(); // gesture aborted → discard
+    }
+  }, [voiceLocked, cancelVoice]);
 
   // Register in global map so keyboard shortcuts can trigger voice toggle
   useEffect(() => {
     if (tileId != null && canTranscribe) {
-      inputBarRegistry.set(tileId, { toggleVoice: handleMicClick });
+      inputBarRegistry.set(tileId, { toggleVoice: handleMicToggle });
       return () => inputBarRegistry.delete(tileId);
     }
-  }, [tileId, canTranscribe, handleMicClick]);
+  }, [tileId, canTranscribe, handleMicToggle]);
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -162,6 +251,7 @@ export function InputBar({ sessionId, session, tileId }) {
     const el = textareaRef.current;
     if (!el) return;
     el.value = loadDraft(sessionId);
+    setHasText(!!el.value.trim());
     autoResize();
   }, [sessionId, autoResize]);
 
@@ -391,6 +481,7 @@ export function InputBar({ sessionId, session, tileId }) {
     if (text) pushHistory(text);
     el.value = '';
     saveDraft(sessionId, ''); // sent — drop the persisted draft
+    setHasText(false);
     setCmdSuggestions(null);
     setFileSuggestions(null);
     setAttachments([]);
@@ -466,6 +557,11 @@ export function InputBar({ sessionId, session, tileId }) {
   };
 
   const handleSend = () => handleSendInner(textareaRef.current);
+  // Keep a ref to the latest handleSend so the push-to-talk pointer handlers
+  // (memoized useCallbacks) always invoke the current version, not a stale
+  // closure missing the latest attachments/subagent state.
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
 
   // Returns the row the cursor is on (0-indexed).
   const cursorRow = useCallback(() => {
@@ -595,6 +691,7 @@ export function InputBar({ sessionId, session, tileId }) {
     autoResize();
     updateSuggestions();
     saveDraft(sessionId, e.target.value);
+    setHasText(!!e.target.value.trim());
     // File suggestions with debounce.
     clearTimeout(fileDebounceRef.current);
     fileDebounceRef.current = setTimeout(updateFileSuggestions, 100);
@@ -724,7 +821,7 @@ export function InputBar({ sessionId, session, tileId }) {
               {canTranscribe && (
                 <button
                   class={`input-mic permission-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''} ${!voiceSupported ? 'unavailable' : ''}`}
-                  onClick={handleMicClick}
+                  onClick={handleMicToggle}
                   disabled={transcribing}
                   title={!voiceSupported ? 'Voice input (requires HTTPS)' : recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
                 >
@@ -835,25 +932,56 @@ export function InputBar({ sessionId, session, tileId }) {
               onKeyDown={handleKey}
               onPaste={handlePaste}
             />
-            {canTranscribe && (
-              <button
-                class={`input-mic ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''} ${!voiceSupported ? 'unavailable' : ''}`}
-                onClick={handleMicClick}
-                disabled={transcribing}
-                title={!voiceSupported ? 'Voice input (requires HTTPS)' : recording ? `Stop recording (${formatShortcut('.', { mod: true })})` : transcribing ? 'Transcribing…' : `Voice input (${formatShortcut('.', { mod: true })})`}
-              >
-                {transcribing ? <Loader2 /> : recording ? <MicOff /> : <Mic />}
-              </button>
-            )}
           </div>
-          <button
-            class={`input-send ${busy ? 'steer' : ''}`}
-            onClick={handleSend}
-            disabled={!sessionId}
-            title={busy ? 'Steer' : 'Send'}
-          >
-            <SendHorizonal />
-          </button>
+          {(() => {
+            // The main button is send + push-to-talk. Tap = send; hold =
+            // record; slide up while holding = lock. When there's text to send
+            // (or voice isn't available), it's a plain send button. When idle
+            // and empty, it shows a mic and records on hold.
+            const canVoice = canTranscribe && voiceSupported;
+            const micMode = canVoice && !hasText && !busy;
+            const gesture = canVoice; // attach pointer gesture when voice is usable
+
+            let icon = <SendHorizonal />;
+            if (transcribing) icon = <Loader2 />;
+            else if (recording) icon = voiceLocked ? <Square /> : <Mic />;
+            else if (micMode) icon = <Mic />;
+
+            const cls = [
+              'input-send',
+              busy ? 'steer' : '',
+              recording ? 'recording' : '',
+              voiceLocked ? 'locked' : '',
+              transcribing ? 'transcribing' : '',
+              micMode ? 'mic-mode' : '',
+            ].filter(Boolean).join(' ');
+
+            const title = transcribing ? 'Transcribing…'
+              : recording ? (voiceLocked ? 'Tap to stop & transcribe' : 'Release to transcribe · slide up to lock')
+              : micMode ? `Hold to talk · tap to send (${formatShortcut('.', { mod: true })} for mic)`
+              : busy ? 'Steer' : 'Send';
+
+            const gestureProps = gesture ? {
+              onPointerDown: onSendPointerDown,
+              onPointerMove: onSendPointerMove,
+              onPointerUp: onSendPointerUp,
+              onPointerCancel: onSendPointerCancel,
+              onContextMenu: (e) => e.preventDefault(),
+            } : {
+              onClick: handleSend,
+            };
+
+            return (
+              <button
+                class={cls}
+                disabled={!sessionId || transcribing}
+                title={title}
+                {...gestureProps}
+              >
+                {icon}
+              </button>
+            );
+          })()}
         </>
       )}
     </div>

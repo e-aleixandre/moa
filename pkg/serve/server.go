@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -768,6 +769,7 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 		defer file.Close() //nolint:errcheck
 		text, err := mgr.transcriber.Transcribe(r.Context(), file, header.Filename)
 		if err != nil {
+			slog.Warn("transcription failed", "filename", header.Filename, "size", header.Size, "error", err)
 			http.Error(w, "transcription failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
