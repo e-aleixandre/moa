@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
-import { SendHorizonal, Mic, MicOff, Square, Loader2, Paperclip, X } from 'lucide-preact';
+import { SendHorizonal, Mic, MicOff, Square, Loader2, Paperclip, X, ChevronUp } from 'lucide-preact';
 import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addPermissionRule, steerSubagent } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
@@ -186,14 +186,18 @@ export function InputBar({ sessionId, session, tileId }) {
   }, []);
 
   const finishHold = useCallback((h) => {
-    if (!h) return; // already handled (e.g. by the element handler)
+    if (!h) {
+      // No active hold — this is a tap while locked-recording → stop & transcribe.
+      if (recordingRef.current) { setVoiceLocked(false); stopVoice(); }
+      return;
+    }
     // h.longPress: recording was (or is being) started by this hold.
     if (h.longPress) {
       if (h.locked) return; // locked: keep recording; a later tap stops.
       stopVoice();          // plain hold-and-release → stop + transcribe.
       return;
     }
-    // Not a hold → a tap.
+    // Quick tap (released before HOLD_MS).
     if (recordingRef.current) {
       setVoiceLocked(false);
       stopVoice();          // tap while (locked-)recording → stop + transcribe.
@@ -1001,14 +1005,22 @@ export function InputBar({ sessionId, session, tileId }) {
             };
 
             return (
-              <button
-                class={cls}
-                disabled={!sessionId || transcribing}
-                title={title}
-                {...gestureProps}
-              >
-                {icon}
-              </button>
+              <div class="input-send-wrap">
+                {recording && !voiceLocked && (
+                  <div class="voice-lock-hint">
+                    <ChevronUp />
+                    <span>Slide up to lock</span>
+                  </div>
+                )}
+                <button
+                  class={cls}
+                  disabled={!sessionId || transcribing}
+                  title={title}
+                  {...gestureProps}
+                >
+                  {icon}
+                </button>
+              </div>
             );
           })()}
         </>
