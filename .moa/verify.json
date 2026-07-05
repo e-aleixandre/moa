@@ -1,0 +1,29 @@
+{
+  "checks": [
+    {
+      "name": "build",
+      "command": "go build ./...",
+      "timeout": "5m"
+    },
+    {
+      "name": "vet",
+      "command": "go vet ./...",
+      "timeout": "5m"
+    },
+    {
+      "name": "test",
+      "command": "go test -race -count=1 ./...",
+      "timeout": "10m"
+    },
+    {
+      "name": "lint",
+      "command": "PATH=\"$PATH:$(go env GOPATH)/bin\" golangci-lint run --new-from-rev=c8539f5 ./...",
+      "timeout": "5m"
+    },
+    {
+      "name": "gpt55-review",
+      "command": "bash .moa/gpt55-review.sh",
+      "timeout": "10m"
+    }
+  ]
+}
