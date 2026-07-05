@@ -339,9 +339,7 @@ func (m *Manager) Delete(id string) error {
 			return err
 		}
 		m.invalidateSavedCache()
-		if dir, derr := sessionAttachDir(id); derr == nil {
-			_ = os.RemoveAll(dir)
-		}
+		_ = removeSessionAttachDir(id)
 		return nil
 	}
 	delete(m.sessions, id)
@@ -382,9 +380,7 @@ func (m *Manager) Delete(id string) error {
 		}
 	}
 	m.invalidateSavedCache()
-	if dir, derr := sessionAttachDir(id); derr == nil {
-		_ = os.RemoveAll(dir)
-	}
+	_ = removeSessionAttachDir(id)
 	return nil
 }
 
@@ -404,6 +400,9 @@ func reapStaleAttachments() {
 	}
 	const maxAge = 24 * time.Hour
 	for _, entry := range entries {
+		// entry.IsDir()/Info() use the entry's own type (a symlink reports
+		// IsDir()==false), so links are skipped here; the name must also match
+		// the strict session-id pattern.
 		if !entry.IsDir() || !sessionIDPattern.MatchString(entry.Name()) {
 			continue
 		}
@@ -412,7 +411,9 @@ func reapStaleAttachments() {
 			continue
 		}
 		if time.Since(info.ModTime()) > maxAge {
-			_ = os.RemoveAll(filepath.Join(base, entry.Name()))
+			// Route through the symlink-safe remover (validates id + refuses to
+			// follow a symlinked base/session dir) instead of a raw RemoveAll.
+			_ = removeSessionAttachDir(entry.Name())
 		}
 	}
 }

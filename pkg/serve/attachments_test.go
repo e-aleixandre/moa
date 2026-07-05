@@ -673,6 +673,95 @@ func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
 	}
 }
 
+// TestBuildAttachmentContent_RollbackOnError verifies that when a later
+// attachment in the same call fails (here: exceeds the per-file cap), the
+// files already written to disk during THIS call are rolled back — a failed
+// /send must not leave orphan files counting against the session quota.
+func TestBuildAttachmentContent_RollbackOnError(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+	sessionID := "abcabc1234567890"
+
+	// First attachment: a valid binary that goes to disk.
+	good := Attachment{Name: "ok.bin", Mime: "application/octet-stream", Data: b64([]byte{0x00, 0x01, 0x02, 0x03})}
+	// Second attachment: a binary over the per-file cap → errors after the
+	// first was written.
+	tooBig := Attachment{Name: "big.bin", Mime: "application/octet-stream", Data: b64(make([]byte, maxAttachmentFileBytes+1))}
+
+	_, err := buildAttachmentContent([]Attachment{good, tooBig}, sessionID, pp, false)
+	if err == nil {
+		t.Fatal("expected error for oversized attachment")
+	}
+	dir, derr := sessionAttachDir(sessionID)
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	if entries, rerr := os.ReadDir(dir); rerr == nil {
+		if len(entries) != 0 {
+			names := make([]string, 0, len(entries))
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			t.Fatalf("expected 0 files after rollback, got %d: %v", len(entries), names)
+		}
+	}
+}
+
+// TestRemoveSessionAttachDir_SymlinkSafety verifies that removing a session's
+// attachment dir never follows a symlink into an arbitrary target: if the
+// session path is a symlink, only the link is removed and the target survives.
+func TestRemoveSessionAttachDir_SymlinkSafety(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("MOA_ATTACHMENTS_DIR", base)
+
+	// A victim directory outside the base, with a file we must not delete.
+	victimDir := t.TempDir()
+	victimFile := filepath.Join(victimDir, "keep.txt")
+	if err := os.WriteFile(victimFile, []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plant a session-id-shaped symlink in the base pointing at the victim dir.
+	id := "0011223344556677"
+	link := filepath.Join(base, id)
+	if err := os.Symlink(victimDir, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeSessionAttachDir(id); err != nil {
+		t.Fatalf("removeSessionAttachDir errored: %v", err)
+	}
+	// The symlink must be gone…
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("expected symlink removed, lstat err=%v", err)
+	}
+	// …but the victim file must survive (RemoveAll must NOT have followed it).
+	if got, err := os.ReadFile(victimFile); err != nil || string(got) != "precious" {
+		t.Fatalf("victim clobbered through symlink: err=%v content=%q", err, got)
+	}
+}
+
+// TestRemoveSessionAttachDir_RemovesRealDir verifies the happy path: a real
+// session dir with files is fully removed.
+func TestRemoveSessionAttachDir_RemovesRealDir(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("MOA_ATTACHMENTS_DIR", base)
+	id := "aabbccdd00112233"
+	dir, err := ensureSessionAttachDir(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, werr := writeUnique(dir, "f.bin", []byte("x")); werr != nil {
+		t.Fatal(werr)
+	}
+	if err := removeSessionAttachDir(id); err != nil {
+		t.Fatalf("removeSessionAttachDir errored: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("expected session dir removed, stat err=%v", err)
+	}
+}
+
 // TestWriteUnique_NoFollowSymlink verifies writeUnique refuses to write through
 // a symlink planted at the target path (O_NOFOLLOW), instead of clobbering the
 // symlink's target.

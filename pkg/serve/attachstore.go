@@ -107,6 +107,46 @@ func ensureSessionAttachDir(id string) (string, error) {
 	return dir, nil
 }
 
+// removeSessionAttachDir removes a session's attachment directory safely: it
+// validates the id, refuses to follow a symlinked base dir or a symlinked
+// session dir (removing the link itself, never its target), and only then
+// removes the real directory tree. Best-effort — returns nil if there is
+// nothing to remove. This is the ONLY sanctioned way to delete an attachment
+// dir; callers must not os.RemoveAll a client-influenced path directly.
+func removeSessionAttachDir(id string) error {
+	// Base dir must exist and not be a symlink (never delete through a symlink
+	// that could point outside our tree).
+	base := attachmentsBaseDir()
+	if bi, err := os.Lstat(base); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	} else if bi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("attachments base dir %q is a symlink; refusing to remove", base)
+	}
+	dir, err := sessionAttachDir(id)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		// The session path is itself a symlink: remove only the link, never
+		// follow it into an arbitrary target with RemoveAll.
+		return os.Remove(dir)
+	}
+	if !info.IsDir() {
+		return os.Remove(dir)
+	}
+	return os.RemoveAll(dir)
+}
+
 // safeBase sanitizes an untrusted client-provided filename into a safe
 // basename. It returns "" if no safe name could be derived, leaving the
 // fallback name choice to the caller.

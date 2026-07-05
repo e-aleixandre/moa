@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -108,7 +109,7 @@ func bytesLookLikePDF(data []byte) bool {
 // attachment directory on disk and referenced by path instead. PDFs go
 // native as a "document" block when supportsDocuments is true and the file
 // is small enough; otherwise they fall back to the same on-disk mechanism.
-func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool) ([]core.Content, error) {
+func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool) (result []core.Content, retErr error) {
 	if len(atts) > maxAttachments {
 		return nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
 	}
@@ -120,7 +121,20 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		sessionDir       string
 		pathAdded        bool
 		runningDiskBytes int64
+		writtenPaths     []string // files written during THIS call (for rollback)
 	)
+
+	// On any error return after partial success, remove the files written
+	// during THIS call so a failed /send does not leave orphan files counting
+	// against the session quota (the path-allowlist entry is idempotent and
+	// harmless, so it is intentionally left in place).
+	defer func() {
+		if retErr != nil {
+			for _, p := range writtenPaths {
+				_ = os.Remove(p)
+			}
+		}
+	}()
 
 	toDisk := func(a Attachment, decoded []byte, extraNote string) (core.Content, error) {
 		if len(decoded) > maxAttachmentFileBytes {
@@ -149,6 +163,7 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		if err != nil {
 			return core.Content{}, fmt.Errorf("%w: attachment %q: could not save to disk: %v", ErrBadAttachment, a.Name, err)
 		}
+		writtenPaths = append(writtenPaths, finalPath)
 		runningDiskBytes += int64(len(decoded))
 		advisory := fmt.Sprintf(
 			"El usuario ha adjuntado el archivo %q (%s), guardado en:\n%s\n"+
