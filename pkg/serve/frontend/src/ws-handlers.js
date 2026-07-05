@@ -693,11 +693,18 @@ export function handleWsSubagentStart(id, data) {
   if (!jobId) return;
   const subs = { ...(sess.subagents || {}) };
   const existing = subs[jobId];
+  // Race: promoting a subagent right as it finishes can deliver this
+  // subagent_start (async:true, echoing the promotion) AFTER the
+  // subagent_end that already marked it terminal. Never downgrade a
+  // terminal status back to 'running' — only running/cancelling (or no
+  // existing entry) may become 'running' here.
+  const isTerminal = existing
+    && (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled');
   subs[jobId] = {
     jobId,
     task: data.task || (existing && existing.task) || '',
     model: data.model || (existing && existing.model) || '',
-    status: 'running',
+    status: isTerminal ? existing.status : 'running',
     async: data.async ?? (existing ? existing.async : true),
     messages: (existing && existing.messages) || [],
     streamingText: (existing && existing.streamingText) ?? null,

@@ -235,6 +235,14 @@ export async function cancelSubagent(id, jobId) {
   await api('POST', `/api/sessions/${id}/subagents/${jobId}/cancel`);
 }
 
+// promoteSubagent detaches a synchronous (blocking) subagent so it keeps
+// running in the background after the turn that spawned it ends. The server
+// echoes the flip over the WebSocket (subagent_start with async:true), which
+// flips sa.async in the store and makes the promote button disappear.
+export async function promoteSubagent(id, jobId) {
+  await api('POST', `/api/sessions/${id}/subagents/${jobId}/promote`);
+}
+
 // steerSubagent sends a message to a live subagent's child agent. Returns the
 // server response ({ queued: bool }); there's no WS echo for this (parity with
 // cancelSubagent), so the caller shows optimistic visual feedback.

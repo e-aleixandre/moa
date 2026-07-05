@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from 'preact/hooks';
-import { GitFork, ChevronUp, ChevronDown, X, Loader2 } from 'lucide-preact';
+import { GitFork, ChevronUp, ChevronDown, X, Loader2, Rocket } from 'lucide-preact';
 import { updateSession } from '../store.js';
-import { cancelSubagent } from '../session-actions.js';
+import { cancelSubagent, promoteSubagent } from '../session-actions.js';
+import { addToast } from '../notifications.js';
 
 // liveSubagents returns the running/cancelling subagents of a session, as an
 // array. The tray only shows live agents (finished ones disappear).
@@ -60,6 +61,15 @@ export function AgentTray({ sessionId, session }) {
     } catch (_) { /* best-effort */ }
   }, [sessionId]);
 
+  const handlePromote = useCallback(async (e, jobId) => {
+    e.stopPropagation();
+    try {
+      await promoteSubagent(sessionId, jobId);
+    } catch (e) {
+      addToast({ title: 'Promote failed', detail: e.message, type: 'error' });
+    }
+  }, [sessionId]);
+
   if (live.length === 0) return null;
 
   return (
@@ -106,6 +116,15 @@ export function AgentTray({ sessionId, session }) {
                   onClick={(e) => handleCancel(e, sa.jobId)}
                 >
                   <X />
+                </button>
+              )}
+              {!sa.async && sa.status === 'running' && (
+                <button
+                  class="agent-tray-promote"
+                  title="Promote to background (unblocks parent)"
+                  onClick={(e) => handlePromote(e, sa.jobId)}
+                >
+                  <Rocket />
                 </button>
               )}
             </div>

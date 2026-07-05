@@ -857,6 +857,9 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlG:
 		return m.handleCtrlG()
 
+	case tea.KeyCtrlB:
+		return m.handleCtrlB()
+
 	case tea.KeyCtrlO:
 		if m.s.transcript {
 			m.s.transcript = false

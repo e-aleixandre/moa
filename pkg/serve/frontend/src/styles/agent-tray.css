@@ -97,6 +97,17 @@
 .agent-tray-cancel:hover { color: var(--red); background: var(--red-dim); }
 .agent-tray-cancel .lucide { width: 15px; height: 15px; }
 
+.agent-tray-promote {
+  flex-shrink: 0;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  color: var(--overlay1);
+  display: flex;
+  align-items: center;
+}
+.agent-tray-promote:hover { color: var(--peach); background: var(--peach-dim); }
+.agent-tray-promote .lucide { width: 15px; height: 15px; }
+
 /* ─── Sub-conversation view ──────────────────────────────── */
 
 .subagent-view {
@@ -126,6 +137,16 @@
 }
 .subagent-back:hover { background: var(--peach-med); }
 .subagent-back .lucide { width: 18px; height: 18px; }
+
+.subagent-promote {
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  color: var(--peach);
+  display: flex;
+  align-items: center;
+}
+.subagent-promote:hover { background: var(--peach-med); }
+.subagent-promote .lucide { width: 18px; height: 18px; }
 
 .subagent-view-icon { width: 15px; height: 15px; color: var(--peach); flex-shrink: 0; }
 .subagent-view-titles { flex: 1; min-width: 0; }

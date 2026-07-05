@@ -292,6 +292,53 @@ func (m appModel) handleCtrlG() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleCtrlB promotes a synchronous (blocking) subagent to run in the
+// background, unblocking its parent turn. The candidate is the subagent
+// currently being viewed, or — if none is open — the single sync/running
+// subagent, if there's exactly one.
+func (m appModel) handleCtrlB() (tea.Model, tea.Cmd) {
+	jobID := m.s.viewingSubagent
+	if jobID == "" {
+		var candidates []string
+		for id, t := range m.s.subagents {
+			if !t.async && t.status == "running" {
+				candidates = append(candidates, id)
+			}
+		}
+		switch len(candidates) {
+		case 0:
+			m.status.SetText("no sync subagent to promote")
+			return m, nil
+		case 1:
+			jobID = candidates[0]
+		default:
+			m.status.SetText("multiple sync subagents — open one with Ctrl+G first")
+			return m, nil
+		}
+	}
+
+	t := m.s.subagents[jobID]
+	if t == nil {
+		m.status.SetText("no sync subagent to promote")
+		return m, nil
+	}
+	if t.async {
+		m.status.SetText("subagent already running in background")
+		return m, nil
+	}
+	if t.status != "running" {
+		m.status.SetText("subagent already finished")
+		return m, nil
+	}
+
+	if err := m.runtime.Bus.Execute(bus.PromoteSubagent{JobID: jobID}); err != nil {
+		m.status.SetText("promote failed: " + err.Error())
+		return m, nil
+	}
+	m.status.SetText("subagent promoted to background: " + jobID)
+	return m, nil
+}
+
 // --- Render ---
 
 // renderSubagentViewportContent renders the transcript currently being
@@ -311,7 +358,7 @@ func (m *appModel) renderSubagentViewportContent() string {
 	if t.costUSD > 0 || t.tokens > 0 {
 		statusText += fmt.Sprintf(" · $%.4f · %d tok", t.costUSD, t.tokens)
 	}
-	header := pickerHeaderStyle.Render(fmt.Sprintf("◂ Subagent: %s (%s) — Ctrl+G to return", task, statusText))
+	header := pickerHeaderStyle.Render(fmt.Sprintf("◂ Subagent: %s (%s) — Ctrl+G to return · Ctrl+B to promote", task, statusText))
 
 	parts := []string{header}
 	for i := range t.blocks {

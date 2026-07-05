@@ -1,6 +1,8 @@
-import { ArrowLeft, GitFork } from 'lucide-preact';
+import { ArrowLeft, GitFork, Rocket } from 'lucide-preact';
 import { MessageList } from './MessageList.jsx';
 import { updateSession } from '../store.js';
+import { promoteSubagent } from '../session-actions.js';
+import { addToast } from '../notifications.js';
 
 // SubagentView shows one subagent's live sub-conversation, rendered with the
 // SAME MessageList as the main chat. A back button returns to the parent
@@ -11,6 +13,14 @@ export function SubagentView({ sessionId, session }) {
   const sa = jobId ? (session.subagents || {})[jobId] : null;
 
   const back = () => updateSession(sessionId, { viewingSubagent: null });
+
+  const promote = async () => {
+    try {
+      await promoteSubagent(sessionId, jobId);
+    } catch (e) {
+      addToast({ title: 'Promote failed', detail: e.message, type: 'error' });
+    }
+  };
 
   if (!sa) {
     // Subagent vanished (e.g. finished + pruned) — bounce back.
@@ -52,6 +62,15 @@ export function SubagentView({ sessionId, session }) {
             {costLabel && <span class="subagent-view-cost"> · {costLabel}</span>}
           </div>
         </div>
+        {!sa.async && sa.status === 'running' && (
+          <button
+            class="subagent-promote"
+            onClick={promote}
+            title="Promote to background (unblocks parent)"
+          >
+            <Rocket />
+          </button>
+        )}
       </div>
       <MessageList session={subSession} />
     </div>
