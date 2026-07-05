@@ -1,0 +1,149 @@
+package serve
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// sessionIDPattern validates session ids used to build attachment directory
+// names, preventing path traversal.
+var sessionIDPattern = regexp.MustCompile(`^[a-f0-9]{8,64}$`)
+
+// attachmentsBaseDir returns the base directory under which per-session
+// attachment directories are created. It honors MOA_ATTACHMENTS_DIR when
+// set, defaulting to /tmp/moa otherwise.
+func attachmentsBaseDir() string {
+	if dir := os.Getenv("MOA_ATTACHMENTS_DIR"); dir != "" {
+		return dir
+	}
+	return "/tmp/moa"
+}
+
+// sessionAttachDir validates id and returns the path of its attachment
+// directory, without creating it.
+func sessionAttachDir(id string) (string, error) {
+	if !sessionIDPattern.MatchString(id) {
+		return "", fmt.Errorf("invalid session id: %q", id)
+	}
+	return filepath.Join(attachmentsBaseDir(), id), nil
+}
+
+// ensureBaseDir creates the attachments base directory if needed, refusing
+// to operate through a symlink.
+func ensureBaseDir() (string, error) {
+	base := attachmentsBaseDir()
+	info, err := os.Lstat(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(base, 0o700); err != nil {
+				return "", err
+			}
+			return base, nil
+		}
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("attachments base dir %q is a symlink", base)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("attachments base dir %q is not a directory", base)
+	}
+	_ = os.Chmod(base, 0o700)
+	return base, nil
+}
+
+// ensureSessionAttachDir ensures the base dir and the session's attachment
+// directory exist, returning the session directory path.
+func ensureSessionAttachDir(id string) (string, error) {
+	if _, err := ensureBaseDir(); err != nil {
+		return "", err
+	}
+	dir, err := sessionAttachDir(id)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// safeBase sanitizes an untrusted client-provided filename into a safe
+// basename. It returns "" if no safe name could be derived, leaving the
+// fallback name choice to the caller.
+func safeBase(name string) string {
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = filepath.Base(filepath.Clean(name))
+
+	var b strings.Builder
+	for _, r := range name {
+		if r == 0 || (r < 0x20) || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	name = strings.TrimSpace(b.String())
+
+	if name == "" || name == "." || name == ".." {
+		return ""
+	}
+
+	const maxLen = 200
+	if len(name) > maxLen {
+		ext := filepath.Ext(name)
+		if len(ext) >= maxLen {
+			name = name[:maxLen]
+		} else {
+			stem := strings.TrimSuffix(name, ext)
+			stem = stem[:maxLen-len(ext)]
+			name = stem + ext
+		}
+	}
+	return name
+}
+
+// writeUnique writes data to a new file inside dir, deriving a safe unique
+// name from name. It is TOCTOU-safe: file creation uses O_EXCL and retries
+// with a numeric suffix on collision.
+func writeUnique(dir, name string, data []byte) (finalPath string, err error) {
+	sanitized := safeBase(name)
+	if sanitized == "" {
+		sanitized = "attachment"
+	}
+	ext := filepath.Ext(sanitized)
+	stem := strings.TrimSuffix(sanitized, ext)
+
+	const maxAttempts = 10000
+	for i := 0; i < maxAttempts; i++ {
+		candidate := sanitized
+		if i > 0 {
+			candidate = fmt.Sprintf("%s-%d%s", stem, i+1, ext)
+		}
+		p := filepath.Join(dir, candidate)
+
+		f, ferr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(ferr, os.ErrExist) {
+			continue
+		}
+		if ferr != nil {
+			return "", ferr
+		}
+
+		_, werr := f.Write(data)
+		cerr := f.Close()
+		if werr != nil {
+			_ = os.Remove(p)
+			return "", werr
+		}
+		if cerr != nil {
+			_ = os.Remove(p)
+			return "", cerr
+		}
+		return p, nil
+	}
+	return "", fmt.Errorf("writeUnique: exceeded %d attempts for %q in %q", maxAttempts, name, dir)
+}
