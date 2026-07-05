@@ -47,6 +47,14 @@ const (
 	// A single message is capped here; larger PDFs fall back to disk (which is
 	// governed by the per-session disk quota instead).
 	maxNativeDocBytes = 24 << 20 // 24 MB of native PDF per message
+	// maxSessionNativeDocBytes bounds the CUMULATIVE bytes of native document
+	// blocks already present in the conversation history plus the new message.
+	// Because native documents are re-sent every turn, without this a user could
+	// accumulate ~maxNativeDocBytes per message indefinitely, bypassing the
+	// on-disk session quota and growing memory/persistence/requests unboundedly.
+	// Once history already holds this many native-doc bytes, further PDFs fall
+	// back to disk instead of going native.
+	maxSessionNativeDocBytes = 48 << 20 // 48 MB of native PDF across the whole session
 )
 
 var allowedImageMimes = map[string]bool{
@@ -121,7 +129,7 @@ func bytesLookLikePDF(data []byte) bool {
 // attachment directory on disk and referenced by path instead. PDFs go
 // native as a "document" block when supportsDocuments is true and the file
 // is small enough; otherwise they fall back to the same on-disk mechanism.
-func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool) (result []core.Content, retErr error) {
+func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool, priorNativeDocBytes int64) (result []core.Content, retErr error) {
 	if len(atts) > maxAttachments {
 		return nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
 	}
@@ -229,7 +237,8 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			isPDF := bytesLookLikePDF(decoded)
 			if isPDF && supportsDocuments &&
 				len(decoded) <= maxAttachmentFileBytes &&
-				nativeDocBytes+int64(len(decoded)) <= maxNativeDocBytes {
+				nativeDocBytes+int64(len(decoded)) <= maxNativeDocBytes &&
+				priorNativeDocBytes+nativeDocBytes+int64(len(decoded)) <= maxSessionNativeDocBytes {
 				filename := safeBase(a.Name)
 				if filename == "" {
 					filename = "document.pdf"
@@ -271,6 +280,22 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		content = append(content, block)
 	}
 	return content, nil
+}
+
+// countNativeDocBytes returns the total decoded byte size of native "document"
+// content blocks already present in the conversation history. Used to enforce a
+// cumulative per-session cap on native PDFs (which are re-sent every turn).
+// The Data field holds standard base64; its decoded length is ~len*3/4.
+func countNativeDocBytes(msgs []core.AgentMessage) int64 {
+	var total int64
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if c.Type == "document" {
+				total += int64(base64.StdEncoding.DecodedLen(len(c.Data)))
+			}
+		}
+	}
+	return total
 }
 
 // dirSize sums the sizes of regular files under dir. Best-effort: errors

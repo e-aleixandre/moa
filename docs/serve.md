@@ -63,6 +63,7 @@ In the conversation history, each attachment is tagged so you can tell which pat
 
 - Up to **8 attachments** per message.
 - **32 MB** per file; **64 MB** decoded total per message; **200 MB** on-disk per session.
+- Native PDFs are additionally capped at **24 MB per message** and **48 MB cumulative across the session's history** (because a native PDF is re-sent to the model every turn); PDFs beyond those caps fall back to disk instead.
 - Files that exceed the client-side cap are rejected before upload. Raising these limits would require changing the transport (currently base64-in-JSON), which is out of scope.
 - The base directory can be overridden with the `MOA_ATTACHMENTS_DIR` environment variable (default `/tmp/moa`).
 

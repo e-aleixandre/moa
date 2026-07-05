@@ -312,7 +312,8 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 	// quota check (dirSize + running total) is atomic against concurrent
 	// /send requests to the same idle session.
 	sess.attachMu.Lock()
-	content, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs)
+	priorNativeDoc := countNativeDocBytes(sess.History())
+	content, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs, priorNativeDoc)
 	sess.attachMu.Unlock()
 	if err != nil {
 		return "", err
