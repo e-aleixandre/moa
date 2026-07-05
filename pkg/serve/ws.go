@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"sync"
 
@@ -104,11 +103,7 @@ func enrichEditToolStart(e Event, cwd string) Event {
 	if !filepath.IsAbs(path) && cwd != "" {
 		path = filepath.Join(cwd, path)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return e
-	}
-	d.StartLine = tool.EditStartLine(string(data), oldText)
+	d.StartLine = tool.EditStartLineForFile(path, oldText)
 	e.Data = d
 	return e
 }

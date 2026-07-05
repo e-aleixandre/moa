@@ -482,7 +482,7 @@ export function handleWsStateChange(id, data) {
   updateSession(id, { state: data.state, error: data.error || null });
   if (data.state === 'idle' || data.state === 'error') {
     const sess = store.get().sessions[id];
-    if (sess) updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null });
+    if (sess) updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, compacting: false });
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
       const visible = visibleSessionIds(store.get());

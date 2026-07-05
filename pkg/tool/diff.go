@@ -2,6 +2,8 @@ package tool
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 )
 
@@ -133,6 +135,37 @@ func EditStartLine(content, oldText string) int {
 		idx = start
 	}
 	return strings.Count(content[:idx], "\n") + 1
+}
+
+// maxPreviewFileBytes caps the file read done just to compute an edit preview's
+// starting line number. It runs on a hot path (every edit tool_start event), so
+// it must not read an arbitrarily large file into memory.
+const maxPreviewFileBytes = 4 * 1024 * 1024 // 4 MB
+
+// EditStartLineForFile reads path and returns the 1-based line where oldText
+// begins, for previewing an edit before the tool runs. It is deliberately
+// defensive because it runs on a hot path from untrusted tool args: it only
+// reads regular files (never devices/FIFOs, which could block or stream
+// forever) and caps the read at maxPreviewFileBytes. On any problem it returns
+// 1 so the caller degrades to numbering from the top.
+func EditStartLineForFile(path, oldText string) int {
+	if path == "" || oldText == "" {
+		return 1
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxPreviewFileBytes {
+		return 1
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 1
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxPreviewFileBytes))
+	if err != nil {
+		return 1
+	}
+	return EditStartLine(string(data), oldText)
 }
 
 func splitLines(s string) []string {

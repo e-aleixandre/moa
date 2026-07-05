@@ -2,6 +2,8 @@ package tool
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -152,6 +154,56 @@ func TestEditStartLine(t *testing.T) {
 	t.Run("match at line 1", func(t *testing.T) {
 		if got := EditStartLine(content, "line 1\nline 2"); got != 1 {
 			t.Errorf("EditStartLine = %d, want 1", got)
+		}
+	})
+}
+
+func TestEditStartLineForFile(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("reads a regular file", func(t *testing.T) {
+		p := filepath.Join(dir, "f.txt")
+		var lines []string
+		for i := 1; i <= 300; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := EditStartLineForFile(p, "line 260"); got != 260 {
+			t.Errorf("EditStartLineForFile = %d, want 260", got)
+		}
+	})
+
+	t.Run("missing file degrades to 1", func(t *testing.T) {
+		if got := EditStartLineForFile(filepath.Join(dir, "nope.txt"), "x"); got != 1 {
+			t.Errorf("EditStartLineForFile(missing) = %d, want 1", got)
+		}
+	})
+
+	t.Run("empty args degrade to 1", func(t *testing.T) {
+		if got := EditStartLineForFile("", "x"); got != 1 {
+			t.Errorf("EditStartLineForFile(empty path) = %d, want 1", got)
+		}
+	})
+
+	t.Run("directory degrades to 1", func(t *testing.T) {
+		if got := EditStartLineForFile(dir, "x"); got != 1 {
+			t.Errorf("EditStartLineForFile(dir) = %d, want 1", got)
+		}
+	})
+
+	t.Run("oversized file degrades to 1", func(t *testing.T) {
+		p := filepath.Join(dir, "big.txt")
+		big := make([]byte, maxPreviewFileBytes+1)
+		for i := range big {
+			big[i] = 'a'
+		}
+		if err := os.WriteFile(p, big, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := EditStartLineForFile(p, "aaa"); got != 1 {
+			t.Errorf("EditStartLineForFile(oversized) = %d, want 1", got)
 		}
 	})
 }

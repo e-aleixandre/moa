@@ -1191,25 +1191,31 @@ func deliverQueuedSteers(sctx *SessionContext) {
 	if len(queued) == 0 {
 		return
 	}
-	// Announce the dequeue so frontends move the text from their "queued"
-	// strip into the transcript: the agent loop never saw these steers, so no
-	// Steered event was (or will be) emitted for them.
-	for _, q := range queued {
-		sctx.Bus.Publish(Steered{
-			SessionID: sctx.SessionID,
-			RunGen:    sctx.RunGenAtomic.Load(),
-			Text:      q,
-		})
-	}
+	// Start a run that consumes the queued messages as its prompt.
 	if err := sctx.Bus.Execute(SendPrompt{
 		SessionID: sctx.SessionID,
 		Text:      strings.Join(queued, "\n"),
 	}); err != nil {
 		// A concurrent run won the race for the run slot — hand the messages
-		// back to the steer buffer so that run delivers them between steps.
+		// back to the steer buffer so that run delivers them between steps. That
+		// run's loop emits its own Steered as it drains them, so we must publish
+		// nothing here or the text would appear twice in the transcript.
 		for _, q := range queued {
 			sctx.Agent.Steer(q)
 		}
+		return
+	}
+	// The run started. Its loop won't emit Steered for a prompt (these were
+	// delivered as the prompt, not as mid-run steers), so announce the dequeue
+	// ourselves — that moves the text from the frontend's "queued" strip into
+	// the transcript. Use the new run's gen (startRun bumped it synchronously).
+	gen := sctx.RunGenAtomic.Load()
+	for _, q := range queued {
+		sctx.Bus.Publish(Steered{
+			SessionID: sctx.SessionID,
+			RunGen:    gen,
+			Text:      q,
+		})
 	}
 }
 

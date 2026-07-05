@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -378,14 +377,7 @@ func diffLineKind(line string) int {
 // diff. Degrades to 1 (old behavior) when the file can't be read or oldText
 // isn't found.
 func editPreviewStartLine(path, oldText string) int {
-	if path == "" || oldText == "" {
-		return 1
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 1
-	}
-	return tool.EditStartLine(string(data), oldText)
+	return tool.EditStartLineForFile(path, oldText)
 }
 
 // fallbackEditDiff builds a readable numbered diff from old/new text so edit

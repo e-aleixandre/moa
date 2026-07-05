@@ -231,13 +231,13 @@ func TestEnrichEditToolStart(t *testing.T) {
 		}
 	})
 
-	t.Run("missing file leaves StartLine 0", func(t *testing.T) {
+	t.Run("missing file degrades StartLine to 1", func(t *testing.T) {
 		e := enrichEditToolStart(editStart(map[string]any{
 			"path": filepath.Join(dir, "nope.txt"), "oldText": "x", "newText": "y",
 		}), dir)
 		d := e.Data.(ToolStartData)
-		if d.StartLine != 0 {
-			t.Errorf("StartLine = %d, want 0", d.StartLine)
+		if d.StartLine != 1 {
+			t.Errorf("StartLine = %d, want 1 (degraded)", d.StartLine)
 		}
 	})
 

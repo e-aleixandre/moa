@@ -528,6 +528,20 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleVoiceResult(msg)
 
 	case compactResultMsg:
+		// A message queued during the compact may have started a follow-up run
+		// (deliverQueuedSteers). If the session is actually running now, switch
+		// into run mode and seed the render loop — resetting to idle would
+		// freeze the UI for a live run. The run's own RunEnded restores idle.
+		if m.runtime.State != nil && m.runtime.State.Current() == bus.StateRunning {
+			m.prepareRun("working")
+			if msg.Err != nil {
+				m.s.blocks = append(m.s.blocks, messageBlock{
+					Type: "error", Raw: "Compaction failed: " + msg.Err.Error(),
+				})
+			}
+			m.updateViewport()
+			return m, tea.Batch(renderTick(), m.status.spinner.Tick)
+		}
 		m.s.running = false
 		m.input.SetEnabled(true)
 		m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
