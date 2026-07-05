@@ -113,6 +113,13 @@ type Config struct {
 	// MaxConcurrentAsync caps how many async subagent jobs may run at once.
 	// 0 (or negative) falls back to defaultMaxConcurrentAsync.
 	MaxConcurrentAsync int
+
+	// TranscriptLoader loads a persisted subagent transcript's messages by job
+	// ID, enabling the "resume" parameter to continue a finished subagent's
+	// conversation instead of starting fresh. nil = resume unsupported (the
+	// tool reports a clear error when resume is requested). The caller wires
+	// this to its session-scoped transcript store (see pkg/serve).
+	TranscriptLoader func(jobID string) ([]core.AgentMessage, error)
 }
 
 // RegisterAll registers the subagent tools on reg and returns a handle onto
@@ -159,6 +166,14 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					"type": "string",
 					"description": "Thinking level for the subagent: off, low, medium, high, xhigh. Defaults to the current parent thinking level."
 				},
+				"max_duration": {
+					"type": "string",
+					"description": "Max wall-clock time for the subagent as a Go duration (e.g. \"20m\", \"1h\"). Omit for the default (10m). Raise it for long tasks so the child is not killed mid-work."
+				},
+				"resume": {
+					"type": "string",
+					"description": "Job ID of a previous subagent to resume: its saved transcript is reloaded and 'task' is sent as the next message, continuing that conversation instead of starting fresh."
+				},
 				"async": {
 					"type": "boolean",
 					"description": "Run in background and return a job ID. Use subagent_status to poll progress and subagent_cancel to stop."
@@ -187,6 +202,14 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return *errResult, nil
 			}
 			thinkingLevel, errResult := resolveThinking(currentThinkingLevel(cfg), params)
+			if errResult != nil {
+				return *errResult, nil
+			}
+			maxRunDuration, errResult := resolveMaxDuration(params)
+			if errResult != nil {
+				return *errResult, nil
+			}
+			seedMsgs, errResult := resolveResume(cfg, params)
 			if errResult != nil {
 				return *errResult, nil
 			}
@@ -227,7 +250,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				if cfg.OnAsyncJobChange != nil {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
-				go runAsyncJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, systemPrompt, childReg, task)
+				go runAsyncJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs)
 				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_status to check progress, subagent_cancel to stop."), nil
 			}
 
@@ -244,7 +267,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			jobCtx, jobCancel := context.WithCancel(childCtx)
 			job := jobs.createSync(task, model.ID, jobCancel)
 			defer jobCancel()
-			return runSync(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, systemPrompt, childReg, task, onUpdate)
+			return runSync(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate)
 		},
 	}
 }
@@ -329,10 +352,10 @@ func newSubagentCancel(jobs *jobStore) core.Tool {
 	}
 }
 
-func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string, onUpdate func(core.Result)) (core.Result, error) {
+func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result)) (core.Result, error) {
 	defer jobs.delete(j.id)
 
-	child, err := newChildAgent(cfg, provider, model, thinkingLevel, systemPrompt, childReg)
+	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg)
 	if err != nil {
 		jobs.setFailed(j.id, err.Error())
 		if cfg.OnChildEnd != nil {
@@ -354,7 +377,7 @@ func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider c
 		cfg.OnChildStart(j.id, task, model.ID, false)
 	}
 
-	msgs, err := child.Run(ctx, task)
+	msgs, err := runChild(ctx, child, task, seedMsgs)
 	jobs.setMessages(j.id, msgs)
 	usage, cost := childUsage(msgs), childCost(model, msgs)
 	jobs.setUsage(j.id, usage, cost)
@@ -378,7 +401,7 @@ func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider c
 	return core.TextResult(core.ExtractFinalAssistantText(msgs)), nil
 }
 
-func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry, task string) {
+func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage) {
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
@@ -407,7 +430,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 		}
 	}()
 
-	child, err := newChildAgent(cfg, provider, model, thinkingLevel, systemPrompt, childReg)
+	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg)
 	if err != nil {
 		jobs.setFailed(j.id, err.Error())
 		return
@@ -426,7 +449,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 		cfg.OnChildStart(j.id, task, model.ID, true)
 	}
 
-	msgs, err := child.Run(jobCtx, task)
+	msgs, err := runChild(jobCtx, child, task, seedMsgs)
 	finalMsgs = msgs
 	jobs.setMessages(j.id, msgs)
 	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs))
@@ -492,21 +515,26 @@ func childCost(model core.Model, msgs []core.AgentMessage) float64 {
 
 // resolveChildGuardrails applies defaults for the child's own turn/duration
 // limits, independent of the parent's guardrails and with no budget ($)
-// limit (children never get a MaxBudget).
-func resolveChildGuardrails(cfg Config) (maxTurns int, maxRunDuration time.Duration) {
+// limit (children never get a MaxBudget). A positive perCallDuration overrides
+// the configured/default wall-clock budget (from the tool's max_duration arg).
+func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns int, maxRunDuration time.Duration) {
 	maxTurns = cfg.ChildMaxTurns
 	if maxTurns <= 0 {
 		maxTurns = defaultChildMaxTurns
 	}
-	maxRunDuration = cfg.ChildMaxRunDuration
-	if maxRunDuration <= 0 {
+	switch {
+	case perCallDuration > 0:
+		maxRunDuration = perCallDuration
+	case cfg.ChildMaxRunDuration > 0:
+		maxRunDuration = cfg.ChildMaxRunDuration
+	default:
 		maxRunDuration = defaultChildMaxRunDuration
 	}
 	return maxTurns, maxRunDuration
 }
 
-func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
-	maxTurns, maxRunDuration := resolveChildGuardrails(cfg)
+func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
+	maxTurns, runDuration := resolveChildGuardrails(cfg, maxRunDuration)
 	return agent.New(agent.AgentConfig{
 		Provider:       provider,
 		Model:          model,
@@ -514,7 +542,7 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		ThinkingLevel:  thinkingLevel,
 		Tools:          childReg,
 		MaxTurns:       maxTurns,
-		MaxRunDuration: maxRunDuration,
+		MaxRunDuration: runDuration,
 		// No MaxBudget: children have no $ guardrail of their own (they run under
 		// the parent's own budget, if any).
 		PermissionCheck: func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
@@ -625,6 +653,155 @@ func resolveThinking(defaultThinking string, params map[string]any) (string, *co
 	}
 	res := core.ErrorResult("invalid thinking level: " + thinking)
 	return "", &res
+}
+
+// resolveMaxDuration parses the optional "max_duration" arg (a Go duration
+// string). Returns 0 when absent (meaning "use the configured/default budget").
+func resolveMaxDuration(params map[string]any) (time.Duration, *core.Result) {
+	spec, _ := params["max_duration"].(string)
+	if strings.TrimSpace(spec) == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(spec))
+	if err != nil {
+		res := core.ErrorResult("invalid max_duration (use a Go duration like \"20m\" or \"1h\"): " + err.Error())
+		return 0, &res
+	}
+	if d <= 0 {
+		res := core.ErrorResult("max_duration must be positive")
+		return 0, &res
+	}
+	return d, nil
+}
+
+// resolveResume loads a prior subagent's transcript when the "resume" arg is
+// set, returning the messages to seed the child with. Returns nil (no seed)
+// when resume is absent. Errors are surfaced as tool results so the model gets
+// a clear message (unknown job ID, resume unsupported, etc.).
+func resolveResume(cfg Config, params map[string]any) ([]core.AgentMessage, *core.Result) {
+	jobID, _ := params["resume"].(string)
+	if strings.TrimSpace(jobID) == "" {
+		return nil, nil
+	}
+	if cfg.TranscriptLoader == nil {
+		res := core.ErrorResult("resume is not supported in this environment")
+		return nil, &res
+	}
+	msgs, err := cfg.TranscriptLoader(strings.TrimSpace(jobID))
+	if err != nil {
+		res := core.ErrorResult("cannot resume subagent " + jobID + ": " + err.Error())
+		return nil, &res
+	}
+	if len(msgs) == 0 {
+		res := core.ErrorResult("cannot resume subagent " + jobID + ": transcript is empty")
+		return nil, &res
+	}
+	clean := sanitizeResumeTranscript(msgs)
+	if len(clean) == 0 {
+		res := core.ErrorResult("cannot resume subagent " + jobID + ": transcript has no replayable messages")
+		return nil, &res
+	}
+	return clean, nil
+}
+
+// sanitizeResumeTranscript makes a persisted transcript safe to replay before a
+// new user message is appended (LoadMessages + Send). It:
+//   - strips thinking blocks (their signatures are model-specific; replaying
+//     them, possibly under a different model, causes provider errors);
+//   - drops assistant messages left empty after stripping;
+//   - trims a trailing assistant turn whose tool_call(s) never received their
+//     tool_result — a transcript cut off mid-turn (the exact failure mode of a
+//     timed-out subagent) would otherwise send an orphaned tool_call followed by
+//     a user message, which providers reject.
+//
+// Returns a new outer slice; content slices are rebuilt only for the messages
+// it modifies, and no shared slice is mutated in place, so the input transcript
+// is left untouched.
+func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
+	out := make([]core.AgentMessage, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role != "assistant" {
+			out = append(out, m)
+			continue
+		}
+		hasThinking := false
+		for _, c := range m.Content {
+			if c.Type == "thinking" {
+				hasThinking = true
+				break
+			}
+		}
+		if hasThinking {
+			filtered := make([]core.Content, 0, len(m.Content))
+			for _, c := range m.Content {
+				if c.Type != "thinking" {
+					filtered = append(filtered, c)
+				}
+			}
+			m.Content = filtered
+		}
+		// Drop an assistant message that has no content left (e.g. it was
+		// thinking-only) — an empty assistant turn is an invalid payload.
+		if len(m.Content) == 0 {
+			continue
+		}
+		out = append(out, m)
+	}
+
+	// Trim trailing turns until every tool_call has a matching tool_result. We
+	// collect the result IDs first, then drop any trailing assistant message
+	// that contains an unmatched tool_call (along with anything after it).
+	resultIDs := make(map[string]bool)
+	for _, m := range out {
+		if m.Role == "tool_result" && m.ToolCallID != "" {
+			resultIDs[m.ToolCallID] = true
+		}
+	}
+	cut := len(out)
+	for i := len(out) - 1; i >= 0; i-- {
+		m := out[i]
+		orphan := false
+		if m.Role == "assistant" {
+			for _, c := range m.Content {
+				if c.Type == "tool_call" && !resultIDs[c.ToolCallID] {
+					orphan = true
+					break
+				}
+			}
+		}
+		if orphan {
+			cut = i // drop this assistant turn and everything after it
+			continue
+		}
+		// Stop at the first turn from the end that is fully satisfied.
+		if m.Role == "assistant" {
+			break
+		}
+	}
+	out = out[:cut]
+
+	// A replayable conversation must begin with a user message (a leading
+	// tool_result or assistant is an invalid payload, and providers reject a
+	// history that doesn't start with user). Drop any leading non-user messages
+	// — e.g. a transcript that was itself persisted mid-conversation.
+	start := 0
+	for start < len(out) && out[start].Role != "user" {
+		start++
+	}
+	return out[start:]
+}
+
+// runChild starts a child agent's loop, either fresh (Run) or continuing a
+// resumed transcript (LoadMessages + Send). Resume replays the persisted
+// history and sends task as the next user message.
+func runChild(ctx context.Context, child *agent.Agent, task string, seedMsgs []core.AgentMessage) ([]core.AgentMessage, error) {
+	if len(seedMsgs) == 0 {
+		return child.Run(ctx, task)
+	}
+	if err := child.LoadMessages(seedMsgs); err != nil {
+		return nil, err
+	}
+	return child.Send(ctx, task)
 }
 
 func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryIndex string) string {

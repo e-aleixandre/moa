@@ -92,6 +92,12 @@ type SessionConfig struct {
 	OnSubagentStart func(jobID, task, model string, async bool)
 	OnSubagentEvent func(jobID string, inner any)
 	OnSubagentEnd   func(jobID, status string, usage *core.Usage, costUSD float64)
+
+	// SubagentTranscriptLoader loads a finished subagent's persisted messages
+	// by job ID, enabling the subagent tool's "resume" parameter. Optional
+	// (nil = resume unsupported). The caller wires this to its transcript store
+	// (see pkg/serve's SubagentStore).
+	SubagentTranscriptLoader func(jobID string) ([]core.AgentMessage, error)
 }
 
 // Session is a fully wired session ready for agent.Run/Send.
@@ -415,6 +421,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		OnChildStart:        cfg.OnSubagentStart,
 		OnChildEvent:        cfg.OnSubagentEvent,
 		OnChildEnd:          cfg.OnSubagentEnd,
+		TranscriptLoader:    cfg.SubagentTranscriptLoader,
 	})
 	if err != nil {
 		if mcpMgr != nil {

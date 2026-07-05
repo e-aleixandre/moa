@@ -208,6 +208,21 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				s.persistSubagentTranscript(jobID, status, usage, costUSD)
 			}
 		},
+		SubagentTranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {
+			s := sess
+			if s == nil || s.persister == nil {
+				return nil, fmt.Errorf("transcript store unavailable")
+			}
+			store := s.persister.subagentStore(s.ID)
+			if store == nil {
+				return nil, fmt.Errorf("transcript store unavailable")
+			}
+			t, err := store.Load(jobID)
+			if err != nil {
+				return nil, err
+			}
+			return t.Messages, nil
+		},
 	})
 	if err != nil {
 		sessionCancel()

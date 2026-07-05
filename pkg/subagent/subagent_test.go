@@ -922,7 +922,7 @@ func TestConcurrentStatusPolling(t *testing.T) {
 }
 
 func TestResolveChildGuardrailsDefaults(t *testing.T) {
-	maxTurns, maxRunDuration := resolveChildGuardrails(Config{})
+	maxTurns, maxRunDuration := resolveChildGuardrails(Config{}, 0)
 	if maxTurns != defaultChildMaxTurns {
 		t.Errorf("maxTurns = %d, want default %d", maxTurns, defaultChildMaxTurns)
 	}
@@ -933,7 +933,7 @@ func TestResolveChildGuardrailsDefaults(t *testing.T) {
 
 func TestResolveChildGuardrailsOverrides(t *testing.T) {
 	cfg := Config{ChildMaxTurns: 5, ChildMaxRunDuration: 2 * time.Minute}
-	maxTurns, maxRunDuration := resolveChildGuardrails(cfg)
+	maxTurns, maxRunDuration := resolveChildGuardrails(cfg, 0)
 	if maxTurns != 5 {
 		t.Errorf("maxTurns = %d, want 5", maxTurns)
 	}
@@ -946,7 +946,7 @@ func TestNewChildAgentAppliesGuardrails(t *testing.T) {
 	cfg := Config{ChildMaxTurns: 7, ChildMaxRunDuration: 3 * time.Minute}
 	provider := newMockProvider(textResponse("hi"))
 	reg := core.NewRegistry()
-	child, err := newChildAgent(cfg, provider, core.Model{ID: "m", Provider: "mock"}, "medium", "sys", reg)
+	child, err := newChildAgent(cfg, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1081,5 +1081,231 @@ func TestSubagentTranscriptAccumulatesMidRun(t *testing.T) {
 	finalCount := len(jobs.messages(jobID))
 	if finalCount < midCount {
 		t.Fatalf("final transcript (%d) smaller than mid-run (%d)", finalCount, midCount)
+	}
+}
+
+func TestResolveMaxDuration(t *testing.T) {
+	tests := []struct {
+		name    string
+		params  map[string]any
+		want    time.Duration
+		wantErr bool
+	}{
+		{"absent", map[string]any{}, 0, false},
+		{"empty", map[string]any{"max_duration": ""}, 0, false},
+		{"valid minutes", map[string]any{"max_duration": "20m"}, 20 * time.Minute, false},
+		{"valid hour", map[string]any{"max_duration": "1h"}, time.Hour, false},
+		{"invalid", map[string]any{"max_duration": "soon"}, 0, true},
+		{"non-positive", map[string]any{"max_duration": "-5m"}, 0, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, errRes := resolveMaxDuration(tc.params)
+			if tc.wantErr {
+				if errRes == nil {
+					t.Fatalf("expected error result, got none")
+				}
+				return
+			}
+			if errRes != nil {
+				t.Fatalf("unexpected error: %s", textOf(*errRes))
+			}
+			if got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveChildGuardrailsPerCallDurationOverrides(t *testing.T) {
+	cfg := Config{ChildMaxRunDuration: 10 * time.Minute}
+	if _, d := resolveChildGuardrails(cfg, 30*time.Minute); d != 30*time.Minute {
+		t.Fatalf("per-call override not applied: got %v", d)
+	}
+	if _, d := resolveChildGuardrails(cfg, 0); d != 10*time.Minute {
+		t.Fatalf("configured default not used: got %v", d)
+	}
+	if _, d := resolveChildGuardrails(Config{}, 0); d != defaultChildMaxRunDuration {
+		t.Fatalf("package default not used: got %v", d)
+	}
+}
+
+func TestResolveResumeWithoutLoaderFails(t *testing.T) {
+	_, errRes := resolveResume(Config{}, map[string]any{"resume": "job-1"})
+	if errRes == nil {
+		t.Fatal("expected error when TranscriptLoader is nil")
+	}
+}
+
+func TestResolveResumeUnknownJobFails(t *testing.T) {
+	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) {
+		return nil, fmt.Errorf("not found")
+	}}
+	_, errRes := resolveResume(cfg, map[string]any{"resume": "nope"})
+	if errRes == nil {
+		t.Fatal("expected error for unknown job id")
+	}
+}
+
+func TestResolveResumeAbsentReturnsNil(t *testing.T) {
+	msgs, errRes := resolveResume(Config{}, map[string]any{})
+	if errRes != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes))
+	}
+	if msgs != nil {
+		t.Fatalf("expected nil seed messages, got %d", len(msgs))
+	}
+}
+
+func TestResolveResumeStripsThinking(t *testing.T) {
+	prior := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("earlier task")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			{Type: "thinking", Text: "secret reasoning"},
+			core.TextContent("earlier answer"),
+		}}},
+	}
+	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) { return prior, nil }}
+	msgs, errRes := resolveResume(cfg, map[string]any{"resume": "job-1"})
+	if errRes != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes))
+	}
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if c.Type == "thinking" {
+				t.Fatal("thinking block was not stripped from resumed transcript")
+			}
+		}
+	}
+	// Original slice must be untouched.
+	if prior[1].Content[0].Type != "thinking" {
+		t.Fatal("sanitizeResumeTranscript mutated the input transcript")
+	}
+}
+
+func TestSanitizeResumeTrimsOrphanToolCall(t *testing.T) {
+	// A transcript cut off mid-turn: the last assistant emitted a tool_call that
+	// never got its tool_result. Replaying it + a new user message is invalid.
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("task")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.ToolCallContent("call-1", "read", map[string]any{"path": "x"}),
+		}}},
+		{Message: core.Message{Role: "tool_result", ToolCallID: "call-1", ToolName: "read",
+			Content: []core.Content{core.TextContent("file contents")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.ToolCallContent("call-2", "read", map[string]any{"path": "y"}),
+		}}},
+	}
+	clean := sanitizeResumeTranscript(msgs)
+	// The last assistant (call-2, unmatched) and everything after must be gone;
+	// the satisfied call-1 turn stays.
+	if len(clean) != 3 {
+		t.Fatalf("expected 3 messages after trimming the orphan turn, got %d", len(clean))
+	}
+	last := clean[len(clean)-1]
+	if last.Role != "tool_result" || last.ToolCallID != "call-1" {
+		t.Fatalf("expected transcript to end at the satisfied tool_result, got %+v", last)
+	}
+}
+
+func TestSanitizeResumeDropsThinkingOnlyAssistant(t *testing.T) {
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("task")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			{Type: "thinking", Text: "only thinking, no visible output"},
+		}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.TextContent("real answer"),
+		}}},
+	}
+	clean := sanitizeResumeTranscript(msgs)
+	for _, m := range clean {
+		if m.Role == "assistant" && len(m.Content) == 0 {
+			t.Fatal("an empty assistant message survived sanitization")
+		}
+	}
+	// user + the non-empty assistant remain.
+	if len(clean) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(clean))
+	}
+}
+
+func TestSanitizeResumeStartsWithUser(t *testing.T) {
+	// A transcript persisted mid-conversation could start with a tool_result or
+	// assistant. Replay must begin with a user message.
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "tool_result", ToolCallID: "orphan", ToolName: "read",
+			Content: []core.Content{core.TextContent("leading orphan")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("stray")}}},
+		core.WrapMessage(core.NewUserMessage("the real start")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("answer")}}},
+	}
+	clean := sanitizeResumeTranscript(msgs)
+	if len(clean) == 0 {
+		t.Fatal("expected a non-empty replayable prefix")
+	}
+	if clean[0].Role != "user" {
+		t.Fatalf("replay must start with a user message, got %q", clean[0].Role)
+	}
+	if len(clean) != 2 {
+		t.Fatalf("expected user + assistant, got %d", len(clean))
+	}
+}
+
+func TestSanitizeResumePartialToolCallsInOneAssistant(t *testing.T) {
+	// One assistant emits two tool_calls but only one got a result — the whole
+	// turn is unreplayable and must be trimmed.
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("task")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("ok")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.ToolCallContent("a", "read", nil),
+			core.ToolCallContent("b", "read", nil),
+		}}},
+		{Message: core.Message{Role: "tool_result", ToolCallID: "a", ToolName: "read",
+			Content: []core.Content{core.TextContent("only a answered")}}},
+	}
+	clean := sanitizeResumeTranscript(msgs)
+	// The partial-tool-call turn and its lone result are dropped; the earlier
+	// clean assistant text turn remains.
+	if len(clean) != 2 {
+		t.Fatalf("expected 2 messages after trimming partial turn, got %d", len(clean))
+	}
+	last := clean[len(clean)-1]
+	if last.Role != "assistant" || len(last.Content) == 0 || last.Content[0].Type != "text" {
+		t.Fatalf("expected transcript to end at the clean assistant text turn, got %+v", last)
+	}
+}
+
+func TestSubagentResumeReplaysHistory(t *testing.T) {
+	prior := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("first task")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("first answer")}}},
+	}
+	provider := newMockProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		// The resumed run must include the prior history plus the new task.
+		if len(req.Messages) < 3 {
+			return nil, fmt.Errorf("expected replayed history + new task, got %d messages", len(req.Messages))
+		}
+		return textResponse("resumed answer")(ctx, req)
+	})
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
+		TranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {
+			if jobID != "job-1" {
+				return nil, fmt.Errorf("unknown job %q", jobID)
+			}
+			return prior, nil
+		},
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "continue", "resume": "job-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(res); got != "resumed answer" {
+		t.Fatalf("expected resumed answer, got %q", got)
 	}
 }
