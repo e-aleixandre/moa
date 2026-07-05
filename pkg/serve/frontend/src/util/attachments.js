@@ -3,20 +3,21 @@
 // Images are downscaled/re-encoded in the browser (canvas) before upload so a
 // typical 8 MB phone photo doesn't blow past the server's per-image limit or
 // waste bandwidth/tokens. GIFs are passed through untouched to preserve
-// animation. Non-image files are base64-encoded as-is; the server validates
-// them as UTF-8 text.
+// animation. Non-image files are base64-encoded as-is. Server-side, images
+// and PDFs are sent to the model natively; other files are saved to disk and
+// the agent accesses them by path.
 
 const MAX_DIMENSION = 1568; // long-edge cap; the API's cost/quality sweet spot
 const JPEG_QUALITY = 0.85;
 const SMALL_IMAGE_BYTES = 500 * 1024;
-export const MAX_CLIENT_FILE_SIZE = 20 * 1024 * 1024; // reject obviously-huge files before upload
+export const MAX_CLIENT_FILE_SIZE = 32 * 1024 * 1024; // reject obviously-huge files before upload
 
 // processFile converts a File into { name, mime, data, size, isImage }, where
 // data is a base64 string (no "data:" prefix). Throws on files that are
 // clearly too large to bother uploading.
 export async function processFile(file) {
   if (file.size > MAX_CLIENT_FILE_SIZE) {
-    throw new Error(`${file.name}: file too large (max 20 MB)`);
+    throw new Error(`${file.name}: file too large (max 32 MB)`);
   }
 
   const isImage = file.type.startsWith('image/');

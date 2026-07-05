@@ -791,7 +791,7 @@ export function InputBar({ sessionId, session, tileId }) {
             type="file"
             multiple
             hidden
-            accept="image/*,.txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.html,.css,.js,.ts,.jsx,.tsx,.go,.py,.sh,.sql,.toml"
+            accept="image/*,application/pdf,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.html,.css,.js,.ts,.jsx,.tsx,.go,.py,.sh,.sql,.toml,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.zip,.tar,.gz"
             onChange={handleAttachChange}
           />
           <button

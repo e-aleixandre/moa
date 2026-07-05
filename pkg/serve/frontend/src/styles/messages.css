@@ -66,6 +66,22 @@
   color: var(--subtext0);
 }
 
+.msg-attachment-tag { font-size: 0.75em; opacity: 0.7; margin-left: 0.4em; }
+.msg-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.2em 0.5em;
+  border-radius: var(--radius-md);
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--subtext1);
+  font-size: 0.9em;
+  margin: 0.15em 0;
+}
+.msg-attachment-native { /* native PDF sent to model */ }
+.msg-attachment-disk summary { cursor: pointer; }
+
 /* Assistant prose */
 .msg-assistant {
   font-size: 14px;
