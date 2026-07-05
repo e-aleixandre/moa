@@ -113,7 +113,6 @@ export function useVoice(onTranscript, onError) {
     const chunks = [];
     const startedAt = Date.now();
     recorder._discard = false;
-    recorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
@@ -168,7 +167,17 @@ export function useVoice(onTranscript, onError) {
       }
     };
 
-    recorder.start();
+    // Only publish the recorder (and flip the UI) once it has actually started,
+    // so a throwing start() can't leave a non-null recorderRef with a live mic
+    // that blocks all future recordings.
+    try {
+      recorder.start();
+    } catch (e) {
+      stream.getTracks().forEach(t => t.stop());
+      reportError('Could not start recording: ' + (e.message || String(e)));
+      return;
+    }
+    recorderRef.current = recorder;
     setRecording(true);
   }, [onTranscript, reportError]);
 

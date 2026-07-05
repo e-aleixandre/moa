@@ -208,10 +208,27 @@ export function InputBar({ sessionId, session, tileId }) {
 
   const onSendPointerDown = useCallback((e) => {
     if (e.button != null && e.button !== 0) return; // primary/touch only
-    if (recordingRef.current) return; // locked+recording → tap handled on up
     if (!voiceSupported) return;      // no mic → send-only (onClick)
 
     const el = e.currentTarget;
+
+    // Already recording (locked): this press is a tap to stop. Register global
+    // pointerup/cancel so we stop even if the finger drifts off the button
+    // before release (the element's own pointerup might not fire then).
+    if (recordingRef.current) {
+      const pid = e.pointerId;
+      try { el.setPointerCapture?.(pid); } catch (_) { /* ignore */ }
+      const done = () => {
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        try { el.releasePointerCapture?.(pid); } catch (_) { /* ignore */ }
+      };
+      const onUp = () => { done(); pointerDrivenRef.current = false; setVoiceLocked(false); stopVoice(); };
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+      return;
+    }
+
     const h = { startY: e.clientY ?? 0, longPress: false, locked: false, pointerId: e.pointerId, el };
     holdRef.current = h;
     try { el.setPointerCapture?.(e.pointerId); } catch (_) { /* ignore */ }
@@ -229,7 +246,7 @@ export function InputBar({ sessionId, session, tileId }) {
       h.longPress = true;
       startVoice();
     }, HOLD_MS);
-  }, [voiceSupported, startVoice, endHold, finishHold, cancelVoice]);
+  }, [voiceSupported, startVoice, stopVoice, endHold, finishHold, cancelVoice]);
 
   const onSendPointerMove = useCallback((e) => {
     const h = holdRef.current;
@@ -242,8 +259,9 @@ export function InputBar({ sessionId, session, tileId }) {
   }, []);
 
   const onSendPointerUp = useCallback((e) => {
-    const h = endHold(e);
-    if (h) finishHold(h);
+    // Pass through even when there was no active hold: that case is a tap on the
+    // button while a locked recording is in progress → finishHold stops it.
+    finishHold(endHold(e));
   }, [endHold, finishHold]);
 
   const onSendPointerCancel = useCallback((e) => {
@@ -998,7 +1016,10 @@ export function InputBar({ sessionId, session, tileId }) {
               // that duplicate.
               onClick: () => {
                 if (pointerDrivenRef.current) { pointerDrivenRef.current = false; return; }
-                if (!recording) handleSendRef.current();
+                // Keyboard activation (no pointer sequence): stop if recording,
+                // otherwise send.
+                if (recording) { setVoiceLocked(false); stopVoice(); }
+                else handleSendRef.current();
               },
             } : {
               onClick: handleSend,
