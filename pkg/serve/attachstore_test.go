@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestSessionAttachDir_Valid(t *testing.T) {
@@ -50,6 +51,8 @@ func TestSafeBase(t *testing.T) {
 		{"..", ""},
 		{"bad\x00name.txt", "badname.txt"},
 		{"ctrl\x01\x1fchars.txt", "ctrlchars.txt"},
+		{"/", ""},
+		{"foo/", "foo"},
 	}
 	for _, c := range cases {
 		got := safeBase(c.name)
@@ -64,6 +67,19 @@ func TestSafeBase(t *testing.T) {
 	}
 	if len(got) > 200 {
 		t.Errorf("safeBase(long) length = %d, want <= 200", len(got))
+	}
+
+	// Multi-byte runes must not be split by truncation (valid UTF-8 out).
+	longUnicode := strings.Repeat("é", 300) + ".txt" // é = 2 bytes
+	gu := safeBase(longUnicode)
+	if len(gu) > 200 {
+		t.Errorf("safeBase(unicode) length = %d, want <= 200", len(gu))
+	}
+	if !utf8.ValidString(gu) {
+		t.Errorf("safeBase(unicode) = %q is not valid UTF-8", gu)
+	}
+	if !strings.HasSuffix(gu, ".txt") {
+		t.Errorf("safeBase(unicode) = %q, want suffix .txt", gu)
 	}
 }
 

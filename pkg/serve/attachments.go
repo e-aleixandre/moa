@@ -81,7 +81,11 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			runningDiskBytes = dirSize(sessionDir)
 		}
 		if pp != nil && !pathAdded {
-			_ = pp.AddPath(sessionDir)
+			if err := pp.AddPath(sessionDir); err != nil {
+				// Don't tell the agent it has access if the policy rejected the
+				// path — that would be a false promise. Surface it instead.
+				return core.Content{}, fmt.Errorf("%w: could not grant access to attachment storage: %v", ErrBadAttachment, err)
+			}
 			pathAdded = true
 		}
 		if runningDiskBytes+int64(len(decoded)) > maxSessionDiskBytes {

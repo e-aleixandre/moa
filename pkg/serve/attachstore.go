@@ -69,6 +69,15 @@ func ensureSessionAttachDir(id string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	// Refuse to operate through a symlinked session dir: everything must stay
+	// physically under the base dir (defense-in-depth beyond the id allowlist).
+	if info, lerr := os.Lstat(dir); lerr != nil {
+		return "", lerr
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("session attachment dir %q is a symlink", dir)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("session attachment dir %q is not a directory", dir)
+	}
 	return dir, nil
 }
 
@@ -91,19 +100,44 @@ func safeBase(name string) string {
 	if name == "" || name == "." || name == ".." {
 		return ""
 	}
+	// After Base/Clean a separator should not survive, but guard defensively:
+	// a bare "/" (filepath.Base("/") == "/") or any residual separator is not a
+	// usable basename.
+	if strings.ContainsRune(name, '/') {
+		return ""
+	}
 
 	const maxLen = 200
 	if len(name) > maxLen {
 		ext := filepath.Ext(name)
 		if len(ext) >= maxLen {
-			name = name[:maxLen]
+			name = truncateRunes(name, maxLen)
 		} else {
 			stem := strings.TrimSuffix(name, ext)
-			stem = stem[:maxLen-len(ext)]
+			stem = truncateRunes(stem, maxLen-len(ext))
 			name = stem + ext
 		}
 	}
 	return name
+}
+
+// truncateRunes returns s truncated to at most maxBytes bytes without splitting
+// a multi-byte UTF-8 rune.
+func truncateRunes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	end := 0
+	for i := range s { // range over a string yields rune-start byte indices
+		if i > maxBytes {
+			break
+		}
+		end = i
+	}
+	return s[:end]
 }
 
 // writeUnique writes data to a new file inside dir, deriving a safe unique

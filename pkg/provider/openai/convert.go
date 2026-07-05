@@ -27,7 +27,7 @@ type reasoning struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-func buildRequestBody(req core.Request) ([]byte, error) {
+func buildRequestBody(req core.Request, supportsDocuments bool) ([]byte, error) {
 	r := responsesRequest{
 		Model:        req.Model.ID,
 		Stream:       true,
@@ -37,7 +37,7 @@ func buildRequestBody(req core.Request) ([]byte, error) {
 		Include:      []string{"reasoning.encrypted_content"},
 	}
 
-	r.Input = convertMessages(req.Messages)
+	r.Input = convertMessages(req.Messages, supportsDocuments)
 
 	if len(req.Tools) > 0 {
 		r.Tools = convertToolSpecs(req.Tools)
@@ -79,24 +79,27 @@ func mapReasoningEffort(level string) string {
 }
 
 // convertMessages maps core messages to Responses API input format.
-func convertMessages(msgs []core.Message) []map[string]any {
+// supportsDocuments gates native "document" blocks: when false (e.g. the codex
+// OAuth path), any persisted document block is degraded to a text note instead
+// of being emitted as an input_file the provider would reject or silently drop.
+func convertMessages(msgs []core.Message, supportsDocuments bool) []map[string]any {
 	var result []map[string]any
 
 	for _, msg := range msgs {
-		items := convertMessage(msg)
+		items := convertMessage(msg, supportsDocuments)
 		result = append(result, items...)
 	}
 
 	return result
 }
 
-func convertMessage(msg core.Message) []map[string]any {
+func convertMessage(msg core.Message, supportsDocuments bool) []map[string]any {
 	switch msg.Role {
 	case "user":
 		return []map[string]any{
 			{
 				"role":    "user",
-				"content": convertUserContent(msg.Content),
+				"content": convertUserContent(msg.Content, supportsDocuments),
 			},
 		}
 
@@ -164,7 +167,7 @@ func convertAssistantMessage(msg core.Message) []map[string]any {
 }
 
 // convertUserContent handles text and image content blocks.
-func convertUserContent(blocks []core.Content) []map[string]any {
+func convertUserContent(blocks []core.Content, supportsDocuments bool) []map[string]any {
 	var parts []map[string]any
 	for _, b := range blocks {
 		switch b.Type {
@@ -180,6 +183,21 @@ func convertUserContent(blocks []core.Content) []map[string]any {
 				"image_url": "data:" + b.MimeType + ";base64," + b.Data,
 			})
 		case "document":
+			if !supportsDocuments {
+				// Provider (e.g. codex OAuth) can't accept native documents.
+				// Degrade to a text note so the block is never silently
+				// dropped, even if it was persisted while a document-capable
+				// provider was active and the user later switched.
+				name := b.Filename
+				if name == "" {
+					name = "document"
+				}
+				parts = append(parts, map[string]any{
+					"type": "input_text",
+					"text": "[Documento adjunto \"" + name + "\" no reenviado: el proveedor actual no soporta documentos nativos.]",
+				})
+				continue
+			}
 			parts = append(parts, map[string]any{
 				"type":      "input_file",
 				"filename":  b.Filename,

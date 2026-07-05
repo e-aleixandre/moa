@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -16,7 +17,7 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 		},
 	}
 
-	body, err := buildRequestBody(req)
+	body, err := buildRequestBody(req, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 		},
 	}
 
-	body, err := buildRequestBody(req)
+	body, err := buildRequestBody(req, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestBuildRequestBody_ReasoningEffort(t *testing.T) {
 		Options:  core.StreamOptions{ThinkingLevel: "high"},
 	}
 
-	body, err := buildRequestBody(req)
+	body, err := buildRequestBody(req, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestBuildRequestBody_ReasoningEffort(t *testing.T) {
 
 func TestConvertMessage_ToolResult(t *testing.T) {
 	msg := core.NewToolResultMessage("call-1", "bash", []core.Content{core.TextContent("output")}, false)
-	result := convertMessage(msg)
+	result := convertMessage(msg, true)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(result))
 	}
@@ -133,7 +134,7 @@ func TestConvertMessage_AssistantWithToolCalls(t *testing.T) {
 			core.ToolCallContent("tc-1", "bash", map[string]any{"command": "ls"}),
 		},
 	}
-	items := convertMessage(msg)
+	items := convertMessage(msg, true)
 	// Should produce 2 items: a message item and a function_call item.
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
@@ -191,7 +192,7 @@ func TestMapReasoningEffort(t *testing.T) {
 func TestConvertUserContent_Document(t *testing.T) {
 	parts := convertUserContent([]core.Content{
 		core.DocumentContent("ZGF0YQ==", "application/pdf", "report.pdf"),
-	})
+	}, true)
 
 	if len(parts) != 1 {
 		t.Fatalf("expected 1 part, got %d", len(parts))
@@ -205,6 +206,28 @@ func TestConvertUserContent_Document(t *testing.T) {
 	want := "data:application/pdf;base64,ZGF0YQ=="
 	if parts[0]["file_data"] != want {
 		t.Errorf("file_data: got %v, want %v", parts[0]["file_data"], want)
+	}
+}
+
+// TestConvertUserContent_DocumentDegraded verifies that a persisted document
+// block is NOT emitted as input_file when the active provider (e.g. codex
+// OAuth) doesn't support documents — it degrades to a visible text note rather
+// than being silently dropped or rejected. Guards against a document leaking to
+// an unsupported provider after a mid-conversation model switch.
+func TestConvertUserContent_DocumentDegraded(t *testing.T) {
+	parts := convertUserContent([]core.Content{
+		core.DocumentContent("ZGF0YQ==", "application/pdf", "report.pdf"),
+	}, false)
+
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+	if parts[0]["type"] != "input_text" {
+		t.Fatalf("expected input_text degrade, got %v", parts[0]["type"])
+	}
+	text, _ := parts[0]["text"].(string)
+	if !strings.Contains(text, "report.pdf") || !strings.Contains(text, "no reenviado") {
+		t.Errorf("degraded note missing filename/notice: %q", text)
 	}
 }
 

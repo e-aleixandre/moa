@@ -390,9 +390,14 @@ func (m *Manager) Delete(id string) error {
 
 // reapStaleAttachments removes session attachment directories older than 24h.
 // Best-effort: only directories whose name matches sessionIDPattern are
-// touched; the base dir itself and unrelated entries are left alone.
+// touched; the base dir itself and unrelated entries are left alone. If the
+// base dir is a symlink it is refused (never followed) to avoid deleting
+// through it.
 func reapStaleAttachments() {
 	base := attachmentsBaseDir()
+	if info, err := os.Lstat(base); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return // missing, unreadable, or a symlink we won't follow
+	}
 	entries, err := os.ReadDir(base)
 	if err != nil {
 		return

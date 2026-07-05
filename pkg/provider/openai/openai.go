@@ -76,7 +76,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		apiKey = req.Options.APIKey
 	}
 
-	body, err := buildRequestBody(req)
+	body, err := buildRequestBody(req, o.SupportsDocuments())
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}
