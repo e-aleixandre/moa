@@ -9,6 +9,21 @@
   gap: 14px;
 }
 
+/* Non-scrolling wrapper: takes the flex space that .messages used to take, and
+   is the positioning context for the scroll-to-bottom button so the button
+   anchors to the visible area, not to the scrollable content. */
+.messages-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.messages-wrap > .messages {
+  flex: 1;
+  min-height: 0;
+}
+
 /* Wraps a user message's content blocks (text/image/attachment chip) */
 .msg-user-group {
   align-self: flex-end;
@@ -253,7 +268,7 @@
 /* Scroll-to-bottom button */
 .new-messages-btn {
   position: absolute;
-  bottom: 70px;
+  bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--surface0);

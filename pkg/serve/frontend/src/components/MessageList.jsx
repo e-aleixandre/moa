@@ -31,7 +31,7 @@ export function MessageList({ session }) {
     }
   };
 
-  if (!session) return <div class="messages" />;
+  if (!session) return <div class="messages-wrap"><div class="messages" /></div>;
 
   const messages = session.messages || [];
   const streaming = session.streamingText;
@@ -39,40 +39,47 @@ export function MessageList({ session }) {
   const pendingAsk = session.pendingAsk;
   // pendingSteers are rendered in InputBar, not here.
 
+  // The button lives in a non-scrolling wrapper (position:relative) so it
+  // anchors to the visible viewport, not to the scrollable content. Placing it
+  // inside .messages (which scrolls) would pin it to the bottom of the full
+  // content — i.e. off-screen exactly when the user has scrolled up and needs
+  // it. See styles/messages.css.
   return (
-    <div class="messages" ref={containerRef} onScroll={checkScroll} style="position:relative">
-      {messages.map((msg, i) => {
-        if (msg._type === 'tool_start') {
-          return <ToolCall key={msg.tool_call_id || i} tool={msg} sessionId={session.id} />;
-        }
-        if (msg._type === 'system') {
-          return <div key={i} class="msg-system">{msg.text}</div>;
-        }
-        return <Message key={i} msg={msg} />;
-      })}
+    <div class="messages-wrap">
+      <div class="messages" ref={containerRef} onScroll={checkScroll}>
+        {messages.map((msg, i) => {
+          if (msg._type === 'tool_start') {
+            return <ToolCall key={msg.tool_call_id || i} tool={msg} sessionId={session.id} />;
+          }
+          if (msg._type === 'system') {
+            return <div key={i} class="msg-system">{msg.text}</div>;
+          }
+          return <Message key={i} msg={msg} />;
+        })}
 
-      {thinking && (
-        <details class="thinking-block" open={false}>
-          <summary>Thinking…</summary>
-          <div class="thinking-content">{thinking}</div>
-        </details>
-      )}
+        {thinking && (
+          <details class="thinking-block" open={false}>
+            <summary>Thinking…</summary>
+            <div class="thinking-content">{thinking}</div>
+          </details>
+        )}
 
-      {streaming && (
-        <div class="streaming">
-          <Message msg={{ role: 'assistant', content: [{ type: 'text', text: streaming }] }} />
-        </div>
-      )}
+        {streaming && (
+          <div class="streaming">
+            <Message msg={{ role: 'assistant', content: [{ type: 'text', text: streaming }] }} />
+          </div>
+        )}
 
-      {pendingAsk && (
-        <AskUserCard
-          ask={pendingAsk}
-          sessionId={session.id}
-        />
-      )}
+        {pendingAsk && (
+          <AskUserCard
+            ask={pendingAsk}
+            sessionId={session.id}
+          />
+        )}
+      </div>
 
       {showNewBtn && (
-        <button class="new-messages-btn" onClick={scrollToBottom}>
+        <button class="new-messages-btn" onClick={scrollToBottom} title="Scroll to latest">
           ↓ New messages
         </button>
       )}
