@@ -298,7 +298,13 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 		return "send", nil
 	}
 
-	content, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy)
+	supportsDocs := false
+	if model, qerr := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{}); qerr == nil {
+		if prov, perr := m.providerFactory(model); perr == nil {
+			supportsDocs = core.ProviderSupportsDocuments(prov)
+		}
+	}
+	content, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs)
 	if err != nil {
 		return "", err
 	}

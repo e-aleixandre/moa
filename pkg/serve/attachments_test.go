@@ -310,7 +310,7 @@ func TestBuildAttachmentContent_TextHeader(t *testing.T) {
 	atts := []Attachment{
 		{Name: `report "final".csv`, Mime: "text/csv", Data: b64([]byte("a,b\n1,2"))},
 	}
-	content, err := buildAttachmentContent(atts, "abcdef0123456789", pp)
+	content, err := buildAttachmentContent(atts, "abcdef0123456789", pp, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestBuildAttachmentContent_LargeTextToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "big.txt", Mime: "text/plain", Data: b64(big)}}
 
 	sessionID := "0123456789abcdef"
-	content, err := buildAttachmentContent(atts, sessionID, pp)
+	content, err := buildAttachmentContent(atts, sessionID, pp, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestBuildAttachmentContent_Collision(t *testing.T) {
 	}
 
 	sessionID := "fedcba9876543210"
-	content, err := buildAttachmentContent(atts, sessionID, pp)
+	content, err := buildAttachmentContent(atts, sessionID, pp, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
 	}
 
 	sessionID := "aaaaaaaaaaaaaaaa"
-	content, err := buildAttachmentContent(atts, sessionID, pp)
+	content, err := buildAttachmentContent(atts, sessionID, pp, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,5 +530,75 @@ func TestDelete_RemovesAttachments(t *testing.T) {
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("expected attach dir to be removed after Delete, err=%v", err)
+	}
+}
+
+func TestPDF_NativeWhenSupported(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
+	pdfData := b64([]byte("%PDF-1.4 fake pdf bytes"))
+	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
+
+	sessionID := "fedcba9876543210"
+	content, err := buildAttachmentContent(atts, sessionID, pp, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(content))
+	}
+	if content[0].Type != "document" {
+		t.Fatalf("expected document block, got %q", content[0].Type)
+	}
+	if content[0].Filename != "report.pdf" {
+		t.Fatalf("expected filename report.pdf, got %q", content[0].Filename)
+	}
+	if content[0].Data != pdfData {
+		t.Fatalf("expected data to match original base64")
+	}
+
+	if dir, err := sessionAttachDir(sessionID); err == nil {
+		if _, statErr := os.Stat(dir); statErr == nil {
+			t.Fatalf("expected no file on disk for native PDF")
+		}
+	}
+}
+
+func TestPDF_FallbackToDiskWhenUnsupported(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
+	pdfData := b64([]byte("%PDF-1.4 fake pdf bytes"))
+	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
+
+	sessionID := "0123fedcba987654"
+	content, err := buildAttachmentContent(atts, sessionID, pp, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(content))
+	}
+	if content[0].Type != "text" {
+		t.Fatalf("expected text block, got %q", content[0].Type)
+	}
+	if !strings.Contains(content[0].Text, "guardado en:") {
+		t.Fatalf("expected advisory text, got %q", content[0].Text)
+	}
+	if !strings.Contains(content[0].Text, "no soporta documentos PDF nativos") {
+		t.Fatalf("expected fallback note, got %q", content[0].Text)
+	}
+
+	dir, err := sessionAttachDir(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("expected session dir to exist: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 file on disk, got %d", len(entries))
 	}
 }

@@ -20,7 +20,7 @@ import (
 // Supports both API key auth and OAuth tokens (Claude Max).
 type Anthropic struct {
 	apiKey  string
-	isOAuth bool   // true if apiKey is an OAuth token (sk-ant-oat-...)
+	isOAuth bool // true if apiKey is an OAuth token (sk-ant-oat-...)
 	baseURL string
 	client  *http.Client
 }
@@ -47,6 +47,10 @@ func NewWithBaseURL(apiKey, baseURL string) *Anthropic {
 func (a *Anthropic) IsOAuth() bool {
 	return a.isOAuth
 }
+
+// SupportsDocuments returns true: Anthropic document blocks are GA for both
+// API-key and OAuth auth.
+func (a *Anthropic) SupportsDocuments() bool { return true }
 
 // isOAuthToken returns true if the key is an Anthropic OAuth token.
 func isOAuthToken(key string) bool {

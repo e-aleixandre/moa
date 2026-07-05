@@ -657,3 +657,40 @@ func TestConvertAssistantContent_RedactedThinking(t *testing.T) {
 		t.Errorf("data: got %v", first["data"])
 	}
 }
+
+func TestConvertContentBlocks_Document(t *testing.T) {
+	blocks := convertContentBlocks([]core.Content{
+		core.DocumentContent("ZGF0YQ==", "application/pdf", "report.pdf"),
+	})
+
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	block, ok := blocks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any, got %T", blocks[0])
+	}
+	if block["type"] != "document" {
+		t.Errorf("type: got %v", block["type"])
+	}
+	source, ok := block["source"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected source map, got %T", block["source"])
+	}
+	if source["type"] != "base64" {
+		t.Errorf("source.type: got %v", source["type"])
+	}
+	if source["media_type"] != "application/pdf" {
+		t.Errorf("source.media_type: got %v", source["media_type"])
+	}
+	if source["data"] != "ZGF0YQ==" {
+		t.Errorf("source.data: got %v", source["data"])
+	}
+}
+
+func TestSupportsDocuments(t *testing.T) {
+	a := New("sk-ant-api03-test")
+	if !a.SupportsDocuments() {
+		t.Error("expected SupportsDocuments to be true for Anthropic")
+	}
+}

@@ -224,6 +224,24 @@ func TestEstimateTokens_Image(t *testing.T) {
 	}
 }
 
+func TestDocumentContent(t *testing.T) {
+	dc := DocumentContent("ZGF0YQ==", "application/pdf", "x.pdf")
+	if dc.Type != "document" || dc.Data != "ZGF0YQ==" || dc.MimeType != "application/pdf" || dc.Filename != "x.pdf" {
+		t.Fatalf("DocumentContent: got %+v", dc)
+	}
+}
+
+func TestEstimateTokens_Document(t *testing.T) {
+	m := Message{
+		Role:    "user",
+		Content: []Content{DocumentContent("ZGF0YQ==", "application/pdf", "x.pdf")},
+	}
+	got := EstimateTokens(m)
+	if got <= 0 {
+		t.Fatalf("expected > 0, got %d", got)
+	}
+}
+
 func TestEstimateTokens_Empty(t *testing.T) {
 	m := Message{Role: "user"}
 	got := EstimateTokens(m)

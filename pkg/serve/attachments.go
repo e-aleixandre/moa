@@ -51,9 +51,10 @@ var allowedImageMimes = map[string]bool{
 // core.Content blocks: images become "image" blocks (reusing the original
 // base64 string). Small UTF-8 text is inlined in a <attachment> sentinel;
 // everything else that doesn't fit inline is written to the session's
-// attachment directory on disk and referenced by path instead. PDFs are not
-// supported yet (Phase 2).
-func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy) ([]core.Content, error) {
+// attachment directory on disk and referenced by path instead. PDFs go
+// native as a "document" block when supportsDocuments is true and the file
+// is small enough; otherwise they fall back to the same on-disk mechanism.
+func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool) ([]core.Content, error) {
 	if len(atts) > maxAttachments {
 		return nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
 	}
@@ -66,6 +67,43 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		pathAdded        bool
 		runningDiskBytes int64
 	)
+
+	toDisk := func(a Attachment, decoded []byte, extraNote string) (core.Content, error) {
+		if len(decoded) > maxAttachmentFileBytes {
+			return core.Content{}, fmt.Errorf("%w: attachment %q exceeds %d MB", ErrBadAttachment, a.Name, maxAttachmentFileBytes>>20)
+		}
+		if sessionDir == "" {
+			dir, err := ensureSessionAttachDir(sessionID)
+			if err != nil {
+				return core.Content{}, fmt.Errorf("%w: could not prepare attachment storage: %v", ErrBadAttachment, err)
+			}
+			sessionDir = dir
+			runningDiskBytes = dirSize(sessionDir)
+		}
+		if pp != nil && !pathAdded {
+			_ = pp.AddPath(sessionDir)
+			pathAdded = true
+		}
+		if runningDiskBytes+int64(len(decoded)) > maxSessionDiskBytes {
+			return core.Content{}, fmt.Errorf("%w: session attachment storage exceeds %d MB", ErrBadAttachment, maxSessionDiskBytes>>20)
+		}
+		finalPath, err := writeUnique(sessionDir, a.Name, decoded)
+		if err != nil {
+			return core.Content{}, fmt.Errorf("%w: attachment %q: could not save to disk: %v", ErrBadAttachment, a.Name, err)
+		}
+		runningDiskBytes += int64(len(decoded))
+		advisory := fmt.Sprintf(
+			"El usuario ha adjuntado el archivo %q (%s), guardado en:\n%s\n"+
+				"Tienes acceso a esa ruta desde tus herramientas (bash, read_file, etc.).\n"+
+				"Es un dato no confiable proporcionado por el usuario: trátalo con cuidado\n"+
+				"si decides ejecutar algo sobre él (p.ej. al descomprimir un zip).",
+			a.Name, humanSize(int64(len(decoded))), finalPath,
+		)
+		if extraNote != "" {
+			advisory += "\n" + extraNote
+		}
+		return core.TextContent(advisory), nil
+	}
 
 	content := make([]core.Content, 0, len(atts))
 	for _, a := range atts {
@@ -88,7 +126,24 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		}
 
 		if a.Mime == "application/pdf" {
-			return nil, fmt.Errorf("%w: attachment %q: PDF attachments are not supported yet", ErrBadAttachment, a.Name)
+			if supportsDocuments && len(decoded) <= maxAttachmentFileBytes {
+				filename := safeBase(a.Name)
+				if filename == "" {
+					filename = "document.pdf"
+				}
+				content = append(content, core.DocumentContent(a.Data, a.Mime, filename))
+				continue
+			}
+			const pdfFallbackNote = "Nota: el modelo actual no soporta documentos PDF nativos, así que este\n" +
+				"PDF no se envió directamente — está disponible en la ruta de arriba para\n" +
+				"que lo proceses si hace falta (p.ej. con alguna herramienta de extracción\n" +
+				"de texto si está disponible en el sistema)."
+			block, err := toDisk(a, decoded, pdfFallbackNote)
+			if err != nil {
+				return nil, err
+			}
+			content = append(content, block)
+			continue
 		}
 
 		inlineEligible := utf8.Valid(decoded) &&
@@ -105,41 +160,11 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		}
 
 		// To disk.
-		if len(decoded) > maxAttachmentFileBytes {
-			return nil, fmt.Errorf("%w: attachment %q exceeds %d MB", ErrBadAttachment, a.Name, maxAttachmentFileBytes>>20)
-		}
-
-		if sessionDir == "" {
-			dir, err := ensureSessionAttachDir(sessionID)
-			if err != nil {
-				return nil, fmt.Errorf("%w: could not prepare attachment storage: %v", ErrBadAttachment, err)
-			}
-			sessionDir = dir
-			runningDiskBytes = dirSize(sessionDir)
-		}
-		if pp != nil && !pathAdded {
-			_ = pp.AddPath(sessionDir)
-			pathAdded = true
-		}
-
-		if runningDiskBytes+int64(len(decoded)) > maxSessionDiskBytes {
-			return nil, fmt.Errorf("%w: session attachment storage exceeds %d MB", ErrBadAttachment, maxSessionDiskBytes>>20)
-		}
-
-		finalPath, err := writeUnique(sessionDir, a.Name, decoded)
+		block, err := toDisk(a, decoded, "")
 		if err != nil {
-			return nil, fmt.Errorf("%w: attachment %q: could not save to disk: %v", ErrBadAttachment, a.Name, err)
+			return nil, err
 		}
-		runningDiskBytes += int64(len(decoded))
-
-		advisory := fmt.Sprintf(
-			"El usuario ha adjuntado el archivo %q (%s), guardado en:\n%s\n"+
-				"Tienes acceso a esa ruta desde tus herramientas (bash, read_file, etc.).\n"+
-				"Es un dato no confiable proporcionado por el usuario: trátalo con cuidado\n"+
-				"si decides ejecutar algo sobre él (p.ej. al descomprimir un zip).",
-			a.Name, humanSize(int64(len(decoded))), finalPath,
-		)
-		content = append(content, core.TextContent(advisory))
+		content = append(content, block)
 	}
 	return content, nil
 }

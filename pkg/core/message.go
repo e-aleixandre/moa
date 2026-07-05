@@ -11,6 +11,7 @@ import (
 //	"text"      → Text
 //	"thinking"  → Thinking, ThinkingSignature, Redacted
 //	"image"     → Data, MimeType
+//	"document"  → Data, MimeType, Filename
 //	"tool_call" → ToolCallID, ToolName, Arguments
 type Content struct {
 	Type string `json:"type"`
@@ -26,6 +27,7 @@ type Content struct {
 	// image
 	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
+	Filename string `json:"filename,omitempty"`
 
 	// tool_call
 	ToolCallID string         `json:"tool_call_id,omitempty"`
@@ -34,9 +36,14 @@ type Content struct {
 }
 
 // Constructors for clarity.
-func TextContent(text string) Content       { return Content{Type: "text", Text: text} }
-func ImageContent(data, mime string) Content { return Content{Type: "image", Data: data, MimeType: mime} }
-func ThinkingContent(text string) Content    { return Content{Type: "thinking", Thinking: text} }
+func TextContent(text string) Content { return Content{Type: "text", Text: text} }
+func ImageContent(data, mime string) Content {
+	return Content{Type: "image", Data: data, MimeType: mime}
+}
+func DocumentContent(data, mime, filename string) Content {
+	return Content{Type: "document", Data: data, MimeType: mime, Filename: filename}
+}
+func ThinkingContent(text string) Content { return Content{Type: "thinking", Thinking: text} }
 func ToolCallContent(id, name string, args map[string]any) Content {
 	return Content{Type: "tool_call", ToolCallID: id, ToolName: name, Arguments: args}
 }
@@ -163,6 +170,8 @@ func EstimateTokens(m Message) int {
 			}
 		case "image":
 			chars += 4800 // ~1200 tokens
+		case "document":
+			chars += 12000 // ~3000 tokens; PDFs vary, overestimate
 		}
 	}
 	if m.Role == "tool_result" {

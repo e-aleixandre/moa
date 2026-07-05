@@ -179,6 +179,12 @@ func convertUserContent(blocks []core.Content) []map[string]any {
 				"detail":    "auto",
 				"image_url": "data:" + b.MimeType + ";base64," + b.Data,
 			})
+		case "document":
+			parts = append(parts, map[string]any{
+				"type":      "input_file",
+				"filename":  b.Filename,
+				"file_data": "data:" + b.MimeType + ";base64," + b.Data,
+			})
 		}
 	}
 	return parts

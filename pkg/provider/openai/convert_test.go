@@ -187,3 +187,32 @@ func TestMapReasoningEffort(t *testing.T) {
 		}
 	}
 }
+
+func TestConvertUserContent_Document(t *testing.T) {
+	parts := convertUserContent([]core.Content{
+		core.DocumentContent("ZGF0YQ==", "application/pdf", "report.pdf"),
+	})
+
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+	if parts[0]["type"] != "input_file" {
+		t.Errorf("type: got %v", parts[0]["type"])
+	}
+	if parts[0]["filename"] != "report.pdf" {
+		t.Errorf("filename: got %v", parts[0]["filename"])
+	}
+	want := "data:application/pdf;base64,ZGF0YQ=="
+	if parts[0]["file_data"] != want {
+		t.Errorf("file_data: got %v, want %v", parts[0]["file_data"], want)
+	}
+}
+
+func TestSupportsDocuments(t *testing.T) {
+	if !New("key").SupportsDocuments() {
+		t.Error("expected SupportsDocuments true for API-key provider")
+	}
+	if NewOAuth("tok", "acct").SupportsDocuments() {
+		t.Error("expected SupportsDocuments false for OAuth provider")
+	}
+}

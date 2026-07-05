@@ -18,13 +18,31 @@ type Provider interface {
 	Stream(ctx context.Context, req Request) (<-chan AssistantEvent, error)
 }
 
+// DocumentCapableProvider is an optional interface a Provider may implement to
+// declare whether it accepts native "document" content blocks (e.g. PDFs).
+// Providers that don't implement it are treated as NOT document-capable.
+type DocumentCapableProvider interface {
+	SupportsDocuments() bool
+}
+
+// ProviderSupportsDocuments reports whether p accepts native document blocks.
+// Conservative: an unknown provider (not implementing DocumentCapableProvider)
+// returns false, so callers fall back to disk rather than silently dropping a
+// PDF the provider can't handle.
+func ProviderSupportsDocuments(p Provider) bool {
+	if dc, ok := p.(DocumentCapableProvider); ok {
+		return dc.SupportsDocuments()
+	}
+	return false
+}
+
 // Request contains everything needed for an LLM call.
 type Request struct {
-	Model   Model
-	System  string     // System prompt
-	Messages []Message // Conversation history (user, assistant, tool_result)
-	Tools   []ToolSpec // Available tools for tool_use
-	Options StreamOptions
+	Model    Model
+	System   string     // System prompt
+	Messages []Message  // Conversation history (user, assistant, tool_result)
+	Tools    []ToolSpec // Available tools for tool_use
+	Options  StreamOptions
 }
 
 // ToolSpec is a tool definition sent to the LLM (name + description + JSON schema).

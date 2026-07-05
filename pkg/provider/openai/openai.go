@@ -65,6 +65,10 @@ func NewWithBaseURL(apiKey, baseURL string) *OpenAI {
 	}
 }
 
+// SupportsDocuments returns true only for the API-key path (/v1/responses):
+// the codex OAuth path (/codex/responses) is unverified for input_file.
+func (o *OpenAI) SupportsDocuments() bool { return o.endpoint == apiEndpoint }
+
 // Stream sends a request and returns a channel of normalized AssistantEvents.
 func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	apiKey := o.apiKey

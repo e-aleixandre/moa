@@ -225,6 +225,15 @@ func convertContentBlocks(blocks []core.Content) []any {
 					"data":       b.Data,
 				},
 			})
+		case "document":
+			result = append(result, map[string]any{
+				"type": "document",
+				"source": map[string]any{
+					"type":       "base64",
+					"media_type": b.MimeType,
+					"data":       b.Data,
+				},
+			})
 		}
 	}
 	return result
