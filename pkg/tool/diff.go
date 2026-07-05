@@ -115,6 +115,26 @@ func unifiedDiff(old, new string, contextLines int) string {
 	return strings.TrimSuffix(sb.String(), "\n")
 }
 
+// EditStartLine returns the 1-based line number where oldText starts in
+// content, so edit previews can show real file line numbers. It prefers the
+// first exact occurrence and falls back to the same fuzzy matching the edit
+// tool uses. Returns 1 when oldText is empty or cannot be located (callers
+// degrade to numbering from 1).
+func EditStartLine(content, oldText string) int {
+	if content == "" || oldText == "" {
+		return 1
+	}
+	idx := strings.Index(content, oldText)
+	if idx < 0 {
+		start, _, _, err := fuzzyFind(content, oldText)
+		if err != nil {
+			return 1
+		}
+		idx = start
+	}
+	return strings.Count(content[:idx], "\n") + 1
+}
+
 func splitLines(s string) []string {
 	if s == "" {
 		return nil

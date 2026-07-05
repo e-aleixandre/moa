@@ -112,7 +112,7 @@ export function reduceToolStart(target, buffers, data) {
   if (existingIdx >= 0) {
     target.messages = target.messages.map((m, i) =>
       i === existingIdx
-        ? { ...m, tool_name: data.tool_name, args: data.args, status: 'running' }
+        ? { ...m, tool_name: data.tool_name, args: data.args, start_line: data.start_line, status: 'running' }
         : m);
     return target;
   }
@@ -121,6 +121,7 @@ export function reduceToolStart(target, buffers, data) {
     tool_call_id: data.tool_call_id,
     tool_name: data.tool_name,
     args: data.args,
+    start_line: data.start_line,
     status: 'running',
     result: null,
   }];

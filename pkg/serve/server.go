@@ -492,7 +492,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		}
 
 		// Create reactor that bridges bus events → WS events.
-		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx)
+		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD)
 		defer reactor.cleanup()
 
 		// Invalidate file scanner cache on successful file edits.

@@ -2,7 +2,11 @@ package serve
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,7 +172,7 @@ func TestWSReactor_CleanupStopsWatcher(t *testing.T) {
 	runtime.GC()
 	before := runtime.NumGoroutine()
 
-	r := newWsReactor(b, ctx)
+	r := newWsReactor(b, ctx, "")
 	r.cleanup()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -178,4 +182,79 @@ func TestWSReactor_CleanupStopsWatcher(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func TestEnrichEditToolStart(t *testing.T) {
+	dir := t.TempDir()
+	var sb strings.Builder
+	for i := 1; i <= 300; i++ {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+	path := filepath.Join(dir, "big.txt")
+	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	editStart := func(args map[string]any) Event {
+		return Event{Type: "tool_start", Data: ToolStartData{
+			ToolCallID: "tc1", ToolName: "edit", Args: args,
+		}}
+	}
+
+	t.Run("edit at line 260 gets start_line 260", func(t *testing.T) {
+		e := enrichEditToolStart(editStart(map[string]any{
+			"path": path, "oldText": "line 260\nline 261", "newText": "x",
+		}), dir)
+		d := e.Data.(ToolStartData)
+		if d.StartLine != 260 {
+			t.Errorf("StartLine = %d, want 260", d.StartLine)
+		}
+	})
+
+	t.Run("relative path resolves against cwd", func(t *testing.T) {
+		e := enrichEditToolStart(editStart(map[string]any{
+			"path": "big.txt", "oldText": "line 42", "newText": "x",
+		}), dir)
+		d := e.Data.(ToolStartData)
+		if d.StartLine != 42 {
+			t.Errorf("StartLine = %d, want 42", d.StartLine)
+		}
+	})
+
+	t.Run("oldText not found degrades to 1", func(t *testing.T) {
+		e := enrichEditToolStart(editStart(map[string]any{
+			"path": path, "oldText": "no such content here", "newText": "x",
+		}), dir)
+		d := e.Data.(ToolStartData)
+		if d.StartLine != 1 {
+			t.Errorf("StartLine = %d, want 1", d.StartLine)
+		}
+	})
+
+	t.Run("missing file leaves StartLine 0", func(t *testing.T) {
+		e := enrichEditToolStart(editStart(map[string]any{
+			"path": filepath.Join(dir, "nope.txt"), "oldText": "x", "newText": "y",
+		}), dir)
+		d := e.Data.(ToolStartData)
+		if d.StartLine != 0 {
+			t.Errorf("StartLine = %d, want 0", d.StartLine)
+		}
+	})
+
+	t.Run("non-edit tools untouched", func(t *testing.T) {
+		e := enrichEditToolStart(Event{Type: "tool_start", Data: ToolStartData{
+			ToolCallID: "tc1", ToolName: "bash", Args: map[string]any{"command": "ls"},
+		}}, dir)
+		d := e.Data.(ToolStartData)
+		if d.StartLine != 0 {
+			t.Errorf("StartLine = %d, want 0", d.StartLine)
+		}
+	})
+
+	t.Run("non-tool_start events untouched", func(t *testing.T) {
+		orig := Event{Type: "text_delta", Data: DeltaData{Delta: "hi"}}
+		if got := enrichEditToolStart(orig, dir); got != orig {
+			t.Errorf("event was modified: %+v", got)
+		}
+	})
 }

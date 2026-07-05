@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -987,11 +989,13 @@ func TestSummarizeToolBlock_WriteError(t *testing.T) {
 }
 
 func TestSummarizeToolBlock_EditShowsFallbackDiffBeforeExecution(t *testing.T) {
+	// Nonexistent file: preview must degrade to numbering from 1 without panic.
+	path := filepath.Join(t.TempDir(), "missing.txt")
 	block := messageBlock{
 		Type:     "tool",
 		ToolName: "edit",
 		ToolArgs: map[string]any{
-			"path":    "/tmp/x.txt",
+			"path":    path,
 			"oldText": "line1\nline2",
 			"newText": "line1\nlineX",
 		},
@@ -1001,8 +1005,8 @@ func TestSummarizeToolBlock_EditShowsFallbackDiffBeforeExecution(t *testing.T) {
 	if action != "edit" {
 		t.Fatalf("action = %q, want edit", action)
 	}
-	if target != "/tmp/x.txt" {
-		t.Fatalf("target = %q, want /tmp/x.txt", target)
+	if target != path {
+		t.Fatalf("target = %q, want %q", target, path)
 	}
 	if !strings.Contains(body, "@@ -1 +1 @@") {
 		t.Fatalf("expected fallback diff header, got:\n%s", body)
@@ -1014,6 +1018,75 @@ func TestSummarizeToolBlock_EditShowsFallbackDiffBeforeExecution(t *testing.T) {
 	data := buildToolBlockData(block, false)
 	if !data.IsDiff {
 		t.Fatalf("expected IsDiff=true for edit fallback diff")
+	}
+}
+
+func TestSummarizeToolBlock_EditFallbackDiffUsesRealLineNumbers(t *testing.T) {
+	// Build a 300-line file; the edit targets line 260 — the preview must
+	// number lines from 260, matching the final server-computed diff.
+	var lines []string
+	for i := 1; i <= 300; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	path := filepath.Join(t.TempDir(), "big.txt")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	block := messageBlock{
+		Type:     "tool",
+		ToolName: "edit",
+		ToolArgs: map[string]any{
+			"path":    path,
+			"oldText": "line 260\nline 261",
+			"newText": "line 260\nCHANGED",
+		},
+		ToolDone: false,
+	}
+	_, _, _, body, _ := summarizeToolBlock(block, maxToolPreviewLines)
+	if !strings.Contains(body, "@@ -260 +260 @@") {
+		t.Fatalf("expected hunk header at line 260, got:\n%s", body)
+	}
+	if !strings.Contains(body, " 260  line 260") {
+		t.Fatalf("expected context line numbered 260, got:\n%s", body)
+	}
+	if !strings.Contains(body, " 261 -line 261") || !strings.Contains(body, " 261 +CHANGED") {
+		t.Fatalf("expected -/+ lines numbered 261, got:\n%s", body)
+	}
+}
+
+func TestFallbackEditDiff_StartLine(t *testing.T) {
+	t.Run("multiline from offset", func(t *testing.T) {
+		got := fallbackEditDiff("a\nb\nc", "a\nX\nc", 10)
+		want := "@@ -10 +10 @@\n  10  a\n  11 -b\n  11 +X\n  12  c"
+		if got != want {
+			t.Errorf("fallbackEditDiff = \n%s\nwant:\n%s", got, want)
+		}
+	})
+	t.Run("startLine below 1 clamps to 1", func(t *testing.T) {
+		got := fallbackEditDiff("a", "b", 0)
+		if !strings.Contains(got, "@@ -1 +1 @@") {
+			t.Errorf("expected numbering from 1, got:\n%s", got)
+		}
+	})
+}
+
+func TestEditPreviewStartLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := editPreviewStartLine(path, "three\nfour"); got != 3 {
+		t.Errorf("editPreviewStartLine = %d, want 3", got)
+	}
+	if got := editPreviewStartLine(path, "not present"); got != 1 {
+		t.Errorf("editPreviewStartLine(not found) = %d, want 1", got)
+	}
+	if got := editPreviewStartLine(filepath.Join(t.TempDir(), "nope"), "x"); got != 1 {
+		t.Errorf("editPreviewStartLine(missing file) = %d, want 1", got)
+	}
+	if got := editPreviewStartLine("", "x"); got != 1 {
+		t.Errorf("editPreviewStartLine(empty path) = %d, want 1", got)
 	}
 }
 

@@ -93,6 +93,10 @@ type ToolStartData struct {
 	ToolCallID string         `json:"tool_call_id"`
 	ToolName   string         `json:"tool_name"`
 	Args       map[string]any `json:"args"`
+	// StartLine is the real 1-based file line where an edit's oldText starts,
+	// so the frontend diff preview shows real line numbers before the tool
+	// result arrives. 0 when unknown (frontend numbers from 1). Edit tool only.
+	StartLine int `json:"start_line,omitempty"`
 }
 
 // ToolUpdateData carries streaming tool output.

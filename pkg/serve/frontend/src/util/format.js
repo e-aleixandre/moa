@@ -81,8 +81,9 @@ export function toolPath(name, args) {
   return '';
 }
 
-/** Extract the most relevant content for the tool preview. */
-export function toolPreview(name, args, result, status) {
+/** Extract the most relevant content for the tool preview.
+ * startLine: real 1-based file line for edit previews (0/undefined → number from 1). */
+export function toolPreview(name, args, result, status, startLine) {
   const n = (name || '').toLowerCase();
   const a = typeof args === 'string' ? tryParse(args) : (args || {});
 
@@ -95,7 +96,7 @@ export function toolPreview(name, args, result, status) {
     // Fallback for old results without diff.
     const oldText = a.oldText || a.old_text || '';
     const newText = a.newText || a.new_text || '';
-    if (oldText || newText) return { text: formatDiff(oldText, newText), kind: 'diff' };
+    if (oldText || newText) return { text: formatDiff(oldText, newText, startLine), kind: 'diff' };
   }
 
   // ask_user is rendered by AskUserPreview component — skip here.
@@ -139,8 +140,10 @@ export function splitPreviewTail(text, maxLines = PREVIEW_LINES) {
   };
 }
 
-/** Format a simple unified-style diff between old and new text with line numbers. */
-function formatDiff(oldText, newText) {
+/** Format a simple unified-style diff between old and new text with line numbers.
+ * startLine is the real 1-based file line where oldText starts (defaults to 1). */
+export function formatDiff(oldText, newText, startLine = 1) {
+  const base = (Number.isInteger(startLine) && startLine > 1) ? startLine - 1 : 0;
   const oldLines = oldText ? oldText.split('\n') : [];
   const newLines = newText ? newText.split('\n') : [];
   const lines = [];
@@ -162,25 +165,25 @@ function formatDiff(oldText, newText) {
 
   // Context before
   for (let i = contextStart; i < prefixLen; i++) {
-    lines.push(`${pad(i + 1)}   ${oldLines[i]}`);
+    lines.push(`${pad(base + i + 1)}   ${oldLines[i]}`);
   }
 
   // Removed lines
   for (let i = prefixLen; i < oldLines.length - suffixLen; i++) {
-    lines.push(`${pad(i + 1)} - ${oldLines[i]}`);
+    lines.push(`${pad(base + i + 1)} - ${oldLines[i]}`);
   }
 
   // Added lines
   let newStart = prefixLen;
   for (let i = prefixLen; i < newLines.length - suffixLen; i++) {
-    lines.push(`${pad(newStart + 1 + (i - prefixLen))} + ${newLines[i]}`);
+    lines.push(`${pad(base + newStart + 1 + (i - prefixLen))} + ${newLines[i]}`);
   }
 
   // Context after
   const afterStart = oldLines.length - suffixLen;
   const afterEnd = Math.min(oldLines.length, afterStart + maxContext);
   for (let i = afterStart; i < afterEnd; i++) {
-    lines.push(`${pad(i + 1)}   ${oldLines[i]}`);
+    lines.push(`${pad(base + i + 1)}   ${oldLines[i]}`);
   }
 
   return lines.join('\n');

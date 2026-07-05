@@ -97,3 +97,61 @@ func TestUnifiedDiff_NoChange(t *testing.T) {
 		t.Errorf("expected empty diff for identical content, got:\n%s", diff)
 	}
 }
+
+func TestEditStartLine(t *testing.T) {
+	// Build a 300-line file; oldText starts at line 260.
+	var lines []string
+	for i := 1; i <= 300; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	content := strings.Join(lines, "\n")
+
+	t.Run("match at line 260", func(t *testing.T) {
+		if got := EditStartLine(content, "line 260"); got != 260 {
+			t.Errorf("EditStartLine = %d, want 260", got)
+		}
+	})
+
+	t.Run("multiline match", func(t *testing.T) {
+		old := "line 260\nline 261\nline 262"
+		if got := EditStartLine(content, old); got != 260 {
+			t.Errorf("EditStartLine = %d, want 260", got)
+		}
+	})
+
+	t.Run("first occurrence wins", func(t *testing.T) {
+		c := "x\ndup\ny\ndup\n"
+		if got := EditStartLine(c, "dup"); got != 2 {
+			t.Errorf("EditStartLine = %d, want 2", got)
+		}
+	})
+
+	t.Run("not found degrades to 1", func(t *testing.T) {
+		if got := EditStartLine(content, "no such text anywhere"); got != 1 {
+			t.Errorf("EditStartLine = %d, want 1", got)
+		}
+	})
+
+	t.Run("empty inputs", func(t *testing.T) {
+		if got := EditStartLine("", "x"); got != 1 {
+			t.Errorf("EditStartLine(empty content) = %d, want 1", got)
+		}
+		if got := EditStartLine(content, ""); got != 1 {
+			t.Errorf("EditStartLine(empty oldText) = %d, want 1", got)
+		}
+	})
+
+	t.Run("fuzzy whitespace match", func(t *testing.T) {
+		c := "func a() {\n\tfoo()\n}\n\nfunc b() {\n\tbar()\n}\n"
+		// oldText with different indentation — exact match fails, fuzzy finds it.
+		if got := EditStartLine(c, "func b() {\n    bar()\n}"); got != 5 {
+			t.Errorf("EditStartLine = %d, want 5", got)
+		}
+	})
+
+	t.Run("match at line 1", func(t *testing.T) {
+		if got := EditStartLine(content, "line 1\nline 2"); got != 1 {
+			t.Errorf("EditStartLine = %d, want 1", got)
+		}
+	})
+}

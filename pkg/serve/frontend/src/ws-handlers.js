@@ -419,6 +419,7 @@ export function handleWsToolStart(id, data) {
         ...m,
         tool_name: data.tool_name,
         args: data.args,
+        start_line: data.start_line,
         status: 'running',
       };
     });
@@ -431,6 +432,7 @@ export function handleWsToolStart(id, data) {
     tool_call_id: data.tool_call_id,
     tool_name: data.tool_name,
     args: data.args,
+    start_line: data.start_line,
     status: 'running',
     result: null,
   };

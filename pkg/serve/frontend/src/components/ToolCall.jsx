@@ -38,7 +38,7 @@ export function ToolCall({ tool, sessionId }) {
   const liveText = isRunning && tool.streamingResult ? tool.streamingResult : null;
   // Final result (from toolPreview) — only used when not streaming
   const preview = !isAskUser && !liveText
-    ? toolPreview(tool.tool_name, tool.args, tool.result, tool.status)
+    ? toolPreview(tool.tool_name, tool.args, tool.result, tool.status, tool.start_line)
     : null;
   const isDiff = !isAskUser && !liveText && preview && preview.kind === 'diff';
 

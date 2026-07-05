@@ -2,11 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // Layout controls how each block type is rendered to a string.
@@ -213,7 +215,7 @@ func summarizeToolBlock(block messageBlock, maxLines int) (action, target, heade
 			oldText, _ := stringArg(block.ToolArgs, "oldText")
 			newText, _ := stringArg(block.ToolArgs, "newText")
 			if oldText != "" || newText != "" {
-				body = fallbackEditDiff(oldText, newText)
+				body = fallbackEditDiff(oldText, newText, editPreviewStartLine(target, oldText))
 			} else {
 				body = block.ToolResult
 			}
@@ -371,17 +373,37 @@ func diffLineKind(line string) int {
 	}
 }
 
+// editPreviewStartLine returns the real 1-based line number where oldText
+// starts in the file at path, so edit previews number lines like the final
+// diff. Degrades to 1 (old behavior) when the file can't be read or oldText
+// isn't found.
+func editPreviewStartLine(path, oldText string) int {
+	if path == "" || oldText == "" {
+		return 1
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 1
+	}
+	return tool.EditStartLine(string(data), oldText)
+}
+
 // fallbackEditDiff builds a readable numbered diff from old/new text so edit
 // cards show a diff immediately (before tool execution/update events arrive).
-func fallbackEditDiff(oldText, newText string) string {
+// startLine is the real file line number of the first oldText line (1 when
+// unknown).
+func fallbackEditDiff(oldText, newText string, startLine int) string {
 	oldLines := splitPreserveEmpty(oldText)
 	newLines := splitPreserveEmpty(newText)
 	if len(oldLines) == 0 && len(newLines) == 0 {
 		return ""
 	}
+	if startLine < 1 {
+		startLine = 1
+	}
 
 	var sb strings.Builder
-	sb.WriteString("@@ -1 +1 @@\n")
+	fmt.Fprintf(&sb, "@@ -%d +%d @@\n", startLine, startLine)
 
 	maxN := len(oldLines)
 	if len(newLines) > maxN {
@@ -391,14 +413,14 @@ func fallbackEditDiff(oldText, newText string) string {
 		hasOld := i < len(oldLines)
 		hasNew := i < len(newLines)
 		if hasOld && hasNew && oldLines[i] == newLines[i] {
-			fmt.Fprintf(&sb, "%4d  %s\n", i+1, oldLines[i])
+			fmt.Fprintf(&sb, "%4d  %s\n", startLine+i, oldLines[i])
 			continue
 		}
 		if hasOld {
-			fmt.Fprintf(&sb, "%4d -%s\n", i+1, oldLines[i])
+			fmt.Fprintf(&sb, "%4d -%s\n", startLine+i, oldLines[i])
 		}
 		if hasNew {
-			fmt.Fprintf(&sb, "%4d +%s\n", i+1, newLines[i])
+			fmt.Fprintf(&sb, "%4d +%s\n", startLine+i, newLines[i])
 		}
 	}
 	return strings.TrimSuffix(sb.String(), "\n")

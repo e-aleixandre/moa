@@ -2,11 +2,14 @@ package serve
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // wsReactor bridges typed bus events to a per-WebSocket Event channel.
@@ -26,8 +29,10 @@ type wsReactor struct {
 const wsReactorBuffer = 512 // per-WS event channel capacity
 
 // newWsReactor subscribes to all bus events and session context cancellation.
+// cwd is the session working directory, used to resolve relative file paths
+// when enriching edit tool_start events with real line numbers.
 // Returns the reactor and a read-only channel for the WS writer loop.
-func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
+func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string) *wsReactor {
 	r := &wsReactor{
 		ch:   make(chan Event, wsReactorBuffer),
 		done: make(chan struct{}),
@@ -58,7 +63,7 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 
 	r.unsubs = append(r.unsubs, b.SubscribeAll(func(event any) {
 		if wsEvent, ok := wsEventFromBus(event); ok {
-			send(wsEvent)
+			send(enrichEditToolStart(wsEvent, cwd))
 		}
 	}))
 
@@ -76,6 +81,36 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context) *wsReactor {
 	}()
 
 	return r
+}
+
+// enrichEditToolStart adds the real 1-based starting line number to edit
+// tool_start events, so the frontend diff preview numbers lines like the
+// final diff. The event fires before the edit executes, so the file still
+// holds the pre-edit content. Degrades silently (StartLine stays 0) when the
+// file can't be read or oldText isn't found.
+func enrichEditToolStart(e Event, cwd string) Event {
+	if e.Type != "tool_start" {
+		return e
+	}
+	d, ok := e.Data.(ToolStartData)
+	if !ok || d.ToolName != "edit" {
+		return e
+	}
+	path, _ := d.Args["path"].(string)
+	oldText, _ := d.Args["oldText"].(string)
+	if path == "" || oldText == "" {
+		return e
+	}
+	if !filepath.IsAbs(path) && cwd != "" {
+		path = filepath.Join(cwd, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return e
+	}
+	d.StartLine = tool.EditStartLine(string(data), oldText)
+	e.Data = d
+	return e
 }
 
 func wsEventFromBus(event any) (Event, bool) {
