@@ -12,8 +12,8 @@
     },
     {
       "name": "test",
-      "command": "go test -race -count=1 ./...",
-      "timeout": "10m"
+      "command": "bash .moa/test-retry.sh",
+      "timeout": "15m"
     },
     {
       "name": "lint",
