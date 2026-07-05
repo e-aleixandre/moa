@@ -45,6 +45,14 @@ type AppendToConversation struct {
 // AbortRun cancels a running agent.
 type AbortRun struct{ SessionID string }
 
+// PromoteSubagent flips a running synchronous subagent job to async,
+// unblocking its parent's blocking tool call while the child keeps running
+// in the background.
+type PromoteSubagent struct {
+	SessionID string
+	JobID     string
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/usage"
 )
 
@@ -77,6 +78,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleListSubagents(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleGetSubagent(manager))
@@ -619,6 +621,24 @@ func handleCancelSubagent(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+}
+
+func handlePromoteSubagent(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := mgr.PromoteSubagent(r.PathValue("id"), r.PathValue("jobID"))
+		switch {
+		case err == nil:
+			writeJSON(w, http.StatusOK, map[string]any{})
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, subagent.ErrNotSync):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "subagent is already async"})
+		case errors.Is(err, subagent.ErrNotRunning):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "subagent already finished"})
+		default:
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 	}
 }

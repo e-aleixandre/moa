@@ -181,13 +181,29 @@ func waitFor(t *testing.T, timeout time.Duration, fn func() bool) {
 
 func newSubagentTools(t *testing.T, cfg Config, parentTools ...core.Tool) (core.Tool, core.Tool, core.Tool) {
 	t.Helper()
+	sub, status, cancel, _ := newSubagentToolsWithStore(t, cfg, parentTools...)
+	return sub, status, cancel
+}
+
+// newSubagentToolsWithStore is like newSubagentTools but also returns the
+// underlying jobStore, for tests that need to promote a job by ID (there is
+// no "subagent_promote" tool — promotion is triggered via Jobs.Promote /
+// jobStore.promote, the same path pkg/serve and the bus command use).
+func newSubagentToolsWithStore(t *testing.T, cfg Config, parentTools ...core.Tool) (core.Tool, core.Tool, core.Tool, *jobStore) {
+	t.Helper()
 	reg := core.NewRegistry()
 	for _, tool := range parentTools {
 		_ = reg.Register(tool)
 	}
 	cfg.ParentTools = reg
+	if cfg.AppCtx == nil {
+		// The sync path now derives its job ctx from cfg.AppCtx (same as
+		// async), so it needs a non-nil AppCtx even in tests that don't
+		// otherwise care about cancellation.
+		cfg.AppCtx = context.Background()
+	}
 	jobs := newJobStore()
-	return newSubagent(cfg, jobs), newSubagentStatus(jobs), newSubagentCancel(jobs)
+	return newSubagent(cfg, jobs), newSubagentStatus(jobs), newSubagentCancel(jobs), jobs
 }
 
 func TestSubagentSyncBasic(t *testing.T) {
@@ -1307,5 +1323,234 @@ func TestSubagentResumeReplaysHistory(t *testing.T) {
 	}
 	if got := textOf(res); got != "resumed answer" {
 		t.Fatalf("expected resumed answer, got %q", got)
+	}
+}
+
+// onlyJobID returns the id of the single job currently tracked in s. Fails
+// the test if there isn't exactly one.
+func onlyJobID(t *testing.T, s *jobStore) string {
+	t.Helper()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.jobs) != 1 {
+		t.Fatalf("expected exactly 1 job, got %d", len(s.jobs))
+	}
+	for id := range s.jobs {
+		return id
+	}
+	return ""
+}
+
+func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "promoted result"))
+
+	var (
+		mu          sync.Mutex
+		completeID  string
+		completeSt  string
+		completeRes string
+		completeN   int
+	)
+	sub, statusTool, _, jobs := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			mu.Lock()
+			completeID = jobID
+			completeSt = status
+			completeRes = resultTail
+			completeN++
+			mu.Unlock()
+		},
+	})
+
+	resultCh := make(chan core.Result, 1)
+	go func() {
+		res, _ := sub.Execute(context.Background(), map[string]any{"task": "do it"}, nil)
+		resultCh <- res
+	}()
+
+	<-started
+	jobID := onlyJobID(t, jobs)
+	if err := jobs.promote(jobID); err != nil {
+		t.Fatalf("promote() error = %v", err)
+	}
+
+	// The parent must unblock immediately with a "promoted" message, not the
+	// child's eventual result.
+	var res core.Result
+	select {
+	case res = <-resultCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for parent to unblock after promotion")
+	}
+	if !strings.Contains(textOf(res), "promoted to background") {
+		t.Fatalf("expected parent result to mention promotion, got %q", textOf(res))
+	}
+	if strings.Contains(textOf(res), "promoted result") {
+		t.Fatal("parent result must not carry the child's eventual output")
+	}
+
+	// Now let the child finish; its result must arrive via OnAsyncComplete,
+	// not by any other channel.
+	close(release)
+	waitFor(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return completeN > 0
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if completeN != 1 {
+		t.Fatalf("OnAsyncComplete called %d times, want 1", completeN)
+	}
+	if completeID != jobID {
+		t.Fatalf("OnAsyncComplete jobID = %q, want %q", completeID, jobID)
+	}
+	if completeSt != statusCompleted {
+		t.Fatalf("OnAsyncComplete status = %q, want %q", completeSt, statusCompleted)
+	}
+	if completeRes != "promoted result" {
+		t.Fatalf("OnAsyncComplete result = %q, want %q", completeRes, "promoted result")
+	}
+
+	// subagent_status must also reflect completion, confirming the job store
+	// itself has the final result (not just the callback).
+	statusRes, err := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(textOf(statusRes), "Status: completed") {
+		t.Fatalf("expected completed status, got %q", textOf(statusRes))
+	}
+}
+
+func TestSyncSubagentSurvivesParentCtxCancellationAfterPromotion(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "survived"))
+
+	completed := make(chan struct{})
+	sub, statusTool, _, jobs := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			close(completed)
+		},
+	})
+
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	resultCh := make(chan core.Result, 1)
+	go func() {
+		res, _ := sub.Execute(parentCtx, map[string]any{"task": "do it"}, nil)
+		resultCh <- res
+	}()
+
+	<-started
+	jobID := onlyJobID(t, jobs)
+	if err := jobs.promote(jobID); err != nil {
+		t.Fatalf("promote() error = %v", err)
+	}
+	<-resultCh // parent unblocked by promotion
+
+	// Cancelling the parent's own context after promotion must NOT kill the
+	// (now decoupled) child.
+	cancelParent()
+
+	statusRes, err := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(textOf(statusRes), "Status: running") {
+		t.Fatalf("expected job to survive parent ctx cancellation, got %q", textOf(statusRes))
+	}
+
+	close(release)
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for child to complete after parent ctx cancellation")
+	}
+	waitFor(t, time.Second, func() bool {
+		res, _ := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+		return strings.Contains(textOf(res), "Status: completed")
+	})
+}
+
+func TestSyncSubagentPromoteVsFinishRaceDeliversExactlyOnce(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		provider := newMockProvider(textResponse("race result"))
+
+		var (
+			mu        sync.Mutex
+			completeN int
+		)
+		sub, _, _, jobs := newSubagentToolsWithStore(t, Config{
+			DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+			ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+			AppCtx:          context.Background(),
+			OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+				mu.Lock()
+				completeN++
+				mu.Unlock()
+			},
+		})
+
+		resultCh := make(chan core.Result, 1)
+		go func() {
+			res, _ := sub.Execute(context.Background(), map[string]any{"task": "do it"}, nil)
+			resultCh <- res
+		}()
+
+		// Race a promote() call against the child finishing on its own: spin
+		// until the job shows up in the store, then promote it immediately.
+		// The provider responds near-instantly, so this genuinely races
+		// jobStore.promote (guarded by j.mu) against setCompleted (also
+		// guarded by j.mu) — exactly the race awaitSyncResult/runJob must
+		// linearize into a single delivery lane.
+		go func() {
+			for {
+				jobs.mu.RLock()
+				n := len(jobs.jobs)
+				var id string
+				for k := range jobs.jobs {
+					id = k
+				}
+				jobs.mu.RUnlock()
+				if n == 1 {
+					_ = jobs.promote(id)
+					return
+				}
+			}
+		}()
+
+		res := <-resultCh
+
+		// Poll briefly: if promote won the race, OnAsyncComplete fires
+		// asynchronously from runJob's own goroutine and may not have run yet.
+		promoted := strings.Contains(textOf(res), "promoted to background")
+		if promoted {
+			waitFor(t, time.Second, func() bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return completeN == 1
+			})
+		}
+
+		mu.Lock()
+		n := completeN
+		mu.Unlock()
+
+		if promoted && n != 1 {
+			t.Fatalf("iteration %d: promoted parent result but OnAsyncComplete called %d times, want 1", i, n)
+		}
+		if !promoted && n != 0 {
+			t.Fatalf("iteration %d: non-promoted parent result but OnAsyncComplete called %d times, want 0", i, n)
+		}
 	}
 }

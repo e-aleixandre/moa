@@ -417,6 +417,10 @@ func main() {
 			os.Exit(1)
 		}
 
+		rt.Bus.OnCommand(func(c bus.PromoteSubagent) error {
+			return sess.Subagents.Promote(c.JobID)
+		})
+
 		// Attach persister BEFORE bus restore so state changes are persisted.
 		// Attach even in browser mode (persistedSess may be nil): the persister
 		// is nil-safe until the first session is opened, at which point

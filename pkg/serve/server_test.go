@@ -1151,3 +1151,28 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 	}
 	resp.Body.Close() //nolint:errcheck
 }
+
+func TestPromoteSubagentEndpoint(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unknown job in an existing session → 404 (Manager maps
+	// subagent.ErrUnknownJob to ErrNotFound).
+	resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/subagents/sa-nope/promote", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown job promote status = %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close() //nolint:errcheck
+
+	// Unknown session → 404.
+	resp = apiReq(t, srv, "POST", "/api/sessions/does-not-exist/subagents/sa-x/promote", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown session promote status = %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close() //nolint:errcheck
+}

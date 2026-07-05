@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,14 @@ import (
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
+)
+
+// Sentinel errors returned by promote/Promote, distinguishable by callers
+// (e.g. pkg/serve maps them to specific HTTP statuses).
+var (
+	ErrUnknownJob = errors.New("unknown job ID")
+	ErrNotSync    = errors.New("subagent is already async")
+	ErrNotRunning = errors.New("subagent already finished")
 )
 
 const (
@@ -37,6 +46,7 @@ type job struct {
 	progLen    int
 	cancel     context.CancelFunc
 	done       chan struct{}
+	promoted   chan struct{}
 	startedAt  time.Time
 	finishedAt time.Time
 	sync       bool // true when this job runs synchronously (blocking the parent tool call)
@@ -91,6 +101,7 @@ func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync
 			status:    statusRunning,
 			cancel:    cancel,
 			done:      make(chan struct{}),
+			promoted:  make(chan struct{}),
 			startedAt: time.Now(),
 			sync:      sync,
 		}
@@ -119,6 +130,26 @@ func (j *job) getChildAgent() *agent.Agent {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.childAgent
+}
+
+// isPromoted reports whether this job's promoted channel has been closed,
+// i.e. it was flipped from sync to async while running. Non-blocking.
+func (j *job) isPromoted() bool {
+	select {
+	case <-j.promoted:
+		return true
+	default:
+		return false
+	}
+}
+
+// isSync reports whether this job is currently running in sync mode
+// (blocking its parent's tool call). Reads under j.mu since promote() may
+// flip it concurrently.
+func (j *job) isSync() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.sync
 }
 
 func (s *jobStore) get(id string) (*job, bool) {
@@ -286,6 +317,29 @@ func (s *jobStore) requestCancel(id string) (*job, jobSnapshot, bool) {
 	return j, snapshotLocked(j), true
 }
 
+// promote flips a running sync job to async, unblocking its parent's
+// blocking tool call while the child keeps running in the background.
+// Locking j.mu here linearizes promote against setCompleted/setFailed/
+// setCancelled (also taken under j.mu), so a promote-vs-finish race can never
+// result in double delivery of the result.
+func (s *jobStore) promote(id string) error {
+	j, ok := s.get(id)
+	if !ok {
+		return ErrUnknownJob
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if !j.sync {
+		return ErrNotSync
+	}
+	if j.status != statusRunning {
+		return ErrNotRunning
+	}
+	j.sync = false
+	close(j.promoted)
+	return nil
+}
+
 func (s *jobStore) cleanup(olderThan time.Duration) {
 	if olderThan <= 0 {
 		return
@@ -318,7 +372,12 @@ func (s *jobStore) delete(id string) {
 // runningCount returns the number of live (running/cancelling) ASYNC jobs.
 // Sync jobs are excluded: they block the parent tool call and shouldn't count
 // against the async concurrency cap, nor against the "N agents working" async
-// counter shown in the UI.
+// counter shown in the UI. A job promoted from sync to async while running is
+// counted here (its sync flag flips to false), even though the cap in
+// newSubagent's async path is not re-checked retroactively — promoting an
+// already-running child adds no new load, it just unblocks the parent, so
+// runningCount (and the cap) may legitimately exceed MaxConcurrentAsync right
+// after a promotion.
 func (s *jobStore) runningCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -418,6 +477,17 @@ func (j *Jobs) Cancel(jobID string) bool {
 		jb.cancel()
 	}
 	return true
+}
+
+// Promote flips a running sync subagent job to async, unblocking its parent's
+// blocking tool call while the child keeps running in the background.
+// Propagates ErrUnknownJob, ErrNotSync, ErrNotRunning from the underlying
+// store so callers (e.g. pkg/serve) can map them to specific responses.
+func (j *Jobs) Promote(jobID string) error {
+	if j == nil || j.store == nil {
+		return ErrUnknownJob
+	}
+	return j.store.promote(jobID)
 }
 
 // Has reports whether a job with jobID is currently tracked.

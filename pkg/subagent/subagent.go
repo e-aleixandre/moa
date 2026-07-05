@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/agent"
@@ -38,15 +37,6 @@ const (
 	// async subagent jobs, used when Config.MaxConcurrentAsync is not set.
 	defaultMaxConcurrentAsync = 5
 )
-
-// syncChildCounter yields unique agent IDs for synchronous subagents, which
-// have no job ID. The "sync-" prefix keeps them distinct from async job IDs
-// (random hex) and from the root agent ("").
-var syncChildCounter atomic.Uint64
-
-func nextSyncChildID() string {
-	return fmt.Sprintf("sync-%d", syncChildCounter.Add(1))
-}
 
 // excludedTools prevents recursive subagent spawning.
 // Subagents are leaf workers, not orchestrators.
@@ -242,7 +232,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				job := jobs.create(task, model.ID, jobCancel)
 				// Isolate the child's shell state: seed a copy from the parent
 				// (read from the spawning ctx) and tag the child ctx with its
-				// job ID. runAsyncJob drops the snapshot when it finishes.
+				// job ID. runJob drops the snapshot when it finishes.
 				if cfg.BashState != nil {
 					cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 					jobCtx = core.WithAgentID(jobCtx, job.id)
@@ -250,24 +240,31 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				if cfg.OnAsyncJobChange != nil {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
-				go runAsyncJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs)
+				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil)
 				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_status to check progress, subagent_cancel to stop."), nil
 			}
 
-			// Isolate the child's shell state (subshell semantics): seed a copy
-			// from the parent, tag the child ctx with an ephemeral ID, and drop
-			// the snapshot when the sync run returns.
-			childCtx := ctx
-			if cfg.BashState != nil {
-				childID := nextSyncChildID()
-				cfg.BashState.Seed(childID, core.AgentIDFromContext(ctx))
-				defer cfg.BashState.Drop(childID)
-				childCtx = core.WithAgentID(ctx, childID)
-			}
-			jobCtx, jobCancel := context.WithCancel(childCtx)
+			// Sync: the child still runs in its own goroutine (unified with
+			// async via runJob), so it can survive being promoted to
+			// background. The parent blocks in awaitSyncResult until the
+			// child finishes or is promoted. jobCtx derives from cfg.AppCtx
+			// (like async) rather than from ctx, so a promoted child is not
+			// tied to the parent tool call's context; a linker goroutine
+			// propagates the parent's cancellation into the child only while
+			// it has not been promoted.
+			jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 			job := jobs.createSync(task, model.ID, jobCancel)
-			defer jobCancel()
-			return runSync(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate)
+			// Isolate the child's shell state (subshell semantics): seed a
+			// copy from the parent and tag the child ctx with the job's own
+			// ID (stable across a promotion, unlike the old ephemeral
+			// childID). runJob drops the snapshot when it finishes.
+			if cfg.BashState != nil {
+				cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
+				jobCtx = core.WithAgentID(jobCtx, job.id)
+			}
+			go linker(ctx, jobCtx, jobCancel, job)
+			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate)
+			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
 	}
 }
@@ -352,56 +349,67 @@ func newSubagentCancel(jobs *jobStore) core.Tool {
 	}
 }
 
-func runSync(ctx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result)) (core.Result, error) {
-	defer jobs.delete(j.id)
-
-	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg)
-	if err != nil {
-		jobs.setFailed(j.id, err.Error())
-		if cfg.OnChildEnd != nil {
-			cfg.OnChildEnd(j.id, statusFailed, nil, 0)
-		}
-		return core.ErrorResult(err.Error()), nil
+// linker propagates parentCtx's cancellation into jobCancel, but only while
+// the job has not been promoted (or already finished). Once promoted, the
+// child is deliberately decoupled from the parent's context so it survives
+// the parent tool call returning.
+func linker(parentCtx, jobCtx context.Context, jobCancel context.CancelFunc, j *job) {
+	select {
+	case <-parentCtx.Done():
+		jobCancel()
+	case <-j.promoted:
+	case <-j.done:
 	}
-	jobs.setChildAgent(j.id, child)
-	unsub := child.Subscribe(func(e core.AgentEvent) {
-		forwardSyncEvent(e, onUpdate)
-		forwardChildEvent(cfg, j.id, e)
-		if e.Type == core.AgentEventMessageEnd {
-			jobs.setMessages(j.id, child.Messages())
-		}
-	})
-	defer unsub()
-
-	if cfg.OnChildStart != nil {
-		cfg.OnChildStart(j.id, task, model.ID, false)
-	}
-
-	msgs, err := runChild(ctx, child, task, seedMsgs)
-	jobs.setMessages(j.id, msgs)
-	usage, cost := childUsage(msgs), childCost(model, msgs)
-	jobs.setUsage(j.id, usage, cost)
-	if err != nil {
-		status := statusFailed
-		if errors.Is(err, context.Canceled) {
-			status = statusCancelled
-			jobs.setCancelled(j.id)
-		} else {
-			jobs.setFailed(j.id, err.Error())
-		}
-		if cfg.OnChildEnd != nil {
-			cfg.OnChildEnd(j.id, status, usage, cost)
-		}
-		return core.ErrorResult(err.Error()), nil
-	}
-	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
-	if cfg.OnChildEnd != nil {
-		cfg.OnChildEnd(j.id, statusCompleted, usage, cost)
-	}
-	return core.TextResult(core.ExtractFinalAssistantText(msgs)), nil
 }
 
-func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage) {
+// awaitSyncResult blocks until j finishes or is promoted to background,
+// deciding which happened by consulting j.isPromoted() — never by which
+// channel of the select fired, since Go's select picks pseudo-randomly among
+// ready cases and both may be ready in a promote-vs-finish race. This
+// guarantees the result is delivered exactly once, via a single lane:
+// promoted → async (OnAsyncComplete, from runJob's defer); not promoted →
+// this function's return value.
+func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Model) (core.Result, error) {
+	select {
+	case <-j.done:
+	case <-j.promoted:
+	}
+
+	if j.isPromoted() {
+		if cfg.OnChildStart != nil {
+			cfg.OnChildStart(j.id, task, model.ID, true)
+		}
+		if cfg.OnAsyncJobChange != nil {
+			cfg.OnAsyncJobChange(jobs.runningCount())
+		}
+		return core.TextResult("Subagent promoted to background.\nJob ID: " + j.id + "\nYou'll be notified when it finishes; use subagent_status to check progress."), nil
+	}
+
+	snap, ok := jobs.snapshot(j.id)
+	jobs.delete(j.id)
+	if !ok {
+		return core.ErrorResult("subagent job disappeared"), nil
+	}
+	switch snap.Status {
+	case statusCompleted:
+		return core.TextResult(snap.Result), nil
+	case statusFailed:
+		return core.ErrorResult(snap.Error), nil
+	case statusCancelled:
+		return core.ErrorResult("cancelled"), nil
+	default:
+		return core.ErrorResult("subagent finished in unexpected state: " + snap.Status), nil
+	}
+}
+
+// runJob runs a child agent to completion, tracking its progress/result on
+// jobs and notifying cfg's callbacks. Used for both async jobs (onUpdate ==
+// nil) and sync jobs (onUpdate delivers streamed output back to the parent's
+// blocking tool call) — the job's isSync() flag (checked per-event, since a
+// sync job may be promoted to async mid-run) decides how each streamed event
+// is forwarded, so there is a single subscription with no resubscription and
+// therefore no risk of losing or duplicating events across a promotion.
+func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result)) {
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
@@ -409,16 +417,22 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 		defer cfg.BashState.Drop(j.id)
 	}
 	defer func() {
-		if cfg.OnAsyncComplete != nil {
-			snap, ok := jobs.snapshot(j.id)
-			if !ok {
-				return
+		// Only notify the async lanes if the job is (now) async — either it
+		// started async, or it was promoted while running. A sync job that
+		// finished without being promoted delivers its result via the
+		// parent's return value in awaitSyncResult instead, and must not
+		// also fire these callbacks (single delivery lane).
+		if !j.isSync() {
+			if cfg.OnAsyncComplete != nil {
+				snap, ok := jobs.snapshot(j.id)
+				if ok {
+					tail, wasTruncated := tailLinesWithFlag(snap.Result, asyncResultTailLines)
+					cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tail, wasTruncated)
+				}
 			}
-			tail, wasTruncated := tailLinesWithFlag(snap.Result, asyncResultTailLines)
-			cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tail, wasTruncated)
-		}
-		if cfg.OnAsyncJobChange != nil {
-			cfg.OnAsyncJobChange(jobs.runningCount())
+			if cfg.OnAsyncJobChange != nil {
+				cfg.OnAsyncJobChange(jobs.runningCount())
+			}
 		}
 		if cfg.OnChildEnd != nil {
 			snap, ok := jobs.snapshot(j.id)
@@ -437,7 +451,11 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 	}
 	jobs.setChildAgent(j.id, child)
 	unsub := child.Subscribe(func(e core.AgentEvent) {
-		forwardAsyncEvent(jobs, j.id, e)
+		if j.isSync() {
+			forwardSyncEvent(e, onUpdate)
+		} else {
+			forwardAsyncEvent(jobs, j.id, e)
+		}
 		forwardChildEvent(cfg, j.id, e)
 		if e.Type == core.AgentEventMessageEnd {
 			jobs.setMessages(j.id, child.Messages())
@@ -446,7 +464,7 @@ func runAsyncJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, pro
 	defer unsub()
 
 	if cfg.OnChildStart != nil {
-		cfg.OnChildStart(j.id, task, model.ID, true)
+		cfg.OnChildStart(j.id, task, model.ID, !j.isSync())
 	}
 
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)

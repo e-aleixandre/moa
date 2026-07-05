@@ -8,6 +8,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/subagent"
 )
 
 // ReconfigureSession changes the model and/or thinking level of a session.
@@ -104,6 +105,28 @@ func (m *Manager) CancelSubagent(sessionID, jobID string) error {
 	}
 	if !sess.subagents.Cancel(jobID) {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// PromoteSubagent flips a running sync subagent job to async, unblocking its
+// parent's blocking tool call while the child keeps running in the
+// background. Returns ErrNotFound if the session/job doesn't exist, and
+// propagates subagent.ErrNotSync / subagent.ErrNotRunning otherwise so
+// callers can map them to specific responses.
+func (m *Manager) PromoteSubagent(sessionID, jobID string) error {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return ErrNotFound
+	}
+	if sess.subagents == nil {
+		return ErrNotFound
+	}
+	if err := sess.subagents.Promote(jobID); err != nil {
+		if errors.Is(err, subagent.ErrUnknownJob) {
+			return ErrNotFound
+		}
+		return err
 	}
 	return nil
 }

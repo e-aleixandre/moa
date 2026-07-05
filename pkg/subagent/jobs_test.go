@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -83,5 +84,76 @@ func TestJobs_Cancel_ReportsExistence(t *testing.T) {
 	}
 	if handle.Cancel("sa-does-not-exist") {
 		t.Fatal("Cancel(missing) = true, want false")
+	}
+}
+
+func TestJobStore_Promote_FlipsSyncAndClosesPromoted(t *testing.T) {
+	s := newJobStore()
+	j := s.createSync("task", "m", func() {})
+
+	if err := s.promote(j.id); err != nil {
+		t.Fatalf("promote() error = %v, want nil", err)
+	}
+	if j.isSync() {
+		t.Fatal("isSync() = true after promote, want false")
+	}
+	select {
+	case <-j.promoted:
+	default:
+		t.Fatal("promoted channel not closed after promote()")
+	}
+}
+
+func TestJobStore_Promote_NonSyncReturnsErrNotSync(t *testing.T) {
+	s := newJobStore()
+	j := s.create("task", "m", func() {}) // async, not sync
+
+	if err := s.promote(j.id); !errors.Is(err, ErrNotSync) {
+		t.Fatalf("promote() error = %v, want ErrNotSync", err)
+	}
+}
+
+func TestJobStore_Promote_NotRunningReturnsErrNotRunning(t *testing.T) {
+	s := newJobStore()
+	j := s.createSync("task", "m", func() {})
+	s.setCompleted(j.id, "done")
+
+	if err := s.promote(j.id); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("promote() error = %v, want ErrNotRunning", err)
+	}
+}
+
+func TestJobStore_Promote_UnknownJobReturnsErrUnknownJob(t *testing.T) {
+	s := newJobStore()
+	if err := s.promote("sa-does-not-exist"); !errors.Is(err, ErrUnknownJob) {
+		t.Fatalf("promote() error = %v, want ErrUnknownJob", err)
+	}
+}
+
+func TestJobStore_RunningCount_CountsPromotedJob(t *testing.T) {
+	s := newJobStore()
+	j := s.createSync("task", "m", func() {})
+
+	if got := s.runningCount(); got != 0 {
+		t.Fatalf("runningCount = %d before promote, want 0 (sync excluded)", got)
+	}
+	if err := s.promote(j.id); err != nil {
+		t.Fatalf("promote() error = %v", err)
+	}
+	if got := s.runningCount(); got != 1 {
+		t.Fatalf("runningCount = %d after promote, want 1", got)
+	}
+}
+
+func TestJobs_Promote_Wrapper(t *testing.T) {
+	s := newJobStore()
+	j := s.createSync("task", "m", func() {})
+	handle := &Jobs{store: s}
+
+	if err := handle.Promote(j.id); err != nil {
+		t.Fatalf("Promote() error = %v, want nil", err)
+	}
+	if err := handle.Promote("sa-does-not-exist"); !errors.Is(err, ErrUnknownJob) {
+		t.Fatalf("Promote(missing) error = %v, want ErrUnknownJob", err)
 	}
 }
