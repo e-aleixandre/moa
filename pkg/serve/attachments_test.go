@@ -19,6 +19,26 @@ import (
 
 func b64(data []byte) string { return base64.StdEncoding.EncodeToString(data) }
 
+// pngBytes returns a byte slice that starts with a valid PNG signature + IHDR
+// so http.DetectContentType classifies it as image/png. The trailing padding
+// lets callers reach a desired total size for limit tests. This exists because
+// buildAttachmentContent now sniffs magic bytes and refuses to forward a
+// mislabeled binary to the provider as an image.
+func pngBytes(total int) []byte {
+	sig := []byte{
+		0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+		0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R', // IHDR chunk header
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
+		0x08, 0x02, 0x00, 0x00, 0x00, // bit depth/color/etc.
+	}
+	if total <= len(sig) {
+		return sig
+	}
+	out := make([]byte, total)
+	copy(out, sig)
+	return out
+}
+
 func sendBody(t *testing.T, text string, atts []Attachment) string {
 	t.Helper()
 	body := struct {
@@ -41,7 +61,7 @@ func TestSend_WithImageAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	atts := []Attachment{{Name: "captura.png", Mime: "image/png", Data: b64([]byte("fake-png-bytes"))}}
+	atts := []Attachment{{Name: "captura.png", Mime: "image/png", Data: b64(pngBytes(64))}}
 	resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/send", sendBody(t, "mira esta captura", atts))
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 202 {
@@ -186,7 +206,7 @@ func TestSend_AttachmentTooLarge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		big := bytes.Repeat([]byte{0}, maxImageBytes+1)
+		big := pngBytes(maxImageBytes + 1)
 		atts := []Attachment{{Name: "huge.png", Mime: "image/png", Data: b64(big)}}
 		resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/send", sendBody(t, "hi", atts))
 		defer resp.Body.Close() //nolint:errcheck
@@ -600,5 +620,86 @@ func TestPDF_FallbackToDiskWhenUnsupported(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 file on disk, got %d", len(entries))
+	}
+}
+
+// TestMimeMismatch_ImageGoesToDisk verifies a binary mislabeled as image/png
+// is NOT forwarded to the provider as an image (which would be rejected) but
+// saved to disk with a mismatch note.
+func TestMimeMismatch_ImageGoesToDisk(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
+	// Not a real image — random binary claiming to be a PNG.
+	atts := []Attachment{{Name: "fake.png", Mime: "image/png", Data: b64([]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d})}}
+
+	sessionID := "aabbccdd11223344"
+	content, err := buildAttachmentContent(atts, sessionID, pp, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(content))
+	}
+	if content[0].Type != "text" {
+		t.Fatalf("expected mislabeled image to go to disk (text block), got %q", content[0].Type)
+	}
+	if !strings.Contains(content[0].Text, "no coincide con su contenido real") {
+		t.Fatalf("expected MIME-mismatch note, got %q", content[0].Text)
+	}
+}
+
+// TestMimeMismatch_PDFGoesToDisk verifies a binary mislabeled as
+// application/pdf is not sent as a native document but saved to disk.
+func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
+	atts := []Attachment{{Name: "notreally.pdf", Mime: "application/pdf", Data: b64([]byte("this is not a pdf at all"))}}
+
+	sessionID := "ddccbbaa44332211"
+	content, err := buildAttachmentContent(atts, sessionID, pp, true) // supportsDocuments=true
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(content))
+	}
+	if content[0].Type != "text" {
+		t.Fatalf("expected mislabeled PDF to go to disk (text block), got %q", content[0].Type)
+	}
+	if !strings.Contains(content[0].Text, "no coincide con su contenido real") {
+		t.Fatalf("expected MIME-mismatch note, got %q", content[0].Text)
+	}
+}
+
+// TestWriteUnique_NoFollowSymlink verifies writeUnique refuses to write through
+// a symlink planted at the target path (O_NOFOLLOW), instead of clobbering the
+// symlink's target.
+func TestWriteUnique_NoFollowSymlink(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "victim.txt")
+	if err := os.WriteFile(victim, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Plant a symlink "evil.txt" -> victim inside the attachment dir.
+	link := filepath.Join(dir, "evil.txt")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	// writeUnique must NOT follow the symlink to overwrite victim. With O_EXCL
+	// the existing symlink path collides, so it writes a suffixed regular file
+	// instead — either way the victim's target is never clobbered.
+	got, err := writeUnique(dir, "evil.txt", []byte("attacker"))
+	if err != nil {
+		t.Fatalf("writeUnique errored: %v", err)
+	}
+	// The written path must be a regular file inside dir, not the symlink.
+	if fi, lerr := os.Lstat(got); lerr != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("writeUnique returned a symlink or bad path: %v (mode err %v)", got, lerr)
+	}
+	victimContent, _ := os.ReadFile(victim)
+	if string(victimContent) != "original" {
+		t.Fatalf("symlink target was clobbered: %q", victimContent)
 	}
 }

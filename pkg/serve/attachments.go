@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -45,6 +46,59 @@ var allowedImageMimes = map[string]bool{
 	"image/png":  true,
 	"image/gif":  true,
 	"image/webp": true,
+}
+
+// pdfFallbackNote is appended when a PDF is saved to disk because the active
+// provider can't accept native documents.
+const pdfFallbackNote = "Nota: el modelo actual no soporta documentos PDF nativos, así que este\n" +
+	"PDF no se envió directamente — está disponible en la ruta de arriba para\n" +
+	"que lo proceses si hace falta (p.ej. con alguna herramienta de extracción\n" +
+	"de texto si está disponible en el sistema)."
+
+// mimeMismatchNote is appended when an attachment's declared MIME (image/PDF)
+// does not match its actual bytes, so it is saved to disk instead of being
+// forwarded natively to the provider (which would reject it).
+const mimeMismatchNote = "Nota: el tipo declarado del archivo no coincide con su contenido real,\n" +
+	"así que no se envió como imagen/PDF nativo — está guardado en disco para\n" +
+	"que lo inspecciones."
+
+// bytesLookLikeImage reports whether data's magic bytes match the declared
+// image MIME. Uses net/http content sniffing plus explicit checks so a binary
+// mislabeled as image/png isn't forwarded to the provider as an image.
+func bytesLookLikeImage(data []byte, declaredMime string) bool {
+	if len(data) < 12 {
+		return false
+	}
+	sniffed := http.DetectContentType(data) // e.g. "image/png", "image/jpeg"
+	switch declaredMime {
+	case "image/jpeg":
+		return sniffed == "image/jpeg"
+	case "image/png":
+		return sniffed == "image/png"
+	case "image/gif":
+		return sniffed == "image/gif"
+	case "image/webp":
+		// http.DetectContentType returns "image/webp" for RIFF....WEBP.
+		return sniffed == "image/webp"
+	default:
+		return false
+	}
+}
+
+// bytesLookLikePDF reports whether data begins with the PDF magic header.
+// A leading BOM/whitespace is tolerated within the first few bytes, matching
+// how lenient PDF readers behave.
+func bytesLookLikePDF(data []byte) bool {
+	// Fast path: exact "%PDF-" prefix.
+	if bytes.HasPrefix(data, []byte("%PDF-")) {
+		return true
+	}
+	// Tolerate a few leading bytes (some producers prepend whitespace/BOM).
+	head := data
+	if len(head) > 1024 {
+		head = head[:1024]
+	}
+	return bytes.Contains(head, []byte("%PDF-"))
 }
 
 // buildAttachmentContent validates and converts uploaded attachments into
@@ -122,6 +176,16 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		}
 
 		if allowedImageMimes[a.Mime] {
+			// Trust the bytes, not the client-declared MIME: a mislabeled
+			// binary must not be forwarded to the provider as an image.
+			if !bytesLookLikeImage(decoded, a.Mime) {
+				block, derr := toDisk(a, decoded, mimeMismatchNote)
+				if derr != nil {
+					return nil, derr
+				}
+				content = append(content, block)
+				continue
+			}
 			if len(decoded) > maxImageBytes {
 				return nil, fmt.Errorf("%w: attachment %q: image exceeds %d MB", ErrBadAttachment, a.Name, maxImageBytes>>20)
 			}
@@ -130,7 +194,9 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		}
 
 		if a.Mime == "application/pdf" {
-			if supportsDocuments && len(decoded) <= maxAttachmentFileBytes {
+			// Only send natively if the bytes are actually a PDF (%PDF- magic).
+			isPDF := bytesLookLikePDF(decoded)
+			if isPDF && supportsDocuments && len(decoded) <= maxAttachmentFileBytes {
 				filename := safeBase(a.Name)
 				if filename == "" {
 					filename = "document.pdf"
@@ -138,11 +204,11 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 				content = append(content, core.DocumentContent(a.Data, a.Mime, filename))
 				continue
 			}
-			const pdfFallbackNote = "Nota: el modelo actual no soporta documentos PDF nativos, así que este\n" +
-				"PDF no se envió directamente — está disponible en la ruta de arriba para\n" +
-				"que lo proceses si hace falta (p.ej. con alguna herramienta de extracción\n" +
-				"de texto si está disponible en el sistema)."
-			block, err := toDisk(a, decoded, pdfFallbackNote)
+			note := pdfFallbackNote
+			if !isPDF {
+				note = mimeMismatchNote
+			}
+			block, err := toDisk(a, decoded, note)
 			if err != nil {
 				return nil, err
 			}

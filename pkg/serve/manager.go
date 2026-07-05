@@ -44,6 +44,10 @@ type ManagedSession struct {
 	// to it so the agent can read/write files it was given.
 	pathPolicy *tool.PathPolicy
 
+	// attachMu serializes per-session attachment processing so the on-disk
+	// quota check is atomic against concurrent /send requests.
+	attachMu sync.Mutex
+
 	// Mutable under mu.
 	mu          sync.Mutex
 	Title       string
@@ -304,7 +308,12 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 			supportsDocs = core.ProviderSupportsDocuments(prov)
 		}
 	}
+	// Serialize attachment processing per session so the per-session on-disk
+	// quota check (dirSize + running total) is atomic against concurrent
+	// /send requests to the same idle session.
+	sess.attachMu.Lock()
 	content, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs)
+	sess.attachMu.Unlock()
 	if err != nil {
 		return "", err
 	}

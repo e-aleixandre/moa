@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 // sessionIDPattern validates session ids used to build attachment directory
@@ -141,8 +142,9 @@ func truncateRunes(s string, maxBytes int) string {
 }
 
 // writeUnique writes data to a new file inside dir, deriving a safe unique
-// name from name. It is TOCTOU-safe: file creation uses O_EXCL and retries
-// with a numeric suffix on collision.
+// name from name. It is TOCTOU-safe: file creation uses O_EXCL (never
+// overwrite) and O_NOFOLLOW (never follow a symlink planted at the leaf path
+// by a racing same-UID process), retrying with a numeric suffix on collision.
 func writeUnique(dir, name string, data []byte) (finalPath string, err error) {
 	sanitized := safeBase(name)
 	if sanitized == "" {
@@ -159,7 +161,7 @@ func writeUnique(dir, name string, data []byte) (finalPath string, err error) {
 		}
 		p := filepath.Join(dir, candidate)
 
-		f, ferr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		f, ferr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
 		if errors.Is(ferr, os.ErrExist) {
 			continue
 		}
