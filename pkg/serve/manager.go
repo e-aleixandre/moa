@@ -17,6 +17,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/push"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
+	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/usage"
 )
 
@@ -37,6 +38,11 @@ type ManagedSession struct {
 	ID      string    `json:"id"`
 	CWD     string    `json:"cwd"`
 	Created time.Time `json:"created"`
+
+	// pathPolicy is the runtime-mutable path access policy shared with the
+	// session's tools; attachments-to-disk add the session's attachment dir
+	// to it so the agent can read/write files it was given.
+	pathPolicy *tool.PathPolicy
 
 	// Mutable under mu.
 	mu          sync.Mutex
@@ -230,7 +236,7 @@ type ManagerConfig struct {
 // NewManager creates a Manager. The context controls the lifetime of all agent
 // runs — cancelling it aborts every active session.
 func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
-	return &Manager{
+	m := &Manager{
 		sessions:        make(map[string]*ManagedSession),
 		baseCtx:         ctx,
 		providerFactory: cfg.ProviderFactory,
@@ -245,6 +251,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
 	}
+	reapStaleAttachments()
+	return m
 }
 
 // Send delivers a user message (with optional attachments) to a session.
@@ -290,7 +298,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 		return "send", nil
 	}
 
-	content, err := buildAttachmentContent(atts)
+	content, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy)
 	if err != nil {
 		return "", err
 	}

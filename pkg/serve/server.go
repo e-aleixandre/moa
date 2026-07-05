@@ -948,8 +948,11 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 const maxJSONBodySize = 1 << 20
 
 // maxSendBodySize bounds POST /api/sessions/{id}/send, which may carry base64
-// attachments inline (see attachments.go) — much larger than other JSON bodies.
-const maxSendBodySize = 25 << 20
+// attachments inline (see attachments.go) — much larger than other JSON
+// bodies. Downstream, buildAttachmentContent enforces per-file
+// (maxAttachmentFileBytes, 32 MB) and aggregate (maxRequestBytes, 64 MB)
+// decoded-size limits; this body cap allows for base64 overhead (~4/3x).
+const maxSendBodySize = 90 << 20
 
 func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)

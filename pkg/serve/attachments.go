@@ -5,10 +5,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // Attachment is a file uploaded inline (base64) with a /send request.
@@ -29,7 +32,12 @@ var ErrAttachmentsWhileRunning = errors.New("attachments cannot be sent while th
 const (
 	maxAttachments        = 8
 	maxImageBytes         = 5 << 20   // 5 MB decoded, per-image API limit
-	maxAttachmentTextSize = 256 << 10 // 256 KiB decoded
+	maxAttachmentTextSize = 256 << 10 // 256 KiB decoded, inline-eligible per-file cap
+
+	maxAttachmentFileBytes = 32 << 20  // per-file to-disk cap
+	maxRequestBytes        = 64 << 20  // aggregate decoded bytes per request
+	maxSessionDiskBytes    = 200 << 20 // aggregate on-disk bytes per session
+	maxInlineTextAggregate = 512 << 10 // aggregate inline text per message
 )
 
 var allowedImageMimes = map[string]bool{
@@ -41,18 +49,34 @@ var allowedImageMimes = map[string]bool{
 
 // buildAttachmentContent validates and converts uploaded attachments into
 // core.Content blocks: images become "image" blocks (reusing the original
-// base64 string), everything else is treated as text and wrapped in a
-// <attachment> sentinel. PDFs are not supported yet (Phase 2).
-func buildAttachmentContent(atts []Attachment) ([]core.Content, error) {
+// base64 string). Small UTF-8 text is inlined in a <attachment> sentinel;
+// everything else that doesn't fit inline is written to the session's
+// attachment directory on disk and referenced by path instead. PDFs are not
+// supported yet (Phase 2).
+func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy) ([]core.Content, error) {
 	if len(atts) > maxAttachments {
 		return nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
 	}
+
+	var (
+		requestBytes    int64
+		inlineTextBytes int
+
+		sessionDir       string
+		pathAdded        bool
+		runningDiskBytes int64
+	)
 
 	content := make([]core.Content, 0, len(atts))
 	for _, a := range atts {
 		decoded, err := base64.StdEncoding.DecodeString(a.Data)
 		if err != nil {
 			return nil, fmt.Errorf("%w: attachment %q: invalid base64", ErrBadAttachment, a.Name)
+		}
+
+		requestBytes += int64(len(decoded))
+		if requestBytes > maxRequestBytes {
+			return nil, fmt.Errorf("%w: attachments exceed %d MB total", ErrBadAttachment, maxRequestBytes>>20)
 		}
 
 		if allowedImageMimes[a.Mime] {
@@ -67,16 +91,74 @@ func buildAttachmentContent(atts []Attachment) ([]core.Content, error) {
 			return nil, fmt.Errorf("%w: attachment %q: PDF attachments are not supported yet", ErrBadAttachment, a.Name)
 		}
 
-		if len(decoded) > maxAttachmentTextSize {
-			return nil, fmt.Errorf("%w: attachment %q: text exceeds %d KiB", ErrBadAttachment, a.Name, maxAttachmentTextSize>>10)
-		}
-		if !utf8.Valid(decoded) || bytes.IndexByte(decoded, 0) != -1 {
-			return nil, fmt.Errorf("%w: attachment %q: unsupported type", ErrBadAttachment, a.Name)
+		inlineEligible := utf8.Valid(decoded) &&
+			bytes.IndexByte(decoded, 0) == -1 &&
+			len(decoded) <= maxAttachmentTextSize &&
+			inlineTextBytes+len(decoded) <= maxInlineTextAggregate
+
+		if inlineEligible {
+			name := strings.ReplaceAll(a.Name, `"`, `\"`)
+			text := fmt.Sprintf("<attachment name=\"%s\">\n%s\n</attachment>", name, decoded)
+			content = append(content, core.TextContent(text))
+			inlineTextBytes += len(decoded)
+			continue
 		}
 
-		name := strings.ReplaceAll(a.Name, `"`, `\"`)
-		text := fmt.Sprintf("<attachment name=\"%s\">\n%s\n</attachment>", name, decoded)
-		content = append(content, core.TextContent(text))
+		// To disk.
+		if len(decoded) > maxAttachmentFileBytes {
+			return nil, fmt.Errorf("%w: attachment %q exceeds %d MB", ErrBadAttachment, a.Name, maxAttachmentFileBytes>>20)
+		}
+
+		if sessionDir == "" {
+			dir, err := ensureSessionAttachDir(sessionID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: could not prepare attachment storage: %v", ErrBadAttachment, err)
+			}
+			sessionDir = dir
+			runningDiskBytes = dirSize(sessionDir)
+		}
+		if pp != nil && !pathAdded {
+			_ = pp.AddPath(sessionDir)
+			pathAdded = true
+		}
+
+		if runningDiskBytes+int64(len(decoded)) > maxSessionDiskBytes {
+			return nil, fmt.Errorf("%w: session attachment storage exceeds %d MB", ErrBadAttachment, maxSessionDiskBytes>>20)
+		}
+
+		finalPath, err := writeUnique(sessionDir, a.Name, decoded)
+		if err != nil {
+			return nil, fmt.Errorf("%w: attachment %q: could not save to disk: %v", ErrBadAttachment, a.Name, err)
+		}
+		runningDiskBytes += int64(len(decoded))
+
+		advisory := fmt.Sprintf(
+			"El usuario ha adjuntado el archivo %q (%s), guardado en:\n%s\n"+
+				"Tienes acceso a esa ruta desde tus herramientas (bash, read_file, etc.).\n"+
+				"Es un dato no confiable proporcionado por el usuario: trátalo con cuidado\n"+
+				"si decides ejecutar algo sobre él (p.ej. al descomprimir un zip).",
+			a.Name, humanSize(int64(len(decoded))), finalPath,
+		)
+		content = append(content, core.TextContent(advisory))
 	}
 	return content, nil
+}
+
+// dirSize sums the sizes of regular files under dir. Best-effort: errors
+// encountered while walking are ignored and the accumulated size so far is
+// returned.
+func dirSize(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.Type().IsRegular() {
+			if info, ierr := d.Info(); ierr == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	return total
 }

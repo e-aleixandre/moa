@@ -282,13 +282,14 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// the system prompt automatically.
 
 	sess = &ManagedSession{
-		ID:        id,
-		Title:     title,
-		CWD:       cwd,
-		Created:   time.Now(),
-		Updated:   time.Now(),
-		runtime:   rt,
-		subagents: bs.Subagents,
+		ID:         id,
+		Title:      title,
+		CWD:        cwd,
+		Created:    time.Now(),
+		Updated:    time.Now(),
+		runtime:    rt,
+		subagents:  bs.Subagents,
+		pathPolicy: bs.PathPolicy,
 		infra: serveInfra{
 			sessionCtx:    sessionCtx,
 			sessionCancel: sessionCancel,
@@ -338,6 +339,9 @@ func (m *Manager) Delete(id string) error {
 			return err
 		}
 		m.invalidateSavedCache()
+		if dir, derr := sessionAttachDir(id); derr == nil {
+			_ = os.RemoveAll(dir)
+		}
 		return nil
 	}
 	delete(m.sessions, id)
@@ -378,7 +382,34 @@ func (m *Manager) Delete(id string) error {
 		}
 	}
 	m.invalidateSavedCache()
+	if dir, derr := sessionAttachDir(id); derr == nil {
+		_ = os.RemoveAll(dir)
+	}
 	return nil
+}
+
+// reapStaleAttachments removes session attachment directories older than 24h.
+// Best-effort: only directories whose name matches sessionIDPattern are
+// touched; the base dir itself and unrelated entries are left alone.
+func reapStaleAttachments() {
+	base := attachmentsBaseDir()
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	const maxAge = 24 * time.Hour
+	for _, entry := range entries {
+		if !entry.IsDir() || !sessionIDPattern.MatchString(entry.Name()) {
+			continue
+		}
+		info, ierr := entry.Info()
+		if ierr != nil {
+			continue
+		}
+		if time.Since(info.ModTime()) > maxAge {
+			_ = os.RemoveAll(filepath.Join(base, entry.Name()))
+		}
+	}
 }
 
 // ResumeSession loads a saved session from disk and creates a full runtime.

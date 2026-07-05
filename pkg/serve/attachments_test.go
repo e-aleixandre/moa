@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 func b64(data []byte) string { return base64.StdEncoding.EncodeToString(data) }
@@ -115,7 +118,12 @@ func TestSend_AttachmentOnlyNoText(t *testing.T) {
 	})
 }
 
-func TestSend_AttachmentInvalidMime(t *testing.T) {
+// TestSend_BinaryGoesToDisk covers the case of a non-text, non-image, non-PDF
+// attachment: it no longer errors, it's routed to disk under the session's
+// attachment dir and the agent gets a text advisory pointing at the path.
+func TestSend_BinaryGoesToDisk(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()
 
@@ -128,17 +136,48 @@ func TestSend_AttachmentInvalidMime(t *testing.T) {
 	atts := []Attachment{{Name: "weird.bin", Mime: "application/x-msdownload", Data: b64(badBytes)}}
 	resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/send", sendBody(t, "hi", atts))
 	defer resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode != 400 {
-		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	if resp.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(resp.Body)
-	if !strings.Contains(buf.String(), "weird.bin") {
-		t.Fatalf("expected error message to mention attachment name, got %q", buf.String())
+
+	pollUntil(t, 5*time.Second, "session idle after send", func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sessState(sess) == StateIdle
+	})
+
+	dir, err := sessionAttachDir(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("expected attach dir to exist: %v", err)
+	}
+	if len(entries) < 1 {
+		t.Fatalf("expected at least 1 file in %q, got %d", dir, len(entries))
+	}
+
+	msgs := sess.History()
+	var found bool
+	for _, m := range msgs {
+		if m.Role != "user" {
+			continue
+		}
+		for _, c := range m.Content {
+			if c.Type == "text" && strings.Contains(c.Text, "guardado en:") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected user message to contain a text block mentioning the saved path")
 	}
 }
 
 func TestSend_AttachmentTooLarge(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()
 
@@ -161,12 +200,14 @@ func TestSend_AttachmentTooLarge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// A >256KiB text file no longer errors — it overflows the inline
+		// per-file cap and is routed to disk instead.
 		big := bytes.Repeat([]byte("a"), maxAttachmentTextSize+1)
 		atts := []Attachment{{Name: "huge.txt", Mime: "text/plain", Data: b64(big)}}
 		resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/send", sendBody(t, "hi", atts))
 		defer resp.Body.Close() //nolint:errcheck
-		if resp.StatusCode != 400 {
-			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		if resp.StatusCode != 202 {
+			t.Fatalf("expected 202, got %d", resp.StatusCode)
 		}
 	})
 }
@@ -263,10 +304,13 @@ func TestSend_AttachmentsWhileRunning(t *testing.T) {
 }
 
 func TestBuildAttachmentContent_TextHeader(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
 	atts := []Attachment{
 		{Name: `report "final".csv`, Mime: "text/csv", Data: b64([]byte("a,b\n1,2"))},
 	}
-	content, err := buildAttachmentContent(atts)
+	content, err := buildAttachmentContent(atts, "abcdef0123456789", pp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,5 +323,212 @@ func TestBuildAttachmentContent_TextHeader(t *testing.T) {
 	want := "<attachment name=\"report \\\"final\\\".csv\">\na,b\n1,2\n</attachment>"
 	if content[0].Text != want {
 		t.Fatalf("unexpected sentinel:\n got: %q\nwant: %q", content[0].Text, want)
+	}
+}
+
+func TestBuildAttachmentContent_LargeTextToDisk(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
+	big := bytes.Repeat([]byte("a"), 300<<10) // 300 KiB, valid UTF-8
+	atts := []Attachment{{Name: "big.txt", Mime: "text/plain", Data: b64(big)}}
+
+	sessionID := "0123456789abcdef"
+	content, err := buildAttachmentContent(atts, sessionID, pp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(content))
+	}
+	if content[0].Type != "text" {
+		t.Fatalf("expected text block, got %q", content[0].Type)
+	}
+	if !strings.Contains(content[0].Text, "guardado en:") {
+		t.Fatalf("expected advisory text, got %q", content[0].Text)
+	}
+
+	dir, err := sessionAttachDir(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("expected session dir to exist: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 file on disk, got %d", len(entries))
+	}
+
+	found := false
+	for _, p := range pp.AllowedPaths() {
+		if p == dir {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected pp.AllowedPaths() to include %q, got %v", dir, pp.AllowedPaths())
+	}
+}
+
+func TestBuildAttachmentContent_Collision(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
+	binary := []byte{0x00, 0x01, 0x02, 0x03}
+	atts := []Attachment{
+		{Name: "data.bin", Mime: "application/octet-stream", Data: b64(binary)},
+		{Name: "data.bin", Mime: "application/octet-stream", Data: b64(binary)},
+	}
+
+	sessionID := "fedcba9876543210"
+	content, err := buildAttachmentContent(atts, sessionID, pp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(content))
+	}
+	for _, c := range content {
+		if c.Type != "text" {
+			t.Fatalf("expected text block, got %q", c.Type)
+		}
+	}
+
+	dir, err := sessionAttachDir(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	if !names["data.bin"] || !names["data-2.bin"] {
+		t.Fatalf("expected data.bin and data-2.bin, got %v", names)
+	}
+}
+
+func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+
+	chunk := bytes.Repeat([]byte("b"), 200<<10) // 200 KiB each, ≤256KiB per-file cap
+	atts := []Attachment{
+		{Name: "one.txt", Mime: "text/plain", Data: b64(chunk)},
+		{Name: "two.txt", Mime: "text/plain", Data: b64(chunk)},
+		{Name: "three.txt", Mime: "text/plain", Data: b64(chunk)},
+	}
+
+	sessionID := "aaaaaaaaaaaaaaaa"
+	content, err := buildAttachmentContent(atts, sessionID, pp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 3 {
+		t.Fatalf("expected 3 blocks, got %d", len(content))
+	}
+	// First two fit within the 512 KiB inline aggregate; the third overflows
+	// to disk.
+	if !strings.Contains(content[0].Text, "<attachment") {
+		t.Fatalf("expected block 0 to be inline, got %.40q", content[0].Text)
+	}
+	if !strings.Contains(content[1].Text, "<attachment") {
+		t.Fatalf("expected block 1 to be inline, got %.40q", content[1].Text)
+	}
+	if !strings.Contains(content[2].Text, "guardado en:") {
+		t.Fatalf("expected block 2 to be the disk advisory, got %.40q", content[2].Text)
+	}
+
+	dir, err := sessionAttachDir(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 file on disk, got %d", len(entries))
+	}
+}
+
+func TestReapStaleAttachments(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("MOA_ATTACHMENTS_DIR", base)
+
+	oldValid := "0123456789abcdef"
+	recentValid := "fedcba9876543210"
+	notASession := "notasession"
+
+	for _, name := range []string{oldValid, recentValid, notASession} {
+		if err := os.MkdirAll(filepath.Join(base, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldTime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(filepath.Join(base, oldValid), oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(base, notASession), oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	reapStaleAttachments()
+
+	if _, err := os.Stat(filepath.Join(base, oldValid)); !os.IsNotExist(err) {
+		t.Errorf("expected %q to be removed, err=%v", oldValid, err)
+	}
+	if _, err := os.Stat(filepath.Join(base, recentValid)); err != nil {
+		t.Errorf("expected %q to be kept, err=%v", recentValid, err)
+	}
+	if _, err := os.Stat(filepath.Join(base, notASession)); err != nil {
+		t.Errorf("expected %q to be kept (non-matching name), err=%v", notASession, err)
+	}
+}
+
+func TestDelete_RemovesAttachments(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binary := []byte{0x00, 0x01, 0x02, 0x03}
+	atts := []Attachment{{Name: "data.bin", Mime: "application/octet-stream", Data: b64(binary)}}
+	resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/send", sendBody(t, "hi", atts))
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	}
+
+	pollUntil(t, 5*time.Second, "session idle after send", func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sessState(sess) == StateIdle
+	})
+
+	dir, err := sessionAttachDir(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("expected attach dir to exist before delete: %v", err)
+	}
+
+	if err := mgr.Delete(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("expected attach dir to be removed after Delete, err=%v", err)
 	}
 }
