@@ -266,6 +266,25 @@ func TestCollectMetadata_WithThinking(t *testing.T) {
 	}
 }
 
+func TestCollectMetadata_CWD(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{model: core.Model{ID: "claude-4", Provider: "anthropic"}}
+
+	// Present cwd is persisted so the UI can list it as a recent project.
+	sctx := newTestSessionContext(b, fa)
+	sctx.CWD = "/home/me/project"
+	if meta := collectMetadata(sctx); meta[session.MetaCWD] != "/home/me/project" {
+		t.Fatalf("cwd = %v, want /home/me/project", meta[session.MetaCWD])
+	}
+
+	// Empty cwd is omitted rather than stored as "".
+	sctx2 := newTestSessionContext(b, fa)
+	if _, ok := collectMetadata(sctx2)[session.MetaCWD]; ok {
+		t.Fatal("empty cwd should not be persisted")
+	}
+}
+
 func TestExtractFinalAssistantText(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: "hello"}}}},
