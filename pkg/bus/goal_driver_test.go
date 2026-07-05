@@ -31,6 +31,14 @@ func (p verdictProvider) Stream(ctx context.Context, req core.Request) (<-chan c
 	return ch, nil
 }
 
+// errProvider always fails Stream — simulates a persistently unreachable
+// verifier (every retry attempt fails).
+type errProvider struct{}
+
+func (errProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func newGoalDriverContext(b EventBus, agent AgentController, verdictJSON string) *SessionContext {
 	sctx := &SessionContext{
 		SessionID:       "test-session",
@@ -145,25 +153,78 @@ func TestGoalDriver_MaxIterations_Stops(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
-	// Verdict never matters — the iteration backstop trips first.
+	// Unsatisfied verdict: with MaxIterations=1 the loop verifies the first run
+	// and then stops (the cap is checked AFTER the verdict, so all N iterations
+	// are actually verified rather than running an unverified N+1th).
 	sctx := newGoalDriverContext(b, fa, `{"satisfied":false,"feedback":"x"}`)
 	RegisterHandlers(sctx)
 
+	iterCh := make(chan GoalIterationEnded, 4)
+	b.Subscribe(func(e GoalIterationEnded) { iterCh <- e })
 	endedCh := make(chan GoalEnded, 4)
 	b.Subscribe(func(e GoalEnded) { endedCh <- e })
 
-	// Pre-advance the iteration counter so the next BeginIteration exceeds the cap.
 	enterTestGoal(t, sctx, goal.Options{MaxIterations: 1})
-	sctx.Goal.BeginIteration() // iteration = 1
 
-	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1}) // BeginIteration → 2 > 1
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "attempt"})
 
+	// The single allowed iteration is verified before the backstop fires.
+	iter := drainChan(iterCh, b, t)
+	if iter.Iteration != 1 {
+		t.Fatalf("expected iteration 1 to be verified, got %d", iter.Iteration)
+	}
 	ended := drainChan(endedCh, b, t)
-	if ended.Reason == "" {
-		t.Fatal("expected a stop reason for the iteration backstop")
+	if !strings.Contains(ended.Reason, "max iterations") {
+		t.Fatalf("expected a max-iterations stop reason, got %q", ended.Reason)
 	}
 	if sctx.Goal.Active() {
 		t.Fatal("goal should stop after reaching max iterations")
+	}
+}
+
+func TestGoalDriver_VerifierError_PausesWithoutRelaunch(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	// A provider that always fails the Stream: the verifier can't reach a verdict.
+	sctx := &SessionContext{
+		SessionID:       "test-session",
+		SessionCtx:      context.Background(),
+		Bus:             b,
+		Agent:           fa,
+		State:           NewStateMachine(b, "test-session"),
+		Goal:            goal.New(),
+		ProviderFactory: func(core.Model) (core.Provider, error) { return errProvider{}, nil },
+	}
+	sctx.RunGenAtomic.Store(1)
+	RegisterHandlers(sctx)
+
+	iterCh := make(chan GoalIterationEnded, 4)
+	b.Subscribe(func(e GoalIterationEnded) { iterCh <- e })
+	endedCh := make(chan GoalEnded, 4)
+	b.Subscribe(func(e GoalEnded) { endedCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{})
+
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "did work"})
+
+	iter := drainChan(iterCh, b, t)
+	if iter.Err == nil {
+		t.Fatal("a verifier failure must surface as GoalIterationEnded.Err")
+	}
+	if iter.Satisfied {
+		t.Fatal("a verifier failure is not a satisfied verdict")
+	}
+	ended := drainChan(endedCh, b, t)
+	if !strings.Contains(ended.Reason, "verifier unavailable") {
+		t.Fatalf("expected a 'verifier unavailable' pause, got %q", ended.Reason)
+	}
+	if sctx.Goal.Active() {
+		t.Fatal("goal should pause (stop) when the verifier is unavailable")
+	}
+	// The maker must NOT be relaunched with a cryptic error as feedback.
+	if fa.wasSendCalled() {
+		t.Fatal("verifier failure must not relaunch the maker")
 	}
 }
 
@@ -195,7 +256,10 @@ func TestGoalDriver_BudgetCeiling_Stops(t *testing.T) {
 func TestGoalDriver_BudgetCapsNextIteration(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
-	fa := &fakeAgent{}
+	// A large send delay parks the relaunched run so it can't cascade into
+	// further iterations (and trip the stall guard, which would restore the
+	// budget) before we observe the capped value.
+	fa := &fakeAgent{sendDelay: time.Hour}
 	sctx := newGoalDriverContext(b, fa, `{"satisfied":false,"feedback":"more"}`)
 	RegisterHandlers(sctx)
 
@@ -209,9 +273,9 @@ func TestGoalDriver_BudgetCapsNextIteration(t *testing.T) {
 	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "partial", Cost: 3.0})
 
 	_ = drainChan(iterCh, b, t) // wait for the verdict to be processed
-	// Generous deadline: the relaunch's SetMaxBudget runs async after the
-	// verdict, and this test can be starved under full-suite parallel load.
-	deadline := time.After(5 * time.Second)
+	// The relaunch's SetMaxBudget runs async after the verdict. Poll until it
+	// lands, draining the bus each tick.
+	deadline := time.After(10 * time.Second)
 	for fa.MaxBudget() != 7.0 {
 		select {
 		case <-deadline:

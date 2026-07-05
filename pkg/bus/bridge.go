@@ -96,10 +96,10 @@ type SessionContext struct {
 	// restores this value.
 	goalPrevMaxBudget float64
 
-	// goalLastCommit is the HEAD commit hash seen at the previous goal iteration.
-	// The driver uses it to tell a productive iteration (new commit) from a
-	// stalled one. Baselined by EnterGoal; updated each iteration by the driver.
-	goalLastCommit string
+	// cancelGoalVerify aborts an in-flight goal verification (evidence build +
+	// verifier call). Set by RegisterHandlers; called on a new user run or when
+	// the goal stops so stale checks don't run against fresh edits. May be nil.
+	cancelGoalVerify func()
 
 	// GateConfig is used to reconstruct a Gate when switching from yolo
 	// to ask/auto. Preserves allow/deny patterns, rules, headless, etc.

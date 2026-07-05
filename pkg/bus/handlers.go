@@ -353,6 +353,14 @@ func RegisterHandlers(sctx *SessionContext) {
 			autoVerifyCount.Store(0)
 			cancelAutoVerify()
 		}
+		// A genuine user prompt (not the goal loop's own relaunch) aborts any
+		// in-flight goal verification so stale build/tests don't run against the
+		// new run's edits.
+		if cmd.Custom == nil || cmd.Custom["source"] != "goal" {
+			if sctx.cancelGoalVerify != nil {
+				sctx.cancelGoalVerify()
+			}
+		}
 		return startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
@@ -365,6 +373,10 @@ func RegisterHandlers(sctx *SessionContext) {
 		// User-initiated content send resets auto-verify counter.
 		autoVerifyCount.Store(0)
 		cancelAutoVerify()
+		// Also abort any in-flight goal verification (stale build/tests).
+		if sctx.cancelGoalVerify != nil {
+			sctx.cancelGoalVerify()
+		}
 		label := "content"
 		if len(cmd.Content) > 0 && cmd.Content[0].Text != "" {
 			label = cmd.Content[0].Text
@@ -576,7 +588,25 @@ func RegisterHandlers(sctx *SessionContext) {
 		// Interpret the configured per-run MaxBudget as the goal's TOTAL budget:
 		// the driver caps each iteration at the remaining pool so the loop's
 		// cumulative spend can't exceed it (an unbounded N×budget otherwise).
+		// An explicit --budget overrides this.
 		sctx.goalPrevMaxBudget = sctx.Agent.MaxBudget()
+		totalBudget := cmd.TotalBudget
+		if totalBudget <= 0 {
+			totalBudget = sctx.goalPrevMaxBudget
+		}
+		// Apply an explicit --budget up front so it also binds the FIRST run (the
+		// driver only caps subsequent iterations). Hard-fail if it can't bind
+		// (e.g. the model has no pricing) rather than silently promising a ceiling
+		// we won't enforce. The derived-from-MaxBudget case already holds on the
+		// first run, so it stays best-effort below.
+		if cmd.TotalBudget > 0 {
+			if err := sctx.Agent.SetMaxBudget(cmd.TotalBudget); err != nil {
+				if cmd.CompactAt > 0 {
+					_ = sctx.Agent.SetCompactAt(sctx.goalPrevCompactAt) // roll back the compaction change
+				}
+				return fmt.Errorf("goal: cannot apply --budget: %w", err)
+			}
+		}
 		// Enter() creates STATE.md and fires onChange → rebuilds the system
 		// prompt (injecting the directive) and publishes GoalChanged.
 		if err := sctx.Goal.Enter(goal.Options{
@@ -586,17 +616,21 @@ func RegisterHandlers(sctx *SessionContext) {
 			MaxIterations: cmd.MaxIterations,
 			MaxStalled:    cmd.MaxStalled,
 			Timeout:       cmd.Timeout,
-			TotalBudget:   sctx.goalPrevMaxBudget,
+			TotalBudget:   totalBudget,
+			VerifyTimeout: cmd.VerifyTimeout,
 		}); err != nil {
 			if cmd.CompactAt > 0 {
 				_ = sctx.Agent.SetCompactAt(sctx.goalPrevCompactAt) // roll back on failure
+			}
+			if cmd.TotalBudget > 0 {
+				_ = sctx.Agent.SetMaxBudget(sctx.goalPrevMaxBudget) // roll back the budget too
 			}
 			return err
 		}
 		// Baseline the commit so the driver's progress check has a reference for
 		// the first iteration (progress = new edits or a new commit).
 		if sctx.CWD != "" {
-			sctx.goalLastCommit = runGit(sctx.SessionCtx, sctx.CWD, "rev-parse", "HEAD")
+			sctx.Goal.SetLastCommit(runGit(sctx.SessionCtx, sctx.CWD, "rev-parse", "HEAD"))
 		}
 		// Kick the first iteration. The driver takes over from RunEnded on.
 		return sctx.Bus.Execute(SendPrompt{
@@ -898,6 +932,15 @@ func RegisterHandlers(sctx *SessionContext) {
 	// objective and the loop either ends (finite success or a backstop) or
 	// relaunches the maker with feedback. Modeled on the auto-verify reactor.
 	var goalVerifyCancel atomic.Pointer[context.CancelFunc]
+	// cancelGoalVerify aborts an in-flight goal verification (build/tests + the
+	// verifier LLM call). Called when the user starts a new run or stops the
+	// goal, so stale checks don't run concurrently with fresh edits.
+	cancelGoalVerify := func() {
+		if fn := goalVerifyCancel.Swap(nil); fn != nil {
+			(*fn)()
+		}
+	}
+	sctx.cancelGoalVerify = cancelGoalVerify
 	b.Subscribe(func(e RunEnded) {
 		if sctx.Goal == nil || !sctx.Goal.Active() {
 			return
@@ -925,24 +968,57 @@ func RegisterHandlers(sctx *SessionContext) {
 		// Backstops that don't depend on the verdict — checked before spending
 		// a verifier call.
 		it := sctx.Goal.BeginIteration()
-		if info.MaxIterations > 0 && it > info.MaxIterations {
-			stopGoal(sctx, fmt.Sprintf("reached max iterations (%d)", info.MaxIterations))
-			return
-		}
 		if !info.Deadline.IsZero() && time.Now().After(info.Deadline) {
 			stopGoal(sctx, "reached time limit")
 			return
 		}
 
+		// Separate budgets: building the evidence runs the project's real checks
+		// (build + full test suite via verify.Execute), which can take minutes.
+		// Sharing a single 2-min context with the verifier starved the verifier's
+		// own timeout and produced systematic "context deadline exceeded" errors.
+		// Give the evidence a generous budget and the verifier a fresh context
+		// derived from the session (not the already-spent evidence context).
+		//
+		// The contexts and cancel handle are created and registered here —
+		// synchronously, before the goroutine starts — so a user prompt arriving
+		// in the gap can't miss the cancel and let a stale build/tests run against
+		// fresh edits.
+		evidenceCtx, evidenceCancel := context.WithTimeout(sctx.SessionCtx, 10*time.Minute)
+		verifyCtx, verifyCancel := context.WithCancel(sctx.SessionCtx)
+		var combined context.CancelFunc = func() {
+			evidenceCancel()
+			verifyCancel()
+		}
+		goalVerifyCancel.Store(&combined)
+
 		go func() {
-			ctx, cancel := context.WithTimeout(sctx.SessionCtx, 2*time.Minute)
-			defer cancel()
-			goalVerifyCancel.Store(&cancel)
-			defer goalVerifyCancel.CompareAndSwap(&cancel, nil)
+			defer func() {
+				goalVerifyCancel.CompareAndSwap(&combined, nil)
+				evidenceCancel()
+				verifyCancel()
+			}()
 
-			evidence := buildGoalEvidence(ctx, sctx.CWD, e.FinalText)
-			verdict, err := goal.Verify(ctx, sctx.ProviderFactory, info.VerifierSpec, info.Objective, evidence)
+			// A user prompt may have cancelled us before the goroutine got
+			// scheduled — bail before spending minutes on build/tests.
+			if evidenceCtx.Err() != nil || sctx.RunGenAtomic.Load() != startRunGen {
+				return
+			}
 
+			evidence := buildGoalEvidence(evidenceCtx, sctx.CWD, e.FinalText)
+			evidenceCancel() // done with the evidence phase; free it before verifying
+			verdict, err := goal.Verify(verifyCtx, sctx.ProviderFactory, info.VerifierSpec, info.Objective, evidence, info.VerifyTimeout)
+
+			// If our verify context was cancelled, a user prompt or /goal stop
+			// aborted us (cancelGoalVerify cancels both phases via `combined`).
+			// That's not a verifier failure — bail silently so we don't spuriously
+			// pause the goal or relaunch. Checked before the RunGen guard because a
+			// user prompt cancels us *before* startRun bumps RunGen, so RunGen
+			// alone wouldn't catch it. (evidenceCtx is always cancelled here — we
+			// cancel it explicitly above — so only verifyCtx is meaningful.)
+			if verifyCtx.Err() != nil {
+				return
+			}
 			// Discard if a newer run started while we were verifying.
 			if sctx.RunGenAtomic.Load() != startRunGen {
 				return
@@ -953,10 +1029,20 @@ func RegisterHandlers(sctx *SessionContext) {
 				return
 			}
 			if err != nil {
-				// Treat a verifier failure as an unsatisfied iteration so a
-				// persistent error still trips the stalled backstop instead of
-				// looping forever.
-				verdict = goal.Verdict{Satisfied: false, Feedback: "verifier error: " + err.Error()}
+				// A verifier failure is infrastructure noise, NOT a "not satisfied"
+				// verdict. goal.Verify already retried transient errors; if it
+				// still failed, pause the loop (stop the goal, like an errored run)
+				// instead of relaunching the maker with a cryptic, unactionable
+				// error as "feedback". A user can inspect and re-issue /goal.
+				sctx.Bus.Publish(GoalIterationEnded{
+					SessionID: sctx.SessionID,
+					Iteration: it,
+					Satisfied: false,
+					Feedback:  "verifier unavailable: " + err.Error(),
+					Err:       err,
+				})
+				stopGoal(sctx, "verifier unavailable (paused): "+err.Error())
+				return
 			}
 
 			sctx.Bus.Publish(GoalIterationEnded{
@@ -977,10 +1063,10 @@ func RegisterHandlers(sctx *SessionContext) {
 			// long goal is legitimately "not done" for many productive iterations.
 			var commit string
 			if sctx.CWD != "" {
-				commit = runGit(ctx, sctx.CWD, "rev-parse", "HEAD")
+				commit = runGit(verifyCtx, sctx.CWD, "rev-parse", "HEAD")
 			}
-			progressed := e.HadEdits || (commit != "" && commit != sctx.goalLastCommit)
-			sctx.goalLastCommit = commit
+			progressed := e.HadEdits || (commit != "" && commit != sctx.Goal.LastCommit())
+			sctx.Goal.SetLastCommit(commit)
 			if progressed {
 				sctx.Goal.ResetStalled()
 			} else {
@@ -989,6 +1075,20 @@ func RegisterHandlers(sctx *SessionContext) {
 					stopGoal(sctx, fmt.Sprintf("no progress after %d attempts", stalled))
 					return
 				}
+			}
+			// Stop here if we've verified the last allowed iteration — checking
+			// after the verdict means all N iterations are actually verified
+			// (checking before relaunch would run an N+1th, unverified run).
+			if info.MaxIterations > 0 && it >= info.MaxIterations {
+				stopGoal(sctx, fmt.Sprintf("reached max iterations (%d)", info.MaxIterations))
+				return
+			}
+			// The deadline may have passed while building evidence + verifying
+			// (both can take minutes). Re-check before relaunching so a goal can't
+			// overshoot --timeout by a whole extra iteration.
+			if !info.Deadline.IsZero() && time.Now().After(info.Deadline) {
+				stopGoal(sctx, "reached time limit")
+				return
 			}
 			// Cap the next iteration at the remaining budget so the loop's total
 			// spend stays under the ceiling (the agent resets per-run cost each
@@ -999,7 +1099,11 @@ func RegisterHandlers(sctx *SessionContext) {
 					fmt.Fprintf(os.Stderr, "warning: goal budget cap: %v\n", err)
 				}
 			}
-			goalRelaunch(sctx, "Not done yet.\n\n"+verdict.Feedback+"\n\nContinue.")
+			feedback := strings.TrimSpace(verdict.Feedback)
+			if feedback == "" {
+				feedback = "The objective is not yet satisfied. Re-check it against your STATE.md and the actual diff, then continue."
+			}
+			goalRelaunch(sctx, "Not done yet.\n\n"+feedback+"\n\nContinue.")
 		}()
 	})
 }
@@ -1016,7 +1120,17 @@ func RegisterHandlers(sctx *SessionContext) {
 func stopGoal(sctx *SessionContext, reason string) {
 	prev := sctx.goalPrevCompactAt
 	prevBudget := sctx.goalPrevMaxBudget
-	sctx.Goal.Exit() // marks inactive; onChange rebuilds the prompt (may no-op if running)
+	// Exit reports whether this call actually turned the goal off. If it was
+	// already off (e.g. a TOCTOU with /goal stop), do nothing — otherwise we'd
+	// publish a second GoalEnded and restore CompactAt/MaxBudget twice.
+	if !sctx.Goal.Exit() {
+		return
+	}
+	// Abort any in-flight verification so stale build/tests don't run against a
+	// fresh run's edits.
+	if sctx.cancelGoalVerify != nil {
+		sctx.cancelGoalVerify()
+	}
 	// Restore the per-run budget the driver lowered each iteration, alongside the
 	// compaction threshold. Both are rejected while a run is live, so defer to
 	// RunEnded in that case (e.g. /goal stop mid-turn).
@@ -1079,9 +1193,10 @@ func buildGoalEvidence(ctx context.Context, cwd, finalText string) string {
 		b.WriteString("\n\n")
 	}
 	if cwd != "" {
-		if out := runGit(ctx, cwd, "status", "--short"); out != "" {
+		status := runGit(ctx, cwd, "status", "--short")
+		if status != "" {
 			b.WriteString("UNCOMMITTED CHANGES (git status --short):\n")
-			b.WriteString(out)
+			b.WriteString(status)
 			b.WriteString("\n")
 		}
 		if out := runGit(ctx, cwd, "log", "-1", "--format=%h %s"); out != "" {
@@ -1096,6 +1211,16 @@ func buildGoalEvidence(ctx context.Context, cwd, finalText string) string {
 			b.WriteString("\nDIFF vs HEAD (working tree + staged):\n")
 			b.WriteString(out)
 			b.WriteString("\n")
+		} else if status == "" {
+			// Clean tree: the maker committed its work (the directive tells it
+			// to). `git diff HEAD` is then empty, which would leave the verifier
+			// with almost no evidence and bias it toward "not satisfied". Show
+			// the last commit's own diff instead.
+			if out := runGit(ctx, cwd, "show", "--stat", "-p", "HEAD"); out != "" {
+				b.WriteString("\nLAST COMMIT DIFF (git show HEAD):\n")
+				b.WriteString(out)
+				b.WriteString("\n")
+			}
 		}
 		// Objective evidence: actually run the project's checks (build/tests).
 		// A worker claiming "all tests pass" no longer settles it — the verifier

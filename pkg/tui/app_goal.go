@@ -52,6 +52,8 @@ func (m appModel) handleGoalCommand(args string) (tea.Model, tea.Cmd) {
 			MaxIterations: gc.MaxIterations,
 			MaxStalled:    gc.MaxStalled,
 			Timeout:       gc.Timeout,
+			VerifyTimeout: gc.VerifyTimeout,
+			TotalBudget:   gc.TotalBudget,
 		}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Goal: " + err.Error()})
 			m.updateViewport()

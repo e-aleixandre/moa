@@ -152,6 +152,8 @@ type EnterGoal struct {
 	MaxIterations int           // 0 = unlimited
 	MaxStalled    int           // 0 = default
 	Timeout       time.Duration // 0 = no wall-clock deadline
+	VerifyTimeout time.Duration // 0 = default per-attempt verifier timeout
+	TotalBudget   float64       // cumulative USD ceiling; 0 = derive from per-run MaxBudget
 	StatePath     string        // "" = default (.moa/goal/STATE.md)
 }
 

@@ -16,15 +16,17 @@ type Command struct {
 	MaxIterations int           // --max N
 	MaxStalled    int           // --stalled N
 	Timeout       time.Duration // --timeout DUR (e.g. 2h, 90m)
+	VerifyTimeout time.Duration // --verify-timeout DUR (per-attempt verifier timeout)
+	TotalBudget   float64       // --budget USD (cumulative ceiling across iterations)
 }
 
 // FlagsUsage is a one-line hint of the accepted knobs, for help/palette text.
-const FlagsUsage = "[--max N] [--stalled N] [--timeout 2h] [--verifier haiku] [--compact N]"
+const FlagsUsage = "[--max N] [--stalled N] [--timeout 2h] [--budget 5] [--verifier haiku] [--verify-timeout 90s] [--compact N]"
 
 // ParseCommand parses "<objective> [--max N] [--stalled N] [--timeout DUR]
-// [--verifier SPEC] [--compact N]". The objective is every token before the
-// first --flag; flags may then appear in any order. An empty objective or an
-// unknown/invalid flag is an error.
+// [--budget USD] [--verifier SPEC] [--verify-timeout DUR] [--compact N]". The
+// objective is every token before the first --flag; flags may then appear in
+// any order. An empty objective or an unknown/invalid flag is an error.
 func ParseCommand(args string) (Command, error) {
 	fields := strings.Fields(args)
 
@@ -73,6 +75,18 @@ func ParseCommand(args string) (Command, error) {
 				return cmd, fmt.Errorf("invalid --timeout: %s", val)
 			}
 			cmd.Timeout = d
+		case "--verify-timeout":
+			d, err := time.ParseDuration(val)
+			if err != nil || d <= 0 {
+				return cmd, fmt.Errorf("invalid --verify-timeout: %s", val)
+			}
+			cmd.VerifyTimeout = d
+		case "--budget":
+			f, err := strconv.ParseFloat(val, 64)
+			if err != nil || f < 0 {
+				return cmd, fmt.Errorf("invalid --budget: %s", val)
+			}
+			cmd.TotalBudget = f
 		case "--verifier":
 			cmd.VerifierSpec = val
 		default:

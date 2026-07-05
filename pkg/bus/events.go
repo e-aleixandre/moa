@@ -266,6 +266,10 @@ type GoalIterationEnded struct {
 	Iteration int
 	Satisfied bool
 	Feedback  string
+	// Err is set when the iteration ended because the verifier was unavailable
+	// (a transient infrastructure failure that survived retries), as opposed to
+	// a genuine "not satisfied" verdict. The loop pauses in that case.
+	Err error
 }
 
 // GoalEnded is published when the loop stops (objective met or a backstop hit).

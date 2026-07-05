@@ -19,7 +19,7 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name: "all knobs",
-			args: "ship feature X --max 10 --stalled 5 --timeout 2h --verifier haiku --compact 40000",
+			args: "ship feature X --max 10 --stalled 5 --timeout 2h --verifier haiku --compact 40000 --budget 7.5 --verify-timeout 3m",
 			want: Command{
 				Objective:     "ship feature X",
 				MaxIterations: 10,
@@ -27,7 +27,29 @@ func TestParseCommand(t *testing.T) {
 				Timeout:       2 * time.Hour,
 				VerifierSpec:  "haiku",
 				CompactAt:     40000,
+				TotalBudget:   7.5,
+				VerifyTimeout: 3 * time.Minute,
 			},
+		},
+		{
+			name:    "invalid budget",
+			args:    "do thing --budget abc",
+			wantErr: true,
+		},
+		{
+			name:    "negative budget",
+			args:    "do thing --budget -2",
+			wantErr: true,
+		},
+		{
+			name:    "invalid verify-timeout",
+			args:    "do thing --verify-timeout nope",
+			wantErr: true,
+		},
+		{
+			name:    "non-positive verify-timeout",
+			args:    "do thing --verify-timeout 0s",
+			wantErr: true,
 		},
 		{
 			name: "objective with punctuation before flags",

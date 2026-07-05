@@ -32,6 +32,7 @@ type Options struct {
 	MaxStalled    int           // 0 = DefaultMaxStalled
 	Timeout       time.Duration // 0 = no wall-clock deadline
 	TotalBudget   float64       // cumulative USD ceiling across all iterations; 0 = unlimited
+	VerifyTimeout time.Duration // per-attempt verifier timeout; 0 = DefaultVerifyTimeout
 }
 
 // Info is an immutable snapshot for readers (UI, prompt builder, driver checks).
@@ -45,8 +46,9 @@ type Info struct {
 	MaxIterations int
 	MaxStalled    int
 	Deadline      time.Time
-	TotalBudget   float64 // cumulative USD ceiling (0 = unlimited)
-	Spent         float64 // cumulative USD spent so far
+	TotalBudget   float64       // cumulative USD ceiling (0 = unlimited)
+	Spent         float64       // cumulative USD spent so far
+	VerifyTimeout time.Duration // per-attempt verifier timeout (0 = default)
 }
 
 // Goal holds goal-mode runtime state. All exported methods are safe for
@@ -59,6 +61,11 @@ type Goal struct {
 	iteration int
 	stalled   int
 	spent     float64
+
+	// lastCommit is the HEAD hash seen at the previous iteration; the driver
+	// uses it to distinguish a productive iteration (new commit) from a stalled
+	// one. Guarded by mu (see LastCommit/SetLastCommit).
+	lastCommit string
 
 	// onChange fires after Enter/Exit (for TUI/serve status + system-prompt
 	// rebuild). Called with the mutex released.
@@ -103,6 +110,7 @@ func (g *Goal) snapshot() Info {
 		Deadline:      g.deadline,
 		TotalBudget:   g.opts.TotalBudget,
 		Spent:         g.spent,
+		VerifyTimeout: g.opts.VerifyTimeout,
 	}
 }
 
@@ -130,6 +138,7 @@ func (g *Goal) Enter(opts Options) error {
 	g.iteration = 0
 	g.stalled = 0
 	g.spent = 0
+	g.lastCommit = ""
 	if opts.Timeout > 0 {
 		g.deadline = time.Now().Add(opts.Timeout)
 	} else {
@@ -144,12 +153,14 @@ func (g *Goal) Enter(opts Options) error {
 	return nil
 }
 
-// Exit deactivates goal mode. No-op if already off. Fires onChange(false).
-func (g *Goal) Exit() {
+// Exit deactivates goal mode. Returns true if it was active (this call turned
+// it off), false if it was already off. Fires onChange(false) only on the
+// active→inactive transition, so callers can make teardown idempotent.
+func (g *Goal) Exit() bool {
 	g.mu.Lock()
 	if !g.active {
 		g.mu.Unlock()
-		return
+		return false
 	}
 	g.active = false
 	onChange := g.onChange
@@ -158,6 +169,7 @@ func (g *Goal) Exit() {
 	if onChange != nil {
 		onChange(false)
 	}
+	return true
 }
 
 // BeginIteration increments and returns the iteration count. The driver calls
@@ -200,6 +212,22 @@ func (g *Goal) IncStalled() int {
 	defer g.mu.Unlock()
 	g.stalled++
 	return g.stalled
+}
+
+// LastCommit returns the HEAD commit hash recorded at the previous iteration.
+func (g *Goal) LastCommit() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.lastCommit
+}
+
+// SetLastCommit records the HEAD commit hash for the next iteration's progress
+// check. Guarded by the Goal mutex so the driver goroutine and EnterGoal don't
+// race on it.
+func (g *Goal) SetLastCommit(hash string) {
+	g.mu.Lock()
+	g.lastCommit = hash
+	g.mu.Unlock()
 }
 
 // ensureStateFile creates the STATE.md scaffold if it's missing. An existing

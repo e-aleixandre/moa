@@ -183,6 +183,8 @@ func cmdGoal(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 		MaxIterations: gc.MaxIterations,
 		MaxStalled:    gc.MaxStalled,
 		Timeout:       gc.Timeout,
+		VerifyTimeout: gc.VerifyTimeout,
+		TotalBudget:   gc.TotalBudget,
 	}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}

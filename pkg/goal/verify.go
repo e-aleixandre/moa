@@ -13,8 +13,15 @@ import (
 // DefaultVerifierSpec is the cheap, fast model used to judge the objective.
 const DefaultVerifierSpec = "haiku"
 
-// verifyTimeout bounds the one-shot verifier call.
-const verifyTimeout = 60 * time.Second
+// DefaultVerifyTimeout bounds a single verifier call attempt. Callers may
+// override it (see Verify's timeout param); 0 selects this default.
+const DefaultVerifyTimeout = 90 * time.Second
+
+// verifyMaxAttempts is how many times Verify calls the model before giving up.
+// The verifier is a cheap one-shot Haiku call, so retrying a transient failure
+// (network blip, 429/5xx, a slow response that hit the per-attempt timeout)
+// costs cents and avoids mistaking infrastructure noise for a real verdict.
+const verifyMaxAttempts = 3
 
 // Verdict is the verifier's decision.
 type Verdict struct {
@@ -39,7 +46,12 @@ Reply with ONLY a JSON object, no prose and no markdown fences:
 // objective is satisfied given the evidence (typically the maker's final text
 // plus a git diff). The verifier gets minimal context — objective + evidence,
 // no history and no tools — which keeps it cheap and unbiased.
-func Verify(ctx context.Context, factory ProviderFactory, verifierSpec, objective, evidence string) (Verdict, error) {
+//
+// timeout bounds each attempt; 0 selects DefaultVerifyTimeout. Verify retries a
+// transient failure (context deadline, stream/network error) up to
+// verifyMaxAttempts times before returning the last error, so an infrastructure
+// blip is not mistaken for a real "not satisfied" verdict.
+func Verify(ctx context.Context, factory ProviderFactory, verifierSpec, objective, evidence string, timeout time.Duration) (Verdict, error) {
 	if factory == nil {
 		return Verdict{}, fmt.Errorf("goal verify: nil provider factory")
 	}
@@ -55,9 +67,9 @@ func Verify(ctx context.Context, factory ProviderFactory, verifierSpec, objectiv
 	if err != nil {
 		return Verdict{}, fmt.Errorf("goal verify: provider: %w", err)
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
-	defer cancel()
+	if timeout <= 0 {
+		timeout = DefaultVerifyTimeout
+	}
 
 	user := fmt.Sprintf("OBJECTIVE:\n%s\n\nEVIDENCE:\n%s", strings.TrimSpace(objective), strings.TrimSpace(evidence))
 	req := core.Request{
@@ -66,6 +78,28 @@ func Verify(ctx context.Context, factory ProviderFactory, verifierSpec, objectiv
 		Messages: []core.Message{core.NewUserMessage(user)},
 		Options:  core.StreamOptions{ThinkingLevel: "off"},
 	}
+
+	var lastErr error
+	for attempt := 0; attempt < verifyMaxAttempts; attempt++ {
+		// Stop retrying if the parent context is already done (goal stopped, new
+		// run took over) — no point spending another attempt.
+		if err := ctx.Err(); err != nil {
+			return Verdict{}, fmt.Errorf("goal verify: %w", err)
+		}
+		verdict, err := verifyOnce(ctx, prov, req, timeout)
+		if err == nil {
+			return verdict, nil
+		}
+		lastErr = err
+	}
+	return Verdict{}, lastErr
+}
+
+// verifyOnce runs a single verifier attempt under its own per-attempt timeout.
+func verifyOnce(ctx context.Context, prov core.Provider, req core.Request, timeout time.Duration) (Verdict, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	ch, err := prov.Stream(ctx, req)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("goal verify: stream: %w", err)
