@@ -767,9 +767,10 @@ export function handleWsRunEnd(id) {
       thinkingText: null,
       pendingSteers: null,
       runningTool: null,
+      compacting: false,
     });
   } else {
-    updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, runningTool: null });
+    updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, runningTool: null, compacting: false });
   }
 }
 
