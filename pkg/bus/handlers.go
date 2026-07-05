@@ -1191,7 +1191,9 @@ func deliverQueuedSteers(sctx *SessionContext) {
 	if len(queued) == 0 {
 		return
 	}
-	// Start a run that consumes the queued messages as its prompt.
+	// Start a run that consumes the queued messages as its prompt. Go through
+	// the SendPrompt command (not startRun directly) so it keeps the same
+	// semantics as any user prompt: auto-verify reset, goal-verify cancel, etc.
 	if err := sctx.Bus.Execute(SendPrompt{
 		SessionID: sctx.SessionID,
 		Text:      strings.Join(queued, "\n"),
@@ -1208,7 +1210,10 @@ func deliverQueuedSteers(sctx *SessionContext) {
 	// The run started. Its loop won't emit Steered for a prompt (these were
 	// delivered as the prompt, not as mid-run steers), so announce the dequeue
 	// ourselves — that moves the text from the frontend's "queued" strip into
-	// the transcript. Use the new run's gen (startRun bumped it synchronously).
+	// the transcript. Reading the atomic here is safe: SendPrompt transitioned
+	// the session to running synchronously, and the transition table forbids
+	// any other run from starting (and ours can't finish synchronously — it
+	// runs in a goroutine), so the gen can't change under us on this goroutine.
 	gen := sctx.RunGenAtomic.Load()
 	for _, q := range queued {
 		sctx.Bus.Publish(Steered{
