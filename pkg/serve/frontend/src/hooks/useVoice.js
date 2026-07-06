@@ -24,6 +24,42 @@ import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
  */
 const MIN_RECORDING_MS = 400;
 
+// Minimum plausible size of a real recording. An empty container (webm/mp4
+// header with no audio frames) is only a handful of bytes; Whisper rejects it
+// with a 400. Anything below this is treated as "no audio captured". Kept small
+// so genuinely short commands ("sí", "no") still go through.
+const MIN_BLOB_BYTES = 256;
+
+// Apple's WebKit (Safari, and every iOS browser / WKWebView, which are all
+// WebKit under the hood) advertises audio/webm support but its MediaRecorder
+// actually produces MP4/AAC — and sometimes an empty webm container. Detect it
+// so we can request MP4 explicitly instead of trusting a webm that comes back
+// as a 5-byte header.
+const isAppleWebKit = typeof navigator !== 'undefined'
+  && (/iP(hone|ad|od)/.test(navigator.userAgent || '')
+    || /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent || ''));
+
+// isUsableMime rejects empty or malformed container hints like
+// "audio/webm; codecs=" (trailing empty codecs) that some engines report — we
+// don't want to label an upload with those or fall back to them.
+function isUsableMime(t) {
+  if (!t) return false;
+  const s = t.toLowerCase();
+  if (/codecs=\s*$/.test(s)) return false; // "audio/webm; codecs="
+  return /^(audio|video)\//.test(s);
+}
+
+// extForType maps a container MIME to a filename extension Whisper accepts.
+// Returns '' when the type is unknown so callers can bail instead of guessing.
+function extForType(t) {
+  const s = (t || '').toLowerCase();
+  if (s.includes('webm')) return 'webm';
+  if (s.includes('ogg')) return 'ogg';
+  if (s.includes('wav')) return 'wav';
+  if (s.includes('mp4') || s.includes('m4a') || s.includes('aac') || s.includes('mpeg') || s.includes('mpga')) return 'mp4';
+  return '';
+}
+
 export function useVoice(onTranscript, onError) {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -91,17 +127,25 @@ export function useVoice(onTranscript, onError) {
       return;
     }
 
-    // Prefer webm/opus (Chrome/Firefox/Android). iOS Safari doesn't support
-    // webm and records mp4/aac instead, so fall through to an explicit mp4
-    // request when available — asking for a concrete type keeps
-    // recorder.mimeType populated and our extension honest.
-    const preferredTypes = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/mp4;codecs=mp4a.40.2',
-      'audio/ogg;codecs=opus',
-    ];
+    // Pick a container the browser can actually encode. On Apple WebKit, webm
+    // is falsely advertised but produces empty/garbage output, so request
+    // MP4/AAC first. Everywhere else, prefer webm/opus. Asking for a concrete
+    // type keeps recorder.mimeType populated and our extension honest.
+    const preferredTypes = isAppleWebKit
+      ? [
+          'audio/mp4;codecs=mp4a.40.2',
+          'audio/mp4',
+          'audio/aac',
+          'audio/webm;codecs=opus',
+          'audio/webm',
+        ]
+      : [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus',
+          'audio/mp4;codecs=mp4a.40.2',
+          'audio/mp4',
+        ];
     const mimeType = preferredTypes.find(t => MediaRecorder.isTypeSupported(t)) || '';
 
     let recorder;
@@ -143,17 +187,30 @@ export function useVoice(onTranscript, onError) {
         return;
       }
 
-      const blob = new Blob(chunks, { type: recorder.mimeType || requestedMime || 'audio/webm' });
-      // Pick the container from the most trustworthy source available. Prefer
-      // the blob's own type (set from the chunks), then the recorder's reported
-      // mimeType, then what we asked for. iOS Safari records mp4/aac even though
-      // it ignores our webm request, so guessing "webm" blindly gets a 400.
-      const typeHint = (blob.type || recorder.mimeType || requestedMime || '').toLowerCase();
-      const ext = typeHint.includes('webm') ? 'webm'
-        : typeHint.includes('ogg') ? 'ogg'
-        : (typeHint.includes('mp4') || typeHint.includes('m4a') || typeHint.includes('aac') || typeHint.includes('mpeg')) ? 'mp4'
-        : typeHint.includes('wav') ? 'wav'
-        : 'webm';
+      // Determine the real container. Prefer, in order: the actual type of the
+      // recorded chunks, then a valid recorder.mimeType, then what we asked for.
+      // Reject empty/malformed hints like "audio/webm; codecs=". If we still
+      // can't tell, bail rather than mislabel the upload and earn a 400.
+      const chunkType = chunks.find(c => isUsableMime(c.type))?.type || '';
+      const reportedType = isUsableMime(recorder.mimeType) ? recorder.mimeType : '';
+      const effectiveType = chunkType || reportedType || (isUsableMime(requestedMime) ? requestedMime : '');
+
+      const blob = new Blob(chunks, effectiveType ? { type: effectiveType } : {});
+
+      // A container header with no audio frames is only a few dozen bytes. We've
+      // seen tiny uploads (e.g. 5-byte empty webm) when the mic never delivered
+      // samples — another app holding it, or a WebKit encoder producing nothing.
+      // Sending that earns an "invalid file format" 400 from Whisper.
+      if (blob.size < MIN_BLOB_BYTES) {
+        reportError('No audio captured. Make sure the mic isn\u0027t in use by another app, then try again.');
+        return;
+      }
+
+      const ext = extForType(effectiveType || blob.type);
+      if (!ext) {
+        reportError('This browser produced an audio format we can\u0027t transcribe. Try a different browser.');
+        return;
+      }
 
       transcribingRef.current = true;
       setTranscribing(true);
@@ -189,7 +246,12 @@ export function useVoice(onTranscript, onError) {
     // so a throwing start() can't leave a non-null recorderRef with a live mic
     // that blocks all future recordings.
     try {
-      recorder.start();
+      // Pass a timeslice so the recorder emits dataavailable periodically while
+      // recording, instead of only once on stop(). Some engines (notably iOS
+      // Safari / WKWebView) deliver an empty final chunk when started without a
+      // timeslice — which produced 5-byte "empty webm" uploads that Whisper
+      // rejects with a 400. Chunking guarantees we accumulate real audio.
+      recorder.start(1000);
     } catch (e) {
       stream.getTracks().forEach(t => t.stop());
       reportError('Could not start recording: ' + (e.message || String(e)));
