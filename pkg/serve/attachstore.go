@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 )
 
 // sessionIDPattern validates session ids used to build attachment directory
@@ -63,10 +62,9 @@ func ensureBaseDir() (string, error) {
 	}
 	// Reject a base dir owned by a different user (another local account could
 	// tamper with attachment storage). Ownership can't be fixed by chmod.
-	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		if int(st.Uid) != os.Getuid() {
-			return "", fmt.Errorf("attachments base dir %q is not owned by the current user", base)
-		}
+	// (No-op on platforms without Unix ownership semantics, e.g. Windows.)
+	if err := checkDirOwner(base, info); err != nil {
+		return "", err
 	}
 	// Tighten to 0700, then verify the perms actually took — this closes a
 	// pre-created-with-lax-perms base dir (group/other access) rather than
@@ -226,7 +224,7 @@ func writeUnique(dir, name string, data []byte) (finalPath string, err error) {
 		}
 		p := filepath.Join(dir, candidate)
 
-		f, ferr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+		f, ferr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollowFlag, 0o600)
 		if errors.Is(ferr, os.ErrExist) {
 			continue
 		}

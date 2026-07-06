@@ -160,7 +160,7 @@ func EditStartLineForFile(path, oldText string) int {
 	if err != nil {
 		return 1
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, maxPreviewFileBytes))
 	if err != nil {
 		return 1
