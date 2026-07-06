@@ -28,6 +28,7 @@ var allCommands = []commandDef{
 	{Name: "branch", Desc: "Rewind to an earlier point and start a new conversation branch"},
 	{Name: "verify", Desc: "Run project verification checks"},
 	{Name: "prompt", Args: "<name>", Desc: "Insert a prompt template"},
+	{Name: "rename", Args: "<new title>", Desc: "Rename this session"},
 	{Name: "voice", Desc: "Toggle voice recording (Ctrl+R)"},
 	{Name: "settings", Desc: "Open settings menu"},
 	{Name: "clear", Desc: "Clear conversation and start fresh"},

@@ -213,7 +213,7 @@ func (m *appModel) recomputeInputEnabled() {
 }
 
 // --- Helpers ---
-// forceRepaint, waitForBusEvent, renderTick, cleanup, accumulateCost,
+// forceRepaint, waitForBusEvent, renderTick, cleanup, accumulateCacheStats,
 // refreshContextSegment, refreshTaskDisplay are now in app.go (bus-based)
 
 // thinkingLevels defines the cycle order for Shift+Tab.

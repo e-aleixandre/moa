@@ -1,4 +1,4 @@
-import { ClipboardList, Map, Shield, Gauge, Zap, Flame, Target } from 'lucide-preact';
+import { ClipboardList, Map, Shield, Gauge, Zap, Flame, Target, DollarSign } from 'lucide-preact';
 
 /**
  * TaskBar — single-line status bar above the input.
@@ -11,6 +11,12 @@ import { ClipboardList, Map, Shield, Gauge, Zap, Flame, Target } from 'lucide-pr
  */
 function usageLevel(pct) {
   return pct >= 80 ? 'usage-high' : pct >= 50 ? 'usage-med' : 'usage-low';
+}
+
+// fmtCost mirrors the TUI cost segment: sub-cent spends show 4 decimals so a
+// fraction of a cent is still visible, otherwise 2.
+function fmtCost(usd) {
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
 function fmtReset(iso) {
@@ -53,6 +59,8 @@ export function TaskBar({ session, usage }) {
   const contextPct = session.contextPercent ?? -1;
   const permMode = session.permissionMode || 'yolo';
   const hasContext = contextPct >= 0;
+  const costUSD = session.costUSD ?? 0;
+  const hasCost = costUSD > 0;
 
   const u = usage && usage.available ? usage : null;
   const fiveH = u && u.five_hour;
@@ -63,7 +71,7 @@ export function TaskBar({ session, usage }) {
   const hasUsage = !!(fiveH || week || showExtra);
   const onOverage = !!session.onOverage;
 
-  if (!hasPlan && !goalActive && !hasTasks && !hasContext && !hasUsage && !onOverage) return null;
+  if (!hasPlan && !goalActive && !hasTasks && !hasContext && !hasUsage && !onOverage && !hasCost) return null;
 
   const done = tasks.filter(t => t.status === 'done').length;
   const total = tasks.length;
@@ -102,6 +110,13 @@ export function TaskBar({ session, usage }) {
         <span class={`task-bar-pill ${contextClass}`} title={`Context: ${contextPct}%`}>
           <Gauge />
           {contextPct}%
+        </span>
+      )}
+
+      {hasCost && (
+        <span class="task-bar-pill cost" title={`Session cost (main run + subagents): ${fmtCost(costUSD)}`}>
+          <DollarSign />
+          {fmtCost(costUSD)}
         </span>
       )}
 

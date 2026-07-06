@@ -40,6 +40,10 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m.handleGoalCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "goal")))
 	}
 
+	if cmd == "rename" || strings.HasPrefix(cmd, "rename ") {
+		return m.handleRenameCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "rename")))
+	}
+
 	switch cmd {
 	case "model", "models":
 		model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
@@ -389,6 +393,23 @@ func (m appModel) handleSessionBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case tea.KeyCtrlN:
 		return m.activateSession(m.newSession())
+	case tea.KeyCtrlD:
+		sel := m.sessionBrowser.Selected()
+		if sel == nil {
+			return m, nil
+		}
+		if m.sessionBrowser.confirmDelete == sel.ID {
+			// Second ctrl+d on the same session — commit the delete. Don't allow
+			// deleting the currently open session out from under the runtime.
+			if m.session != nil && m.session.ID == sel.ID {
+				m.sessionBrowser.confirmDelete = ""
+				m.sessionBrowser.previewErr = "cannot delete the currently open session"
+				return m, nil
+			}
+			return m, m.deleteSessionByID(sel.ID)
+		}
+		m.sessionBrowser.confirmDelete = sel.ID
+		return m, nil
 	case tea.KeyUp:
 		if m.sessionBrowser.MoveUp() {
 			return m, m.loadSessionPreview(m.sessionBrowser.SelectedID())
@@ -794,6 +815,21 @@ func (m appModel) loadSessionByID(id string) tea.Cmd {
 	}
 }
 
+// deleteSessionByID deletes a saved session from the store (off the UI goroutine).
+func (m appModel) deleteSessionByID(id string) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	store := m.sessionStore
+	return func() tea.Msg {
+		if store == nil {
+			return sessionDeletedMsg{ID: id}
+		}
+		err := store.Delete(id)
+		return sessionDeletedMsg{ID: id, Err: err}
+	}
+}
+
 func (m appModel) newSession() *session.Session {
 	if m.sessionStore == nil {
 		return nil
@@ -1166,6 +1202,30 @@ func (m appModel) handleTasksCommand(args string) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 	}
+}
+
+// handleRenameCommand renames the current session with a user-chosen title,
+// marking it manual so auto-titling won't overwrite it, and persists the change.
+func (m appModel) handleRenameCommand(title string) (tea.Model, tea.Cmd) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /rename <new title>"})
+		m.updateViewport()
+		return m, nil
+	}
+	if m.session == nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "No active session to rename"})
+		m.updateViewport()
+		return m, nil
+	}
+	m.session.Rename(title, 80)
+	m.autoTitled = true // a manual rename claims the one-shot auto-title guard
+	if m.sessionStore != nil {
+		_ = m.sessionStore.Save(m.session)
+	}
+	m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "✎ Renamed session to: " + m.session.Title})
+	m.updateViewport()
+	return m, nil
 }
 
 // handleBranchCommand opens the branch picker.

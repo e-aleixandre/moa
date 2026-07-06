@@ -1,7 +1,7 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
 import { syncConnections } from './api.js';
-import { store, setState, visibleSessionIds } from './store.js';
+import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -191,6 +191,16 @@ const resumingIds = new Set();
 export function afterVisibilityChange() {
   const state = store.get();
   const visible = visibleSessionIds(state);
+
+  // Clear the unread badge for sessions the user can now see (only when the
+  // tab is actually in the foreground — a background visibility shuffle
+  // shouldn't mark things read).
+  if (typeof document === 'undefined' || !document.hidden) {
+    for (const id of visible) {
+      const sess = state.sessions[id];
+      if (sess && sess.unseen) updateSession(id, { unseen: false });
+    }
+  }
 
   for (const id of visible) {
     const sess = state.sessions[id];

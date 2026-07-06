@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -63,6 +64,35 @@ func normalizeThinkingLevel(level string) string {
 	default:
 		return normalized
 	}
+}
+
+// SetTitle renames a session, marking the title as manually set so background
+// auto-titling won't overwrite it, and persists the change immediately.
+func (m *Manager) SetTitle(sessionID, title string) (string, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return "", ErrNotFound
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "", fmt.Errorf("title cannot be empty")
+	}
+	if len(title) > maxTitleLength {
+		title = title[:maxTitleLength] + "…"
+	}
+	sess.mu.Lock()
+	sess.Title = title
+	sess.TitleSource = session.TitleSourceManual
+	sess.Updated = time.Now()
+	sess.mu.Unlock()
+	// One-shot auto-title (if it hasn't fired yet) must not later clobber a
+	// manual rename; claim the guard.
+	sess.autoTitled.Store(true)
+	if sess.persister != nil {
+		sess.persister.saveTitle(title, session.TitleSourceManual)
+	}
+	m.invalidateSavedCache()
+	return title, nil
 }
 
 // SetPermissionMode changes the permission mode for a session via bus command.

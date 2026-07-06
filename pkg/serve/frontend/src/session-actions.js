@@ -59,6 +59,8 @@ export async function loadSessions() {
         tasks: existing ? existing.tasks : [],
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
+        costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
+        unseen: existing ? existing.unseen : false,
       };
     }
     // Detect attention transitions (hidden sessions only)

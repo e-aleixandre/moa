@@ -561,6 +561,11 @@ export function InputBar({ sessionId, session, tileId }) {
             detail: result.message,
             type: result.ok ? 'done' : 'attention',
           });
+        } else if (text.startsWith('/rename') && result && result.ok) {
+          // Reflect the new title immediately; the poll would otherwise lag
+          // (up to 15s on mobile). The server has already persisted it.
+          const title = result.message.replace(/^renamed to:\s*/, '');
+          updateSession(sessionId, { title });
         } else if (result && !result.ok) {
           addToast({ title: 'Command failed', detail: result.message, type: 'error' });
         }

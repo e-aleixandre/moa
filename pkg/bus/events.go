@@ -204,6 +204,17 @@ type ContextUpdated struct {
 	Percent   int
 }
 
+// SessionCostUpdated is published when the accumulated session cost changes:
+// after each run (RunEnded) and after each subagent finishes (SubagentEnded),
+// or when the running total is reset (clear / clean-context plan execution /
+// session load). TotalUSD is the cumulative spend for the session; RunUSD is
+// the delta that triggered this update (0 on a reset).
+type SessionCostUpdated struct {
+	SessionID string
+	TotalUSD  float64
+	RunUSD    float64
+}
+
 // RateLimitUpdated is published after each assistant message with the provider's
 // reported rate-limit state (plan-window utilization + whether the request drew
 // on extra usage). Enables instant, per-session overage awareness without

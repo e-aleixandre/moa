@@ -79,7 +79,7 @@
   -webkit-box-orient: vertical;
 }
 .overview-card-empty { color: var(--surface2); font-style: italic; }
-.overview-card-footer { display: flex; align-items: center; justify-content: flex-end; }
+.overview-card-footer { display: flex; align-items: center; justify-content: space-between; }
 .overview-card-model {
   display: flex;
   align-items: center;
@@ -92,6 +92,20 @@
   border-radius: 9999px;
 }
 .overview-card-model .lucide { width: 9px; height: 9px; }
+
+.overview-card-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--overlay0);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.overview-card-delete .lucide { width: 14px; height: 14px; }
+.overview-card-delete:active { color: var(--red); background: var(--surface0); }
 
 .overview-card.new-card {
   border: 1px dashed var(--surface1);
@@ -152,6 +166,20 @@
   font-family: var(--mono);
   flex-shrink: 0;
 }
+.overview-saved-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--overlay0);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.overview-saved-delete .lucide { width: 14px; height: 14px; }
+.overview-saved-delete:active { color: var(--red); background: var(--surface1); }
 
 /* ─── Empty state ──────────────────────────────────────────── */
 
@@ -230,6 +258,23 @@
 }
 .tab-pill .state-dot { width: 6px; height: 6px; }
 
+.tab-unseen {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+  flex-shrink: 0;
+}
+.overview-card-unseen {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--blue);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.overview-card.unseen { border-color: var(--blue); }
+
 .tab-add {
   width: 34px; height: 34px;
   display: flex;
@@ -299,6 +344,14 @@
 @media (max-width: 768px) {
   .input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .input-bar textarea { font-size: 16px; padding: 10px 38px 10px 16px; }
+  /* iOS/Safari auto-zooms into any focused text field whose font-size is < 16px,
+     leaving the whole PWA zoomed in until you pinch back out. Force a 16px
+     minimum on every focusable text field to suppress that zoom. */
+  input:not([type]), input[type="text"], input[type="search"],
+  input[type="email"], input[type="url"], input[type="number"],
+  input[type="password"], input[type="tel"], textarea, select {
+    font-size: 16px;
+  }
   .code-block-copy { opacity: 1; }
   .toast-container {
     top: auto;

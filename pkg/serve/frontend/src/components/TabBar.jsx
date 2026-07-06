@@ -12,6 +12,7 @@ export function TabBar({ state, onOpenPalette }) {
         const isActive = state.activeSession === sess.id;
         const needsAttention = sess.state === 'permission' || sess.state === 'error';
         const hasFlash = sess.flash && !isActive;
+        const unseen = sess.unseen && !isActive;
         const classes = ['tab-pill'];
         if (isActive) classes.push('active');
         if (needsAttention && !isActive) classes.push('attention');
@@ -25,6 +26,7 @@ export function TabBar({ state, onOpenPalette }) {
           >
             <span class={`state-dot ${sess.state}`} />
             {sess.title || 'Untitled'}
+            {unseen && <span class="tab-unseen" title="Unread activity" />}
           </button>
         );
       })}

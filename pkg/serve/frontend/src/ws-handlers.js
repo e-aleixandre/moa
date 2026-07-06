@@ -216,6 +216,7 @@ export function handleWsInit(id, data) {
     tasks: data.tasks || [],
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,
+    costUSD: data.cost_usd || 0,
     subagents: initSubagents(data.subagents),
     goalActive: !!data.goal_active,
     goalObjective: data.goal_active ? (data.goal_objective || '') : null,
@@ -485,6 +486,7 @@ export function handleWsStateChange(id, data) {
     if (sess) updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, compacting: false });
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
+      markUnseen(id);
       const visible = visibleSessionIds(store.get());
       if (!visible.includes(id) && sess) {
         if (data.state === 'error') {
@@ -552,6 +554,18 @@ function flashSession(id, type) {
   }, 1300);
 }
 
+// markUnseen flags a session as having unread activity when the user isn't
+// currently looking at it (not visible, or the tab is backgrounded), so a badge
+// can nudge them back. Cleared by afterVisibilityChange when it comes into view.
+function markUnseen(id) {
+  const state = store.get();
+  const visible = visibleSessionIds(state);
+  const hidden = typeof document !== 'undefined' && document.hidden;
+  if (visible.includes(id) && !hidden) return;
+  const sess = state.sessions[id];
+  if (sess && !sess.unseen) updateSession(id, { unseen: true });
+}
+
 export function handleWsConfigChange(id, data) {
   const sess = store.get().sessions[id];
   const patch = {
@@ -567,6 +581,12 @@ export function handleWsConfigChange(id, data) {
 export function handleWsContextUpdate(id, data) {
   if (data.context_percent != null) {
     updateSession(id, { contextPercent: data.context_percent });
+  }
+}
+
+export function handleWsSessionCost(id, data) {
+  if (data.cost_usd != null) {
+    updateSession(id, { costUSD: data.cost_usd });
   }
 }
 
@@ -625,6 +645,7 @@ export function handleWsSubagentComplete(id, data) {
     result: data.text || '',
   });
   updateSession(id, { messages });
+  markUnseen(id);
 }
 
 // --- Live subagent sub-conversations (agent tray) ---
@@ -885,6 +906,7 @@ export function handleWsGoalEnd(id, data) {
     goalObjective: null,
     messages: [...sess.messages, { _type: 'system', text: `🎯 Goal ended: ${data.reason || ''}` }],
   });
+  markUnseen(id);
 }
 
 export function handleWsAutoVerifyStart(id) {

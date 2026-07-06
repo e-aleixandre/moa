@@ -52,6 +52,12 @@ type sessionOpenLoadedMsg struct {
 	Err     error
 }
 
+// sessionDeletedMsg reports the outcome of deleting a session from the browser.
+type sessionDeletedMsg struct {
+	ID  string
+	Err error
+}
+
 // clipboardImageMsg carries an image read from the clipboard.
 type clipboardImageMsg struct {
 	Data     []byte // raw PNG bytes

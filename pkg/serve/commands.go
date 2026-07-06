@@ -29,6 +29,7 @@ var commandRegistry = map[string]commandHandler{
 	"undo":        cmdUndo,
 	"path":        cmdPath,
 	"verify":      cmdVerify,
+	"rename":      cmdRename,
 }
 
 // ExecCommand executes a slash command in a session.
@@ -84,6 +85,17 @@ func cmdCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, e
 		return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "conversation compacted"}, nil
+}
+
+func cmdRename(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
+	if len(args) == 0 {
+		return &CommandResult{OK: false, Message: "usage: /rename <new title>"}, nil
+	}
+	title, err := m.SetTitle(sess.ID, strings.Join(args, " "))
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
+	return &CommandResult{OK: true, Message: "renamed to: " + title}, nil
 }
 
 func cmdModel(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

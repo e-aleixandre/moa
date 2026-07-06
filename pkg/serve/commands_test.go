@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 func writeVerifyConfig(t *testing.T, dir, body string) {
@@ -171,5 +173,54 @@ func TestCmdVerify_RejectsConcurrent(t *testing.T) {
 	}
 	if second.OK || !strings.Contains(second.Message, "verify already running") {
 		t.Fatalf("second verify should be rejected, got OK=%v msg=%q", second.OK, second.Message)
+	}
+}
+
+func TestCmdRename_SetsManualTitle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(), dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.ExecCommand(sess.ID, "/rename My New Title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("expected OK, got: %s", res.Message)
+	}
+	if got := sess.title(); got != "My New Title" {
+		t.Fatalf("title = %q, want %q", got, "My New Title")
+	}
+	sess.mu.Lock()
+	src := sess.TitleSource
+	sess.mu.Unlock()
+	if src != session.TitleSourceManual {
+		t.Fatalf("TitleSource = %q, want manual", src)
+	}
+}
+
+func TestCmdRename_EmptyRejected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(), dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.ExecCommand(sess.ID, "/rename")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("expected failure for empty rename, got OK: %s", res.Message)
 	}
 }

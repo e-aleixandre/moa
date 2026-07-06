@@ -31,6 +31,7 @@ type InitData struct {
 	GoalObjective     string              `json:"goal_objective,omitempty"`
 	GoalIteration     int                 `json:"goal_iteration,omitempty"`
 	GoalStalled       int                 `json:"goal_stalled,omitempty"`
+	CostUSD           float64             `json:"cost_usd,omitempty"`
 	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
 }
 
@@ -127,6 +128,11 @@ type RunEndData struct {
 // ContextUpdateData carries the current context usage percentage.
 type ContextUpdateData struct {
 	ContextPercent int `json:"context_percent"`
+}
+
+// SessionCostData carries the accumulated session spend (main run + subagents).
+type SessionCostData struct {
+	CostUSD float64 `json:"cost_usd"`
 }
 
 // RateLimitData carries the provider's per-request rate-limit state: plan-window

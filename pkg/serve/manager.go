@@ -117,6 +117,7 @@ type SessionInfo struct {
 	PlanFile       string       `json:"plan_file,omitempty"`
 	ContextPercent int          `json:"context_percent"` // 0-100, -1 if unknown
 	PermissionMode string       `json:"permission_mode"` // "yolo", "ask", "auto"
+	CostUSD        float64      `json:"cost_usd"`        // accumulated session spend (main run + subagents)
 }
 
 const (
@@ -173,6 +174,7 @@ func (s *ManagedSession) info() SessionInfo {
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	stateErr, _ := bus.QueryTyped[bus.GetSessionError, string](b, bus.GetSessionError{})
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
+	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 
 	s.mu.Lock()
 	info := SessionInfo{
@@ -188,6 +190,7 @@ func (s *ManagedSession) info() SessionInfo {
 		UntrustedMCP:   s.infra.UntrustedMCP,
 		ContextPercent: ctxPct,
 		PermissionMode: permMode,
+		CostUSD:        cost,
 	}
 	s.mu.Unlock()
 	if planInfo.Mode != "off" {

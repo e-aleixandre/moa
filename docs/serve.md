@@ -15,6 +15,9 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Permission prompts and cancel
 - Plan mode, subagents, MCP
 - Model and thinking reconfiguration per session
+- Per-session cost readout (main run + subagents), matching the TUI
+- Rename (`/rename <title>`) and delete sessions from the overview
+- Unread badges on sessions with activity you haven't seen yet
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input

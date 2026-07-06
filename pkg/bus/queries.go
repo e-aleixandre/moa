@@ -29,6 +29,10 @@ type GetSessionState struct{ SessionID string }
 // Handler returns: int
 type GetContextUsage struct{ SessionID string }
 
+// GetSessionCost returns the accumulated session cost in USD (main run + subagents).
+// Handler returns: float64
+type GetSessionCost struct{ SessionID string }
+
 // GetTasks returns the current task list.
 // Handler returns: []tasks.Task
 type GetTasks struct{ SessionID string }

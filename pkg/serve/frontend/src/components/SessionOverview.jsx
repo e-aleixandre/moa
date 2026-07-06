@@ -1,7 +1,7 @@
 import { useCallback, useRef, useMemo } from 'preact/hooks';
-import { Plus, Sparkles, Archive } from 'lucide-preact';
+import { Plus, Sparkles, Archive, Trash2 } from 'lucide-preact';
 import { setActiveSession } from '../tile-actions.js';
-import { resumeSession } from '../session-actions.js';
+import { resumeSession, deleteSession } from '../session-actions.js';
 import { shortModel } from '../util/format.js';
 
 export function SessionOverview({ state, onSelect, onNewSession }) {
@@ -43,6 +43,13 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
     onSelect();
   }, [onSelect]);
 
+  const handleDelete = useCallback((e, sess) => {
+    e.stopPropagation();
+    const label = sess.title || 'Untitled';
+    if (!window.confirm(`Delete session "${label}"? This cannot be undone.`)) return;
+    deleteSession(sess.id).catch(err => console.error('Delete failed:', err));
+  }, []);
+
   return (
     <div class="session-overview" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div class="overview-header">
@@ -55,17 +62,19 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
         {activeSessions.map(sess => {
           const isActive = state.activeSession === sess.id;
           const needsAttention = sess.state === 'permission' || sess.state === 'error';
+          const unseen = sess.unseen && !isActive;
           const lastMsg = getLastMessage(sess);
 
           return (
             <div
               key={sess.id}
-              class={`overview-card ${isActive ? 'active' : ''} ${needsAttention ? 'attention' : ''}`}
+              class={`overview-card ${isActive ? 'active' : ''} ${needsAttention ? 'attention' : ''} ${unseen ? 'unseen' : ''}`}
               onClick={() => handleSelect(sess.id)}
             >
               <div class="overview-card-header">
                 <span class={`state-dot ${sess.state}`} />
                 <span class="overview-card-title">{sess.title || 'Untitled'}</span>
+                {unseen && <span class="overview-card-unseen" title="Unread activity" />}
               </div>
               <div class="overview-card-preview">
                 {lastMsg || <span class="overview-card-empty">No messages yet</span>}
@@ -74,6 +83,14 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
                 <span class="overview-card-model">
                   <Sparkles />{shortModel(sess.model)}
                 </span>
+                <button
+                  class="overview-card-delete"
+                  title="Delete session"
+                  aria-label="Delete session"
+                  onClick={(e) => handleDelete(e, sess)}
+                >
+                  <Trash2 />
+                </button>
               </div>
             </div>
           );
@@ -100,6 +117,14 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
             >
               <span class="overview-saved-title">{sess.title || 'Untitled'}</span>
               <span class="overview-saved-model">{shortModel(sess.model)}</span>
+              <button
+                class="overview-saved-delete"
+                title="Delete session"
+                aria-label="Delete session"
+                onClick={(e) => handleDelete(e, sess)}
+              >
+                <Trash2 />
+              </button>
             </div>
           ))}
         </div>

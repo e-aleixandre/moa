@@ -128,6 +128,12 @@ type SessionContext struct {
 	// (under runMu), read atomically by the bridge.
 	RunGenAtomic atomic.Uint64
 
+	// sessionCost accumulates the session's USD spend (main run cost from
+	// RunEnded plus each subagent's cost from SubagentEnded). Reset to 0 on
+	// clear / clean-context plan execution / session load. Guarded by costMu.
+	costMu      sync.Mutex
+	sessionCost float64
+
 	// Run context management — used by SendPrompt handler.
 	// Protected by runMu.
 	runMu     sync.Mutex
@@ -138,6 +144,33 @@ type SessionContext struct {
 // GetGate returns the current permission gate (may be nil for yolo mode).
 func (sctx *SessionContext) GetGate() *permission.Gate {
 	return sctx.gate.Load()
+}
+
+// addSessionCost adds delta to the accumulated session cost and returns the new
+// total. Publishing SessionCostUpdated is left to the caller so the event can
+// carry the triggering run's delta.
+func (sctx *SessionContext) addSessionCost(delta float64) float64 {
+	sctx.costMu.Lock()
+	defer sctx.costMu.Unlock()
+	sctx.sessionCost += delta
+	return sctx.sessionCost
+}
+
+// resetSessionCost clears the accumulated session cost and publishes a
+// SessionCostUpdated with a zero total. Called when the conversation context is
+// reset (clear / clean-context plan execution / session load).
+func (sctx *SessionContext) resetSessionCost() {
+	sctx.costMu.Lock()
+	sctx.sessionCost = 0
+	sctx.costMu.Unlock()
+	sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: 0, RunUSD: 0})
+}
+
+// sessionCostTotal returns the current accumulated session cost.
+func (sctx *SessionContext) sessionCostTotal() float64 {
+	sctx.costMu.Lock()
+	defer sctx.costMu.Unlock()
+	return sctx.sessionCost
 }
 
 // SetGate atomically replaces the permission gate.

@@ -19,6 +19,7 @@ Type `/` to open the command palette, or type a command directly:
 | `/undo` | Revert files written/edited by the last agent turn (not bash, MCP, or subagent changes); skips any file changed since then to avoid clobbering it |
 | `/verify` | Run project verification checks |
 | `/prompt <name>` | Insert a prompt template |
+| `/rename <title>` | Rename the current session (marks the title manual so auto-titling won't overwrite it) |
 | `/compact` | Force context compaction |
 | `/voice` | Toggle voice recording |
 | `/settings` | Open settings menu |
@@ -61,6 +62,7 @@ Open with `moa --resume`:
 - `↑/↓` — navigate sessions
 - `Enter` — open selected
 - `Ctrl+N` — new session
+- `Ctrl+D` — delete selected session (press twice to confirm)
 - Type to filter by title/id
 
 ## Permission prompts

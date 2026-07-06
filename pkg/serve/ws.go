@@ -153,6 +153,8 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
+	case bus.SessionCostUpdated:
+		return Event{Type: "session_cost", Data: SessionCostData{CostUSD: e.TotalUSD}}, true
 	case bus.RateLimitUpdated:
 		rl := e.RateLimit
 		return Event{Type: "ratelimit", Data: RateLimitData{
@@ -307,6 +309,7 @@ func buildInitData(sess *ManagedSession) InitData {
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
 	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
+	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 
 	data := InitData{
 		Messages:       msgs,
@@ -315,6 +318,7 @@ func buildInitData(sess *ManagedSession) InitData {
 		PermissionMode: permMode,
 		Tasks:          taskList,
 		PathScope:      pathInfo.Scope,
+		CostUSD:        cost,
 	}
 
 	if len(subagents) > 0 {

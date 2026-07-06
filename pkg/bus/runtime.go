@@ -374,6 +374,7 @@ func (r *SessionRuntime) LoadSession(sess *session.Session) error {
 		return fmt.Errorf("bus: LoadSession LoadState: %w", err)
 	}
 	r.sctx.Tree = tree
+	r.sctx.resetSessionCost()
 	if r.sctx.treeSyncer != nil {
 		r.sctx.treeSyncer.Reset(tree, len(msgs))
 	}

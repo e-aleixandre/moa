@@ -121,6 +121,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.State != nil && sctx.State.Current() == StateError {
 			_ = sctx.State.Transition(StateIdle)
 		}
+		sctx.resetSessionCost()
 		sctx.Bus.Publish(CommandExecuted{
 			SessionID: sctx.SessionID,
 			Command:   "clear",
@@ -285,6 +286,10 @@ func RegisterHandlers(sctx *SessionContext) {
 			return nil, nil
 		}
 		return sctx.TaskStore.Tasks(), nil
+	})
+
+	b.OnQuery(func(q GetSessionCost) (float64, error) {
+		return sctx.sessionCostTotal(), nil
 	})
 
 	b.OnQuery(func(q GetPlanMode) (PlanModeInfo, error) {
@@ -560,6 +565,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			if err := sctx.Agent.Reset(); err != nil {
 				return fmt.Errorf("reset before execution: %w", err)
 			}
+			sctx.resetSessionCost()
 		}
 		// StartExecution() calls onChange → publishes PlanModeChanged.
 		sctx.PlanMode.StartExecution()
@@ -877,6 +883,26 @@ func RegisterHandlers(sctx *SessionContext) {
 	b.Subscribe(func(e RunEnded) { publishContextUpdate() })
 	b.Subscribe(func(e CommandExecuted) { publishContextUpdate() })
 	b.Subscribe(func(e ConfigChanged) { publishContextUpdate() })
+
+	// -------------------------------------------------------------------
+	// SessionCostUpdated reactor — accumulates the session's USD spend from
+	// the main run (RunEnded.Cost) and each subagent (SubagentEnded.CostUSD),
+	// so TUI and web report the same figure from one source of truth.
+	// -------------------------------------------------------------------
+	b.Subscribe(func(e RunEnded) {
+		if e.Cost == 0 {
+			return
+		}
+		total := sctx.addSessionCost(e.Cost)
+		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.Cost})
+	})
+	b.Subscribe(func(e SubagentEnded) {
+		if e.CostUSD == 0 {
+			return
+		}
+		total := sctx.addSessionCost(e.CostUSD)
+		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.CostUSD})
+	})
 
 	// Clear approvals orphaned by an aborted run so no stale modal lingers.
 	// Pass the ended run's generation so a newer run's live approval (from an

@@ -23,6 +23,10 @@ type sessionBrowser struct {
 	previewID  string
 	loadErr    string
 	previewErr string
+	// confirmDelete holds the session ID pending a delete confirmation, or ""
+	// when no delete is in flight. Set by a first delete keypress, cleared by
+	// confirming (enter) or any other navigation/filter key.
+	confirmDelete string
 }
 
 func newSessionBrowser() sessionBrowser {
@@ -41,6 +45,7 @@ func (b *sessionBrowser) Open() {
 	b.previewID = ""
 	b.loadErr = ""
 	b.previewErr = ""
+	b.confirmDelete = ""
 }
 
 func (b *sessionBrowser) Close() {
@@ -55,6 +60,24 @@ func (b *sessionBrowser) SetSummaries(summaries []session.Summary) {
 	b.loadErr = ""
 	b.summaries = summaries
 	b.rebuildMatches()
+}
+
+// RemoveSummary drops a session from the local list after it was deleted on
+// disk, so the browser reflects the change without a full reload.
+func (b *sessionBrowser) RemoveSummary(id string) {
+	b.confirmDelete = ""
+	filtered := b.summaries[:0]
+	for _, sum := range b.summaries {
+		if sum.ID != id {
+			filtered = append(filtered, sum)
+		}
+	}
+	b.summaries = filtered
+	b.rebuildMatches()
+	if b.preview != nil && b.previewID == id {
+		b.preview = nil
+		b.previewID = ""
+	}
 }
 
 func (b *sessionBrowser) SetLoadError(err error) {
@@ -96,6 +119,7 @@ func (b *sessionBrowser) SelectedID() string {
 }
 
 func (b *sessionBrowser) MoveUp() bool {
+	b.confirmDelete = ""
 	if b.cursor == 0 {
 		return false
 	}
@@ -108,6 +132,7 @@ func (b *sessionBrowser) MoveUp() bool {
 }
 
 func (b *sessionBrowser) MoveDown(maxVisible int) bool {
+	b.confirmDelete = ""
 	if b.cursor >= len(b.matches)-1 {
 		return false
 	}
@@ -123,6 +148,7 @@ func (b *sessionBrowser) MoveDown(maxVisible int) bool {
 }
 
 func (b *sessionBrowser) AppendFilter(text string) bool {
+	b.confirmDelete = ""
 	oldID := b.SelectedID()
 	b.filter += text
 	b.rebuildMatches()
@@ -130,6 +156,7 @@ func (b *sessionBrowser) AppendFilter(text string) bool {
 }
 
 func (b *sessionBrowser) BackspaceFilter() bool {
+	b.confirmDelete = ""
 	if b.filter == "" {
 		return false
 	}
@@ -224,7 +251,11 @@ func (b sessionBrowser) View(width, height int) string {
 	lines = append(lines, "")
 	lines = append(lines, b.previewLines(innerWidth, height)...)
 	lines = append(lines, "")
-	lines = append(lines, pickerDimStyle.Render("↑↓ navigate · type to filter · enter open · ctrl+n new · esc exit"))
+	if b.confirmDelete != "" {
+		lines = append(lines, pickerSelectedStyle.Render("Delete this session? ctrl+d again to confirm · any other key to cancel"))
+	} else {
+		lines = append(lines, pickerDimStyle.Render("↑↓ navigate · type to filter · enter open · ctrl+n new · ctrl+d delete · esc exit"))
+	}
 
 	return pickerBorderStyle.Width(innerWidth).Render(strings.Join(lines, "\n"))
 }
@@ -356,5 +387,3 @@ func shortSessionID(id string) string {
 func truncateLine(s string, width int) string {
 	return truncateDisplay(s, width)
 }
-
-

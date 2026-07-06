@@ -798,6 +798,7 @@ func handleListCommands() http.HandlerFunc {
 		"tasks":       {Description: "View/manage tasks", Args: "[done <id> | reset]"},
 		"undo":        {Description: "Undo last file change"},
 		"verify":      {Description: "Run verification checks"},
+		"rename":      {Description: "Rename this session", Args: "<new title>"},
 	}
 
 	// Build the list from commandRegistry to stay in sync.

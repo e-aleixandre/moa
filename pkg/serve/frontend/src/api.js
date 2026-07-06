@@ -13,6 +13,7 @@ import {
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalEnd,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer,
+  handleWsSessionCost,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd,
 } from './ws-handlers.js';
@@ -202,6 +203,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'context_update':
       handleWsContextUpdate(sessionId, evt.data);
+      break;
+    case 'session_cost':
+      handleWsSessionCost(sessionId, evt.data);
       break;
     case 'ratelimit':
       handleWsRateLimit(sessionId, evt.data);

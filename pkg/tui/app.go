@@ -601,6 +601,17 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.activateSession(msg.Session)
 
+	case sessionDeletedMsg:
+		if msg.Err != nil {
+			m.sessionBrowser.previewErr = "delete failed: " + msg.Err.Error()
+			return m, nil
+		}
+		m.sessionBrowser.RemoveSummary(msg.ID)
+		if id := m.sessionBrowser.SelectedID(); id != "" {
+			return m, m.loadSessionPreview(id)
+		}
+		return m, nil
+
 	case sessionSavedMsg:
 		return m, nil
 
@@ -1435,6 +1446,10 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	case bus.ContextUpdated:
 		m.statusBar.UpdateContextSegment(e.Percent)
 
+	case bus.SessionCostUpdated:
+		m.s.sessionCost = e.TotalUSD
+		m.statusBar.UpdateCostSegment(e.TotalUSD)
+
 	// --- Rate limit / overage (per-request, from response headers) ---
 	case bus.RateLimitUpdated:
 		if e.RunGen != m.s.runGen {
@@ -1595,7 +1610,7 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 	m.input.SetEnabled(true)
 	m.refreshContextSegment()
-	m.accumulateCost(msgs)
+	m.accumulateCacheStats(msgs)
 
 	if e.Err != nil {
 		m.s.blocks = append(m.s.blocks, messageBlock{
@@ -1712,13 +1727,11 @@ func (m *appModel) refreshContextSegment() {
 	}
 }
 
-// accumulateCost sums Usage from new assistant messages.
-func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
+// accumulateCacheStats sums cache-read ratio from new assistant messages for
+// the TUI-only cache segment. Session cost itself is tracked centrally in the
+// bus (SessionCostUpdated) so TUI and web report the same figure.
+func (m *appModel) accumulateCacheStats(msgs []core.AgentMessage) {
 	if msgs == nil {
-		return
-	}
-	model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
-	if model.Pricing == nil {
 		return
 	}
 	start := m.s.runStartMsgCount
@@ -1727,12 +1740,10 @@ func (m *appModel) accumulateCost(msgs []core.AgentMessage) {
 	}
 	for _, msg := range msgs[start:] {
 		if msg.Role == "assistant" && msg.Usage != nil {
-			m.s.sessionCost += model.Pricing.Cost(*msg.Usage)
 			m.s.sessionInput += msg.Usage.Input
 			m.s.sessionCacheRead += msg.Usage.CacheRead
 		}
 	}
-	m.statusBar.UpdateCostSegment(m.s.sessionCost)
 	totalInput := m.s.sessionInput + m.s.sessionCacheRead
 	if totalInput > 0 {
 		pct := m.s.sessionCacheRead * 100 / totalInput
