@@ -212,3 +212,30 @@ export function shortModel(model) {
   const parts = model.split('/');
   return parts.length > 1 ? parts.slice(1).join('/') : model;
 }
+
+/** A stable key identifying the project a session belongs to (its cwd). */
+export function projectKey(cwd) {
+  if (!cwd) return '';
+  return cwd.replace(/\/+$/, '');
+}
+
+/** A short, human-friendly project label from a cwd: the last two path
+ *  segments (e.g. "/home/me/dev/moa/main" → "moa/main"). */
+export function projectLabel(cwd) {
+  const p = projectKey(cwd);
+  if (!p) return 'No project';
+  const segs = p.split('/').filter(Boolean);
+  if (segs.length === 0) return '/';
+  return segs.slice(-2).join('/');
+}
+
+/** A compact display of a full path for a session card: collapses the home
+ *  prefix to "~" and keeps the tail readable on narrow screens. */
+export function shortPath(cwd, maxLen = 42) {
+  let p = projectKey(cwd);
+  if (!p) return '';
+  p = p.replace(/^\/home\/[^/]+/, '~').replace(/^\/root/, '~');
+  if (p.length <= maxLen) return p;
+  return '…' + p.slice(-(maxLen - 1));
+}
+

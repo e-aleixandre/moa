@@ -37,6 +37,7 @@ export async function loadSessions() {
         model: wsOwns ? existing.model : info.model,
         thinking: wsOwns ? existing.thinking : (info.thinking || ''),
         cwd: info.cwd,
+        updated: info.updated ? Date.parse(info.updated) : (existing ? existing.updated : 0),
         error: wsOwns ? existing.error : (info.error || null),
         untrustedMcp: info.untrusted_mcp || false,
         messages: existing ? existing.messages : [],

@@ -20,6 +20,7 @@ function persistState(s) {
       tileTree: s.tileTree,
       focusedTile: s.focusedTile,
       soundEnabled: s.soundEnabled,
+      groupByProject: s.groupByProject,
     }));
   } catch (_) { /* ignore */ }
 }
@@ -49,6 +50,9 @@ let state = {
   tileTree: initialTree,
   focusedTile: initialFocused,
   soundEnabled: persisted.soundEnabled || false,
+
+  // Overview: group the session list by project (cwd) when true.
+  groupByProject: persisted.groupByProject || false,
 
   isMobile: false,
 

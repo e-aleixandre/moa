@@ -20,11 +20,33 @@
 .overview-header {
   padding: 20px 16px 8px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .overview-title { font-size: 22px; font-weight: 700; color: var(--text); }
 .overview-hint  { font-size: 11px; color: var(--overlay0); }
+.overview-header-actions { display: flex; align-items: center; gap: 6px; }
+.overview-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--surface0);
+  background: var(--base);
+  color: var(--overlay1);
+  cursor: pointer;
+}
+.overview-group-toggle svg { width: 18px; height: 18px; }
+.overview-group-toggle.on {
+  color: var(--peach);
+  border-color: var(--peach);
+  background: var(--peach-dim);
+}
+.overview-group-toggle:active { transform: scale(0.94); }
 
 .overview-grid {
   display: grid;
@@ -77,6 +99,15 @@
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
+}
+.overview-card-path {
+  font-size: 10px;
+  color: var(--overlay0);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: -2px;
 }
 .overview-card-empty { color: var(--surface2); font-style: italic; }
 .overview-card-footer { display: flex; align-items: center; justify-content: space-between; }
@@ -151,6 +182,22 @@
 }
 .overview-saved-item:active { background: var(--surface0); }
 
+.overview-saved-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.overview-saved-path {
+  font-size: 10px;
+  color: var(--overlay0);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .overview-saved-title {
   flex: 1;
   font-size: 13px;
@@ -180,6 +227,43 @@
 }
 .overview-saved-delete .lucide { width: 14px; height: 14px; }
 .overview-saved-delete:active { color: var(--red); background: var(--surface1); }
+
+/* ─── Grouped-by-project overview ──────────────────────────── */
+
+.overview-groups { padding-bottom: 16px; }
+.overview-project { margin-bottom: 4px; }
+.overview-project-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px 2px;
+  position: sticky;
+  top: 0;
+  background: var(--mantle, var(--base));
+  z-index: 1;
+}
+.overview-project-icon { width: 14px; height: 14px; color: var(--peach); flex-shrink: 0; }
+.overview-project-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.overview-project-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--overlay0);
+  background: var(--surface0);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.overview-project .overview-grid { padding-top: 6px; padding-bottom: 6px; }
+.overview-project .overview-saved { padding-top: 0; padding-bottom: 10px; }
 
 /* ─── Empty state ──────────────────────────────────────────── */
 
