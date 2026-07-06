@@ -233,6 +233,10 @@
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  /* Stop WebKit from hijacking the long-press for Haptic Touch / the callout
+     menu, which fires a pointercancel ~2s in and used to kill the recording. */
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Push-to-talk: when the button acts as a mic (empty input), give it a

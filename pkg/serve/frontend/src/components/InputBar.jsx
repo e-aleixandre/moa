@@ -117,7 +117,7 @@ export function InputBar({ sessionId, session, tileId }) {
     addToast({ title: 'Voice input', detail: msg, type: 'error' });
   }, []);
 
-  const { recording, transcribing, start: startVoice, stop: stopVoice, cancel: cancelVoice, supported: voiceSupported } = useVoice(insertAtCursor, onVoiceError);
+  const { recording, transcribing, start: startVoice, stop: stopVoice, supported: voiceSupported } = useVoice(insertAtCursor, onVoiceError);
 
   // Push-to-talk gesture state. `voiceLocked` means the user slid up while
   // holding to lock recording hands-free (Telegram-style); then a tap stops.
@@ -206,6 +206,28 @@ export function InputBar({ sessionId, session, tileId }) {
     handleSendRef.current(); // idle tap → send.
   }, [stopVoice]);
 
+  // handleGestureCancel deals with a pointercancel. On iOS Safari, the system
+  // fires pointercancel while the user is STILL holding — it hijacks the
+  // long-press for Haptic Touch / the callout menu, typically ~1-2s in. Treating
+  // that as "abort and discard" was killing the MediaRecorder (and the mic
+  // track) mid-recording. Instead, if recording already started, promote the
+  // gesture to locked (hands-free) mode and keep the audio flowing; a later tap
+  // stops and transcribes. Only a cancel *before* recording began is discarded.
+  const handleGestureCancel = useCallback((e) => {
+    pointerDrivenRef.current = false;
+    const h = endHold(e);
+    if (h && h.longPress) {
+      if (!h.locked) setVoiceLocked(true); // visual; recorder keeps running
+      return;
+    }
+    if (h && h.longPress === false) {
+      // Cancelled before HOLD_MS elapsed: nothing was recorded, nothing to do.
+      return;
+    }
+    // No active hold: a stray cancel (e.g. while locked-recording). Leave the
+    // recording alone — the user stops it with a tap.
+  }, [endHold]);
+
   const onSendPointerDown = useCallback((e) => {
     if (e.button != null && e.button !== 0) return; // primary/touch only
     if (!voiceSupported) return;      // no mic → send-only (onClick)
@@ -237,7 +259,7 @@ export function InputBar({ sessionId, session, tileId }) {
     // the button, still finish the gesture from the window. No click is
     // synthesized in that path, so clear the suppression flag ourselves.
     h.onWinUp = () => { pointerDrivenRef.current = false; const hh = endHold(); finishHold(hh); };
-    h.onWinCancel = () => { pointerDrivenRef.current = false; const hh = endHold(); if (hh && hh.longPress && !hh.locked) cancelVoice(); };
+    h.onWinCancel = (ev) => handleGestureCancel(ev);
     window.addEventListener('pointerup', h.onWinUp);
     window.addEventListener('pointercancel', h.onWinCancel);
 
@@ -246,7 +268,7 @@ export function InputBar({ sessionId, session, tileId }) {
       h.longPress = true;
       startVoice();
     }, HOLD_MS);
-  }, [voiceSupported, startVoice, stopVoice, endHold, finishHold, cancelVoice]);
+  }, [voiceSupported, startVoice, stopVoice, endHold, finishHold, handleGestureCancel]);
 
   const onSendPointerMove = useCallback((e) => {
     const h = holdRef.current;
@@ -265,9 +287,8 @@ export function InputBar({ sessionId, session, tileId }) {
   }, [endHold, finishHold]);
 
   const onSendPointerCancel = useCallback((e) => {
-    const h = endHold(e);
-    if (h && h.longPress && !h.locked) cancelVoice();
-  }, [endHold, cancelVoice]);
+    handleGestureCancel(e);
+  }, [handleGestureCancel]);
 
   // Tear down any dangling gesture on unmount.
   useEffect(() => () => { endHold(); }, [endHold]);
@@ -1030,7 +1051,13 @@ export function InputBar({ sessionId, session, tileId }) {
               : busy ? 'Steer' : 'Send';
 
             const gestureProps = gesture ? {
-              onPointerDown: (e) => { pointerDrivenRef.current = true; onSendPointerDown(e); },
+              onPointerDown: (e) => {
+                // Suppress WebKit's long-press callout/selection before it can
+                // start (it later fires pointercancel and kills recording).
+                if (e.pointerType === 'touch' && e.cancelable) e.preventDefault();
+                pointerDrivenRef.current = true;
+                onSendPointerDown(e);
+              },
               onPointerMove: onSendPointerMove,
               onPointerUp: onSendPointerUp,
               onPointerCancel: onSendPointerCancel,
