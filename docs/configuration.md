@@ -73,6 +73,7 @@ CLI flags override both at runtime. Project config extends global config; some f
 | `auto_verify` | bool | `false` | Run verification checks automatically after changes |
 | `brave_api_key` | string | | Enables the `web_search` tool |
 | `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
+| `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids Whisper mis-detecting short clips. Use `"auto"` to let the model detect |
 
 ### Models
 

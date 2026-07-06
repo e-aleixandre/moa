@@ -34,6 +34,7 @@ type voiceResultMsg struct {
 type voiceRecorder struct {
 	state       voiceState
 	transcriber core.Transcriber
+	language    string             // ISO-639-1 hint passed to the transcriber ("" = auto)
 	cancel      context.CancelFunc // cancels the recording process
 	tmpFile     string             // path to temp audio file
 	done        chan struct{}      // closed when the recorder process has exited (WAV finalized)
@@ -152,6 +153,7 @@ func (v *voiceRecorder) stopAndTranscribe() tea.Cmd {
 	v.state = voiceTranscribing
 	path := v.tmpFile
 	transcriber := v.transcriber
+	language := v.language
 	done := v.done
 
 	return func() tea.Msg {
@@ -182,7 +184,7 @@ func (v *voiceRecorder) stopAndTranscribe() tea.Cmd {
 			return voiceResultMsg{Err: fmt.Errorf("recording too short")}
 		}
 
-		text, err := transcriber.Transcribe(context.Background(), f, "recording.wav")
+		text, err := transcriber.Transcribe(context.Background(), f, "recording.wav", core.TranscribeOptions{Language: language})
 		if err != nil {
 			return voiceResultMsg{Err: err}
 		}

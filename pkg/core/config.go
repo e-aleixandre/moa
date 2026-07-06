@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -84,6 +85,7 @@ type MoaConfig struct {
 	AutoVerify             *bool                `json:"auto_verify,omitempty"`                   // nil = false (disabled by default)
 	PersistentShell        *bool                `json:"persistent_shell,omitempty"`              // nil = true (enabled by default)
 	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
+	STTLanguage            string               `json:"stt_language,omitempty"`                  // Speech-to-text language as ISO-639-1 (e.g. "es", "en"). Empty = "en"; "auto" lets the model detect.
 	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`            // Max turns per subagent run. 0 = use package default.
 	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"`     // Max subagent run duration as Go duration string. Empty = use package default.
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
@@ -121,6 +123,40 @@ func GetCacheTTL(cfg MoaConfig) string {
 		return "1h"
 	}
 	return ""
+}
+
+// CacheTTLDuration maps the configured cache retention to a concrete window.
+// Anthropic's default ephemeral cache lives 5 minutes; the extended window
+// ("1h") lives an hour. Each request refreshes the timer, so the cache stays
+// warm until the last run + this duration.
+func CacheTTLDuration(cfg MoaConfig) time.Duration {
+	if GetCacheTTL(cfg) == "1h" {
+		return time.Hour
+	}
+	return 5 * time.Minute
+}
+
+// GetSTTLanguage returns the ISO-639-1 language hint for speech-to-text.
+// Default is "en" (English) when unset — a safe international default that also
+// avoids Whisper mis-detecting short/ambiguous clips. Set "stt_language" in
+// config (e.g. "es") to override; "auto" (any case) yields "" so the model
+// auto-detects.
+//
+// The value is normalized to a lowercase two-letter code. Anything that isn't a
+// plausible ISO-639-1 code (wrong length, non-letters) falls back to "en" so a
+// typo can't turn every transcription into an HTTP 400 from the provider.
+func GetSTTLanguage(cfg MoaConfig) string {
+	lang := strings.ToLower(strings.TrimSpace(cfg.STTLanguage))
+	if lang == "" {
+		return "en"
+	}
+	if lang == "auto" {
+		return ""
+	}
+	if len(lang) != 2 || lang[0] < 'a' || lang[0] > 'z' || lang[1] < 'a' || lang[1] > 'z' {
+		return "en"
+	}
+	return lang
 }
 
 // GetMaxRunDuration parses MaxRunDurationStr into a time.Duration.
@@ -253,6 +289,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		CodeReviewModel:    mergeScalar(base.CodeReviewModel, override.CodeReviewModel),
 		CodeReviewThinking: mergeScalar(base.CodeReviewThinking, override.CodeReviewThinking),
 		CacheTTL:           mergeScalar(base.CacheTTL, override.CacheTTL),
+		STTLanguage:        mergeScalar(base.STTLanguage, override.STTLanguage),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {

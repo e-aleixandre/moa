@@ -5,6 +5,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 // mockTranscriber is a test double for core.Transcriber.
@@ -13,7 +15,7 @@ type mockTranscriber struct {
 	err  error
 }
 
-func (m *mockTranscriber) Transcribe(_ context.Context, _ io.Reader, _ string) (string, error) {
+func (m *mockTranscriber) Transcribe(_ context.Context, _ io.Reader, _ string, _ core.TranscribeOptions) (string, error) {
 	return m.text, m.err
 }
 

@@ -637,3 +637,38 @@ func TestMergeConfigs_PersistentShell_NilFallsThrough(t *testing.T) {
 		t.Error("global false should persist when project has no override")
 	}
 }
+
+func TestGetSTTLanguage(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty defaults to english", "", "en"},
+		{"explicit spanish", "es", "es"},
+		{"explicit english", "en", "en"},
+		{"auto lowercases to detect", "auto", ""},
+		{"AUTO any case", "AUTO", ""},
+		{"trims whitespace", "  es  ", "es"},
+		{"uppercase normalized", "ES", "es"},
+		{"invalid too long falls back", "spanish", "en"},
+		{"invalid non-letters falls back", "e5", "en"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := GetSTTLanguage(MoaConfig{STTLanguage: c.in})
+			if got != c.want {
+				t.Errorf("GetSTTLanguage(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestMergeConfigs_STTLanguage_ProjectOverride(t *testing.T) {
+	base := MoaConfig{STTLanguage: "es"}
+	project := MoaConfig{STTLanguage: "en"}
+	merged := mergeConfigs(base, project)
+	if got := GetSTTLanguage(merged); got != "en" {
+		t.Errorf("project override: got %q, want en", got)
+	}
+}

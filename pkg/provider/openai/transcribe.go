@@ -19,7 +19,7 @@ var _ core.Transcriber = (*OpenAI)(nil)
 // Transcribe sends audio to the OpenAI Whisper API and returns the transcribed text.
 // filename should include the extension (e.g. "audio.webm") so the API can detect
 // the format. Supported formats: mp3, mp4, mpeg, mpga, m4a, wav, webm, ogg.
-func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename string) (string, error) {
+func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename string, opts core.TranscribeOptions) (string, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 
@@ -41,6 +41,18 @@ func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename strin
 		if err := mw.WriteField("response_format", "json"); err != nil {
 			pw.CloseWithError(err)
 			return
+		}
+		if opts.Language != "" {
+			if err := mw.WriteField("language", opts.Language); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+		}
+		if opts.Prompt != "" {
+			if err := mw.WriteField("prompt", opts.Prompt); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
 		}
 		pw.CloseWithError(mw.Close())
 	}()
