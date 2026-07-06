@@ -100,6 +100,7 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.sessionCacheRead = 0
 		m.statusBar.UpdateCostSegment(0)
 		m.statusBar.UpdateCacheSegment(0)
+		m.clearCacheCold()
 		m.s.expanded = false
 		m.updateViewport()
 		return m, nil
@@ -872,6 +873,7 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.sessionCacheRead = 0
 	m.statusBar.UpdateCostSegment(0)
 	m.statusBar.UpdateCacheSegment(0)
+	m.clearCacheCold()
 
 	// Restore metadata via bus commands.
 	if sess != nil && sess.Metadata != nil {

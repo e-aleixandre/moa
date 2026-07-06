@@ -18,6 +18,11 @@ type agentSendErrorMsg struct {
 // renderTickMsg triggers a stream cache refresh during streaming (~60fps).
 type renderTickMsg struct{}
 
+// cacheColdMsg fires when the prompt cache is expected to have gone cold (last
+// run + cache TTL). gen guards against stale timers: a new run bumps the
+// session's cacheColdGen, so a timer armed by an earlier run is ignored.
+type cacheColdMsg struct{ gen uint64 }
+
 // clearThinkingStatusMsg clears the ephemeral Ctrl+T toggle feedback.
 type clearThinkingStatusMsg struct{}
 

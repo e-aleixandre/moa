@@ -111,6 +111,7 @@ func (m appModel) executePlanAction(action planAction) (tea.Model, tea.Cmd) {
 		m.s.sessionCacheRead = 0
 		m.statusBar.UpdateCostSegment(0)
 		m.statusBar.UpdateCacheSegment(0)
+		m.clearCacheCold()
 		info, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type: "status", Raw: "▶ Executing plan (clean context)",

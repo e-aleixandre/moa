@@ -49,6 +49,8 @@ func extractToolNote(resultText string, rejected bool) string {
 // prepareRun sets up the common run state.
 func (m *appModel) prepareRun(label string) {
 	m.s.running = true
+	// A new request re-warms the prompt cache: drop any pending/shown cold hint.
+	m.clearCacheCold()
 	msgs := m.currentMessages()
 	m.s.runStartMsgCount = len(msgs)
 	m.s.runStartBlockIdx = len(m.s.blocks)

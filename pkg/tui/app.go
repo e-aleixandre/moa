@@ -58,6 +58,9 @@ type state struct {
 	sessionCost        float64                        // accumulated USD cost this session
 	sessionInput       int                            // accumulated input tokens (for cache %)
 	sessionCacheRead   int                            // accumulated cache_read tokens
+	cacheTTL           time.Duration                  // prompt-cache retention window (Anthropic); 0 = unknown
+	cacheColdGen       uint64                         // invalidates stale cache-cold timers across runs/clears
+	cacheCold          bool                           // true once the prompt cache has gone cold since the last run
 	runStartMsgCount   int                            // message count at start of current run (for delta cost)
 	asyncSubagents     int                            // running async subagent count (for status display)
 	transcript         bool                           // true when in transcript mode (Ctrl+O)
@@ -174,6 +177,8 @@ type Config struct {
 	OnPinnedModelsChange  func([]string) error                    // called when the user changes pinned models
 	PromptTemplates       []promptpkg.Template                    // available prompt templates
 	Transcriber           core.Transcriber                        // speech-to-text for voice input (nil = disabled)
+	STTLanguage           string                                  // ISO-639-1 language hint for STT ("" = auto-detect)
+	CacheTTL              time.Duration                           // prompt-cache retention (Anthropic); drives the "cache cold" hint
 	UsagePoller           *usage.Poller                           // plan usage poller (nil = usage tracking disabled)
 	ProviderFactory       func(core.Model) (core.Provider, error) // one-shot LLM calls (auto-titling); nil disables
 }
@@ -219,7 +224,7 @@ func New(ctx context.Context, cfg Config) appModel {
 	vp.KeyMap = viewport.KeyMap{}
 
 	m := appModel{
-		s:                    &state{showThinking: true},
+		s:                    &state{showThinking: true, cacheTTL: cfg.CacheTTL},
 		runtime:              cfg.Runtime,
 		eventCh:              eventCh,
 		quit:                 quit,
@@ -240,7 +245,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		promptTemplates:      cfg.PromptTemplates,
 		usagePoller:          cfg.UsagePoller,
-		voice:                voiceRecorder{transcriber: cfg.Transcriber},
+		voice:                voiceRecorder{transcriber: cfg.Transcriber, language: cfg.STTLanguage},
 	}
 	m.filePicker.SetWorkDir(cfg.CWD)
 
@@ -481,6 +486,19 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case clearScreenDoneMsg:
+		return m, nil
+
+	case cacheColdMsg:
+		// Ignore timers superseded by a newer run/clear, and re-check the model:
+		// the user may have switched to a non-Anthropic model after the timer was
+		// armed, in which case there's no TTL cache to warn about.
+		if msg.gen == m.s.cacheColdGen && !m.s.running {
+			model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+			if model.Provider == "anthropic" {
+				m.s.cacheCold = true
+				m.statusBar.UpdateCacheColdSegment(true)
+			}
+		}
 		return m, nil
 
 	case clearThinkingStatusMsg:
@@ -1642,8 +1660,22 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 	m.refreshTaskDisplay()
 	m.updateViewport()
 
+	// Arm the "cache cold" hint (Anthropic only). Only successful runs are
+	// guaranteed to have written the cache; a new run re-warms it and re-arms
+	// via clearCacheCold + this path.
+	var coldCmd tea.Cmd
+	if e.Err == nil {
+		coldCmd = m.armCacheColdTimer()
+	}
+
 	if cmd := m.maybeAutoTitle(msgs, e.Err); cmd != nil {
+		if coldCmd != nil {
+			return []tea.Cmd{cmd, coldCmd}
+		}
 		return []tea.Cmd{cmd}
+	}
+	if coldCmd != nil {
+		return []tea.Cmd{coldCmd}
 	}
 	return nil
 }
@@ -1748,6 +1780,36 @@ func (m *appModel) accumulateCacheStats(msgs []core.AgentMessage) {
 	if totalInput > 0 {
 		pct := m.s.sessionCacheRead * 100 / totalInput
 		m.statusBar.UpdateCacheSegment(pct)
+	}
+}
+
+// armCacheColdTimer schedules the "cache cold" hint for after the prompt cache
+// TTL elapses. Only Anthropic models use a refreshable TTL cache, so it's a
+// no-op otherwise. Each call bumps cacheColdGen so a still-pending timer from an
+// earlier run can't fire late; the returned Cmd is nil when there's nothing to
+// arm (unknown TTL or non-Anthropic model).
+func (m *appModel) armCacheColdTimer() tea.Cmd {
+	m.s.cacheColdGen++
+	m.s.cacheCold = false
+	if m.s.cacheTTL <= 0 {
+		return nil
+	}
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+	if model.Provider != "anthropic" {
+		return nil
+	}
+	gen := m.s.cacheColdGen
+	ttl := m.s.cacheTTL
+	return tea.Tick(ttl, func(time.Time) tea.Msg { return cacheColdMsg{gen: gen} })
+}
+
+// clearCacheCold cancels any pending cold hint and removes the cold marker,
+// used when a new run warms the cache or the session context is reset.
+func (m *appModel) clearCacheCold() {
+	m.s.cacheColdGen++
+	if m.s.cacheCold {
+		m.s.cacheCold = false
+		m.statusBar.Remove(SegmentCacheCold)
 	}
 }
 

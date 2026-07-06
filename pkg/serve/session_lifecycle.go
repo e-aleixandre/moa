@@ -302,6 +302,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		CWD:        cwd,
 		Created:    time.Now(),
 		Updated:    time.Now(),
+		cacheTTL:   core.CacheTTLDuration(m.moaCfg),
 		runtime:    rt,
 		subagents:  bs.Subagents,
 		pathPolicy: bs.PathPolicy,
@@ -327,6 +328,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// respective feature is unavailable).
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
+	m.subscribeCacheClock(sess)
 
 	m.mu.Lock()
 	m.sessions[sess.ID] = sess

@@ -152,6 +152,7 @@ const (
 	SegmentTasks       = "tasks"
 	SegmentCost        = "cost"
 	SegmentCache       = "cache"
+	SegmentCacheCold   = "cache_cold" // prompt cache has gone cold since last run
 	SegmentContext     = "context"
 	SegmentUsage       = "usage"       // plan quota (5h + weekly windows)
 	SegmentUsageExtra  = "usage_extra" // pay-as-you-go spend alert
@@ -171,6 +172,7 @@ const (
 	PriorityOverage     = 34 // right after extra spend: "you're on extra right now"
 	PriorityCost        = 80
 	PriorityCache       = 85
+	PriorityCacheCold   = 86 // right after the cache-hit meter it replaces
 	PriorityUsage       = 87 // grouped with the other meters
 	PriorityContext     = 90 // rightmost of the built-ins
 )
@@ -269,6 +271,22 @@ func (sl *StatusLine) UpdateCacheSegment(pct int) {
 	}
 	text := statusLineKeyStyle.Render("cache ") + statusLineValueStyle.Render(fmt.Sprintf("%d%%", pct))
 	sl.Set(SegmentCache, text, PriorityCache)
+}
+
+// UpdateCacheColdSegment shows a hint that the prompt cache has gone cold, so
+// the next message pays a fresh cache-write. When shown it replaces the normal
+// cache-hit meter (they share the same slot conceptually); the next run's
+// accumulateCacheStats repopulates the hit meter. Uses the "medium" warning
+// color.
+func (sl *StatusLine) UpdateCacheColdSegment(show bool) {
+	if !show {
+		sl.Remove(SegmentCacheCold)
+		return
+	}
+	// Drop the hit-rate meter so we don't render "cache 83% | cache cold".
+	sl.Remove(SegmentCache)
+	text := statusLineKeyStyle.Render("cache ") + statusLineContextMedStyle.Render("cold")
+	sl.Set(SegmentCacheCold, text, PriorityCacheCold)
 }
 
 // UpdateTasksSegment sets the task progress segment.

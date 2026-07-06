@@ -54,6 +54,14 @@ type ManagedSession struct {
 	Title       string
 	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
 	Updated     time.Time
+	// lastRunAt is when the most recent run finished. For Anthropic models the
+	// prompt cache is refreshed on every request, so it stays warm until
+	// lastRunAt + cacheTTL; the UI uses this to warn when writing would incur a
+	// fresh cache-write cost. Zero means "no run yet".
+	lastRunAt time.Time
+	// cacheTTL is the prompt-cache retention window (5m default, or 1h when
+	// configured). Immutable after creation; read alongside lastRunAt.
+	cacheTTL time.Duration
 
 	// Bus runtime — owns all session state.
 	runtime *bus.SessionRuntime
@@ -118,6 +126,11 @@ type SessionInfo struct {
 	ContextPercent int          `json:"context_percent"` // 0-100, -1 if unknown
 	PermissionMode string       `json:"permission_mode"` // "yolo", "ask", "auto"
 	CostUSD        float64      `json:"cost_usd"`        // accumulated session spend (main run + subagents)
+	// CacheExpiresAt is when the Anthropic prompt cache for this session goes
+	// cold (last run + cache TTL). Zero/omitted when not applicable (no run yet,
+	// or a non-Anthropic model that doesn't use TTL-based prompt caching). The
+	// UI warns once this time has passed that a new message pays a cache write.
+	CacheExpiresAt time.Time `json:"cache_expires_at,omitzero"`
 }
 
 const (
@@ -177,6 +190,8 @@ func (s *ManagedSession) info() SessionInfo {
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 
 	s.mu.Lock()
+	lastRun := s.lastRunAt
+	cacheTTL := s.cacheTTL
 	info := SessionInfo{
 		ID:             s.ID,
 		Title:          s.Title,
@@ -193,6 +208,11 @@ func (s *ManagedSession) info() SessionInfo {
 		CostUSD:        cost,
 	}
 	s.mu.Unlock()
+	// Prompt caching with a refreshable TTL is Anthropic-specific; only surface
+	// an expiry for those models and only once a run has warmed the cache.
+	if !lastRun.IsZero() && cacheTTL > 0 && model.Provider == "anthropic" {
+		info.CacheExpiresAt = lastRun.Add(cacheTTL)
+	}
 	if planInfo.Mode != "off" {
 		info.PlanMode = planInfo.Mode
 		info.PlanFile = planInfo.PlanFile

@@ -11,6 +11,17 @@ import { allSessionIds, clearSession } from './tileTree.js';
 
 let pollTimer = null;
 
+// cacheExpiresAtMs parses the server's cache_expires_at into an epoch-ms number,
+// returning 0 for absent/unparseable/non-positive values. The backend omits the
+// field when not applicable (omitzero), but a defensive guard keeps a stray Go
+// zero-time ("0001-01-01…", which parses to a negative number) from being
+// treated as a real deadline and spinning up a pointless UI timer.
+function cacheExpiresAtMs(iso) {
+  if (!iso) return 0;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
 export async function loadSessions() {
   try {
     const list = await api('GET', '/api/sessions');
@@ -38,6 +49,7 @@ export async function loadSessions() {
         thinking: wsOwns ? existing.thinking : (info.thinking || ''),
         cwd: info.cwd,
         updated: info.updated ? Date.parse(info.updated) : (existing ? existing.updated : 0),
+        cacheExpiresAt: cacheExpiresAtMs(info.cache_expires_at),
         error: wsOwns ? existing.error : (info.error || null),
         untrustedMcp: info.untrusted_mcp || false,
         messages: existing ? existing.messages : [],

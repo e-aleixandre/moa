@@ -807,6 +807,20 @@ export function InputBar({ sessionId, session, tileId }) {
 
   const permissionMode = session?.permissionMode || 'yolo';
 
+  // Cache-expiry warning: the prompt cache goes cold `cacheExpiresAt` ms after
+  // the last run. We tick a clock while idle so the warning appears on its own
+  // once the cache has expired (writing then pays a fresh cache-write). Only
+  // relevant when the backend reported an expiry (Anthropic models).
+  const cacheExpiresAt = session?.cacheExpiresAt || 0;
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!cacheExpiresAt || busy) return;
+    setNowTick(Date.now());
+    const t = setInterval(() => setNowTick(Date.now()), 15000);
+    return () => clearInterval(t);
+  }, [cacheExpiresAt, busy]);
+  const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
+
   return (
     <div class={`input-bar ${busy ? 'busy' : ''} ${permissionActive ? 'permission-active' : ''}`}>
       {permissionActive ? (
@@ -880,6 +894,12 @@ export function InputBar({ sessionId, session, tileId }) {
         </div>
       ) : (
         <>
+          {cacheExpired && !subagentMode && (
+            <div class="input-cache-warn" title="El caché de prompt de esta conversación ha caducado. El siguiente mensaje se cobra como escritura de caché (más caro).">
+              <span class="input-cache-dot" />
+              Caché caducada · el próximo mensaje paga escritura
+            </div>
+          )}
           {(busy || session?.autoVerifying || session?.compacting) && activityLabel && (
             <div class="input-activity">
               <Loader2 class="input-activity-spinner" />
