@@ -770,7 +770,11 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 		opts := core.TranscribeOptions{Language: core.GetSTTLanguage(mgr.moaCfg)}
 		text, err := mgr.transcriber.Transcribe(r.Context(), file, header.Filename, opts)
 		if err != nil {
-			slog.Warn("transcription failed", "filename", header.Filename, "size", header.Size, "error", err)
+			slog.Warn("transcription failed",
+				"filename", header.Filename,
+				"size", header.Size,
+				"content_type", header.Header.Get("Content-Type"),
+				"error", err)
 			http.Error(w, "transcription failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}

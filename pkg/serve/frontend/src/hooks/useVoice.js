@@ -91,12 +91,18 @@ export function useVoice(onTranscript, onError) {
       return;
     }
 
-    // Prefer webm/opus, fall back to whatever the browser supports.
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : '';
+    // Prefer webm/opus (Chrome/Firefox/Android). iOS Safari doesn't support
+    // webm and records mp4/aac instead, so fall through to an explicit mp4
+    // request when available — asking for a concrete type keeps
+    // recorder.mimeType populated and our extension honest.
+    const preferredTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/ogg;codecs=opus',
+    ];
+    const mimeType = preferredTypes.find(t => MediaRecorder.isTypeSupported(t)) || '';
 
     let recorder;
     try {
@@ -113,6 +119,12 @@ export function useVoice(onTranscript, onError) {
     const chunks = [];
     const startedAt = Date.now();
     recorder._discard = false;
+    // The requested mimeType is our most reliable signal for the container:
+    // recorder.mimeType can come back empty on some browsers (notably iOS
+    // Safari), which previously made us mislabel an mp4 recording as .webm and
+    // earned an "invalid file format" 400 from Whisper. Capture it now and
+    // reconcile with recorder.mimeType (once it's populated) below.
+    const requestedMime = mimeType;
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
@@ -131,10 +143,16 @@ export function useVoice(onTranscript, onError) {
         return;
       }
 
-      const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-      const ext = (recorder.mimeType || '').includes('webm') ? 'webm'
-        : (recorder.mimeType || '').includes('mp4') ? 'mp4'
-        : (recorder.mimeType || '').includes('ogg') ? 'ogg'
+      const blob = new Blob(chunks, { type: recorder.mimeType || requestedMime || 'audio/webm' });
+      // Pick the container from the most trustworthy source available. Prefer
+      // the blob's own type (set from the chunks), then the recorder's reported
+      // mimeType, then what we asked for. iOS Safari records mp4/aac even though
+      // it ignores our webm request, so guessing "webm" blindly gets a 400.
+      const typeHint = (blob.type || recorder.mimeType || requestedMime || '').toLowerCase();
+      const ext = typeHint.includes('webm') ? 'webm'
+        : typeHint.includes('ogg') ? 'ogg'
+        : (typeHint.includes('mp4') || typeHint.includes('m4a') || typeHint.includes('aac') || typeHint.includes('mpeg')) ? 'mp4'
+        : typeHint.includes('wav') ? 'wav'
         : 'webm';
 
       transcribingRef.current = true;
