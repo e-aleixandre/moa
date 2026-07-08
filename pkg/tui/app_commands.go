@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
@@ -411,6 +412,22 @@ func (m appModel) handleSessionBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.sessionBrowser.confirmDelete = sel.ID
 		return m, nil
+	case tea.KeyCtrlV:
+		m.sessionBrowser.ToggleArchived()
+		if id := m.sessionBrowser.SelectedID(); id != "" {
+			return m, m.loadSessionPreview(id)
+		}
+		return m, nil
+	case tea.KeyCtrlA:
+		sel := m.sessionBrowser.Selected()
+		if sel == nil {
+			return m, nil
+		}
+		if m.session != nil && m.session.ID == sel.ID {
+			m.sessionBrowser.previewErr = "cannot archive the currently open session"
+			return m, nil
+		}
+		return m, m.setSessionArchived(sel.ID, !sel.Archived)
 	case tea.KeyUp:
 		if m.sessionBrowser.MoveUp() {
 			return m, m.loadSessionPreview(m.sessionBrowser.SelectedID())
@@ -812,6 +829,16 @@ func (m appModel) loadSessionByID(id string) tea.Cmd {
 			return sessionOpenLoadedMsg{}
 		}
 		sess, err := store.Load(id)
+		// Opening an archived session implicitly unarchives it: reopening is
+		// explicit intent to work on it again (parity with the web server's
+		// ResumeSession). Persist the unarchive so the runtime's persister,
+		// which will rebind to this session, doesn't re-save it as archived.
+		if err == nil && sess != nil && sess.Archived {
+			if aerr := store.SetArchived(id, false); aerr != nil {
+				slog.Warn("failed to unarchive session on open", "id", id, "error", aerr)
+			}
+			sess.Archived = false
+		}
 		return sessionOpenLoadedMsg{Session: sess, Err: err}
 	}
 }
@@ -830,6 +857,22 @@ func (m appModel) deleteSessionByID(id string) tea.Cmd {
 		return sessionDeletedMsg{ID: id, Err: err}
 	}
 }
+
+// setSessionArchived toggles the archived flag on a saved session (off the UI goroutine).
+func (m appModel) setSessionArchived(id string, archived bool) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	store := m.sessionStore
+	return func() tea.Msg {
+		if store == nil {
+			return sessionArchivedMsg{ID: id, Archived: archived}
+		}
+		err := store.SetArchived(id, archived)
+		return sessionArchivedMsg{ID: id, Archived: archived, Err: err}
+	}
+}
+
 
 func (m appModel) newSession() *session.Session {
 	if m.sessionStore == nil {

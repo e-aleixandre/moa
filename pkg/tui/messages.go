@@ -63,6 +63,13 @@ type sessionDeletedMsg struct {
 	Err error
 }
 
+// sessionArchivedMsg reports the outcome of (un)archiving a session from the browser.
+type sessionArchivedMsg struct {
+	ID       string
+	Archived bool
+	Err      error
+}
+
 // clipboardImageMsg carries an image read from the clipboard.
 type clipboardImageMsg struct {
 	Data     []byte // raw PNG bytes

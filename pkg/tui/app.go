@@ -630,6 +630,17 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sessionArchivedMsg:
+		if msg.Err != nil {
+			m.sessionBrowser.previewErr = "archive failed: " + msg.Err.Error()
+			return m, nil
+		}
+		m.sessionBrowser.SetArchivedLocal(msg.ID, msg.Archived)
+		if id := m.sessionBrowser.SelectedID(); id != "" {
+			return m, m.loadSessionPreview(id)
+		}
+		return m, nil
+
 	case sessionSavedMsg:
 		return m, nil
 
@@ -942,8 +953,15 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		if m.cmdPalette.active {
 			selected := m.cmdPalette.Selected()
+			flagMode := m.cmdPalette.FlagMode()
 			m.cmdPalette.Close()
 			if selected != "" {
+				if flagMode {
+					newValue := replaceLastToken(m.input.textarea.Value(), selected+" ")
+					m.input.textarea.SetValue(newValue)
+					m.input.textarea.CursorEnd()
+					return m, m.forceRepaint()
+				}
 				hasArgs := false
 				for _, cmd := range allCommands {
 					if cmd.Name == selected && cmd.Args != "" {
@@ -1003,11 +1021,18 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.cmdPalette.active {
 			selected := m.cmdPalette.Selected()
+			flagMode := m.cmdPalette.FlagMode()
 			m.cmdPalette.Close()
 			if selected != "" {
-				m.input.textarea.Reset()
-				m.input.textarea.SetValue("/" + selected + " ")
-				m.input.textarea.CursorEnd()
+				if flagMode {
+					newValue := replaceLastToken(m.input.textarea.Value(), selected+" ")
+					m.input.textarea.SetValue(newValue)
+					m.input.textarea.CursorEnd()
+				} else {
+					m.input.textarea.Reset()
+					m.input.textarea.SetValue("/" + selected + " ")
+					m.input.textarea.CursorEnd()
+				}
 			}
 			return m, m.forceRepaint()
 		}

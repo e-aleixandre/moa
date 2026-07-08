@@ -70,6 +70,11 @@ func TestParseCommand(t *testing.T) {
 		{"not a command", "", false},
 		{"/etc/passwd", "", false},
 		{"", "", false},
+		// Em/en-dash autocorrect normalization (parity with web InputBar).
+		{"/goal ship it \u2014max 3", "goal ship it --max 3", true},
+		{"/goal ship it \u2013stalled 5", "goal ship it --stalled 5", true},
+		// A dash inside prose (not starting a token) is left untouched.
+		{"/goal fix the foo\u2014bar issue", "goal fix the foo\u2014bar issue", true},
 	}
 
 	for _, tt := range tests {

@@ -247,6 +247,12 @@ func ParseCommand(text string) (string, bool) {
 	if !strings.HasPrefix(text, "/") {
 		return "", false
 	}
+	// Some terminals/keyboards autocorrect a typed "--" into an em/en-dash
+	// ("—"/"–"), which breaks flag parsing (e.g. /goal … --max 3). Normalize a
+	// dash that starts a token (preceded by whitespace, followed by a letter)
+	// back into "--", matching the web InputBar. A real dash inside prose
+	// (word—word) is left untouched. Kept in sync with InputBar.jsx.
+	text = normalizeDashFlags(text)
 	trimmed := strings.TrimSpace(text[1:]) // strip leading "/"
 	fields := strings.Fields(trimmed)
 	if len(fields) == 0 {
@@ -256,4 +262,26 @@ func ParseCommand(text string) (string, bool) {
 		return trimmed, true
 	}
 	return "", false
+}
+
+// normalizeDashFlags rewrites an em/en-dash that begins a token back into "--".
+func normalizeDashFlags(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if (r == '\u2013' || r == '\u2014') &&
+			(i == 0 || runes[i-1] == ' ' || runes[i-1] == '\t') &&
+			i+1 < len(runes) && isASCIILetter(runes[i+1]) {
+			b.WriteString("--")
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func isASCIILetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }

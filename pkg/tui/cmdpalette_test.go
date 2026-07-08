@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ealeixandre/moa/pkg/goal"
+)
 
 func TestCmdPalette_ActivatesOnSlash(t *testing.T) {
 	var p cmdPalette
@@ -84,5 +88,53 @@ func TestCmdPalette_NoMatchesInactive(t *testing.T) {
 	// Active but no matches is fine — view will be empty
 	if p.Selected() != "" {
 		t.Error("should return empty for no matches")
+	}
+}
+
+func TestCmdPalette_FlagModeActivatesOnDash(t *testing.T) {
+	var p cmdPalette
+	p.Update("/goal write tests -")
+	if !p.active || !p.FlagMode() {
+		t.Error("should activate flag mode on '/goal ... -'")
+	}
+	if len(p.matches) != len(goal.Flags()) {
+		t.Errorf("expected all %d flags, got %d", len(goal.Flags()), len(p.matches))
+	}
+}
+
+func TestCmdPalette_FlagModeFiltersByPrefix(t *testing.T) {
+	var p cmdPalette
+	p.Update("/goal write tests --max")
+	if !p.FlagMode() {
+		t.Error("should be in flag mode")
+	}
+	if len(p.matches) != 1 || p.matches[0].Name != "--max" {
+		t.Errorf("expected [--max], got %v", p.matches)
+	}
+}
+
+func TestCmdPalette_FlagModeExcludesUsedFlags(t *testing.T) {
+	var p cmdPalette
+	p.Update("/goal write tests --max 5 --")
+	for _, m := range p.matches {
+		if m.Name == "--max" {
+			t.Error("--max already used, should be excluded")
+		}
+	}
+}
+
+func TestCmdPalette_FlagModeOffWithoutDash(t *testing.T) {
+	var p cmdPalette
+	p.Update("/goal write tests")
+	if p.active {
+		t.Error("plain objective text should close the palette")
+	}
+}
+
+func TestReplaceLastToken(t *testing.T) {
+	got := replaceLastToken("/goal write tests --", "--max ")
+	want := "/goal write tests --max "
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

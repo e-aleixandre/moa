@@ -190,6 +190,62 @@ func TestSessionBrowser_FilterSelectsMatchingSession(t *testing.T) {
 	}
 }
 
+func TestSessionBrowser_ArchivedHiddenUntilToggled(t *testing.T) {
+	b := newSessionBrowser()
+	b.Open()
+	b.SetSummaries([]session.Summary{
+		{ID: "aaa111", Title: "active session"},
+		{ID: "bbb222", Title: "closed session", Archived: true},
+	})
+
+	// Archived sessions are hidden by default.
+	if got := len(b.matches); got != 1 {
+		t.Fatalf("default matches = %d, want 1 (archived hidden)", got)
+	}
+	if got := b.SelectedID(); got != "aaa111" {
+		t.Fatalf("selected id = %q, want aaa111", got)
+	}
+
+	// ctrl+v reveals archived sessions.
+	b.ToggleArchived()
+	if got := len(b.matches); got != 2 {
+		t.Fatalf("after ToggleArchived matches = %d, want 2", got)
+	}
+
+	// Toggling back hides them again.
+	b.ToggleArchived()
+	if got := len(b.matches); got != 1 {
+		t.Fatalf("after second ToggleArchived matches = %d, want 1", got)
+	}
+}
+
+func TestSessionBrowser_SetArchivedLocalUpdatesVisibility(t *testing.T) {
+	b := newSessionBrowser()
+	b.Open()
+	b.SetSummaries([]session.Summary{
+		{ID: "aaa111", Title: "one"},
+		{ID: "bbb222", Title: "two"},
+	})
+	if got := len(b.matches); got != 2 {
+		t.Fatalf("initial matches = %d, want 2", got)
+	}
+
+	// Archiving a session removes it from the default view.
+	b.SetArchivedLocal("aaa111", true)
+	if got := len(b.matches); got != 1 {
+		t.Fatalf("after archive matches = %d, want 1", got)
+	}
+	if got := b.SelectedID(); got != "bbb222" {
+		t.Fatalf("selected id = %q, want bbb222", got)
+	}
+
+	// Unarchiving brings it back.
+	b.SetArchivedLocal("aaa111", false)
+	if got := len(b.matches); got != 2 {
+		t.Fatalf("after unarchive matches = %d, want 2", got)
+	}
+}
+
 // --- Viewport / transcript mode tests ---
 
 func TestVisibleBlocks_ReturnsAllBlocks(t *testing.T) {
