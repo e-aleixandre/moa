@@ -87,9 +87,74 @@ func TestParseCommand(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "unknown flag",
-			args:    "do thing --frobnicate 1",
+			name: "unknown flag",
+			args: "do thing --frobnicate 1",
+			want: Command{Objective: "do thing --frobnicate 1"},
+		},
+		{
+			name: "unknown flag mid-objective",
+			args: "haz que el script corra con --foo y funcione",
+			want: Command{Objective: "haz que el script corra con --foo y funcione"},
+		},
+		{
+			name: "known flag mid-objective not tail",
+			args: "explica que hace --max 3 en el CLI",
+			want: Command{Objective: "explica que hace --max 3 en el CLI", MaxIterations: 0},
+		},
+		{
+			name: "mixed tail",
+			args: "fix --foo handling --max 3",
+			want: Command{Objective: "fix --foo handling", MaxIterations: 3},
+		},
+		{
+			name: "objective starts with dashes",
+			args: "--foo esta roto, arreglalo",
+			want: Command{Objective: "--foo esta roto, arreglalo"},
+		},
+		{
+			name:    "known flag final without value after valid",
+			args:    "do thing --max 3 --stalled",
 			wantErr: true,
+		},
+		{
+			name:    "value looks like flag",
+			args:    "do thing --verifier --max",
+			wantErr: true,
+		},
+		{
+			name: "duplicate flag last wins",
+			args: "do thing --max 3 --max 5",
+			want: Command{Objective: "do thing", MaxIterations: 5},
+		},
+		{
+			name: "multiple flags reverse order",
+			args: "ship it --budget 7.5 --max 10",
+			want: Command{Objective: "ship it", MaxIterations: 10, TotalBudget: 7.5},
+		},
+		{
+			name: "equals form single flag",
+			args: "ship it --max=10",
+			want: Command{Objective: "ship it", MaxIterations: 10},
+		},
+		{
+			name: "equals form mixed with spaced form",
+			args: "ship it --budget=7.5 --max 10",
+			want: Command{Objective: "ship it", MaxIterations: 10, TotalBudget: 7.5},
+		},
+		{
+			name: "equals form verifier value with no space",
+			args: "do thing --verifier=haiku",
+			want: Command{Objective: "do thing", VerifierSpec: "haiku"},
+		},
+		{
+			name:    "equals form invalid value errors",
+			args:    "do thing --max=abc",
+			wantErr: true,
+		},
+		{
+			name: "equals form mid-objective stays literal",
+			args: "explain what --max=3 means",
+			want: Command{Objective: "explain what --max=3 means"},
 		},
 	}
 

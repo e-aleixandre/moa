@@ -20,81 +20,164 @@ type Command struct {
 	TotalBudget   float64       // --budget USD (cumulative ceiling across iterations)
 }
 
+// FlagSpec describes one /goal flag for help text and autocompletion.
+type FlagSpec struct {
+	Name        string // e.g. "--max"
+	Placeholder string // e.g. "N", "2h", "USD", "SPEC"
+	Desc        string // short human description
+}
+
+// Flags returns the declarative list of accepted /goal flags. It is the single
+// source of truth consumed by ParseCommand (known-flag set), FlagsUsage, and
+// the web/TUI autocompletion.
+func Flags() []FlagSpec {
+	return []FlagSpec{
+		{Name: "--max", Placeholder: "N", Desc: "max iterations (0 = unlimited)"},
+		{Name: "--stalled", Placeholder: "N", Desc: "stop after N iterations with no progress"},
+		{Name: "--timeout", Placeholder: "2h", Desc: "wall-clock deadline (Go duration)"},
+		{Name: "--budget", Placeholder: "USD", Desc: "cumulative USD ceiling across iterations"},
+		{Name: "--verifier", Placeholder: "SPEC", Desc: "model spec for the verifier"},
+		{Name: "--verify-timeout", Placeholder: "90s", Desc: "per-attempt verifier timeout (Go duration)"},
+		{Name: "--compact", Placeholder: "N", Desc: "soft compaction threshold in tokens"},
+	}
+}
+
 // FlagsUsage is a one-line hint of the accepted knobs, for help/palette text.
-const FlagsUsage = "[--max N] [--stalled N] [--timeout 2h] [--budget 5] [--verifier haiku] [--verify-timeout 90s] [--compact N]"
+var FlagsUsage = buildFlagsUsage()
+
+func buildFlagsUsage() string {
+	parts := make([]string, 0, len(Flags()))
+	for _, f := range Flags() {
+		parts = append(parts, fmt.Sprintf("[%s %s]", f.Name, f.Placeholder))
+	}
+	return strings.Join(parts, " ")
+}
 
 // ParseCommand parses "<objective> [--max N] [--stalled N] [--timeout DUR]
-// [--budget USD] [--verifier SPEC] [--verify-timeout DUR] [--compact N]". The
-// objective is every token before the first --flag; flags may then appear in
-// any order. An empty objective or an unknown/invalid flag is an error.
+// [--budget USD] [--verifier SPEC] [--verify-timeout DUR] [--compact N]".
+//
+// Flags are only recognized as a contiguous run of known-flag/value pairs at
+// the tail of the input: scanning from the end, as long as the last remaining
+// token is either a known "--flag=value" or a (known flag, non-flag value)
+// pair it is consumed as a flag; the scan stops at the first token that
+// doesn't match. Everything before that point — including unknown "--foo"
+// tokens or known flags that end up separated from the tail — is preserved
+// verbatim as the objective. An empty objective or an invalid flag value in
+// the recognized tail is an error.
 func ParseCommand(args string) (Command, error) {
 	fields := strings.Fields(args)
 
-	var cmd Command
-	i := 0
-	var obj []string
-	for i < len(fields) && !strings.HasPrefix(fields[i], "--") {
-		obj = append(obj, fields[i])
-		i++
+	known := make(map[string]bool, len(Flags()))
+	for _, f := range Flags() {
+		known[f.Name] = true
 	}
-	cmd.Objective = strings.Join(obj, " ")
+
+	// flagOf splits a "--flag=value" token into its flag and value if the flag
+	// is known; ok is false for anything else.
+	flagOf := func(tok string) (flag, val string, ok bool) {
+		if i := strings.IndexByte(tok, '='); i > 0 {
+			f := tok[:i]
+			if known[f] {
+				return f, tok[i+1:], true
+			}
+		}
+		return "", "", false
+	}
+
+	n := len(fields)
+	type pair struct {
+		flag string
+		val  string
+	}
+	var pairs []pair
+
+	if n >= 1 && known[fields[n-1]] {
+		// Last remaining token is itself a bare known flag: it has no value.
+		return Command{}, fmt.Errorf("%s needs a value", fields[n-1])
+	}
+
+	for n >= 1 {
+		// Prefer the single-token "--flag=value" form.
+		if flag, val, ok := flagOf(fields[n-1]); ok {
+			pairs = append(pairs, pair{flag, val})
+			n--
+		} else if n >= 2 && known[fields[n-2]] && !strings.HasPrefix(fields[n-1], "--") {
+			pairs = append(pairs, pair{fields[n-2], fields[n-1]})
+			n -= 2
+		} else {
+			break
+		}
+		if n >= 1 && known[fields[n-1]] {
+			return Command{}, fmt.Errorf("%s needs a value", fields[n-1])
+		}
+	}
+
+	var cmd Command
+	seen := make(map[string]bool, len(pairs))
+	// pairs were collected from the tail inward, so pairs[0] is the
+	// rightmost (last-wins) pair; skip any flag already assigned.
+	for _, p := range pairs {
+		if seen[p.flag] {
+			continue
+		}
+		seen[p.flag] = true
+		if err := applyFlag(&cmd, p.flag, p.val); err != nil {
+			return Command{}, err
+		}
+	}
+
+	cmd.Objective = strings.Join(fields[:n], " ")
 	if cmd.Objective == "" {
 		return cmd, fmt.Errorf("objective is required")
 	}
 
-	for i < len(fields) {
-		flag := fields[i]
-		if i+1 >= len(fields) {
-			return cmd, fmt.Errorf("%s needs a value", flag)
-		}
-		val := fields[i+1]
-		i += 2
-
-		switch flag {
-		case "--max":
-			n, err := nonNegInt(val)
-			if err != nil {
-				return cmd, fmt.Errorf("invalid --max: %s", val)
-			}
-			cmd.MaxIterations = n
-		case "--stalled":
-			n, err := nonNegInt(val)
-			if err != nil {
-				return cmd, fmt.Errorf("invalid --stalled: %s", val)
-			}
-			cmd.MaxStalled = n
-		case "--compact":
-			n, err := nonNegInt(val)
-			if err != nil {
-				return cmd, fmt.Errorf("invalid --compact: %s", val)
-			}
-			cmd.CompactAt = n
-		case "--timeout":
-			d, err := time.ParseDuration(val)
-			if err != nil || d < 0 {
-				return cmd, fmt.Errorf("invalid --timeout: %s", val)
-			}
-			cmd.Timeout = d
-		case "--verify-timeout":
-			d, err := time.ParseDuration(val)
-			if err != nil || d <= 0 {
-				return cmd, fmt.Errorf("invalid --verify-timeout: %s", val)
-			}
-			cmd.VerifyTimeout = d
-		case "--budget":
-			f, err := strconv.ParseFloat(val, 64)
-			if err != nil || f < 0 {
-				return cmd, fmt.Errorf("invalid --budget: %s", val)
-			}
-			cmd.TotalBudget = f
-		case "--verifier":
-			cmd.VerifierSpec = val
-		default:
-			return cmd, fmt.Errorf("unknown flag: %s", flag)
-		}
-	}
-
 	return cmd, nil
+}
+
+func applyFlag(cmd *Command, flag, val string) error {
+	switch flag {
+	case "--max":
+		n, err := nonNegInt(val)
+		if err != nil {
+			return fmt.Errorf("invalid --max: %s", val)
+		}
+		cmd.MaxIterations = n
+	case "--stalled":
+		n, err := nonNegInt(val)
+		if err != nil {
+			return fmt.Errorf("invalid --stalled: %s", val)
+		}
+		cmd.MaxStalled = n
+	case "--compact":
+		n, err := nonNegInt(val)
+		if err != nil {
+			return fmt.Errorf("invalid --compact: %s", val)
+		}
+		cmd.CompactAt = n
+	case "--timeout":
+		d, err := time.ParseDuration(val)
+		if err != nil || d < 0 {
+			return fmt.Errorf("invalid --timeout: %s", val)
+		}
+		cmd.Timeout = d
+	case "--verify-timeout":
+		d, err := time.ParseDuration(val)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("invalid --verify-timeout: %s", val)
+		}
+		cmd.VerifyTimeout = d
+	case "--budget":
+		f, err := strconv.ParseFloat(val, 64)
+		if err != nil || f < 0 {
+			return fmt.Errorf("invalid --budget: %s", val)
+		}
+		cmd.TotalBudget = f
+	case "--verifier":
+		cmd.VerifierSpec = val
+	default:
+		return fmt.Errorf("unknown flag: %s", flag)
+	}
+	return nil
 }
 
 func nonNegInt(s string) (int, error) {
