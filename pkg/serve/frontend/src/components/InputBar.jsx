@@ -68,6 +68,7 @@ export function InputBar({ sessionId, session, tileId }) {
     setSubagentPending([]);
   }, [steerJobId]);
   const [canTranscribe, setCanTranscribe] = useState(false);
+  const [goalFlags, setGoalFlags] = useState([]);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
   const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
@@ -92,7 +93,10 @@ export function InputBar({ sessionId, session, tileId }) {
   useEffect(() => {
     fetch('/api/capabilities', { headers: { 'X-Moa-Request': '1' } })
       .then(r => r.json())
-      .then(caps => setCanTranscribe(!!caps.transcribe))
+      .then(caps => {
+        setCanTranscribe(!!caps.transcribe);
+        setGoalFlags(Array.isArray(caps.goal_flags) ? caps.goal_flags : []);
+      })
       .catch(() => {});
   }, []);
 
@@ -332,14 +336,38 @@ export function InputBar({ sessionId, session, tileId }) {
   // Update command suggestions on input change.
   // Only show suggestions while the user is still typing the command name
   // (before the first space). Once they've moved on to arguments, hide them.
+  // For "/goal ..." lines, also offer flag autocompletion: if the token under
+  // the cursor starts with "-", suggest matching flags from goalFlags.
   const updateSuggestions = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     const val = el.value;
     if (val.startsWith('/') && !val.includes('\n')) {
       const afterSlash = val.slice(1);
-      // Once there's a space, the user is typing arguments — stop suggesting.
+      // Once there's a space, the user is typing arguments — stop suggesting
+      // the command name itself, but /goal gets flag autocompletion instead.
       if (afterSlash.includes(' ')) {
+        if (val.startsWith('/goal ')) {
+          const cursor = el.selectionStart;
+          let tokenStart = cursor;
+          while (tokenStart > 0 && val[tokenStart - 1] !== ' ') tokenStart--;
+          const token = val.slice(tokenStart, cursor);
+          if (token.startsWith('-')) {
+            const filter = token.toLowerCase();
+            const isBare = filter === '-' || filter === '--';
+            const matches = goalFlags.filter(f => {
+              if (!isBare && !f.name.toLowerCase().startsWith(filter)) return false;
+              // Exclude flags already present as a token in the text.
+              const re = new RegExp(`(^|\\s)${f.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+              return !re.test(val);
+            }).map(f => ({ name: f.name, desc: f.desc, args: f.placeholder, __flag: true }));
+            if (matches.length > 0) {
+              setCmdSuggestions(matches);
+              setCmdCursor(0);
+              return;
+            }
+          }
+        }
         setCmdSuggestions(null);
         return;
       }
@@ -352,7 +380,7 @@ export function InputBar({ sessionId, session, tileId }) {
       }
     }
     setCmdSuggestions(null);
-  }, []);
+  }, [goalFlags]);
 
   // --- File suggestions (@mention) ---
   const cancelFileRequest = useCallback(() => {
@@ -517,6 +545,21 @@ export function InputBar({ sessionId, session, tileId }) {
   const acceptSuggestion = useCallback((cmd) => {
     const el = textareaRef.current;
     if (!el) return;
+    if (cmd.__flag) {
+      const val = el.value;
+      const cursor = el.selectionStart;
+      let tokenStart = cursor;
+      while (tokenStart > 0 && val[tokenStart - 1] !== ' ') tokenStart--;
+      const before = val.slice(0, tokenStart);
+      const after = val.slice(cursor);
+      el.value = before + cmd.name + ' ' + after;
+      const newPos = before.length + cmd.name.length + 1;
+      el.selectionStart = el.selectionEnd = newPos;
+      el.focus();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      setCmdSuggestions(null);
+      return;
+    }
     if (cmd.args) {
       el.value = '/' + cmd.name + ' ';
       setCmdSuggestions(null);
@@ -572,8 +615,13 @@ export function InputBar({ sessionId, session, tileId }) {
 
     // Detect slash commands.
     if (text.startsWith('/')) {
+      // Mobile keyboards autocorrect a typed "--" into an em/en-dash ("—"/"–"),
+      // which breaks flag parsing (/goal … --max 3). Normalize a dash that
+      // starts a token (preceded by whitespace, followed by a letter) back into
+      // "--". A real em-dash inside prose (word—word) is left untouched.
+      const normalized = text.replace(/(^|\s)[\u2013\u2014](?=[A-Za-z])/g, '$1--');
       try {
-        const result = await execCommand(sessionId, text);
+        const result = await execCommand(sessionId, normalized);
         if (text.startsWith('/verify') && result) {
           // Verify ran — surface the pass/fail outcome (the spinner is driven
           // by the AutoVerify WS events).
@@ -997,7 +1045,7 @@ export function InputBar({ sessionId, session, tileId }) {
                     onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(cmd); }}
                     onMouseEnter={() => setCmdCursor(i)}
                   >
-                    <span class="cmd-suggestion-name">/{cmd.name}</span>
+                    <span class="cmd-suggestion-name">{cmd.__flag ? cmd.name : '/' + cmd.name}</span>
                     {cmd.args && <span class="cmd-suggestion-args">{cmd.args}</span>}
                     <span class="cmd-suggestion-desc">{cmd.desc}</span>
                   </div>

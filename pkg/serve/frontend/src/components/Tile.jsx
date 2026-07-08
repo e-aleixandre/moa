@@ -99,7 +99,7 @@ export function Tile({ tileId, tileIndex, sessionId, session, usage, isFocused }
         ref={tileRef}
         class={classes.join(' ')}
         data-tile-id={tileId}
-        onClick={() => focusTile(tileId)}
+        onClick={() => focusTile(tileId, { respectSelection: true })}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -128,7 +128,7 @@ export function Tile({ tileId, tileIndex, sessionId, session, usage, isFocused }
       ref={tileRef}
       class={classes.join(' ')}
       data-tile-id={tileId}
-      onClick={() => focusTile(tileId)}
+      onClick={() => focusTile(tileId, { respectSelection: true })}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

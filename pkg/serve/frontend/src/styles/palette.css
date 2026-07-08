@@ -119,6 +119,18 @@
   flex-shrink: 0;
 }
 
+.palette-archived-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--overlay1);
+  background: var(--surface0);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
 .palette-tile-badge {
   font-size: 10px;
   font-weight: 700;

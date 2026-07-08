@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'preact/hooks'
 import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft, ChevronRight } from 'lucide-preact';
 import { store, sessionsByGroup, isSessionInTile } from '../store.js';
 import { assignToTile } from '../tile-actions.js';
-import { resumeSession, createSession } from '../session-actions.js';
+import { resumeSession, createSession, unarchiveSession } from '../session-actions.js';
 import { allTileIds, findTile } from '../tileTree.js';
 
 // Cached capabilities from server
@@ -120,6 +120,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
           model: sess.model, state: sess.state,
           cwd: cwdLabel, inTile,
           saved: sess.state === 'saved',
+          archived: !!sess.archived,
         });
       }
     }
@@ -190,6 +191,12 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
       return;
     }
     if (item.type === 'session') {
+      if (item.archived) {
+        // Reopen: the server also auto-unarchives on resume/send, but for
+        // sessions merely assigned to a tile (not resumed/sent-to), do it
+        // explicitly so it doesn't linger flagged as archived.
+        unarchiveSession(item.id).catch(e => console.error('Unarchive failed:', e));
+      }
       if (item.saved) {
         // Resume puts the session into the focused tile (see state.resumeSession).
         resumeSession(item.id).catch(e => console.error('Resume failed:', e));
@@ -307,6 +314,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
               >
                 <span class={`state-dot ${item.state}`} />
                 <span class="palette-item-label">{item.title}</span>
+                {item.archived && <span class="palette-archived-badge">archived</span>}
                 <span class="palette-item-meta">{item.model}</span>
                 <span class="palette-item-cwd">{item.cwd}</span>
                 {item.inTile && <span class="palette-tile-badge">{item.inTile}</span>}

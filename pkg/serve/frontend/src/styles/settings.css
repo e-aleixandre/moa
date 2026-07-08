@@ -126,6 +126,25 @@
   font-style: italic;
 }
 
+.settings-archive-btn {
+  width: calc(100% - 20px);
+  margin: 4px 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--surface0);
+  color: var(--subtext1);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+.settings-archive-btn:hover { background: var(--surface1); color: var(--text); }
+.settings-archive-btn .lucide { width: 14px; height: 14px; }
+
 /* Notifications control (push + sound) — shared by LayoutBar and ChatView */
 .notif-wrap {
   position: relative;

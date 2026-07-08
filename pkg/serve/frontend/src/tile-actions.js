@@ -81,11 +81,23 @@ export function assignToTile(tileId, sessionId) {
   afterVisibilityChange();
 }
 
-export function focusTile(tileId) {
+// focusTile marks a tile as focused. By default it also moves the keyboard
+// caret into that tile's input (used by keyboard navigation, e.g. Ctrl+1/2).
+//
+// For pointer-driven selection pass { respectSelection: true }: the input is
+// still focused (so keystrokes go to the tile you clicked, not the previously
+// focused one) UNLESS the click produced/left an active text selection, in
+// which case focusing is skipped so we don't collapse the selection.
+export function focusTile(tileId, { focusInput = true, respectSelection = false } = {}) {
   const state = store.get();
   const ids = allTileIds(state.tileTree);
   if (!ids.includes(tileId)) return;
   setState({ focusedTile: tileId });
+  if (!focusInput) return;
+  if (respectSelection) {
+    const sel = typeof window !== 'undefined' && window.getSelection && window.getSelection();
+    if (sel && !sel.isCollapsed && String(sel).length > 0) return;
+  }
   requestAnimationFrame(() => {
     const tile = document.querySelector(`[data-tile-id="${tileId}"]`);
     if (tile) {

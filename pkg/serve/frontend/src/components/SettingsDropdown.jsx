@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { Settings, Brain, ChevronDown, Check, Shield } from 'lucide-preact';
-import { configureSession } from '../session-actions.js';
+import { Settings, Brain, ChevronDown, Check, Shield, Archive, ArchiveRestore } from 'lucide-preact';
+import { configureSession, archiveSession, unarchiveSession } from '../session-actions.js';
 import { api } from '../api.js';
 
 const THINKING_LEVELS = [
@@ -64,6 +64,19 @@ export function SettingsDropdown({ sessionId, session }) {
       await configureSession(sessionId, { permissionMode: mode });
     } catch (e) {
       console.error('Permission mode change failed:', e);
+    }
+  };
+
+  const handleArchiveToggle = async () => {
+    try {
+      if (session?.archived) {
+        await unarchiveSession(sessionId);
+      } else {
+        await archiveSession(sessionId);
+      }
+      setOpen(false);
+    } catch (e) {
+      console.error('Archive toggle failed:', e);
     }
   };
 
@@ -140,6 +153,14 @@ export function SettingsDropdown({ sessionId, session }) {
                 );
               })}
             </div>
+          </div>
+
+          <div class="settings-section">
+            <button class="settings-archive-btn" onClick={handleArchiveToggle}>
+              {session?.archived
+                ? (<><ArchiveRestore /> Reopen session</>)
+                : (<><Archive /> Close session</>)}
+            </button>
           </div>
         </div>
       )}

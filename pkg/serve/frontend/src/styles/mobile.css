@@ -437,6 +437,18 @@
     font-size: 16px;
   }
   .code-block-copy { opacity: 1; }
+  /* Tool-call header: on a narrow screen the single-line ellipsis hides the
+     part of the path that matters most (the filename). Let it wrap to as many
+     lines as needed so the whole path is always visible; the verb/tag stay
+     aligned to the top of the row. */
+  .tool-call-head { align-items: flex-start; }
+  .tool-call-path {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
   .toast-container {
     top: auto;
     bottom: 80px;

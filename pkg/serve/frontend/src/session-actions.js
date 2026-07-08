@@ -74,6 +74,13 @@ export async function loadSessions() {
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
         unseen: existing ? existing.unseen : false,
+        // archived is server-owned (no WS event tracks it), so the poll is
+        // always the source of truth here — unlike wsOwns fields above, we
+        // don't prefer the optimistic `existing` value. An in-flight optimistic
+        // archiveSession/unarchiveSession update gets briefly overwritten by a
+        // stale poll only if the poll started before the archive call
+        // resolved; the next poll (≤3s desktop / ≤15s mobile) self-corrects.
+        archived: info.archived || false,
       };
     }
     // Detect attention transitions (hidden sessions only)
@@ -167,6 +174,33 @@ export async function deleteSession(id) {
   const activeSession = state.activeSession === id ? null : state.activeSession;
   setState({ sessions, tileTree, activeSession });
   afterVisibilityChange();
+}
+
+// archiveSession "closes" a session: unlike deleteSession it doesn't remove
+// the session from the store, it just flips `archived`, which hides it from
+// the TabBar/overview. It still needs to drop the session from wherever it's
+// currently visible (tile/activeSession), mirroring deleteSession, so the UI
+// doesn't keep showing a closed session as if it were open.
+export async function archiveSession(id, archived = true) {
+  await api('POST', `/api/sessions/${id}/archive`, { archived });
+  // Reflect immediately so the UI updates without waiting for the next poll
+  // (which can lag up to ~15s on mobile). The server already committed above.
+  updateSession(id, { archived });
+  if (!archived) return;
+  const state = store.get();
+  const tileTree = clearSession(state.tileTree, id);
+  const activeSession = state.activeSession === id ? null : state.activeSession;
+  setState({ tileTree, activeSession });
+  afterVisibilityChange();
+}
+
+// unarchiveSession reopens a closed session. The server also auto-unarchives
+// on send/resume, but reopening from the palette can assign an already-loaded
+// session straight into a tile without going through send/resume, so we flip
+// the flag explicitly here too.
+export async function unarchiveSession(id) {
+  await api('POST', `/api/sessions/${id}/archive`, { archived: false });
+  updateSession(id, { archived: false });
 }
 
 // attachmentToContent converts a client-side attachment into the same content

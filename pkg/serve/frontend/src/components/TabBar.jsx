@@ -3,7 +3,10 @@ import { setActiveSession } from '../tile-actions.js';
 
 export function TabBar({ state, onOpenPalette }) {
   const sessions = Object.values(state.sessions)
-    .filter(s => s.state !== 'saved')
+    // Archived ("closed") sessions drop off the tab bar, but as a safety net
+    // one that needs attention (a pending permission or an error) still
+    // surfaces here rather than getting silently stuck out of sight.
+    .filter(s => s.state !== 'saved' && (!s.archived || s.state === 'permission' || s.state === 'error'))
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
 
   return (
