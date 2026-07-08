@@ -76,7 +76,14 @@ func (s *FileStore) Save(sess *Session) error {
 
 func (s *FileStore) saveLocked(sess *Session) error {
 	sess.Updated = nowFunc()
+	return s.writeLocked(sess)
+}
 
+// writeLocked validates and atomically writes sess to disk WITHOUT touching
+// Updated. Callers that want normal save semantics (bump Updated) should use
+// saveLocked; callers that need to persist a change without reordering
+// session lists (e.g. SetArchived) call writeLocked directly.
+func (s *FileStore) writeLocked(sess *Session) error {
 	// Validate v2 entries before persisting
 	if sess.Version >= SessionVersion && len(sess.Entries) > 0 {
 		if err := ValidateEntries(sess.Entries, sess.LeafID); err != nil {
@@ -102,6 +109,22 @@ func (s *FileStore) saveLocked(sess *Session) error {
 		return fmt.Errorf("session: rename error: %w", err)
 	}
 	return nil
+}
+
+// SetArchived toggles the archived flag on a session, preserving Updated so
+// archiving does not reorder session lists (archive is presentation-only).
+func (s *FileStore) SetArchived(id string, archived bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, err := s.loadLocked(id)
+	if err != nil {
+		return err
+	}
+	if sess.Archived == archived {
+		return nil
+	}
+	sess.Archived = archived
+	return s.writeLocked(sess)
 }
 
 // Load reads a session by ID.

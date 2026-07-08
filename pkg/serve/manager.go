@@ -53,6 +53,7 @@ type ManagedSession struct {
 	mu          sync.Mutex
 	Title       string
 	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
+	Archived    bool   // closed-but-kept (presentation-only); see session.Session.Archived
 	Updated     time.Time
 	// lastRunAt is when the most recent run finished. For Anthropic models the
 	// prompt cache is refreshed on every request, so it stays warm until
@@ -113,6 +114,7 @@ type serveInfra struct {
 type SessionInfo struct {
 	ID             string       `json:"id"`
 	Title          string       `json:"title"`
+	Archived       bool         `json:"archived,omitempty"`
 	State          SessionState `json:"state"`
 	Model          string       `json:"model"`
 	Thinking       string       `json:"thinking"`
@@ -195,6 +197,7 @@ func (s *ManagedSession) info() SessionInfo {
 	info := SessionInfo{
 		ID:             s.ID,
 		Title:          s.Title,
+		Archived:       s.Archived,
 		State:          SessionState(state),
 		Model:          modelDisplayName(model),
 		Thinking:       thinking,
@@ -293,6 +296,15 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 		return "", ErrNotFound
 	}
 
+	sess.mu.Lock()
+	archived := sess.Archived
+	sess.mu.Unlock()
+	if archived {
+		if err := m.ArchiveSession(sessionID, false); err != nil {
+			slog.Warn("failed to auto-unarchive session on send", "session", sessionID, "error", err)
+		}
+	}
+
 	state := sess.runtime.State.Current()
 	if state == bus.StateRunning || state == bus.StatePermission {
 		if len(atts) > 0 {
@@ -382,13 +394,14 @@ func (m *Manager) List() []SessionInfo {
 		model, _ := sum.Metadata["model"].(string)
 		cwd, _ := sum.Metadata["cwd"].(string)
 		list = append(list, SessionInfo{
-			ID:      sum.ID,
-			Title:   sum.Title,
-			State:   StateSaved,
-			Model:   model,
-			CWD:     cwd,
-			Created: sum.Created,
-			Updated: sum.Updated,
+			ID:       sum.ID,
+			Title:    sum.Title,
+			Archived: sum.Archived,
+			State:    StateSaved,
+			Model:    model,
+			CWD:      cwd,
+			Created:  sum.Created,
+			Updated:  sum.Updated,
 		})
 	}
 
@@ -416,6 +429,34 @@ func (m *Manager) invalidateSavedCache() {
 	m.savedCacheMu.Lock()
 	m.savedCache = nil
 	m.savedCacheMu.Unlock()
+}
+
+// ArchiveSession sets or clears the archived flag on a session, whether it is
+// currently active in memory or only saved on disk. Archiving is
+// presentation-only: it never unloads an active session or touches Updated.
+func (m *Manager) ArchiveSession(id string, archived bool) error {
+	if sess, ok := m.Get(id); ok {
+		sess.mu.Lock()
+		sess.Archived = archived
+		sess.mu.Unlock()
+		if sess.persister != nil {
+			if err := sess.persister.setArchived(archived); err != nil {
+				return err
+			}
+		}
+		m.invalidateSavedCache()
+		return nil
+	}
+
+	_, store, err := session.FindSession(m.sessionBaseDir, id)
+	if err != nil {
+		return err
+	}
+	if err := store.SetArchived(id, archived); err != nil {
+		return err
+	}
+	m.invalidateSavedCache()
+	return nil
 }
 
 // Get returns a managed session by ID.

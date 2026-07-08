@@ -43,9 +43,16 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 
 	snapshot := *sp.persisted
 	store := sp.store
+	// Save under the lock so it serializes with setArchived/saveTitle: otherwise
+	// a concurrent setArchived (which preserves Updated) could land between the
+	// copy above and the Save below, and this Save — carrying a stale Archived
+	// and a bumped Updated — would clobber it. The persistence reactor is
+	// single-threaded, so the only contenders for this lock are the rare
+	// out-of-band writers, making the in-lock I/O cost negligible.
+	err := store.Save(&snapshot)
 	sp.mu.Unlock()
 
-	if err := store.Save(&snapshot); err != nil {
+	if err != nil {
 		slog.Warn("session save failed", "error", err)
 		return err
 	}
@@ -72,9 +79,11 @@ func (sp *servePersister) SnapshotTree(entries []session.Entry, leafID string, m
 
 	snapshot := *sp.persisted
 	store := sp.store
+	// Save under the lock — see the rationale in Snapshot.
+	err := store.Save(&snapshot)
 	sp.mu.Unlock()
 
-	if err := store.Save(&snapshot); err != nil {
+	if err != nil {
 		slog.Warn("session save failed", "error", err)
 		return err
 	}
@@ -99,6 +108,18 @@ func (sp *servePersister) saveTitle(title, source string) {
 	if err := sp.store.Save(&snapshot); err != nil {
 		slog.Warn("session title save failed", "error", err)
 	}
+}
+
+// setArchived persists an archive/unarchive toggle out-of-band, preserving
+// Updated (archive is presentation-only and must not reorder session lists).
+func (sp *servePersister) setArchived(archived bool) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.persisted == nil || sp.store == nil {
+		return nil
+	}
+	sp.persisted.Archived = archived
+	return sp.store.SetArchived(sp.persisted.ID, archived)
 }
 
 // markDeleted prevents future Snapshot calls from writing to disk.

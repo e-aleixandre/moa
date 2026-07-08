@@ -1176,3 +1176,44 @@ func TestPromoteSubagentEndpoint(t *testing.T) {
 	}
 	resp.Body.Close() //nolint:errcheck
 }
+
+func TestArchiveEndpoint(t *testing.T) {
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	resp := apiReq(t, srv, "POST", "/api/sessions", `{"title":"test","model":"sonnet"}`)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: expected 201, got %d", resp.StatusCode)
+	}
+	var info SessionInfo
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+
+	// Missing "archived" field → 400 (must not silently unarchive).
+	r1 := apiReq(t, srv, "POST", "/api/sessions/"+info.ID+"/archive", `{}`)
+	defer r1.Body.Close() //nolint:errcheck
+	if r1.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty body: expected 400, got %d", r1.StatusCode)
+	}
+
+	// Archive it.
+	r2 := apiReq(t, srv, "POST", "/api/sessions/"+info.ID+"/archive", `{"archived":true}`)
+	defer r2.Body.Close() //nolint:errcheck
+	if r2.StatusCode != http.StatusOK {
+		t.Fatalf("archive: expected 200, got %d", r2.StatusCode)
+	}
+	g := apiReq(t, srv, "GET", "/api/sessions/"+info.ID, "")
+	defer g.Body.Close() //nolint:errcheck
+	var got SessionInfo
+	_ = json.NewDecoder(g.Body).Decode(&got)
+	if !got.Archived {
+		t.Fatal("expected session to report Archived=true after archive")
+	}
+
+	// Unknown session → 404.
+	r3 := apiReq(t, srv, "POST", "/api/sessions/nonexistent/archive", `{"archived":true}`)
+	defer r3.Body.Close() //nolint:errcheck
+	if r3.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown session: expected 404, got %d", r3.StatusCode)
+	}
+}

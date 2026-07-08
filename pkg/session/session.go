@@ -28,6 +28,8 @@ var ErrNotFound = errors.New("session: not found")
 //   - Latest returns the most recently updated session, or (nil, nil) if the store is empty.
 //   - List returns summaries sorted by Updated descending. Empty store returns (nil, nil).
 //   - Delete is idempotent — deleting a non-existent session returns nil.
+//   - SetArchived toggles the archived flag and persists it WITHOUT touching
+//     Updated (archiving is presentation-only and must not reorder lists).
 type SessionStore interface {
 	Create() *Session
 	Save(sess *Session) error
@@ -35,6 +37,7 @@ type SessionStore interface {
 	Latest() (*Session, error)
 	List() ([]Summary, error)
 	Delete(id string) error
+	SetArchived(id string, archived bool) error
 }
 
 // SessionVersion is the current session format version.
@@ -55,8 +58,12 @@ type Session struct {
 	Title   string    `json:"title"`
 	// TitleSource records how Title was set: "manual" (user renamed) or "auto"
 	// (derived / LLM-generated). Empty is legacy and treated as auto.
-	TitleSource string         `json:"title_source,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+	TitleSource string `json:"title_source,omitempty"`
+	// Archived marks a session as closed-but-kept (presentation-only; does
+	// not unload it from memory). Must stay top-level (not in Metadata,
+	// which is rebuilt from scratch on every snapshot via collectMetadata).
+	Archived bool           `json:"archived,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 
 	// V2: entry-based tree log
 	LeafID  string  `json:"leaf_id,omitempty"`
@@ -75,6 +82,7 @@ type Summary struct {
 	Updated     time.Time      `json:"updated"`
 	Title       string         `json:"title"`
 	TitleSource string         `json:"title_source,omitempty"`
+	Archived    bool           `json:"archived,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 

@@ -475,6 +475,62 @@ func TestDeleteByID_NotFound(t *testing.T) {
 	}
 }
 
+func TestSetArchived_PreservesUpdated(t *testing.T) {
+	store := tempStore(t)
+
+	fakeTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return fakeTime }
+	defer func() { nowFunc = time.Now }()
+
+	sess := store.Create()
+	sess.Title = "archive me"
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	wantUpdated := sess.Updated
+
+	// Advance the clock: if SetArchived bumped Updated we'd see it here.
+	nowFunc = func() time.Time { return fakeTime.Add(time.Hour) }
+
+	if err := store.SetArchived(sess.ID, true); err != nil {
+		t.Fatalf("SetArchived(true): %v", err)
+	}
+
+	loaded, err := store.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.Archived {
+		t.Error("expected Archived = true after SetArchived(true)")
+	}
+	if !loaded.Updated.Equal(wantUpdated) {
+		t.Errorf("Updated = %v, want unchanged %v", loaded.Updated, wantUpdated)
+	}
+
+	// Unarchive: Updated must still be preserved.
+	if err := store.SetArchived(sess.ID, false); err != nil {
+		t.Fatalf("SetArchived(false): %v", err)
+	}
+	loaded, err = store.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Archived {
+		t.Error("expected Archived = false after SetArchived(false)")
+	}
+	if !loaded.Updated.Equal(wantUpdated) {
+		t.Errorf("Updated = %v, want unchanged %v", loaded.Updated, wantUpdated)
+	}
+}
+
+func TestSetArchived_NotFound(t *testing.T) {
+	store := tempStore(t)
+	err := store.SetArchived("does-not-exist", true)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetArchived on missing session: got %v, want ErrNotFound", err)
+	}
+}
+
 func TestFileStore_ConcurrentSave(t *testing.T) {
 	base := t.TempDir()
 	store, err := NewFileStore(base, "")

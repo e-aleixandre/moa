@@ -23,6 +23,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/usage"
@@ -73,6 +74,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/archive", handleArchiveSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
@@ -312,6 +314,34 @@ func handleDeleteSession(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleArchiveSession(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limitBody(w, r, maxJSONBodySize)
+		var body struct {
+			Archived *bool `json:"archived"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Archived == nil {
+			http.Error(w, "missing 'archived' field", http.StatusBadRequest)
+			return
+		}
+		id := r.PathValue("id")
+		err := mgr.ArchiveSession(id, *body.Archived)
+		if errors.Is(err, session.ErrNotFound) || errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "archived": *body.Archived})
 	}
 }
 
@@ -712,10 +742,19 @@ func handleGetSubagent(mgr *Manager) http.HandlerFunc {
 
 func handleCapabilities(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		goalFlags := make([]map[string]string, 0, len(goal.Flags()))
+		for _, f := range goal.Flags() {
+			goalFlags = append(goalFlags, map[string]string{
+				"name":        f.Name,
+				"placeholder": f.Placeholder,
+				"desc":        f.Desc,
+			})
+		}
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
 			"workspaceRoot": mgr.workspaceRoot,
 			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),
+			"goal_flags":    goalFlags,
 		}
 		writeJSON(w, http.StatusOK, caps)
 	}

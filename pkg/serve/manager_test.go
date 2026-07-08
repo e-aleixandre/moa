@@ -521,6 +521,89 @@ func TestAutoSave_AfterRun(t *testing.T) {
 	}
 }
 
+func TestArchiveSession_ActiveSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(simpleResponseHandler("reply"))
+	mgr := newTestManager(t, ctx, prov)
+
+	sess, err := mgr.CreateSession(CreateOpts{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info := sess.info(); info.Archived {
+		t.Fatal("expected new session to be unarchived")
+	}
+
+	if err := mgr.ArchiveSession(sess.ID, true); err != nil {
+		t.Fatalf("ArchiveSession(true): %v", err)
+	}
+	if info := sess.info(); !info.Archived {
+		t.Fatal("expected session to be archived after ArchiveSession(true)")
+	}
+
+	var found bool
+	for _, si := range mgr.List() {
+		if si.ID == sess.ID {
+			found = true
+			if !si.Archived {
+				t.Error("expected List() entry to report Archived = true")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("session missing from List()")
+	}
+
+	if err := mgr.ArchiveSession(sess.ID, false); err != nil {
+		t.Fatalf("ArchiveSession(false): %v", err)
+	}
+	if info := sess.info(); info.Archived {
+		t.Fatal("expected session to be unarchived after ArchiveSession(false)")
+	}
+}
+
+func TestArchiveSession_NotFound(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider()
+	mgr := newTestManager(t, ctx, prov)
+
+	err := mgr.ArchiveSession("does-not-exist", true)
+	if !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("ArchiveSession on missing session: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestSend_UnarchivesSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(simpleResponseHandler("reply"))
+	mgr := newTestManager(t, ctx, prov)
+
+	sess, err := mgr.CreateSession(CreateOpts{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.ArchiveSession(sess.ID, true); err != nil {
+		t.Fatalf("ArchiveSession(true): %v", err)
+	}
+	if info := sess.info(); !info.Archived {
+		t.Fatal("expected session to be archived before Send")
+	}
+
+	if _, err := mgr.Send(sess.ID, "hello", nil); err != nil {
+		t.Fatal(err)
+	}
+	if info := sess.info(); info.Archived {
+		t.Error("expected Send to auto-unarchive the session")
+	}
+}
+
 func TestList_IncludesSavedSessions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
