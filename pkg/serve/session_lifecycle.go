@@ -518,6 +518,17 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 
 	// 6. Finalize.
 	sess.Created = saved.Created
+	// Resuming an archived session implicitly unarchives it (see design
+	// decision: archiving is presentation-only, and reopening a session is
+	// explicit user intent to work on it again). The in-memory session never
+	// carries Archived=true; persist the unarchive on disk if needed.
+	sess.Archived = false
+	if saved.Archived {
+		if err := store.SetArchived(id, false); err != nil {
+			slog.Warn("resume: failed to unarchive session", "id", id, "error", err)
+		}
+		m.invalidateSavedCache()
+	}
 	return sess, nil
 }
 
@@ -559,6 +570,13 @@ func (m *Manager) Shutdown() {
 			slog.Warn("shutdown flush failed", "session", s.ID, "error", err)
 		}
 		s.flushLiveSubagentTranscripts()
+		// Close the runtime after flushing: this drains the bus's async
+		// persistence reactor (Bus.Close waits for subscriber goroutines to
+		// finish their queued events) so no delayed save can still be writing
+		// to the session dir after Shutdown returns. Without this an async
+		// RunEnded→save could race a caller that removes the session dir right
+		// after Shutdown (e.g. t.TempDir cleanup in tests). Idempotent.
+		s.runtime.Close()
 	}
 }
 
