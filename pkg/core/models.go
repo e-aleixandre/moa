@@ -46,6 +46,30 @@ var knownModels = map[string]Model{
 		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
 		Pricing: &Pricing{Input: 1.25, Output: 10, CacheRead: 0.125},
 	},
+	"gpt-5.6-sol": {
+		ID: "gpt-5.6-sol", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.6 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (<=272K input) pricing shown here. Long-context
+		// (>272K input) prompts are billed at 2x input and 1.5x output
+		// (Input: 10, Output: 45, CacheRead: 1, CacheWrite: 12.5).
+		Pricing: &Pricing{Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25},
+	},
+	"gpt-5.6-terra": {
+		ID: "gpt-5.6-terra", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.6 Terra", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (<=272K input) pricing shown here. Long-context
+		// (>272K input) prompts are billed at 2x input and 1.5x output
+		// (Input: 5, Output: 22.5, CacheRead: 0.5, CacheWrite: 6.25).
+		Pricing: &Pricing{Input: 2.5, Output: 15, CacheRead: 0.25, CacheWrite: 3.125},
+	},
+	"gpt-5.6-luna": {
+		ID: "gpt-5.6-luna", Provider: "openai", API: "openai-chat",
+		Name: "GPT-5.6 Luna", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (<=272K input) pricing shown here. Long-context
+		// (>272K input) prompts are billed at 2x input and 1.5x output
+		// (Input: 2, Output: 9, CacheRead: 0.2, CacheWrite: 2.5).
+		Pricing: &Pricing{Input: 1, Output: 6, CacheRead: 0.1, CacheWrite: 1.25},
+	},
 	"gpt-5.5": {
 		ID: "gpt-5.5", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.5", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -71,6 +95,10 @@ var modelAliases = map[string]string{
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
 	"codex-5.2":   "gpt-5.2-codex",
+	"sol":         "gpt-5.6-sol",
+	"terra":       "gpt-5.6-terra",
+	"luna":        "gpt-5.6-luna",
+	"gpt-5.6":     "gpt-5.6-sol",
 	"gpt5":        "gpt-5.5",
 	"gpt5-mini":   "gpt-5.4-mini",
 	"gpt5.5":      "gpt-5.5",
