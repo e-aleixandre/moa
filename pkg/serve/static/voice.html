@@ -57,9 +57,16 @@
   <span id="status" class="sub" style="margin:0">idle</span>
 </div>
 
+<div class="row" style="margin-bottom:8px">
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b949e;cursor:pointer">
+    <input type="checkbox" id="bargein" /> Barge-in (interrupt while it speaks — use with headphones; off avoids echo on speakers)
+  </label>
+</div>
+
 <div id="active">active session: <b>—</b></div>
 
 <div id="log"></div>
+
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
@@ -92,6 +99,7 @@ async function api(method, path, body) {
 // ---------------------------------------------------------------------------
 let pc = null, dc = null, micTrack = null;
 let dcReady = false, userMuted = false, modelSpeaking = false;
+let bargeIn = localStorage.getItem('moa_voice_bargein') === '1';
 
 const sessions = new Map(); // id -> snapshot
 let activeId = null;
@@ -119,7 +127,7 @@ async function loadSessions() {
     if (!sessions.has(s.id)) {
       sessions.set(s.id, {
         id: s.id, title: s.title, state: s.state, lastAgentText: '',
-        toolActivity: {}, pendingAsk: null, pendingPerm: null, subagentsActive: 0, ws: null,
+        history: [], toolActivity: {}, pendingAsk: null, pendingPerm: null, subagentsActive: 0, ws: null,
       });
     } else {
       sessions.get(s.id).title = s.title;
@@ -177,8 +185,10 @@ function handleBusEvent(id, evt) {
   switch (evt.type) {
     case 'init':
       s.state = d.state || 'idle';
-      if (d.pendingPermission) s.pendingPerm = d.pendingPermission;
-      if (d.pendingAsk) s.pendingAsk = d.pendingAsk;
+      // init carries the full history + pending state (snake_case JSON).
+      s.history = Array.isArray(d.messages) ? d.messages : [];
+      if (d.pending_permission) s.pendingPerm = { id: d.pending_permission.id, toolName: d.pending_permission.tool_name, args: d.pending_permission.args };
+      if (d.pending_ask) s.pendingAsk = { id: d.pending_ask.id, questions: d.pending_ask.questions || [] };
       s.subagentsActive = (d.subagents || []).length;
       if (id === activeId) updateTools();
       return;
@@ -195,7 +205,11 @@ function handleBusEvent(id, evt) {
       return;
     }
     case 'message_end':
-      if (d.text) s.lastAgentText = d.text;
+      if (d.text) {
+        s.lastAgentText = d.text;
+        // Keep history growing live so "catch me up" works mid-session.
+        s.history.push({ role: 'assistant', content: [{ type: 'text', text: d.text }] });
+      }
       return;
 
     case 'state_change':
@@ -245,6 +259,20 @@ function summarize(md) {
   if (s.length > 240) s = s.slice(0, 240) + '…';
   return s || 'done';
 }
+
+// Render one history message to a compact spoken-friendly line.
+function renderMsg(m) {
+  const role = m.role || 'unknown';
+  const text = (m.content || [])
+    .filter(c => c.type === 'text' && c.text)
+    .map(c => c.text).join(' ');
+  if (role === 'tool_result') return null; // skip raw tool output in a spoken recap
+  const who = role === 'assistant' ? 'agent' : (role === 'user' ? 'you' : role);
+  const body = text ? summarize(text) : (role === 'assistant' ? '(tool calls)' : '');
+  if (!body) return null;
+  return `${who}: ${body}`;
+}
+
 function shortArgs(args) {
   try { const s = JSON.stringify(args); return s.length > 120 ? s.slice(0,120)+'…' : s; }
   catch { return ''; }
@@ -265,6 +293,12 @@ function currentTools() {
     { type: 'function', name: 'get_status',
       description: 'Get the state of the active session (what it is doing now).',
       parameters: { type: 'object', properties: {} } },
+    { type: 'function', name: 'read_history',
+      description: 'Read recent messages of the active session, newest first, paginated. Call with offset 0 for the most recent; increase offset to go further back if you still need context.',
+      parameters: { type: 'object', properties: {
+        count: { type: 'integer', description: 'How many messages to read (default 3, max 10).' },
+        offset: { type: 'integer', description: 'How many messages back from the end to start (default 0 = most recent).' },
+      } } },
     { type: 'function', name: 'list_sessions',
       description: 'List all sessions with their state and whether they need attention.',
       parameters: { type: 'object', properties: {} } },
@@ -318,6 +352,25 @@ async function runTool(name, args) {
         pending_permission: a.pendingPerm ? a.pendingPerm.toolName : null,
         last_agent_text: a.lastAgentText ? summarize(a.lastAgentText) : null,
       };
+    case 'read_history': {
+      if (!a) return { ok: false, error: 'no active session' };
+      const total = a.history.length;
+      const count = Math.min(Math.max(parseInt(args.count) || 3, 1), 10);
+      const offset = Math.max(parseInt(args.offset) || 0, 0);
+      // Newest-first window: end index counts back from the end by offset.
+      const end = Math.max(total - offset, 0);
+      const start = Math.max(end - count, 0);
+      const slice = a.history.slice(start, end).reverse(); // newest first
+      const messages = slice.map(renderMsg).filter(Boolean);
+      return {
+        session: titleOf(a.id),
+        total_messages: total,
+        returned: messages.length,
+        offset, count,
+        remaining_older: start, // how many older messages exist beyond this window
+        messages,
+      };
+    }
     case 'list_sessions':
       return { active: activeId ? titleOf(activeId) : null,
         sessions: [...sessions.values()].map(s => ({
@@ -361,6 +414,7 @@ Rules:
 - Events prefixed [MOA EVENT] are facts from a session. Relay the essential part naturally and briefly. Do not read code, paths or diffs aloud.
 - Events may come from the current session or from ANOTHER one (the text says which). When a finished turn, question, or permission happens in another session, tell the user and OFFER to switch ("your other conversation X just finished / is asking Y — want to switch?"). Only switch when the user agrees, using switch_session. Don't switch on every little event.
 - When the agent asks a question or requests permission, relay the essence and WAIT for the user's decision, then call answer_agent_question / resolve_permission.
+- If the user asks what happened / to catch them up / about earlier messages, use read_history (offset 0 = latest). If you still lack context, call it again with a bigger offset to page further back. Don't dump everything; summarize.
 - When the user gives an instruction for the agent, call send_message_to_agent. Pass their literal words in 'verbatim'.
 - Be concise and conversational. Summarize routine activity; don't narrate every tool.
 - Before destructive actions (cancel, approving a risky permission), confirm verbally first.
@@ -373,13 +427,13 @@ function configureSession() {
   }));
 }
 
-// Half-duplex anti-echo: mute the mic while the model speaks so open speakers
-// don't feed its own voice back in (echo loop). Restored when it stops, unless
-// the user manually muted.
+// Half-duplex anti-echo (default): mute the mic while the model speaks so open
+// speakers don't feed its own voice back in (echo loop). When barge-in is ON,
+// the mic stays open so the user can interrupt (best with headphones).
 function onModelSpeakingStart() {
   modelSpeaking = true;
   $('dot').className = 'dot speaking';
-  if (micTrack && !userMuted) micTrack.enabled = false;
+  if (micTrack && !userMuted && !bargeIn) micTrack.enabled = false;
 }
 function onModelSpeakingStop() {
   modelSpeaking = false;
@@ -504,6 +558,17 @@ function toggleMute() {
 $('connect').onclick = connect;
 $('disconnect').onclick = disconnect;
 $('mute').onclick = toggleMute;
+
+// Barge-in toggle (persisted). When turned OFF mid-speech, re-apply half-duplex
+// immediately so the mic mutes if the model is currently talking.
+const bargeEl = $('bargein');
+bargeEl.checked = bargeIn;
+bargeEl.onchange = () => {
+  bargeIn = bargeEl.checked;
+  localStorage.setItem('moa_voice_bargein', bargeIn ? '1' : '0');
+  if (micTrack && !userMuted) micTrack.enabled = bargeIn ? true : !modelSpeaking;
+  log('bridge', 'barge-in ' + (bargeIn ? 'on (you can interrupt)' : 'off (half-duplex, echo-safe)'));
+};
 
 loadSessions();
 </script>
