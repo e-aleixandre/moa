@@ -13,12 +13,10 @@
   }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { color: #8b949e; font-size: 13px; margin: 0 0 16px; }
-  select, button {
+  button {
     font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid #30363d;
-    background: #161b22; color: #e6edf3;
+    background: #161b22; color: #e6edf3; cursor: pointer;
   }
-  select { width: 100%; margin-bottom: 12px; }
-  button { cursor: pointer; }
   button.primary { background: #238636; border-color: #2ea043; font-weight: 600; }
   button.danger { background: #b62324; border-color: #da3633; }
   button:disabled { opacity: .5; cursor: default; }
@@ -26,9 +24,11 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; background: #6e7681; display: inline-block; }
   .dot.live { background: #2ea043; box-shadow: 0 0 8px #2ea043; }
   .dot.speaking { background: #d29922; box-shadow: 0 0 8px #d29922; }
+  #active { color: #8b949e; font-size: 13px; margin: 0 0 12px; }
+  #active b { color: #e6edf3; }
   #log {
     background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 10px;
-    height: 46vh; overflow-y: auto; font-size: 13px; white-space: pre-wrap; word-break: break-word;
+    height: 52vh; overflow-y: auto; font-size: 13px; white-space: pre-wrap; word-break: break-word;
   }
   .le { padding: 3px 0; border-bottom: 1px solid #21262d; }
   .le .t { color: #6e7681; font-size: 11px; }
@@ -42,14 +42,12 @@
 </head>
 <body>
 <h1>moa voice <span style="color:#8b949e;font-weight:400">— prototype</span></h1>
-<p class="sub">Throwaway bench to feel the magic. Audio goes browser↔OpenAI direct; control goes to moa serve.</p>
+<p class="sub">Throwaway bench. Audio goes browser↔OpenAI direct; the model manages all your sessions.</p>
 
 <div id="unavailable" class="banner" style="display:none">
   Realtime voice isn't available: no OpenAI API key on this <code>moa serve</code>.
   Add an <code>openai</code> API key (or <code>openai-transcribe</code>) to the auth store.
 </div>
-
-<select id="session"></select>
 
 <div class="row">
   <button id="connect" class="primary">🎙️ Start voice</button>
@@ -58,6 +56,8 @@
   <span class="dot" id="dot"></span>
   <span id="status" class="sub" style="margin:0">idle</span>
 </div>
+
+<div id="active">active session: <b>—</b></div>
 
 <div id="log"></div>
 
@@ -87,61 +87,66 @@ async function api(method, path, body) {
 }
 
 // ---------------------------------------------------------------------------
-// State
+// State — one live snapshot per moa session. The bridge tracks ALL sessions;
+// the model picks which one is "active" for commands.
 // ---------------------------------------------------------------------------
-let pc = null;          // RTCPeerConnection to OpenAI
-let dc = null;          // data channel (realtime events)
-let micTrack = null;
-let moaWs = null;       // WebSocket to moa serve session bus
-let sessionId = null;
-let dcReady = false;
+let pc = null, dc = null, micTrack = null;
+let dcReady = false, userMuted = false, modelSpeaking = false;
 
-// Live snapshot the bridge maintains from the moa bus, so the model can answer
-// "where are we?" without us streaming every delta.
-const snap = {
-  state: 'idle',
-  lastAgentText: '',
-  toolActivity: {},      // toolName -> count, aggregated per run
-  pendingAsk: null,      // { id, questions: [{question, options}] }
-  pendingPerm: null,     // { id, toolName, args }
-  subagentsActive: 0,
-};
+const sessions = new Map(); // id -> snapshot
+let activeId = null;
+
+function titleOf(id) { const s = sessions.get(id); return s ? (s.title || '(untitled)') : id; }
+function activeSess() { return activeId ? sessions.get(activeId) : null; }
+
+function setActive(id, announce) {
+  if (!sessions.get(id)) return false;
+  activeId = id;
+  $('active').innerHTML = 'active session: <b>' + escapeHtml(titleOf(id)) + '</b>';
+  updateTools();
+  if (announce) log('bridge', 'active session → ' + titleOf(id));
+  return true;
+}
 
 // ---------------------------------------------------------------------------
-// Load sessions
+// Load sessions + open a bus feed for each
 // ---------------------------------------------------------------------------
 async function loadSessions() {
   const caps = await api('GET', '/api/capabilities').catch(() => ({}));
   if (!caps.realtime) { $('unavailable').style.display = 'block'; $('connect').disabled = true; }
-  const list = await api('GET', '/api/sessions');
-  const sel = $('session');
-  sel.innerHTML = '';
-  for (const s of list.filter(s => !s.archived)) {
-    const o = document.createElement('option');
-    o.value = s.id;
-    o.textContent = `${s.title || '(untitled)'} — ${s.state}`;
-    sel.appendChild(o);
+  const list = await api('GET', '/api/sessions').catch(() => []);
+  for (const s of (list || []).filter(s => !s.archived)) {
+    if (!sessions.has(s.id)) {
+      sessions.set(s.id, {
+        id: s.id, title: s.title, state: s.state, lastAgentText: '',
+        toolActivity: {}, pendingAsk: null, pendingPerm: null, subagentsActive: 0, ws: null,
+      });
+    } else {
+      sessions.get(s.id).title = s.title;
+    }
   }
-  if (!list.length) {
-    const o = document.createElement('option');
-    o.textContent = '(no sessions — create one in the main UI first)';
-    sel.appendChild(o);
-  }
+  if (!activeId && sessions.size) setActive([...sessions.keys()][0], false);
 }
 
-// ---------------------------------------------------------------------------
-// The bridge: moa bus -> realtime briefing
-// ---------------------------------------------------------------------------
-// We connect a SECOND read-only feed of the same session WebSocket the main UI
-// uses, and translate it into short spoken-friendly briefings. Deltas are
-// ignored; we only wake the model on structural / attention events.
-function connectMoaBus(id) {
+function connectAllBuses() { for (const s of sessions.values()) connectBus(s.id); }
+
+function connectBus(id) {
+  const s = sessions.get(id);
+  if (!s || s.ws) return;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  moaWs = new WebSocket(`${proto}//${location.host}/api/sessions/${id}/ws`);
-  moaWs.onmessage = (e) => handleBusEvent(JSON.parse(e.data));
-  moaWs.onclose = () => { if (moaWs) log('err', 'moa bus disconnected'); };
+  const ws = new WebSocket(`${proto}//${location.host}/api/sessions/${id}/ws`);
+  s.ws = ws;
+  ws.onmessage = (e) => handleBusEvent(id, JSON.parse(e.data));
+  ws.onclose = () => { if (s.ws === ws) s.ws = null; };
 }
 
+function closeAllBuses() {
+  for (const s of sessions.values()) { if (s.ws) { const w = s.ws; s.ws = null; w.close(); } }
+}
+
+// ---------------------------------------------------------------------------
+// Bridge: moa bus -> realtime briefing
+// ---------------------------------------------------------------------------
 function briefModel(text, askResponse = true) {
   if (!dcReady) return;
   log('bridge', '→ ' + text);
@@ -153,80 +158,84 @@ function briefModel(text, askResponse = true) {
   if (askResponse) dc.send(JSON.stringify({ type: 'response.create' }));
 }
 
-function toolSummary() {
-  const parts = Object.entries(snap.toolActivity).map(([k, v]) => `${k}×${v}`);
+function toolSummary(s) {
+  const parts = Object.entries(s.toolActivity).map(([k, v]) => `${k}×${v}`);
   return parts.length ? parts.join(', ') : 'none';
 }
 
-function handleBusEvent(evt) {
+// Prefix that names the conversation when it is NOT the active one, so the
+// model can offer to switch.
+function where(id) {
+  if (id === activeId) return 'In the current session';
+  return `In another session "${titleOf(id)}"`;
+}
+
+function handleBusEvent(id, evt) {
+  const s = sessions.get(id);
+  if (!s) return;
   const d = evt.data || {};
   switch (evt.type) {
     case 'init':
-      snap.state = d.state || 'idle';
-      if (d.pendingPermission) snap.pendingPerm = d.pendingPermission;
-      if (d.pendingAsk) snap.pendingAsk = d.pendingAsk;
-      snap.subagentsActive = (d.subagents || []).length;
+      s.state = d.state || 'idle';
+      if (d.pendingPermission) s.pendingPerm = d.pendingPermission;
+      if (d.pendingAsk) s.pendingAsk = d.pendingAsk;
+      s.subagentsActive = (d.subagents || []).length;
+      if (id === activeId) updateTools();
       return;
 
-    // --- lossy: ignore entirely ---
+    // lossy: ignore
     case 'text_delta': case 'thinking_delta':
     case 'tool_update': case 'tool_call_delta':
       return;
 
-    // --- aggregate tool activity, stay silent ---
+    // aggregate, stay silent
     case 'tool_start': {
       const n = d.tool_name || 'tool';
-      snap.toolActivity[n] = (snap.toolActivity[n] || 0) + 1;
+      s.toolActivity[n] = (s.toolActivity[n] || 0) + 1;
       return;
     }
     case 'message_end':
-      if (d.text) snap.lastAgentText = d.text;
+      if (d.text) s.lastAgentText = d.text;
       return;
 
-    // --- attention / structural: wake the model ---
     case 'state_change':
-      snap.state = d.state;
-      if (d.state === 'error') briefModel(`The agent hit an error: ${d.error || 'unknown'}.`);
+      s.state = d.state;
+      if (d.state === 'error') briefModel(`${where(id)}: the agent hit an error: ${d.error || 'unknown'}.`);
       return;
 
     case 'ask_user':
-      snap.pendingAsk = { id: d.id, questions: d.questions || [] };
-      updateTools();
-      briefModel(`The agent is asking you: ${(d.questions||[]).map(q => q.question).join(' / ')}`);
+      s.pendingAsk = { id: d.id, questions: d.questions || [] };
+      if (id === activeId) updateTools();
+      briefModel(`${where(id)}: the agent is asking you: ${(d.questions||[]).map(q => q.question).join(' / ')}`);
       return;
 
     case 'permission_request':
-      snap.pendingPerm = { id: d.id, toolName: d.tool_name, args: d.args };
-      updateTools();
-      briefModel(`The agent wants permission to run ${d.tool_name}: ${shortArgs(d.args)}. Approve?`);
+      s.pendingPerm = { id: d.id, toolName: d.tool_name, args: d.args };
+      if (id === activeId) updateTools();
+      briefModel(`${where(id)}: the agent wants permission to run ${d.tool_name}: ${shortArgs(d.args)}. Approve?`);
       return;
 
-    case 'ask_resolved': snap.pendingAsk = null; updateTools(); return;
-    case 'permission_resolved': snap.pendingPerm = null; updateTools(); return;
+    case 'ask_resolved': s.pendingAsk = null; if (id === activeId) updateTools(); return;
+    case 'permission_resolved': s.pendingPerm = null; if (id === activeId) updateTools(); return;
 
     case 'run_end': {
-      // In goal mode run_end is noise; goal_iteration/goal_end carry the signal.
-      const tools = toolSummary();
-      const txt = snap.lastAgentText ? summarize(snap.lastAgentText) : 'done';
-      snap.toolActivity = {};
-      briefModel(`The agent finished a turn. Result: ${txt}. (tools this turn: ${tools})`);
+      const tools = toolSummary(s);
+      const txt = s.lastAgentText ? summarize(s.lastAgentText) : 'done';
+      s.toolActivity = {};
+      briefModel(`${where(id)}: the agent finished a turn. Result: ${txt}. (tools this turn: ${tools})`);
       return;
     }
     case 'goal_iteration':
-      briefModel(`Goal iteration ${d.iteration}: ${d.satisfied ? 'satisfied' : 'not yet'}. ${d.feedback || ''}`);
+      briefModel(`${where(id)}: goal iteration ${d.iteration}: ${d.satisfied ? 'satisfied' : 'not yet'}. ${d.feedback || ''}`);
       return;
     case 'goal_end':
-      briefModel(`Goal loop ended: ${d.reason || ''}.`);
+      briefModel(`${where(id)}: goal loop ended: ${d.reason || ''}.`);
       return;
-    case 'subagent_start': snap.subagentsActive++; return;
-    case 'subagent_end':
-      snap.subagentsActive = Math.max(0, snap.subagentsActive - 1);
-      return;
+    case 'subagent_start': s.subagentsActive++; return;
+    case 'subagent_end': s.subagentsActive = Math.max(0, s.subagentsActive - 1); return;
   }
 }
 
-// Very rough "markdown -> one spoken line". A real bridge would do better; this
-// is enough to feel it. Strips code blocks, collapses whitespace, truncates.
 function summarize(md) {
   let s = md.replace(/```[\s\S]*?```/g, ' [code] ')
             .replace(/`[^`]*`/g, '')
@@ -242,37 +251,42 @@ function shortArgs(args) {
 }
 
 // ---------------------------------------------------------------------------
-// Realtime tools (model -> moa actions)
+// Realtime tools (model -> moa actions), scoped to the ACTIVE session
 // ---------------------------------------------------------------------------
-// Mutating tools that resolve a pending item only exist while a pending item
-// exists — the model can't approve/answer something that isn't there, and the
-// bridge (not the model) owns the pending ID.
 function currentTools() {
+  const a = activeSess();
   const tools = [
     { type: 'function', name: 'send_message_to_agent',
-      description: 'Send a new instruction/message to the moa agent (or steer it if already running).',
+      description: 'Send a new instruction to the active moa session (or steer it if running).',
       parameters: { type: 'object', properties: {
-        text: { type: 'string', description: 'The message to send, phrased as an instruction.' },
+        text: { type: 'string', description: 'The message, phrased as an instruction.' },
         verbatim: { type: 'string', description: "The user's literal words, for technical fidelity." },
       }, required: ['text'] } },
     { type: 'function', name: 'get_status',
-      description: 'Get the current state of the agent (what it is doing right now).',
+      description: 'Get the state of the active session (what it is doing now).',
       parameters: { type: 'object', properties: {} } },
+    { type: 'function', name: 'list_sessions',
+      description: 'List all sessions with their state and whether they need attention.',
+      parameters: { type: 'object', properties: {} } },
+    { type: 'function', name: 'switch_session',
+      description: 'Make another session the active one. Match by title or partial title.',
+      parameters: { type: 'object', properties: {
+        query: { type: 'string', description: 'Title or partial title of the session to switch to.' },
+      }, required: ['query'] } },
     { type: 'function', name: 'cancel_agent',
-      description: 'Cancel the current agent run.',
+      description: 'Cancel the active session current run.',
       parameters: { type: 'object', properties: {} } },
   ];
-  if (snap.pendingAsk) {
+  if (a && a.pendingAsk) {
     tools.push({ type: 'function', name: 'answer_agent_question',
-      description: 'Answer the question the agent is currently asking.',
+      description: 'Answer the question the active session agent is asking.',
       parameters: { type: 'object', properties: {
-        answers: { type: 'array', items: { type: 'string' },
-          description: 'One answer per question, in order.' },
+        answers: { type: 'array', items: { type: 'string' }, description: 'One answer per question, in order.' },
       }, required: ['answers'] } });
   }
-  if (snap.pendingPerm) {
+  if (a && a.pendingPerm) {
     tools.push({ type: 'function', name: 'resolve_permission',
-      description: 'Approve or deny the permission the agent is currently requesting.',
+      description: 'Approve or deny the permission the active session agent is requesting.',
       parameters: { type: 'object', properties: {
         approved: { type: 'boolean' },
         feedback: { type: 'string', description: 'Optional note when denying.' },
@@ -287,33 +301,49 @@ function updateTools() {
 }
 
 async function runTool(name, args) {
+  const a = activeSess();
   switch (name) {
     case 'send_message_to_agent': {
+      if (!a) return { ok: false, error: 'no active session' };
       const text = args.verbatim ? `${args.text}\n\n(user said: "${args.verbatim}")` : args.text;
-      const res = await api('POST', `/api/sessions/${sessionId}/send`, { text });
-      return { ok: true, action: res?.action || 'send' };
+      const res = await api('POST', `/api/sessions/${a.id}/send`, { text });
+      return { ok: true, action: res?.action || 'send', session: titleOf(a.id) };
     }
     case 'get_status':
+      if (!a) return { ok: false, error: 'no active session' };
       return {
-        state: snap.state,
-        tools_this_turn: toolSummary(),
-        subagents_active: snap.subagentsActive,
-        pending_question: snap.pendingAsk ? snap.pendingAsk.questions.map(q=>q.question) : null,
-        pending_permission: snap.pendingPerm ? snap.pendingPerm.toolName : null,
-        last_agent_text: snap.lastAgentText ? summarize(snap.lastAgentText) : null,
+        session: titleOf(a.id), state: a.state, tools_this_turn: toolSummary(a),
+        subagents_active: a.subagentsActive,
+        pending_question: a.pendingAsk ? a.pendingAsk.questions.map(q=>q.question) : null,
+        pending_permission: a.pendingPerm ? a.pendingPerm.toolName : null,
+        last_agent_text: a.lastAgentText ? summarize(a.lastAgentText) : null,
       };
+    case 'list_sessions':
+      return { active: activeId ? titleOf(activeId) : null,
+        sessions: [...sessions.values()].map(s => ({
+          title: titleOf(s.id), state: s.state,
+          needs_attention: !!(s.pendingAsk || s.pendingPerm) || s.state === 'error',
+        })) };
+    case 'switch_session': {
+      const q = (args.query || '').toLowerCase();
+      const hit = [...sessions.values()].find(s => (titleOf(s.id)).toLowerCase().includes(q));
+      if (!hit) return { ok: false, error: 'no session matches "' + args.query + '"' };
+      setActive(hit.id, true);
+      return { ok: true, active: titleOf(hit.id), state: hit.state };
+    }
     case 'cancel_agent':
-      await api('POST', `/api/sessions/${sessionId}/cancel`);
+      if (!a) return { ok: false, error: 'no active session' };
+      await api('POST', `/api/sessions/${a.id}/cancel`);
       return { ok: true };
     case 'answer_agent_question': {
-      if (!snap.pendingAsk) return { ok: false, error: 'no pending question' };
-      await api('POST', `/api/sessions/${sessionId}/ask`, { id: snap.pendingAsk.id, answers: args.answers });
+      if (!a || !a.pendingAsk) return { ok: false, error: 'no pending question' };
+      await api('POST', `/api/sessions/${a.id}/ask`, { id: a.pendingAsk.id, answers: args.answers });
       return { ok: true };
     }
     case 'resolve_permission': {
-      if (!snap.pendingPerm) return { ok: false, error: 'no pending permission' };
-      await api('POST', `/api/sessions/${sessionId}/permission`,
-        { id: snap.pendingPerm.id, approved: !!args.approved, feedback: args.feedback || '' });
+      if (!a || !a.pendingPerm) return { ok: false, error: 'no pending permission' };
+      await api('POST', `/api/sessions/${a.id}/permission`,
+        { id: a.pendingPerm.id, approved: !!args.approved, feedback: args.feedback || '' });
       return { ok: true };
     }
     default:
@@ -324,13 +354,14 @@ async function runTool(name, args) {
 // ---------------------------------------------------------------------------
 // Realtime session setup
 // ---------------------------------------------------------------------------
-const INSTRUCTIONS = `You are a hands-free VOICE MEDIATOR between the user (speaking) and a coding agent called moa that runs on a server.
+const INSTRUCTIONS = `You are a hands-free VOICE MEDIATOR between the user (speaking) and a coding agent called moa that runs on a server. The user may have several moa sessions (conversations) at once; one is "active" and your commands act on it.
 
 Rules:
 - You are NOT the coding agent. Never invent code, file contents, or technical answers. If unsure, call get_status or say you don't know.
-- Events prefixed [MOA EVENT] are facts from the agent. Relay the essential part to the user naturally and briefly. Do not read code, paths or diffs aloud.
-- When the agent asks a question or requests permission, tell the user the essence and WAIT for their decision, then call the matching tool (answer_agent_question / resolve_permission).
-- When the user gives an instruction for the agent, call send_message_to_agent. Pass their literal words in 'verbatim' for technical fidelity.
+- Events prefixed [MOA EVENT] are facts from a session. Relay the essential part naturally and briefly. Do not read code, paths or diffs aloud.
+- Events may come from the current session or from ANOTHER one (the text says which). When a finished turn, question, or permission happens in another session, tell the user and OFFER to switch ("your other conversation X just finished / is asking Y — want to switch?"). Only switch when the user agrees, using switch_session. Don't switch on every little event.
+- When the agent asks a question or requests permission, relay the essence and WAIT for the user's decision, then call answer_agent_question / resolve_permission.
+- When the user gives an instruction for the agent, call send_message_to_agent. Pass their literal words in 'verbatim'.
 - Be concise and conversational. Summarize routine activity; don't narrate every tool.
 - Before destructive actions (cancel, approving a risky permission), confirm verbally first.
 - Speak the user's language (Spanish or English, follow their lead).`;
@@ -338,34 +369,36 @@ Rules:
 function configureSession() {
   dc.send(JSON.stringify({
     type: 'session.update',
-    session: {
-      type: 'realtime',
-      instructions: INSTRUCTIONS,
-      tools: currentTools(),
-      tool_choice: 'auto',
-    },
+    session: { type: 'realtime', instructions: INSTRUCTIONS, tools: currentTools(), tool_choice: 'auto' },
   }));
+}
+
+// Half-duplex anti-echo: mute the mic while the model speaks so open speakers
+// don't feed its own voice back in (echo loop). Restored when it stops, unless
+// the user manually muted.
+function onModelSpeakingStart() {
+  modelSpeaking = true;
+  $('dot').className = 'dot speaking';
+  if (micTrack && !userMuted) micTrack.enabled = false;
+}
+function onModelSpeakingStop() {
+  modelSpeaking = false;
+  $('dot').className = 'dot live';
+  if (micTrack && !userMuted) micTrack.enabled = true;
 }
 
 function handleRealtimeEvent(evt) {
   switch (evt.type) {
-    case 'session.created':
-    case 'session.updated':
-      return;
-    case 'input_audio_buffer.speech_started':
-      $('dot').className = 'dot speaking'; return;
-    case 'input_audio_buffer.speech_stopped':
-      $('dot').className = 'dot live'; return;
+    case 'session.created': case 'session.updated': return;
+    case 'output_audio_buffer.started': onModelSpeakingStart(); return;
+    case 'output_audio_buffer.stopped':
+    case 'output_audio_buffer.cleared': onModelSpeakingStop(); return;
     case 'response.output_audio_transcript.done':
-      if (evt.transcript) log('agent', '🔊 ' + evt.transcript);
-      return;
+      if (evt.transcript) log('agent', '🔊 ' + evt.transcript); return;
     case 'conversation.item.input_audio_transcription.completed':
-      if (evt.transcript) log('you', '🗣️ ' + evt.transcript);
-      return;
-    case 'response.function_call_arguments.done':
-      handleFunctionCall(evt); return;
-    case 'error':
-      log('err', 'realtime error: ' + JSON.stringify(evt.error || evt)); return;
+      if (evt.transcript) log('you', '🗣️ ' + evt.transcript); return;
+    case 'response.function_call_arguments.done': handleFunctionCall(evt); return;
+    case 'error': log('err', 'realtime error: ' + JSON.stringify(evt.error || evt)); return;
   }
 }
 
@@ -387,24 +420,25 @@ async function handleFunctionCall(evt) {
 // Connect / disconnect
 // ---------------------------------------------------------------------------
 async function connect() {
-  sessionId = $('session').value;
-  if (!sessionId) { log('err', 'pick a session first'); return; }
+  await loadSessions();
+  if (!sessions.size) { log('err', 'no sessions — create one in the main UI first'); return; }
   setStatus('connecting…');
   $('connect').disabled = true;
 
   try {
-    // 1) mint ephemeral token from moa serve
     const tok = await api('POST', '/api/realtime/token');
     const key = tok.value || (tok.client_secret && tok.client_secret.value);
     if (!key) throw new Error('no token value in response');
 
-    // 2) WebRTC peer connection to OpenAI
     pc = new RTCPeerConnection();
     const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
     pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; };
 
-    const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // echoCancellation/noiseSuppression help when using open speakers.
+    const ms = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
     micTrack = ms.getTracks()[0];
     pc.addTrack(micTrack);
 
@@ -413,16 +447,15 @@ async function connect() {
       dcReady = true;
       configureSession();
       log('bridge', 'voice session ready — say hi 👋');
+      const attn = [...sessions.values()].filter(s => s.pendingAsk || s.pendingPerm || s.state === 'error');
       let catchup = 'Say a short greeting and tell the user you are listening.';
-      if (snap.pendingPerm) catchup += ` Note: the agent is waiting for permission to run ${snap.pendingPerm.toolName}.`;
-      if (snap.pendingAsk) catchup += ' Note: the agent has a pending question.';
+      if (attn.length) catchup += ' Note: these sessions need attention: ' + attn.map(s => titleOf(s.id)).join(', ') + '.';
       briefModel(catchup);
     };
     dc.onmessage = (e) => handleRealtimeEvent(JSON.parse(e.data));
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-
     const resp = await fetch('https://api.openai.com/v1/realtime/calls', {
       method: 'POST', body: offer.sdp,
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/sdp' },
@@ -430,11 +463,10 @@ async function connect() {
     if (!resp.ok) throw new Error('OpenAI SDP exchange failed: ' + resp.status);
     await pc.setRemoteDescription({ type: 'answer', sdp: await resp.text() });
 
-    // 3) connect the moa bus feed
-    connectMoaBus(sessionId);
+    connectAllBuses();
 
     $('dot').className = 'dot live';
-    setStatus('live · ' + sessionId.slice(0, 8));
+    setStatus('live · ' + sessions.size + ' session(s)');
     $('disconnect').disabled = false;
     $('mute').disabled = false;
   } catch (e) {
@@ -447,10 +479,11 @@ async function connect() {
 
 function disconnect() {
   dcReady = false;
-  if (moaWs) { const w = moaWs; moaWs = null; w.close(); }
+  closeAllBuses();
   if (dc) { dc.close(); dc = null; }
   if (micTrack) { micTrack.stop(); micTrack = null; }
   if (pc) { pc.close(); pc = null; }
+  userMuted = false; modelSpeaking = false;
   $('dot').className = 'dot';
   setStatus('idle');
   $('connect').disabled = false;
@@ -461,9 +494,11 @@ function disconnect() {
 
 function toggleMute() {
   if (!micTrack) return;
-  micTrack.enabled = !micTrack.enabled;
-  $('mute').textContent = micTrack.enabled ? 'Mute mic' : 'Unmute mic';
-  log('bridge', micTrack.enabled ? 'mic on' : 'mic muted');
+  userMuted = !userMuted;
+  // When muted, force off. When unmuted, only enable if the model isn't speaking.
+  micTrack.enabled = userMuted ? false : !modelSpeaking;
+  $('mute').textContent = userMuted ? 'Unmute mic' : 'Mute mic';
+  log('bridge', userMuted ? 'mic muted' : 'mic on');
 }
 
 $('connect').onclick = connect;
