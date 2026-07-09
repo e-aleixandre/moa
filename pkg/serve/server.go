@@ -98,6 +98,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
 	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
+	mux.HandleFunc("POST /api/realtime/token", handleRealtimeToken(manager))
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
@@ -752,6 +753,7 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 		}
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
+			"realtime":      mgr.openaiKey != "",
 			"workspaceRoot": mgr.workspaceRoot,
 			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),
 			"goal_flags":    goalFlags,

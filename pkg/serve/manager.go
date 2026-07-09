@@ -231,6 +231,7 @@ type Manager struct {
 
 	providerFactory func(model core.Model) (core.Provider, error)
 	transcriber     core.Transcriber // nil when no speech-to-text is available
+	openaiKey       string           // OpenAI API key; enables realtime voice token minting (empty = disabled)
 	usagePoller     *usage.Poller    // nil when plan usage tracking is unavailable
 	pushStore       *push.Store      // nil when Web Push is unavailable
 	pushDispatcher  *push.Dispatcher // nil when Web Push is unavailable
@@ -255,6 +256,7 @@ type Manager struct {
 type ManagerConfig struct {
 	ProviderFactory func(model core.Model) (core.Provider, error)
 	Transcriber     core.Transcriber // optional; enables POST /api/transcribe
+	OpenAIKey       string           // optional; enables POST /api/realtime/token (voice prototype)
 	UsagePoller     *usage.Poller    // optional; enables GET /api/usage
 	PushStore       *push.Store      // optional; enables Web Push
 	PushDispatcher  *push.Dispatcher // optional; enables Web Push
@@ -272,6 +274,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		baseCtx:         ctx,
 		providerFactory: cfg.ProviderFactory,
 		transcriber:     cfg.Transcriber,
+		openaiKey:       cfg.OpenAIKey,
 		usagePoller:     cfg.UsagePoller,
 		pushStore:       cfg.PushStore,
 		pushDispatcher:  cfg.PushDispatcher,

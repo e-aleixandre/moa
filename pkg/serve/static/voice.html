@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>moa voice (prototype)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif;
+    background: #0d1117; color: #e6edf3; padding: 16px; max-width: 720px; margin: 0 auto;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8b949e; font-size: 13px; margin: 0 0 16px; }
+  select, button {
+    font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid #30363d;
+    background: #161b22; color: #e6edf3;
+  }
+  select { width: 100%; margin-bottom: 12px; }
+  button { cursor: pointer; }
+  button.primary { background: #238636; border-color: #2ea043; font-weight: 600; }
+  button.danger { background: #b62324; border-color: #da3633; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #6e7681; display: inline-block; }
+  .dot.live { background: #2ea043; box-shadow: 0 0 8px #2ea043; }
+  .dot.speaking { background: #d29922; box-shadow: 0 0 8px #d29922; }
+  #log {
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 10px;
+    height: 46vh; overflow-y: auto; font-size: 13px; white-space: pre-wrap; word-break: break-word;
+  }
+  .le { padding: 3px 0; border-bottom: 1px solid #21262d; }
+  .le .t { color: #6e7681; font-size: 11px; }
+  .le.bridge { color: #58a6ff; }
+  .le.tool { color: #d29922; }
+  .le.agent { color: #7ee787; }
+  .le.err { color: #ff7b72; }
+  .le.you { color: #e6edf3; }
+  .banner { background: #3d1d00; border: 1px solid #d29922; color: #ffd; padding: 10px; border-radius: 10px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<h1>moa voice <span style="color:#8b949e;font-weight:400">— prototype</span></h1>
+<p class="sub">Throwaway bench to feel the magic. Audio goes browser↔OpenAI direct; control goes to moa serve.</p>
+
+<div id="unavailable" class="banner" style="display:none">
+  Realtime voice isn't available: no OpenAI API key on this <code>moa serve</code>.
+  Add an <code>openai</code> API key (or <code>openai-transcribe</code>) to the auth store.
+</div>
+
+<select id="session"></select>
+
+<div class="row">
+  <button id="connect" class="primary">🎙️ Start voice</button>
+  <button id="disconnect" class="danger" disabled>Stop</button>
+  <button id="mute" disabled>Mute mic</button>
+  <span class="dot" id="dot"></span>
+  <span id="status" class="sub" style="margin:0">idle</span>
+</div>
+
+<div id="log"></div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+function log(kind, msg) {
+  const div = document.createElement('div');
+  div.className = 'le ' + kind;
+  const t = new Date().toLocaleTimeString();
+  div.innerHTML = `<span class="t">${t}</span> ${escapeHtml(msg)}`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function setStatus(s) { $('status').textContent = s; }
+
+const HDRS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
+async function api(method, path, body) {
+  const opts = { method, headers: HDRS, credentials: 'same-origin' };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0,200)}`);
+  if (r.status === 204) return null;
+  const txt = await r.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let pc = null;          // RTCPeerConnection to OpenAI
+let dc = null;          // data channel (realtime events)
+let micTrack = null;
+let moaWs = null;       // WebSocket to moa serve session bus
+let sessionId = null;
+let dcReady = false;
+
+// Live snapshot the bridge maintains from the moa bus, so the model can answer
+// "where are we?" without us streaming every delta.
+const snap = {
+  state: 'idle',
+  lastAgentText: '',
+  toolActivity: {},      // toolName -> count, aggregated per run
+  pendingAsk: null,      // { id, questions: [{question, options}] }
+  pendingPerm: null,     // { id, toolName, args }
+  subagentsActive: 0,
+};
+
+// ---------------------------------------------------------------------------
+// Load sessions
+// ---------------------------------------------------------------------------
+async function loadSessions() {
+  const caps = await api('GET', '/api/capabilities').catch(() => ({}));
+  if (!caps.realtime) { $('unavailable').style.display = 'block'; $('connect').disabled = true; }
+  const list = await api('GET', '/api/sessions');
+  const sel = $('session');
+  sel.innerHTML = '';
+  for (const s of list.filter(s => !s.archived)) {
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = `${s.title || '(untitled)'} — ${s.state}`;
+    sel.appendChild(o);
+  }
+  if (!list.length) {
+    const o = document.createElement('option');
+    o.textContent = '(no sessions — create one in the main UI first)';
+    sel.appendChild(o);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The bridge: moa bus -> realtime briefing
+// ---------------------------------------------------------------------------
+// We connect a SECOND read-only feed of the same session WebSocket the main UI
+// uses, and translate it into short spoken-friendly briefings. Deltas are
+// ignored; we only wake the model on structural / attention events.
+function connectMoaBus(id) {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  moaWs = new WebSocket(`${proto}//${location.host}/api/sessions/${id}/ws`);
+  moaWs.onmessage = (e) => handleBusEvent(JSON.parse(e.data));
+  moaWs.onclose = () => { if (moaWs) log('err', 'moa bus disconnected'); };
+}
+
+function briefModel(text, askResponse = true) {
+  if (!dcReady) return;
+  log('bridge', '→ ' + text);
+  dc.send(JSON.stringify({
+    type: 'conversation.item.create',
+    item: { type: 'message', role: 'user',
+      content: [{ type: 'input_text', text: `[MOA EVENT] ${text}` }] },
+  }));
+  if (askResponse) dc.send(JSON.stringify({ type: 'response.create' }));
+}
+
+function toolSummary() {
+  const parts = Object.entries(snap.toolActivity).map(([k, v]) => `${k}×${v}`);
+  return parts.length ? parts.join(', ') : 'none';
+}
+
+function handleBusEvent(evt) {
+  const d = evt.data || {};
+  switch (evt.type) {
+    case 'init':
+      snap.state = d.state || 'idle';
+      if (d.pendingPermission) snap.pendingPerm = d.pendingPermission;
+      if (d.pendingAsk) snap.pendingAsk = d.pendingAsk;
+      snap.subagentsActive = (d.subagents || []).length;
+      return;
+
+    // --- lossy: ignore entirely ---
+    case 'text_delta': case 'thinking_delta':
+    case 'tool_update': case 'tool_call_delta':
+      return;
+
+    // --- aggregate tool activity, stay silent ---
+    case 'tool_start': {
+      const n = d.tool_name || 'tool';
+      snap.toolActivity[n] = (snap.toolActivity[n] || 0) + 1;
+      return;
+    }
+    case 'message_end':
+      if (d.text) snap.lastAgentText = d.text;
+      return;
+
+    // --- attention / structural: wake the model ---
+    case 'state_change':
+      snap.state = d.state;
+      if (d.state === 'error') briefModel(`The agent hit an error: ${d.error || 'unknown'}.`);
+      return;
+
+    case 'ask_user':
+      snap.pendingAsk = { id: d.id, questions: d.questions || [] };
+      updateTools();
+      briefModel(`The agent is asking you: ${(d.questions||[]).map(q => q.question).join(' / ')}`);
+      return;
+
+    case 'permission_request':
+      snap.pendingPerm = { id: d.id, toolName: d.tool_name, args: d.args };
+      updateTools();
+      briefModel(`The agent wants permission to run ${d.tool_name}: ${shortArgs(d.args)}. Approve?`);
+      return;
+
+    case 'ask_resolved': snap.pendingAsk = null; updateTools(); return;
+    case 'permission_resolved': snap.pendingPerm = null; updateTools(); return;
+
+    case 'run_end': {
+      // In goal mode run_end is noise; goal_iteration/goal_end carry the signal.
+      const tools = toolSummary();
+      const txt = snap.lastAgentText ? summarize(snap.lastAgentText) : 'done';
+      snap.toolActivity = {};
+      briefModel(`The agent finished a turn. Result: ${txt}. (tools this turn: ${tools})`);
+      return;
+    }
+    case 'goal_iteration':
+      briefModel(`Goal iteration ${d.iteration}: ${d.satisfied ? 'satisfied' : 'not yet'}. ${d.feedback || ''}`);
+      return;
+    case 'goal_end':
+      briefModel(`Goal loop ended: ${d.reason || ''}.`);
+      return;
+    case 'subagent_start': snap.subagentsActive++; return;
+    case 'subagent_end':
+      snap.subagentsActive = Math.max(0, snap.subagentsActive - 1);
+      return;
+  }
+}
+
+// Very rough "markdown -> one spoken line". A real bridge would do better; this
+// is enough to feel it. Strips code blocks, collapses whitespace, truncates.
+function summarize(md) {
+  let s = md.replace(/```[\s\S]*?```/g, ' [code] ')
+            .replace(/`[^`]*`/g, '')
+            .replace(/[#*_>|-]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+  if (s.length > 240) s = s.slice(0, 240) + '…';
+  return s || 'done';
+}
+function shortArgs(args) {
+  try { const s = JSON.stringify(args); return s.length > 120 ? s.slice(0,120)+'…' : s; }
+  catch { return ''; }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime tools (model -> moa actions)
+// ---------------------------------------------------------------------------
+// Mutating tools that resolve a pending item only exist while a pending item
+// exists — the model can't approve/answer something that isn't there, and the
+// bridge (not the model) owns the pending ID.
+function currentTools() {
+  const tools = [
+    { type: 'function', name: 'send_message_to_agent',
+      description: 'Send a new instruction/message to the moa agent (or steer it if already running).',
+      parameters: { type: 'object', properties: {
+        text: { type: 'string', description: 'The message to send, phrased as an instruction.' },
+        verbatim: { type: 'string', description: "The user's literal words, for technical fidelity." },
+      }, required: ['text'] } },
+    { type: 'function', name: 'get_status',
+      description: 'Get the current state of the agent (what it is doing right now).',
+      parameters: { type: 'object', properties: {} } },
+    { type: 'function', name: 'cancel_agent',
+      description: 'Cancel the current agent run.',
+      parameters: { type: 'object', properties: {} } },
+  ];
+  if (snap.pendingAsk) {
+    tools.push({ type: 'function', name: 'answer_agent_question',
+      description: 'Answer the question the agent is currently asking.',
+      parameters: { type: 'object', properties: {
+        answers: { type: 'array', items: { type: 'string' },
+          description: 'One answer per question, in order.' },
+      }, required: ['answers'] } });
+  }
+  if (snap.pendingPerm) {
+    tools.push({ type: 'function', name: 'resolve_permission',
+      description: 'Approve or deny the permission the agent is currently requesting.',
+      parameters: { type: 'object', properties: {
+        approved: { type: 'boolean' },
+        feedback: { type: 'string', description: 'Optional note when denying.' },
+      }, required: ['approved'] } });
+  }
+  return tools;
+}
+
+function updateTools() {
+  if (!dcReady) return;
+  dc.send(JSON.stringify({ type: 'session.update', session: { tools: currentTools() } }));
+}
+
+async function runTool(name, args) {
+  switch (name) {
+    case 'send_message_to_agent': {
+      const text = args.verbatim ? `${args.text}\n\n(user said: "${args.verbatim}")` : args.text;
+      const res = await api('POST', `/api/sessions/${sessionId}/send`, { text });
+      return { ok: true, action: res?.action || 'send' };
+    }
+    case 'get_status':
+      return {
+        state: snap.state,
+        tools_this_turn: toolSummary(),
+        subagents_active: snap.subagentsActive,
+        pending_question: snap.pendingAsk ? snap.pendingAsk.questions.map(q=>q.question) : null,
+        pending_permission: snap.pendingPerm ? snap.pendingPerm.toolName : null,
+        last_agent_text: snap.lastAgentText ? summarize(snap.lastAgentText) : null,
+      };
+    case 'cancel_agent':
+      await api('POST', `/api/sessions/${sessionId}/cancel`);
+      return { ok: true };
+    case 'answer_agent_question': {
+      if (!snap.pendingAsk) return { ok: false, error: 'no pending question' };
+      await api('POST', `/api/sessions/${sessionId}/ask`, { id: snap.pendingAsk.id, answers: args.answers });
+      return { ok: true };
+    }
+    case 'resolve_permission': {
+      if (!snap.pendingPerm) return { ok: false, error: 'no pending permission' };
+      await api('POST', `/api/sessions/${sessionId}/permission`,
+        { id: snap.pendingPerm.id, approved: !!args.approved, feedback: args.feedback || '' });
+      return { ok: true };
+    }
+    default:
+      return { ok: false, error: 'unknown tool' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime session setup
+// ---------------------------------------------------------------------------
+const INSTRUCTIONS = `You are a hands-free VOICE MEDIATOR between the user (speaking) and a coding agent called moa that runs on a server.
+
+Rules:
+- You are NOT the coding agent. Never invent code, file contents, or technical answers. If unsure, call get_status or say you don't know.
+- Events prefixed [MOA EVENT] are facts from the agent. Relay the essential part to the user naturally and briefly. Do not read code, paths or diffs aloud.
+- When the agent asks a question or requests permission, tell the user the essence and WAIT for their decision, then call the matching tool (answer_agent_question / resolve_permission).
+- When the user gives an instruction for the agent, call send_message_to_agent. Pass their literal words in 'verbatim' for technical fidelity.
+- Be concise and conversational. Summarize routine activity; don't narrate every tool.
+- Before destructive actions (cancel, approving a risky permission), confirm verbally first.
+- Speak the user's language (Spanish or English, follow their lead).`;
+
+function configureSession() {
+  dc.send(JSON.stringify({
+    type: 'session.update',
+    session: {
+      type: 'realtime',
+      instructions: INSTRUCTIONS,
+      tools: currentTools(),
+      tool_choice: 'auto',
+    },
+  }));
+}
+
+function handleRealtimeEvent(evt) {
+  switch (evt.type) {
+    case 'session.created':
+    case 'session.updated':
+      return;
+    case 'input_audio_buffer.speech_started':
+      $('dot').className = 'dot speaking'; return;
+    case 'input_audio_buffer.speech_stopped':
+      $('dot').className = 'dot live'; return;
+    case 'response.output_audio_transcript.done':
+      if (evt.transcript) log('agent', '🔊 ' + evt.transcript);
+      return;
+    case 'conversation.item.input_audio_transcription.completed':
+      if (evt.transcript) log('you', '🗣️ ' + evt.transcript);
+      return;
+    case 'response.function_call_arguments.done':
+      handleFunctionCall(evt); return;
+    case 'error':
+      log('err', 'realtime error: ' + JSON.stringify(evt.error || evt)); return;
+  }
+}
+
+async function handleFunctionCall(evt) {
+  let args = {};
+  try { args = JSON.parse(evt.arguments || '{}'); } catch {}
+  log('tool', `⚙️ ${evt.name}(${shortArgs(args)})`);
+  let result;
+  try { result = await runTool(evt.name, args); }
+  catch (e) { result = { ok: false, error: String(e.message || e) }; log('err', `${evt.name} failed: ${e.message||e}`); }
+  dc.send(JSON.stringify({
+    type: 'conversation.item.create',
+    item: { type: 'function_call_output', call_id: evt.call_id, output: JSON.stringify(result) },
+  }));
+  dc.send(JSON.stringify({ type: 'response.create' }));
+}
+
+// ---------------------------------------------------------------------------
+// Connect / disconnect
+// ---------------------------------------------------------------------------
+async function connect() {
+  sessionId = $('session').value;
+  if (!sessionId) { log('err', 'pick a session first'); return; }
+  setStatus('connecting…');
+  $('connect').disabled = true;
+
+  try {
+    // 1) mint ephemeral token from moa serve
+    const tok = await api('POST', '/api/realtime/token');
+    const key = tok.value || (tok.client_secret && tok.client_secret.value);
+    if (!key) throw new Error('no token value in response');
+
+    // 2) WebRTC peer connection to OpenAI
+    pc = new RTCPeerConnection();
+    const audioEl = document.createElement('audio');
+    audioEl.autoplay = true;
+    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; };
+
+    const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micTrack = ms.getTracks()[0];
+    pc.addTrack(micTrack);
+
+    dc = pc.createDataChannel('oai-events');
+    dc.onopen = () => {
+      dcReady = true;
+      configureSession();
+      log('bridge', 'voice session ready — say hi 👋');
+      let catchup = 'Say a short greeting and tell the user you are listening.';
+      if (snap.pendingPerm) catchup += ` Note: the agent is waiting for permission to run ${snap.pendingPerm.toolName}.`;
+      if (snap.pendingAsk) catchup += ' Note: the agent has a pending question.';
+      briefModel(catchup);
+    };
+    dc.onmessage = (e) => handleRealtimeEvent(JSON.parse(e.data));
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    const resp = await fetch('https://api.openai.com/v1/realtime/calls', {
+      method: 'POST', body: offer.sdp,
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/sdp' },
+    });
+    if (!resp.ok) throw new Error('OpenAI SDP exchange failed: ' + resp.status);
+    await pc.setRemoteDescription({ type: 'answer', sdp: await resp.text() });
+
+    // 3) connect the moa bus feed
+    connectMoaBus(sessionId);
+
+    $('dot').className = 'dot live';
+    setStatus('live · ' + sessionId.slice(0, 8));
+    $('disconnect').disabled = false;
+    $('mute').disabled = false;
+  } catch (e) {
+    log('err', 'connect failed: ' + (e.message || e));
+    setStatus('error');
+    $('connect').disabled = false;
+    disconnect();
+  }
+}
+
+function disconnect() {
+  dcReady = false;
+  if (moaWs) { const w = moaWs; moaWs = null; w.close(); }
+  if (dc) { dc.close(); dc = null; }
+  if (micTrack) { micTrack.stop(); micTrack = null; }
+  if (pc) { pc.close(); pc = null; }
+  $('dot').className = 'dot';
+  setStatus('idle');
+  $('connect').disabled = false;
+  $('disconnect').disabled = true;
+  $('mute').disabled = true;
+  $('mute').textContent = 'Mute mic';
+}
+
+function toggleMute() {
+  if (!micTrack) return;
+  micTrack.enabled = !micTrack.enabled;
+  $('mute').textContent = micTrack.enabled ? 'Mute mic' : 'Unmute mic';
+  log('bridge', micTrack.enabled ? 'mic on' : 'mic muted');
+}
+
+$('connect').onclick = connect;
+$('disconnect').onclick = disconnect;
+$('mute').onclick = toggleMute;
+
+loadSessions();
+</script>
+</body>
+</html>

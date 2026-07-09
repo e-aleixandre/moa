@@ -64,10 +64,13 @@ func runServe(args []string) {
 	// Priority: 1) "openai-transcribe" credential in auth store
 	//           2) OpenAI credential if it's an API key (not OAuth)
 	var transcriber core.Transcriber
+	var openaiKey string
 	if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Key != "" {
 		transcriber = openai.New(cred.Key)
+		openaiKey = cred.Key
 	} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
 		transcriber = openai.New(apiKey)
+		openaiKey = apiKey
 	}
 
 	// Web Push (optional): VAPID keys + subscription store live in the moa
@@ -83,6 +86,7 @@ func runServe(args []string) {
 			return build.Provider, nil
 		},
 		Transcriber:    transcriber,
+		OpenAIKey:      openaiKey,
 		UsagePoller:    newAnthropicUsagePoller(authStore),
 		PushStore:      pushStore,
 		PushDispatcher: pushDispatcher,
