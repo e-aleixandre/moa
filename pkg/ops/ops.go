@@ -101,48 +101,48 @@ type LifecycleUpdate struct {
 
 // JobCounts contains only aggregate safe counts.
 type JobCounts struct {
-	Subagents int
-	Bash      int
+	Subagents int `json:"subagents"`
+	Bash      int `json:"bash"`
 }
 
 // Verification is a structured result rather than command output.
 type Verification struct {
-	State VerificationState
-	At    time.Time
+	State VerificationState `json:"state"`
+	At    time.Time         `json:"at,omitempty"`
 }
 
 // Milestone is one bounded, structured journal entry.
 type Milestone struct {
-	Type  MilestoneType
-	At    time.Time
-	RefID string
+	Type  MilestoneType `json:"type"`
+	At    time.Time     `json:"at"`
+	RefID string        `json:"ref_id"`
 }
 
 // Snapshot is a detached, deterministic view of the roster.
 type Snapshot struct {
-	Projects []Project
+	Projects []Project `json:"projects"`
 }
 
 // Project groups sessions by exact supplied CanonicalCWD.
 type Project struct {
-	CanonicalCWD string
-	Aliases      []string
-	Sessions     []Session
+	CanonicalCWD string    `json:"canonical_cwd"`
+	Aliases      []string  `json:"aliases,omitempty"`
+	Sessions     []Session `json:"sessions"`
 }
 
 // Session is the safe operational projection. It has no raw transcript,
 // error, tool argument, or log fields.
 type Session struct {
-	ID               string
-	Title            string
-	Aliases          []string
-	Presence         Presence
-	Lifecycle        LifecycleState
-	Activity         Activity
-	LastTransitionAt time.Time
-	Jobs             JobCounts
-	Verification     Verification
-	Milestones       []Milestone
+	ID               string         `json:"id"`
+	Title            string         `json:"title"`
+	Aliases          []string       `json:"aliases,omitempty"`
+	Presence         Presence       `json:"presence"`
+	Lifecycle        LifecycleState `json:"lifecycle"`
+	Activity         Activity       `json:"activity"`
+	LastTransitionAt time.Time      `json:"last_transition_at,omitempty"`
+	Jobs             JobCounts      `json:"jobs"`
+	Verification     Verification   `json:"verification"`
+	Milestones       []Milestone    `json:"milestones"`
 }
 
 // Service is a synchronous actor boundary around the deterministic reducer.

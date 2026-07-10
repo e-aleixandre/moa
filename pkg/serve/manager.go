@@ -17,6 +17,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/files"
 	"github.com/ealeixandre/moa/pkg/mcp"
+	"github.com/ealeixandre/moa/pkg/ops"
 	"github.com/ealeixandre/moa/pkg/push"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
@@ -267,6 +268,8 @@ type Manager struct {
 	// attention normalizes cross-session blocking state for future voice and
 	// digest clients. It owns no session state and is stopped on Shutdown.
 	attention *attention.Service
+	// ops is the read-only, safe cross-session operational projection.
+	ops *ops.Service
 }
 
 // ManagerConfig configures a Manager.
@@ -335,6 +338,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		fileScanner:     files.NewScanner(),
 		scheduler:       scheduler,
 		attention:       attention.New(attention.Config{}),
+		ops:             ops.New(ops.Config{}),
 	}
 	m.instructionRequests = make(map[string][]instructionRequest)
 	m.instructionRates = make(map[string][]time.Time)
@@ -394,6 +398,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 	}
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
+	m.updateOpsTitle(sess)
 
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
