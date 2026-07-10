@@ -101,17 +101,19 @@ func TestInstructionEndpointValidationAndRateLimit(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestInstructionEndpointIsNotReachableWithoutAuth(t *testing.T) {
+func TestInstructionEndpointUsesNormalUnauthenticatedServePolicy(t *testing.T) {
 	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
 	sess, err := mgr.CreateSession(CreateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/instruction", strings.NewReader(`{"text":"hello","request_id":"one"}`))
+	req.Host = "localhost"
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Moa-Request", "1")
 	resp := httptest.NewRecorder()
 	NewServer(mgr).ServeHTTP(resp, req)
-	if resp.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.Code)
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.Code)
 	}
 }

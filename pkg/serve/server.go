@@ -78,17 +78,13 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/archive", handleArchiveSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
-	// Voice companion instructions are deliberately unavailable on an
-	// unauthenticated server. The dashboard's normal /send route retains its
-	// established local-server behavior, but a phone-facing entry point must
-	// never be exposed merely because the server happens to be reachable.
-	if o.token != "" {
-		mux.HandleFunc("POST /api/sessions/{id}/instruction", handleInstruction(manager))
-		mux.HandleFunc("POST /api/ops/instruction", handleOpsInstruction(manager))
-		// The realtime Ops projection is deliberately phone-facing and therefore
-		// unavailable unless the server has opted into token authentication.
-		mux.HandleFunc("GET /api/ops/ws", handleOpsWebSocket(manager))
-	}
+	// Voice/Ops inherits Serve's established access model: a configured token
+	// protects every route through the shared middleware; without one, the
+	// operator must restrict network reachability (for example with Tailscale).
+	// It must not have a surprising, stricter policy than the rest of Serve.
+	mux.HandleFunc("POST /api/sessions/{id}/instruction", handleInstruction(manager))
+	mux.HandleFunc("POST /api/ops/instruction", handleOpsInstruction(manager))
+	mux.HandleFunc("GET /api/ops/ws", handleOpsWebSocket(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
