@@ -127,36 +127,47 @@ type instructionBody struct {
 	RequestID string `json:"request_id"`
 }
 
+func decodeInstructionBody(w http.ResponseWriter, r *http.Request, body any) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return false
+	}
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, instructionBodyLimit))
+	if err != nil {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return false
+	}
+	if !utf8.Valid(bodyBytes) {
+		http.Error(w, "request body must be valid UTF-8", http.StatusBadRequest)
+		return false
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(bodyBytes)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(body); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func validInstructionBody(w http.ResponseWriter, text, requestID *string) bool {
+	*text = strings.TrimSpace(*text)
+	if *text == "" || utf8.RuneCountInString(*text) > instructionTextLimit {
+		http.Error(w, "text must be non-empty and no more than 1024 runes", http.StatusBadRequest)
+		return false
+	}
+	if !validInstructionID(*requestID) {
+		http.Error(w, "request_id must contain 1-128 safe opaque characters", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
 func handleInstruction(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil || !strings.EqualFold(mediaType, "application/json") {
-			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
-			return
-		}
-		bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, instructionBodyLimit))
-		if err != nil {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		if !utf8.Valid(bodyBytes) {
-			http.Error(w, "request body must be valid UTF-8", http.StatusBadRequest)
-			return
-		}
 		var body instructionBody
-		decoder := json.NewDecoder(strings.NewReader(string(bodyBytes)))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&body); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid JSON", http.StatusBadRequest)
-			return
-		}
-		body.Text = strings.TrimSpace(body.Text)
-		if body.Text == "" || utf8.RuneCountInString(body.Text) > instructionTextLimit {
-			http.Error(w, "text must be non-empty and no more than 1024 runes", http.StatusBadRequest)
-			return
-		}
-		if !validInstructionID(body.RequestID) {
-			http.Error(w, "request_id must contain 1-128 safe opaque characters", http.StatusBadRequest)
+		if !decodeInstructionBody(w, r, &body) || !validInstructionBody(w, &body.Text, &body.RequestID) {
 			return
 		}
 

@@ -85,6 +85,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// never be exposed merely because the server happens to be reachable.
 	if o.token != "" {
 		mux.HandleFunc("POST /api/sessions/{id}/instruction", handleInstruction(manager))
+		mux.HandleFunc("POST /api/ops/instruction", handleOpsInstruction(manager))
 	}
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
