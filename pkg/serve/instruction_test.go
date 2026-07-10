@@ -50,9 +50,7 @@ func TestVoiceInstructionIdempotencyAndMismatch(t *testing.T) {
 }
 
 func TestInstructionEndpointValidationAndRateLimit(t *testing.T) {
-	srv, mgr, cancel := newTestServer(t)
-	defer cancel()
-	defer srv.Close()
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
 	sess, err := mgr.CreateSession(CreateOpts{})
 	if err != nil {
 		t.Fatal(err)
@@ -60,17 +58,12 @@ func TestInstructionEndpointValidationAndRateLimit(t *testing.T) {
 	path := "/api/sessions/" + sess.ID + "/instruction"
 
 	request := func(body, contentType string) *http.Response {
-		req, err := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.SetPathValue("id", sess.ID)
 		req.Header.Set("Content-Type", contentType)
-		req.Header.Set("X-Moa-Request", "1")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return resp
+		resp := httptest.NewRecorder()
+		handleInstruction(mgr).ServeHTTP(resp, req)
+		return resp.Result()
 	}
 
 	resp := request(`{"text":"hello","request_id":"one","unexpected":true}`, "application/json")
@@ -108,7 +101,7 @@ func TestInstructionEndpointValidationAndRateLimit(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestInstructionEndpointRequiresCSRFMiddleware(t *testing.T) {
+func TestInstructionEndpointIsNotReachableWithoutAuth(t *testing.T) {
 	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
 	sess, err := mgr.CreateSession(CreateOpts{})
 	if err != nil {
