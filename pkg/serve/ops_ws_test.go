@@ -29,7 +29,7 @@ func opsAuthenticatedClient(t *testing.T, srv *httptest.Server) *http.Client {
 	return client
 }
 
-func TestOpsWebSocketOnlyRegisteredWithAuth(t *testing.T) {
+func TestOpsWebSocketUsesNormalUnauthenticatedServePolicy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("x")))
@@ -38,8 +38,8 @@ func TestOpsWebSocketOnlyRegisteredWithAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/ops/ws", nil)
 	req.Host = "localhost"
 	NewServer(mgr).ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unauthenticated server route status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusUpgradeRequired {
+		t.Fatalf("unauthenticated server route status = %d, want 426", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()

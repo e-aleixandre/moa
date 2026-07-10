@@ -23,7 +23,7 @@ func opsInstructionRequest(t *testing.T, handler http.Handler, body string) *htt
 	return rec
 }
 
-func TestOpsInstructionEndpointNotRegisteredWithoutAuth(t *testing.T) {
+func TestOpsInstructionEndpointUsesNormalUnauthenticatedServePolicy(t *testing.T) {
 	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
 	req := httptest.NewRequest(http.MethodPost, "/api/ops/instruction", strings.NewReader(`{"target":"x","text":"hello","request_id":"one"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -31,8 +31,8 @@ func TestOpsInstructionEndpointNotRegisteredWithoutAuth(t *testing.T) {
 	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 	NewServer(mgr).ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want 405", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
 
