@@ -127,6 +127,7 @@ func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.P
 		for _, id := range ids {
 			_ = mgr.Delete(id)
 		}
+		mgr.Shutdown()
 	})
 	return mgr
 }
@@ -186,6 +187,32 @@ func TestCreateSession(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(list))
 	}
+}
+
+func TestManagerAttentionTracksAndClearsSessionPermission(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "deploy api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sess.runtime.Bus.Publish(bus.PermissionRequested{
+		SessionID: sess.ID,
+		ID:        "perm_voice_test",
+		ToolName:  "bash",
+		Args:      map[string]any{"command": "git status"},
+	})
+	pollUntil(t, time.Second, "attention permission", func() bool {
+		items := mgr.attention.Status()
+		return len(items) == 1 && items[0].RefID == "perm_voice_test" && items[0].SessionID == sess.ID
+	})
+
+	sess.runtime.Bus.Publish(bus.PermissionResolved{SessionID: sess.ID, ID: "perm_voice_test"})
+	pollUntil(t, time.Second, "resolved attention permission", func() bool {
+		return len(mgr.attention.Status()) == 0
+	})
 }
 
 func TestManagerConfigLoaderIsUsedForSessionBuild(t *testing.T) {

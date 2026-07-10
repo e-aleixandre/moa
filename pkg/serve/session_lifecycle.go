@@ -412,6 +412,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
 	m.subscribeCacheClock(sess)
+	m.subscribeAttention(sess)
 
 	return sess, nil
 }
@@ -673,6 +674,9 @@ func (m *Manager) Shutdown() {
 		// RunEnded→save could race a caller that removes the session dir right
 		// after Shutdown (e.g. t.TempDir cleanup in tests). Idempotent.
 		s.runtime.Close()
+	}
+	if m.attention != nil {
+		m.attention.Close()
 	}
 }
 
