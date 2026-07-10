@@ -20,6 +20,10 @@ type sharedFile struct {
 	Name string // download filename (basename or override)
 	Mime string
 	Size int64
+	// identity pins the exact file that was authorized. The path may be
+	// replaced between send_file and download, so it must be checked again on
+	// the already-open descriptor before serving.
+	identity os.FileInfo
 }
 
 // sharedFiles is the per-session allowlist: only entries registered here can
@@ -103,7 +107,7 @@ func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles) co
 
 			mimeType := detectMime(resolved, name)
 
-			id := reg.add(sharedFile{Path: resolved, Name: name, Mime: mimeType, Size: info.Size()})
+			id := reg.add(sharedFile{Path: resolved, Name: name, Mime: mimeType, Size: info.Size(), identity: info})
 			url := fmt.Sprintf("/api/sessions/%s/files/%s", sessionID, id)
 
 			// Result = one human-readable line for the model, then a JSON line the
@@ -178,7 +182,7 @@ func handleDownloadFile(mgr *Manager) http.HandlerFunc {
 		defer file.Close() //nolint:errcheck
 
 		info, err := file.Stat()
-		if err != nil || !info.Mode().IsRegular() {
+		if err != nil || !info.Mode().IsRegular() || f.identity == nil || !os.SameFile(f.identity, info) {
 			http.Error(w, "file no longer exists on disk", http.StatusNotFound)
 			return
 		}
