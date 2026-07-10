@@ -20,10 +20,10 @@ import {
   handleWsCompactionStart, handleWsCompactionEnd,
 } from './ws-handlers.js';
 
-const HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
+export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
 
 export async function api(method, path, body) {
-  const opts = { method, headers: HEADERS };
+  const opts = { method, headers: REQUEST_HEADERS };
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);

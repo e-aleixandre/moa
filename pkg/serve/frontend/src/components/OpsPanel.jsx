@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { AlertTriangle, RefreshCw, ShieldCheck, X } from 'lucide-preact';
+import { AlertTriangle, ArrowRight, RefreshCw, Send, ShieldCheck, X } from 'lucide-preact';
 import { opsProjectLabel, sessionStatusLabel } from '../ops-data.js';
 import { applyOpsSnapshot, nextOpsReconnectDelay } from '../ops-stream.js';
+import { newInstructionRequestID, opsSessions, submitOpsInstruction } from '../ops-instruction.js';
 
 const OPS_WS_INITIAL_BACKOFF = 1000;
 const OPS_WS_MAX_BACKOFF = 16000;
@@ -12,12 +13,17 @@ async function getOps(path, signal) {
   return response.json();
 }
 
-export function OpsPanel({ open, onClose }) {
+export function OpsPanel({ open, onClose, onNavigate }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const requestRef = useRef(null);
   const streamVersionRef = useRef(0);
+  const instructionIDRef = useRef('');
+  const [targetID, setTargetID] = useState('');
+  const [instruction, setInstruction] = useState('');
+  const [sending, setSending] = useState(false);
+  const [outcome, setOutcome] = useState(null);
 
   const load = useCallback(() => {
     requestRef.current?.abort();
@@ -39,7 +45,7 @@ export function OpsPanel({ open, onClose }) {
         }));
       }
     }).catch((err) => {
-      if (err.name !== 'AbortError' && requestRef.current === controller) setError(err.message || 'Unable to load Ops');
+      if (err.name !== 'AbortError' && requestRef.current === controller) setError('Unable to load verified Ops status.');
     }).finally(() => {
       if (requestRef.current === controller) setLoading(false);
     });
@@ -104,6 +110,43 @@ export function OpsPanel({ open, onClose }) {
     };
   }, [open, load]);
 
+  const sessions = opsSessions(data?.overview);
+  const target = sessions.find(session => session.id === targetID);
+
+  useEffect(() => {
+    if (targetID && !sessions.some(session => session.id === targetID)) {
+      setTargetID('');
+      setOutcome({ kind: 'no-match' });
+    }
+  }, [targetID, data?.overview]);
+
+  const selectTarget = (id) => {
+    instructionIDRef.current = '';
+    setTargetID(id);
+    setOutcome(null);
+  };
+
+  const sendInstruction = async (event) => {
+    event.preventDefault();
+    const text = instruction.trim();
+    if (!target || !text || sending) return;
+    setSending(true);
+    setOutcome(null);
+    if (!instructionIDRef.current) instructionIDRef.current = newInstructionRequestID();
+    try {
+      const result = await submitOpsInstruction({ target: target.id, text, request_id: instructionIDRef.current });
+      setOutcome(result);
+      if (result.kind === 'send' || result.kind === 'steer') {
+        setInstruction('');
+        instructionIDRef.current = '';
+      }
+    } catch {
+      setOutcome({ kind: 'unavailable' });
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (!open) return null;
   const projects = data?.overview?.projects || [];
   const blockers = data?.blockers?.blockers || [];
@@ -122,6 +165,24 @@ export function OpsPanel({ open, onClose }) {
         {error && <div class="ops-state ops-error">{error}<button onClick={load}>Try again</button></div>}
         {data && !error && <div class="ops-content">
           <p class="ops-sitrep">{data.sitrep?.spoken || 'Ops status is available.'}</p>
+          <section class="ops-instruction" aria-label="Directed instruction">
+            <div class="ops-section-title">Directed instruction</div>
+            <p class="ops-instruction-help">Select one verified session, then send a short instruction. This does not start a chat.</p>
+            <form onSubmit={sendInstruction}>
+              <label class="ops-instruction-label" for="ops-target">Target</label>
+              <select id="ops-target" value={targetID} onChange={(event) => selectTarget(event.currentTarget.value)} disabled={!sessions.length || sending}>
+                <option value="">Select a verified session…</option>
+                {sessions.map(session => <option value={session.id} key={session.id}>{session.title} — {opsProjectLabel(session.project)}</option>)}
+              </select>
+              <label class="ops-instruction-label" for="ops-text">Instruction</label>
+              <textarea id="ops-text" value={instruction} maxLength="280" rows="2" placeholder="Short, directed instruction" onInput={(event) => { instructionIDRef.current = ''; setInstruction(event.currentTarget.value); setOutcome(null); }} disabled={!target || sending} />
+              <div class="ops-instruction-actions">
+                {target && <button type="button" class="ops-open-target" onClick={() => onNavigate?.(target.id)}><ArrowRight /> Open target</button>}
+                <button class="ops-send" type="submit" disabled={!target || !instruction.trim() || sending}><Send />{sending ? 'Sending…' : 'Send instruction'}</button>
+              </div>
+            </form>
+            {outcome && <InstructionOutcome outcome={outcome} target={target} onNavigate={onNavigate} onRefresh={load} />}
+          </section>
           <section class="ops-blockers" aria-label="Blockers">
             <div class="ops-section-title"><AlertTriangle /> Blockers</div>
             {blockers.length ? blockers.map(blocker => (
@@ -136,10 +197,10 @@ export function OpsPanel({ open, onClose }) {
               <div class="ops-project" key={project.canonical_cwd}>
                 <div class="ops-project-title" title={project.canonical_cwd}>{opsProjectLabel(project.canonical_cwd)}</div>
                 {(project.sessions || []).map(session => (
-                  <div class="ops-session" key={session.id}>
+                  <button class={`ops-session ${targetID === session.id ? 'selected' : ''}`} key={session.id} onClick={() => selectTarget(session.id)}>
                     <strong>{session.title || 'Untitled'}</strong>
                     <span>{sessionStatusLabel(session)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )) : <div class="ops-empty">No active projects.</div>}
@@ -148,4 +209,23 @@ export function OpsPanel({ open, onClose }) {
       </section>
     </div>
   );
+}
+
+function InstructionOutcome({ outcome, target, onNavigate, onRefresh }) {
+  const messages = {
+    send: 'Instruction sent to the selected session.',
+    steer: 'Steering instruction sent to the selected session.',
+    permission: 'Permission is needed before this instruction can be applied.',
+    ambiguous: 'The target needs review. Select one verified session and try again.',
+    'no-match': 'That verified session is no longer available. Refresh Ops and select again.',
+    invalid: 'Use a short instruction and try again.',
+    'rate-limited': 'Please wait a moment before sending another instruction.',
+    unavailable: 'Instruction was not sent. Try again when Ops is available.',
+  };
+  const canOpen = target && (outcome.kind === 'permission' || outcome.kind === 'send' || outcome.kind === 'steer');
+  return <div class={`ops-instruction-outcome ${outcome.kind}`} role="status">
+    <span>{messages[outcome.kind]}</span>
+    {canOpen && <button onClick={() => onNavigate?.(target.id)}>Open target</button>}
+    {outcome.kind === 'no-match' && <button onClick={onRefresh}>Refresh</button>}
+  </div>;
 }

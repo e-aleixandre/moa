@@ -147,7 +147,7 @@ function App() {
         )}
         <ToastContainer />
         <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} />
-        <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} />
+        <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} onNavigate={(id) => { if (openSession(id)) setOpsOpen(false); }} />
       </div>
     );
   }
@@ -160,7 +160,7 @@ function App() {
       </div>
       <ToastContainer />
       <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} />
-      <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} />
+      <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} onNavigate={(id) => { if (openSession(id)) setOpsOpen(false); }} />
     </div>
   );
 }
