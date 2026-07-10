@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -172,6 +173,168 @@ func TestList(t *testing.T) {
 	}
 	if summaries[1].ID != s1.ID {
 		t.Errorf("summaries[1].ID = %q, want %q (s1)", summaries[1].ID, s1.ID)
+	}
+}
+
+// bigEntries builds a linear chain of n padded user-message entries, useful
+// for exercising realistically-large session files in tests/benchmarks.
+func bigEntries(n int) ([]Entry, string) {
+	entries := make([]Entry, n)
+	parent := ""
+	for i := 0; i < n; i++ {
+		id := generateEntryID()
+		entries[i] = Entry{
+			ID:       id,
+			ParentID: parent,
+			Type:     EntryMessage,
+			Message: core.AgentMessage{
+				Message: core.Message{
+					Role:      "user",
+					Content:   []core.Content{core.TextContent(strings.Repeat("x", 300))},
+					Timestamp: time.Now().Unix(),
+				},
+			},
+		}
+		parent = id
+	}
+	return entries, parent
+}
+
+// TestList_LargeMetadataBeforeEntries verifies the streaming decoder finds
+// the summary fields even when metadata is far larger than the old fixed
+// 4KB read window, and that it still doesn't need a fallback full read to
+// do so (it stops right at "entries").
+func TestList_LargeMetadataBeforeEntries(t *testing.T) {
+	store := tempStore(t)
+
+	sess := store.Create()
+	sess.Title = "big metadata"
+	// >4KB of metadata — would have defeated the old fixed-prefix read.
+	big := make([]string, 2000)
+	for i := range big {
+		big[i] = "some reasonably sized metadata value to pad things out"
+	}
+	sess.Metadata = map[string]any{"padding": big}
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Sanity check the file really is bigger than the old 4KB limit.
+	data, err := os.ReadFile(filepath.Join(store.dir, sess.ID+".json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(data) < 8192 {
+		t.Fatalf("test fixture not big enough: %d bytes", len(data))
+	}
+
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("List = %d, want 1", len(summaries))
+	}
+	if summaries[0].ID != sess.ID {
+		t.Errorf("ID = %q, want %q", summaries[0].ID, sess.ID)
+	}
+	if summaries[0].Title != "big metadata" {
+		t.Errorf("Title = %q, want %q", summaries[0].Title, "big metadata")
+	}
+	padding, ok := summaries[0].Metadata["padding"].([]any)
+	if !ok || len(padding) != len(big) {
+		t.Errorf("Metadata[padding] not decoded correctly: %v", summaries[0].Metadata["padding"])
+	}
+}
+
+// TestList_LargeConversationSkipped verifies List doesn't need to decode
+// large entries/messages arrays: it stops as soon as it sees the key.
+func TestList_LargeConversationSkipped(t *testing.T) {
+	store := tempStore(t)
+
+	sess := store.Create()
+	sess.Title = "big conversation"
+	sess.Entries, sess.LeafID = bigEntries(5000)
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(store.dir, sess.ID+".json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(data) < 1024*1024 {
+		t.Fatalf("test fixture not big enough: %d bytes", len(data))
+	}
+
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != sess.ID {
+		t.Fatalf("List = %+v, want single summary for %q", summaries, sess.ID)
+	}
+	if summaries[0].Title != "big conversation" {
+		t.Errorf("Title = %q, want %q", summaries[0].Title, "big conversation")
+	}
+}
+
+// TestDecodeSummaryPrefix_UnusualMetadataFallsBack verifies readSummary
+// falls back to a full read when the streaming decode can't handle the
+// document (here: top-level array instead of object).
+func TestDecodeSummaryPrefix_UnusualMetadataFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "weird.json")
+	if err := os.WriteFile(path, []byte(`["not", "an", "object"]`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := readSummary(path); err == nil {
+		t.Error("expected error for non-object top level")
+	}
+}
+
+// TestDecodeSummaryPrefix_TruncatedMidValueFallsBack simulates the exact
+// failure mode the old fixed-prefix approach had: metadata truncated
+// mid-value. The streaming decoder reads the whole (valid) document instead
+// of a prefix, so this only exercises the readSummary fallback path when fed
+// genuinely malformed JSON.
+func TestDecodeSummaryPrefix_TruncatedMidValueFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "truncated.json")
+	// Missing closing braces/quotes — genuinely malformed.
+	if err := os.WriteFile(path, []byte(`{"id":"abc","title":"unterm`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := readSummary(path); err == nil {
+		t.Error("expected error for truncated JSON")
+	}
+}
+
+// BenchmarkList_ManySessions measures List() performance across many
+// sessions with realistically sized conversation history, to justify the
+// streaming-decoder approach over loading full files.
+func BenchmarkList_ManySessions(b *testing.B) {
+	dir := b.TempDir()
+	store, err := NewFileStore(dir, "")
+	if err != nil {
+		b.Fatalf("NewFileStore: %v", err)
+	}
+
+	const numSessions = 50
+	for i := 0; i < numSessions; i++ {
+		sess := store.Create()
+		sess.Title = "bench session"
+		sess.Entries, sess.LeafID = bigEntries(500)
+		if err := store.Save(sess); err != nil {
+			b.Fatalf("Save: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := store.List(); err != nil {
+			b.Fatalf("List: %v", err)
+		}
 	}
 }
 

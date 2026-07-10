@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -230,16 +231,10 @@ func (s *FileStore) Latest() (*Session, error) {
 	return s.loadLocked(summaries[0].ID)
 }
 
-// summaryReadLimit caps how many bytes we read from each session file for
-// listing. Summary fields (id, title, created, updated, metadata) appear
-// before the messages array, so a small prefix suffices. Sessions with very
-// large metadata may need more, but the JSON decoder handles partial reads
-// gracefully (fields it finds are populated, the rest are zero).
-const summaryReadLimit = 4096
-
 // List returns summaries of all sessions, sorted by Updated descending (newest first).
-// Only reads the first summaryReadLimit bytes of each file — avoids loading
-// multi-megabyte message arrays just to show a session list.
+// Uses a streaming json.Decoder that stops as soon as it reaches the
+// entries/messages field, so it never reads (or allocates) the — potentially
+// multi-megabyte — conversation history just to show a session list.
 func (s *FileStore) List() ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -271,11 +266,26 @@ func (s *FileStore) listLocked() ([]Summary, error) {
 	return summaries, nil
 }
 
-// readSummary reads only the header fields from a session file. It reads at
-// most summaryReadLimit bytes and parses what it can. Because JSON keys appear
-// in order (id, created, updated, title, messages...), the small prefix
-// contains everything we need. Malformed trailing JSON from the truncation is
-// handled by falling back to a full read.
+// heavySessionFields are the Session keys that hold the (potentially huge)
+// conversation history. readSummary stops decoding as soon as it sees one of
+// these keys, so their values are never read off disk.
+var heavySessionFields = map[string]bool{
+	"entries":  true,
+	"messages": true,
+}
+
+// readSummary reads only the header fields from a session file using a
+// streaming json.Decoder: it walks the top-level object key by key and stops
+// as soon as it reaches "entries" or "messages" (the conversation history),
+// which in a well-formed Session always comes after the summary fields (see
+// the field-ordering comment on Session). This avoids reading the
+// potentially multi-megabyte tail of the file at all, regardless of how
+// large the leading metadata happens to be — unlike a fixed byte-prefix
+// read, it never truncates mid-value.
+//
+// If anything about the file doesn't match the expected shape (unusual
+// metadata that fails to decode into map[string]any, non-object top level,
+// etc.), it falls back to a full read + json.Unmarshal into Summary.
 func readSummary(path string) (Summary, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -283,29 +293,101 @@ func readSummary(path string) (Summary, error) {
 	}
 	defer f.Close() //nolint:errcheck
 
-	// Try partial read first.
-	buf := make([]byte, summaryReadLimit)
-	n, _ := f.Read(buf)
-	if n == 0 {
-		return Summary{}, fmt.Errorf("empty file")
-	}
-
-	var sum Summary
-	if err := json.Unmarshal(buf[:n], &sum); err == nil {
+	sum, ok := decodeSummaryPrefix(f)
+	if ok {
 		return sum, nil
 	}
 
-	// Partial JSON failed (truncated mid-value). Fall back to full read.
-	// This only happens for files with >4KB of metadata before the messages
-	// array, which is rare.
+	// Fall back to a full read + Unmarshal. This covers malformed/unusual
+	// files (e.g. metadata containing a type our streaming path doesn't
+	// expect) that the fast path couldn't handle.
 	full, err := os.ReadFile(path)
 	if err != nil {
 		return Summary{}, err
 	}
-	if err := json.Unmarshal(full, &sum); err != nil {
+	var fullSum Summary
+	if err := json.Unmarshal(full, &fullSum); err != nil {
 		return Summary{}, err
 	}
-	return sum, nil
+	return fullSum, nil
+}
+
+// decodeSummaryPrefix streams the leading summary fields of a session object
+// out of r, stopping before any heavySessionFields key. The second return
+// value reports whether the streaming decode succeeded; on false, the caller
+// should fall back to a full read.
+func decodeSummaryPrefix(r io.Reader) (Summary, bool) {
+	dec := json.NewDecoder(r)
+
+	tok, err := dec.Token()
+	if err != nil {
+		return Summary{}, false
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return Summary{}, false
+	}
+
+	var sum Summary
+	sawID := false
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return Summary{}, false
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return Summary{}, false
+		}
+		if heavySessionFields[key] {
+			// Everything we need comes before the conversation history —
+			// stop here without touching it.
+			break
+		}
+		switch key {
+		case "id":
+			if err := dec.Decode(&sum.ID); err != nil {
+				return Summary{}, false
+			}
+			sawID = true
+		case "created":
+			if err := dec.Decode(&sum.Created); err != nil {
+				return Summary{}, false
+			}
+		case "updated":
+			if err := dec.Decode(&sum.Updated); err != nil {
+				return Summary{}, false
+			}
+		case "title":
+			if err := dec.Decode(&sum.Title); err != nil {
+				return Summary{}, false
+			}
+		case "title_source":
+			if err := dec.Decode(&sum.TitleSource); err != nil {
+				return Summary{}, false
+			}
+		case "archived":
+			if err := dec.Decode(&sum.Archived); err != nil {
+				return Summary{}, false
+			}
+		case "metadata":
+			if err := dec.Decode(&sum.Metadata); err != nil {
+				return Summary{}, false
+			}
+		default:
+			// Unknown/uninteresting field (version, leaf_id,
+			// compaction_epoch, ...): decode-and-discard to advance past
+			// its value without caring about its shape.
+			var discard json.RawMessage
+			if err := dec.Decode(&discard); err != nil {
+				return Summary{}, false
+			}
+		}
+	}
+
+	if !sawID || sum.ID == "" {
+		return Summary{}, false
+	}
+	return sum, true
 }
 
 // Delete removes a session by ID.
