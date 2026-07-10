@@ -56,6 +56,41 @@ func TestAttentionEndpointReturnsCrossSessionBlockingItems(t *testing.T) {
 	})
 }
 
+func TestOpsOverviewEndpointShape(t *testing.T) {
+	ts, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer ts.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "ops api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(ts.URL + "/api/ops/overview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Projects []struct {
+			CanonicalCWD string `json:"canonical_cwd"`
+			Sessions     []struct {
+				ID       string `json:"id"`
+				Title    string `json:"title"`
+				Activity string `json:"activity"`
+				Jobs     struct {
+					Bash int `json:"bash"`
+				} `json:"jobs"`
+			} `json:"sessions"`
+		} `json:"projects"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&body) != nil || len(body.Projects) != 1 || len(body.Projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected ops response: status=%d body=%#v", resp.StatusCode, body)
+	}
+	got := body.Projects[0].Sessions[0]
+	if got.ID != sess.ID || got.Title != "ops api" || got.Activity != "idle" || got.Jobs.Bash != 0 || body.Projects[0].CanonicalCWD == "" {
+		t.Fatalf("unexpected safe ops session: %#v", got)
+	}
+}
+
 func newTestServerWithRoot(t *testing.T, root string) (*httptest.Server, *Manager, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

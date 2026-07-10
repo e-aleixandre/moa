@@ -215,6 +215,58 @@ func TestManagerAttentionTracksAndClearsSessionPermission(t *testing.T) {
 	})
 }
 
+func TestManagerOpsAttachesTracksLifecycleAndRemovesSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "safe title"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "ops attach", func() bool {
+		snapshot := mgr.ops.Snapshot()
+		return len(snapshot.Projects) == 1 && len(snapshot.Projects[0].Sessions) == 1 &&
+			snapshot.Projects[0].Sessions[0].ID == sess.ID && snapshot.Projects[0].Sessions[0].Title == "safe title"
+	})
+	sess.runtime.Bus.Publish(bus.StateChanged{SessionID: sess.ID, State: string(bus.StatePermission)})
+	sess.runtime.Bus.Publish(bus.BashJobStarted{SessionID: sess.ID, JobID: "job"})
+	pollUntil(t, time.Second, "ops lifecycle and job", func() bool {
+		s := mgr.ops.Snapshot().Projects[0].Sessions[0]
+		return s.Activity == "permission" && s.Jobs.Bash == 1
+	})
+	if err := mgr.Delete(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := mgr.ops.Snapshot(); len(got.Projects) != 0 {
+		t.Fatalf("ops retained deleted session: %#v", got)
+	}
+}
+
+func TestResumeSessionReconcilesOpsRoster(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir, sessionBase := t.TempDir(), t.TempDir()
+	store, err := session.NewFileStore(sessionBase, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := store.Create()
+	saved.Title = "resumed"
+	saved.Metadata = map[string]any{"model": "test-model", "cwd": dir}
+	if err := store.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(ctx, ManagerConfig{ProviderFactory: func(core.Model) (core.Provider, error) { return newMockProvider(), nil }, DefaultModel: core.Model{ID: "test-model", Provider: "mock"}, WorkspaceRoot: dir, MoaCfg: core.MoaConfig{DisableSandbox: true}, ConfigLoader: isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}), SessionBaseDir: sessionBase})
+	defer mgr.Shutdown()
+	if _, err := mgr.ResumeSession(saved.ID); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := mgr.ops.Snapshot()
+	if len(snapshot.Projects) != 1 || snapshot.Projects[0].CanonicalCWD != dir || len(snapshot.Projects[0].Sessions) != 1 || snapshot.Projects[0].Sessions[0].ID != saved.ID {
+		t.Fatalf("resume did not reconcile ops roster: %#v", snapshot)
+	}
+}
+
 func TestManagerConfigLoaderIsUsedForSessionBuild(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
