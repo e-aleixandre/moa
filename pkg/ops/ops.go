@@ -151,6 +151,8 @@ type Service struct {
 	mu            sync.RWMutex
 	maxMilestones int
 	sessions      map[string]*sessionState
+	version       uint64
+	watchers      map[chan struct{}]struct{}
 }
 
 type sessionState struct {
@@ -176,7 +178,7 @@ func New(cfg Config) *Service {
 	if limit > maxMilestones {
 		limit = maxMilestones
 	}
-	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState)}
+	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState), watchers: make(map[chan struct{}]struct{})}
 }
 
 // UpsertSession adds or replaces verified roster metadata while preserving the
@@ -191,9 +193,11 @@ func (s *Service) UpsertSession(in SessionInput) error {
 	defer s.mu.Unlock()
 	if existing := s.sessions[in.ID]; existing != nil {
 		existing.input = in
+		s.changedLocked()
 		return nil
 	}
 	s.sessions[in.ID] = &sessionState{input: in, lifecycle: LifecycleUpdate{State: LifecycleIdle, Activity: ActivityIdle}}
+	s.changedLocked()
 	return nil
 }
 
@@ -205,6 +209,7 @@ func (s *Service) RemoveSession(id string) bool {
 		return false
 	}
 	delete(s.sessions, id)
+	s.changedLocked()
 	return true
 }
 
@@ -220,6 +225,7 @@ func (s *Service) UpdateLifecycle(id string, update LifecycleUpdate) error {
 		return ErrUnknownSession
 	}
 	state.lifecycle = update
+	s.changedLocked()
 	return nil
 }
 
@@ -232,6 +238,7 @@ func (s *Service) UpdateJobs(id string, jobs JobCounts) error {
 		return ErrUnknownSession
 	}
 	state.jobs = jobs
+	s.changedLocked()
 	return nil
 }
 
@@ -247,6 +254,7 @@ func (s *Service) UpdateVerification(id string, verification Verification) error
 		return ErrUnknownSession
 	}
 	state.verify = verification
+	s.changedLocked()
 	return nil
 }
 
@@ -270,7 +278,47 @@ func (s *Service) RecordMilestone(id string, milestone Milestone) error {
 	if excess := len(state.milestones) - s.maxMilestones; excess > 0 {
 		state.milestones = append([]sequencedMilestone(nil), state.milestones[excess:]...)
 	}
+	s.changedLocked()
 	return nil
+}
+
+// Subscribe reports snapshot replacements. Notifications are coalesced and
+// never block lifecycle producers; callers fetch the authoritative snapshot
+// after receiving one. The returned function must be called when finished.
+func (s *Service) Subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	s.mu.Lock()
+	s.watchers[ch] = struct{}{}
+	s.mu.Unlock()
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if _, ok := s.watchers[ch]; ok {
+				delete(s.watchers, ch)
+				close(ch)
+			}
+			s.mu.Unlock()
+		})
+	}
+}
+
+// SnapshotVersion returns a coherent detached snapshot and its monotonically
+// increasing replacement version.
+func (s *Service) SnapshotVersion() (Snapshot, uint64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.snapshotLocked(), s.version
+}
+
+func (s *Service) changedLocked() {
+	s.version++
+	for ch := range s.watchers {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // Snapshot returns a fully detached view sorted by canonical CWD then session
@@ -278,6 +326,10 @@ func (s *Service) RecordMilestone(id string, milestone Milestone) error {
 func (s *Service) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.snapshotLocked()
+}
+
+func (s *Service) snapshotLocked() Snapshot {
 	projects := make(map[string]*Project)
 	for _, state := range s.sessions {
 		project := projects[state.input.CanonicalCWD]

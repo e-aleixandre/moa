@@ -80,6 +80,37 @@ func TestRemoveSessionRemovesItsProject(t *testing.T) {
 	}
 }
 
+func TestSubscribeCoalescesWithoutBlockingAndUnsubscribes(t *testing.T) {
+	service := New(Config{})
+	updates, unsubscribe := service.Subscribe()
+	addSession(t, service, "s", "/work/a")
+	// Do not drain updates: all of these lifecycle calls must remain bounded by
+	// the service mutex rather than a slow stream consumer.
+	for i := 0; i < 100; i++ {
+		if err := service.UpdateJobs("s", JobCounts{Bash: i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-updates:
+	default:
+		t.Fatal("expected coalesced snapshot notification")
+	}
+	_, version := service.SnapshotVersion()
+	if version != 101 {
+		t.Fatalf("version = %d, want 101", version)
+	}
+	unsubscribe()
+	select {
+	case _, ok := <-updates:
+		if ok {
+			t.Fatal("subscription channel remains open after cleanup")
+		}
+	default:
+		t.Fatal("subscription cleanup did not close channel")
+	}
+}
+
 func TestSnapshotIsIsolated(t *testing.T) {
 	service := New(Config{})
 	if err := service.UpsertSession(SessionInput{ID: "s", CanonicalCWD: "/work/a", ProjectAliases: []string{"a"}, Aliases: []string{"one"}}); err != nil {
