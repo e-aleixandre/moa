@@ -24,6 +24,7 @@ type CompactionPayload struct {
 	ModifiedFiles  []string `json:"modified_files,omitempty"`
 	SummaryMsgID   string   `json:"summary_msg_id,omitempty"`
 	FirstKeptMsgID string   `json:"first_kept_msg_id,omitempty"`
+	Usage          *Usage   `json:"usage,omitempty"`
 }
 
 // compactionTailMargin is the extra headroom (≈2× the summary-message estimate)

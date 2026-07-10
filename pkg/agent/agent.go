@@ -594,6 +594,7 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 			}
 			return ""
 		}(),
+		Usage: result.Usage,
 	}, nil
 }
 

@@ -199,6 +199,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 								}
 								return ""
 							}(),
+							Usage: result.Usage,
 						},
 					})
 				} else {
