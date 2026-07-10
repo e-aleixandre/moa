@@ -17,6 +17,7 @@ import { SessionOverview } from './components/SessionOverview.jsx';
 import { ToastContainer } from './components/Toast.jsx';
 import { CommandPalette } from './components/CommandPalette.jsx';
 import { LayoutBar } from './components/LayoutBar.jsx';
+import { OpsPanel } from './components/OpsPanel.jsx';
 import './styles/index.css';
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
   const [overview, setOverview] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteMode, setPaletteMode] = useState('search');
+  const [opsOpen, setOpsOpen] = useState(false);
 
   useEffect(() => store.subscribe(setState), []);
 
@@ -108,6 +110,7 @@ function App() {
     setPaletteOpen(true);
   }, []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const openOps = useCallback(() => setOpsOpen(true), []);
 
   const hotkeys = useMemo(() => [
     { key: 'k', mod: true, handler: () => setPaletteOpen(v => !v) },
@@ -138,6 +141,7 @@ function App() {
             state={state}
             onSelect={() => setOverview(false)}
             onNewSession={() => { setOverview(false); openPalette('create'); }}
+            onOpenOps={openOps}
           />
         ) : (
           <>
@@ -146,7 +150,8 @@ function App() {
           </>
         )}
         <ToastContainer />
-        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} />
+        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} />
+        <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} />
       </div>
     );
   }
@@ -154,11 +159,12 @@ function App() {
   return (
     <div class="app desktop">
       <div class="main">
-        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} />
+        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} onOpenOps={openOps} />
         <TileTree state={state} />
       </div>
       <ToastContainer />
-      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} />
+      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} />
+      <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} />
     </div>
   );
 }

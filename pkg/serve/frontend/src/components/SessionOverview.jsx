@@ -1,12 +1,12 @@
 import { useCallback, useRef, useMemo } from 'preact/hooks';
-import { Plus, Sparkles, Archive, Trash2, FolderTree } from 'lucide-preact';
+import { Plus, Sparkles, Archive, Trash2, FolderTree, ShieldCheck } from 'lucide-preact';
 import { setActiveSession } from '../tile-actions.js';
 import { resumeSession, deleteSession } from '../session-actions.js';
 import { setState } from '../store.js';
 import { addToast } from '../notifications.js';
 import { shortModel, shortPath, projectKey, projectLabel } from '../util/format.js';
 
-export function SessionOverview({ state, onSelect, onNewSession }) {
+export function SessionOverview({ state, onSelect, onNewSession, onOpenOps }) {
   const touchStart = useRef(null);
 
   const onTouchStart = useCallback((e) => {
@@ -158,6 +158,9 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
       <div class="overview-header">
         <span class="overview-title">Sessions</span>
         <div class="overview-header-actions">
+          <button class="overview-group-toggle" title="Ops status" aria-label="Ops status" onClick={onOpenOps}>
+            <ShieldCheck />
+          </button>
           <button
             class={`overview-group-toggle ${groupByProject ? 'on' : ''}`}
             title={groupByProject ? 'Grouping by project' : 'Group by project'}
