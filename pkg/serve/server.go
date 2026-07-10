@@ -85,6 +85,9 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	if o.token != "" {
 		mux.HandleFunc("POST /api/sessions/{id}/instruction", handleInstruction(manager))
 		mux.HandleFunc("POST /api/ops/instruction", handleOpsInstruction(manager))
+		// The realtime Ops projection is deliberately phone-facing and therefore
+		// unavailable unless the server has opted into token authentication.
+		mux.HandleFunc("GET /api/ops/ws", handleOpsWebSocket(manager))
 	}
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
