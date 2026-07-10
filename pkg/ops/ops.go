@@ -6,6 +6,7 @@ package ops
 import (
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,6 +21,8 @@ var (
 	ErrInvalidSession = errors.New("ops: session id and canonical cwd are required")
 	ErrInvalidUpdate  = errors.New("ops: update timestamp is required")
 	ErrInvalidEvent   = errors.New("ops: milestone type, timestamp, and ref id are required")
+	ErrAliasCollision = errors.New("ops: alias is already assigned")
+	ErrInvalidAlias   = errors.New("ops: alias is required")
 )
 
 // Presence describes whether a session is currently active or only saved.
@@ -78,6 +81,9 @@ const (
 // the default bound.
 type Config struct {
 	MaxMilestones int
+	// Persist is called synchronously with a safe, detached durable projection
+	// after each accepted mutation. It must not call this Service.
+	Persist func(DurableState) error
 }
 
 // SessionInput is the verified roster metadata. CanonicalCWD must already be
@@ -153,6 +159,7 @@ type Service struct {
 	sessions      map[string]*sessionState
 	version       uint64
 	watchers      map[chan struct{}]struct{}
+	persist       func(DurableState) error
 }
 
 type sessionState struct {
@@ -178,7 +185,88 @@ func New(cfg Config) *Service {
 	if limit > maxMilestones {
 		limit = maxMilestones
 	}
-	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState), watchers: make(map[chan struct{}]struct{})}
+	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState), watchers: make(map[chan struct{}]struct{}), persist: cfg.Persist}
+}
+
+// SetSessionAliases replaces the explicit aliases for one session. Aliases
+// are normalized for uniqueness but retain their user-assigned spelling.
+func (s *Service) SetSessionAliases(id string, aliases []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessions[id]
+	if state == nil {
+		return ErrUnknownSession
+	}
+	aliases, err := s.validateAliasesLocked(id, state.input.CanonicalCWD, aliases, false)
+	if err != nil {
+		return err
+	}
+	state.input.Aliases = aliases
+	s.changedLocked()
+	return nil
+}
+
+// SetProjectAliases replaces aliases for a canonical project. Project aliases
+// are unique across both project and session aliases.
+func (s *Service) SetProjectAliases(cwd string, aliases []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := false
+	for _, state := range s.sessions {
+		if state.input.CanonicalCWD == cwd {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrUnknownSession
+	}
+	aliases, err := s.validateAliasesLocked("", cwd, aliases, true)
+	if err != nil {
+		return err
+	}
+	for _, state := range s.sessions {
+		if state.input.CanonicalCWD == cwd {
+			state.input.ProjectAliases = aliases
+		}
+	}
+	s.changedLocked()
+	return nil
+}
+
+func (s *Service) validateAliasesLocked(sessionID, cwd string, aliases []string, project bool) ([]string, error) {
+	out := make([]string, 0, len(aliases))
+	seen := make(map[string]struct{})
+	for _, alias := range aliases {
+		n := normalizeAlias(alias)
+		if n == "" {
+			return nil, ErrInvalidAlias
+		}
+		if _, ok := seen[n]; ok {
+			return nil, ErrAliasCollision
+		}
+		seen[n] = struct{}{}
+		out = append(out, strings.Join(strings.Fields(alias), " "))
+	}
+	for id, state := range s.sessions {
+		isSameProject := state.input.CanonicalCWD == cwd
+		for _, existing := range append(cloneStrings(state.input.Aliases), state.input.ProjectAliases...) {
+			n := normalizeAlias(existing)
+			if _, wanted := seen[n]; !wanted {
+				continue
+			}
+			// Ignore aliases being replaced on the target itself/project.
+			if (!project && id == sessionID) || (project && isSameProject) {
+				continue
+			}
+			return nil, ErrAliasCollision
+		}
+	}
+	return out, nil
+}
+
+func normalizeAlias(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), " "))
 }
 
 // UpsertSession adds or replaces verified roster metadata while preserving the
@@ -192,6 +280,14 @@ func (s *Service) UpsertSession(in SessionInput) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing := s.sessions[in.ID]; existing != nil {
+		// Live attachment supplies verified runtime metadata, while aliases are
+		// user-assigned durable metadata and must survive a restart/reseed.
+		if in.Aliases == nil {
+			in.Aliases = cloneStrings(existing.input.Aliases)
+		}
+		if in.ProjectAliases == nil {
+			in.ProjectAliases = cloneStrings(existing.input.ProjectAliases)
+		}
 		existing.input = in
 		s.changedLocked()
 		return nil
@@ -209,6 +305,20 @@ func (s *Service) RemoveSession(id string) bool {
 		return false
 	}
 	delete(s.sessions, id)
+	s.changedLocked()
+	return true
+}
+
+// MarkSaved detaches a live session while retaining its aliases and bounded
+// journal for a later resume/reseed.
+func (s *Service) MarkSaved(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessions[id]
+	if state == nil {
+		return false
+	}
+	state.input.Presence = PresenceSaved
 	s.changedLocked()
 	return true
 }
@@ -270,6 +380,11 @@ func (s *Service) RecordMilestone(id string, milestone Milestone) error {
 	if state == nil {
 		return ErrUnknownSession
 	}
+	for _, existing := range state.milestones {
+		if existing.RefID == milestone.RefID {
+			return nil
+		}
+	}
 	state.sequence++
 	state.milestones = append(state.milestones, sequencedMilestone{Milestone: milestone, sequence: state.sequence})
 	sort.SliceStable(state.milestones, func(i, j int) bool {
@@ -312,6 +427,10 @@ func (s *Service) SnapshotVersion() (Snapshot, uint64) {
 }
 
 func (s *Service) changedLocked() {
+	if s.persist != nil {
+		if err := s.persist(s.durableLocked()); err != nil { /* mutations remain useful in memory; callers cannot lose liveness */
+		}
+	}
 	s.version++
 	for ch := range s.watchers {
 		select {
@@ -319,6 +438,65 @@ func (s *Service) changedLocked() {
 		default:
 		}
 	}
+}
+
+// DurableState contains the only fields allowed in the on-disk Ops journal.
+// It deliberately excludes titles, transcript data, tool data, and job state.
+type DurableState struct {
+	Sessions []DurableSession `json:"sessions"`
+}
+type DurableSession struct {
+	ID               string      `json:"id"`
+	CanonicalCWD     string      `json:"canonical_cwd"`
+	ProjectAliases   []string    `json:"project_aliases,omitempty"`
+	Aliases          []string    `json:"aliases,omitempty"`
+	LastTransitionAt time.Time   `json:"last_transition_at,omitempty"`
+	VerificationAt   time.Time   `json:"verification_at,omitempty"`
+	Milestones       []Milestone `json:"milestones"`
+}
+
+func (s *Service) durableLocked() DurableState {
+	out := DurableState{Sessions: make([]DurableSession, 0, len(s.sessions))}
+	for _, state := range s.sessions {
+		d := DurableSession{ID: state.input.ID, CanonicalCWD: state.input.CanonicalCWD, ProjectAliases: cloneStrings(state.input.ProjectAliases), Aliases: cloneStrings(state.input.Aliases), LastTransitionAt: state.lifecycle.At, VerificationAt: state.verify.At}
+		for _, m := range state.milestones {
+			d.Milestones = append(d.Milestones, m.Milestone)
+		}
+		out.Sessions = append(out.Sessions, d)
+	}
+	sort.Slice(out.Sessions, func(i, j int) bool { return out.Sessions[i].ID < out.Sessions[j].ID })
+	return out
+}
+
+// Restore replaces the safe durable portion before live sessions are attached.
+func (s *Service) Restore(d DurableState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = make(map[string]*sessionState)
+	for _, record := range d.Sessions {
+		if record.ID == "" || record.CanonicalCWD == "" {
+			continue
+		}
+		state := &sessionState{input: SessionInput{ID: record.ID, CanonicalCWD: record.CanonicalCWD, ProjectAliases: cloneStrings(record.ProjectAliases), Aliases: cloneStrings(record.Aliases), Presence: PresenceSaved}, lifecycle: LifecycleUpdate{State: LifecycleIdle, Activity: ActivityIdle, At: record.LastTransitionAt}, verify: Verification{State: VerificationUnknown, At: record.VerificationAt}}
+		seenRefs := make(map[string]struct{})
+		for _, m := range record.Milestones {
+			if _, duplicate := seenRefs[m.RefID]; duplicate {
+				continue
+			}
+			if validMilestone(m) {
+				seenRefs[m.RefID] = struct{}{}
+				state.sequence++
+				state.milestones = append(state.milestones, sequencedMilestone{Milestone: m, sequence: state.sequence})
+			}
+		}
+		sort.SliceStable(state.milestones, func(i, j int) bool { return state.milestones[i].At.Before(state.milestones[j].At) })
+		if n := len(state.milestones) - s.maxMilestones; n > 0 {
+			state.milestones = state.milestones[n:]
+		}
+		s.sessions[record.ID] = state
+	}
+	s.changedLocked()
+	return nil
 }
 
 // Snapshot returns a fully detached view sorted by canonical CWD then session
