@@ -1451,8 +1451,7 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 
 	// Notify subscribers of the run generation (single source of truth for runGen).
 	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen})
-
-	// Capture message count before run to extract only new text.
+	// Compatibility fallback for controllers that do not emit lifecycle events.
 	msgsBefore := len(sctx.Agent.Messages())
 
 	go func() {
@@ -1491,18 +1490,25 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			}
 		}
 
-		// Extract final text, edits, and cost from NEW messages.
-		var finalText string
-		var hadEdits bool
-		var runCost float64
-		if len(msgs) > msgsBefore {
-			newMsgs := msgs[msgsBefore:]
-			finalText = extractFinalAssistantText(newMsgs)
-			hadEdits = hasSuccessfulEdits(newMsgs)
+		stats := sctx.snapshotRunStats(gen)
+		fallbackMsgs := msgs
+		if len(msgs) >= msgsBefore {
+			fallbackMsgs = msgs[msgsBefore:]
+		}
+		// Controllers used by integrations may return messages without emitting
+		// lifecycle events. Keep that compatibility fallback; normal agent runs
+		// use the event-fed stats above, which survive compaction.
+		if stats.finalText == "" {
+			stats.finalText = extractFinalAssistantText(fallbackMsgs)
+		}
+		if !stats.hadEdits {
+			stats.hadEdits = hasSuccessfulEdits(fallbackMsgs)
+		}
+		if stats.costUSD == 0 {
 			if pricing := sctx.Agent.Model().Pricing; pricing != nil {
-				for _, m := range newMsgs {
+				for _, m := range fallbackMsgs {
 					if m.Usage != nil {
-						runCost += pricing.Cost(*m.Usage)
+						stats.costUSD += pricing.Cost(*m.Usage)
 					}
 				}
 			}
@@ -1516,10 +1522,10 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 		sctx.Bus.Publish(RunEnded{
 			SessionID: sctx.SessionID,
 			RunGen:    gen,
-			FinalText: finalText,
+			FinalText: stats.finalText,
 			Err:       runErr,
-			HadEdits:  hadEdits,
-			Cost:      runCost,
+			HadEdits:  stats.hadEdits,
+			Cost:      stats.costUSD,
 		})
 	}()
 	return nil

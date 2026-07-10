@@ -144,9 +144,18 @@ type SessionContext struct {
 
 	// Run context management — used by SendPrompt handler.
 	// Protected by runMu.
-	runMu     sync.Mutex
-	runCancel context.CancelFunc // cancels the current run context; nil when idle
-	runGen    uint64             // incremented each run; used to avoid clearing a newer run's cancel
+	runMu      sync.Mutex
+	runCancel  context.CancelFunc // cancels the current run context; nil when idle
+	runGen     uint64             // incremented each run; used to avoid clearing a newer run's cancel
+	runStatsMu sync.Mutex
+	runStats   runStats
+}
+
+type runStats struct {
+	gen       uint64
+	finalText string
+	hadEdits  bool
+	costUSD   float64
 }
 
 // GetGate returns the current permission gate (may be nil for yolo mode).
@@ -199,7 +208,51 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	sctx.runCancel = cancel
 	sctx.runGen++
 	sctx.RunGenAtomic.Store(sctx.runGen)
+	sctx.runStatsMu.Lock()
+	sctx.runStats = runStats{gen: sctx.runGen}
+	sctx.runStatsMu.Unlock()
 	return ctx, sctx.runGen
+}
+
+func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
+	if e.Type != core.AgentEventMessageEnd && e.Type != core.AgentEventToolExecEnd && e.Type != core.AgentEventCompactionEnd {
+		return
+	}
+	sctx.runStatsMu.Lock()
+	defer sctx.runStatsMu.Unlock()
+	if sctx.runStats.gen != gen {
+		return
+	}
+	var pricing *core.Pricing
+	if sctx.Agent != nil {
+		pricing = sctx.Agent.Model().Pricing
+	}
+	switch e.Type {
+	case core.AgentEventMessageEnd:
+		if e.Message.Role == "assistant" {
+			sctx.runStats.finalText = messageText(e.Message)
+			if pricing != nil && e.Message.Usage != nil {
+				sctx.runStats.costUSD += pricing.Cost(*e.Message.Usage)
+			}
+		}
+	case core.AgentEventToolExecEnd:
+		if !e.IsError && !e.Rejected && (e.ToolName == "edit" || e.ToolName == "write" || e.ToolName == "multiedit" || e.ToolName == "apply_patch") {
+			sctx.runStats.hadEdits = true
+		}
+	case core.AgentEventCompactionEnd:
+		if pricing != nil && e.Compaction != nil && e.Compaction.Usage != nil {
+			sctx.runStats.costUSD += pricing.Cost(*e.Compaction.Usage)
+		}
+	}
+}
+
+func (sctx *SessionContext) snapshotRunStats(gen uint64) runStats {
+	sctx.runStatsMu.Lock()
+	defer sctx.runStatsMu.Unlock()
+	if sctx.runStats.gen != gen {
+		return runStats{}
+	}
+	return sctx.runStats
 }
 
 // cancelRun cancels the current run context if any. Safe to call multiple times.
@@ -244,6 +297,7 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	}
 	sid := sctx.SessionID
 	gen := sctx.RunGenAtomic.Load()
+	sctx.addRunEvent(gen, e)
 	for _, ev := range TranslateAgentEvent(sid, gen, e, sctx.TaskStore) {
 		sctx.Bus.Publish(ev)
 	}

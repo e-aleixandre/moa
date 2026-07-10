@@ -10,11 +10,10 @@ Implement all actionable work in `tmp/review-5-6-master-plan.md`.
 - Native history quota: images and documents now share a cumulative native binary cap; images over the remaining cap fall back to disk.
 
 ## Current iteration
-- Fixed regression from MsgID work: `Agent.Messages` is read-only again; MsgIDs are stamped by the loop's writer path under its state lock.
+- P1 implemented: bridge-fed per-RunGen stats carry final assistant text, successful edits and message/compaction usage; legacy controllers retain a returned-message fallback.
 
 ## Next
-- P1: implement per-RunGen stats in SessionContext/bridge/startRun and adversarial regressions.
-- Then P2 WS reconciliation, P3 session restore convergence, P4 async Bash jobs, P5/P6 hardening, and parity backlog.
+- Add P1 adversarial compaction/run-cost regressions, then P2 WS reconciliation, P3 session restore convergence, P4 async Bash jobs, P5/P6 hardening, and parity backlog.
 
 ## Discarded
 - Do not retry empty Sonnet jobs as evidence of progress; inspect actual diffs/tests.
