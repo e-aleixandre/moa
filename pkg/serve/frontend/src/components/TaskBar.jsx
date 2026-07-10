@@ -63,9 +63,10 @@ export function TaskBar({ session, usage }) {
   const hasCost = costUSD > 0;
 
   const u = usage && usage.available ? usage : null;
-  const fiveH = u && u.five_hour;
-  const week = u && u.seven_day;
-  const extra = u && u.extra_usage;
+  const isAnthropic = !session.provider || session.provider === 'anthropic';
+  const fiveH = isAnthropic && u && u.five_hour;
+  const week = isAnthropic && u && u.seven_day;
+  const extra = isAnthropic && u && u.extra_usage;
   const showExtra = extra && extra.is_enabled;
   const extraOn = showExtra && (extra.used_credits ?? 0) > 0;
   const hasUsage = !!(fiveH || week || showExtra);

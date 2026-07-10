@@ -247,8 +247,12 @@ type TreeSynced struct {
 
 // ConfigChanged is published when session configuration changes (model, thinking, etc).
 type ConfigChanged struct {
-	SessionID      string
-	Model          string
+	SessionID string
+	Model     string
+	// Provider is the new model's provider (e.g. "anthropic"), set alongside
+	// Model on a model switch. Empty when this event doesn't carry a model
+	// change (e.g. a thinking-level or permission-mode-only update).
+	Provider       string
 	Thinking       string
 	PermissionMode string
 	PathScope      string

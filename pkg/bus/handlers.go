@@ -94,6 +94,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		sctx.Bus.Publish(ConfigChanged{
 			SessionID: sctx.SessionID,
 			Model:     newModel.Name,
+			Provider:  newModel.Provider,
 			Thinking:  sctx.Agent.ThinkingLevel(),
 		})
 		return nil

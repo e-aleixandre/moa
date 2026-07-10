@@ -167,7 +167,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.ConfigChanged:
 		return Event{Type: "config_change", Data: ConfigChangeData{
-			Model: e.Model, Thinking: e.Thinking,
+			Model: e.Model, Provider: e.Provider, Thinking: e.Thinking,
 			PermissionMode: e.PermissionMode, PathScope: e.PathScope,
 		}}, true
 	case bus.PlanModeChanged:

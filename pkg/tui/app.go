@@ -129,7 +129,8 @@ type appModel struct {
 	autoTitled      bool
 
 	// Display
-	modelName string
+	modelName     string
+	modelProvider string
 
 	// Provider switching (for model picker — factory data only)
 	scopedModels         map[string]bool
@@ -257,6 +258,7 @@ func New(ctx context.Context, cfg Config) appModel {
 			name = model.ID
 		}
 		m.modelName = name
+		m.modelProvider = model.Provider
 		m.statusBar.UpdateModelSegment(name)
 	}
 	if thinking, err := bus.QueryTyped[bus.GetThinkingLevel, string](b, bus.GetThinkingLevel{}); err == nil {
@@ -295,6 +297,9 @@ func (m appModel) Init() tea.Cmd {
 	if c := m.fetchUsageCmd(); c != nil {
 		cmds = append(cmds, c)
 	}
+	if m.usagePoller != nil {
+		cmds = append(cmds, tea.Tick(usagePollInterval, func(time.Time) tea.Msg { return usageTickMsg{} }))
+	}
 	// Initial session display on first WindowSizeMsg handled in Update.
 	return tea.Batch(cmds...)
 }
@@ -308,10 +313,12 @@ type usageMsg struct{ snap *usage.Snapshot }
 type usageTickMsg struct{}
 
 // fetchUsageCmd fetches the plan usage snapshot off the UI goroutine. Returns
-// nil when usage tracking is disabled (no poller).
+// nil when usage tracking is disabled (no poller) or the current model isn't
+// Anthropic (the usage endpoint only reflects the Anthropic subscription plan,
+// so it's meaningless — and confusing — for other providers).
 func (m appModel) fetchUsageCmd() tea.Cmd {
 	poller := m.usagePoller
-	if poller == nil {
+	if poller == nil || m.modelProvider != "anthropic" {
 		return nil
 	}
 	ctx := m.baseCtx
@@ -346,8 +353,13 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 // applyRateLimit refreshes the plan-quota segments instantly from a request's
 // rate-limit response headers and flags when the request was served from extra
 // usage. This is the fast, per-request path; the 60s poller (applyUsage) remains
-// the authoritative source for the extra-usage spend amount.
+// the authoritative source for the extra-usage spend amount. Only Anthropic
+// requests carry these headers, but guard explicitly in case the model was
+// switched away from Anthropic mid-flight.
 func (m *appModel) applyRateLimit(rl core.RateLimit) {
+	if m.modelProvider != "anthropic" {
+		return
+	}
 	// Refresh the quota segment only when both window utilizations are known
 	// (>= 0); a -1 means the header was absent, and we must not clobber the
 	// poller's good value with a fake 0%.
@@ -447,10 +459,14 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case usageMsg:
 		m.applyUsage(msg.snap)
-		return m, tea.Tick(usagePollInterval, func(time.Time) tea.Msg { return usageTickMsg{} })
+		return m, nil
 
 	case usageTickMsg:
-		return m, m.fetchUsageCmd()
+		cmds := []tea.Cmd{tea.Tick(usagePollInterval, func(time.Time) tea.Msg { return usageTickMsg{} })}
+		if c := m.fetchUsageCmd(); c != nil {
+			cmds = append(cmds, c)
+		}
+		return m, tea.Batch(cmds...)
 
 	case autoTitleMsg:
 		if msg.title != "" && m.session != nil {
@@ -1455,7 +1471,11 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 	case bus.ConfigChanged:
 		if e.Model != "" {
 			m.modelName = e.Model
+			m.modelProvider = e.Provider
 			m.statusBar.UpdateModelSegment(e.Model)
+			if e.Provider != "anthropic" {
+				m.applyUsage(nil)
+			}
 		}
 		if e.Thinking != "" {
 			m.statusBar.UpdateThinkingSegment(e.Thinking)

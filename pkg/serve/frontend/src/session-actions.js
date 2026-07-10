@@ -46,6 +46,7 @@ export async function loadSessions() {
         title: info.title,
         state: wsOwns ? existing.state : info.state,
         model: wsOwns ? existing.model : info.model,
+        provider: wsOwns ? existing.provider : info.provider,
         thinking: wsOwns ? existing.thinking : (info.thinking || ''),
         cwd: info.cwd,
         updated: info.updated ? Date.parse(info.updated) : (existing ? existing.updated : 0),

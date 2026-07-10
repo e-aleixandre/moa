@@ -198,6 +198,7 @@ type CommandData struct {
 // ConfigChangeData is sent when model/thinking/permissions/path scope change.
 type ConfigChangeData struct {
 	Model          string `json:"model,omitempty"`
+	Provider       string `json:"provider,omitempty"`
 	Thinking       string `json:"thinking,omitempty"`
 	PermissionMode string `json:"permission_mode,omitempty"`
 	PathScope      string `json:"path_scope,omitempty"`

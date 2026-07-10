@@ -117,6 +117,7 @@ type SessionInfo struct {
 	Archived       bool         `json:"archived,omitempty"`
 	State          SessionState `json:"state"`
 	Model          string       `json:"model"`
+	Provider       string       `json:"provider"`
 	Thinking       string       `json:"thinking"`
 	CWD            string       `json:"cwd"`
 	Created        time.Time    `json:"created"`
@@ -200,6 +201,7 @@ func (s *ManagedSession) info() SessionInfo {
 		Archived:       s.Archived,
 		State:          SessionState(state),
 		Model:          modelDisplayName(model),
+		Provider:       model.Provider,
 		Thinking:       thinking,
 		CWD:            s.CWD,
 		Created:        s.Created,

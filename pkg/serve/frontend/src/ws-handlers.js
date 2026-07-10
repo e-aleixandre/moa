@@ -571,6 +571,7 @@ export function handleWsConfigChange(id, data) {
   const sess = store.get().sessions[id];
   const patch = {
     model: data.model || sess?.model,
+    provider: data.provider || sess?.provider,
     thinking: data.thinking || sess?.thinking,
   };
   if (data.permission_mode) {
