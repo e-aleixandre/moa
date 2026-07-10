@@ -57,9 +57,16 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
   }, []);
 
   const groupByProject = state.groupByProject;
+	const attentionItems = state.attentionItems || [];
   const toggleGroup = useCallback(() => {
     setState(s => ({ groupByProject: !s.groupByProject }));
   }, []);
+
+	const openAttentionSession = useCallback((id) => {
+		if (!id) return;
+		setActiveSession(id);
+		onSelect();
+	}, [onSelect]);
 
   const renderCard = (sess) => {
     const isActive = state.activeSession === sess.id;
@@ -161,6 +168,22 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
           </button>
         </div>
       </div>
+
+      {attentionItems.length > 0 && (
+        <section class="overview-attention" aria-label="Needs attention">
+          <div class="overview-attention-title">Needs attention</div>
+          {attentionItems.map(item => (
+            <button
+              key={item.id}
+              class={`overview-attention-item ${item.kind || ''}`}
+              onClick={() => openAttentionSession(item.session_id)}
+            >
+              <span>{item.spoken}</span>
+              <small>{item.alias || 'Open session'}</small>
+            </button>
+          ))}
+        </section>
+      )}
 
       {groupByProject ? (
         <div class="overview-groups">

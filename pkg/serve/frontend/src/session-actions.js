@@ -28,7 +28,10 @@ function samePolledSession(existing, next) {
 
 export async function loadSessions() {
   try {
-    const list = await api('GET', '/api/sessions');
+    const [list, attention] = await Promise.all([
+      api('GET', '/api/sessions'),
+      api('GET', '/api/attention'),
+    ]);
     // Read the store AFTER the round-trip: WS handlers may have updated
     // sessions while the request was in flight, and rebuilding from a
     // pre-await snapshot would silently revert those (lost messages, perms).
@@ -106,7 +109,9 @@ export async function loadSessions() {
         }
       }
     }
-		if (sessionsChanged) setState({ sessions });
+		if (sessionsChanged || attention) {
+			setState({ sessions, attentionItems: attention?.items || [] });
+		}
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     const currentState = store.get();
