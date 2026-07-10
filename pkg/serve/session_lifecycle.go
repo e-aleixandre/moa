@@ -100,6 +100,9 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
+	m.mu.Lock()
+	m.sessions[sess.ID] = sess
+	m.mu.Unlock()
 	m.invalidateSavedCache()
 	return sess, nil
 }
@@ -340,9 +343,6 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribeAutoTitle(sess)
 	m.subscribeCacheClock(sess)
 
-	m.mu.Lock()
-	m.sessions[sess.ID] = sess
-	m.mu.Unlock()
 	return sess, nil
 }
 
@@ -448,18 +448,22 @@ func reapStaleAttachments() {
 
 // ResumeSession loads a saved session from disk and creates a full runtime.
 func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
-	// Reserve the slot to prevent concurrent resumes.
+	// Reserve the ID without exposing a nil placeholder to readers.
 	m.mu.Lock()
 	if _, ok := m.sessions[id]; ok {
 		m.mu.Unlock()
 		return nil, ErrBusy
 	}
-	m.sessions[id] = nil // nil placeholder
+	if _, ok := m.resuming[id]; ok {
+		m.mu.Unlock()
+		return nil, ErrBusy
+	}
+	m.resuming[id] = struct{}{}
 	m.mu.Unlock()
 
 	cleanup := func() {
 		m.mu.Lock()
-		delete(m.sessions, id)
+		delete(m.resuming, id)
 		m.mu.Unlock()
 	}
 
@@ -540,6 +544,10 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		}
 		m.invalidateSavedCache()
 	}
+	m.mu.Lock()
+	delete(m.resuming, id)
+	m.sessions[id] = sess
+	m.mu.Unlock()
 	return sess, nil
 }
 

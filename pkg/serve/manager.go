@@ -229,6 +229,7 @@ func (s *ManagedSession) info() SessionInfo {
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*ManagedSession
+	resuming map[string]struct{}
 	baseCtx  context.Context
 
 	providerFactory func(model core.Model) (core.Provider, error)
@@ -279,6 +280,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	}
 	m := &Manager{
 		sessions:        make(map[string]*ManagedSession),
+		resuming:        make(map[string]struct{}),
 		baseCtx:         ctx,
 		providerFactory: cfg.ProviderFactory,
 		transcriber:     cfg.Transcriber,
