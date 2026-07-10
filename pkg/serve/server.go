@@ -70,6 +70,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/models", handleListModels())
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
+	mux.HandleFunc("GET /api/ops", handleOpsQuery(manager))
 	mux.HandleFunc("GET /api/ops/overview", handleOpsOverview(manager))
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
