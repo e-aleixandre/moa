@@ -517,15 +517,16 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 
-		// Send init data.
+		// Subscribe before taking the init snapshot. Events published while the
+		// snapshot is assembled are queued by the reactor and sent immediately
+		// after init, rather than being lost in the old snapshot→subscribe gap.
+		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD)
+		defer reactor.cleanup()
+
 		initData := buildInitData(sess)
 		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData}); err != nil {
 			return
 		}
-
-		// Create reactor that bridges bus events → WS events.
-		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD)
-		defer reactor.cleanup()
 
 		// Invalidate file scanner cache on successful file edits.
 		editToolUnsub := sess.runtime.Bus.Subscribe(func(e bus.ToolExecEnded) {
