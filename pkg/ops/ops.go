@@ -17,12 +17,17 @@ const (
 )
 
 var (
-	ErrUnknownSession = errors.New("ops: unknown session")
-	ErrInvalidSession = errors.New("ops: session id and canonical cwd are required")
-	ErrInvalidUpdate  = errors.New("ops: update timestamp is required")
-	ErrInvalidEvent   = errors.New("ops: milestone type, timestamp, and ref id are required")
-	ErrAliasCollision = errors.New("ops: alias is already assigned")
-	ErrInvalidAlias   = errors.New("ops: alias is required")
+	ErrUnknownSession    = errors.New("ops: unknown session")
+	ErrInvalidSession    = errors.New("ops: session id and canonical cwd are required")
+	ErrInvalidUpdate     = errors.New("ops: update timestamp is required")
+	ErrInvalidEvent      = errors.New("ops: milestone type, timestamp, and ref id are required")
+	ErrAliasCollision    = errors.New("ops: alias is already assigned")
+	ErrInvalidAlias      = errors.New("ops: alias is required")
+	ErrInvalidCheckpoint = errors.New("ops: invalid checkpoint name or timestamp")
+	ErrCheckpointExists  = errors.New("ops: checkpoint already exists")
+	ErrUnknownCheckpoint = errors.New("ops: unknown checkpoint")
+	ErrInvalidWindow     = errors.New("ops: invalid changes window")
+	ErrRetentionGap      = errors.New("ops: requested changes precede retained journal")
 )
 
 // Presence describes whether a session is currently active or only saved.
@@ -160,15 +165,17 @@ type Service struct {
 	version       uint64
 	watchers      map[chan struct{}]struct{}
 	persist       func(DurableState) error
+	checkpoints   map[string]Checkpoint
 }
 
 type sessionState struct {
-	input      SessionInput
-	lifecycle  LifecycleUpdate
-	jobs       JobCounts
-	verify     Verification
-	milestones []sequencedMilestone
-	sequence   uint64
+	input       SessionInput
+	lifecycle   LifecycleUpdate
+	jobs        JobCounts
+	verify      Verification
+	milestones  []sequencedMilestone
+	sequence    uint64
+	retentionAt time.Time
 }
 
 type sequencedMilestone struct {
@@ -185,7 +192,7 @@ func New(cfg Config) *Service {
 	if limit > maxMilestones {
 		limit = maxMilestones
 	}
-	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState), watchers: make(map[chan struct{}]struct{}), persist: cfg.Persist}
+	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState), checkpoints: make(map[string]Checkpoint), watchers: make(map[chan struct{}]struct{}), persist: cfg.Persist}
 }
 
 // SetSessionAliases replaces the explicit aliases for one session. Aliases
@@ -391,6 +398,11 @@ func (s *Service) RecordMilestone(id string, milestone Milestone) error {
 		return state.milestones[i].At.Before(state.milestones[j].At)
 	})
 	if excess := len(state.milestones) - s.maxMilestones; excess > 0 {
+		for _, removed := range state.milestones[:excess] {
+			if removed.At.After(state.retentionAt) {
+				state.retentionAt = removed.At.UTC()
+			}
+		}
 		state.milestones = append([]sequencedMilestone(nil), state.milestones[excess:]...)
 	}
 	s.changedLocked()
@@ -443,7 +455,8 @@ func (s *Service) changedLocked() {
 // DurableState contains the only fields allowed in the on-disk Ops journal.
 // It deliberately excludes titles, transcript data, tool data, and job state.
 type DurableState struct {
-	Sessions []DurableSession `json:"sessions"`
+	Sessions    []DurableSession `json:"sessions"`
+	Checkpoints []Checkpoint     `json:"checkpoints,omitempty"`
 }
 type DurableSession struct {
 	ID               string      `json:"id"`
@@ -452,19 +465,24 @@ type DurableSession struct {
 	Aliases          []string    `json:"aliases,omitempty"`
 	LastTransitionAt time.Time   `json:"last_transition_at,omitempty"`
 	VerificationAt   time.Time   `json:"verification_at,omitempty"`
+	RetentionAt      time.Time   `json:"retention_at,omitempty"`
 	Milestones       []Milestone `json:"milestones"`
 }
 
 func (s *Service) durableLocked() DurableState {
 	out := DurableState{Sessions: make([]DurableSession, 0, len(s.sessions))}
 	for _, state := range s.sessions {
-		d := DurableSession{ID: state.input.ID, CanonicalCWD: state.input.CanonicalCWD, ProjectAliases: cloneStrings(state.input.ProjectAliases), Aliases: cloneStrings(state.input.Aliases), LastTransitionAt: state.lifecycle.At, VerificationAt: state.verify.At}
+		d := DurableSession{ID: state.input.ID, CanonicalCWD: state.input.CanonicalCWD, ProjectAliases: cloneStrings(state.input.ProjectAliases), Aliases: cloneStrings(state.input.Aliases), LastTransitionAt: state.lifecycle.At, VerificationAt: state.verify.At, RetentionAt: state.retentionAt}
 		for _, m := range state.milestones {
 			d.Milestones = append(d.Milestones, m.Milestone)
 		}
 		out.Sessions = append(out.Sessions, d)
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool { return out.Sessions[i].ID < out.Sessions[j].ID })
+	for _, checkpoint := range s.checkpoints {
+		out.Checkpoints = append(out.Checkpoints, checkpoint)
+	}
+	sort.Slice(out.Checkpoints, func(i, j int) bool { return out.Checkpoints[i].Name < out.Checkpoints[j].Name })
 	return out
 }
 
@@ -473,11 +491,21 @@ func (s *Service) Restore(d DurableState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions = make(map[string]*sessionState)
+	s.checkpoints = make(map[string]Checkpoint)
+	for _, checkpoint := range d.Checkpoints {
+		if name, ok := validCheckpoint(checkpoint.Name, checkpoint.At); ok {
+			// First occurrence wins so a malformed manually edited store cannot
+			// make checkpoint selection depend on map iteration.
+			if _, exists := s.checkpoints[name]; !exists {
+				s.checkpoints[name] = Checkpoint{Name: name, At: checkpoint.At.UTC()}
+			}
+		}
+	}
 	for _, record := range d.Sessions {
 		if record.ID == "" || record.CanonicalCWD == "" {
 			continue
 		}
-		state := &sessionState{input: SessionInput{ID: record.ID, CanonicalCWD: record.CanonicalCWD, ProjectAliases: cloneStrings(record.ProjectAliases), Aliases: cloneStrings(record.Aliases), Presence: PresenceSaved}, lifecycle: LifecycleUpdate{State: LifecycleIdle, Activity: ActivityIdle, At: record.LastTransitionAt}, verify: Verification{State: VerificationUnknown, At: record.VerificationAt}}
+		state := &sessionState{input: SessionInput{ID: record.ID, CanonicalCWD: record.CanonicalCWD, ProjectAliases: cloneStrings(record.ProjectAliases), Aliases: cloneStrings(record.Aliases), Presence: PresenceSaved}, lifecycle: LifecycleUpdate{State: LifecycleIdle, Activity: ActivityIdle, At: record.LastTransitionAt}, verify: Verification{State: VerificationUnknown, At: record.VerificationAt}, retentionAt: record.RetentionAt.UTC()}
 		seenRefs := make(map[string]struct{})
 		for _, m := range record.Milestones {
 			if _, duplicate := seenRefs[m.RefID]; duplicate {
@@ -491,6 +519,11 @@ func (s *Service) Restore(d DurableState) error {
 		}
 		sort.SliceStable(state.milestones, func(i, j int) bool { return state.milestones[i].At.Before(state.milestones[j].At) })
 		if n := len(state.milestones) - s.maxMilestones; n > 0 {
+			for _, removed := range state.milestones[:n] {
+				if removed.At.After(state.retentionAt) {
+					state.retentionAt = removed.At.UTC()
+				}
+			}
 			state.milestones = state.milestones[n:]
 		}
 		s.sessions[record.ID] = state

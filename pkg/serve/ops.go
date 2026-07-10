@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,6 +49,24 @@ func (m *Manager) OpsStatus(target string) ops.StatusResult {
 		return ops.StatusResult{Resolution: ops.Resolution{Target: target}}
 	}
 	return m.ops.Status(target)
+}
+
+// CreateOpsCheckpoint records an explicit UTC owner checkpoint in the durable
+// Ops journal. It is a server-side primitive; no unaudited UI write route is
+// exposed for it.
+func (m *Manager) CreateOpsCheckpoint(name string, at time.Time) (ops.Checkpoint, error) {
+	if m.ops == nil {
+		return ops.Checkpoint{}, errors.New("ops unavailable")
+	}
+	return m.ops.CreateCheckpoint(name, at)
+}
+
+// ListOpsCheckpoints returns named owner checkpoints in stable order.
+func (m *Manager) ListOpsCheckpoints() []ops.Checkpoint {
+	if m.ops == nil {
+		return nil
+	}
+	return m.ops.Checkpoints()
 }
 
 // subscribeOps attaches the safe operational projection before a session is
@@ -310,8 +329,7 @@ func handleOpsInstruction(m *Manager) http.HandlerFunc {
 }
 
 // handleOpsQuery exposes deterministic, read-only operational briefings. Its
-// intentionally small query shape avoids accepting a natural-language command:
-// view is sitrep, blockers, or status; status additionally requires target.
+// intentionally small query shape avoids accepting a natural-language command.
 func handleOpsQuery(m *Manager) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if m.ops == nil {
@@ -320,7 +338,7 @@ func handleOpsQuery(m *Manager) func(http.ResponseWriter, *http.Request) {
 		}
 		query := r.URL.Query()
 		for key, values := range query {
-			if (key != "view" && key != "target") || len(values) != 1 {
+			if (key != "view" && key != "target" && key != "since" && key != "checkpoint" && key != "until") || len(values) != 1 {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ops query"})
 				return
 			}
@@ -328,26 +346,83 @@ func handleOpsQuery(m *Manager) func(http.ResponseWriter, *http.Request) {
 		view := query.Get("view")
 		switch view {
 		case "sitrep":
-			if query.Has("target") {
+			if query.Has("target") || query.Has("since") || query.Has("checkpoint") || query.Has("until") {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target is only valid for status"})
 				return
 			}
 			writeJSON(w, http.StatusOK, m.ops.Sitrep())
 		case "blockers":
-			if query.Has("target") {
+			if query.Has("target") || query.Has("since") || query.Has("checkpoint") || query.Has("until") {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target is only valid for status"})
 				return
 			}
 			writeJSON(w, http.StatusOK, m.ops.Blockers())
+		case "checkpoints":
+			if query.Has("target") || query.Has("since") || query.Has("checkpoint") || query.Has("until") {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid checkpoints query"})
+				return
+			}
+			writeJSON(w, http.StatusOK, m.ops.Checkpoints())
 		case "status":
+			if query.Has("since") || query.Has("checkpoint") || query.Has("until") {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid status query"})
+				return
+			}
 			target, ok := query["target"]
 			if !ok || target[0] == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status requires target"})
 				return
 			}
 			writeJSON(w, http.StatusOK, m.ops.Status(target[0]))
+		case "changes-since":
+			if query.Has("target") || !query.Has("until") || (query.Has("since") == query.Has("checkpoint")) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "changes-since requires exactly one of since or checkpoint and until"})
+				return
+			}
+			until, ok := parseOpsUTCTimestamp(query.Get("until"))
+			if !ok {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "until must be RFC3339 UTC"})
+				return
+			}
+			var briefing ops.ChangesBriefing
+			var err error
+			if sinceValue, hasSince := query["since"]; hasSince {
+				since, valid := parseOpsUTCTimestamp(sinceValue[0])
+				if !valid {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since must be RFC3339 UTC"})
+					return
+				}
+				briefing, err = m.ops.ChangesSince(since, until)
+			} else {
+				briefing, err = m.ops.ChangesSinceCheckpoint(query.Get("checkpoint"), until)
+			}
+			if err != nil {
+				status := http.StatusBadRequest
+				if errors.Is(err, ops.ErrUnknownCheckpoint) {
+					status = http.StatusNotFound
+				}
+				if errors.Is(err, ops.ErrRetentionGap) {
+					status = http.StatusGone
+				}
+				writeJSON(w, status, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, briefing)
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ops view"})
 		}
 	}
+}
+
+func parseOpsUTCTimestamp(value string) (time.Time, bool) {
+	// RFC3339 permits numeric offsets. Ops deliberately accepts only Z so a
+	// spoken/API timestamp has one unambiguous representation.
+	if !strings.HasSuffix(value, "Z") {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil || at.Location() != time.UTC {
+		return time.Time{}, false
+	}
+	return at, true
 }
