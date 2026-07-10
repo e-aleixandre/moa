@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -190,6 +192,82 @@ func handleOpsOverview(m *Manager) func(http.ResponseWriter, *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, m.ops.Snapshot())
+	}
+}
+
+type opsInstructionBody struct {
+	Target    string `json:"target"`
+	Text      string `json:"text"`
+	RequestID string `json:"request_id"`
+}
+
+// opsInstructionTarget is deliberately narrower than ops.Candidate. It is
+// the only roster metadata this write endpoint returns.
+type opsInstructionTarget struct {
+	ID      string `json:"id"`
+	Title   string `json:"title,omitempty"`
+	Project string `json:"project,omitempty"`
+}
+
+func safeOpsInstructionTarget(candidate ops.Candidate) opsInstructionTarget {
+	return opsInstructionTarget{ID: candidate.ID, Title: candidate.Title, Project: candidate.CanonicalCWD}
+}
+
+// handleOpsInstruction resolves a roster target before delivering through the
+// shared voice-instruction policy. Resolution never picks among alternatives.
+func handleOpsInstruction(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body opsInstructionBody
+		if !decodeInstructionBody(w, r, &body) || !validInstructionBody(w, &body.Text, &body.RequestID) {
+			return
+		}
+		if m.ops == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops unavailable"})
+			return
+		}
+
+		resolution := m.ops.Resolve(body.Target)
+		switch len(resolution.Candidates) {
+		case 0:
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		case 1:
+		default:
+			candidates := make([]opsInstructionTarget, len(resolution.Candidates))
+			for i, candidate := range resolution.Candidates {
+				candidates[i] = safeOpsInstructionTarget(candidate)
+			}
+			writeJSON(w, http.StatusConflict, struct {
+				Candidates []opsInstructionTarget `json:"candidates"`
+			}{Candidates: candidates})
+			return
+		}
+
+		candidate := resolution.Candidates[0]
+		// Projects are valid Ops status targets but cannot receive a directed
+		// instruction. Do not expand one into its sessions implicitly.
+		if candidate.Kind != ops.TargetSession || candidate.ID == "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		action, err := m.VoiceInstruction(candidate.ID, body.Text, body.RequestID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, ErrInstructionPermission), errors.Is(err, ErrInstructionConflict):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, ErrInstructionRateLimit):
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+		case err != nil:
+			http.Error(w, "unable to apply instruction", http.StatusInternalServerError)
+		default:
+			slog.Info("ops instruction applied", "session_id", candidate.ID, "action", action)
+			writeJSON(w, http.StatusAccepted, struct {
+				Action string               `json:"action"`
+				Target opsInstructionTarget `json:"target"`
+			}{Action: action, Target: safeOpsInstructionTarget(candidate)})
+		}
 	}
 }
 
