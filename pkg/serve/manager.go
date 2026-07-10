@@ -235,6 +235,13 @@ type Manager struct {
 	resuming map[string]struct{}
 	baseCtx  context.Context
 
+	// instructionMu serializes voice instruction idempotency, rate limiting, and
+	// state selection. This keeps a retried instruction from being applied twice.
+	instructionMu       sync.Mutex
+	instructionRequests map[string][]instructionRequest
+	instructionRates    map[string][]time.Time
+	instructionGlobal   []time.Time
+
 	providerFactory func(model core.Model) (core.Provider, error)
 	transcriber     core.Transcriber // nil when no speech-to-text is available
 	usagePoller     *usage.Poller    // nil when plan usage tracking is unavailable
@@ -329,6 +336,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		scheduler:       scheduler,
 		attention:       attention.New(attention.Config{}),
 	}
+	m.instructionRequests = make(map[string][]instructionRequest)
+	m.instructionRates = make(map[string][]time.Time)
 	m.attention.Start()
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
