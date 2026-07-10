@@ -356,12 +356,6 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 		return "send", nil
 	}
 
-	supportsDocs := false
-	if model, qerr := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{}); qerr == nil {
-		if prov, perr := m.providerFactory(model); perr == nil {
-			supportsDocs = core.ProviderSupportsDocuments(prov)
-		}
-	}
 	// Serialize attachment processing per session so the per-session on-disk
 	// quota check and insertion into conversation are atomic against concurrent
 	// /send requests to the same idle session. Native PDFs only count once the
@@ -370,7 +364,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 	sess.attachMu.Lock()
 	defer sess.attachMu.Unlock()
 	priorNativeDoc := countNativeDocBytes(sess.History())
-	content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs, priorNativeDoc)
+	content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc)
 	if err != nil {
 		return "", err
 	}

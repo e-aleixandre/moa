@@ -330,7 +330,7 @@ func TestBuildAttachmentContent_TextHeader(t *testing.T) {
 	atts := []Attachment{
 		{Name: `report "final".csv`, Mime: "text/csv", Data: b64([]byte("a,b\n1,2"))},
 	}
-	content, _, err := buildAttachmentContent(atts, "abcdef0123456789", pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, "abcdef0123456789", pp, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestBuildAttachmentContent_LargeTextToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "big.txt", Mime: "text/plain", Data: b64(big)}}
 
 	sessionID := "0123456789abcdef"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestBuildAttachmentContent_Collision(t *testing.T) {
 	}
 
 	sessionID := "fedcba9876543210"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
 	}
 
 	sessionID := "aaaaaaaaaaaaaaaa"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +553,7 @@ func TestDelete_RemovesAttachments(t *testing.T) {
 	}
 }
 
-func TestPDF_NativeWhenSupported(t *testing.T) {
+func TestPDF_AlwaysStoredOnDisk(t *testing.T) {
 	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
 
@@ -561,39 +561,7 @@ func TestPDF_NativeWhenSupported(t *testing.T) {
 	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
 
 	sessionID := "fedcba9876543210"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(content) != 1 {
-		t.Fatalf("expected 1 block, got %d", len(content))
-	}
-	if content[0].Type != "document" {
-		t.Fatalf("expected document block, got %q", content[0].Type)
-	}
-	if content[0].Filename != "report.pdf" {
-		t.Fatalf("expected filename report.pdf, got %q", content[0].Filename)
-	}
-	if content[0].Data != pdfData {
-		t.Fatalf("expected data to match original base64")
-	}
-
-	if dir, err := sessionAttachDir(sessionID); err == nil {
-		if _, statErr := os.Stat(dir); statErr == nil {
-			t.Fatalf("expected no file on disk for native PDF")
-		}
-	}
-}
-
-func TestPDF_FallbackToDiskWhenUnsupported(t *testing.T) {
-	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
-	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
-
-	pdfData := b64([]byte("%PDF-1.4 fake pdf bytes"))
-	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
-
-	sessionID := "0123fedcba987654"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, false, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,13 +569,10 @@ func TestPDF_FallbackToDiskWhenUnsupported(t *testing.T) {
 		t.Fatalf("expected 1 block, got %d", len(content))
 	}
 	if content[0].Type != "text" {
-		t.Fatalf("expected text block, got %q", content[0].Type)
+		t.Fatalf("expected disk advisory text, got %q", content[0].Type)
 	}
-	if !strings.Contains(content[0].Text, "guardado en:") {
-		t.Fatalf("expected advisory text, got %q", content[0].Text)
-	}
-	if !strings.Contains(content[0].Text, "no soporta documentos PDF nativos") {
-		t.Fatalf("expected fallback note, got %q", content[0].Text)
+	if !strings.Contains(content[0].Text, "guardado en:") || !strings.Contains(content[0].Text, "se guardan en disco por defecto") {
+		t.Fatalf("expected disk-first PDF advisory, got %q", content[0].Text)
 	}
 
 	dir, err := sessionAttachDir(sessionID)
@@ -620,6 +585,13 @@ func TestPDF_FallbackToDiskWhenUnsupported(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 file on disk, got %d", len(entries))
+	}
+	stored, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stored) != "%PDF-1.4 fake pdf bytes" {
+		t.Fatalf("stored PDF differs from upload: %q", stored)
 	}
 }
 
@@ -634,7 +606,7 @@ func TestMimeMismatch_ImageGoesToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "fake.png", Mime: "image/png", Data: b64([]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d})}}
 
 	sessionID := "aabbccdd11223344"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +630,7 @@ func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "notreally.pdf", Mime: "application/pdf", Data: b64([]byte("this is not a pdf at all"))}}
 
 	sessionID := "ddccbbaa44332211"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0) // supportsDocuments=true
+	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -673,46 +645,11 @@ func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
 	}
 }
 
-// TestPDF_SessionNativeBudgetFallsBackToDisk verifies the CUMULATIVE per-session
-// native-doc cap: if the conversation history already holds close to the session
-// native budget, a new native-eligible PDF falls back to disk instead of being
-// embedded natively (bounding cross-turn growth).
-func TestPDF_SessionNativeBudgetFallsBackToDisk(t *testing.T) {
-	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
-	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
-	sessionID := "cafecafecafe0000"
-
-	pdf := make([]byte, 4<<20) // 4 MB
-	copy(pdf, []byte("%PDF-1.7\n"))
-	atts := []Attachment{{Name: "x.pdf", Mime: "application/pdf", Data: b64(pdf)}}
-
-	// Simulate history already at the session budget.
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, true, maxSessionNativeDocBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(content) != 1 {
-		t.Fatalf("expected 1 block, got %d", len(content))
-	}
-	if content[0].Type != "text" {
-		t.Fatalf("expected disk fallback (text) when session native budget exhausted, got %q", content[0].Type)
-	}
-
-	// With no prior history, the same PDF goes native.
-	content2, _, err := buildAttachmentContent(atts, sessionID, pp, true, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if content2[0].Type != "document" {
-		t.Fatalf("expected native document with empty history, got %q", content2[0].Type)
-	}
-}
-
 func TestImage_SessionNativeBudgetFallsBackToDisk(t *testing.T) {
 	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
 	image := pngBytes(1024)
-	content, _, err := buildAttachmentContent([]Attachment{{Name: "x.png", Mime: "image/png", Data: b64(image)}}, "cafecafecafe0000", pp, false, maxSessionNativeDocBytes)
+	content, _, err := buildAttachmentContent([]Attachment{{Name: "x.png", Mime: "image/png", Data: b64(image)}}, "cafecafecafe0000", pp, maxSessionNativeDocBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,40 +681,6 @@ func TestBytesLookLikePDF(t *testing.T) {
 	}
 }
 
-// TestPDF_NativeBudgetFallsBackToDisk verifies that once the per-message native
-// PDF budget is exhausted, further PDFs fall back to disk instead of being
-// embedded natively (which would be re-sent unbounded every turn).
-func TestPDF_NativeBudgetFallsBackToDisk(t *testing.T) {
-	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
-	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
-	sessionID := "beefbeefbeef0000"
-
-	// Build a valid-ish PDF just over half the native budget, so the first goes
-	// native and the second exceeds the aggregate and must fall back to disk.
-	half := maxNativeDocBytes/2 + 1024
-	mk := func() Attachment {
-		b := make([]byte, half)
-		copy(b, []byte("%PDF-1.7\n"))
-		return Attachment{Name: "big.pdf", Mime: "application/pdf", Data: b64(b)}
-	}
-	content, _, err := buildAttachmentContent([]Attachment{mk(), mk()}, sessionID, pp, true, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(content) != 2 {
-		t.Fatalf("expected 2 blocks, got %d", len(content))
-	}
-	if content[0].Type != "document" {
-		t.Fatalf("expected first PDF native (document), got %q", content[0].Type)
-	}
-	if content[1].Type != "text" {
-		t.Fatalf("expected second PDF to fall back to disk (text), got %q", content[1].Type)
-	}
-	if !strings.Contains(content[1].Text, "guardado en:") {
-		t.Fatalf("expected disk advisory for the overflow PDF, got %q", content[1].Text)
-	}
-}
-
 // TestBuildAttachmentContent_RollbackOnError verifies that when a later
 // attachment in the same call fails (here: exceeds the per-file cap), the
 // files already written to disk during THIS call are rolled back — a failed
@@ -793,7 +696,7 @@ func TestBuildAttachmentContent_RollbackOnError(t *testing.T) {
 	// first was written.
 	tooBig := Attachment{Name: "big.bin", Mime: "application/octet-stream", Data: b64(make([]byte, maxAttachmentFileBytes+1))}
 
-	_, _, err := buildAttachmentContent([]Attachment{good, tooBig}, sessionID, pp, false, 0)
+	_, _, err := buildAttachmentContent([]Attachment{good, tooBig}, sessionID, pp, 0)
 	if err == nil {
 		t.Fatal("expected error for oversized attachment")
 	}

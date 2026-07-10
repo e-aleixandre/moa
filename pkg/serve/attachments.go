@@ -40,17 +40,10 @@ const (
 	maxRequestBytes        = 64 << 20  // aggregate decoded bytes per request
 	maxSessionDiskBytes    = 200 << 20 // aggregate on-disk bytes per session
 	maxInlineTextAggregate = 512 << 10 // aggregate inline text per message
-	// maxNativeDocBytes bounds the total bytes of native PDF "document" blocks
-	// in ONE message. Native documents (unlike to-disk files) are embedded in
-	// the conversation as base64 and re-sent every turn, so an unbounded native
-	// PDF payload would inflate persistence/memory/request size across turns.
-	// A single message is capped here; larger PDFs fall back to disk (which is
-	// governed by the per-session disk quota instead).
-	maxNativeDocBytes = 24 << 20 // 24 MB of native PDF per message
-	// maxSessionNativeDocBytes bounds all native binary content (documents and
-	// images) retained in history. Both are base64-persisted and re-sent every
-	// turn, so a per-file image cap alone would still permit unbounded session
-	// memory, persistence and provider request growth.
+	// maxSessionNativeDocBytes bounds all native binary content retained in
+	// history. Images (and documents persisted by older sessions) are base64
+	// content that can be re-sent across turns, so a per-file image cap alone
+	// would still permit unbounded session memory and request growth.
 	maxSessionNativeDocBytes = 48 << 20 // 48 MB across the whole session
 )
 
@@ -61,18 +54,11 @@ var allowedImageMimes = map[string]bool{
 	"image/webp": true,
 }
 
-// pdfUnsupportedNote is appended when a PDF is saved to disk because the active
-// provider can't accept native documents.
-const pdfUnsupportedNote = "Nota: el modelo actual no soporta documentos PDF nativos, así que este\n" +
-	"PDF no se envió directamente — está disponible en la ruta de arriba para\n" +
-	"que lo proceses si hace falta (p.ej. con alguna herramienta de extracción\n" +
-	"de texto si está disponible en el sistema)."
-
-// pdfSizeFallbackNote is appended when a native-eligible PDF is saved to disk
-// because it exceeds the per-file or native-document budget instead.
-const pdfSizeFallbackNote = "Nota: este PDF supera el límite para envío nativo al modelo, así que se\n" +
-	"guardó en disco — está disponible en la ruta de arriba para que lo proceses\n" +
-	"si hace falta."
+// pdfStoredOnDiskNote explains the disk-first policy. PDFs can be large and
+// native blocks are retained in history and sent to the provider across turns,
+// so embedding them by default makes context, latency, and cost unpredictable.
+const pdfStoredOnDiskNote = "Nota: los PDF se guardan en disco por defecto y no se envían íntegros al\n" +
+	"modelo, para evitar inflar el contexto. Usa la ruta de arriba para extraer\n" + "texto, consultar metadatos o procesarlo con las herramientas disponibles."
 
 const nativeContentFallbackNote = "Nota: este adjunto supera el límite acumulado de contenido binario nativo de la sesión, así que se\n" +
 	"guardó en disco para evitar que el historial y las solicitudes al modelo crezcan sin límite."
@@ -132,10 +118,10 @@ func bytesLookLikePDF(data []byte) bool {
 // core.Content blocks: images become "image" blocks (reusing the original
 // base64 string). Small UTF-8 text is inlined in a <attachment> sentinel;
 // everything else that doesn't fit inline is written to the session's
-// attachment directory on disk and referenced by path instead. PDFs go
-// native as a "document" block when supportsDocuments is true and the file
-// is small enough; otherwise they fall back to the same on-disk mechanism.
-func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, supportsDocuments bool, priorNativeDocBytes int64) (result []core.Content, writtenFiles []string, retErr error) {
+// attachment directory on disk and referenced by path instead. PDFs are
+// deliberately disk-first, even for capable providers: a large native PDF
+// would otherwise live in and be re-sent from conversation history every turn.
+func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, priorNativeDocBytes int64) (result []core.Content, writtenFiles []string, retErr error) {
 	if len(atts) > maxAttachments {
 		return nil, nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
 	}
@@ -143,7 +129,6 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 	var (
 		requestBytes      int64
 		inlineTextBytes   int
-		nativeDocBytes    int64 // total bytes of native PDF blocks this message
 		nativeBinaryBytes int64 // all native binary blocks this message
 
 		sessionDir       string
@@ -246,34 +231,9 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		}
 
 		if a.Mime == "application/pdf" {
-			// Only send natively if the bytes are actually a PDF (%PDF- magic),
-			// the provider supports documents, the file fits the per-file cap,
-			// AND adding it stays within the per-message native-doc budget
-			// (native PDFs are re-sent every turn, so they can't be unbounded).
-			isPDF := bytesLookLikePDF(decoded)
-			if isPDF && supportsDocuments &&
-				len(decoded) <= maxAttachmentFileBytes &&
-				nativeDocBytes+int64(len(decoded)) <= maxNativeDocBytes &&
-				priorNativeDocBytes+nativeBinaryBytes+int64(len(decoded)) <= maxSessionNativeDocBytes {
-				filename := safeBase(a.Name)
-				if filename == "" {
-					filename = "document.pdf"
-				}
-				content = append(content, core.DocumentContent(a.Data, a.Mime, filename))
-				nativeDocBytes += int64(len(decoded))
-				nativeBinaryBytes += int64(len(decoded))
-				continue
-			}
-			// Choose an accurate fallback note based on WHY it isn't native.
-			var note string
-			switch {
-			case !isPDF:
+			note := pdfStoredOnDiskNote
+			if !bytesLookLikePDF(decoded) {
 				note = mimeMismatchNote
-			case !supportsDocuments:
-				note = pdfUnsupportedNote
-			default:
-				// Native-eligible but too large or over the native budget.
-				note = pdfSizeFallbackNote
 			}
 			block, err := toDisk(a, decoded, note)
 			if err != nil {
