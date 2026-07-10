@@ -255,9 +255,7 @@ type Manager struct {
 	// fileScanner is shared across /api/sessions/{id}/files requests.
 	// Invalidated on successful edit tool completions.
 	fileScanner *files.Scanner
-<<<<<<< HEAD
-=======
-	scheduler *schedulerService
+	scheduler   *schedulerService
 }
 
 // ManagerConfig configures a Manager.
