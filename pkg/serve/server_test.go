@@ -91,6 +91,64 @@ func TestOpsOverviewEndpointShape(t *testing.T) {
 	}
 }
 
+func TestOpsQueryEndpointStrictShapeAndAmbiguity(t *testing.T) {
+	ts, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer ts.Close()
+	first, err := mgr.CreateSession(CreateOpts{Title: "release"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.CreateSession(CreateOpts{Title: "release"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/ops?view=sitrep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var sitrep struct {
+		Spoken string `json:"spoken"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&sitrep) != nil || sitrep.Spoken != "Ops: 2 sessions; 0 blockers." {
+		t.Fatalf("unexpected sitrep: status=%d body=%#v", resp.StatusCode, sitrep)
+	}
+
+	resp, err = http.Get(ts.URL + "/api/ops?view=status&target=release")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var ambiguous struct {
+		Resolution struct {
+			Candidates []json.RawMessage `json:"candidates"`
+		} `json:"resolution"`
+		Briefing json.RawMessage `json:"briefing"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&ambiguous) != nil || len(ambiguous.Resolution.Candidates) != 2 || len(ambiguous.Briefing) != 0 {
+		t.Fatalf("unexpected ambiguous status: status=%d body=%#v", resp.StatusCode, ambiguous)
+	}
+
+	resp, err = http.Get(ts.URL + "/api/ops?view=status&target=" + first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status by explicit ID = %d", resp.StatusCode)
+	}
+
+	resp, err = http.Get(ts.URL + "/api/ops?view=sitrep&target=nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected invalid query status: %d", resp.StatusCode)
+	}
+}
+
 func newTestServerWithRoot(t *testing.T, root string) (*httptest.Server, *Manager, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

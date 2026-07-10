@@ -192,3 +192,46 @@ func handleOpsOverview(m *Manager) func(http.ResponseWriter, *http.Request) {
 		writeJSON(w, http.StatusOK, m.ops.Snapshot())
 	}
 }
+
+// handleOpsQuery exposes deterministic, read-only operational briefings. Its
+// intentionally small query shape avoids accepting a natural-language command:
+// view is sitrep, blockers, or status; status additionally requires target.
+func handleOpsQuery(m *Manager) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if m.ops == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops unavailable"})
+			return
+		}
+		query := r.URL.Query()
+		for key, values := range query {
+			if (key != "view" && key != "target") || len(values) != 1 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ops query"})
+				return
+			}
+		}
+		view := query.Get("view")
+		switch view {
+		case "sitrep":
+			if query.Has("target") {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target is only valid for status"})
+				return
+			}
+			writeJSON(w, http.StatusOK, m.ops.Sitrep())
+		case "blockers":
+			if query.Has("target") {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target is only valid for status"})
+				return
+			}
+			writeJSON(w, http.StatusOK, m.ops.Blockers())
+		case "status":
+			target, ok := query["target"]
+			if !ok || target[0] == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status requires target"})
+				return
+			}
+			writeJSON(w, http.StatusOK, m.ops.Status(target[0]))
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ops view"})
+		}
+	}
+}
