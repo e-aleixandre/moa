@@ -9,7 +9,7 @@ Implement all actionable work in `tmp/review-5-6-master-plan.md`.
 - `3f253c1 include compaction usage in lifecycle events`: P1 groundwork; automatic and manual compaction publish their provider usage.
 
 ## Current iteration
-- Finished isolated P1 groundwork: compaction usage propagation.
+- Fixed regression from MsgID work: `Agent.Messages` is read-only again; MsgIDs are stamped by the loop's writer path under its state lock.
 
 ## Next
 - P1: implement per-RunGen stats in SessionContext/bridge/startRun and adversarial regressions.

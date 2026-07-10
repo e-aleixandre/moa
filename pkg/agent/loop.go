@@ -35,6 +35,9 @@ type Hooks interface {
 // stateMu across a callback would risk deadlock.
 func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
 	cfg.stateMu.Lock()
+	for i := range msgs {
+		msgs[i].EnsureMsgID()
+	}
 	cfg.state.Messages = append(cfg.state.Messages, msgs...)
 	cfg.stateMu.Unlock()
 }

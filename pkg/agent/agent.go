@@ -495,9 +495,6 @@ func stripThinkingFromHistory(msgs []core.AgentMessage) {
 func (a *Agent) Messages() []core.AgentMessage {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for i := range a.state.Messages {
-		a.state.Messages[i].EnsureMsgID()
-	}
 	msgs := make([]core.AgentMessage, len(a.state.Messages))
 	copy(msgs, a.state.Messages)
 	return msgs
