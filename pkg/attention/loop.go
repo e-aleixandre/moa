@@ -51,6 +51,9 @@ func (s *Service) handleCtrl(st *loopState, c ctrlMsg) {
 	switch c.kind {
 	case ctrlAttach:
 		s.doAttach(st, c.session)
+		if c.reply != nil {
+			c.reply <- ctrlReply{}
+		}
 	case ctrlDetach:
 		s.doDetach(st, c.detach)
 	case ctrlSetClient:
@@ -93,6 +96,9 @@ func (s *Service) doAttach(st *loopState, req *attachReq) {
 	}
 	if req.seedState != "" {
 		snap.state = req.seedState
+	}
+	if req.seedState == bus.StateError {
+		s.ensureErrorItem(st, snap, req.seedError)
 	}
 	// Seed pending items (dedup by refID handles overlap with later events).
 	for _, p := range req.seedPerm {
@@ -237,17 +243,7 @@ func (s *Service) handleStateChange(st *loopState, snap *sessionSnapshot, state 
 	snap.state = state
 	if state == bus.StateError {
 		snap.lastError = errMsg
-		// StateChanged(error) may be replayed while the same failure remains
-		// active. It represents one attention condition, not a new interruption
-		// for every emission.
-		if !st.hasUnresolvedError(snap.id) {
-			s.addItem(st, &AttentionItem{
-				ID: s.nextItemID(), Priority: P0Blocking, Kind: KindError,
-				SessionID: snap.id, Alias: snap.alias,
-				Spoken: s.lang.spokenError(snap.alias, errMsg),
-				State:  StatePending, CreatedAt: time.Now(),
-			})
-		}
+		s.ensureErrorItem(st, snap, errMsg)
 	} else {
 		// Errors have no external approval ID. A transition out of error is the
 		// authoritative resolution signal; retaining the item would make a
@@ -267,10 +263,13 @@ func (s *Service) handleRunEnded(st *loopState, snap *sessionSnapshot, e bus.Run
 			s.lang.spokenRunOK(snap.alias, e.FinalText, e.HadEdits), sig)
 		return
 	}
+	s.ensureErrorItem(st, snap, e.Err.Error())
+}
+
+func (s *Service) ensureErrorItem(st *loopState, snap *sessionSnapshot, msg string) {
 	if st.hasUnresolvedError(snap.id) {
 		return
 	}
-	msg := e.Err.Error()
 	s.addItem(st, &AttentionItem{
 		ID: s.nextItemID(), Priority: P0Blocking, Kind: KindError,
 		SessionID: snap.id, Alias: snap.alias,

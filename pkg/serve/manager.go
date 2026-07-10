@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/attention"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/files"
@@ -256,6 +257,9 @@ type Manager struct {
 	// Invalidated on successful edit tool completions.
 	fileScanner *files.Scanner
 	scheduler   *schedulerService
+	// attention normalizes cross-session blocking state for future voice and
+	// digest clients. It owns no session state and is stopped on Shutdown.
+	attention *attention.Service
 }
 
 // ManagerConfig configures a Manager.
@@ -323,7 +327,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
 		scheduler:       scheduler,
+		attention:       attention.New(attention.Config{}),
 	}
+	m.attention.Start()
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
 	}

@@ -118,6 +118,7 @@ type attachReq struct {
 	seedPerm  []seedPending
 	seedAsk   []seedPending
 	seedState bus.SessionState
+	seedError string
 }
 
 type seedPending struct {
@@ -174,6 +175,26 @@ func (s *Service) nextItemID() string {
 // (may be zero). Returns a detach func to append to the session's unsub list.
 func (s *Service) Attach(b bus.EventBus, sessionID, alias, title string) func() {
 	gen := s.genSeq.Add(1)
+	// Subscribe before reading the seed snapshot, but keep events behind a
+	// per-attach gate until the actor owns the session. This closes the
+	// snapshot→subscribe race without allowing events to arrive before attach.
+	var gateMu sync.Mutex
+	ready := false
+	var buffered []inboxMsg
+	unsub := b.SubscribeAll(func(ev any) {
+		if !whitelisted(ev) {
+			return
+		}
+		m := inboxMsg{sessionID: sessionID, gen: gen, event: ev}
+		gateMu.Lock()
+		if !ready {
+			buffered = append(buffered, m)
+			gateMu.Unlock()
+			return
+		}
+		gateMu.Unlock()
+		s.forward(m)
+	})
 
 	// Seed from current pending state so an already-waiting session surfaces.
 	var req attachReq
@@ -196,16 +217,21 @@ func (s *Service) Attach(b bus.EventBus, sessionID, alias, title string) func() 
 	if st, err := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{}); err == nil {
 		req.seedState = bus.SessionState(st)
 	}
+	if errText, err := bus.QueryTyped[bus.GetSessionError, string](b, bus.GetSessionError{}); err == nil {
+		req.seedError = errText
+	}
 
-	s.sendCtrl(ctrlMsg{kind: ctrlAttach, session: &req})
-
-	// Subscribe to the bus; forward whitelisted events tagged with this gen.
-	unsub := b.SubscribeAll(func(ev any) {
-		if !whitelisted(ev) {
-			return
-		}
-		s.forward(inboxMsg{sessionID: sessionID, gen: gen, event: ev})
-	})
+	// Wait until attach has reached the actor, then flush in publication order.
+	// Hold the gate during the flush so a later event cannot overtake a buffered
+	// event in the attention service.
+	s.sendCtrlReply(ctrlMsg{kind: ctrlAttach, session: &req})
+	gateMu.Lock()
+	for _, m := range buffered {
+		s.forward(m)
+	}
+	buffered = nil
+	ready = true
+	gateMu.Unlock()
 
 	// The detach func: unsubscribe first (stop new events), then tell the loop
 	// to invalidate the generation and purge the session's items.

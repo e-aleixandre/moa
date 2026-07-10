@@ -157,4 +157,3 @@ func containsAny(haystack []string, want string) bool {
 	}
 	return false
 }
-
