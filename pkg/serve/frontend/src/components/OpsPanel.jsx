@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { AlertTriangle, RefreshCw, ShieldCheck, X } from 'lucide-preact';
 import { opsProjectLabel, sessionStatusLabel } from '../ops-data.js';
+import { applyOpsSnapshot, nextOpsReconnectDelay } from '../ops-stream.js';
+
+const OPS_WS_INITIAL_BACKOFF = 1000;
+const OPS_WS_MAX_BACKOFF = 16000;
 
 async function getOps(path, signal) {
   const response = await fetch(path, { signal, headers: { 'X-Moa-Request': '1' } });
@@ -13,6 +17,7 @@ export function OpsPanel({ open, onClose }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const requestRef = useRef(null);
+  const streamVersionRef = useRef(0);
 
   const load = useCallback(() => {
     requestRef.current?.abort();
@@ -25,7 +30,14 @@ export function OpsPanel({ open, onClose }) {
       getOps('/api/ops?view=blockers', controller.signal),
       getOps('/api/ops/overview', controller.signal),
     ]).then(([sitrep, blockers, overview]) => {
-      if (requestRef.current === controller) setData({ sitrep, blockers, overview });
+      if (requestRef.current === controller) {
+        setData(current => ({
+          sitrep,
+          blockers,
+          overview: streamVersionRef.current > 0 && current?.overview ? current.overview : overview,
+          streamVersion: current?.streamVersion || 0,
+        }));
+      }
     }).catch((err) => {
       if (err.name !== 'AbortError' && requestRef.current === controller) setError(err.message || 'Unable to load Ops');
     }).finally(() => {
@@ -34,9 +46,62 @@ export function OpsPanel({ open, onClose }) {
   }, []);
 
   useEffect(() => {
-    if (open) load();
-    else requestRef.current?.abort();
-    return () => requestRef.current?.abort();
+    if (!open) {
+      requestRef.current?.abort();
+      return undefined;
+    }
+
+    streamVersionRef.current = 0;
+    setData(current => current ? { ...current, streamVersion: 0 } : current);
+    load();
+
+    let stopped = false;
+    let connected = false;
+    let backoff = OPS_WS_INITIAL_BACKOFF;
+    let ws;
+    let retryTimer;
+
+    const connect = () => {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/api/ops/ws`);
+
+      ws.onopen = () => {
+        connected = true;
+        backoff = OPS_WS_INITIAL_BACKOFF;
+      };
+      ws.onmessage = (message) => {
+        let event;
+        try {
+          event = JSON.parse(message.data);
+        } catch {
+          return;
+        }
+        if (!Number.isSafeInteger(event?.version) || event.version <= streamVersionRef.current) return;
+        setData(current => {
+          const next = applyOpsSnapshot(current, event);
+          if (next !== current) streamVersionRef.current = event.version;
+          return next;
+        });
+      };
+      ws.onerror = () => ws.close();
+      ws.onclose = () => {
+        if (stopped || !connected) return;
+        const delay = backoff;
+        backoff = nextOpsReconnectDelay(backoff, OPS_WS_MAX_BACKOFF);
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          if (!stopped) connect();
+        }, delay);
+      };
+    };
+
+    connect();
+    return () => {
+      stopped = true;
+      requestRef.current?.abort();
+      if (retryTimer) clearTimeout(retryTimer);
+      ws?.close();
+    };
   }, [open, load]);
 
   if (!open) return null;
