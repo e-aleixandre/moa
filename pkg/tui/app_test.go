@@ -173,6 +173,65 @@ func TestActivateSession_LoadSessionErrorKeepsCurrentSession(t *testing.T) {
 	}
 }
 
+func TestSessionSwitch_IgnoresOldAsyncSubagentEvents(t *testing.T) {
+	m := newSwitchTestApp(t)
+	m.s.sessionEpoch = 1
+	m.s.sessionEventFloor = 0
+
+	// The job starts in the first session and is therefore owned by epoch 1.
+	m.handleBusEventSeq(10, bus.SubagentStarted{JobID: "old-job", Task: "old work", Async: true})
+	if _, ok := m.s.subagents["old-job"]; !ok {
+		t.Fatal("old job was not recorded")
+	}
+
+	// This mirrors a successful in-place session switch: transcript state is
+	// reset, but ownership is retained so delayed old events can be rejected.
+	m.s.sessionEpoch++
+	m.s.sessionEventFloor = 10
+	m.s.subagents = nil
+	m.s.asyncSubagents = 0
+
+	m.handleBusEventSeq(11, bus.SubagentEvent{JobID: "old-job", Inner: bus.TextDelta{Delta: "stale"}})
+	m.handleBusEventSeq(12, bus.SubagentCompleted{JobID: "old-job", Text: "stale completion"})
+	m.handleBusEventSeq(13, bus.SubagentEnded{JobID: "old-job", Status: "completed"})
+	if len(m.s.subagents) != 0 || m.s.asyncSubagents != 0 {
+		t.Fatalf("old async job leaked into new session: %+v, count=%d", m.s.subagents, m.s.asyncSubagents)
+	}
+
+	// A queued start published before the session boundary is also stale.
+	m.handleBusEventSeq(10, bus.SubagentStarted{JobID: "queued-old", Async: true})
+	if _, ok := m.s.subagents["queued-old"]; ok {
+		t.Fatal("queued old subagent start leaked into new session")
+	}
+}
+
+func TestSessionSwitch_IgnoresDelayedAutoTitle(t *testing.T) {
+	m := newSwitchTestApp(t)
+	old := &session.Session{ID: "old"}
+	newSession := &session.Session{ID: "new"}
+	m.session = old
+	m.s.sessionEpoch = 4
+	m.autoTitled = true
+
+	result, _ := m.activateSession(newSession)
+	rm := result.(appModel)
+	if rm.autoTitled {
+		t.Fatal("new session inherited old session's auto-title guard")
+	}
+	if old.Title != "" {
+		t.Fatalf("old title = %q before delayed result", old.Title)
+	}
+
+	updated, _ := rm.Update(autoTitleMsg{title: "old generated title", session: old, epoch: 4})
+	got := updated.(appModel)
+	if old.Title != "" {
+		t.Fatalf("stale title mutated old session after switch: %q", old.Title)
+	}
+	if got.session.Title != "" {
+		t.Fatalf("stale title crossed into new session: %q", got.session.Title)
+	}
+}
+
 func TestSessionBrowser_FilterSelectsMatchingSession(t *testing.T) {
 	b := newSessionBrowser()
 	b.Open()
@@ -534,8 +593,8 @@ func TestPatchFromMessages_DoesNotPatchPreviousTurnBlocks(t *testing.T) {
 		// Turn 2: user block added, but MessageEnd not yet processed
 		{Type: "user", Raw: "turn 2 question"},
 	}
-	m.s.runStartBlockIdx = 2  // run started at the turn-2 user block
-	m.s.runStartMsgCount = 2  // skip turn-1 messages (user + assistant)
+	m.s.runStartBlockIdx = 2 // run started at the turn-2 user block
+	m.s.runStartMsgCount = 2 // skip turn-1 messages (user + assistant)
 
 	// agent.Send returns with turn-2 assistant text, but MessageEnd was missed
 	m.patchFromMessages([]core.AgentMessage{
@@ -2060,13 +2119,36 @@ func TestSettingsMenu_CtrlCCloses(t *testing.T) {
 	}
 }
 
-func TestAskPrompt_CtrlCCancels(t *testing.T) {
+func TestAskPrompt_CtrlCKeepsPromptOpenWhenResolveFails(t *testing.T) {
 	m := newSwitchTestApp(t)
 	m.askPrompt.ShowFromBus("ask-1", []bus.AskQuestion{{Text: "Q?", Options: []string{"a", "b"}}})
 
 	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
 	rm := updated.(appModel)
-	if rm.askPrompt.active {
-		t.Error("Ctrl+C should cancel the ask prompt")
+	if !rm.askPrompt.active {
+		t.Error("Ctrl+C should retain the ask prompt when resolution fails")
+	}
+}
+
+func TestVerifyCommand_RejectsActiveGoalFromRuntime(t *testing.T) {
+	m := newSwitchTestApp(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	b.OnQuery(func(bus.GetGoal) (bus.GoalInfo, error) {
+		return bus.GoalInfo{Active: true}, nil
+	})
+	m.runtime.Bus = b
+	m.s.running = true // Goal can be in its maker phase as well as its idle verifier phase.
+
+	updated, cmd := m.handleCommand("verify")
+	rm := updated.(appModel)
+	if cmd != nil {
+		t.Fatal("rejected verify should not start a command")
+	}
+	if !rm.s.running {
+		t.Fatal("rejected verify should preserve the active goal run state")
+	}
+	if len(rm.s.blocks) == 0 || rm.s.blocks[len(rm.s.blocks)-1].Raw != bus.ErrManualVerifyGoalActive.Error() {
+		t.Fatalf("verify result = %+v, want goal-policy error", rm.s.blocks)
 	}
 }

@@ -80,6 +80,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/bash-jobs/{jobID}/cancel", handleCancelBashJob(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleListSubagents(manager))
@@ -523,8 +524,13 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD)
 		defer reactor.cleanup()
 
+		// The sequence cut is captured before assembling the snapshot. Events at
+		// or before it are represented by init and must not be replayed; events
+		// after it are already queued in the reactor, even during a slow write.
+		cut := sess.runtime.Bus.LastSeq()
 		initData := buildInitData(sess)
-		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData}); err != nil {
+		initData.LastSeq = cut
+		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}); err != nil {
 			return
 		}
 
@@ -550,6 +556,9 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		for {
 			select {
 			case evt := <-reactor.Events():
+				if evt.Seq <= cut {
+					continue
+				}
 				if err := wsWriteJSON(ctx, conn, evt); err != nil {
 					return
 				}
@@ -657,6 +666,21 @@ func handleCancelSubagent(mgr *Manager) http.HandlerFunc {
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
+	}
+}
+
+func handleCancelBashJob(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := mgr.CancelBashJob(r.PathValue("id"), r.PathValue("jobID"))
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -929,12 +953,10 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		// Return updated messages for the new branch
-		msgs, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](sess.runtime.Bus, bus.GetDisplayMessages{})
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"messages": msgs,
-		})
+		// The bounded branch snapshot is delivered by CommandExecuted over the
+		// session WebSocket. Do not duplicate an unbounded history in this REST
+		// response, which can exhaust a mobile browser before WS reconnects.
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -921,6 +922,156 @@ func TestHeadTailBuffer_AcceptedBytes(t *testing.T) {
 	b.Close()
 }
 
+func TestHeadTailBuffer_SpillCapNeverClaimsFullOutput(t *testing.T) {
+	dir := t.TempDir()
+	budget := newSpillBudget(1 << 20)
+	b := headTailBuffer{
+		headMax:       10,
+		tailMax:       10,
+		SpillDir:      dir,
+		SpillMaxBytes: 15,
+		spillBudget:   budget,
+	}
+	data := strings.Repeat("x", 40)
+	if _, err := b.Write([]byte(data)); err != nil {
+		t.Fatal(err)
+	}
+	b.Close()
+	if b.SpillPath == "" {
+		t.Fatal("expected partial spill file")
+	}
+	spill, err := os.ReadFile(b.SpillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spill) != 15 {
+		t.Fatalf("spill has %d bytes, want hard cap of 15", len(spill))
+	}
+	out := b.String()
+	if strings.Contains(out, "full output at") {
+		t.Fatalf("capped spill was advertised as full output: %q", out)
+	}
+	if !strings.Contains(out, "spill is incomplete") || !strings.Contains(out, "per-spill size cap") {
+		t.Fatalf("missing accurate capped-spill notice: %q", out)
+	}
+}
+
+func TestHeadTailBuffer_GlobalSpillCap(t *testing.T) {
+	dir := t.TempDir()
+	budget := newSpillBudget(15)
+	newBuffer := func() *headTailBuffer {
+		return &headTailBuffer{
+			headMax:     10,
+			tailMax:     10,
+			SpillDir:    dir,
+			spillBudget: budget,
+		}
+	}
+	first, second := newBuffer(), newBuffer()
+	if _, err := first.Write([]byte(strings.Repeat("a", 11))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Write([]byte(strings.Repeat("b", 11))); err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	second.Close()
+
+	var total int
+	for _, b := range []*headTailBuffer{first, second} {
+		if b.SpillPath == "" {
+			continue
+		}
+		info, err := os.Stat(b.SpillPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += int(info.Size())
+	}
+	if total > 15 {
+		t.Fatalf("global spill cap exceeded: %d > 15", total)
+	}
+	if !strings.Contains(second.String(), "global spill size cap") || strings.Contains(second.String(), "full output at") {
+		t.Fatalf("global-capped spill notice is inaccurate: %q", second.String())
+	}
+}
+
+func TestSpillBudget_ExistingFilesBlockNewSpillsUntilCleaned(t *testing.T) {
+	budget := newSpillBudget(10)
+	budget.account(15)
+	if got := budget.reserve(1); got != 0 {
+		t.Fatalf("existing over-cap spills allowed %d new bytes", got)
+	}
+	budget.release(6)
+	if got := budget.reserve(1); got != 1 {
+		t.Fatalf("cleanup should restore capacity below cap, reserved %d", got)
+	}
+}
+
+func TestHeadTailBuffer_SpillWriteFailureNeverClaimsFullOutput(t *testing.T) {
+	b := headTailBuffer{headMax: 10, tailMax: 10, SpillDir: t.TempDir(), spillBudget: newSpillBudget(1 << 20)}
+	if _, err := b.Write([]byte(strings.Repeat("x", 11))); err != nil {
+		t.Fatal(err)
+	}
+	if b.spillFile == nil {
+		t.Fatal("expected spill file")
+	}
+	if err := b.spillFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Write([]byte("more")); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.Contains(out, "full output at") || !strings.Contains(out, "spill write failed") {
+		t.Fatalf("write failure notice is inaccurate: %q", out)
+	}
+}
+
+func TestCleanupSpillFiles_TTLAndSymlinkSafety(t *testing.T) {
+	dir := t.TempDir()
+	budget := newSpillBudget(1024)
+	now := time.Now()
+	old := filepath.Join(dir, "moa-output-old.txt")
+	fresh := filepath.Join(dir, "moa-output-fresh.txt")
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(old, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fresh, []byte("fresh"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "moa-output-link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Chtimes(old, now.Add(-2*spillTTL), now.Add(-2*spillTTL)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(link, now.Add(-2*spillTTL), now.Add(-2*spillTTL)); err != nil {
+		t.Fatal(err)
+	}
+	budget.reserve(3)
+	if err := cleanupSpillFiles(dir, now, spillTTL, budget); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(old); !os.IsNotExist(err) {
+		t.Fatalf("expired regular spill was not removed: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("fresh spill was removed: %v", err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("cleanup followed or removed spill symlink: %v", err)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "target" {
+		t.Fatalf("symlink target changed: %q, %v", got, err)
+	}
+}
+
 // --- PDF read tests ---
 
 // minimalPDF returns raw bytes of a valid PDF containing the given text lines.
@@ -1142,6 +1293,20 @@ func TestTruncateLinesHeadTail_SpillPathInNotice(t *testing.T) {
 	}
 	if !strings.Contains(got, "full output at") {
 		t.Errorf("notice should mention full output location, got %q", got)
+	}
+}
+
+func TestTruncateLinesHeadTail_IncompleteSpillNeverClaimsFullOutput(t *testing.T) {
+	lines := make([]string, 10)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d", i)
+	}
+	got := truncateLinesHeadTail(strings.Join(lines, "\n"), 4, "/tmp/partial.txt", "global spill size cap reached")
+	if strings.Contains(got, "full output at") {
+		t.Fatalf("incomplete spill was advertised as full output: %q", got)
+	}
+	if !strings.Contains(got, "spill is incomplete") || !strings.Contains(got, "partial output at") {
+		t.Fatalf("missing partial-spill notice: %q", got)
 	}
 }
 

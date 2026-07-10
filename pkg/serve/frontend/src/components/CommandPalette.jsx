@@ -4,6 +4,7 @@ import { store, sessionsByGroup, isSessionInTile } from '../store.js';
 import { assignToTile } from '../tile-actions.js';
 import { resumeSession, createSession, unarchiveSession } from '../session-actions.js';
 import { allTileIds, findTile } from '../tileTree.js';
+import { addToast } from '../notifications.js';
 
 // Cached capabilities from server
 let _caps = null;
@@ -185,7 +186,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
     if (el) el.scrollIntoView({ block: 'nearest' });
   }, [selectedIdx]);
 
-  const handleSelectSearch = useCallback((item) => {
+  const handleSelectSearch = useCallback(async (item) => {
     if (item.type === 'action' && item.id === '__new') {
       setMode('create');
       return;
@@ -199,7 +200,12 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
       }
       if (item.saved) {
         // Resume puts the session into the focused tile (see state.resumeSession).
-        resumeSession(item.id).catch(e => console.error('Resume failed:', e));
+        try {
+          await resumeSession(item.id);
+        } catch (e) {
+          addToast(`Could not resume session: ${e.message}`, 'error');
+          return;
+        }
       } else {
         // Always assign to the focused tile. If the session was visible
         // elsewhere, assignToTile clears it from the old tile first.

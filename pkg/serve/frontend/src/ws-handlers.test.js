@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsSubagentStart, handleWsSubagentEnd } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -41,4 +41,15 @@ test('handleWsSubagentStart does not downgrade a terminal status back to running
   const sa = store.get().sessions.s1.subagents.j1;
   expect(sa.status).toBe('completed');
   expect(sa.async).toBe(true);
+});
+
+test('handleWsInit preserves the bounded-history marker', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [{ role: 'assistant', msg_id: 'latest', content: [{ type: 'text', text: 'latest' }] }],
+    history_truncated: true,
+  });
+  const session = store.get().sessions.s1;
+  expect(session.historyTruncated).toBe(true);
+  expect(session.messages).toHaveLength(1);
 });

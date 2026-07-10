@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'preact/hooks';
 import { GitFork, ChevronUp, ChevronDown, X, Loader2, Rocket } from 'lucide-preact';
 import { updateSession } from '../store.js';
-import { cancelSubagent, promoteSubagent } from '../session-actions.js';
+import { cancelSubagent, cancelBashJob, promoteSubagent } from '../session-actions.js';
 import { addToast } from '../notifications.js';
 
 // liveSubagents returns the running/cancelling subagents of a session, as an
@@ -57,9 +57,11 @@ export function AgentTray({ sessionId, session }) {
   const handleCancel = useCallback(async (e, jobId) => {
     e.stopPropagation();
     try {
-      await cancelSubagent(sessionId, jobId);
+      const job = session?.subagents?.[jobId];
+      if (job?.kind === 'bash') await cancelBashJob(sessionId, jobId);
+      else await cancelSubagent(sessionId, jobId);
     } catch (_) { /* best-effort */ }
-  }, [sessionId]);
+  }, [sessionId, session]);
 
   const handlePromote = useCallback(async (e, jobId) => {
     e.stopPropagation();
@@ -83,7 +85,7 @@ export function AgentTray({ sessionId, session }) {
         <span class="agent-tray-grip" />
         <GitFork class="agent-tray-icon" />
         <span class="agent-tray-count">
-          {live.length} {live.length === 1 ? 'agent' : 'agents'} working
+          {live.length} {live.length === 1 ? 'job' : 'jobs'} working
         </span>
         {totals.costUSD > 0 && (
           <span class="agent-tray-cost" title="Total spent by subagents this session">
@@ -105,11 +107,11 @@ export function AgentTray({ sessionId, session }) {
               <div class="agent-tray-item-body">
                 <div class="agent-tray-task">{sa.task || sa.jobId}</div>
                 <div class="agent-tray-meta">
-                  {sa.model || 'model'}
+                  {sa.kind === 'bash' ? 'background bash' : (sa.model || 'model')}
                   {sa.status === 'cancelling' && ' · cancelling…'}
                 </div>
               </div>
-              {sa.async && sa.status === 'running' && (
+              {(sa.kind === 'bash' || sa.async) && sa.status === 'running' && (
                 <button
                   class="agent-tray-cancel"
                   title="Cancel this agent"

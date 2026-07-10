@@ -1,7 +1,7 @@
 import { ArrowLeft, GitFork, Rocket } from 'lucide-preact';
 import { MessageList } from './MessageList.jsx';
 import { updateSession } from '../store.js';
-import { promoteSubagent } from '../session-actions.js';
+import { cancelBashJob, promoteSubagent } from '../session-actions.js';
 import { addToast } from '../notifications.js';
 
 // SubagentView shows one subagent's live sub-conversation, rendered with the
@@ -19,6 +19,13 @@ export function SubagentView({ sessionId, session }) {
       await promoteSubagent(sessionId, jobId);
     } catch (e) {
       addToast({ title: 'Promote failed', detail: e.message, type: 'error' });
+    }
+  };
+  const cancel = async () => {
+    try {
+      await cancelBashJob(sessionId, jobId);
+    } catch (e) {
+      addToast({ title: 'Cancel failed', detail: e.message, type: 'error' });
     }
   };
 
@@ -56,9 +63,9 @@ export function SubagentView({ sessionId, session }) {
         </button>
         <GitFork class="subagent-view-icon" />
         <div class="subagent-view-titles">
-          <div class="subagent-view-task">{sa.task || jobId}</div>
+          <div class="subagent-view-task">{sa.kind === 'bash' ? `Bash: ${sa.task || jobId}` : (sa.task || jobId)}</div>
           <div class="subagent-view-meta">
-            {sa.model || 'model'} · {statusLabel}
+            {sa.kind === 'bash' ? 'background bash' : (sa.model || 'model')} · {statusLabel}
             {costLabel && <span class="subagent-view-cost"> · {costLabel}</span>}
           </div>
         </div>
@@ -70,6 +77,9 @@ export function SubagentView({ sessionId, session }) {
           >
             <Rocket />
           </button>
+        )}
+        {sa.kind === 'bash' && sa.status === 'running' && (
+          <button class="subagent-promote" onClick={cancel} title="Cancel background bash job">×</button>
         )}
       </div>
       <MessageList session={subSession} />

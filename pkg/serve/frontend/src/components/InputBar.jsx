@@ -60,7 +60,7 @@ export function InputBar({ sessionId, session, tileId }) {
   // main agent. `steerJobId` is set iff a live subagent view is open.
   const steerJobId = session?.viewingSubagent || null;
   const steerSub = steerJobId ? (session?.subagents || {})[steerJobId] : null;
-  const subagentMode = !!steerSub;
+  const subagentMode = !!steerSub && steerSub.kind !== 'bash';
   // Optimistic list of messages sent to the current subagent (no WS echo).
   const [subagentPending, setSubagentPending] = useState([]);
   // Reset the optimistic queue whenever the targeted subagent changes / closes.

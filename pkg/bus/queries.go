@@ -131,6 +131,18 @@ type SubagentSnapshot struct {
 	Messages []core.AgentMessage
 }
 
+// GetBashJobs returns active/recent background bash jobs for reconnecting UIs.
+type GetBashJobs struct{ SessionID string }
+
+// BashJobSnapshot is the transport-safe snapshot of one background bash job.
+type BashJobSnapshot struct {
+	JobID   string
+	Command string
+	CWD     string
+	Status  string
+	Output  string
+}
+
 // BranchPoint describes a possible branch target in the conversation.
 type BranchPoint struct {
 	EntryID       string `json:"entry_id"`

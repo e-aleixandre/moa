@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -131,6 +132,11 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m.handlePlanCommand()
 
 	case "verify":
+		if err := bus.RequireManualVerifyAllowed(m.runtime.Bus); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			m.updateViewport()
+			return m, nil
+		}
 		if m.s.running {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "error", Raw: "Cannot verify while agent is running",
@@ -208,10 +214,14 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if m.askPrompt.Submit() {
 			// All questions answered — resolve via bus.
-			_ = m.runtime.Bus.Execute(bus.ResolveAskUser{
+			if err := m.runtime.Bus.Execute(bus.ResolveAskUser{
 				AskID:   m.askPrompt.askID,
 				Answers: m.askPrompt.CollectAnswers(),
-			})
+			}); err != nil {
+				m.askPrompt.active = true
+				m.askPrompt.current = len(m.askPrompt.questions) - 1
+				m.s.pendingStatus = "✗ " + err.Error()
+			}
 			return m, nil
 		}
 		return m, nil
@@ -230,6 +240,9 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			AskID:   askID,
 			Answers: emptyAnswers,
 		}); err != nil {
+			if !errors.Is(err, bus.ErrNoHandler) {
+				m.askPrompt.active = true
+			}
 			m.s.pendingStatus = "✗ " + err.Error()
 		}
 		return m, nil
@@ -256,10 +269,13 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			if rule := m.permPrompt.SaveRule(); rule != "" {
-				_ = m.runtime.Bus.Execute(bus.AddPermissionRule{
+				if err := m.runtime.Bus.Execute(bus.AddPermissionRule{
 					PermissionID: m.permPrompt.permID,
 					Rule:         rule,
-				})
+				}); err != nil {
+					m.s.pendingStatus = "✗ " + err.Error()
+					return m, nil
+				}
 				m.s.blocks = append(m.s.blocks, messageBlock{
 					Type: "status", Raw: fmt.Sprintf("✓ rule added: %s", rule),
 				})
@@ -289,12 +305,15 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			opt := m.permPrompt.options[m.permPrompt.cursor]
-			_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+			if err := m.runtime.Bus.Execute(bus.ResolvePermission{
 				PermissionID: m.permPrompt.permID,
 				Approved:     opt.approved,
 				Feedback:     strings.TrimSpace(m.permPrompt.amendBuf),
 				AllowPattern: opt.allow,
-			})
+			}); err != nil {
+				m.s.pendingStatus = "✗ " + err.Error()
+				return m, nil
+			}
 			m.permPrompt.active = false
 			return m, nil
 		case tea.KeyEsc:
@@ -335,12 +354,15 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.permPrompt.ruleBuf = ""
 			return m, nil
 		}
-		_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+		if err := m.runtime.Bus.Execute(bus.ResolvePermission{
 			PermissionID: m.permPrompt.permID,
 			Approved:     opt.approved,
 			Feedback:     strings.TrimSpace(m.permPrompt.amendBuf),
 			AllowPattern: opt.allow,
-		})
+		}); err != nil {
+			m.s.pendingStatus = "✗ " + err.Error()
+			return m, nil
+		}
 		m.permPrompt.active = false
 		return m, nil
 	case tea.KeyTab:
@@ -354,10 +376,13 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.permPrompt.amendBuf = ""
 		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
-		_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+		if err := m.runtime.Bus.Execute(bus.ResolvePermission{
 			PermissionID: m.permPrompt.permID,
 			Approved:     false,
-		})
+		}); err != nil {
+			m.s.pendingStatus = "✗ " + err.Error()
+			return m, nil
+		}
 		m.permPrompt.active = false
 		_ = m.runtime.Bus.Execute(bus.AbortRun{})
 		return m, nil
@@ -374,11 +399,14 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.permPrompt.cursor = idx
-				_ = m.runtime.Bus.Execute(bus.ResolvePermission{
+				if err := m.runtime.Bus.Execute(bus.ResolvePermission{
 					PermissionID: m.permPrompt.permID,
 					Approved:     opt.approved,
 					AllowPattern: opt.allow,
-				})
+				}); err != nil {
+					m.s.pendingStatus = "✗ " + err.Error()
+					return m, nil
+				}
 				m.permPrompt.active = false
 				return m, nil
 			}
@@ -872,7 +900,6 @@ func (m appModel) setSessionArchived(id string, archived bool) tea.Cmd {
 	}
 }
 
-
 func (m appModel) newSession() *session.Session {
 	if m.sessionStore == nil {
 		return nil
@@ -886,6 +913,11 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	if sess == nil {
 		sess = m.newSession()
 	}
+	// Establish the boundary before SwitchSession publishes SessionLoaded. A
+	// promoted subagent belongs to the conversation that launched it even
+	// though its completion may arrive long after the main run is idle.
+	// Keep job ownership in subagentEpoch so those late events are ignored.
+	eventFloor := m.runtime.Bus.LastSeq()
 	// SwitchSession restores history and all persisted runtime metadata before
 	// rebinding the persister, so no intermediate ConfigChanged snapshot can
 	// write old-session capabilities into the new session.
@@ -896,6 +928,9 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	m.s.sessionEventFloor = eventFloor
+	m.s.sessionEpoch++
+	m.autoTitled = false
 
 	m.session = sess
 	m.sessionBrowser.Close()
@@ -911,6 +946,9 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.sessionCost = 0
 	m.s.sessionInput = 0
 	m.s.sessionCacheRead = 0
+	m.s.asyncSubagents = 0
+	m.s.subagents = nil
+	m.s.viewingSubagent = ""
 	m.statusBar.UpdateCostSegment(0)
 	m.statusBar.UpdateCacheSegment(0)
 	m.clearCacheCold()

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'preact/hooks';
+import { memo } from 'preact/compat';
 import { MessageSquarePlus, GripHorizontal, GitFork, Columns2, Rows2, X } from 'lucide-preact';
 import { focusTile, assignToTile, swapTiles, splitTile, closeTile } from '../tile-actions.js';
 import { getTileCount } from '../store.js';
@@ -13,7 +14,7 @@ import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { ModelPill } from './ModelPill.jsx';
 import { TaskBar } from './TaskBar.jsx';
 
-export function Tile({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
+function TileView({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
   const [dragOver, setDragOver] = useState(false);
   const tileRef = useRef(null);
   const needsAttention = session && (session.state === 'permission' || session.state === 'error');
@@ -160,3 +161,5 @@ export function Tile({ tileId, tileIndex, sessionId, session, usage, isFocused }
     </div>
   );
 }
+
+export const Tile = memo(TileView);

@@ -142,6 +142,15 @@ func (m *Manager) CancelSubagent(sessionID, jobID string) error {
 	return nil
 }
 
+// CancelBashJob cancels a session-scoped background bash job.
+func (m *Manager) CancelBashJob(sessionID, jobID string) error {
+	sess, ok := m.Get(sessionID)
+	if !ok || sess.bashJobs == nil || !sess.bashJobs.Cancel(jobID) {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // PromoteSubagent flips a running sync subagent job to async, unblocking its
 // parent's blocking tool call while the child keeps running in the
 // background. Returns ErrNotFound if the session/job doesn't exist, and

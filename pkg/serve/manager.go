@@ -70,6 +70,7 @@ type ManagedSession struct {
 	// subagents is the handle onto the subagent job store (bootstrap.Session.Subagents),
 	// used to answer the GetSubagents query and future cancellation from the UI.
 	subagents *subagent.Jobs
+	bashJobs  *tool.BashJobs
 
 	// Serve-specific persistence.
 	persister *servePersister

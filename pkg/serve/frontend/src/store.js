@@ -71,8 +71,16 @@ export const store = {
 
 export function setState(patch) {
   const next = typeof patch === 'function' ? patch(state) : patch;
+  const previous = state;
   state = { ...state, ...next };
-  persistState(state);
+  if (
+    state.tileTree !== previous.tileTree ||
+    state.focusedTile !== previous.focusedTile ||
+    state.soundEnabled !== previous.soundEnabled ||
+    state.groupByProject !== previous.groupByProject
+  ) {
+    persistState(state);
+  }
   listeners.forEach(fn => fn(state));
 }
 

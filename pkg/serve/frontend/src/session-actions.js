@@ -22,6 +22,10 @@ function cacheExpiresAtMs(iso) {
   return Number.isFinite(ms) && ms > 0 ? ms : 0;
 }
 
+function samePolledSession(existing, next) {
+  return !!existing && Object.keys(next).every(key => Object.is(existing[key], next[key]));
+}
+
 export async function loadSessions() {
   try {
     const list = await api('GET', '/api/sessions');
@@ -32,6 +36,7 @@ export async function loadSessions() {
     const prev = state.sessions;
     const visible = new Set(visibleSessionIds(state));
     const sessions = {};
+	let sessionsChanged = Object.keys(prev).length !== list.length;
     for (const info of list) {
       const existing = prev[info.id];
       // A visible session has a live WS connection that owns its live-tracked
@@ -41,7 +46,7 @@ export async function loadSessions() {
       // Hidden sessions have no WS connection, so the poll is their only source
       // of truth and must refresh those fields.
       const wsOwns = existing && visible.has(info.id);
-      sessions[info.id] = {
+      const next = {
         id: info.id,
         title: info.title,
         state: wsOwns ? existing.state : info.state,
@@ -83,6 +88,12 @@ export async function loadSessions() {
         // resolved; the next poll (≤3s desktop / ≤15s mobile) self-corrects.
         archived: info.archived || false,
       };
+		if (samePolledSession(existing, next)) {
+			sessions[info.id] = existing;
+		} else {
+			sessions[info.id] = next;
+			sessionsChanged = true;
+		}
     }
     // Detect attention transitions (hidden sessions only)
     for (const [id, sess] of Object.entries(sessions)) {
@@ -95,7 +106,7 @@ export async function loadSessions() {
         }
       }
     }
-    setState({ sessions });
+		if (sessionsChanged) setState({ sessions });
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     const currentState = store.get();
@@ -202,6 +213,10 @@ export async function archiveSession(id, archived = true) {
 export async function unarchiveSession(id) {
   await api('POST', `/api/sessions/${id}/archive`, { archived: false });
   updateSession(id, { archived: false });
+}
+
+export async function cancelBashJob(sessionId, jobId) {
+  return api('POST', `/api/sessions/${sessionId}/bash-jobs/${jobId}/cancel`);
 }
 
 // attachmentToContent converts a client-side attachment into the same content

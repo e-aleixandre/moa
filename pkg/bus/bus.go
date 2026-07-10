@@ -52,6 +52,14 @@ type EventBus interface {
 	// Returns a no-op unsubscribe if bus is already closed.
 	SubscribeAll(handler func(any)) func()
 
+	// SubscribeAllSeq is the sequenced counterpart of SubscribeAll. Sequence
+	// numbers are monotonically increasing within this bus and identify a
+	// publication boundary; gaps are valid when consumers drop lossy events.
+	SubscribeAllSeq(handler func(seq uint64, event any)) func()
+
+	// LastSeq returns the most recently accepted publication sequence.
+	LastSeq() uint64
+
 	// Execute dispatches a command to its registered handler synchronously.
 	// Returns ErrNoHandler if none registered, ErrClosed if bus is closed.
 	// Recovers handler panics and returns them as wrapped errors.
@@ -118,15 +126,18 @@ const subscriberBuffer = 256
 type LocalBus struct {
 	closed atomic.Bool
 
-	mu        sync.RWMutex
-	eventSubs map[reflect.Type][]*subscriber
-	allSubs   []*subscriber // SubscribeAll handlers — receive ALL events in order
-	cmdH      map[reflect.Type]reflect.Value
-	queryH    map[reflect.Type]reflect.Value
+	mu         sync.RWMutex
+	publishMu  sync.Mutex // serializes sequence allocation and enqueue order
+	eventSubs  map[reflect.Type][]*subscriber
+	allSubs    []*subscriber // SubscribeAll handlers — receive ALL events in order
+	allSeqSubs []*subscriber
+	cmdH       map[reflect.Type]reflect.Value
+	queryH     map[reflect.Type]reflect.Value
 
 	// Global inflight counter for Drain.
 	inflight atomic.Int64
 	idleCh   chan struct{} // buffered(1), signalled when inflight reaches 0
+	seq      atomic.Uint64
 }
 
 // NewLocalBus creates a ready-to-use LocalBus.
@@ -148,7 +159,7 @@ func NewLocalBus() *LocalBus {
 // publisher.
 type subscriber struct {
 	mu     sync.Mutex
-	queue  []any         // FIFO of pending events
+	queue  []queuedEvent // FIFO of pending events
 	notify chan struct{} // buffered(1): signals the queue is non-empty
 
 	fn       reflect.Value
@@ -158,6 +169,12 @@ type subscriber struct {
 	stopped  atomic.Bool   // fast check: true after stop() called
 	bus      *LocalBus     // back-reference for inflight tracking
 	isAll    bool          // true for SubscribeAll handlers (fn is func(any))
+	isSeqAll bool          // true for SubscribeAllSeq (fn is func(uint64, any))
+}
+
+type queuedEvent struct {
+	seq   uint64
+	event any
 }
 
 // stop signals the subscriber goroutine to drain and exit. Safe to call
@@ -274,14 +291,57 @@ func (b *LocalBus) SubscribeAll(handler func(any)) func() {
 	}
 }
 
+// SubscribeAllSeq implements EventBus.SubscribeAllSeq.
+func (b *LocalBus) SubscribeAllSeq(handler func(uint64, any)) func() {
+	if handler == nil {
+		panic("bus: SubscribeAllSeq handler must not be nil")
+	}
+	b.mu.Lock()
+	if b.closed.Load() {
+		b.mu.Unlock()
+		return func() {}
+	}
+	sub := &subscriber{
+		notify: make(chan struct{}, 1), fn: reflect.ValueOf(handler),
+		done: make(chan struct{}), exited: make(chan struct{}), bus: b, isSeqAll: true,
+	}
+	go sub.loop()
+	b.allSeqSubs = append(b.allSeqSubs, sub)
+	b.mu.Unlock()
+	var unsubOnce sync.Once
+	return func() {
+		unsubOnce.Do(func() {
+			b.mu.Lock()
+			for i, s := range b.allSeqSubs {
+				if s == sub {
+					b.allSeqSubs = append(b.allSeqSubs[:i], b.allSeqSubs[i+1:]...)
+					break
+				}
+			}
+			b.mu.Unlock()
+			sub.stop()
+		})
+	}
+}
+
+// LastSeq implements EventBus.LastSeq.
+func (b *LocalBus) LastSeq() uint64 {
+	b.publishMu.Lock()
+	defer b.publishMu.Unlock()
+	return b.seq.Load()
+}
+
 // Publish implements EventBus.
 func (b *LocalBus) Publish(event any) {
 	if event == nil {
 		panic("bus: nil event")
 	}
+	b.publishMu.Lock()
+	defer b.publishMu.Unlock()
 	if b.closed.Load() {
 		return
 	}
+	seq := b.seq.Add(1)
 	et := reflect.TypeOf(event)
 
 	lossy := isLossyEvent(event)
@@ -298,8 +358,17 @@ func (b *LocalBus) Publish(event any) {
 			continue
 		}
 		b.inflight.Add(1)
-		if !sub.enqueue(event, lossy) {
+		if !sub.enqueue(seq, event, lossy) {
 			b.decrementInflight() // lossy event dropped under backpressure
+		}
+	}
+	for _, sub := range b.allSeqSubs {
+		if sub.stopped.Load() {
+			continue
+		}
+		b.inflight.Add(1)
+		if !sub.enqueue(seq, event, lossy) {
+			b.decrementInflight()
 		}
 	}
 
@@ -309,7 +378,7 @@ func (b *LocalBus) Publish(event any) {
 			continue // skip subscribers in the process of shutting down
 		}
 		b.inflight.Add(1)
-		if !sub.enqueue(event, lossy) {
+		if !sub.enqueue(seq, event, lossy) {
 			b.decrementInflight() // lossy event dropped under backpressure
 		}
 	}
@@ -475,12 +544,14 @@ func (b *LocalBus) Close() {
 
 	// Take write lock so no Publish can be in its enqueue loop.
 	b.mu.Lock()
-	allSubs := make([]*subscriber, 0, len(b.allSubs))
+	allSubs := make([]*subscriber, 0, len(b.allSubs)+len(b.allSeqSubs))
 	allSubs = append(allSubs, b.allSubs...)
+	allSubs = append(allSubs, b.allSeqSubs...)
 	for _, subs := range b.eventSubs {
 		allSubs = append(allSubs, subs...)
 	}
 	b.allSubs = nil
+	b.allSeqSubs = nil
 	b.eventSubs = make(map[reflect.Type][]*subscriber)
 	b.mu.Unlock()
 
@@ -508,13 +579,13 @@ func (b *LocalBus) Close() {
 // Lossy events are dropped once the queue depth reaches subscriberBuffer;
 // lossless events are always enqueued. Returns false only when the event was
 // dropped. Never blocks.
-func (s *subscriber) enqueue(event any, lossy bool) bool {
+func (s *subscriber) enqueue(seq uint64, event any, lossy bool) bool {
 	s.mu.Lock()
 	if lossy && len(s.queue) >= subscriberBuffer {
 		s.mu.Unlock()
 		return false
 	}
-	s.queue = append(s.queue, event)
+	s.queue = append(s.queue, queuedEvent{seq: seq, event: event})
 	s.mu.Unlock()
 
 	// Wake the goroutine; a single pending signal is enough.
@@ -556,14 +627,16 @@ func (s *subscriber) drain() {
 	}
 }
 
-func (s *subscriber) process(event any) {
+func (s *subscriber) process(queued queuedEvent) {
 	defer s.bus.decrementInflight()
 	defer func() { _ = recover() }() // swallow handler panics
 	if s.isAll {
 		// SubscribeAll handler: fn is func(any), call directly for efficiency.
-		s.fn.Interface().(func(any))(event)
+		s.fn.Interface().(func(any))(queued.event)
+	} else if s.isSeqAll {
+		s.fn.Interface().(func(uint64, any))(queued.seq, queued.event)
 	} else {
-		s.fn.Call([]reflect.Value{reflect.ValueOf(event)})
+		s.fn.Call([]reflect.Value{reflect.ValueOf(queued.event)})
 	}
 }
 

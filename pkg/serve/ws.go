@@ -2,8 +2,10 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -26,6 +28,15 @@ type wsReactor struct {
 }
 
 const wsReactorBuffer = 512 // per-WS event channel capacity
+
+// A WebSocket init must be small enough for a mobile browser to parse and
+// render without being killed by memory pressure. Older history remains safely
+// persisted; the client receives a recent display tail on reconnect.
+const (
+	initHistoryMaxMessages = 150
+	initHistoryMaxBytes    = 1 << 20
+	historyContentMaxBytes = 64 << 10
+)
 
 // newWsReactor subscribes to all bus events and session context cancellation.
 // cwd is the session working directory, used to resolve relative file paths
@@ -60,8 +71,9 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string) *wsRea
 		}
 	}
 
-	r.unsubs = append(r.unsubs, b.SubscribeAll(func(event any) {
+	r.unsubs = append(r.unsubs, b.SubscribeAllSeq(func(seq uint64, event any) {
 		if wsEvent, ok := wsEventFromBus(event); ok {
+			wsEvent.Seq = seq
 			send(enrichEditToolStart(wsEvent, cwd))
 		}
 	}))
@@ -125,7 +137,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.ThinkingDelta:
 		return Event{Type: "thinking_delta", Data: DeltaData{Delta: e.Delta}}, true
 	case bus.MessageEnded:
-		return Event{Type: "message_end", Data: MessageEndData{Text: e.FullText}}, true
+		return Event{Type: "message_end", Data: MessageEndData{Text: truncateHistoryString(e.FullText), MsgID: e.Message.MsgID}}, true
 	case bus.ToolCallStreaming:
 		return Event{Type: "tool_call_start", Data: ToolCallStreamingData{
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
@@ -186,8 +198,9 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.GoalEnded:
 		return Event{Type: "goal_end", Data: GoalEndData{Reason: e.Reason}}, true
 	case bus.CommandExecuted:
+		messages, truncated := limitInitHistory(e.Messages)
 		return Event{Type: "command", Data: CommandData{
-			Command: e.Command, Messages: e.Messages,
+			Command: e.Command, Messages: messages, HistoryTruncated: truncated,
 		}}, true
 	case bus.Steered:
 		return Event{Type: "steer", Data: SteerData{Text: e.Text}}, true
@@ -240,6 +253,12 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "subagent_event", Data: SubagentEventData{
 			JobID: e.JobID, Event: &inner,
 		}}, true
+	case bus.BashJobStarted:
+		return Event{Type: "bash_job_start", Data: BashJobStartData{JobID: e.JobID, Command: e.Command, CWD: e.CWD}}, true
+	case bus.BashJobOutput:
+		return Event{Type: "bash_job_output", Data: BashJobOutputData{JobID: e.JobID, Delta: e.Delta}}, true
+	case bus.BashJobEnded:
+		return Event{Type: "bash_job_end", Data: BashJobEndData{JobID: e.JobID, Status: e.Status, Output: e.Output}}, true
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
 	case bus.CompactionEnded:
@@ -256,6 +275,7 @@ var wsLossyEventTypes = map[string]bool{
 	"thinking_delta":  true,
 	"tool_update":     true,
 	"tool_call_delta": true,
+	"bash_job_output": true,
 }
 
 // isLossyWsEvent reports whether e can be safely dropped on channel overflow.
@@ -309,29 +329,39 @@ func buildInitData(sess *ManagedSession) InitData {
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
 	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
+	bashJobs, _ := bus.QueryTyped[bus.GetBashJobs, []bus.BashJobSnapshot](b, bus.GetBashJobs{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 
+	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
-		Messages:       msgs,
-		State:          state,
-		ContextPercent: ctxPct,
-		PermissionMode: permMode,
-		Tasks:          taskList,
-		PathScope:      pathInfo.Scope,
-		CostUSD:        cost,
+		Messages:         msgs,
+		HistoryTruncated: historyTruncated,
+		State:            state,
+		ContextPercent:   ctxPct,
+		PermissionMode:   permMode,
+		Tasks:            taskList,
+		PathScope:        pathInfo.Scope,
+		CostUSD:          cost,
 	}
 
 	if len(subagents) > 0 {
 		data.Subagents = make([]SubagentInitData, len(subagents))
 		for i, sa := range subagents {
+			messages, _ := limitInitHistory(sa.Messages)
 			data.Subagents[i] = SubagentInitData{
 				JobID:    sa.JobID,
 				Task:     sa.Task,
 				Model:    sa.Model,
 				Status:   sa.Status,
 				Async:    sa.Async,
-				Messages: sa.Messages,
+				Messages: messages,
 			}
+		}
+	}
+	if len(bashJobs) > 0 {
+		data.BashJobs = make([]BashJobInitData, len(bashJobs))
+		for i, job := range bashJobs {
+			data.BashJobs[i] = BashJobInitData{JobID: job.JobID, Command: job.Command, CWD: job.CWD, Status: job.Status, Output: job.Output}
 		}
 	}
 
@@ -362,4 +392,105 @@ func buildInitData(sess *ManagedSession) InitData {
 	}
 
 	return data
+}
+
+// limitInitHistory returns a bounded, recent display tail. It also removes
+// large inline attachment payloads and bounds individual text blocks: sending
+// a whole historic image or pasted file to a phone is neither useful nor safe.
+func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) {
+	if len(messages) == 0 {
+		return nil, false
+	}
+	selected := make([]core.AgentMessage, 0, min(len(messages), initHistoryMaxMessages))
+	bytes := 0
+	truncated := false
+	firstIndex := len(messages)
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg, size := sanitizeHistoryMessage(messages[i])
+		if size > initHistoryMaxBytes {
+			msg = core.WrapMessage(core.Message{
+				Role:    messages[i].Role,
+				MsgID:   messages[i].MsgID,
+				Content: []core.Content{core.TextContent("[historic message too large to load on this device]")},
+			})
+			size = len("[historic message too large to load on this device]") + 128
+		}
+		if len(selected) >= initHistoryMaxMessages || (len(selected) > 0 && bytes+size > initHistoryMaxBytes) {
+			truncated = true
+			break
+		}
+		selected = append(selected, msg)
+		firstIndex = i
+		bytes += size
+	}
+	if len(selected) < len(messages) {
+		truncated = true
+	}
+	for left, right := 0, len(selected)-1; left < right; left, right = left+1, right-1 {
+		selected[left], selected[right] = selected[right], selected[left]
+	}
+	// Do not begin a display tail with orphaned tool results: retain the
+	// immediately preceding assistant/tool-call message when possible.
+	if len(selected) > 0 && selected[0].Role == "tool_result" && firstIndex > 0 {
+		previous := messages[firstIndex-1]
+		if previous.Role == "assistant" {
+			projected, _ := sanitizeHistoryMessage(previous)
+			selected = append([]core.AgentMessage{projected}, selected...)
+		} else {
+			for len(selected) > 0 && selected[0].Role == "tool_result" {
+				selected = selected[1:]
+			}
+		}
+	}
+	return selected, truncated
+}
+
+func sanitizeHistoryMessage(msg core.AgentMessage) (core.AgentMessage, int) {
+	copyMsg := msg
+	copyMsg.Content = append([]core.Content(nil), msg.Content...)
+	copyMsg.Custom = boundedHistoryMap(copyMsg.Custom)
+	for i := range copyMsg.Content {
+		content := &copyMsg.Content[i]
+		switch content.Type {
+		case "image", "document":
+			if len(content.Data) > historyContentMaxBytes {
+				content.Data = ""
+				if content.Filename == "" {
+					content.Filename = "attachment omitted from reconnect history"
+				}
+			}
+		case "text":
+			content.Text = truncateHistoryString(content.Text)
+		case "thinking":
+			content.Thinking = truncateHistoryString(content.Thinking)
+		}
+		content.Arguments = boundedHistoryMap(content.Arguments)
+	}
+	encoded, err := json.Marshal(copyMsg)
+	if err != nil {
+		return core.WrapMessage(core.Message{Role: msg.Role, Content: []core.Content{core.TextContent("[historic message unavailable on this device]")}}), 96
+	}
+	return copyMsg, len(encoded)
+}
+
+func boundedHistoryMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return values
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil || len(encoded) > historyContentMaxBytes {
+		return map[string]any{"_truncated": true}
+	}
+	return values
+}
+
+func truncateHistoryString(value string) string {
+	if len(value) <= historyContentMaxBytes {
+		return value
+	}
+	end := historyContentMaxBytes
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end] + "\n\n[historic content truncated on this device]"
 }

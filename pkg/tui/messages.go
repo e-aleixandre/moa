@@ -8,6 +8,7 @@ import (
 
 // busEventMsg wraps any bus event for the Bubble Tea event loop.
 type busEventMsg struct {
+	seq   uint64
 	event any
 }
 

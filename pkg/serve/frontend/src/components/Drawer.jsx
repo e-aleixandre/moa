@@ -3,6 +3,7 @@ import { X, Plus, Check } from 'lucide-preact';
 import { sessionsByGroup } from '../store.js';
 import { setActiveSession } from '../tile-actions.js';
 import { deleteSession, resumeSession } from '../session-actions.js';
+import { addToast } from '../notifications.js';
 
 // toggleDrawer was previously an unused import — the Drawer is mobile-only
 // and currently not rendered. Stub to avoid reference errors until cleanup.
@@ -23,11 +24,16 @@ export function Drawer({ state, onOpenPalette }) {
     }
   }, [confirmId]);
 
-  const handleClick = (e, sess) => {
+  const handleClick = async (e, sess) => {
     if (e.target.closest('.drawer-item-delete, .delete-confirm')) return;
     if (confirmId) { setConfirmId(null); return; }
     if (sess.state === 'saved') {
-      resumeSession(sess.id).catch(e => console.error('Resume failed:', e));
+      try {
+        await resumeSession(sess.id);
+      } catch (err) {
+        addToast(`Could not resume session: ${err.message}`, 'error');
+        return;
+      }
     } else {
       setActiveSession(sess.id);
     }

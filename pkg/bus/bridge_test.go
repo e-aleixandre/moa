@@ -735,6 +735,33 @@ func TestBridgeEvent_CompactionEnded(t *testing.T) {
 	}
 }
 
+func TestRunStats_UsesLifecycleEventsForCostAndFinalText(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	pricing := &core.Pricing{Input: 1_000_000}
+	fa := &fakeAgent{model: core.Model{Pricing: pricing}}
+	sctx := newTestSessionContext(b, fa)
+	sctx.RunGenAtomic.Store(7)
+	sctx.runStats = runStats{gen: 7}
+
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventMessageEnd,
+		Message: core.AgentMessage{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("final")}, Usage: &core.Usage{Input: 2}}}})
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolName: "edit"})
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventCompactionEnd,
+		Compaction: &core.CompactionPayload{Usage: &core.Usage{Input: 3}}})
+
+	stats := sctx.snapshotRunStats(7)
+	if stats.finalText != "final" || !stats.hadEdits || stats.costUSD != 5 {
+		t.Fatalf("stats = %#v, want final text, edits, and cost 5", stats)
+	}
+	sctx.RunGenAtomic.Store(8)
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventMessageEnd,
+		Message: core.AgentMessage{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("stale")}}}})
+	if got := sctx.snapshotRunStats(7).finalText; got != "final" {
+		t.Fatalf("stale generation changed final text to %q", got)
+	}
+}
+
 // ===========================================================================
 // Bridge integration test — subscribe/unsubscribe lifecycle
 // ===========================================================================

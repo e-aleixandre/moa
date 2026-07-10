@@ -23,7 +23,7 @@ export function normalizeHistory(raw) {
           textParts.push(c.text);
         } else if (c.type === 'tool_call') {
           if (textParts.length > 0) {
-            result.push({ role: 'assistant', content: [{ type: 'text', text: textParts.join('') }] });
+            result.push({ role: 'assistant', _msg_id: msg.msg_id, content: [{ type: 'text', text: textParts.join('') }] });
             textParts.length = 0;
           }
           const tr = resultMap[c.tool_call_id];
@@ -51,7 +51,7 @@ export function normalizeHistory(raw) {
         }
       }
       if (textParts.length > 0) {
-        result.push({ role: 'assistant', content: [{ type: 'text', text: textParts.join('') }] });
+        result.push({ role: 'assistant', _msg_id: msg.msg_id, content: [{ type: 'text', text: textParts.join('') }] });
       }
     } else if (msg.role === 'shell' || (msg.role === 'user' && msg.custom?.shell)) {
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
@@ -134,6 +134,7 @@ function extractToolNote(result, rejected) {
 const pendingTextDeltas = {};
 const pendingThinkingDeltas = {};
 const pendingToolDeltas = {};
+const pendingBashDeltas = {}; // sessionId → { jobId → output }
 const pendingToolCallBuffers = {}; // sessionId → { toolCallId → { args } }
 const materializedTextDuringMessage = {};
 let flushScheduled = false;
@@ -152,14 +153,17 @@ function flushDeltas() {
     ...Object.keys(pendingTextDeltas),
     ...Object.keys(pendingThinkingDeltas),
     ...Object.keys(pendingToolDeltas),
+    ...Object.keys(pendingBashDeltas),
   ]);
 
+  const patches = {};
   for (const id of sessionIds) {
     const sess = state.sessions[id];
     if (!sess) {
       delete pendingTextDeltas[id];
       delete pendingThinkingDeltas[id];
       delete pendingToolDeltas[id];
+      delete pendingBashDeltas[id];
       continue;
     }
     const patch = {};
@@ -190,9 +194,32 @@ function flushDeltas() {
       delete pendingToolDeltas[id];
     }
 
-    if (Object.keys(patch).length > 0) {
-      updateSession(id, patch);
+    if (pendingBashDeltas[id]) {
+      const subagents = { ...(patch.subagents || sess.subagents || {}) };
+      for (const [jobId, delta] of Object.entries(pendingBashDeltas[id])) {
+        const existing = subagents[jobId];
+        if (!existing) continue;
+        subagents[jobId] = {
+          ...existing,
+          messages: existing.messages.map(m => m._type === 'tool_start' && m.tool_call_id === jobId
+            ? { ...m, streamingResult: (m.streamingResult || '') + delta }
+            : m),
+        };
+      }
+      patch.subagents = subagents;
+      delete pendingBashDeltas[id];
     }
+
+    if (Object.keys(patch).length > 0) {
+      patches[id] = patch;
+    }
+  }
+  if (Object.keys(patches).length > 0) {
+    const sessions = { ...state.sessions };
+    for (const [id, patch] of Object.entries(patches)) {
+      sessions[id] = { ...sessions[id], ...patch };
+    }
+    setState({ sessions });
   }
 }
 
@@ -202,10 +229,12 @@ export function handleWsInit(id, data) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
+	delete pendingBashDeltas[id];
   delete pendingToolCallBuffers[id];
   delete materializedTextDuringMessage[id];
   updateSession(id, {
     messages: normalizeHistory(data.messages || []),
+    historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
     contextPercent: data.context_percent ?? -1,
     permissionMode: data.permission_mode || 'yolo',
@@ -217,12 +246,13 @@ export function handleWsInit(id, data) {
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,
     costUSD: data.cost_usd || 0,
-    subagents: initSubagents(data.subagents),
+    subagents: { ...initSubagents(data.subagents), ...initBashJobs(data.bash_jobs) },
     goalActive: !!data.goal_active,
     goalObjective: data.goal_active ? (data.goal_objective || '') : null,
     goalWorkDir: data.goal_active ? (data.goal_work_dir || '') : null,
     goalIteration: data.goal_iteration || 0,
     goalStalled: data.goal_stalled || 0,
+    lastSeq: data.last_seq || 0,
   });
 }
 
@@ -246,6 +276,37 @@ function initSubagents(raw) {
     };
   }
   return out;
+}
+
+function initBashJobs(raw) {
+  const out = {};
+  for (const job of (raw || [])) {
+    if (!job || !job.job_id) continue;
+    out[job.job_id] = bashJobState(job);
+  }
+  return out;
+}
+
+function bashJobState(job, existing = null) {
+  const command = job.command || existing?.task || '';
+  const output = job.output || '';
+  return {
+    jobId: job.job_id,
+    task: command,
+    model: 'bash',
+    kind: 'bash',
+    cwd: job.cwd || existing?.cwd || '',
+    status: job.status || existing?.status || 'running',
+    async: true,
+    messages: [{
+      _type: 'tool_start', tool_call_id: job.job_id, tool_name: 'bash',
+      args: { command, cwd: job.cwd || existing?.cwd || '' },
+      status: (job.status === 'completed') ? 'done' : (job.status && job.status !== 'running' && job.status !== 'cancelling') ? 'error' : 'running',
+      result: output || null,
+      streamingResult: (job.status === 'running' || job.status === 'cancelling') ? output : null,
+    }],
+    streamingText: null, thinkingText: null, usage: null,
+  };
 }
 
 
@@ -272,13 +333,19 @@ export function handleWsThinkingDelta(id, delta) {
   scheduleFlush();
 }
 
-export function handleWsMessageEnd(id, fullText) {
+export function handleWsMessageEnd(id, fullText, msgId = '') {
   const pendingText = pendingTextDeltas[id] || '';
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   const sess = store.get().sessions[id];
   if (!sess) {
     delete materializedTextDuringMessage[id];
+    return;
+  }
+
+  if (msgId && sess.messages.some(m => m._msg_id === msgId)) {
+    delete materializedTextDuringMessage[id];
+    updateSession(id, { streamingText: null, thinkingText: null });
     return;
   }
 
@@ -304,7 +371,7 @@ export function handleWsMessageEnd(id, fullText) {
     thinkingText: null,
   };
   if (assistantText) {
-    const msg = { role: 'assistant', content: [{ type: 'text', text: assistantText }] };
+    const msg = { role: 'assistant', _msg_id: msgId || undefined, content: [{ type: 'text', text: assistantText }] };
     patch.messages = [...sess.messages, msg];
   }
 
@@ -775,10 +842,37 @@ export function handleWsSubagentEnd(id, data) {
   updateSession(id, { subagents: subs });
 }
 
+export function handleWsBashJobStart(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data.job_id) return;
+  const subs = { ...(sess.subagents || {}) };
+  subs[data.job_id] = bashJobState(data, subs[data.job_id]);
+  updateSession(id, { subagents: subs });
+}
+
+export function handleWsBashJobOutput(id, data) {
+  if (!store.get().sessions[id] || !data.job_id || !data.delta) return;
+  pendingBashDeltas[id] = pendingBashDeltas[id] || {};
+  pendingBashDeltas[id][data.job_id] = (pendingBashDeltas[id][data.job_id] || '') + data.delta;
+  scheduleFlush();
+}
+
+export function handleWsBashJobEnd(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data.job_id) return;
+  const existing = sess.subagents?.[data.job_id];
+  if (!existing) return;
+  const status = data.status || 'completed';
+  const messages = existing.messages.map(m => m._type === 'tool_start' && m.tool_call_id === data.job_id
+    ? { ...m, status: status === 'completed' ? 'done' : 'error', result: data.output || '', streamingResult: null } : m);
+  updateSession(id, { subagents: { ...sess.subagents, [data.job_id]: { ...existing, status, messages } } });
+}
+
 export function handleWsRunEnd(id) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
+	delete pendingBashDeltas[id];
   delete pendingToolCallBuffers[id];
   delete materializedTextDuringMessage[id];
 
@@ -844,7 +938,7 @@ export function handleWsCommand(id, data) {
   } else if (data.command === 'branch') {
     // Branch switched — reload messages from new branch path.
     if (data.messages) {
-      updateSession(id, { messages: normalizeHistory(data.messages) });
+      updateSession(id, { messages: normalizeHistory(data.messages), historyTruncated: !!data.history_truncated });
     }
   }
 }

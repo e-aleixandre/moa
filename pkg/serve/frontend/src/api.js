@@ -10,6 +10,7 @@ import {
   handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd,
+  handleWsBashJobStart, handleWsBashJobOutput, handleWsBashJobEnd,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalEnd,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer,
@@ -82,12 +83,20 @@ function openWs(sessionId, initialBackoff) {
   pendingTimers.delete(sessionId);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws`);
-  const entry = { ws, backoff: initialBackoff };
+  const entry = { ws, backoff: initialBackoff, lastSeq: 0 };
   connections.set(sessionId, entry);
 
   ws.onmessage = (e) => {
+    if (connections.get(sessionId)?.ws !== ws) return;
     const evt = JSON.parse(e.data);
-    if (evt.type === 'init') entry.backoff = 1000; // reset on successful handshake
+    if (evt.type === 'init') {
+      entry.backoff = 1000; // reset on successful handshake
+      entry.lastSeq = evt.data?.last_seq || evt.seq || 0;
+    }
+    if (evt.type !== 'init' && evt.seq > 0) {
+      if (evt.seq <= entry.lastSeq) return;
+      entry.lastSeq = evt.seq;
+    }
     routeEvent(sessionId, evt);
   };
 
@@ -127,7 +136,7 @@ function routeEvent(sessionId, evt) {
       handleWsMessageStart(sessionId);
       break;
     case 'message_end':
-      handleWsMessageEnd(sessionId, evt.data.text);
+      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id);
       break;
     case 'tool_call_start':
       handleWsToolCallStart(sessionId, evt.data);
@@ -176,6 +185,15 @@ function routeEvent(sessionId, evt) {
       break;
     case 'subagent_end':
       handleWsSubagentEnd(sessionId, evt.data);
+      break;
+    case 'bash_job_start':
+      handleWsBashJobStart(sessionId, evt.data);
+      break;
+    case 'bash_job_output':
+      handleWsBashJobOutput(sessionId, evt.data);
+      break;
+    case 'bash_job_end':
+      handleWsBashJobEnd(sessionId, evt.data);
       break;
     case 'run_end':
       handleWsRunEnd(sessionId);

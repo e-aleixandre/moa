@@ -112,6 +112,20 @@ func TestHandleSubagentStartedAndEnded(t *testing.T) {
 	}
 }
 
+func TestBashJobTranscript(t *testing.T) {
+	m := &appModel{s: &state{}}
+	m.handleBashJobStarted(bus.BashJobStarted{JobID: "bash-1", Command: "go test ./...", CWD: "/work"})
+	m.handleBashJobOutput(bus.BashJobOutput{JobID: "bash-1", Delta: "running\n"})
+	m.handleBashJobEnded(bus.BashJobEnded{JobID: "bash-1", Status: "completed", Output: "done\n"})
+	transcript := m.s.subagents["bash-1"]
+	if transcript == nil || transcript.kind != "bash" || transcript.status != "completed" {
+		t.Fatalf("transcript = %+v", transcript)
+	}
+	if len(transcript.blocks) != 1 || !transcript.blocks[0].ToolDone || transcript.blocks[0].ToolResult != "done\n" {
+		t.Fatalf("blocks = %+v", transcript.blocks)
+	}
+}
+
 // TestHandleSubagentStarted_DoesNotResurrectTerminal covers the promote/finish
 // race: a promotion's SubagentStarted(Async:true) can arrive AFTER the
 // SubagentEnded that already marked the job terminal. It must not flip the job

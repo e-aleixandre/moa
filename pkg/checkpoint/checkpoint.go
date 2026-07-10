@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -88,12 +90,17 @@ type activeCheckpoint struct {
 // Store is an in-memory, thread-safe checkpoint store with a circular buffer.
 type Store struct {
 	mu     sync.Mutex
+	opMu   sync.Mutex   // serializes a full undo transaction against new turns
 	ring   []Checkpoint // circular buffer
 	head   int          // next write position
 	count  int          // used slots
 	cap    int          // buffer capacity
 	nextID int
 	active *activeCheckpoint // nil when no turn in progress
+
+	// restoreFile is deliberately held on the store rather than package-global
+	// so tests can inject a failure without racing other sessions.
+	restoreFile func(path string, content []byte, perm fs.FileMode) error
 }
 
 // New creates a Store with the given capacity (number of checkpoints retained).
@@ -102,14 +109,122 @@ func New(capacity int) *Store {
 		capacity = 20
 	}
 	return &Store{
-		ring: make([]Checkpoint, capacity),
-		cap:  capacity,
+		ring:        make([]Checkpoint, capacity),
+		cap:         capacity,
+		restoreFile: atomicWriteFile,
 	}
+}
+
+// Restore applies a checkpoint as one transaction. It first verifies that no
+// file has changed since the agent's turn, then saves every current state. If
+// any restore operation fails, every file already touched is rolled back.
+// The checkpoint remains owned by the caller, which can Repush it for retry.
+func (s *Store) Restore(cp *Checkpoint) error {
+	if cp == nil {
+		return errors.New("checkpoint: nil checkpoint")
+	}
+
+	s.mu.Lock()
+	restoreFile := s.restoreFile
+	s.mu.Unlock()
+	if restoreFile == nil {
+		restoreFile = atomicWriteFile
+	}
+
+	type current struct {
+		exists  bool
+		content []byte
+		perm    fs.FileMode
+	}
+	before := make(map[string]current, len(cp.Files))
+	for _, snap := range cp.Files {
+		if snap.ModifiedSinceCapture() {
+			return fmt.Errorf("checkpoint: %s changed since the agent edited it", filepath.Base(snap.Path))
+		}
+		info, err := os.Stat(snap.Path)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				before[snap.Path] = current{}
+				continue
+			}
+			return fmt.Errorf("checkpoint: stat %s before restore: %w", snap.Path, err)
+		}
+		content, err := os.ReadFile(snap.Path)
+		if err != nil {
+			return fmt.Errorf("checkpoint: read %s before restore: %w", snap.Path, err)
+		}
+		before[snap.Path] = current{exists: true, content: content, perm: info.Mode().Perm()}
+	}
+
+	restore := func(snap Snapshot) error {
+		if snap.Content == nil {
+			if err := os.Remove(snap.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+		return restoreFile(snap.Path, snap.Content, snap.Perm)
+	}
+	rollback := func(path string) error {
+		state := before[path]
+		if !state.exists {
+			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+		return atomicWriteFile(path, state.content, state.perm)
+	}
+
+	touched := make([]string, 0, len(cp.Files))
+	for _, snap := range cp.Files {
+		if err := restore(snap); err != nil {
+			// The failed operation may have changed the target before returning an
+			// error, so include it in the rollback as well.
+			touched = append(touched, snap.Path)
+			var rollbackErrs []string
+			for i := len(touched) - 1; i >= 0; i-- {
+				if rollbackErr := rollback(touched[i]); rollbackErr != nil {
+					rollbackErrs = append(rollbackErrs, fmt.Sprintf("%s: %v", filepath.Base(touched[i]), rollbackErr))
+				}
+			}
+			if len(rollbackErrs) > 0 {
+				return fmt.Errorf("checkpoint: restore %s: %w (rollback failed: %s)", filepath.Base(snap.Path), err, strings.Join(rollbackErrs, "; "))
+			}
+			return fmt.Errorf("checkpoint: restore %s: %w (all files rolled back)", filepath.Base(snap.Path), err)
+		}
+		touched = append(touched, snap.Path)
+	}
+	return nil
+}
+
+func atomicWriteFile(path string, content []byte, perm fs.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".moa-undo-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // Begin opens a checkpoint for the current turn. Thread-safe.
 // If a previous active checkpoint exists (stale from aborted run), it's discarded.
 func (s *Store) Begin(label string) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.active = &activeCheckpoint{
@@ -123,6 +238,8 @@ func (s *Store) Begin(label string) {
 // No-op if already captured in this turn or if no active checkpoint.
 // Returns error on I/O failure reading the file to snapshot.
 func (s *Store) Capture(path string) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -162,6 +279,8 @@ func (s *Store) Capture(path string) error {
 // Commit closes the active checkpoint and adds it to the ring.
 // No-op if no active checkpoint or if no files were captured.
 func (s *Store) Commit() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -192,6 +311,8 @@ func (s *Store) Commit() {
 
 // Discard closes the active checkpoint without saving.
 func (s *Store) Discard() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	s.active = nil
 	s.mu.Unlock()
@@ -200,19 +321,21 @@ func (s *Store) Discard() {
 // Repush puts a checkpoint back on the ring buffer after a failed undo.
 // This allows the caller to retry /undo after fixing the restore failure.
 func (s *Store) Repush(cp *Checkpoint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ring[s.head] = *cp
-	s.head = (s.head + 1) % s.cap
-	if s.count < s.cap {
-		s.count++
-	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.repush(cp)
 }
 
 // Undo pops the most recent checkpoint and returns it for the caller to restore.
 // If restoration fails, call Repush to put it back for retry.
 // Returns error if no checkpoints exist or if a turn is in progress.
 func (s *Store) Undo() (*Checkpoint, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.undo()
+}
+
+func (s *Store) undo() (*Checkpoint, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -233,6 +356,33 @@ func (s *Store) Undo() (*Checkpoint, error) {
 	cp := s.ring[s.head]
 	s.ring[s.head] = Checkpoint{} // clear slot
 	return &cp, nil
+}
+
+// UndoAndRestore performs the entire undo transaction under one operation
+// lock. A new run cannot open/capture/commit a checkpoint between popping this
+// checkpoint and either committing its restoration or putting it back.
+func (s *Store) UndoAndRestore() error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	cp, err := s.undo()
+	if err != nil {
+		return err
+	}
+	if err := s.Restore(cp); err != nil {
+		s.repush(cp)
+		return err
+	}
+	return nil
+}
+
+func (s *Store) repush(cp *Checkpoint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ring[s.head] = *cp
+	s.head = (s.head + 1) % s.cap
+	if s.count < s.cap {
+		s.count++
+	}
 }
 
 // List returns summaries of all checkpoints, newest first.

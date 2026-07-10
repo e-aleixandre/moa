@@ -42,6 +42,31 @@ func TestPublish_CorrectType(t *testing.T) {
 	}
 }
 
+func TestSubscribeAllSeq_OrdersPublicationsAndReportsBoundary(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	type received struct {
+		seq   uint64
+		value string
+	}
+	got := make(chan received, 2)
+	b.SubscribeAllSeq(func(seq uint64, event any) {
+		got <- received{seq: seq, value: event.(testEvent).Value}
+	})
+	b.Publish(testEvent{Value: "first"})
+	if cut := b.LastSeq(); cut != 1 {
+		t.Fatalf("LastSeq after first publish = %d, want 1", cut)
+	}
+	b.Publish(testEvent{Value: "second"})
+	b.Drain(time.Second)
+	for _, want := range []received{{seq: 1, value: "first"}, {seq: 2, value: "second"}} {
+		e := <-got
+		if e != want {
+			t.Fatalf("event = %#v, want %#v", e, want)
+		}
+	}
+}
+
 func TestPublish_WrongType(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()

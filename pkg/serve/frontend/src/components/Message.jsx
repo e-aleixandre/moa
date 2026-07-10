@@ -1,3 +1,4 @@
+import { memo } from 'preact/compat';
 import { renderMarkdown } from '../util/markdown.js';
 
 // ATTACHMENT_RE matches the <attachment name="..."> sentinel wrapping a
@@ -12,6 +13,13 @@ const DISK_RE = /^El usuario ha adjuntado el archivo "((?:[^"\\]|\\.)*)" \(([^)]
 
 function renderUserBlock(c, i) {
   if (c.type === 'image') {
+    if (!c.data) {
+      return (
+        <div key={i} class="msg-attachment-chip" title="The original attachment remains in the session history">
+          🖼️ {c.filename || 'Image'} <span class="msg-attachment-tag">not loaded on this device</span>
+        </div>
+      );
+    }
     return <img key={i} class="msg-image" src={`data:${c.mime_type};base64,${c.data}`} alt="attachment" />;
   }
   if (c.type === 'document') {
@@ -49,7 +57,7 @@ function renderUserBlock(c, i) {
   return null;
 }
 
-export function Message({ msg }) {
+function MessageView({ msg }) {
   if (!msg || !msg.role) return null;
 
   if (msg.role === 'user') {
@@ -75,3 +83,7 @@ export function Message({ msg }) {
   // tool_result messages are handled by ToolCall state updates, skip here
   return null;
 }
+
+// Streaming updates should not reparse every finalized Markdown message in
+// every visible pane. WS reducers preserve unchanged message object identity.
+export const Message = memo(MessageView);

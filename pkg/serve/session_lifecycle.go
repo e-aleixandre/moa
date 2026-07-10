@@ -221,6 +221,21 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				s.persistSubagentTranscript(jobID, status, usage, costUSD)
 			}
 		},
+		OnBashJobStart: func(job tool.BashJobInfo) {
+			if s := sess; s != nil {
+				s.runtime.Bus.Publish(bus.BashJobStarted{SessionID: s.ID, JobID: job.JobID, Command: job.Command, CWD: job.CWD})
+			}
+		},
+		OnBashJobOutput: func(jobID, delta string) {
+			if s := sess; s != nil {
+				s.runtime.Bus.Publish(bus.BashJobOutput{SessionID: s.ID, JobID: jobID, Delta: delta})
+			}
+		},
+		OnBashJobEnd: func(job tool.BashJobInfo) {
+			if s := sess; s != nil {
+				s.runtime.Bus.Publish(bus.BashJobEnded{SessionID: s.ID, JobID: job.JobID, Status: job.Status, Output: job.Output})
+			}
+		},
 		SubagentTranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {
 			s := sess
 			if s == nil || s.persister == nil {
@@ -299,6 +314,17 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		}
 		return out, nil
 	})
+	rt.Bus.OnQuery(func(q bus.GetBashJobs) ([]bus.BashJobSnapshot, error) {
+		if bs.BashJobs == nil {
+			return nil, nil
+		}
+		infos := bs.BashJobs.Snapshot()
+		out := make([]bus.BashJobSnapshot, 0, len(infos))
+		for _, info := range infos {
+			out = append(out, bus.BashJobSnapshot{JobID: info.JobID, Command: info.Command, CWD: info.CWD, Status: info.Status, Output: info.Output})
+		}
+		return out, nil
+	})
 
 	// Apply thinking level if restoring.
 	if opts != nil && opts.initialThinking != "" {
@@ -318,6 +344,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		cacheTTL:   core.CacheTTLDuration(moaCfg),
 		runtime:    rt,
 		subagents:  bs.Subagents,
+		bashJobs:   bs.BashJobs,
 		pathPolicy: bs.PathPolicy,
 		infra: serveInfra{
 			sessionCtx:    sessionCtx,
@@ -356,6 +383,10 @@ var (
 // Delete aborts any running agent, closes resources, and removes the session.
 func (m *Manager) Delete(id string) error {
 	m.mu.Lock()
+	if _, resuming := m.resuming[id]; resuming {
+		m.mu.Unlock()
+		return ErrBusy
+	}
 	sess, ok := m.sessions[id]
 	if !ok {
 		m.mu.Unlock()

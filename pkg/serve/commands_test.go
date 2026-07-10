@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -126,6 +127,32 @@ func TestCmdVerify_NoConfig(t *testing.T) {
 	}
 	if res.OK {
 		t.Fatal("expected non-OK result when no verify config exists")
+	}
+}
+
+func TestCmdVerify_RejectsWhileGoalActive(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(), dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bus.NewLocalBus()
+	defer b.Close()
+	b.OnQuery(func(bus.GetGoal) (bus.GoalInfo, error) {
+		return bus.GoalInfo{Active: true}, nil
+	})
+	sess.runtime.Bus = b
+
+	res, err := mgr.ExecCommand(sess.ID, "/verify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || !strings.Contains(res.Message, "goal mode is active") {
+		t.Fatalf("manual verify should be rejected by active goal, got OK=%v message=%q", res.OK, res.Message)
 	}
 }
 

@@ -290,6 +290,9 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 // manual /verify command. It reuses the core verify.Execute entry point and
 // publishes AutoVerify events so the web frontend paints the running spinner.
 func cmdVerify(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+	if err := bus.RequireManualVerifyAllowed(sess.runtime.Bus); err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}

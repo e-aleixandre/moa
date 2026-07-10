@@ -3,6 +3,7 @@ import { Plus, Sparkles, Archive, Trash2, FolderTree } from 'lucide-preact';
 import { setActiveSession } from '../tile-actions.js';
 import { resumeSession, deleteSession } from '../session-actions.js';
 import { setState } from '../store.js';
+import { addToast } from '../notifications.js';
 import { shortModel, shortPath, projectKey, projectLabel } from '../util/format.js';
 
 export function SessionOverview({ state, onSelect, onNewSession }) {
@@ -39,9 +40,13 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
     onSelect();
   }, [onSelect]);
 
-  const handleResume = useCallback((id) => {
-    resumeSession(id).catch(e => console.error('Resume failed:', e));
-    onSelect();
+  const handleResume = useCallback(async (id) => {
+    try {
+      await resumeSession(id);
+      onSelect();
+    } catch (e) {
+      addToast(`Could not resume session: ${e.message}`, 'error');
+    }
   }, [onSelect]);
 
   const handleDelete = useCallback((e, sess) => {

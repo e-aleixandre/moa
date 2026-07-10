@@ -75,6 +75,9 @@ type state struct {
 	viewportCacheDirty bool                           // viewport needs re-render
 	subagents          map[string]*subagentTranscript // live/completed subagent sub-conversations, by jobID
 	viewingSubagent    string                         // jobID currently displayed instead of the main conversation ("" = main)
+	sessionEpoch       uint64                         // invalidates delayed work from a previously active session
+	sessionEventFloor  uint64                         // last bus event published before the current session became active
+	subagentEpoch      map[string]uint64              // job ownership, retained across switches to reject old completions
 }
 
 type pendingTimelineEvent struct {
@@ -203,17 +206,19 @@ func New(ctx context.Context, cfg Config) appModel {
 	eventCh := make(chan busEventMsg, 1024)
 	quit := make(chan struct{})
 
-	// Single ordered subscription for all bus events.
-	unsubAll := cfg.Runtime.Bus.SubscribeAll(func(event any) {
+	// Single ordered subscription for all bus events. The sequence number gives
+	// a session switch a publication boundary: events already queued for the
+	// old session cannot be mistaken for new-session work.
+	unsubAll := cfg.Runtime.Bus.SubscribeAllSeq(func(seq uint64, event any) {
 		if isStructuralBusEvent(event) {
 			select {
-			case eventCh <- busEventMsg{event: event}:
+			case eventCh <- busEventMsg{seq: seq, event: event}:
 			case <-time.After(5 * time.Second):
 				// structural event dropped — should not happen
 			}
 		} else {
 			select {
-			case eventCh <- busEventMsg{event: event}:
+			case eventCh <- busEventMsg{seq: seq, event: event}:
 			default: // lossy for deltas
 			}
 		}
@@ -225,7 +230,7 @@ func New(ctx context.Context, cfg Config) appModel {
 	vp.KeyMap = viewport.KeyMap{}
 
 	m := appModel{
-		s:                    &state{showThinking: true, cacheTTL: cfg.CacheTTL},
+		s:                    &state{showThinking: true, cacheTTL: cfg.CacheTTL, sessionEpoch: 1, subagentEpoch: make(map[string]uint64)},
 		runtime:              cfg.Runtime,
 		eventCh:              eventCh,
 		quit:                 quit,
@@ -443,7 +448,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case busEventMsg:
-		cmds := m.handleBusEvent(msg.event)
+		cmds := m.handleBusEventSeq(msg.seq, msg.event)
 		allCmds := []tea.Cmd{m.waitForBusEvent()}
 		allCmds = append(allCmds, cmds...)
 		return m, tea.Batch(allCmds...)
@@ -469,12 +474,18 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case autoTitleMsg:
-		if msg.title != "" && m.session != nil {
-			m.session.SetAutoTitle(msg.title, 80)
+		// The generation is deliberately tied to the active-session epoch. A
+		// title request can finish after the user has opened another session;
+		// never let that stale result mutate or persist the old session from the
+		// new UI context.
+		if msg.epoch == m.s.sessionEpoch && msg.session == m.session && msg.title != "" && msg.session != nil {
+			msg.session.SetAutoTitle(msg.title, 80)
 			if m.sessionStore != nil {
-				_ = m.sessionStore.Save(m.session)
+				_ = m.sessionStore.Save(msg.session)
 			}
-			m.updateViewport()
+			if m.session == msg.session {
+				m.updateViewport()
+			}
 		}
 		return m, nil
 
@@ -803,6 +814,18 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.Type {
+	case tea.KeyRunes:
+		if string(msg.Runes) == "c" && m.s.viewingSubagent != "" {
+			if t := m.s.subagents[m.s.viewingSubagent]; t != nil && t.kind == "bash" && (t.status == "running" || t.status == "cancelling") {
+				if err := m.runtime.Bus.Execute(bus.CancelBashJob{JobID: t.jobID}); err != nil {
+					m.status.SetText("cancel failed: " + err.Error())
+				} else {
+					m.status.SetText("bash job cancellation requested")
+				}
+				return m, nil
+			}
+		}
+
 	case tea.KeyCtrlC, tea.KeyEsc:
 		if m.filePicker.active {
 			m.filePicker.Close()
@@ -1183,6 +1206,13 @@ func (m *appModel) navigateFilePicker() {
 // --- Bus event handling ---
 
 func (m *appModel) handleBusEvent(event any) []tea.Cmd {
+	return m.handleBusEventSeq(^uint64(0), event)
+}
+
+func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
+	if !m.acceptSessionScopedAsyncEvent(seq, event) {
+		return nil
+	}
 	// Mark chrome dirty for events that affect status/chrome.
 	// Skip the three high-frequency streaming events that never change chrome.
 	switch event.(type) {
@@ -1522,19 +1552,31 @@ func (m *appModel) handleBusEvent(event any) []tea.Cmd {
 
 	// --- Subagents ---
 	case bus.SubagentCountChanged:
-		m.s.asyncSubagents = e.Count
+		// Counts are global to the long-lived subagent store and carry no job
+		// ID. Derive the visible count from jobs owned by this UI session below.
 
 	case bus.SubagentStarted:
 		m.handleSubagentStarted(e)
+		m.refreshAsyncSubagentCount()
 
 	case bus.SubagentEvent:
 		m.applySubagentInner(e.JobID, e.Inner)
 
 	case bus.SubagentEnded:
 		m.handleSubagentEnded(e)
+		m.refreshAsyncSubagentCount()
 
 	case bus.SubagentCompleted:
 		return m.handleSubagentCompleted(e)
+
+	case bus.BashJobStarted:
+		m.handleBashJobStarted(e)
+
+	case bus.BashJobOutput:
+		m.handleBashJobOutput(e)
+
+	case bus.BashJobEnded:
+		m.handleBashJobEnded(e)
 	}
 	return nil
 }
@@ -1726,7 +1768,11 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 }
 
 // autoTitleMsg carries a background-generated session title.
-type autoTitleMsg struct{ title string }
+type autoTitleMsg struct {
+	title   string
+	session *session.Session
+	epoch   uint64
+}
 
 // maybeAutoTitle kicks off a one-shot background title generation after the
 // first successful run, unless the session was manually renamed. Returns nil
@@ -1741,13 +1787,15 @@ func (m *appModel) maybeAutoTitle(msgs []core.AgentMessage, runErr error) tea.Cm
 	m.autoTitled = true
 	factory := m.providerFactory
 	ctx := m.baseCtx
+	target := m.session
+	epoch := m.s.sessionEpoch
 	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
 	return func() tea.Msg {
 		title, err := autotitle.Generate(ctx, factory, sessionModel, msgs)
 		if err != nil {
 			return autoTitleMsg{} // empty → ignored
 		}
-		return autoTitleMsg{title: title}
+		return autoTitleMsg{title: title, session: target, epoch: epoch}
 	}
 }
 

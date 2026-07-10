@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
@@ -115,7 +116,7 @@ func NewSessionRestoreState(sess *session.Session) SessionRestoreState {
 
 	meta := sess.Metadata
 	if modelSpec, ok := meta[session.MetaModel].(string); ok && modelSpec != "" {
-		if model, ok := core.ResolveModel(modelSpec); ok {
+		if model, known := core.ResolveModel(modelSpec); known || core.ValidateModelSpec(modelSpec) == nil {
 			state.Model = model
 			state.HasModel = true
 		}
@@ -429,6 +430,54 @@ func (r *SessionRuntime) WaitSettled(ctx context.Context) bool {
 		case <-woke:
 		case <-ctx.Done():
 			return settled()
+		}
+	}
+}
+
+// WaitQuiescent waits for the complete autonomous session chain to finish.
+// Unlike WaitSettled, it does not return in the gap after a foreground run
+// becomes idle while auto-verify, a goal verifier, or an asynchronous child
+// job can still publish work (and potentially start another run). It includes
+// background bash jobs because their final output is likewise delivered after
+// the foreground turn.
+//
+// A goal that is active but paused without work is quiescent. This makes the
+// method usable for headless callers even when a goal stops on a verifier
+// infrastructure failure and requires human intervention to resume.
+func (r *SessionRuntime) WaitQuiescent(ctx context.Context) bool {
+	woke := make(chan struct{}, 1)
+	unsub := r.Bus.SubscribeAll(func(any) {
+		select {
+		case woke <- struct{}{}:
+		default:
+		}
+	})
+	defer unsub()
+
+	quiescent := func() bool {
+		state := r.State.Current()
+		return state != StateRunning && state != StatePermission && !r.sctx.hasBackgroundWork()
+	}
+
+	for {
+		// A RunEnded fan-out schedules the automatic reactors asynchronously.
+		// Drain the currently accepted publication batch before inspecting the
+		// counters, otherwise a caller observing RunEnded could win the race
+		// just before the auto-verify/goal reactor marks itself active.
+		r.Bus.Drain(2 * time.Second)
+		if quiescent() {
+			// One final drain closes the check-after-drain race for events emitted
+			// by a reactor while its RunEnded handler was unwinding.
+			r.Bus.Drain(2 * time.Second)
+			if quiescent() {
+				return true
+			}
+			continue
+		}
+		select {
+		case <-woke:
+		case <-ctx.Done():
+			return quiescent()
 		}
 	}
 }

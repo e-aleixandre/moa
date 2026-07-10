@@ -54,6 +54,14 @@ func rebuildSystemPrompt(sctx *SessionContext) {
 func RegisterHandlers(sctx *SessionContext) {
 	b := sctx.Bus
 
+	// Background jobs can continue after the foreground agent reaches idle.
+	// Keep their lifecycle in the runtime so headless callers can wait for the
+	// same complete result chain that interactive frontends observe.
+	b.Subscribe(func(e SubagentStarted) { sctx.trackBackgroundEvent(e) })
+	b.Subscribe(func(e SubagentEnded) { sctx.trackBackgroundEvent(e) })
+	b.Subscribe(func(e BashJobStarted) { sctx.trackBackgroundEvent(e) })
+	b.Subscribe(func(e BashJobEnded) { sctx.trackBackgroundEvent(e) })
+
 	// -------------------------------------------------------------------
 	// Commands
 	// -------------------------------------------------------------------
@@ -189,41 +197,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.Checkpoints == nil {
 			return fmt.Errorf("checkpoints not available")
 		}
-		cp, err := sctx.Checkpoints.Undo()
-		if err != nil {
-			return err
-		}
-		var restoreErrs, skipped []string
-		for _, snap := range cp.Files {
-			// Refuse to clobber a file changed after the agent's turn (by the
-			// user, bash, MCP, a subagent…) — restoring would silently discard
-			// that work. Leave it untouched and report it instead.
-			if snap.ModifiedSinceCapture() {
-				skipped = append(skipped, filepath.Base(snap.Path))
-				continue
-			}
-			if snap.Content == nil {
-				// File was created by the agent — delete it.
-				if rmErr := os.Remove(snap.Path); rmErr != nil && !os.IsNotExist(rmErr) {
-					restoreErrs = append(restoreErrs, fmt.Sprintf("delete %s: %v", filepath.Base(snap.Path), rmErr))
-				}
-			} else {
-				// File existed before — restore original content.
-				if wErr := os.WriteFile(snap.Path, snap.Content, snap.Perm); wErr != nil {
-					restoreErrs = append(restoreErrs, fmt.Sprintf("restore %s: %v", filepath.Base(snap.Path), wErr))
-				}
-			}
-		}
-		if len(restoreErrs) > 0 {
-			// Push checkpoint back so undo can be retried.
-			sctx.Checkpoints.Repush(cp)
-			return fmt.Errorf("partial restore: %s", strings.Join(restoreErrs, "; "))
-		}
-		if len(skipped) > 0 {
-			return fmt.Errorf("skipped %d file(s) changed since the agent edited them (left untouched to avoid discarding your edits): %s",
-				len(skipped), strings.Join(skipped, ", "))
-		}
-		return nil
+		return sctx.Checkpoints.UndoAndRestore()
 	})
 
 	b.OnCommand(func(cmd MarkTaskDone) error {
@@ -476,8 +450,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			sctx.GetGate().SetMode(newMode)
 		}
 
-		var modeStr string
-		modeStr = string(sctx.GetGate().Mode())
+		modeStr := string(sctx.GetGate().Mode())
 		evt := ConfigChanged{
 			SessionID:      sctx.SessionID,
 			PermissionMode: modeStr,
@@ -967,8 +940,10 @@ func RegisterHandlers(sctx *SessionContext) {
 
 		// Capture run generation so we can detect stale results.
 		startRunGen := e.RunGen
+		sctx.beginAutoVerify()
 
 		go func() {
+			defer sctx.endAutoVerify()
 			sctx.Bus.Publish(AutoVerifyStarted{SessionID: sctx.SessionID})
 
 			ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
@@ -1082,9 +1057,11 @@ func RegisterHandlers(sctx *SessionContext) {
 			verifyCancel()
 		}
 		goalVerifyCancel.Store(&combined)
+		sctx.beginGoalVerify()
 
 		go func() {
 			defer func() {
+				sctx.endGoalVerify()
 				goalVerifyCancel.CompareAndSwap(&combined, nil)
 				evidenceCancel()
 				verifyCancel()
@@ -1451,8 +1428,6 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 
 	// Notify subscribers of the run generation (single source of truth for runGen).
 	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen})
-	// Compatibility fallback for controllers that do not emit lifecycle events.
-	msgsBefore := len(sctx.Agent.Messages())
 
 	go func() {
 		// Open checkpoint.
@@ -1476,6 +1451,10 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			}
 		}
 
+		// Snapshot before returning to idle: an immediately-started later run
+		// resets the generation accumulator, but must never erase this result.
+		stats := sctx.snapshotRunStats(gen)
+
 		// Clear run cancel BEFORE state transition to prevent a race where
 		// a new run starts (setting a new runCancel) and then this goroutine
 		// clears it. The generation token ensures we only clear our own cancel.
@@ -1490,28 +1469,14 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			}
 		}
 
-		stats := sctx.snapshotRunStats(gen)
-		fallbackMsgs := msgs
-		if len(msgs) >= msgsBefore {
-			fallbackMsgs = msgs[msgsBefore:]
-		}
 		// Controllers used by integrations may return messages without emitting
-		// lifecycle events. Keep that compatibility fallback; normal agent runs
-		// use the event-fed stats above, which survive compaction.
+		// lifecycle events. Keep text/edit compatibility fallbacks only; cost
+		// remains lifecycle-attributed so compaction cannot mischarge history.
 		if stats.finalText == "" {
-			stats.finalText = extractFinalAssistantText(fallbackMsgs)
+			stats.finalText = extractFinalAssistantText(msgs)
 		}
 		if !stats.hadEdits {
-			stats.hadEdits = hasSuccessfulEdits(fallbackMsgs)
-		}
-		if stats.costUSD == 0 {
-			if pricing := sctx.Agent.Model().Pricing; pricing != nil {
-				for _, m := range fallbackMsgs {
-					if m.Usage != nil {
-						stats.costUSD += pricing.Cost(*m.Usage)
-					}
-				}
-			}
+			stats.hadEdits = hasSuccessfulEdits(msgs)
 		}
 
 		// Publish run result.

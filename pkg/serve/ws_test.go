@@ -34,6 +34,64 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	}
 }
 
+func TestLimitInitHistoryBoundsPayloadAndInlineAttachments(t *testing.T) {
+	largeImage := strings.Repeat("a", historyContentMaxBytes+1)
+	messages := make([]core.AgentMessage, initHistoryMaxMessages+10)
+	for i := range messages {
+		messages[i] = core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent(fmt.Sprintf("message %d", i))}})
+	}
+	messages[len(messages)-1] = core.WrapMessage(core.Message{Role: "user", Content: []core.Content{{Type: "image", Data: largeImage, MimeType: "image/png"}}})
+
+	limited, truncated := limitInitHistory(messages)
+	if !truncated || len(limited) != initHistoryMaxMessages {
+		t.Fatalf("limited=%d truncated=%v, want %d and true", len(limited), truncated, initHistoryMaxMessages)
+	}
+	if got := limited[len(limited)-1].Content[0].Data; got != "" {
+		t.Fatalf("inline image retained %d bytes", len(got))
+	}
+}
+
+func TestLimitInitHistoryBoundsLargeText(t *testing.T) {
+	message := core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent(strings.Repeat("x", historyContentMaxBytes+1))}})
+	limited, truncated := limitInitHistory([]core.AgentMessage{message})
+	if truncated {
+		t.Fatal("single bounded message should not be marked as omitted history")
+	}
+	if got := limited[0].Content[0].Text; len(got) <= historyContentMaxBytes || !strings.Contains(got, "historic content truncated") {
+		t.Fatalf("large text was not safely truncated: %d bytes", len(got))
+	}
+}
+
+func TestLimitInitHistoryDropsOversizedToolArguments(t *testing.T) {
+	message := core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{{
+		Type: "tool_call", ToolCallID: "tool-1", ToolName: "bash",
+		Arguments: map[string]any{"command": strings.Repeat("x", historyContentMaxBytes+1)},
+	}}})
+	limited, _ := limitInitHistory([]core.AgentMessage{message})
+	args := limited[0].Content[0].Arguments
+	if args["_truncated"] != true {
+		t.Fatalf("oversized args = %#v, want truncation marker", args)
+	}
+}
+
+func TestWsEventFromBus_BashJobLifecycle(t *testing.T) {
+	start, ok := wsEventFromBus(bus.BashJobStarted{SessionID: "s1", JobID: "bash-1", Command: "go test ./...", CWD: "/work"})
+	if !ok || start.Type != "bash_job_start" {
+		t.Fatalf("start = %+v, ok=%v", start, ok)
+	}
+	if got := start.Data.(BashJobStartData); got.JobID != "bash-1" || got.Command != "go test ./..." {
+		t.Fatalf("start data = %+v", got)
+	}
+	output, ok := wsEventFromBus(bus.BashJobOutput{SessionID: "s1", JobID: "bash-1", Delta: "ok\n"})
+	if !ok || output.Type != "bash_job_output" || !isLossyWsEvent(output) {
+		t.Fatalf("output = %+v, ok=%v", output, ok)
+	}
+	end, ok := wsEventFromBus(bus.BashJobEnded{SessionID: "s1", JobID: "bash-1", Status: "completed", Output: "ok\n"})
+	if !ok || end.Type != "bash_job_end" || isLossyWsEvent(end) {
+		t.Fatalf("end = %+v, ok=%v", end, ok)
+	}
+}
+
 func TestWsEventFromBus_SubagentEnded(t *testing.T) {
 	t.Run("with usage", func(t *testing.T) {
 		ev, ok := wsEventFromBus(bus.SubagentEnded{

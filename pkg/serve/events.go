@@ -9,6 +9,7 @@ import (
 type Event struct {
 	Type string `json:"type"`
 	Data any    `json:"data,omitempty"`
+	Seq  uint64 `json:"seq,omitempty"`
 }
 
 // --- Typed event data structs ---
@@ -34,6 +35,9 @@ type InitData struct {
 	GoalStalled       int                 `json:"goal_stalled,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
 	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
+	BashJobs          []BashJobInitData   `json:"bash_jobs,omitempty"`
+	LastSeq           uint64              `json:"last_seq,omitempty"`
+	HistoryTruncated  bool                `json:"history_truncated,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients
@@ -46,6 +50,15 @@ type SubagentInitData struct {
 	Status   string              `json:"status"`
 	Async    bool                `json:"async"`
 	Messages []core.AgentMessage `json:"messages"`
+}
+
+// BashJobInitData restores a live/recent background command after reconnect.
+type BashJobInitData struct {
+	JobID   string `json:"job_id"`
+	Command string `json:"command"`
+	CWD     string `json:"cwd"`
+	Status  string `json:"status"`
+	Output  string `json:"output"`
 }
 
 // PermissionData is a pending permission request.
@@ -75,7 +88,8 @@ type DeltaData struct {
 
 // MessageEndData carries the full assistant text on message completion.
 type MessageEndData struct {
-	Text string `json:"text"`
+	Text  string `json:"text"`
+	MsgID string `json:"msg_id,omitempty"`
 }
 
 // ToolStartData is sent when a tool execution begins.
@@ -191,8 +205,9 @@ type GoalEndData struct {
 
 // CommandData is sent when a slash command is executed.
 type CommandData struct {
-	Command  string              `json:"command"`
-	Messages []core.AgentMessage `json:"messages,omitempty"` // compact sends updated messages
+	Command          string              `json:"command"`
+	Messages         []core.AgentMessage `json:"messages,omitempty"` // compact sends updated messages
+	HistoryTruncated bool                `json:"history_truncated,omitempty"`
 }
 
 // ConfigChangeData is sent when model/thinking/permissions/path scope change.
@@ -241,4 +256,21 @@ type SubagentEndData struct {
 type SubagentEventData struct {
 	JobID string `json:"job_id"`
 	Event *Event `json:"event"`
+}
+
+type BashJobStartData struct {
+	JobID   string `json:"job_id"`
+	Command string `json:"command"`
+	CWD     string `json:"cwd"`
+}
+
+type BashJobOutputData struct {
+	JobID string `json:"job_id"`
+	Delta string `json:"delta"`
+}
+
+type BashJobEndData struct {
+	JobID  string `json:"job_id"`
+	Status string `json:"status"`
+	Output string `json:"output"`
 }

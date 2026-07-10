@@ -82,7 +82,7 @@ func NewFind(cfg ToolConfig) core.Tool {
 			}
 
 			// Truncate by lines
-			output = truncateLinesHeadTail(output, 1000, stdout.SpillPath)
+			output = truncateLinesHeadTail(output, 1000, stdout.SpillPath, stdout.spillIncomplete)
 
 			return core.TextResult(output), nil
 		},
@@ -114,4 +114,3 @@ func buildFindArgs(pattern, searchPath, fileType string) []string {
 	args = append(args, "-name", pattern)
 	return args
 }
-

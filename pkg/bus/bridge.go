@@ -149,6 +149,15 @@ type SessionContext struct {
 	runGen     uint64             // incremented each run; used to avoid clearing a newer run's cancel
 	runStatsMu sync.Mutex
 	runStats   runStats
+
+	// Background work that can outlive a foreground RunEnded. Headless callers
+	// use it to wait for the complete autonomous chain, not merely the first
+	// maker turn.
+	quiescenceMu      sync.Mutex
+	autoVerifyRunning int
+	goalVerifyRunning int
+	activeSubagents   map[string]struct{}
+	activeBashJobs    map[string]struct{}
 }
 
 type runStats struct {
@@ -156,6 +165,59 @@ type runStats struct {
 	finalText string
 	hadEdits  bool
 	costUSD   float64
+}
+
+func (sctx *SessionContext) beginAutoVerify() {
+	sctx.quiescenceMu.Lock()
+	sctx.autoVerifyRunning++
+	sctx.quiescenceMu.Unlock()
+}
+
+func (sctx *SessionContext) endAutoVerify() {
+	sctx.quiescenceMu.Lock()
+	if sctx.autoVerifyRunning > 0 {
+		sctx.autoVerifyRunning--
+	}
+	sctx.quiescenceMu.Unlock()
+}
+
+func (sctx *SessionContext) beginGoalVerify() {
+	sctx.quiescenceMu.Lock()
+	sctx.goalVerifyRunning++
+	sctx.quiescenceMu.Unlock()
+}
+
+func (sctx *SessionContext) endGoalVerify() {
+	sctx.quiescenceMu.Lock()
+	if sctx.goalVerifyRunning > 0 {
+		sctx.goalVerifyRunning--
+	}
+	sctx.quiescenceMu.Unlock()
+}
+
+func (sctx *SessionContext) trackBackgroundEvent(event any) {
+	sctx.quiescenceMu.Lock()
+	defer sctx.quiescenceMu.Unlock()
+	if sctx.activeSubagents == nil {
+		sctx.activeSubagents = make(map[string]struct{})
+		sctx.activeBashJobs = make(map[string]struct{})
+	}
+	switch e := event.(type) {
+	case SubagentStarted:
+		sctx.activeSubagents[e.JobID] = struct{}{}
+	case SubagentEnded:
+		delete(sctx.activeSubagents, e.JobID)
+	case BashJobStarted:
+		sctx.activeBashJobs[e.JobID] = struct{}{}
+	case BashJobEnded:
+		delete(sctx.activeBashJobs, e.JobID)
+	}
+}
+
+func (sctx *SessionContext) hasBackgroundWork() bool {
+	sctx.quiescenceMu.Lock()
+	defer sctx.quiescenceMu.Unlock()
+	return sctx.autoVerifyRunning > 0 || sctx.goalVerifyRunning > 0 || len(sctx.activeSubagents) > 0 || len(sctx.activeBashJobs) > 0
 }
 
 // GetGate returns the current permission gate (may be nil for yolo mode).
@@ -215,7 +277,7 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 }
 
 func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
-	if e.Type != core.AgentEventMessageEnd && e.Type != core.AgentEventToolExecEnd && e.Type != core.AgentEventCompactionEnd {
+	if e.Type != core.AgentEventEnd && e.Type != core.AgentEventMessageEnd && e.Type != core.AgentEventToolExecEnd && e.Type != core.AgentEventCompactionEnd {
 		return
 	}
 	sctx.runStatsMu.Lock()
@@ -228,6 +290,13 @@ func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
 		pricing = sctx.Agent.Model().Pricing
 	}
 	switch e.Type {
+	case core.AgentEventEnd:
+		// A cancelled stream can leave a partial assistant message without a
+		// MessageEnd. AgentEventEnd carries the final state in emitter order,
+		// so it is a safe fallback without relying on a mutable history offset.
+		if sctx.runStats.finalText == "" {
+			sctx.runStats.finalText = extractFinalAssistantText(e.Messages)
+		}
 	case core.AgentEventMessageEnd:
 		if e.Message.Role == "assistant" {
 			sctx.runStats.finalText = messageText(e.Message)

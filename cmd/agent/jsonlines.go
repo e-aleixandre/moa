@@ -35,10 +35,23 @@ func newJSONLineWriter() *jsonLineWriter {
 // publication order (single goroutine). When done is non-nil, RunEnded is
 // delivered via a separate typed subscriber to avoid backpressure from
 // high-volume stream events dropping the completion signal.
-func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan<- bus.RunEnded) {
+func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan bus.RunEnded) {
 	// Dedicated completion subscriber — isolated from streaming backpressure.
 	if done != nil {
-		b.Subscribe(func(e bus.RunEnded) { done <- e })
+		b.Subscribe(func(e bus.RunEnded) {
+			select {
+			case done <- e:
+			default:
+				select {
+				case <-done:
+				default:
+				}
+				select {
+				case done <- e:
+				default:
+				}
+			}
+		})
 	}
 
 	// Ordered rendering of all stream events.

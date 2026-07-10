@@ -72,6 +72,18 @@ func TestNewSessionRuntime_AutoSubscriber(t *testing.T) {
 	defer rt.Close()
 }
 
+func TestNewSessionRestoreStateAcceptsExplicitCustomModel(t *testing.T) {
+	state := NewSessionRestoreState(&session.Session{Metadata: map[string]any{
+		session.MetaModel: "openai/internal-model",
+	}})
+	if !state.HasModel {
+		t.Fatal("custom provider/model was discarded")
+	}
+	if state.Model.Provider != "openai" || state.Model.ID != "internal-model" {
+		t.Fatalf("custom model = %#v", state.Model)
+	}
+}
+
 func TestNewSessionRuntime_NoSubscriber(t *testing.T) {
 	// fakeAgent does NOT implement AgentSubscriber.
 	fa := &fakeAgent{}
@@ -393,6 +405,40 @@ func TestWaitSettled_ReturnsImmediatelyWhenIdle(t *testing.T) {
 	defer cancel()
 	if !rt.WaitSettled(ctx) {
 		t.Fatal("WaitSettled = false for an already-idle session")
+	}
+}
+
+func TestWaitQuiescent_WaitsForAutonomousBackgroundWork(t *testing.T) {
+	fas := newFakeAgentSubscriber()
+	rt, err := NewSessionRuntime(RuntimeConfig{Agent: fas.fakeAgent, Subscriber: &fas.fakeSubscriber})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	// These are the three independent sources of follow-up work that may outlive
+	// a foreground RunEnded: auto-verify, goal verification, and an async child.
+	rt.sctx.beginAutoVerify()
+	rt.sctx.beginGoalVerify()
+	rt.Bus.Publish(SubagentStarted{JobID: "child"})
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		rt.sctx.endAutoVerify()
+		time.Sleep(20 * time.Millisecond)
+		rt.sctx.endGoalVerify()
+		time.Sleep(20 * time.Millisecond)
+		rt.Bus.Publish(SubagentEnded{JobID: "child", Status: "completed"})
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	started := time.Now()
+	if !rt.WaitQuiescent(ctx) {
+		t.Fatal("WaitQuiescent = false, want true")
+	}
+	if elapsed := time.Since(started); elapsed < 45*time.Millisecond {
+		t.Fatalf("WaitQuiescent returned after %v, before background work ended", elapsed)
 	}
 }
 

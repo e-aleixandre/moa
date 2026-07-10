@@ -17,10 +17,107 @@ type subagentTranscript struct {
 	model      string
 	status     string // "running", "completed", "failed", "cancelled"
 	async      bool
+	kind       string // "subagent" or "bash"
 	blocks     []messageBlock
 	streamText string // current streaming assistant text (not yet materialized)
 	costUSD    float64
 	tokens     int // input+output tokens, populated on end
+}
+
+// acceptSessionScopedAsyncEvent keeps background subagent work bound to the
+// session that launched it. The TUI reuses one runtime while switching saved
+// sessions, so a promoted job from the old conversation can otherwise keep
+// streaming into (or start a notification run in) the newly opened one.
+func (m *appModel) acceptSessionScopedAsyncEvent(seq uint64, event any) bool {
+	if m.s.subagentEpoch == nil {
+		m.s.subagentEpoch = make(map[string]uint64)
+	}
+	owner := func(jobID string) bool {
+		epoch, ok := m.s.subagentEpoch[jobID]
+		return ok && epoch == m.s.sessionEpoch
+	}
+	switch e := event.(type) {
+	case bus.SubagentStarted:
+		// A start published before the switch may still be waiting in Bubble
+		// Tea's queue. It belongs to the old session, not whichever session is
+		// active when the queue is eventually consumed.
+		if seq <= m.s.sessionEventFloor {
+			return false
+		}
+		m.s.subagentEpoch[e.JobID] = m.s.sessionEpoch
+		return true
+	case bus.SubagentEvent:
+		return owner(e.JobID)
+	case bus.SubagentEnded:
+		return owner(e.JobID)
+	case bus.SubagentCompleted:
+		return owner(e.JobID)
+	case bus.BashJobStarted:
+		if seq <= m.s.sessionEventFloor {
+			return false
+		}
+		m.s.subagentEpoch[e.JobID] = m.s.sessionEpoch
+		return true
+	case bus.BashJobOutput:
+		return owner(e.JobID)
+	case bus.BashJobEnded:
+		return owner(e.JobID)
+	default:
+		return true
+	}
+}
+
+func (m *appModel) refreshAsyncSubagentCount() {
+	count := 0
+	for jobID, t := range m.s.subagents {
+		if m.s.subagentEpoch[jobID] == m.s.sessionEpoch && t.async && (t.status == "running" || t.status == "cancelling") {
+			count++
+		}
+	}
+	m.s.asyncSubagents = count
+}
+
+func (m *appModel) handleBashJobStarted(e bus.BashJobStarted) {
+	t := m.ensureSubagent(e.JobID)
+	t.task = e.Command
+	t.model = "bash"
+	t.kind = "bash"
+	t.async = true
+	t.status = "running"
+	t.blocks = []messageBlock{{Type: "tool", ToolCallID: e.JobID, ToolName: "bash", ToolArgs: map[string]any{"command": e.Command, "cwd": e.CWD}}}
+}
+
+func (m *appModel) handleBashJobOutput(e bus.BashJobOutput) {
+	t := m.ensureSubagent(e.JobID)
+	t.kind = "bash"
+	for i := len(t.blocks) - 1; i >= 0; i-- {
+		if t.blocks[i].Type == "tool" && t.blocks[i].ToolCallID == e.JobID {
+			t.blocks[i].ToolResult += e.Delta
+			t.blocks[i].touch()
+			break
+		}
+	}
+	if m.s.viewingSubagent == e.JobID {
+		m.s.viewportDirty = true
+	}
+}
+
+func (m *appModel) handleBashJobEnded(e bus.BashJobEnded) {
+	t := m.ensureSubagent(e.JobID)
+	t.kind = "bash"
+	t.status = e.Status
+	for i := len(t.blocks) - 1; i >= 0; i-- {
+		if t.blocks[i].Type == "tool" && t.blocks[i].ToolCallID == e.JobID {
+			t.blocks[i].ToolDone = true
+			t.blocks[i].IsError = e.Status != "completed"
+			t.blocks[i].ToolResult = e.Output
+			t.blocks[i].touch()
+			break
+		}
+	}
+	if m.s.viewingSubagent == e.JobID {
+		m.s.viewportDirty = true
+	}
 }
 
 // ensureSubagent returns the transcript for jobID, creating it if absent.
@@ -368,7 +465,13 @@ func (m *appModel) renderSubagentViewportContent() string {
 	if t.costUSD > 0 || t.tokens > 0 {
 		statusText += fmt.Sprintf(" · $%.4f · %d tok", t.costUSD, t.tokens)
 	}
-	header := pickerHeaderStyle.Render(fmt.Sprintf("◂ Subagent: %s (%s) — Ctrl+G to return · Ctrl+B to promote", task, statusText))
+	kind := "Subagent"
+	action := "Ctrl+B to promote"
+	if t.kind == "bash" {
+		kind = "Background Bash"
+		action = "c to cancel"
+	}
+	header := pickerHeaderStyle.Render(fmt.Sprintf("◂ %s: %s (%s) — Ctrl+G to return · %s", kind, task, statusText, action))
 
 	parts := []string{header}
 	for i := range t.blocks {

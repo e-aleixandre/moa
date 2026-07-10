@@ -1,6 +1,8 @@
 package checkpoint
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -72,6 +74,126 @@ func TestCapture_NewFile(t *testing.T) {
 	_ = os.Remove(path)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("expected file to not exist after undo")
+	}
+}
+
+func TestRestore_RollsBackAllFilesWhenOneRestoreFails(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.txt")
+	second := filepath.Join(dir, "second.txt")
+	writeFile(t, first, []byte("before first"))
+	writeFile(t, second, []byte("before second"))
+
+	s := New(2)
+	s.Begin("turn")
+	if err := s.Capture(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Capture(second); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, first, []byte("agent first"))
+	writeFile(t, second, []byte("agent second"))
+	s.Commit()
+	cp, err := s.Undo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the order deterministic: first restoration succeeds, then the
+	// injected failure proves that first is rolled back as well.
+	if cp.Files[0].Path == second {
+		cp.Files[0], cp.Files[1] = cp.Files[1], cp.Files[0]
+	}
+	s.restoreFile = func(path string, content []byte, perm fs.FileMode) error {
+		if path == second {
+			return errors.New("injected restore failure")
+		}
+		return atomicWriteFile(path, content, perm)
+	}
+
+	if err := s.Restore(cp); err == nil {
+		t.Fatal("Restore succeeded despite injected failure")
+	}
+	for path, want := range map[string]string{first: "agent first", second: "agent second"} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Errorf("%s after failed restore = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestRestore_RestoresEveryFileOrDeletesAgentCreatedFiles(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "existing.txt")
+	created := filepath.Join(dir, "created.txt")
+	writeFile(t, existing, []byte("before"))
+
+	s := New(2)
+	s.Begin("turn")
+	if err := s.Capture(existing); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Capture(created); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, existing, []byte("agent"))
+	writeFile(t, created, []byte("created"))
+	s.Commit()
+	cp, err := s.Undo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Restore(cp); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "before" {
+		t.Errorf("existing = %q, want original content", got)
+	}
+	if _, err := os.Stat(created); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("created file remains after restore: %v", err)
+	}
+}
+
+func TestUndoAndRestore_MixedMultiFileCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	updated := filepath.Join(dir, "updated.txt")
+	deleted := filepath.Join(dir, "deleted.txt")
+	created := filepath.Join(dir, "created.txt")
+	writeFile(t, updated, []byte("before update"))
+	writeFile(t, deleted, []byte("before delete"))
+
+	s := New(2)
+	s.Begin("turn")
+	for _, path := range []string{updated, deleted, created} {
+		if err := s.Capture(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, updated, []byte("agent update"))
+	if err := os.Remove(deleted); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, created, []byte("agent created"))
+	s.Commit()
+
+	if err := s.UndoAndRestore(); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{updated: "before update", deleted: "before delete"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Errorf("%s = %q, %v; want %q", path, got, err, want)
+		}
+	}
+	if _, err := os.Stat(created); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("agent-created file remains: %v", err)
 	}
 }
 

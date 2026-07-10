@@ -360,6 +360,34 @@ type SubagentEnded struct {
 }
 
 // ---------------------------------------------------------------------------
+// Background bash jobs
+// ---------------------------------------------------------------------------
+
+// BashJobStarted announces a session-scoped background bash command.
+type BashJobStarted struct {
+	SessionID string
+	JobID     string
+	Command   string
+	CWD       string
+}
+
+// BashJobOutput carries streamed background command output. It is lossy; the
+// final BashJobEnded Output is authoritative.
+type BashJobOutput struct {
+	SessionID string
+	JobID     string
+	Delta     string
+}
+
+// BashJobEnded finalizes a background bash command with full bounded output.
+type BashJobEnded struct {
+	SessionID string
+	JobID     string
+	Status    string
+	Output    string
+}
+
+// ---------------------------------------------------------------------------
 // Permission
 // ---------------------------------------------------------------------------
 
@@ -438,7 +466,7 @@ func isLossyEvent(event any) bool {
 		return isLossyEvent(se.Inner)
 	}
 	switch event.(type) {
-	case TextDelta, ThinkingDelta, ToolExecUpdate, ToolCallDelta:
+	case TextDelta, ThinkingDelta, ToolExecUpdate, ToolCallDelta, BashJobOutput:
 		return true
 	default:
 		return false

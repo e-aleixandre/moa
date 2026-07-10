@@ -25,6 +25,7 @@ import (
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
 )
 
@@ -292,6 +293,15 @@ func main() {
 				JobID: jobID, Status: status, Usage: usage, CostUSD: costUSD,
 			})
 		},
+		OnBashJobStart: func(job tool.BashJobInfo) {
+			preBus.Publish(bus.BashJobStarted{JobID: job.JobID, Command: job.Command, CWD: job.CWD})
+		},
+		OnBashJobOutput: func(jobID, delta string) {
+			preBus.Publish(bus.BashJobOutput{JobID: jobID, Delta: delta})
+		},
+		OnBashJobEnd: func(job tool.BashJobInfo) {
+			preBus.Publish(bus.BashJobEnded{JobID: job.JobID, Status: job.Status, Output: job.Output})
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -384,6 +394,12 @@ func main() {
 		rt.Bus.OnCommand(func(c bus.PromoteSubagent) error {
 			return sess.Subagents.Promote(c.JobID)
 		})
+		rt.Bus.OnCommand(func(c bus.CancelBashJob) error {
+			if sess.BashJobs == nil || !sess.BashJobs.Cancel(c.JobID) {
+				return fmt.Errorf("unknown bash job: %s", c.JobID)
+			}
+			return nil
+		})
 
 		// Attach persister BEFORE bus restore so state changes are persisted.
 		// Attach even in browser mode (persistedSess may be nil): the persister
@@ -467,9 +483,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Subagent completions → steer into the running agent.
+	// Match the interactive frontends: a completion joins a live parent as a
+	// steer, but when the parent has already ended it starts a notification turn
+	// so headless quiescence includes the child's result instead of exiting with
+	// it stranded in the steer buffer.
 	rt.Bus.Subscribe(func(e bus.SubagentCompleted) {
-		_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+		if rt.State.Current() == bus.StateRunning {
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+			return
+		}
+		if err := rt.Bus.Execute(bus.SendPrompt{
+			Text: e.Text,
+			Custom: map[string]any{
+				"source":          "subagent",
+				"subagent_job_id": e.JobID,
+				"subagent_task":   e.Task,
+				"subagent_status": e.Status,
+			},
+		}); err != nil {
+			// A concurrent run may have won the idle→running transition. Queue it
+			// for that run rather than dropping the completion.
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+		}
 	})
 
 	// Subscribe for output (SubscribeAll guarantees event order).
@@ -501,6 +536,27 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
 		os.Exit(130)
 	}
+	// A foreground RunEnded is not necessarily the end of headless work: the
+	// runtime may now be auto-verifying, running a goal verifier, waiting on an
+	// async subagent, or executing the follow-up prompt any of those starts.
+	if !rt.WaitQuiescent(ctx) {
+		rt.Bus.Drain(2 * time.Second)
+		rt.Close()
+		fmt.Fprintf(os.Stderr, "\n(interrupted)\n")
+		os.Exit(130)
+	}
+	// Keep the terminal run's status for exit handling. The completion channel
+	// is deliberately bounded so consume every result that arrived while the
+	// quiescence wait was following autonomous follow-up runs.
+	for {
+		select {
+		case result = <-done:
+		default:
+			goto drainedRunResults
+		}
+	}
+
+drainedRunResults:
 	rt.Bus.Drain(5 * time.Second)
 
 	if !jsonOutput {

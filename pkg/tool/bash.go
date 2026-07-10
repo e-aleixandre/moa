@@ -37,6 +37,9 @@ func NewBash(cfg ToolConfig) core.Tool {
 	if cfg.BashState != nil {
 		description = "Execute a bash command. Working directory and exported environment variables persist across calls (cd, export, venv activation carry over). Returns stdout, stderr, and exit code. Output is truncated to 50KB."
 	}
+	if cfg.BashJobs != nil {
+		description += " Set async:true before launching long-running work to run it in the background. A synchronous bash call cannot be promoted safely after launch; cancel it and relaunch with async:true instead."
+	}
 	return core.Tool{
 		Name:        "bash",
 		Label:       "Bash",
@@ -55,6 +58,10 @@ func NewBash(cfg ToolConfig) core.Tool {
 				"timeout": {
 					"type": "integer",
 					"description": "Timeout in seconds (default: 300)"
+				},
+				"async": {
+					"type": "boolean",
+					"description": "Run in the background and return a job ID. Use bash_status to inspect it and bash_cancel to stop it. Background jobs do not persist cd/export changes."
 				}
 			},
 			"required": ["command"]
@@ -108,130 +115,193 @@ func NewBash(cfg ToolConfig) core.Tool {
 				timeout = secondsToDuration(t)
 			}
 
-			ctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			// When persisting state, prepend an EXIT trap that dumps the final
-			// cwd and exported env to temp files, then re-apply them on the next
-			// call via cmd.Dir/Env. The trap runs on `exit N` and normal
-			// completion but NOT on death by signal (timeout/kill), so a killed
-			// command never corrupts the snapshot. Paths come from MkdirTemp and
-			// are %q-quoted, and the model's command sits on its own line — no
-			// injection surface. `builtin pwd` / `command env` can't be shadowed
-			// by a same-name function the command defines (which would corrupt
-			// the capture). Startup/control vars (BASH_ENV, BASH_FUNC_*) are
-			// stripped from the persisted env in parseNullSepEnv so a persisted
-			// export can't run code on the next call before the trap installs.
-			runCommand := command
-			var cwdFile, envFile string
-			if cfg.BashState != nil {
-				if stateDir, err := os.MkdirTemp("", "moa-bash-state-"); err == nil {
-					defer func() { _ = os.RemoveAll(stateDir) }()
-					cwdFile = filepath.Join(stateDir, "cwd")
-					envFile = filepath.Join(stateDir, "env")
-					runCommand = fmt.Sprintf("trap '{ builtin pwd > %q; command env -0 > %q; } 2>/dev/null' EXIT\n%s",
-						cwdFile, envFile, command)
+			if getBool(params, "async", false) {
+				if cfg.BashJobs == nil {
+					return core.ErrorResult("background bash jobs are not configured"), nil
 				}
-				// MkdirTemp failure => run without persistence this call (best effort).
-			}
-
-			cmd := exec.CommandContext(ctx, "bash", "-c", runCommand)
-			cmd.Dir = cwd
-			if persistedEnv != nil {
-				cmd.Env = persistedEnv
-			}
-			setProcGroup(cmd)
-			// If the process doesn't exit within 5s of cancel signal, Go force-kills.
-			cmd.WaitDelay = 5 * time.Second
-
-			// Capture stdout and stderr, streaming via onUpdate.
-			// Buffers keep head + tail to preserve both the start and end of output.
-			var stdout, stderr headTailBuffer
-			stdout.headMax = maxOutputBytes / 2
-			stdout.tailMax = maxOutputBytes / 2
-			stdout.SpillDir = spillOutputDir
-			stderr.headMax = maxOutputBytes / 2
-			stderr.tailMax = maxOutputBytes / 2
-			stderr.SpillDir = spillOutputDir
-
-			// Assign io.Writers so os/exec owns the output copiers and Wait()
-			// drains them before closing the pipes. A self-owned StdoutPipe read
-			// concurrently with Wait() truncates output — exec has no copier to
-			// wait for, so Wait closes the read end the instant the process is
-			// reaped, before our reader consumes the tail. WaitDelay still bounds
-			// the wait if a grandchild keeps the pipes open past cancel.
-			// streamWriter streams newly captured bytes live via onUpdate.
-			cmd.Stdout = &streamWriter{buf: &stdout, onUpdate: onUpdate}
-			cmd.Stderr = &streamWriter{buf: &stderr, onUpdate: onUpdate}
-
-			if err := cmd.Start(); err != nil {
-				return core.ErrorResult(fmt.Sprintf("failed to start: %v", err)), nil
-			}
-
-			err := cmd.Wait()
-
-			// Check context FIRST — on timeout, cmd.Wait() may return
-			// an ExitError (SIGTERM exit), masking the real cause.
-			if ctx.Err() != nil {
-				killProcGroup(cmd) // reap grandchildren that ignored SIGTERM
-				stdout.Close()
-				stderr.Close()
-				return core.ErrorResult("command timed out"), nil
-			}
-
-			exitCode := 0
-			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok {
-					exitCode = exitErr.ExitCode()
-				} else {
-					// ErrWaitDelay: the main process exited but a child kept the
-					// pipes open past WaitDelay. Reap the group so no grandchild
-					// lingers.
-					if errors.Is(err, exec.ErrWaitDelay) {
-						killProcGroup(cmd)
-					}
-					stdout.Close()
-					stderr.Close()
-					return core.ErrorResult(fmt.Sprintf("exec: %v", err)), nil
+				// The cwd/env are captured above before the goroutine starts. Do not
+				// write them back: async completion must never clobber foreground
+				// shell state after later bash calls have continued.
+				job, err := cfg.BashJobs.Start(command, cwd, func(jobCtx context.Context, update func(core.Result)) (core.Result, error) {
+					return executeBash(jobCtx, cfg, command, cwd, persistedEnv, agentID, timeout, false, update)
+				})
+				if err != nil {
+					return core.ErrorResult(err.Error()), nil
 				}
+				return core.TextResult("Bash job started in background.\nJob ID: " + job.JobID + "\nUse bash_status to inspect output or bash_cancel to stop it."), nil
 			}
 
+			return executeBash(ctx, cfg, command, cwd, persistedEnv, agentID, timeout, cfg.BashState != nil, onUpdate)
+		},
+	}
+}
+
+// executeBash is shared by synchronous and background invocations. persistState
+// is false for jobs because their launch snapshot is intentionally isolated.
+func executeBash(ctx context.Context, cfg ToolConfig, command, cwd string, persistedEnv []string, agentID string, timeout time.Duration, persistState bool, onUpdate func(core.Result)) (core.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// When persisting state, prepend an EXIT trap that dumps the final
+	// cwd and exported env to temp files, then re-apply them on the next
+	// call via cmd.Dir/Env. The trap runs on `exit N` and normal
+	// completion but NOT on death by signal (timeout/kill), so a killed
+	// command never corrupts the snapshot. Paths come from MkdirTemp and
+	// are %q-quoted, and the model's command sits on its own line — no
+	// injection surface. `builtin pwd` / `command env` can't be shadowed
+	// by a same-name function the command defines (which would corrupt
+	// the capture). Startup/control vars (BASH_ENV, BASH_FUNC_*) are
+	// stripped from the persisted env in parseNullSepEnv so a persisted
+	// export can't run code on the next call before the trap installs.
+	runCommand := command
+	var cwdFile, envFile string
+	if persistState && cfg.BashState != nil {
+		if stateDir, err := os.MkdirTemp("", "moa-bash-state-"); err == nil {
+			defer func() { _ = os.RemoveAll(stateDir) }()
+			cwdFile = filepath.Join(stateDir, "cwd")
+			envFile = filepath.Join(stateDir, "env")
+			runCommand = fmt.Sprintf("trap '{ builtin pwd > %q; command env -0 > %q; } 2>/dev/null' EXIT\n%s",
+				cwdFile, envFile, command)
+		}
+		// MkdirTemp failure => run without persistence this call (best effort).
+	}
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", runCommand)
+	cmd.Dir = cwd
+	if persistedEnv != nil {
+		cmd.Env = persistedEnv
+	}
+	setProcGroup(cmd)
+	// If the process doesn't exit within 5s of cancel signal, Go force-kills.
+	cmd.WaitDelay = 5 * time.Second
+
+	// Capture stdout and stderr, streaming via onUpdate.
+	// Buffers keep head + tail to preserve both the start and end of output.
+	var stdout, stderr headTailBuffer
+	stdout.headMax = maxOutputBytes / 2
+	stdout.tailMax = maxOutputBytes / 2
+	stdout.SpillDir = spillOutputDir
+	stderr.headMax = maxOutputBytes / 2
+	stderr.tailMax = maxOutputBytes / 2
+	stderr.SpillDir = spillOutputDir
+
+	// Assign io.Writers so os/exec owns the output copiers and Wait()
+	// drains them before closing the pipes. A self-owned StdoutPipe read
+	// concurrently with Wait() truncates output — exec has no copier to
+	// wait for, so Wait closes the read end the instant the process is
+	// reaped, before our reader consumes the tail. WaitDelay still bounds
+	// the wait if a grandchild keeps the pipes open past cancel.
+	// streamWriter streams newly captured bytes live via onUpdate.
+	cmd.Stdout = &streamWriter{buf: &stdout, onUpdate: onUpdate}
+	cmd.Stderr = &streamWriter{buf: &stderr, onUpdate: onUpdate}
+
+	if err := cmd.Start(); err != nil {
+		return core.ErrorResult(fmt.Sprintf("failed to start: %v", err)), nil
+	}
+
+	err := cmd.Wait()
+
+	// Check context FIRST — on timeout, cmd.Wait() may return
+	// an ExitError (SIGTERM exit), masking the real cause.
+	if ctx.Err() != nil {
+		killProcGroup(cmd) // reap grandchildren that ignored SIGTERM
+		stdout.Close()
+		stderr.Close()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return core.ErrorResult("command timed out"), nil
+		}
+		return core.ErrorResult("command cancelled"), nil
+	}
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			// ErrWaitDelay: the main process exited but a child kept the
+			// pipes open past WaitDelay. Reap the group so no grandchild
+			// lingers.
+			if errors.Is(err, exec.ErrWaitDelay) {
+				killProcGroup(cmd)
+			}
 			stdout.Close()
 			stderr.Close()
+			return core.ErrorResult(fmt.Sprintf("exec: %v", err)), nil
+		}
+	}
 
-			// Capture the new cwd+env. Only reachable when the command did NOT
-			// time out and Wait returned success or an ExitError (the trap ran),
-			// so `exit N` still updates state. cwd+env update atomically.
-			if cfg.BashState != nil && cwdFile != "" {
-				captureShellState(cfg.BashState, agentID, cwdFile, envFile)
-			}
+	stdout.Close()
+	stderr.Close()
 
-			out := stdout.String()
-			errOut := stderr.String()
+	// Capture the new cwd+env. Only reachable when the command did NOT
+	// time out and Wait returned success or an ExitError (the trap ran),
+	// so `exit N` still updates state. cwd+env update atomically.
+	if persistState && cfg.BashState != nil && cwdFile != "" {
+		captureShellState(cfg.BashState, agentID, cwdFile, envFile)
+	}
 
-			var result strings.Builder
-			if out != "" {
-				result.WriteString(out)
-			}
-			if errOut != "" {
-				if result.Len() > 0 {
-					result.WriteString("\n")
-				}
-				result.WriteString("STDERR:\n")
-				result.WriteString(errOut)
-			}
-			if exitCode != 0 {
-				if result.Len() > 0 {
-					result.WriteString("\n")
-				}
-				fmt.Fprintf(&result, "Exit code: %d", exitCode)
-			}
+	out := stdout.String()
+	errOut := stderr.String()
 
-			if result.Len() == 0 {
-				result.WriteString("(no output)")
-			}
+	var result strings.Builder
+	if out != "" {
+		result.WriteString(out)
+	}
+	if errOut != "" {
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		result.WriteString("STDERR:\n")
+		result.WriteString(errOut)
+	}
+	if exitCode != 0 {
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		fmt.Fprintf(&result, "Exit code: %d", exitCode)
+	}
 
-			return core.TextResult(result.String()), nil
+	if result.Len() == 0 {
+		result.WriteString("(no output)")
+	}
+
+	return core.TextResult(result.String()), nil
+}
+
+// NewBashStatus creates the status tool paired with async bash.
+func NewBashStatus(cfg ToolConfig) core.Tool {
+	return core.Tool{
+		Name: "bash_status", Label: "Bash Status",
+		Description: "Check a background bash job's status and output.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","description":"Background bash job ID"}},"required":["job_id"]}`),
+		Effect:      core.EffectReadOnly,
+		Execute: func(_ context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
+			jobID := getString(params, "job_id", "")
+			if cfg.BashJobs == nil {
+				return core.ErrorResult("background bash jobs are not configured"), nil
+			}
+			job, ok := cfg.BashJobs.Get(jobID)
+			if !ok {
+				return core.ErrorResult("unknown bash job ID: " + jobID), nil
+			}
+			return core.TextResult(fmt.Sprintf("Status: %s\nCommand: %s\nCWD: %s\n\nOutput:\n%s", job.Status, job.Command, job.CWD, job.Output)), nil
+		},
+	}
+}
+
+// NewBashCancel creates the cancellation tool paired with async bash.
+func NewBashCancel(cfg ToolConfig) core.Tool {
+	return core.Tool{
+		Name: "bash_cancel", Label: "Bash Cancel",
+		Description: "Cancel a running background bash job.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","description":"Background bash job ID"}},"required":["job_id"]}`),
+		Effect:      core.EffectShell,
+		Execute: func(_ context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
+			jobID := getString(params, "job_id", "")
+			if cfg.BashJobs == nil || !cfg.BashJobs.Cancel(jobID) {
+				return core.ErrorResult("unknown bash job ID: " + jobID), nil
+			}
+			return core.TextResult("Cancellation requested for bash job " + jobID), nil
 		},
 	}
 }
@@ -261,5 +331,3 @@ func captureShellState(st *BashState, agentID, cwdFile, envFile string) {
 func secondsToDuration(s int) time.Duration {
 	return time.Duration(s) * time.Second
 }
-
-

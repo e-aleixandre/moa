@@ -93,6 +93,12 @@ type SessionConfig struct {
 	OnSubagentEvent func(jobID string, inner any)
 	OnSubagentEnd   func(jobID, status string, usage *core.Usage, costUSD float64)
 
+	// Background bash callbacks feed the shared session bus/UI. Output is a
+	// lossy live delta; end carries the authoritative bounded log.
+	OnBashJobStart  func(job tool.BashJobInfo)
+	OnBashJobOutput func(jobID, delta string)
+	OnBashJobEnd    func(job tool.BashJobInfo)
+
 	// SubagentTranscriptLoader loads a finished subagent's persisted messages
 	// by job ID, enabling the subagent tool's "resume" parameter. Optional
 	// (nil = resume unsupported). The caller wires this to its transcript store
@@ -137,6 +143,7 @@ type Session struct {
 	// subagent.RegisterAll. Used for the init snapshot (reconnect), the agent
 	// tray, and cancellation.
 	Subagents *subagent.Jobs
+	BashJobs  *tool.BashJobs
 }
 
 // BuildSession wires up a complete agent session. The returned Session
@@ -159,6 +166,11 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 	if cfg.Ctx == nil {
 		return nil, fmt.Errorf("bootstrap: Ctx is required")
+	}
+	// Spills intentionally outlive an individual tool call so the agent can
+	// inspect them. Prune expired ones whenever a session is brought up.
+	if err := tool.CleanupSpillFiles(); err != nil {
+		slog.Warn("cleanup tool output spills", "error", err)
 	}
 
 	// Apply defaults.
@@ -226,6 +238,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	pathPolicy := tool.NewPathPolicy(cfg.CWD, allAllowed, isUnrestricted)
 
 	fileTracker := tool.NewFileTracker()
+	bashJobs := tool.NewBashJobs(cfg.Ctx, cfg.OnBashJobStart, cfg.OnBashJobOutput, cfg.OnBashJobEnd)
 	var bashState *tool.BashState
 	if core.IsPersistentShellEnabled(moaCfg) {
 		bashState = tool.NewBashState()
@@ -239,6 +252,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		BeforeWrite:   cfg.BeforeWrite,
 		FileTracker:   fileTracker,
 		BashState:     bashState,
+		BashJobs:      bashJobs,
 	}); err != nil {
 		return nil, fmt.Errorf("register builtins: %w", err)
 	}
@@ -428,6 +442,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		return nil, fmt.Errorf("bootstrap: subagent registration: %w", err)
 	}
 	sess.Subagents = subagentJobs
+	sess.BashJobs = bashJobs
 
 	// 11. Plan mode.
 	planSessionDir := cfg.PlanSessionDir

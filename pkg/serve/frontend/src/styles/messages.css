@@ -105,6 +105,13 @@
   max-width: 100%;
   word-break: break-word;
 }
+.msg-streaming-text { white-space: pre-wrap; }
+.messages > .msg-user-group,
+.messages > .msg-assistant,
+.messages > .tool-call {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
 .msg-assistant p { margin-bottom: 12px; }
 .msg-assistant p:last-child { margin-bottom: 0; }
 .msg-assistant ul, .msg-assistant ol { padding-left: 24px; margin-bottom: 12px; }

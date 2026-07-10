@@ -275,6 +275,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			wrapped.Custom["compaction_epoch"] = cfg.state.CompactionEpoch
 		}
 		cfg.appendState(wrapped)
+		// MessageEnd is a state-observable boundary: reconnect snapshots that
+		// include this lifecycle event must also include its stable MsgID.
+		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventMessageEnd, Message: wrapped})
 
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
@@ -447,12 +450,6 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 				partialThinking += event.Delta
 			case core.ProviderEventDone:
 				finalMsg = event.Message
-				if finalMsg != nil {
-					emitter.Emit(core.AgentEvent{
-						Type:    core.AgentEventMessageEnd,
-						Message: core.WrapMessage(*finalMsg),
-					})
-				}
 			case core.ProviderEventError:
 				if event.Error != nil {
 					return nil, event.Error
@@ -711,6 +708,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		result := cfg.hooks.FireToolResult(ctx, slots[i].tc.ToolName, resultWithFeedback, slots[i].isError)
 		isError := result.IsError
 
+		cfg.appendState(toolResultMessage(slots[i].tc, result, isError, false))
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecEnd,
 			ToolCallID: slots[i].tc.ToolCallID,
@@ -719,7 +717,6 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			IsError:    isError,
 			Rejected:   false,
 		})
-		cfg.appendState(toolResultMessage(slots[i].tc, result, isError, false))
 	}
 }
 

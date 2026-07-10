@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
+import { memo } from 'preact/compat';
 import { Check, X, Loader2, Maximize2, Minimize2, GitFork } from 'lucide-preact';
 import { toolVerb, toolPath, toolPreview, splitPreview, splitPreviewTail } from '../util/format.js';
 import { AskUserPreview } from './AskUserPreview.jsx';
 import { openPersistedSubagent } from '../session-actions.js';
 import { FileCard } from './FileCard.jsx';
 
-export function ToolCall({ tool, sessionId }) {
+function ToolCallView({ tool, sessionId }) {
   const [expanded, setExpanded] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -126,6 +127,8 @@ export function ToolCall({ tool, sessionId }) {
     </>
   );
 }
+
+export const ToolCall = memo(ToolCallView);
 
 function renderDiffLines(text) {
   if (!text) return text;

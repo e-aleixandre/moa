@@ -3,6 +3,8 @@ import { Message } from './Message.jsx';
 import { ToolCall } from './ToolCall.jsx';
 import { AskUserCard } from './AskUserCard.jsx';
 
+const MAX_RENDERED_MESSAGES = 200;
+
 export function MessageList({ session }) {
   const containerRef = useRef(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -21,7 +23,7 @@ export function MessageList({ session }) {
     if (atBottom && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  });
+  }, [atBottom, session?.messages?.length, session?.streamingText, session?.thinkingText]);
 
   const scrollToBottom = () => {
     const el = containerRef.current;
@@ -34,6 +36,8 @@ export function MessageList({ session }) {
   if (!session) return <div class="messages-wrap"><div class="messages" /></div>;
 
   const messages = session.messages || [];
+	const firstRendered = Math.max(0, messages.length - MAX_RENDERED_MESSAGES);
+	const renderedMessages = messages.slice(firstRendered);
   const streaming = session.streamingText;
   const thinking = session.thinkingText;
   const pendingAsk = session.pendingAsk;
@@ -47,14 +51,20 @@ export function MessageList({ session }) {
   return (
     <div class="messages-wrap">
       <div class="messages" ref={containerRef} onScroll={checkScroll}>
-        {messages.map((msg, i) => {
+		{(session.historyTruncated || firstRendered > 0) && (
+			<div class="msg-system">
+				Older messages are not rendered on this device to keep the conversation responsive.
+			</div>
+		)}
+        {renderedMessages.map((msg, i) => {
+			const messageIndex = firstRendered + i;
           if (msg._type === 'tool_start') {
-            return <ToolCall key={msg.tool_call_id || i} tool={msg} sessionId={session.id} />;
+            return <ToolCall key={msg.tool_call_id || messageIndex} tool={msg} sessionId={session.id} />;
           }
           if (msg._type === 'system') {
-            return <div key={i} class="msg-system">{msg.text}</div>;
+            return <div key={messageIndex} class="msg-system">{msg.text}</div>;
           }
-          return <Message key={i} msg={msg} />;
+          return <Message key={msg._msg_id || msg.msg_id || messageIndex} msg={msg} />;
         })}
 
         {thinking && (
@@ -66,7 +76,7 @@ export function MessageList({ session }) {
 
         {streaming && (
           <div class="streaming">
-            <Message msg={{ role: 'assistant', content: [{ type: 'text', text: streaming }] }} />
+            <div class="msg-assistant msg-streaming-text">{streaming}</div>
           </div>
         )}
 

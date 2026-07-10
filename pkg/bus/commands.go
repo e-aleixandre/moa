@@ -53,6 +53,15 @@ type PromoteSubagent struct {
 	JobID     string
 }
 
+// CancelBashJob cancels a session-scoped background bash job. Background bash
+// is explicit-only: a synchronous bash call cannot be safely promoted after
+// launch because its tool result and shell-state semantics are already bound
+// to the foreground turn; cancel and relaunch it with async:true instead.
+type CancelBashJob struct {
+	SessionID string
+	JobID     string
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ import (
 type PathPolicy struct {
 	mu            sync.RWMutex
 	workspaceRoot string
-	realRoot      string   // cached EvalSymlinks(workspaceRoot), resolved once at construction
+	realRoot      string // cached EvalSymlinks(workspaceRoot), resolved once at construction
 	allowedPaths  []string
 	unrestricted  bool // true = no path checks (was DisableSandbox)
 }
@@ -111,8 +111,20 @@ func (p *PathPolicy) SetUnrestricted(v bool) {
 // Restore replaces the mutable path-policy state without publishing a runtime
 // configuration event. It is used when a persisted session is restored.
 func (p *PathPolicy) Restore(allowed []string, unrestricted bool) {
-	cp := make([]string, len(allowed))
-	copy(cp, allowed)
+	cp := make([]string, 0, len(allowed))
+	seen := make(map[string]struct{}, len(allowed))
+	for _, path := range allowed {
+		path = filepath.Clean(path)
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		cp = append(cp, path)
+	}
 	p.mu.Lock()
 	p.allowedPaths = cp
 	p.unrestricted = unrestricted
