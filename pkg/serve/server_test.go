@@ -15,6 +15,7 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
 )
@@ -22,6 +23,37 @@ import (
 func newTestServer(t *testing.T) (*httptest.Server, *Manager, context.CancelFunc) {
 	t.Helper()
 	return newTestServerWithRoot(t, "/tmp")
+}
+
+func TestAttentionEndpointReturnsCrossSessionBlockingItems(t *testing.T) {
+	ts, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer ts.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{Title: "deploy api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Publish(bus.PermissionRequested{
+		SessionID: sess.ID,
+		ID:        "perm_attention_api",
+		ToolName:  "bash",
+		Args:      map[string]any{"command": "git status"},
+	})
+	pollUntil(t, time.Second, "attention API item", func() bool {
+		resp, err := http.Get(ts.URL + "/api/attention")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		var body struct {
+			Items []struct {
+				RefID string `json:"ref_id"`
+			} `json:"items"`
+		}
+		return resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&body) == nil &&
+			len(body.Items) == 1 && body.Items[0].RefID == "perm_attention_api"
+	})
 }
 
 func newTestServerWithRoot(t *testing.T, root string) (*httptest.Server, *Manager, context.CancelFunc) {
