@@ -49,6 +49,8 @@ const COMMANDS = [
   { name: 'verify', desc: 'Run verification checks' },
   { name: 'undo', desc: 'Undo last file change' },
   { name: 'path', desc: 'Manage path access scope', args: '[list|add <dir>|rm <dir>|scope workspace|unrestricted]' },
+  { name: 'rename', desc: 'Rename this conversation', args: '<title>' },
+  { name: 'schedule', desc: 'Schedule a prompt in this conversation', args: 'at <date> <time> [zone] -- <task> | in <duration> -- <task> | list | cancel <id>' },
 ];
 
 export function InputBar({ sessionId, session, tileId }) {
