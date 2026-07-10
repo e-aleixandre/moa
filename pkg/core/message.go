@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"time"
@@ -54,6 +56,7 @@ func ToolCallContent(id, name string, args map[string]any) Content {
 //	"assistant"   → Content, Provider, Model, Usage, StopReason
 //	"tool_result" → ToolCallID, ToolName, Content, IsError
 type Message struct {
+	MsgID     string    `json:"msg_id,omitempty"`
 	Role      string    `json:"role"`
 	Content   []Content `json:"content"`
 	Timestamp int64     `json:"timestamp"`
@@ -69,6 +72,19 @@ type Message struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	ToolName   string `json:"tool_name,omitempty"`
 	IsError    bool   `json:"is_error,omitempty"`
+}
+
+// EnsureMsgID assigns a stable identifier when the message does not have one.
+func (m *Message) EnsureMsgID() {
+	if m.MsgID != "" {
+		return
+	}
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err == nil {
+		m.MsgID = hex.EncodeToString(b)
+		return
+	}
+	m.MsgID = time.Now().UTC().Format("20060102150405.000000000")
 }
 
 // NewUserMessage creates a user message with text content.

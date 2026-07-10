@@ -44,6 +44,9 @@ func NewTreeFromEntries(entries []Entry, leafID string) (*Tree, error) {
 	}
 	copy(t.entries, entries)
 	for i, e := range t.entries {
+		if e.Type == EntryMessage && e.Message.MsgID == "" {
+			t.entries[i].Message.MsgID = e.ID
+		}
 		if _, exists := t.index[e.ID]; exists {
 			return nil, fmt.Errorf("tree: duplicate entry ID: %s", e.ID)
 		}
@@ -93,7 +96,11 @@ func (t *Tree) detectCycle(startID string) error {
 // Returns the assigned entry ID.
 func (t *Tree) Append(e Entry) string {
 	// Expensive work outside lock (independent of tree state)
-	id := generateEntryID()
+	id := e.Message.MsgID
+	if id == "" {
+		id = generateEntryID()
+		e.Message.MsgID = id
+	}
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now()
 	}
@@ -101,6 +108,10 @@ func (t *Tree) Append(e Entry) string {
 
 	// All state access under write lock
 	t.mu.Lock()
+	if _, exists := t.index[id]; exists {
+		id = generateEntryID()
+		e.Message.MsgID = id
+	}
 	e.ID = id
 	e.ParentID = t.leafID
 	t.entries = append(t.entries, e)
