@@ -572,6 +572,9 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 	if result == nil {
 		return nil, nil
 	}
+	for i := range compacted {
+		compacted[i].EnsureMsgID()
+	}
 
 	a.mu.Lock()
 	a.state.Messages = compacted
@@ -584,6 +587,13 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 		TokensAfter:   result.TokensAfter,
 		ReadFiles:     result.ReadFiles,
 		ModifiedFiles: result.ModifiedFiles,
+		SummaryMsgID:  compacted[0].MsgID,
+		FirstKeptMsgID: func() string {
+			if len(compacted) > 1 {
+				return compacted[1].MsgID
+			}
+			return ""
+		}(),
 	}, nil
 }
 

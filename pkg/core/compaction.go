@@ -17,11 +17,13 @@ var DefaultCompactionSettings = CompactionSettings{
 
 // CompactionPayload is the typed result of a compaction event.
 type CompactionPayload struct {
-	Summary       string   `json:"summary"`
-	TokensBefore  int      `json:"tokens_before"`
-	TokensAfter   int      `json:"tokens_after"`
-	ReadFiles     []string `json:"read_files,omitempty"`
-	ModifiedFiles []string `json:"modified_files,omitempty"`
+	Summary        string   `json:"summary"`
+	TokensBefore   int      `json:"tokens_before"`
+	TokensAfter    int      `json:"tokens_after"`
+	ReadFiles      []string `json:"read_files,omitempty"`
+	ModifiedFiles  []string `json:"modified_files,omitempty"`
+	SummaryMsgID   string   `json:"summary_msg_id,omitempty"`
+	FirstKeptMsgID string   `json:"first_kept_msg_id,omitempty"`
 }
 
 // compactionTailMargin is the extra headroom (≈2× the summary-message estimate)

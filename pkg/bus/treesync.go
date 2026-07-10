@@ -133,16 +133,7 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
-	msgs := ts.sctx.Agent.Messages()
-
-	// Find first kept entry ID in tree.
-	// After compaction, msgs[0] is compaction_summary, msgs[1..] are kept messages.
-	// The kept messages existed before compaction and were already synced to the tree.
-	// Match by role + timestamp (unique enough for practical purposes).
-	firstKeptID := ""
-	if len(msgs) > 1 {
-		firstKeptID = ts.findEntryByMessage(msgs[1])
-	}
+	firstKeptID := e.Payload.FirstKeptMsgID
 
 	ts.tree.Append(session.Entry{
 		Type: session.EntryCompaction,
@@ -157,8 +148,8 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 
 	// The summary is represented by the compaction entry, not an ordinary
 	// message entry, but must not appear as an in-flight display tail.
-	if len(msgs) > 0 && msgs[0].MsgID != "" {
-		ts.synced[msgs[0].MsgID] = struct{}{}
+	if e.Payload.SummaryMsgID != "" {
+		ts.synced[e.Payload.SummaryMsgID] = struct{}{}
 	}
 }
 
@@ -176,21 +167,4 @@ func (ts *TreeSyncer) Reset(tree *session.Tree, syncCount int) {
 			ts.synced[msg.MsgID] = struct{}{}
 		}
 	}
-}
-
-// findEntryByMessage finds the tree entry ID for a given agent message.
-// Searches the current path backwards (most recent first) for a message
-// matching by role + timestamp.
-func (ts *TreeSyncer) findEntryByMessage(msg core.AgentMessage) string {
-	path := ts.tree.Path()
-	for i := len(path) - 1; i >= 0; i-- {
-		e := path[i]
-		if e.Type != session.EntryMessage {
-			continue
-		}
-		if e.Message.Role == msg.Role && e.Message.Timestamp == msg.Timestamp {
-			return e.ID
-		}
-	}
-	return ""
 }

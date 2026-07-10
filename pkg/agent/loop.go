@@ -173,6 +173,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 						Type: core.AgentEventCompactionEnd, Error: err,
 					})
 				} else if result != nil {
+					for i := range compacted {
+						compacted[i].EnsureMsgID()
+					}
 					cfg.stateMu.Lock()
 					cfg.state.Messages = compacted
 					cfg.state.CompactionEpoch++
@@ -189,6 +192,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 							TokensAfter:   result.TokensAfter,
 							ReadFiles:     result.ReadFiles,
 							ModifiedFiles: result.ModifiedFiles,
+							SummaryMsgID:  compacted[0].MsgID,
+							FirstKeptMsgID: func() string {
+								if len(compacted) > 1 {
+									return compacted[1].MsgID
+								}
+								return ""
+							}(),
 						},
 					})
 				} else {
