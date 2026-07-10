@@ -12,6 +12,44 @@ import (
 	"github.com/ealeixandre/moa/pkg/ops"
 )
 
+// OpsSnapshot returns the safe operational projection for server-side clients.
+func (m *Manager) OpsSnapshot() ops.Snapshot {
+	if m.ops == nil {
+		return ops.Snapshot{}
+	}
+	return m.ops.Snapshot()
+}
+
+// SetOpsSessionAliases assigns explicit aliases to a known Ops session.
+func (m *Manager) SetOpsSessionAliases(id string, aliases []string) error {
+	if m.ops == nil {
+		return errors.New("ops unavailable")
+	}
+	return m.ops.SetSessionAliases(id, aliases)
+}
+
+// SetOpsProjectAliases assigns explicit aliases to a known canonical project.
+func (m *Manager) SetOpsProjectAliases(cwd string, aliases []string) error {
+	if m.ops == nil {
+		return errors.New("ops unavailable")
+	}
+	return m.ops.SetProjectAliases(cwd, aliases)
+}
+
+// ResolveOps and OpsStatus provide strict server-side query primitives.
+func (m *Manager) ResolveOps(target string) ops.Resolution {
+	if m.ops == nil {
+		return ops.Resolution{Target: target}
+	}
+	return m.ops.Resolve(target)
+}
+func (m *Manager) OpsStatus(target string) ops.StatusResult {
+	if m.ops == nil {
+		return ops.StatusResult{Resolution: ops.Resolution{Target: target}}
+	}
+	return m.ops.Status(target)
+}
+
 // subscribeOps attaches the safe operational projection before a session is
 // exposed. Like attention, it subscribes before taking its initial snapshots
 // and gates events until those snapshots are installed, preventing an attach
@@ -55,11 +93,11 @@ func (m *Manager) subscribeOps(sess *ManagedSession) {
 			}
 		case bus.RunStarted:
 			_ = m.ops.UpdateLifecycle(sess.ID, ops.LifecycleUpdate{State: ops.LifecycleRunning, Activity: ops.ActivityRunning, At: now})
-			_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneRunStarted, At: now, RefID: opsRunRef(e.RunGen)})
+			_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneRunStarted, At: now, RefID: opsRunRef(e.RunGen) + "_started"})
 		case bus.RunEnded:
-			_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneRunEnded, At: now, RefID: opsRunRef(e.RunGen)})
+			_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneRunEnded, At: now, RefID: opsRunRef(e.RunGen) + "_ended"})
 			if e.Err != nil {
-				_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneError, At: now, RefID: opsRunRef(e.RunGen)})
+				_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneError, At: now, RefID: opsRunRef(e.RunGen) + "_error"})
 			}
 		case bus.PermissionRequested:
 			_ = m.ops.UpdateLifecycle(sess.ID, ops.LifecycleUpdate{State: ops.LifecycleRunning, Activity: ops.ActivityPermission, At: now})
@@ -153,7 +191,7 @@ func (m *Manager) subscribeOps(sess *ManagedSession) {
 	sess.pushUnsubs = append(sess.pushUnsubs, func() {
 		once.Do(func() {
 			unsub()
-			m.ops.RemoveSession(sess.ID)
+			m.ops.MarkSaved(sess.ID)
 		})
 	})
 }

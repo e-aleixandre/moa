@@ -289,6 +289,9 @@ type ManagerConfig struct {
 	// SchedulePath overrides the durable schedules file. Empty stores it beside
 	// the session base directory.
 	SchedulePath string
+	// OpsPath overrides the durable safe Ops journal. Empty stores it beside
+	// the session base directory.
+	OpsPath string
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -320,6 +323,38 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
 		}
 	}
+	opsPath := cfg.OpsPath
+	if opsPath == "" {
+		baseDir := cfg.SessionBaseDir
+		if baseDir == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				baseDir = filepath.Join(home, ".config", "moa", "sessions")
+			}
+		}
+		if baseDir != "" {
+			opsPath = filepath.Join(filepath.Dir(baseDir), "ops.json")
+		}
+	}
+	var opsStore *ops.Store
+	var opsState ops.DurableState
+	if opsPath != "" {
+		var err error
+		opsStore, opsState, err = ops.OpenStore(opsPath)
+		if err != nil {
+			slog.Warn("ops storage disabled", "path", opsPath, "error", err)
+		}
+	}
+	opsService := ops.New(ops.Config{Persist: func(state ops.DurableState) error {
+		if opsStore == nil {
+			return nil
+		}
+		return opsStore.Save(state)
+	}})
+	if opsStore != nil {
+		if err := opsService.Restore(opsState); err != nil {
+			slog.Warn("ops restore failed", "error", err)
+		}
+	}
 	m := &Manager{
 		sessions:        make(map[string]*ManagedSession),
 		resuming:        make(map[string]struct{}),
@@ -338,7 +373,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		fileScanner:     files.NewScanner(),
 		scheduler:       scheduler,
 		attention:       attention.New(attention.Config{}),
-		ops:             ops.New(ops.Config{}),
+		ops:             opsService,
 	}
 	m.instructionRequests = make(map[string][]instructionRequest)
 	m.instructionRates = make(map[string][]time.Time)
