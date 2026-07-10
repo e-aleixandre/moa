@@ -54,6 +54,7 @@ func (m appModel) handleGoalCommand(args string) (tea.Model, tea.Cmd) {
 			Timeout:       gc.Timeout,
 			VerifyTimeout: gc.VerifyTimeout,
 			TotalBudget:   gc.TotalBudget,
+			WorkDir:       gc.WorkDir,
 		}); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Goal: " + err.Error()})
 			m.updateViewport()
@@ -75,6 +76,9 @@ func goalStatusText(info bus.GoalInfo) string {
 	}
 	if info.Stalled > 0 {
 		fmt.Fprintf(&b, ", stalled %d", info.Stalled)
+	}
+	if info.WorkDir != "" {
+		fmt.Fprintf(&b, "\nworkdir: %s", info.WorkDir)
 	}
 	return b.String()
 }

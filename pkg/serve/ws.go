@@ -176,7 +176,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.GoalChanged:
 		return Event{Type: "goal_change", Data: GoalChangeData{
-			Active: e.Active, Objective: e.Objective,
+			Active: e.Active, Objective: e.Objective, WorkDir: e.WorkDir,
 			Iteration: e.Iteration, Stalled: e.Stalled,
 		}}, true
 	case bus.GoalIterationEnded:
@@ -356,6 +356,7 @@ func buildInitData(sess *ManagedSession) InitData {
 	if goalInfo.Active {
 		data.GoalActive = true
 		data.GoalObjective = goalInfo.Objective
+		data.GoalWorkDir = goalInfo.WorkDir
 		data.GoalIteration = goalInfo.Iteration
 		data.GoalStalled = goalInfo.Stalled
 	}

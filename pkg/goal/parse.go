@@ -18,6 +18,7 @@ type Command struct {
 	Timeout       time.Duration // --timeout DUR (e.g. 2h, 90m)
 	VerifyTimeout time.Duration // --verify-timeout DUR (per-attempt verifier timeout)
 	TotalBudget   float64       // --budget USD (cumulative ceiling across iterations)
+	WorkDir       string        // --cwd DIR (execution/evaluation directory; "" = session CWD)
 }
 
 // FlagSpec describes one /goal flag for help text and autocompletion.
@@ -39,6 +40,7 @@ func Flags() []FlagSpec {
 		{Name: "--verifier", Placeholder: "SPEC", Desc: "model spec for the verifier"},
 		{Name: "--verify-timeout", Placeholder: "90s", Desc: "per-attempt verifier timeout (Go duration)"},
 		{Name: "--compact", Placeholder: "N", Desc: "soft compaction threshold in tokens"},
+		{Name: "--cwd", Placeholder: "DIR", Desc: "execution/evaluation directory (default: session CWD)"},
 	}
 }
 
@@ -54,7 +56,8 @@ func buildFlagsUsage() string {
 }
 
 // ParseCommand parses "<objective> [--max N] [--stalled N] [--timeout DUR]
-// [--budget USD] [--verifier SPEC] [--verify-timeout DUR] [--compact N]".
+// [--budget USD] [--verifier SPEC] [--verify-timeout DUR] [--compact N]
+// [--cwd DIR]".
 //
 // Flags are only recognized as a contiguous run of known-flag/value pairs at
 // the tail of the input: scanning from the end, as long as the last remaining
@@ -174,6 +177,11 @@ func applyFlag(cmd *Command, flag, val string) error {
 		cmd.TotalBudget = f
 	case "--verifier":
 		cmd.VerifierSpec = val
+	case "--cwd":
+		if strings.TrimSpace(val) == "" {
+			return fmt.Errorf("invalid --cwd: empty")
+		}
+		cmd.WorkDir = val
 	default:
 		return fmt.Errorf("unknown flag: %s", flag)
 	}

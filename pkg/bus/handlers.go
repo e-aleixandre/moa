@@ -318,6 +318,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		return GoalInfo{
 			Active:        info.Active,
 			Objective:     info.Objective,
+			WorkDir:       info.WorkDir,
 			Iteration:     info.Iteration,
 			Stalled:       info.Stalled,
 			MaxIterations: info.MaxIterations,
@@ -627,12 +628,16 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.State != nil && sctx.State.Current() == StateRunning {
 			return fmt.Errorf("cannot start a goal while the agent is running")
 		}
+		workDir, err := resolveGoalWorkDir(sctx, cmd.WorkDir)
+		if err != nil {
+			return err
+		}
 		statePath := cmd.StatePath
 		if statePath == "" {
 			statePath = goal.DefaultStatePath
 		}
 		if !filepath.IsAbs(statePath) {
-			statePath = filepath.Join(sctx.CWD, statePath)
+			statePath = filepath.Join(workDir, statePath)
 		}
 		// Lower the compaction threshold for the duration of the goal, remembering
 		// the previous value so we can restore it (not blindly reset to 0) on exit.
@@ -669,6 +674,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if err := sctx.Goal.Enter(goal.Options{
 			Objective:     cmd.Objective,
 			StatePath:     statePath,
+			WorkDir:       workDir,
 			VerifierSpec:  cmd.VerifierSpec,
 			MaxIterations: cmd.MaxIterations,
 			MaxStalled:    cmd.MaxStalled,
@@ -686,8 +692,8 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 		// Baseline the commit so the driver's progress check has a reference for
 		// the first iteration (progress = new edits or a new commit).
-		if sctx.CWD != "" {
-			sctx.Goal.SetLastCommit(runGit(sctx.SessionCtx, sctx.CWD, "rev-parse", "HEAD"))
+		if workDir != "" {
+			sctx.Goal.SetLastCommit(runGit(sctx.SessionCtx, workDir, "rev-parse", "HEAD"))
 		}
 		// Kick the first iteration. The driver takes over from RunEnded on.
 		return sctx.Bus.Execute(SendPrompt{
@@ -848,6 +854,13 @@ func RegisterHandlers(sctx *SessionContext) {
 			}
 			// Only user/assistant entries are valid branch targets
 			if e.Message.Role != "user" && e.Message.Role != "assistant" {
+				continue
+			}
+			// Skip targets that would leave a dangling tool_call (e.g. an
+			// assistant turn whose tool results haven't landed on this path
+			// yet). Branch() enforces the same rule; filtering here keeps
+			// the picker from ever offering a target it would reject.
+			if err := sctx.Tree.ValidBranchTarget(e.ID); err != nil {
 				continue
 			}
 			label := firstLine(messageText(e.Message))
@@ -1082,7 +1095,7 @@ func RegisterHandlers(sctx *SessionContext) {
 				return
 			}
 
-			evidence := buildGoalEvidence(evidenceCtx, sctx.CWD, e.FinalText)
+			evidence := buildGoalEvidence(evidenceCtx, goalWorkDir(sctx, info), e.FinalText)
 			evidenceCancel() // done with the evidence phase; free it before verifying
 			verdict, err := goal.Verify(verifyCtx, sctx.ProviderFactory, info.VerifierSpec, info.Objective, evidence, info.VerifyTimeout)
 
@@ -1139,8 +1152,8 @@ func RegisterHandlers(sctx *SessionContext) {
 			// new commit), NOT merely that the global objective isn't finished: a
 			// long goal is legitimately "not done" for many productive iterations.
 			var commit string
-			if sctx.CWD != "" {
-				commit = runGit(verifyCtx, sctx.CWD, "rev-parse", "HEAD")
+			if dir := goalWorkDir(sctx, info); dir != "" {
+				commit = runGit(verifyCtx, dir, "rev-parse", "HEAD")
 			}
 			progressed := e.HadEdits || (commit != "" && commit != sctx.Goal.LastCommit())
 			sctx.Goal.SetLastCommit(commit)
@@ -1268,6 +1281,49 @@ func deliverQueuedSteers(sctx *SessionContext) {
 	}
 }
 
+// resolveGoalWorkDir validates and resolves EnterGoal's --cwd override. An
+// empty cmdWorkDir keeps the existing behavior (evaluate in the session's
+// CWD). A relative override resolves against the session CWD; the result must
+// exist, be a directory, and pass the session's PathPolicy — otherwise
+// verify.Execute (which runs the target directory's .moa/verify.json) would
+// become a way to run arbitrary commands outside the sandbox. The error is
+// actionable: it tells the user to `/path add` the directory first.
+func resolveGoalWorkDir(sctx *SessionContext, cmdWorkDir string) (string, error) {
+	if strings.TrimSpace(cmdWorkDir) == "" {
+		return sctx.CWD, nil
+	}
+	dir := cmdWorkDir
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(sctx.CWD, dir)
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("goal: --cwd %q: %w", cmdWorkDir, err)
+	}
+	info, err := os.Stat(real)
+	if err != nil {
+		return "", fmt.Errorf("goal: --cwd %q: %w", cmdWorkDir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("goal: --cwd %q is not a directory", cmdWorkDir)
+	}
+	if sctx.PathPolicy != nil && !sctx.PathPolicy.IsAllowed(real) {
+		return "", fmt.Errorf("goal: --cwd %q is outside the allowed paths — run `/path add %s` first", cmdWorkDir, real)
+	}
+	return real, nil
+}
+
+// goalWorkDir returns the directory the driver should evaluate/execute in for
+// the given goal snapshot: Info.WorkDir if set, else the session CWD. Kept as
+// a helper so all four evaluation points (evidence, baseline commit, progress
+// check, verify config) agree on the same resolution rule.
+func goalWorkDir(sctx *SessionContext, info goal.Info) string {
+	if info.WorkDir != "" {
+		return info.WorkDir
+	}
+	return sctx.CWD
+}
+
 // goalRelaunch sends the next iteration's prompt if the agent is idle/error.
 // Drops it if the goal is no longer active or a run is already in flight (a
 // newer user turn took over).
@@ -1293,12 +1349,16 @@ func goalChangedEvent(sessionID string, info goal.Info) GoalChanged {
 		SessionID: sessionID,
 		Active:    info.Active,
 		Objective: info.Objective,
+		WorkDir:   info.WorkDir,
 		Iteration: info.Iteration,
 		Stalled:   info.Stalled,
 	}
 }
 
 func goalFirstKick(info goal.Info) string {
+	if info.WorkDir != "" {
+		return fmt.Sprintf("Start the goal. Work in %s — read %s there, then work the objective: %s", info.WorkDir, info.StatePath, info.Objective)
+	}
 	return fmt.Sprintf("Start the goal. Read %s, then work the objective: %s", info.StatePath, info.Objective)
 }
 

@@ -172,10 +172,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve model from registry.
+	// Resolve model from registry. A spec that can't possibly build a
+	// provider (a bare unknown name, or an explicit "provider/model" that
+	// mismatches a known model's real provider) fails fast here instead of
+	// limping into runtime errors later. A "provider/model" spec that simply
+	// isn't in the registry (a genuine custom model) is still accepted, with
+	// reduced context/pricing metadata.
+	if err := core.ValidateModelSpec(*modelFlag); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 	resolvedModel, knownModel := core.ResolveModel(*modelFlag)
 	if !knownModel {
-		fmt.Fprintf(os.Stderr, "warning: unknown model %q — context management disabled\n", *modelFlag)
+		fmt.Fprintf(os.Stderr, "warning: unrecognized model %q — context management disabled\n", *modelFlag)
 	}
 
 	// Build provider for the resolved model.

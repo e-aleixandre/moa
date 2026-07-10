@@ -163,6 +163,7 @@ type EnterGoal struct {
 	VerifyTimeout time.Duration // 0 = default per-attempt verifier timeout
 	TotalBudget   float64       // cumulative USD ceiling; 0 = derive from per-run MaxBudget
 	StatePath     string        // "" = default (.moa/goal/STATE.md)
+	WorkDir       string        // "" = session CWD; relative paths resolve against the session CWD
 }
 
 // ExitGoal stops goal mode (removes the directive and restores compaction).

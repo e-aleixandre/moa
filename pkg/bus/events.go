@@ -274,6 +274,7 @@ type GoalChanged struct {
 	SessionID string
 	Active    bool
 	Objective string
+	WorkDir   string
 	Iteration int
 	Stalled   int
 }

@@ -47,6 +47,10 @@ func runServe(args []string) {
 		}
 	}
 
+	if err := core.ValidateModelSpec(*modelFlag); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 	defaultModel, _ := core.ResolveModel(*modelFlag)
 	authStore := auth.NewStore("")
 

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -115,10 +116,32 @@ func (t *Tree) Append(e Entry) string {
 // Returns an error if:
 //   - the entry ID doesn't exist
 //   - the target is a tool_result (would leave dangling tool_call)
+//   - the resulting path (as BuildContext would see it) leaves any
+//     assistant tool_call without a matching tool_result
 func (t *Tree) Branch(entryID string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if err := t.validBranchTargetLocked(entryID); err != nil {
+		return err
+	}
+	t.leafID = entryID
+	return nil
+}
+
+// ValidBranchTarget reports whether branching to entryID would be accepted
+// by Branch, without mutating the tree. Callers building branch-picker UIs
+// should use this to filter candidates so they never offer a target that
+// Branch would reject (e.g. an assistant turn with unresolved tool calls).
+func (t *Tree) ValidBranchTarget(entryID string) error {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.validBranchTargetLocked(entryID)
+}
+
+// validBranchTargetLocked implements the Branch validity check.
+// Caller must hold at least a read lock.
+func (t *Tree) validBranchTargetLocked(entryID string) error {
 	idx, ok := t.index[entryID]
 	if !ok {
 		return fmt.Errorf("tree: unknown entry ID: %s", entryID)
@@ -127,7 +150,10 @@ func (t *Tree) Branch(entryID string) error {
 	if e.Type == EntryMessage && e.Message.Role == "tool_result" {
 		return fmt.Errorf("tree: cannot branch to tool_result entry (would leave dangling tool_call)")
 	}
-	t.leafID = entryID
+	path := t.pathToLocked(entryID)
+	if err := validateToolCallBalance(entriesToContext(path)); err != nil {
+		return fmt.Errorf("tree: cannot branch to %s: %w", entryID, err)
+	}
 	return nil
 }
 
@@ -250,6 +276,14 @@ func (t *Tree) BuildContext() ([]core.AgentMessage, int) {
 	}
 	t.mu.RUnlock()
 
+	return entriesToContext(path)
+}
+
+// entriesToContext implements the BuildContext algorithm over an already
+// resolved root→leaf path. Extracted so validBranchTargetLocked can compute
+// the exact context a candidate branch target would produce (including
+// compaction handling) without mutating the tree.
+func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 	if len(path) == 0 {
 		return nil, 0
 	}
@@ -349,6 +383,37 @@ func collectMessages(path []Entry) []core.AgentMessage {
 		}
 	}
 	return msgs
+}
+
+// validateToolCallBalance reports an error if any assistant tool_call in msgs
+// lacks a matching tool_result later in the same slice. msgs is expected to
+// be in the shape BuildContext produces (LLM-relevant roles only, in order).
+// A dangling tool_call is a history a provider can legitimately reject, so
+// this is used to reject branch targets that would produce one.
+func validateToolCallBalance(msgs []core.AgentMessage, _ int) error {
+	pending := make(map[string]string) // tool_call_id -> tool name (for the error message)
+	for _, m := range msgs {
+		switch m.Role {
+		case "assistant":
+			for _, c := range m.Content {
+				if c.Type == "tool_call" && c.ToolCallID != "" {
+					pending[c.ToolCallID] = c.ToolName
+				}
+			}
+		case "tool_result":
+			delete(pending, m.ToolCallID)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	// Deterministic error message.
+	ids := make([]string, 0, len(pending))
+	for id := range pending {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return fmt.Errorf("unresolved tool call %s (%s)", ids[0], pending[ids[0]])
 }
 
 // generateEntryID creates a unique entry ID (16 hex chars from 8 random bytes).

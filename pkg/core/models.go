@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -113,24 +114,71 @@ var modelAliases = map[string]string{
 //   - "openai/gpt-5.3-codex"      → provider prefix
 //
 // For unknown models, returns a Model with MaxInput=0 and ok=false.
+//
+// When a "provider/model" spec resolves to a known model whose registered
+// Provider differs from the requested prefix (e.g. "openai/sonnet", where
+// "sonnet" is an Anthropic model), ok is false — a provider/model mismatch on
+// a *known* model name is treated as caller error, not as an intentional
+// custom model. A provider/model pair that resolves to no known model at all
+// is still accepted as a legitimate custom model spec (ok=false, but
+// Provider/ID are populated verbatim so callers can still use it — pricing
+// and context-window metadata will simply be absent). Use ValidateModelSpec
+// to distinguish these two ok=false cases when that matters (e.g. to decide
+// whether to fail fast at config-parse time).
 func ResolveModel(spec string) (Model, bool) {
+	m, ok, _ := resolveModelSpec(spec)
+	return m, ok
+}
+
+// ValidateModelSpec reports whether spec can possibly be used to build a
+// provider, without needing pricing/context metadata for it. It rejects two
+// cases ResolveModel alone can't distinguish by its return value:
+//   - a bare (no "provider/" prefix) spec that isn't a known alias, model
+//     ID, or display name
+//   - a "provider/model" spec whose model portion IS a known model but
+//     registered under a *different* provider (almost certainly a typo,
+//     e.g. "openai/sonnet" — sonnet is an Anthropic model)
+//
+// A "provider/model" spec whose model portion is simply absent from the
+// registry is accepted (nil error): it's treated as a legitimate custom
+// model, just without pricing/context-window metadata.
+func ValidateModelSpec(spec string) error {
+	_, ok, mismatch := resolveModelSpec(spec)
+	if ok {
+		return nil
+	}
+	if mismatch {
+		return fmt.Errorf("model %q: provider/model mismatch (that model is registered under a different provider)", spec)
+	}
+	if strings.IndexByte(spec, '/') > 0 {
+		// Explicit provider + unknown model ID: accepted as custom.
+		return nil
+	}
+	return fmt.Errorf("unknown model %q (use \"<provider>/<model-id>\" for a custom model)", spec)
+}
+
+// resolveModelSpec is the shared implementation behind ResolveModel and
+// ValidateModelSpec. mismatch is true only when spec had an explicit
+// "provider/" prefix whose model portion matched a *known* model registered
+// under a different provider.
+func resolveModelSpec(spec string) (m Model, ok bool, mismatch bool) {
 	// Check alias first.
 	if full, ok := modelAliases[spec]; ok {
 		if m, ok2 := knownModels[full]; ok2 {
-			return m, true
+			return m, true, false
 		}
 	}
 
 	// Direct lookup.
 	if m, ok := knownModels[spec]; ok {
-		return m, true
+		return m, true, false
 	}
 
 	// Fallback: match by display Name (handles legacy session data
 	// that stored "Claude Sonnet 4.6" instead of "claude-sonnet-4-6").
 	for _, m := range knownModels {
 		if m.Name == spec {
-			return m, true
+			return m, true, false
 		}
 	}
 
@@ -142,20 +190,32 @@ func ResolveModel(spec string) (Model, bool) {
 		// Alias after stripping provider.
 		if full, ok := modelAliases[modelID]; ok {
 			if m, ok2 := knownModels[full]; ok2 {
-				return m, true
+				if m.Provider != provider {
+					// Explicit provider mismatches the provider of the known
+					// model the alias resolves to (e.g. "openai/sonnet"). This
+					// is very likely a typo, not a real custom model — surface
+					// it as unresolved rather than silently ignoring the
+					// requested provider.
+					return Model{ID: modelID, Provider: provider}, false, true
+				}
+				return m, true, false
 			}
 		}
 
 		// Direct lookup of model ID part.
 		if m, ok := knownModels[modelID]; ok {
-			return m, true
+			if m.Provider != provider {
+				return Model{ID: modelID, Provider: provider}, false, true
+			}
+			return m, true, false
 		}
 
-		// Unknown model with explicit provider.
-		return Model{ID: modelID, Provider: provider}, false
+		// Unknown model with explicit provider: treated as a valid custom
+		// model spec (provider/model), just without pricing/context metadata.
+		return Model{ID: modelID, Provider: provider}, false, false
 	}
 
-	return Model{ID: spec}, false
+	return Model{ID: spec}, false, false
 }
 
 // ListModels returns all unique known models, deduplicated by ID,

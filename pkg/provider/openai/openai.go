@@ -22,6 +22,12 @@ const (
 
 	apiEndpoint   = "/v1/responses"
 	codexEndpoint = "/codex/responses"
+
+	// Codex client identity, required for OAuth requests to chatgpt.com.
+	// Newer models are gated on the first-party Codex identity; a neutral
+	// version is used so we don't claim a specific Codex release.
+	codexOriginator = "codex_cli_rs"
+	codexUserAgent  = "codex_cli_rs/0.0.0 (Moa)"
 )
 
 // OpenAI implements core.Provider for the OpenAI Responses API.
@@ -91,6 +97,12 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		r.Header.Set("Accept", "text/event-stream")
 		if o.accountID != "" {
 			r.Header.Set("chatgpt-account-id", o.accountID)
+			// Newer Codex models (e.g. gpt-5.6-luna) are gated on the
+			// first-party Codex client identity: without these headers the
+			// backend returns "Model not found". A neutral version is used so
+			// we don't claim a specific Codex release.
+			r.Header.Set("originator", codexOriginator)
+			r.Header.Set("User-Agent", codexUserAgent)
 		}
 		return r, nil
 	}

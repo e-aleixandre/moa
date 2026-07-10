@@ -10,12 +10,16 @@ import (
 // survives every compaction — that's what keeps the loop alive across context
 // resets. STATE.md carries the durable, canonical progress.
 func GoalDirective(info Info) string {
-	return fmt.Sprintf(directiveTemplate, strings.TrimSpace(info.Objective), info.StatePath)
+	workDirLine := ""
+	if info.WorkDir != "" {
+		workDirLine = fmt.Sprintf("\nWORKING DIRECTORY: %s — do all work there (the shell starts elsewhere; cd there first).\n", info.WorkDir)
+	}
+	return fmt.Sprintf(directiveTemplate, strings.TrimSpace(info.Objective), info.StatePath, workDirLine)
 }
 
 const directiveTemplate = `[GOAL MODE ACTIVE]
 Objective: %[1]s
-
+%[3]s
 You are running an autonomous goal loop. When you stop (a turn with no tool calls), a separate verifier judges the objective and either ends the loop or relaunches you with feedback. So conclude naturally when the work is done — do NOT try to loop forever yourself.
 
 STATE FILE: %[2]s — this is your canonical brain, and it survives context compaction. At the START of every iteration, read it. Keep it tidy AND truthful: prune what's resolved and correct anything that no longer applies. If the compaction summary and the state file disagree, the state file wins. Record: done (change → commit), discarded (approach → why), blocked, and what's next. The discarded section stops you from retrying dead ends.

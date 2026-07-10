@@ -28,6 +28,9 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	result := map[string]string{}
 
 	if modelSpec != "" {
+		if err := core.ValidateModelSpec(modelSpec); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidModel, err)
+		}
 		if err := sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec}); err != nil {
 			return nil, err
 		}

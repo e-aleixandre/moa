@@ -27,6 +27,7 @@ const DefaultMaxStalled = 3
 type Options struct {
 	Objective     string
 	StatePath     string        // default DefaultStatePath
+	WorkDir       string        // cwd of execution/evaluation; "" = session CWD
 	VerifierSpec  string        // model spec for the verifier; "" = DefaultVerifierSpec
 	MaxIterations int           // 0 = unlimited
 	MaxStalled    int           // 0 = DefaultMaxStalled
@@ -40,6 +41,7 @@ type Info struct {
 	Active        bool
 	Objective     string
 	StatePath     string
+	WorkDir       string // cwd of execution/evaluation; "" = session CWD (see goal.Options.WorkDir)
 	VerifierSpec  string
 	Iteration     int
 	Stalled       int
@@ -102,6 +104,7 @@ func (g *Goal) snapshot() Info {
 		Active:        g.active,
 		Objective:     g.opts.Objective,
 		StatePath:     g.opts.StatePath,
+		WorkDir:       g.opts.WorkDir,
 		VerifierSpec:  g.opts.VerifierSpec,
 		Iteration:     g.iteration,
 		Stalled:       g.stalled,

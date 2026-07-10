@@ -32,6 +32,25 @@ func assistantEntry(text string) Entry {
 	}
 }
 
+// assistantToolCallEntry builds an assistant entry that issues one or more
+// tool calls (used to test dangling tool_call branch validation).
+func assistantToolCallEntry(callIDs ...string) Entry {
+	content := make([]core.Content, len(callIDs))
+	for i, id := range callIDs {
+		content[i] = core.ToolCallContent(id, "bash", map[string]any{"command": "echo hi"})
+	}
+	return Entry{
+		Type: EntryMessage,
+		Message: core.AgentMessage{
+			Message: core.Message{
+				Role:      "assistant",
+				Content:   content,
+				Timestamp: time.Now().Unix(),
+			},
+		},
+	}
+}
+
 func toolResultEntry(callID, toolName, result string) Entry {
 	return Entry{
 		Type: EntryMessage,
@@ -221,6 +240,78 @@ func TestBranch_AllowsUserEntry(t *testing.T) {
 
 	if err := tree.Branch(id1); err != nil {
 		t.Fatalf("should allow branching to user entry: %v", err)
+	}
+}
+
+// --- F15: branch targets must not leave dangling tool calls ---
+
+func TestBranch_RejectsAssistantWithUnresolvedToolCall(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("run a command"))
+	acID := tree.Append(assistantToolCallEntry("tc1"))
+	// No tool_result appended — acID is a dangling tool_call target.
+
+	err := tree.Branch(acID)
+	if err == nil {
+		t.Fatal("should reject branching to assistant entry with unresolved tool call")
+	}
+	if !strings.Contains(err.Error(), "tc1") {
+		t.Fatalf("error should reference the unresolved call id, got: %v", err)
+	}
+	if tree.LeafID() != acID {
+		// Branch only rejects; leaf should remain wherever Append left it
+		// (the last appended entry), not silently move.
+		t.Fatalf("leaf should be unaffected by rejected branch, got %s", tree.LeafID())
+	}
+}
+
+func TestBranch_RejectsAssistantWithPartiallyResolvedToolCalls(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("run two commands"))
+	acID := tree.Append(assistantToolCallEntry("tc1", "tc2"))
+	tree.Append(toolResultEntry("tc1", "bash", "done"))
+	// tc2 has no matching tool_result on this path.
+
+	if err := tree.ValidBranchTarget(acID); err == nil {
+		t.Fatal("should reject branch target with a sibling unresolved tool call")
+	}
+	if err := tree.Branch(acID); err == nil {
+		t.Fatal("Branch should reject the same target ValidBranchTarget rejects")
+	}
+}
+
+func TestBranch_AllowsAssistantWithAllToolCallsResolved(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("run two commands"))
+	tree.Append(assistantToolCallEntry("tc1", "tc2"))
+	tree.Append(toolResultEntry("tc1", "bash", "done"))
+	tree.Append(toolResultEntry("tc2", "bash", "done too"))
+	finalID := tree.Append(assistantEntry("both done"))
+
+	if err := tree.ValidBranchTarget(finalID); err != nil {
+		t.Fatalf("branching after both results landed should be allowed: %v", err)
+	}
+	if err := tree.Branch(finalID); err != nil {
+		t.Fatalf("branching to the final assistant turn should be allowed: %v", err)
+	}
+}
+
+func TestBranch_ToolCallBeforeCompactionBoundary_NotCountedAsUnresolved(t *testing.T) {
+	// A dangling tool_call that predates the compaction's firstKeptEntryID is
+	// dropped from BuildContext's output entirely, so it must not block
+	// branching to entries after the compaction.
+	tree := NewTree()
+	tree.Append(userEntry("start"))
+	tree.Append(assistantToolCallEntry("tc-old")) // never resolved, pre-compaction
+	keepID := tree.Append(userEntry("kept"))
+	compID := tree.Append(compactionEntry("summary", keepID, 5000))
+	tailID := tree.Append(assistantEntry("post-compaction reply"))
+
+	if err := tree.ValidBranchTarget(compID); err != nil {
+		t.Fatalf("compaction entry should remain a valid branch target: %v", err)
+	}
+	if err := tree.ValidBranchTarget(tailID); err != nil {
+		t.Fatalf("post-compaction assistant entry should be valid: %v", err)
 	}
 }
 

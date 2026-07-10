@@ -280,7 +280,7 @@ func handleCreateSession(mgr *Manager) http.HandlerFunc {
 		}
 		sess, err := mgr.CreateSession(opts)
 		if err != nil {
-			if errors.Is(err, ErrInvalidCWD) {
+			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -619,6 +619,10 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 			}
 			if errors.Is(err, ErrBusy) {
 				http.Error(w, "session already active", http.StatusConflict)
+				return
+			}
+			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -29,6 +29,7 @@ type InitData struct {
 	PlanFile          string              `json:"plan_file,omitempty"`
 	GoalActive        bool                `json:"goal_active,omitempty"`
 	GoalObjective     string              `json:"goal_objective,omitempty"`
+	GoalWorkDir       string              `json:"goal_work_dir,omitempty"`
 	GoalIteration     int                 `json:"goal_iteration,omitempty"`
 	GoalStalled       int                 `json:"goal_stalled,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
@@ -171,6 +172,7 @@ type PlanModeData struct {
 type GoalChangeData struct {
 	Active    bool   `json:"active"`
 	Objective string `json:"objective,omitempty"`
+	WorkDir   string `json:"work_dir,omitempty"`
 	Iteration int    `json:"iteration"`
 	Stalled   int    `json:"stalled"`
 }

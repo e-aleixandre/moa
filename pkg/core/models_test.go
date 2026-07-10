@@ -71,6 +71,75 @@ func TestResolveModel_UnknownWithProvider(t *testing.T) {
 	}
 }
 
+// F16/A6: an explicit provider prefix that mismatches a *known* model's
+// registered provider is rejected (ok=false), not silently resolved to the
+// wrong provider's model.
+func TestResolveModel_ProviderMismatchOnKnownAlias(t *testing.T) {
+	m, ok := ResolveModel("openai/sonnet")
+	if ok {
+		t.Fatal("expected not ok for provider/model mismatch on known alias")
+	}
+	if m.Provider != "openai" {
+		t.Fatalf("provider should be the requested one, got %s", m.Provider)
+	}
+	if m.ID != "sonnet" {
+		t.Fatalf("id should be passthrough, got %s", m.ID)
+	}
+}
+
+func TestResolveModel_ProviderMismatchOnKnownDirectID(t *testing.T) {
+	m, ok := ResolveModel("openai/claude-sonnet-5")
+	if ok {
+		t.Fatal("expected not ok for provider/model mismatch on known direct id")
+	}
+	if m.Provider != "openai" {
+		t.Fatalf("provider should be the requested one, got %s", m.Provider)
+	}
+}
+
+// A provider/model spec that resolves to no known model at all remains a
+// valid custom-model spec (still ok=false since metadata is absent, but the
+// provider/id are preserved verbatim so callers can still use it).
+func TestResolveModel_CustomProviderModelStillPreserved(t *testing.T) {
+	m, ok := ResolveModel("openai/my-fine-tuned-model")
+	if ok {
+		t.Fatal("expected not ok (no pricing/context known)")
+	}
+	if m.Provider != "openai" || m.ID != "my-fine-tuned-model" {
+		t.Fatalf("custom provider/model should be preserved verbatim, got %+v", m)
+	}
+}
+
+// F16/A6: ValidateModelSpec is the entry point CLI/API use to fail fast.
+func TestValidateModelSpec(t *testing.T) {
+	cases := []struct {
+		name    string
+		spec    string
+		wantErr bool
+	}{
+		{"known alias", "sonnet", false},
+		{"known direct id", "gpt-5.3-codex", false},
+		{"known provider/alias", "anthropic/sonnet", false},
+		{"known provider/id", "openai/gpt-5.3-codex", false},
+		{"provider mismatch on alias", "openai/sonnet", true},
+		{"provider mismatch on direct id", "openai/claude-sonnet-5", true},
+		{"bare unknown", "some-future-model", true},
+		{"custom provider/model", "openai/my-fine-tuned-model", false},
+		{"custom unknown provider", "google/gemini-2", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateModelSpec(tc.spec)
+			if tc.wantErr && err == nil {
+				t.Fatalf("ValidateModelSpec(%q): expected error, got nil", tc.spec)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidateModelSpec(%q): unexpected error: %v", tc.spec, err)
+			}
+		})
+	}
+}
+
 func TestListModels_Deduplicated(t *testing.T) {
 	models := ListModels()
 	if len(models) == 0 {

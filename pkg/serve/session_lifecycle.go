@@ -36,6 +36,20 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		cwd = m.workspaceRoot
 	}
 
+	// Validate the model spec up front for explicit, user-driven creation.
+	// An unknown bare name, or a "provider/model" spec whose model portion
+	// matches a *known* model registered under a different provider (e.g.
+	// "openai/sonnet"), is rejected here instead of silently falling back to
+	// the default model or surfacing an opaque provider-factory error later.
+	// A "provider/model" spec that simply isn't in the registry is still
+	// accepted as a genuine custom model (reduced context/pricing metadata,
+	// but usable).
+	if opts.Model != "" {
+		if err := core.ValidateModelSpec(opts.Model); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidModel, err)
+		}
+	}
+
 	// A title chosen explicitly at creation is treated as manual, so auto-titling
 	// won't overwrite it. (The web never sets one — titles come from the first
 	// message — so this only affects programmatic callers.)
@@ -333,9 +347,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 }
 
 var (
-	ErrNotFound   = errors.New("session not found")
-	ErrBusy       = errors.New("session is busy")
-	ErrInvalidCWD = errors.New("invalid working directory")
+	ErrNotFound     = errors.New("session not found")
+	ErrBusy         = errors.New("session is busy")
+	ErrInvalidCWD   = errors.New("invalid working directory")
+	ErrInvalidModel = errors.New("invalid model")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.

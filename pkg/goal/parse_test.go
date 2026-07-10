@@ -19,7 +19,7 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name: "all knobs",
-			args: "ship feature X --max 10 --stalled 5 --timeout 2h --verifier haiku --compact 40000 --budget 7.5 --verify-timeout 3m",
+			args: "ship feature X --max 10 --stalled 5 --timeout 2h --verifier haiku --compact 40000 --budget 7.5 --verify-timeout 3m --cwd ../wt-foo",
 			want: Command{
 				Objective:     "ship feature X",
 				MaxIterations: 10,
@@ -29,7 +29,33 @@ func TestParseCommand(t *testing.T) {
 				CompactAt:     40000,
 				TotalBudget:   7.5,
 				VerifyTimeout: 3 * time.Minute,
+				WorkDir:       "../wt-foo",
 			},
+		},
+		{
+			name: "cwd relative",
+			args: "do thing --cwd ../wt-foo",
+			want: Command{Objective: "do thing", WorkDir: "../wt-foo"},
+		},
+		{
+			name: "cwd absolute",
+			args: "do thing --cwd /tmp/wt-foo",
+			want: Command{Objective: "do thing", WorkDir: "/tmp/wt-foo"},
+		},
+		{
+			name: "cwd equals form",
+			args: "do thing --cwd=/tmp/wt-foo",
+			want: Command{Objective: "do thing", WorkDir: "/tmp/wt-foo"},
+		},
+		{
+			name: "cwd last wins",
+			args: "do thing --cwd /tmp/a --cwd /tmp/b",
+			want: Command{Objective: "do thing", WorkDir: "/tmp/b"},
+		},
+		{
+			name:    "cwd missing value",
+			args:    "do thing --cwd",
+			wantErr: true,
 		},
 		{
 			name:    "invalid budget",

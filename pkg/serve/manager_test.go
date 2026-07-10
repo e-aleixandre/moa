@@ -464,6 +464,78 @@ func TestCreateSession_InvalidCWD(t *testing.T) {
 	}
 }
 
+// TestCreateSession_InvalidModel is the F16/A6 regression: a model spec that
+// mismatches a known model's provider (or is a bare unknown name) must be
+// rejected at creation with a clear, immediate error — not accepted and left
+// to fail opaquely later at the provider factory.
+func TestCreateSession_InvalidModel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider()
+	mgr := newTestManager(t, ctx, prov)
+
+	_, err := mgr.CreateSession(CreateOpts{Model: "openai/sonnet"})
+	if err == nil {
+		t.Fatal("expected error for provider/model mismatch")
+	}
+	if !errors.Is(err, ErrInvalidModel) {
+		t.Fatalf("expected ErrInvalidModel, got: %v", err)
+	}
+
+	_, err = mgr.CreateSession(CreateOpts{Model: "totally-unknown-model"})
+	if !errors.Is(err, ErrInvalidModel) {
+		t.Fatalf("expected ErrInvalidModel for unknown bare model, got: %v", err)
+	}
+}
+
+// TestCreateSession_CustomProviderModelStillAllowed ensures F16/A6 doesn't
+// regress support for genuine custom models expressed as "provider/model"
+// that simply aren't in the registry.
+func TestCreateSession_CustomProviderModelStillAllowed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider()
+	mgr := newTestManager(t, ctx, prov)
+
+	sess, err := mgr.CreateSession(CreateOpts{Model: "mock/my-custom-finetune"})
+	if err != nil {
+		t.Fatalf("custom provider/model should be accepted, got: %v", err)
+	}
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+	if model.Provider != "mock" || model.ID != "my-custom-finetune" {
+		t.Fatalf("custom model not preserved, got: %+v", model)
+	}
+}
+
+// TestReconfigureSession_InvalidModel is the manager-level F16/A6 regression:
+// switching to a model spec ValidateModelSpec rejects must fail with
+// ErrInvalidModel, without touching the session's current model.
+func TestReconfigureSession_InvalidModel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(simpleResponseHandler("hi"))
+	mgr := newTestManager(t, ctx, prov)
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+
+	_, err = mgr.ReconfigureSession(sess.ID, "openai/sonnet", "")
+	if !errors.Is(err, ErrInvalidModel) {
+		t.Fatalf("expected ErrInvalidModel, got: %v", err)
+	}
+
+	after, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+	if after != before {
+		t.Fatalf("model should be unchanged after rejected reconfigure: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestDelete_CancelsSessionContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

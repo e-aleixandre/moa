@@ -132,3 +132,46 @@ func TestHandler_BranchTo_AllowedWhenIdle(t *testing.T) {
 		t.Fatalf("leaf = %s, want %s", got, firstID)
 	}
 }
+
+// TestHandler_BranchTo_RejectsDanglingToolCall verifies the F15 guard: an
+// assistant turn with an unresolved tool_call must not become the new leaf,
+// even while idle, and GetBranchPoints must not offer it as a target.
+func TestHandler_BranchTo_RejectsDanglingToolCall(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+
+	tree := session.NewTree()
+	tree.Append(session.Entry{
+		Type:    session.EntryMessage,
+		Message: core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("run a command")}}),
+	})
+	acID := tree.Append(session.Entry{
+		Type: session.EntryMessage,
+		Message: core.WrapMessage(core.Message{
+			Role:    "assistant",
+			Content: []core.Content{core.ToolCallContent("tc1", "bash", map[string]any{"command": "echo hi"})},
+		}),
+	})
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	leafBefore := tree.LeafID()
+	if err := b.Execute(BranchTo{EntryID: acID}); err == nil {
+		t.Fatal("expected BranchTo to reject an assistant entry with an unresolved tool call")
+	}
+	if got := tree.LeafID(); got != leafBefore {
+		t.Fatalf("tree leaf changed despite rejected branch: %s → %s", leafBefore, got)
+	}
+
+	points, err := QueryTyped[GetBranchPoints, []BranchPoint](b, GetBranchPoints{})
+	if err != nil {
+		t.Fatalf("GetBranchPoints: %v", err)
+	}
+	for _, p := range points {
+		if p.EntryID == acID {
+			t.Fatalf("GetBranchPoints must not offer an entry with a dangling tool call: %+v", p)
+		}
+	}
+}

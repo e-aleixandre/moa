@@ -170,7 +170,11 @@ func cmdGoal(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 		if info.Stalled > 0 {
 			msg += fmt.Sprintf(", stalled %d", info.Stalled)
 		}
-		return &CommandResult{OK: true, Message: msg + ")"}, nil
+		msg += ")"
+		if info.WorkDir != "" {
+			msg += "\nworkdir: " + info.WorkDir
+		}
+		return &CommandResult{OK: true, Message: msg}, nil
 	}
 
 	if args[0] == "stop" {
@@ -197,6 +201,7 @@ func cmdGoal(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 		Timeout:       gc.Timeout,
 		VerifyTimeout: gc.VerifyTimeout,
 		TotalBudget:   gc.TotalBudget,
+		WorkDir:       gc.WorkDir,
 	}); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}

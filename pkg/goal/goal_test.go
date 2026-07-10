@@ -172,4 +172,24 @@ func TestGoalDirective_ContainsObjectiveAndStatePath(t *testing.T) {
 	if !strings.Contains(d, "GOAL MODE ACTIVE") {
 		t.Fatal("directive should carry the goal-mode marker")
 	}
+	if strings.Contains(d, "WORKING DIRECTORY") {
+		t.Fatal("directive should omit the working-directory line when WorkDir is empty")
+	}
+}
+
+func TestGoalDirective_MentionsWorkDirWhenSet(t *testing.T) {
+	d := GoalDirective(Info{Objective: "refactor auth", StatePath: ".moa/goal/STATE.md", WorkDir: "/tmp/wt-foo"})
+	if !strings.Contains(d, "WORKING DIRECTORY: /tmp/wt-foo") {
+		t.Fatalf("directive should call out the working directory, got:\n%s", d)
+	}
+}
+
+func TestEnter_StoresWorkDir(t *testing.T) {
+	g := New()
+	if err := g.Enter(Options{Objective: "x", StatePath: filepath.Join(t.TempDir(), "s.md"), WorkDir: "/tmp/wt-foo"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Info().WorkDir; got != "/tmp/wt-foo" {
+		t.Fatalf("WorkDir = %q, want /tmp/wt-foo", got)
+	}
 }

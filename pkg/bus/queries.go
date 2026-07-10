@@ -58,6 +58,7 @@ type GetGoal struct{ SessionID string }
 type GoalInfo struct {
 	Active        bool
 	Objective     string
+	WorkDir       string
 	Iteration     int
 	Stalled       int
 	MaxIterations int

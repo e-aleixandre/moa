@@ -705,6 +705,44 @@ func TestCreateSession_InvalidCWD_Returns400(t *testing.T) {
 	}
 }
 
+// TestCreateSession_InvalidModel_Returns400 is the F16/A6 API regression:
+// an unresolvable model spec must fail the request immediately with 400,
+// not create a session that later errors opaquely at the provider factory.
+func TestCreateSession_InvalidModel_Returns400(t *testing.T) {
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	resp := apiReq(t, srv, "POST", "/api/sessions", `{"title":"test","model":"openai/sonnet"}`)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 400 {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestReconfigureSession_InvalidModel_Returns400 covers the F16/A6
+// reconfigure path (PATCH .../config): switching an already-created session
+// to an unresolvable model spec must also fail with 400.
+func TestReconfigureSession_InvalidModel_Returns400(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(simpleResponseHandler("hi"))
+	mgr := newTestManager(t, ctx, prov)
+	httpSrv := httptest.NewServer(NewServer(mgr))
+	defer httpSrv.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := apiReq(t, httpSrv, "PATCH", "/api/sessions/"+sess.ID+"/config", `{"model":"openai/sonnet"}`)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 400 {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestCreateSession_WithCWD_API(t *testing.T) {
 	dir := t.TempDir()
 	srv, _, cancel := newTestServerWithRoot(t, dir)

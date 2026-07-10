@@ -220,6 +220,7 @@ export function handleWsInit(id, data) {
     subagents: initSubagents(data.subagents),
     goalActive: !!data.goal_active,
     goalObjective: data.goal_active ? (data.goal_objective || '') : null,
+    goalWorkDir: data.goal_active ? (data.goal_work_dir || '') : null,
     goalIteration: data.goal_iteration || 0,
     goalStalled: data.goal_stalled || 0,
   });
@@ -881,6 +882,7 @@ export function handleWsGoalChange(id, data) {
   updateSession(id, {
     goalActive: !!data.active,
     goalObjective: data.active ? (data.objective || '') : null,
+    goalWorkDir: data.active ? (data.work_dir || '') : null,
     goalIteration: data.iteration || 0,
     goalStalled: data.stalled || 0,
   });
@@ -904,6 +906,7 @@ export function handleWsGoalEnd(id, data) {
   updateSession(id, {
     goalActive: false,
     goalObjective: null,
+    goalWorkDir: null,
     messages: [...sess.messages, { _type: 'system', text: `🎯 Goal ended: ${data.reason || ''}` }],
   });
   markUnseen(id);
