@@ -81,25 +81,62 @@ type Model struct {
 }
 
 // Pricing holds per-token costs in USD per million tokens.
+//
+// Some providers (e.g. OpenAI's long-context GPT models) charge a different
+// flat rate once the prompt exceeds a context-length threshold. Tiers lists
+// those higher-context rates in ascending Threshold order; the base
+// Input/Output/CacheRead/CacheWrite fields are the tier that applies below
+// the first threshold ("short context"). Cost picks the tier by the
+// request's total input context (Input+CacheRead tokens count toward the
+// prompt length the provider bills against) and applies it to the *whole*
+// request, matching how these providers actually bill — not a blended rate.
 type Pricing struct {
+	Input      float64 `json:"input"`       // $/M input tokens
+	Output     float64 `json:"output"`      // $/M output tokens
+	CacheRead  float64 `json:"cache_read"`  // $/M cached input tokens
+	CacheWrite float64 `json:"cache_write"` // $/M cache write tokens
+
+	// Tiers holds additional pricing tiers keyed by a context-length
+	// threshold, for providers that charge more once the prompt exceeds a
+	// given size. Must be sorted ascending by Threshold.
+	Tiers []PricingTier `json:"tiers,omitempty"`
+}
+
+// PricingTier is a pricing tier that applies once the request's context
+// (input + cache-read tokens) reaches Threshold tokens.
+type PricingTier struct {
+	Threshold  int     `json:"threshold"`   // tier applies when Input+CacheRead >= this
 	Input      float64 `json:"input"`       // $/M input tokens
 	Output     float64 `json:"output"`      // $/M output tokens
 	CacheRead  float64 `json:"cache_read"`  // $/M cached input tokens
 	CacheWrite float64 `json:"cache_write"` // $/M cache write tokens
 }
 
-// Cost calculates the USD cost for a given Usage.
+// Cost calculates the USD cost for a given Usage, selecting the pricing
+// tier based on the request's total context (Input+CacheRead tokens) and
+// applying that tier's rates to the entire request.
 func (p *Pricing) Cost(u Usage) float64 {
 	if p == nil {
 		return 0
 	}
-	const m = 1_000_000.0
-	cost := float64(u.Input)*p.Input/m + float64(u.Output)*p.Output/m
-	if p.CacheRead > 0 {
-		cost += float64(u.CacheRead) * p.CacheRead / m
+	rate := struct {
+		Input, Output, CacheRead, CacheWrite float64
+	}{p.Input, p.Output, p.CacheRead, p.CacheWrite}
+
+	context := u.Input + u.CacheRead
+	for _, t := range p.Tiers {
+		if context >= t.Threshold {
+			rate.Input, rate.Output, rate.CacheRead, rate.CacheWrite = t.Input, t.Output, t.CacheRead, t.CacheWrite
+		}
 	}
-	if p.CacheWrite > 0 {
-		cost += float64(u.CacheWrite) * p.CacheWrite / m
+
+	const m = 1_000_000.0
+	cost := float64(u.Input)*rate.Input/m + float64(u.Output)*rate.Output/m
+	if rate.CacheRead > 0 {
+		cost += float64(u.CacheRead) * rate.CacheRead / m
+	}
+	if rate.CacheWrite > 0 {
+		cost += float64(u.CacheWrite) * rate.CacheWrite / m
 	}
 	return cost
 }

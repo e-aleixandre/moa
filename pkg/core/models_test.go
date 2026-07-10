@@ -212,6 +212,62 @@ func TestPricing_Cost_NoCacheFields(t *testing.T) {
 	}
 }
 
+func TestPricing_Cost_Tiers(t *testing.T) {
+	p := &Pricing{
+		Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25,
+		Tiers: []PricingTier{
+			{Threshold: 272_000, Input: 10, Output: 45, CacheRead: 1, CacheWrite: 12.5},
+		},
+	}
+
+	t.Run("below threshold uses base tier", func(t *testing.T) {
+		u := Usage{Input: 271_999, Output: 1000}
+		got := p.Cost(u)
+		want := float64(271_999)*5/1e6 + float64(1000)*30/1e6
+		if got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("cost = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("at threshold uses upper tier", func(t *testing.T) {
+		u := Usage{Input: 272_000, Output: 1000}
+		got := p.Cost(u)
+		want := float64(272_000)*10/1e6 + float64(1000)*45/1e6
+		if got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("cost = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("above threshold uses upper tier, applies to whole request", func(t *testing.T) {
+		u := Usage{Input: 300_000, Output: 5000, CacheWrite: 1000}
+		got := p.Cost(u)
+		want := float64(300_000)*10/1e6 + float64(5000)*45/1e6 + float64(1000)*12.5/1e6
+		if got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("cost = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("cache read counts toward threshold", func(t *testing.T) {
+		// Input alone is below threshold, but Input+CacheRead crosses it.
+		u := Usage{Input: 100_000, CacheRead: 200_000, Output: 1000}
+		got := p.Cost(u)
+		want := float64(100_000)*10/1e6 + float64(1000)*45/1e6 + float64(200_000)*1/1e6
+		if got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("cost = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no tiers behaves like base pricing", func(t *testing.T) {
+		base := &Pricing{Input: 1, Output: 4}
+		u := Usage{Input: 1_000_000, Output: 1_000_000}
+		got := base.Cost(u)
+		want := 5.0
+		if got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("cost = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestKnownModels_HavePricing(t *testing.T) {
 	for id, m := range knownModels {
 		if m.Pricing == nil {

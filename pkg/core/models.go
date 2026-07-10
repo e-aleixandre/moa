@@ -51,32 +51,49 @@ var knownModels = map[string]Model{
 		ID: "gpt-5.6-sol", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.6 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
 		// Short-context (<=272K input) pricing shown here. Long-context
-		// (>272K input) prompts are billed at 2x input and 1.5x output
-		// (Input: 10, Output: 45, CacheRead: 1, CacheWrite: 12.5).
-		Pricing: &Pricing{Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25},
+		// (>272K input) prompts are billed at 2x input and 1.5x output.
+		Pricing: &Pricing{
+			Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 10, Output: 45, CacheRead: 1, CacheWrite: 12.5},
+			},
+		},
 	},
 	"gpt-5.6-terra": {
 		ID: "gpt-5.6-terra", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.6 Terra", MaxInput: 1_050_000, MaxOutput: 128_000,
 		// Short-context (<=272K input) pricing shown here. Long-context
-		// (>272K input) prompts are billed at 2x input and 1.5x output
-		// (Input: 5, Output: 22.5, CacheRead: 0.5, CacheWrite: 6.25).
-		Pricing: &Pricing{Input: 2.5, Output: 15, CacheRead: 0.25, CacheWrite: 3.125},
+		// (>272K input) prompts are billed at 2x input and 1.5x output.
+		Pricing: &Pricing{
+			Input: 2.5, Output: 15, CacheRead: 0.25, CacheWrite: 3.125,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 5, Output: 22.5, CacheRead: 0.5, CacheWrite: 6.25},
+			},
+		},
 	},
 	"gpt-5.6-luna": {
 		ID: "gpt-5.6-luna", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.6 Luna", MaxInput: 1_050_000, MaxOutput: 128_000,
 		// Short-context (<=272K input) pricing shown here. Long-context
-		// (>272K input) prompts are billed at 2x input and 1.5x output
-		// (Input: 2, Output: 9, CacheRead: 0.2, CacheWrite: 2.5).
-		Pricing: &Pricing{Input: 1, Output: 6, CacheRead: 0.1, CacheWrite: 1.25},
+		// (>272K input) prompts are billed at 2x input and 1.5x output.
+		Pricing: &Pricing{
+			Input: 1, Output: 6, CacheRead: 0.1, CacheWrite: 1.25,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 2, Output: 9, CacheRead: 0.2, CacheWrite: 2.5},
+			},
+		},
 	},
 	"gpt-5.5": {
 		ID: "gpt-5.5", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.5", MaxInput: 1_050_000, MaxOutput: 128_000,
 		// Short-context (<=200K input) pricing shown here. Long-context
-		// (>200K input) prompts are billed at Input: 10, Output: 45, CacheRead: 1.
-		Pricing: &Pricing{Input: 5, Output: 30, CacheRead: 0.5},
+		// (>200K input) prompts are billed at higher rates.
+		Pricing: &Pricing{
+			Input: 5, Output: 30, CacheRead: 0.5,
+			Tiers: []PricingTier{
+				{Threshold: 200_000, Input: 10, Output: 45, CacheRead: 1},
+			},
+		},
 	},
 	"gpt-5.4-mini": {
 		ID: "gpt-5.4-mini", Provider: "openai", API: "openai-chat",
