@@ -708,6 +708,19 @@ func TestPDF_SessionNativeBudgetFallsBackToDisk(t *testing.T) {
 	}
 }
 
+func TestImage_SessionNativeBudgetFallsBackToDisk(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
+	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+	image := pngBytes(1024)
+	content, _, err := buildAttachmentContent([]Attachment{{Name: "x.png", Mime: "image/png", Data: b64(image)}}, "cafecafecafe0000", pp, false, maxSessionNativeDocBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 || content[0].Type != "text" {
+		t.Fatalf("image at exhausted native budget = %#v, want disk text fallback", content)
+	}
+}
+
 // TestBytesLookLikePDF verifies the magic check is prefix-anchored: "%PDF-"
 // must be at the start (after an optional BOM/whitespace), not anywhere in the
 // file, so an arbitrary binary containing "%PDF-" is not mis-sent as a document.
