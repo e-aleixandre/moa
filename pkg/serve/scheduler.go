@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/schedule"
 )
 
@@ -89,6 +89,15 @@ func (s *schedulerService) deliverDue(m *Manager, now time.Time) {
 		if !ok || sess.runtime.State.Current() != bus.StateIdle {
 			continue
 		}
+		// Prompt persistence is the source of truth for exactly-once recovery.
+		// If a previous process accepted the prompt but crashed before marking
+		// this record delivered, do not ask the agent to perform it twice.
+		if scheduleOccurrenceExists(sess.History(), record.OccurrenceID) {
+			if err := s.markDelivered(record.ID, now); err != nil {
+				slog.Error("recover schedule delivery", "schedule", record.ID, "error", err)
+			}
+			continue
+		}
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
 			Text: record.Text,
 			Custom: map[string]any{
@@ -107,65 +116,19 @@ func (s *schedulerService) deliverDue(m *Manager, now time.Time) {
 	}
 }
 
-// markDelivered is intentionally kept in the serve-owned service: pkg/schedule
-// currently exposes creation, listing, and cancellation only. Reopen the core
-// store after atomically replacing its JSON representation so its in-memory
-// view remains authoritative for subsequent commands.
 func (s *schedulerService) markDelivered(id string, deliveredAt time.Time) error {
-	records := s.store.List()
-	found := false
-	for i := range records {
-		if records[i].ID == id {
-			records[i].Status = schedule.StatusDelivered
-			records[i].DeliveredAt = deliveredAt.UTC()
-			found = true
-			break
+	_, err := s.store.MarkDelivered(id, deliveredAt)
+	return err
+}
+
+func scheduleOccurrenceExists(messages []core.AgentMessage, occurrenceID string) bool {
+	for _, message := range messages {
+		if message.Custom == nil {
+			continue
+		}
+		if message.Custom["source"] == "schedule" && message.Custom["occurrence_id"] == occurrenceID {
+			return true
 		}
 	}
-	if !found {
-		return schedule.ErrNotFound
-	}
-	data, err := json.MarshalIndent(records, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	path := s.store.Path()
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".schedules-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err == nil {
-		_, err = tmp.Write(data)
-	}
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	if dir, err := os.Open(filepath.Dir(path)); err == nil {
-		err = dir.Sync()
-		closeErr := dir.Close()
-		if err == nil {
-			err = closeErr
-		}
-		if err != nil {
-			return err
-		}
-	}
-	store, err := schedule.Open(path)
-	if err != nil {
-		return err
-	}
-	s.store = store
-	return nil
+	return false
 }

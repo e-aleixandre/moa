@@ -205,6 +205,34 @@ func (s *Store) Cancel(id string) (Schedule, error) {
 	return record, nil
 }
 
+// MarkDelivered records that a schedule's single occurrence was accepted by
+// its delivery target. It is idempotent so recovery code can safely repeat it
+// after a crash between prompt persistence and this store update.
+func (s *Store) MarkDelivered(id string, deliveredAt time.Time) (Schedule, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.schedules[id]
+	if !ok {
+		return Schedule{}, ErrNotFound
+	}
+	if record.Status == StatusDelivered {
+		return record, nil
+	}
+	if record.Status != StatusPending {
+		return Schedule{}, fmt.Errorf("schedule %q cannot be delivered from status %s", id, record.Status)
+	}
+	record.Status = StatusDelivered
+	record.DeliveredAt = deliveredAt.UTC()
+	s.schedules[id] = record
+	if err := s.saveLocked(); err != nil {
+		record.Status = StatusPending
+		record.DeliveredAt = time.Time{}
+		s.schedules[id] = record
+		return Schedule{}, err
+	}
+	return record, nil
+}
+
 func (s *Store) recordsLocked() []Schedule {
 	records := make([]Schedule, 0, len(s.schedules))
 	for _, record := range s.schedules {
