@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -19,8 +20,8 @@ type TreeSyncer struct {
 	tree *session.Tree
 	sctx *SessionContext
 
-	mu            sync.Mutex
-	lastSyncCount int // number of agent messages at last sync
+	mu     sync.Mutex
+	synced map[string]struct{}
 }
 
 // RegisterTreeSyncer creates a TreeSyncer and subscribes to bus events.
@@ -31,8 +32,12 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 		sctx: sctx,
 	}
 
-	// Set initial sync point: count agent messages already loaded
-	ts.lastSyncCount = len(sctx.Agent.Messages())
+	ts.synced = make(map[string]struct{})
+	for _, msg := range sctx.Tree.AllMessages() {
+		if msg.MsgID != "" {
+			ts.synced[msg.MsgID] = struct{}{}
+		}
+	}
 
 	// Expose the syncer so GetDisplayMessages can include the in-flight turn.
 	sctx.treeSyncer = ts
@@ -56,7 +61,7 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 			case "clear":
 				ts.mu.Lock()
 				ts.tree.Clear()
-				ts.lastSyncCount = 0
+				ts.synced = make(map[string]struct{})
 				ts.mu.Unlock()
 			case "compact":
 				// CompactionEnded records the compacted tree state.
@@ -84,16 +89,13 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	treeMsgs := ts.tree.AllMessages()
 	agentMsgs := ts.sctx.Agent.Messages()
 
-	// Tail = agent messages not yet synced to the tree. Clamp defensively: a
-	// branch/LoadState can shrink the agent below the last sync point before the
-	// resync command runs, which would otherwise slice out of range.
-	if ts.lastSyncCount >= len(agentMsgs) {
-		return treeMsgs
-	}
-	tail := agentMsgs[ts.lastSyncCount:]
-	out := make([]core.AgentMessage, 0, len(treeMsgs)+len(tail))
+	out := make([]core.AgentMessage, 0, len(treeMsgs)+len(agentMsgs))
 	out = append(out, treeMsgs...)
-	out = append(out, tail...)
+	for i, msg := range agentMsgs {
+		if _, ok := ts.synced[messageSyncID(msg, i)]; !ok {
+			out = append(out, msg)
+		}
+	}
 	return out
 }
 
@@ -103,13 +105,24 @@ func (ts *TreeSyncer) syncMessages() {
 	defer ts.mu.Unlock()
 
 	msgs := ts.sctx.Agent.Messages()
-	for i := ts.lastSyncCount; i < len(msgs); i++ {
+	for i, msg := range msgs {
+		id := messageSyncID(msg, i)
+		if _, ok := ts.synced[id]; ok {
+			continue
+		}
 		ts.tree.Append(session.Entry{
 			Type:    session.EntryMessage,
-			Message: msgs[i], // Tree.Append deep-copies
+			Message: msg,
 		})
+		ts.synced[id] = struct{}{}
 	}
-	ts.lastSyncCount = len(msgs)
+}
+
+func messageSyncID(msg core.AgentMessage, index int) string {
+	if msg.MsgID != "" {
+		return msg.MsgID
+	}
+	return fmt.Sprintf("legacy:%d", index)
 }
 
 // handleCompaction records a compaction in the tree.
@@ -142,8 +155,11 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 		},
 	})
 
-	// After compaction the agent has fewer messages.
-	ts.lastSyncCount = len(msgs)
+	// The summary is represented by the compaction entry, not an ordinary
+	// message entry, but must not appear as an in-flight display tail.
+	if len(msgs) > 0 && msgs[0].MsgID != "" {
+		ts.synced[msgs[0].MsgID] = struct{}{}
+	}
 }
 
 // Reset re-points the syncer at a new tree and sync baseline. Used when the
@@ -154,7 +170,12 @@ func (ts *TreeSyncer) Reset(tree *session.Tree, syncCount int) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	ts.tree = tree
-	ts.lastSyncCount = syncCount
+	ts.synced = make(map[string]struct{})
+	for _, msg := range tree.AllMessages() {
+		if msg.MsgID != "" {
+			ts.synced[msg.MsgID] = struct{}{}
+		}
+	}
 }
 
 // findEntryByMessage finds the tree entry ID for a given agent message.
