@@ -387,6 +387,64 @@ func TestSchedule_UnknownEffectTreatedAsShell(t *testing.T) {
 	<-done
 }
 
+func TestSchedule_InteractiveTreatedAsBarrier(t *testing.T) {
+	bWrite, bAsk := newBarrier(), newBarrier()
+	reg := core.NewRegistry()
+	_ = reg.Register(core.Tool{
+		Name: "w", Effect: core.EffectWritePath,
+		LockKey: func(args map[string]any) string { return "/a.go" },
+		Execute: bWrite.execute,
+	})
+	_ = reg.Register(core.Tool{Name: "ask_user", Effect: core.EffectInteractive, Execute: bAsk.execute})
+
+	cfg := makeCfg(reg)
+	calls := []core.Content{
+		makeToolCall("1", "w", nil),
+		makeToolCall("2", "ask_user", nil),
+	}
+
+	done := runExecuteTools(context.Background(), cfg, calls)
+
+	assertStarted(t, bWrite, "write")
+	assertNotStarted(t, bAsk, "ask_user (should wait like shell)")
+
+	bWrite.release()
+	assertStarted(t, bAsk, "ask_user (should start after write)")
+
+	bAsk.release()
+	<-done
+}
+
+func TestSchedule_WriteAfterInteractiveWaits(t *testing.T) {
+	// [ask_user, write /a] → write must wait for ask_user to complete
+	// (an interactive call is a barrier for anything that follows it).
+	bAsk, bWrite := newBarrier(), newBarrier()
+	reg := core.NewRegistry()
+	_ = reg.Register(core.Tool{Name: "ask_user", Effect: core.EffectInteractive, Execute: bAsk.execute})
+	_ = reg.Register(core.Tool{
+		Name: "w", Effect: core.EffectWritePath,
+		LockKey: func(args map[string]any) string { return "/a.go" },
+		Execute: bWrite.execute,
+	})
+
+	cfg := makeCfg(reg)
+	calls := []core.Content{
+		makeToolCall("1", "ask_user", nil),
+		makeToolCall("2", "w", nil),
+	}
+
+	done := runExecuteTools(context.Background(), cfg, calls)
+
+	assertStarted(t, bAsk, "ask_user")
+	assertNotStarted(t, bWrite, "write (should wait for ask_user barrier)")
+
+	bAsk.release()
+	assertStarted(t, bWrite, "write (should start after ask_user)")
+
+	bWrite.release()
+	<-done
+}
+
 func TestSchedule_WritePathNilLockKey_FallsBackToShell(t *testing.T) {
 	// WritePath with nil LockKey can't be registered (panics).
 	// So this tests the runtime fallback when LockKey returns "".

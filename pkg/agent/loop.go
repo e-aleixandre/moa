@@ -659,7 +659,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
 			}(i, waitForPath, waitForShell)
 
-		default: // EffectShell, EffectUnknown
+		default: // EffectShell, EffectUnknown, EffectInteractive
 			done := make(chan struct{})
 			allDone.Add(1)
 			// Wait for all pending path writers + previous shell.

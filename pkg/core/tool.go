@@ -14,10 +14,11 @@ import (
 type ToolEffect int
 
 const (
-	EffectUnknown   ToolEffect = iota // zero value — serialized (conservative)
-	EffectReadOnly                    // no side effects — safe to parallelize
-	EffectWritePath                   // writes to a specific path via LockKey
-	EffectShell                       // may write anywhere — acts as barrier
+	EffectUnknown     ToolEffect = iota // zero value — serialized (conservative)
+	EffectReadOnly                      // no side effects — safe to parallelize
+	EffectWritePath                     // writes to a specific path via LockKey
+	EffectShell                         // may write anywhere — acts as barrier
+	EffectInteractive                   // blocks on a human response (e.g. ask_user) — acts as a total barrier
 )
 
 // Tool is a callable function with JSON Schema parameters.

@@ -68,7 +68,7 @@ func NewTool(b *Bridge) core.Tool {
 			},
 			"required": ["questions"]
 		}`),
-		Effect: core.EffectReadOnly,
+		Effect: core.EffectInteractive,
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			questions, err := parseQuestions(params)
 			if err != nil {
