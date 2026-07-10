@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { normalizeHistory } from './ws-handlers.js';
-import { triggerAttention } from './notifications.js';
+import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   assignToTile, setActiveSession, afterVisibilityChange, autoFillTiles,
@@ -423,7 +423,7 @@ export async function branchTo(id, entryId) {
 export async function execShell(id, command, silent) {
   const result = await api('POST', `/api/sessions/${id}/shell`, { command, silent });
   const output = (result.output || '').replace(/\n$/, '');
-  const isError = result.exit_code !== 0;
+  const isError = result.exit_code !== 0 || result.timed_out;
 
   const state = store.get();
   const sess = state.sessions[id];
@@ -434,9 +434,13 @@ export async function execShell(id, command, silent) {
       tool_name: 'bash',
       args: { command },
       status: isError ? 'error' : 'done',
-      result: output,
+      result: result.timed_out ? `${output}\n(timed out)` : output,
     };
     updateSession(id, { messages: [...sess.messages, toolMsg] });
+  }
+
+  if (result.delivery_error) {
+    addToast({ title: 'Shell output not delivered', detail: result.delivery_error, type: 'error' });
   }
 
   return result;

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -1084,55 +1083,24 @@ func (m appModel) handleShellEscape(text string) (tea.Model, tea.Cmd) {
 	m.s.viewportDirty = true
 	m.updateViewport()
 
-	b := m.runtime.Bus
-	running := m.s.running
-	cwd := m.cwd
+	sctx := m.runtime.Context()
 	baseCtx := m.baseCtx
 
 	return m, func() tea.Msg {
-		cmd := exec.CommandContext(baseCtx, "sh", "-c", command)
-		cmd.Dir = cwd
-		out, _ := cmd.CombinedOutput()
-		output := strings.TrimRight(string(out), "\n")
-		isError := cmd.ProcessState != nil && !cmd.ProcessState.Success()
-		_ = b // available if needed for steer
+		res := bus.RunUserShell(baseCtx, sctx, command, silent)
 		return shellResultMsg{
-			Command: command,
-			Output:  output,
-			IsError: isError,
-			Silent:  silent,
-			Running: running,
+			Command:     command,
+			Output:      res.Output,
+			IsError:     res.ExitCode != 0 || res.TimedOut,
+			Silent:      silent,
+			Delivered:   res.Delivered,
+			DeliveryErr: res.DeliveryErr,
 		}
 	}
 }
 
 // handleShellResult processes the completed shell escape command.
 func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
-	b := m.runtime.Bus
-	if msg.Running && !msg.Silent {
-		body := fmt.Sprintf("Shell output (from user):\n$ %s\n%s", msg.Command, msg.Output)
-		_ = b.Execute(bus.SteerAgent{Text: body})
-	} else if !msg.Running {
-		var body string
-		if msg.Output != "" {
-			body = fmt.Sprintf("$ %s\n%s", msg.Command, msg.Output)
-		} else {
-			body = fmt.Sprintf("$ %s\n(no output)", msg.Command)
-		}
-		role := "user"
-		if msg.Silent {
-			role = "shell"
-		}
-		agentMsg := core.AgentMessage{
-			Message: core.Message{
-				Role:    role,
-				Content: []core.Content{core.TextContent(body)},
-			},
-			Custom: map[string]any{"shell": true},
-		}
-		_ = b.Execute(bus.AppendToConversation{Message: agentMsg})
-	}
-
 	for i := len(m.s.blocks) - 1; i >= 0; i-- {
 		blk := &m.s.blocks[i]
 		if blk.ToolName == "bash" && !blk.ToolDone {
@@ -1144,6 +1112,13 @@ func (m appModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+	}
+
+	if msg.DeliveryErr != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error",
+			Raw:  fmt.Sprintf("Shell output not delivered: %s", msg.DeliveryErr),
+		})
 	}
 
 	m.s.viewportDirty = true

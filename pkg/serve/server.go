@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -971,48 +970,18 @@ func handleShell(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		cmd := exec.CommandContext(r.Context(), "sh", "-c", body.Command)
-		cmd.Dir = sess.CWD
-		out, _ := cmd.CombinedOutput()
+		res := bus.RunUserShell(r.Context(), sess.runtime.Context(), body.Command, body.Silent)
 
-		exitCode := 0
-		if cmd.ProcessState != nil {
-			exitCode = cmd.ProcessState.ExitCode()
+		resp := map[string]any{
+			"output":    res.Output,
+			"exit_code": res.ExitCode,
+			"timed_out": res.TimedOut,
+			"delivered": string(res.Delivered),
 		}
-
-		output := strings.TrimRight(string(out), "\n")
-		var msgBody string
-		if output != "" {
-			msgBody = fmt.Sprintf("$ %s\n%s", body.Command, output)
-		} else {
-			msgBody = fmt.Sprintf("$ %s\n(no output)", body.Command)
+		if res.DeliveryErr != nil {
+			resp["delivery_error"] = res.DeliveryErr.Error()
 		}
-
-		b := sess.runtime.Bus
-		state := sess.runtime.State.Current()
-
-		if state == bus.StateRunning && !body.Silent {
-			_ = b.Execute(bus.SteerAgent{Text: fmt.Sprintf("Shell output (from user):\n%s", msgBody)})
-		} else if state != bus.StateRunning {
-			role := "user"
-			if body.Silent {
-				role = "shell"
-			}
-			_ = b.Execute(bus.AppendToConversation{
-				Message: core.AgentMessage{
-					Message: core.Message{
-						Role:    role,
-						Content: []core.Content{core.TextContent(msgBody)},
-					},
-					Custom: map[string]any{"shell": true},
-				},
-			})
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"output":    output,
-			"exit_code": exitCode,
-		})
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

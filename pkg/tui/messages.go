@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
@@ -85,11 +86,12 @@ type verifyResultMsg struct {
 
 // shellResultMsg carries the result of an async ! or !! shell escape.
 type shellResultMsg struct {
-	Command string
-	Output  string
-	IsError bool
-	Silent  bool // !! prefix
-	Running bool // was the agent running when the command was dispatched?
+	Command     string
+	Output      string
+	IsError     bool
+	Silent      bool // !! prefix
+	Delivered   bus.UserShellDelivery
+	DeliveryErr error
 }
 
 // clearScreenDoneMsg is in expand.go (unchanged)
