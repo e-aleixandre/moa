@@ -181,6 +181,13 @@ type StateChanged struct {
 	Error     string
 }
 
+// SessionLoaded is published once a persisted session has been fully restored
+// into a long-lived runtime. No intermediate configuration events are emitted
+// during restoration.
+type SessionLoaded struct {
+	SessionID string
+}
+
 // RunStarted is published when a new agent run begins (after state transition).
 // Frontends use RunGen to filter events belonging to the current run.
 type RunStarted struct {

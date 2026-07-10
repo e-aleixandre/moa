@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/ealeixandre/moa/pkg/ansi"
 )
 
 // assistantPadChars is the left padding added to assistant text by layouts.
@@ -80,13 +81,13 @@ func (r *renderer) rebuild() {
 
 func (r *renderer) RenderMarkdown(text string) string {
 	if r.glamour == nil || strings.TrimSpace(text) == "" {
-		return text
+		return ansi.AllowSGR(text)
 	}
 	out, err := r.glamour.Render(text)
 	if err != nil {
-		return text
+		return ansi.AllowSGR(text)
 	}
-	return strings.Trim(out, "\n")
+	return strings.Trim(ansi.AllowSGR(out), "\n")
 }
 
 // FormatUserMessage renders a user message using the active layout.
@@ -134,12 +135,12 @@ func renderSingleBlockImpl(block messageBlock, r *renderer, showThinking bool, e
 	// to produce exactly one blank line between blocks.
 	switch block.Type {
 	case "user":
-		return l.RenderUserMessage(block.Raw, w, t)
+		return l.RenderUserMessage(ansi.Strip(block.Raw), w, t)
 	case "thinking":
 		if !showThinking {
 			return ""
 		}
-		return l.RenderThinking(block.Raw, w, t)
+		return l.RenderThinking(ansi.Strip(block.Raw), w, t)
 	case "assistant":
 		return l.RenderAssistantText(r.RenderMarkdown(block.Raw), w)
 	case "tool":
@@ -149,9 +150,9 @@ func renderSingleBlockImpl(block messageBlock, r *renderer, showThinking bool, e
 		data := buildSubagentBlockData(block, expanded)
 		return l.RenderToolBlock(data, w, t)
 	case "error":
-		return l.RenderError(block.Raw, w, t)
+		return l.RenderError(ansi.Strip(block.Raw), w, t)
 	case "status":
-		return l.RenderStatus(block.Raw, w, t)
+		return l.RenderStatus(ansi.Strip(block.Raw), w, t)
 	default:
 		return ""
 	}
@@ -168,5 +169,3 @@ func renderBlocks(blocks []messageBlock, r *renderer, showThinking bool, expande
 	}
 	return strings.Join(parts, "\n\n")
 }
-
-

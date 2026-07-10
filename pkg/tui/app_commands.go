@@ -887,13 +887,11 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	if sess == nil {
 		sess = m.newSession()
 	}
-	// Load the target session's history into the agent runtime and re-point the
-	// persister at it, so the model resumes with full context and future turns
-	// persist under this session (not the previous one, which would create a
-	// ghost session). Replaces the old ClearSession approach that wiped the
-	// agent and left it amnesiac.
+	// SwitchSession restores history and all persisted runtime metadata before
+	// rebinding the persister, so no intermediate ConfigChanged snapshot can
+	// write old-session capabilities into the new session.
 	if sess != nil {
-		if err := m.runtime.LoadSession(sess); err != nil {
+		if err := m.runtime.SwitchSession(sess); err != nil {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "could not load session: " + err.Error()})
 			m.updateViewport()
 			return m, nil
@@ -918,19 +916,6 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.statusBar.UpdateCacheSegment(0)
 	m.clearCacheCold()
 
-	// Restore metadata via bus commands.
-	if sess != nil && sess.Metadata != nil {
-		if modelSpec, ok := sess.Metadata["model"].(string); ok && modelSpec != "" {
-			_ = m.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec})
-		}
-		if thinking, ok := sess.Metadata["thinking"].(string); ok && thinking != "" {
-			_ = m.runtime.Bus.Execute(bus.SetThinking{Level: thinking})
-		}
-		if mode, ok := sess.Metadata["permission_mode"].(string); ok && mode != "" {
-			_ = m.runtime.Bus.Execute(bus.SetPermissionMode{Mode: mode})
-		}
-	}
-
 	// Query updated state for display.
 	if model, err := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{}); err == nil {
 		name := model.Name
@@ -945,6 +930,16 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	}
 	if permMode, err := bus.QueryTyped[bus.GetPermissionMode, string](m.runtime.Bus, bus.GetPermissionMode{}); err == nil {
 		m.statusBar.UpdatePermissionsSegment(permMode)
+	}
+	if pathInfo, err := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](m.runtime.Bus, bus.GetPathPolicy{}); err == nil && pathInfo.WorkspaceRoot != "" {
+		m.statusBar.UpdatePathScopeSegment(pathInfo.Scope)
+	}
+	if planInfo, err := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](m.runtime.Bus, bus.GetPlanMode{}); err == nil {
+		if planInfo.Mode == "" || planInfo.Mode == "off" {
+			m.statusBar.UpdatePlanSegment("")
+		} else {
+			m.statusBar.UpdatePlanSegment(planInfo.Mode)
+		}
 	}
 
 	// Use display messages from tree for full history (includes pre-compaction messages).

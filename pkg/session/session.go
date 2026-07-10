@@ -149,6 +149,8 @@ func (s *Session) PathMeta() (scope string, allowedPaths []string) {
 				allowedPaths = append(allowedPaths, p)
 			}
 		}
+	} else if raw, ok := s.Metadata[MetaAllowedPaths].([]string); ok {
+		allowedPaths = append(allowedPaths, raw...)
 	}
 	return
 }

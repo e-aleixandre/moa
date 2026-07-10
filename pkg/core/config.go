@@ -297,6 +297,11 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	} else {
 		merged.MaxBudget = base.MaxBudget
 	}
+	// Project config may tighten resource guardrails but never relax a global
+	// limit. A zero project value means "not specified", not "unlimited".
+	merged.MaxTurns = tighterPositiveLimit(base.MaxTurns, override.MaxTurns)
+	merged.MaxToolCallsPerTurn = tighterPositiveLimit(base.MaxToolCallsPerTurn, override.MaxToolCallsPerTurn)
+	merged.MaxRunDurationStr = tighterDurationLimit(base.MaxRunDurationStr, override.MaxRunDurationStr)
 	// MemoryEnabled: project overrides global (explicit wins).
 	if override.MemoryEnabled != nil {
 		merged.MemoryEnabled = override.MemoryEnabled
@@ -319,6 +324,34 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged.SubagentMaxRunDuration = mergeScalar(base.SubagentMaxRunDuration, override.SubagentMaxRunDuration)
 	merged.SubagentMaxConcurrent = mergeScalar(base.SubagentMaxConcurrent, override.SubagentMaxConcurrent)
 	return merged
+}
+
+func tighterPositiveLimit(base, override int) int {
+	if override <= 0 {
+		return base
+	}
+	if base <= 0 || override < base {
+		return override
+	}
+	return base
+}
+
+func tighterDurationLimit(base, override string) string {
+	if override == "" {
+		return base
+	}
+	overrideDuration, err := time.ParseDuration(override)
+	if err != nil || overrideDuration <= 0 {
+		return base
+	}
+	if base == "" {
+		return override
+	}
+	baseDuration, err := time.ParseDuration(base)
+	if err != nil || baseDuration <= 0 || overrideDuration < baseDuration {
+		return override
+	}
+	return base
 }
 
 // SaveGlobalConfig reads the current global config, applies update, and writes

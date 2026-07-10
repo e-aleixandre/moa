@@ -1765,6 +1765,16 @@ func renderTick() tea.Cmd {
 func (m *appModel) cleanup() {
 	m.s.cleanupOnce.Do(func() {
 		close(m.quit)
+		// Let an active run observe cancellation and let TreeSyncer consume its
+		// final events before taking the durable snapshot. Closing the runtime
+		// first would make those events no-ops and can lose the last turn.
+		_ = m.runtime.Bus.Execute(bus.AbortRun{SessionID: m.runtime.ID})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		m.runtime.WaitSettled(ctx)
+		cancel()
+		if err := m.runtime.Flush(); err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "failed to save session: " + err.Error()})
+		}
 		if m.unsubAll != nil {
 			m.unsubAll()
 		}

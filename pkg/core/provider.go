@@ -25,13 +25,29 @@ type DocumentCapableProvider interface {
 	SupportsDocuments() bool
 }
 
+// ProviderUnwrapper is optionally implemented by Provider decorators to expose
+// the provider they wrap. Capability helpers follow this chain so decorators
+// do not hide optional provider interfaces.
+//
+// Unwrap must return nil when there is no wrapped provider.
+type ProviderUnwrapper interface {
+	Unwrap() Provider
+}
+
 // ProviderSupportsDocuments reports whether p accepts native document blocks.
 // Conservative: an unknown provider (not implementing DocumentCapableProvider)
 // returns false, so callers fall back to disk rather than silently dropping a
 // PDF the provider can't handle.
 func ProviderSupportsDocuments(p Provider) bool {
-	if dc, ok := p.(DocumentCapableProvider); ok {
-		return dc.SupportsDocuments()
+	for p != nil {
+		if dc, ok := p.(DocumentCapableProvider); ok {
+			return dc.SupportsDocuments()
+		}
+		unwrapper, ok := p.(ProviderUnwrapper)
+		if !ok {
+			return false
+		}
+		p = unwrapper.Unwrap()
 	}
 	return false
 }

@@ -595,7 +595,7 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		sessionCfg := core.LoadMoaConfig(cwd)
+		sessionCfg := mgr.loadConfig(cwd)
 		if err := sess.reloadMCP(sessionCfg); err != nil {
 			if errors.Is(err, ErrBusy) {
 				http.Error(w, "session is busy; try again when idle", http.StatusConflict)

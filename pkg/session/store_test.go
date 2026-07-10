@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -200,6 +201,45 @@ func TestDelete(t *testing.T) {
 	}
 	if len(summaries) != 0 {
 		t.Errorf("List = %d, want 0 after delete", len(summaries))
+	}
+}
+
+func TestStoreRejectsTraversalIDs(t *testing.T) {
+	store := tempStore(t)
+	for _, id := range []string{"../victim", "..\\victim"} {
+		if _, err := store.Load(id); err == nil {
+			t.Errorf("Load(%q) succeeded", id)
+		}
+		if err := store.Delete(id); err == nil {
+			t.Errorf("Delete(%q) succeeded", id)
+		}
+	}
+}
+
+func TestFindSessionMigratesV1(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "0123456789abcdef01234567"
+	legacy := &Session{ID: id, Messages: []core.AgentMessage{core.WrapMessage(core.NewUserMessage("preserve me"))}}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Dir(), id+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := FindSession(base, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != SessionVersion || len(got.Entries) == 0 || len(got.Messages) != 0 {
+		t.Fatalf("legacy session not migrated: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(store.Dir(), id+".json.v1.bak")); err != nil {
+		t.Fatalf("v1 backup missing: %v", err)
 	}
 }
 

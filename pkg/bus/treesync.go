@@ -37,38 +37,35 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 	// Expose the syncer so GetDisplayMessages can include the in-flight turn.
 	sctx.treeSyncer = ts
 
-	// Sync new messages after each run completes, then signal persistence.
-	// Publishing TreeSynced AFTER the append lets the persistence reactor
-	// snapshot the tree without racing this goroutine (lost-last-turn fix).
-	b.Subscribe(func(e RunEnded) {
-		ts.syncMessages()
-		b.Publish(TreeSynced{SessionID: sctx.SessionID})
-	})
-
-	// Handle compaction (both auto mid-run and manual)
-	b.Subscribe(func(e CompactionEnded) {
-		if e.Err != nil || e.Payload == nil {
-			return
-		}
-		ts.handleCompaction(e)
-		b.Publish(TreeSynced{SessionID: sctx.SessionID})
-	})
-
-	// Handle commands: clear resets, others re-sync
-	b.Subscribe(func(e CommandExecuted) {
-		switch e.Command {
-		case "clear":
-			ts.mu.Lock()
-			ts.tree.Clear()
-			ts.lastSyncCount = 0
-			ts.mu.Unlock()
-		case "compact":
-			// Compaction already handled by CompactionEnded subscriber
-		default:
-			// Re-sync to catch AppendToConversation, model switch side-effects, etc.
+	// Tree mutations must share one ordered subscription. Typed subscriptions
+	// have independent goroutines, so a RunEnded and CompactionEnded published
+	// back-to-back could otherwise observe mutable agent state in either order.
+	b.SubscribeAll(func(event any) {
+		switch e := event.(type) {
+		case RunEnded:
 			ts.syncMessages()
+			b.Publish(TreeSynced{SessionID: sctx.SessionID})
+		case CompactionEnded:
+			if e.Err != nil || e.Payload == nil {
+				return
+			}
+			ts.handleCompaction(e)
+			b.Publish(TreeSynced{SessionID: sctx.SessionID})
+		case CommandExecuted:
+			switch e.Command {
+			case "clear":
+				ts.mu.Lock()
+				ts.tree.Clear()
+				ts.lastSyncCount = 0
+				ts.mu.Unlock()
+			case "compact":
+				// CompactionEnded records the compacted tree state.
+			default:
+				// Catch AppendToConversation and other direct mutations.
+				ts.syncMessages()
+			}
+			b.Publish(TreeSynced{SessionID: sctx.SessionID})
 		}
-		b.Publish(TreeSynced{SessionID: sctx.SessionID})
 	})
 
 	return ts

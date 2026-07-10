@@ -295,35 +295,33 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		}
 	}
 
-	// 6. Permission gate.
-	var gate *permission.Gate
-	if permMode != permission.ModeYolo {
-		allow := append([]string(nil), moaCfg.Permissions.Allow...)
-		allow = append(allow, cfg.ExtraAllowPatterns...)
-		permCfg := permission.Config{
-			Allow:    allow,
-			Deny:     moaCfg.Permissions.Deny,
-			Rules:    moaCfg.Permissions.Rules,
-			Headless: cfg.Headless,
-		}
-		if permMode == permission.ModeAuto {
-			evalModelSpec := moaCfg.Permissions.Model
-			if cfg.PermissionEvalModel != "" {
-				evalModelSpec = cfg.PermissionEvalModel
-			}
-			if evalModelSpec == "" {
-				evalModelSpec = "haiku"
-			}
-			evalModel, _ := core.ResolveModel(evalModelSpec)
-			evalProv, evalErr := cfg.ProviderFactory(evalModel)
-			if evalErr == nil {
-				permCfg.Evaluator = permission.NewEvaluator(evalProv, evalModel)
-			} else {
-				fmt.Fprintf(os.Stderr, "warning: could not create permission evaluator for %q: %v (falling back to ask mode)\n", evalModelSpec, evalErr)
-			}
-		}
-		gate = permission.New(permMode, permCfg)
+	// 6. Permission gate. Keep it in yolo mode too: yolo auto-approves normal
+	// calls, but the gate still enforces hard-coded prompt-injection exceptions.
+	allow := append([]string(nil), moaCfg.Permissions.Allow...)
+	allow = append(allow, cfg.ExtraAllowPatterns...)
+	permCfg := permission.Config{
+		Allow:    allow,
+		Deny:     moaCfg.Permissions.Deny,
+		Rules:    moaCfg.Permissions.Rules,
+		Headless: cfg.Headless,
 	}
+	if permMode == permission.ModeAuto {
+		evalModelSpec := moaCfg.Permissions.Model
+		if cfg.PermissionEvalModel != "" {
+			evalModelSpec = cfg.PermissionEvalModel
+		}
+		if evalModelSpec == "" {
+			evalModelSpec = "haiku"
+		}
+		evalModel, _ := core.ResolveModel(evalModelSpec)
+		evalProv, evalErr := cfg.ProviderFactory(evalModel)
+		if evalErr == nil {
+			permCfg.Evaluator = permission.NewEvaluator(evalProv, evalModel)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: could not create permission evaluator for %q: %v (falling back to ask mode)\n", evalModelSpec, evalErr)
+		}
+	}
+	gate := permission.New(permMode, permCfg)
 
 	// 7. MCP servers.
 	untrustedMCP := false
@@ -340,7 +338,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 	var mcpMgr *mcp.Manager
 	if len(moaCfg.MCPServers) > 0 {
-		mcpMgr = mcp.NewManager(nil)
+		mcpMgr = mcp.NewManager(nil, cfg.CWD)
 		mcpMgr.Start(cfg.Ctx, moaCfg.MCPServers)
 		for _, t := range mcpMgr.Tools() {
 			core.RegisterOrLog(toolReg, t)

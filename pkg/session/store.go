@@ -29,6 +29,18 @@ type FileStore struct {
 	mu  sync.Mutex
 }
 
+// ValidateID accepts the opaque identifier generated for persisted sessions.
+// Keeping IDs filename-safe prevents external API inputs from escaping a store.
+func ValidateID(id string) error {
+	if len(id) != 24 {
+		return fmt.Errorf("invalid session ID")
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return fmt.Errorf("invalid session ID")
+	}
+	return nil
+}
+
 // NewFileStore creates a FileStore for sessions scoped to the given CWD.
 // baseDir is the root sessions directory (empty = ~/.config/moa/sessions/).
 // cwd determines the project subdirectory. Empty cwd uses baseDir directly (legacy/tests).
@@ -84,6 +96,9 @@ func (s *FileStore) saveLocked(sess *Session) error {
 // saveLocked; callers that need to persist a change without reordering
 // session lists (e.g. SetArchived) call writeLocked directly.
 func (s *FileStore) writeLocked(sess *Session) error {
+	if err := ValidateID(sess.ID); err != nil {
+		return err
+	}
 	// Validate v2 entries before persisting
 	if sess.Version >= SessionVersion && len(sess.Entries) > 0 {
 		if err := ValidateEntries(sess.Entries, sess.LeafID); err != nil {
@@ -100,12 +115,28 @@ func (s *FileStore) writeLocked(sess *Session) error {
 
 	// Atomic write: temp file in same directory, then rename.
 	// Same directory ensures same filesystem for atomic rename.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	tmp, err := os.CreateTemp(s.dir, ".session-*.tmp")
+	if err != nil {
+		return fmt.Errorf("session: create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("session: chmod temp: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("session: write error: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp) // cleanup on rename failure
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("session: sync error: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("session: close temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("session: rename error: %w", err)
 	}
 	return nil
@@ -136,6 +167,9 @@ func (s *FileStore) Load(id string) (*Session, error) {
 }
 
 func (s *FileStore) loadLocked(id string) (*Session, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
 	path := s.path(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -147,6 +181,9 @@ func (s *FileStore) loadLocked(id string) (*Session, error) {
 	var sess Session
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, fmt.Errorf("session: unmarshal error: %w", err)
+	}
+	if sess.ID != id {
+		return nil, fmt.Errorf("session: ID does not match filename")
 	}
 
 	// Auto-migrate v1 → v2
@@ -160,12 +197,19 @@ func (s *FileStore) loadLocked(id string) (*Session, error) {
 		}
 		// Back up original before writing migrated version
 		backup := path + ".v1.bak"
-		_ = os.WriteFile(backup, data, 0600)
+		if err := os.WriteFile(backup, data, 0600); err != nil {
+			return nil, fmt.Errorf("session: write migration backup: %w", err)
+		}
 		// Persist migrated session
-		_ = s.saveLocked(&sess)
+		if err := s.saveLocked(&sess); err != nil {
+			return nil, fmt.Errorf("session: persist migration: %w", err)
+		}
 	} else if sess.Version == 0 {
 		// Empty v1 session — just stamp version
 		sess.Version = SessionVersion
+		if err := s.saveLocked(&sess); err != nil {
+			return nil, fmt.Errorf("session: persist migration: %w", err)
+		}
 	}
 
 	return &sess, nil
@@ -268,6 +312,13 @@ func readSummary(path string) (Summary, error) {
 func (s *FileStore) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ValidateID(id); err != nil {
+		if strings.ContainsAny(id, `/\\`) || strings.Contains(id, "..") {
+			return err
+		}
+		// Delete has historically been idempotent, including for unknown IDs.
+		return nil
+	}
 	path := s.path(id)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("session: delete error: %w", err)
@@ -358,6 +409,9 @@ func ListAll(baseDir string) ([]Summary, error) {
 // FindSession searches all project stores under baseDir for a session by ID.
 // Returns the session, the store it was found in, and any error.
 func FindSession(baseDir, id string) (*Session, *FileStore, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
 	if baseDir == "" {
 		var err error
 		baseDir, err = defaultBaseDir()
@@ -373,23 +427,20 @@ func FindSession(baseDir, id string) (*Session, *FileStore, error) {
 		if !e.IsDir() {
 			continue
 		}
-		dir := filepath.Join(baseDir, e.Name())
-		path := filepath.Join(dir, id+".json")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
+		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
+		sess, err := store.Load(id)
+		if err == nil {
+			return sess, store, nil
 		}
-		var sess Session
-		if err := json.Unmarshal(data, &sess); err != nil {
-			continue
-		}
-		return &sess, &FileStore{dir: dir}, nil
 	}
 	return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
 }
 
 // DeleteByID searches all project stores under baseDir and deletes the session.
 func DeleteByID(baseDir, id string) error {
+	if err := ValidateID(id); err != nil {
+		return fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
 	if baseDir == "" {
 		var err error
 		baseDir, err = defaultBaseDir()
@@ -405,8 +456,8 @@ func DeleteByID(baseDir, id string) error {
 		if !e.IsDir() {
 			continue
 		}
-		path := filepath.Join(baseDir, e.Name(), id+".json")
-		if err := os.Remove(path); err == nil {
+		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
+		if err := store.Delete(id); err == nil {
 			// Also remove the subagent transcript side directory, if any.
 			_ = os.RemoveAll(filepath.Join(baseDir, e.Name(), id+".subagents"))
 			return nil

@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync/atomic"
 
+	"github.com/ealeixandre/moa/pkg/ansi"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -22,15 +23,15 @@ func subscribeHeadlessAll(b bus.EventBus, streamedChars *atomic.Int64, done chan
 	b.SubscribeAll(func(event any) {
 		switch e := event.(type) {
 		case bus.TextDelta:
-			fmt.Print(e.Delta)
+			fmt.Print(ansi.Strip(e.Delta))
 			streamedChars.Add(int64(len(e.Delta)))
 		case bus.ThinkingDelta:
-			fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", e.Delta)
+			fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m", ansi.Strip(e.Delta))
 		case bus.ToolExecStarted:
-			fmt.Fprintf(os.Stderr, "\n\033[36m[%s]\033[0m %s\n", e.ToolName, tool.SummarizeArgs(e.Args))
+			fmt.Fprintf(os.Stderr, "\n\033[36m[%s]\033[0m %s\n", ansi.Strip(e.ToolName), ansi.Strip(tool.SummarizeArgs(e.Args)))
 		case bus.ToolExecEnded:
 			if e.Rejected {
-				fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m \033[31m✗ %s\033[0m\n", e.ToolName, e.Result)
+				fmt.Fprintf(os.Stderr, "\033[36m[%s]\033[0m \033[31m✗ %s\033[0m\n", ansi.Strip(e.ToolName), ansi.Strip(e.Result))
 			} else {
 				icon := "\033[32m✓\033[0m"
 				if e.IsError {

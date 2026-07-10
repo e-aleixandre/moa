@@ -105,6 +105,20 @@ func (g *Gate) SetMode(mode Mode) {
 	g.mu.Unlock()
 }
 
+// Restore replaces the mode and policy configuration without producing a
+// frontend event. Session restoration uses the startup policy configuration so
+// rules or allow patterns accumulated by another session do not leak across it.
+func (g *Gate) Restore(mode Mode, cfg Config) {
+	g.mu.Lock()
+	g.mode = mode
+	g.allow = append([]string(nil), cfg.Allow...)
+	g.deny = append([]string(nil), cfg.Deny...)
+	g.rules = append([]string(nil), cfg.Rules...)
+	g.evaluator = cfg.Evaluator
+	g.headless = cfg.Headless
+	g.mu.Unlock()
+}
+
 // Requests returns the channel the UI listens on for approval requests.
 func (g *Gate) Requests() <-chan Request { return g.reqCh }
 

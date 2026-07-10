@@ -36,8 +36,8 @@ var dangerousOperators = []string{
 	"$(", "`",
 	">>", ">",
 	"<<",
-	"&", // background execution
-	"<", // input redirection / process substitution <(...)
+	"&",  // background execution
+	"<",  // input redirection / process substitution <(...)
 	"\n", // multi-line
 }
 
@@ -81,7 +81,7 @@ var safePrefixes = []string{
 	"git status", "git log ", "git log\n",
 	"git diff ", "git diff\n",
 	"git show ", "git show\n",
-	"git branch", // git branch alone = list branches (safe)
+	"git branch",  // git branch alone = list branches (safe)
 	"git branch ", // git branch -a, git branch -r (list variants)
 	"git rev-parse ", "git ls-files",
 	"git describe", "git blame ",
@@ -112,6 +112,33 @@ var exactSafe = []string{
 }
 
 func matchesSafePrefix(cmd string) bool {
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return false
+	}
+	// Prefix matching alone is not sufficient for commands with mutating
+	// subcommands or options. Keep the broad read-only command list below, but
+	// explicitly reject their execution/write forms.
+	switch fields[0] {
+	case "find":
+		for _, field := range fields[1:] {
+			switch field {
+			case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf":
+				return false
+			}
+		}
+	case "git":
+		if len(fields) > 1 && fields[1] == "branch" {
+			for _, field := range fields[2:] {
+				if field == "-D" || field == "-d" || field == "-m" || field == "-M" || field == "--delete" || field == "--move" || field == "--copy" {
+					return false
+				}
+			}
+		}
+	case "awk":
+		// awk programs can invoke system(), redirect output, and mutate files.
+		return false
+	}
 	for _, exact := range exactSafe {
 		if cmd == exact {
 			return true

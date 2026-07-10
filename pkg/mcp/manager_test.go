@@ -2,11 +2,62 @@ package mcp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/ealeixandre/moa/pkg/core"
 )
+
+func TestMCPHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_MCP_HELPER") != "1" {
+		return
+	}
+	if err := os.WriteFile(os.Getenv("MCP_CWD_OUTPUT"), []byte(mustGetwd(t)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "cwd-helper", Version: "0.1"}, nil)
+	if err := server.Run(context.Background(), &sdkmcp.StdioTransport{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cwd
+}
+
+func TestManagerStartsServerInConfiguredCWD(t *testing.T) {
+	cwd := t.TempDir()
+	output := filepath.Join(t.TempDir(), "server-cwd")
+	mgr := NewManager(nil, cwd)
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"cwd-helper": {
+			Command: os.Args[0],
+			Args:    []string{"-test.run=^TestMCPHelperProcess$", "--"},
+			Env: map[string]string{
+				"GO_WANT_MCP_HELPER": "1",
+				"MCP_CWD_OUTPUT":     output,
+			},
+		},
+	})
+	defer mgr.Close()
+
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("MCP helper did not report its working directory: %v", err)
+	}
+	if string(got) != cwd {
+		t.Errorf("MCP server cwd = %q, want %q", got, cwd)
+	}
+}
 
 // --- sanitizeToolName ---
 

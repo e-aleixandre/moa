@@ -228,17 +228,30 @@ func (s *Store) SaveToMetadata() map[string]any {
 
 // RestoreFromMetadata loads task state from session.Metadata.
 func (s *Store) RestoreFromMetadata(meta map[string]any) {
+	if st, ok := StateFromMetadata(meta); ok {
+		s.RestoreState(st)
+	}
+}
+
+// StateFromMetadata decodes task state from session metadata. It returns false
+// when the metadata has no valid task snapshot.
+func StateFromMetadata(meta map[string]any) (State, bool) {
 	raw, ok := meta[metadataKey]
 	if !ok {
-		return
+		return State{}, false
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return
+		return State{}, false
 	}
 	var st State
 	if err := json.Unmarshal(data, &st); err != nil {
-		return
+		return State{}, false
 	}
-	s.RestoreState(st)
+	switch st.WidgetMode {
+	case WidgetAll, WidgetCurrent, WidgetHidden:
+	default:
+		st.WidgetMode = WidgetAll
+	}
+	return st, true
 }

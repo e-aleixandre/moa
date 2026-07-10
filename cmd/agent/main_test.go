@@ -104,6 +104,21 @@ func TestBuildProvider_AnthropicOAuthReturnsAuthNoticeWithoutPrinting(t *testing
 	}
 }
 
+func TestBuildProvider_RefreshingWrapperPreservesDocumentCapability(t *testing.T) {
+	store := newTestAuthStore(t)
+	if err := store.Set("anthropic", auth.Credential{Type: "api_key", Key: "test-key"}); err != nil {
+		t.Fatalf("store.Set: %v", err)
+	}
+
+	build, err := buildProvider(core.Model{ID: "claude-sonnet-4-6", Provider: "anthropic"}, store)
+	if err != nil {
+		t.Fatalf("buildProvider: %v", err)
+	}
+	if !core.ProviderSupportsDocuments(build.Provider) {
+		t.Fatal("provider built through refreshingProvider should support documents")
+	}
+}
+
 func TestPrintAuthNotice(t *testing.T) {
 	var buf bytes.Buffer
 	printAuthNotice(&buf, "Claude Max OAuth")

@@ -298,16 +298,27 @@ func (pm *PlanMode) SaveState() map[string]any {
 // Does NOT apply runtime effects (tool switching, etc.) — call ApplyRestoredState()
 // after restoring to sync the runtime.
 func (pm *PlanMode) RestoreState(meta map[string]any) {
+	pm.Restore(RestoreFromMetadata(meta))
+}
+
+// Restore replaces the persisted plan-mode state without emitting an onChange
+// callback. It first restores any tools restricted by the previous state, so a
+// session restored to off cannot inherit the previous session's plan-only tool
+// registry. Call ApplyRestoredState afterwards to install the new state's tool
+// restrictions.
+func (pm *PlanMode) Restore(state State) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	pm.state = RestoreFromMetadata(meta)
+	pm.restoreTools()
+	pm.registry.Unregister("request_review")
+	pm.state = state
 }
 
 // ApplyRestoredState syncs the runtime (tool registry) with the restored state.
 // Must be called after RestoreState() and after tools are registered.
 // For PLANNING/READY/REVIEWING: snapshots tools and switches to planning set.
 // For EXECUTING: registers the request_review tool.
-// For OFF: no-op.
+// For OFF: restores the full non-plan tool set.
 func (pm *PlanMode) ApplyRestoredState() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -334,7 +345,8 @@ func (pm *PlanMode) ApplyRestoredState() {
 		core.RegisterOrLog(pm.registry, requestReviewTool(pm))
 
 	case ModeOff:
-		// No-op.
+		pm.restoreTools()
+		pm.registry.Unregister("request_review")
 	}
 }
 

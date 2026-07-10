@@ -337,40 +337,6 @@ func main() {
 			return build.Provider, nil
 		}
 
-		if persistedSess != nil {
-			// Determine how to load state: v2 entries (tree) or v1 messages (flat).
-			// For v2, skip loading here — the runtime will reconstruct from entries.
-			var loadErr error
-			if persistedSess.Version >= session.SessionVersion && len(persistedSess.Entries) > 0 {
-				// V2: tree-based. Agent state will be loaded by NewSessionRuntime
-				// from entries via BuildContext. Just validate the tree here.
-				loadErr = session.ValidateEntries(persistedSess.Entries, persistedSess.LeafID)
-			} else if len(persistedSess.Messages) > 0 {
-				loadErr = ag.LoadState(persistedSess.Messages, persistedSess.CompactionEpoch)
-			}
-			if loadErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not restore session: %v\n", loadErr)
-				persistedSess = nil
-			} else {
-				// Restore model pre-runtime (initialization, same approach as serve).
-				savedModel, _, _, _ := persistedSess.RuntimeMeta()
-				if savedModel != "" {
-					if m, ok := core.ResolveModel(savedModel); ok &&
-						(m.ID != resolvedModel.ID || m.Provider != resolvedModel.Provider) {
-						if prov, err := providerFactory(m); err == nil {
-							if err := ag.Reconfigure(prov, m, ag.ThinkingLevel()); err == nil {
-								sess.Model = m
-								resolvedModel = m
-							} else {
-								slog.Warn("restore: model reconfigure failed", "model", savedModel, "error", err)
-							}
-						} else {
-							slog.Warn("restore: provider creation failed", "model", savedModel, "error", err)
-						}
-					}
-				}
-			}
-		}
 		if persistedSess == nil && sessionStore != nil && !startInSessionBrowser {
 			persistedSess = sessionStore.Create()
 			persistedSess.SetRuntimeMetadata(
@@ -379,13 +345,6 @@ func main() {
 				sess.CurrentPermissionMode(),
 				ag.ThinkingLevel(),
 			)
-		}
-
-		pm := sess.PlanMode
-		// Restore plan mode state from persisted session metadata.
-		if persistedSess != nil && persistedSess.Metadata != nil {
-			pm.RestoreState(persistedSess.Metadata)
-			pm.ApplyRestoredState()
 		}
 
 		// Build transcriber from OpenAI API key (same logic as serve).
@@ -407,10 +366,6 @@ func main() {
 		rcfg.Bus = preBus
 		rcfg.Checkpoints = cpStore
 		rcfg.ProviderFactory = providerFactory
-		if persistedSess != nil && persistedSess.Version >= session.SessionVersion && len(persistedSess.Entries) > 0 {
-			rcfg.InitialEntries = persistedSess.Entries
-			rcfg.InitialLeafID = persistedSess.LeafID
-		}
 		rt, err := bus.NewSessionRuntime(rcfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
@@ -424,41 +379,33 @@ func main() {
 		// Attach persister BEFORE bus restore so state changes are persisted.
 		// Attach even in browser mode (persistedSess may be nil): the persister
 		// is nil-safe until the first session is opened, at which point
-		// LoadSession rebinds it via SessionRebinder.
+		// SwitchSession rebinds it via SessionRebinder.
 		if sessionStore != nil {
 			rt.AttachPersister(&tuiPersister{store: sessionStore, session: persistedSess})
 		}
 
-		// Post-runtime: restore thinking, permissions, paths via bus commands.
+		// Restore the complete persisted snapshot transactionally. This is after
+		// attaching the TUI persister so the single final Flush belongs to the
+		// selected session, not whichever session was previously active.
 		if persistedSess != nil {
-			_, _, savedPermMode, savedThinking := persistedSess.RuntimeMeta()
-			if savedThinking != "" {
-				if err := rt.Bus.Execute(bus.SetThinking{Level: savedThinking}); err != nil {
-					slog.Warn("restore: thinking", "level", savedThinking, "error", err)
-				}
-			}
-			if savedPermMode != "" {
-				if err := rt.Bus.Execute(bus.SetPermissionMode{Mode: savedPermMode}); err != nil {
-					slog.Warn("restore: permission mode", "mode", savedPermMode, "error", err)
-				}
-			}
-			if persistedSess.Metadata != nil {
-				savedScope, savedPaths := persistedSess.PathMeta()
-				if savedScope != "" {
-					if err := rt.Bus.Execute(bus.SetPathScope{Scope: savedScope}); err != nil {
-						slog.Warn("restore: path scope", "scope", savedScope, "error", err)
-					}
-				}
-				for _, p := range savedPaths {
-					if err := rt.Bus.Execute(bus.AddAllowedPath{Path: p}); err != nil {
-						slog.Warn("restore: allowed path", "path", p, "error", err)
+			if err := rt.SwitchSession(persistedSess); err != nil {
+				slog.Warn("restore: session", "id", persistedSess.ID, "error", err)
+				if sessionStore != nil {
+					fallback := sessionStore.Create()
+					fallback.SetRuntimeMetadata(
+						bootstrap.FullModelSpec(resolvedModel),
+						cwd,
+						sess.CurrentPermissionMode(),
+						ag.ThinkingLevel(),
+					)
+					if fallbackErr := rt.SwitchSession(fallback); fallbackErr != nil {
+						slog.Warn("restore: fallback session", "error", fallbackErr)
+					} else {
+						persistedSess = fallback
 					}
 				}
 			}
 		}
-
-		// Sync plan mode state (restore happened before SetOnChange was wired).
-		rt.SyncPlanMode()
 
 		app := tui.New(ctx, tui.Config{
 			Runtime:               rt,

@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 # Full -race suite with up to 4 attempts, tolerating a small allowlist of
-# PRE-EXISTING timing-flaky tests that flake under CPU contention in this VM and
-# are unrelated to the attachments change set:
+# PRE-EXISTING timing-flaky test that flakes under CPU contention in this VM and
+# is unrelated to the attachments change set:
 #   - TestManagerShutdown_WaitsForActiveRun (asserts a >=100ms wait vs a mock delay)
-#   - TestWebSocket_* (10s WebSocket read-timeout tests; the whole family shares
-#     the same root cause and is unrelated to attachments)
-# All are verified to pass in isolation and not touch attachment code. Any
-# failure of a test OUTSIDE this allowlist aborts immediately (no masking of
-# real regressions).
+# Any failure outside this allowlist aborts immediately (no masking of real
+# regressions).
 set -uo pipefail
-cd /home/ealeixandre/dev/moa/main
-KNOWN_FLAKY='TestManagerShutdown_WaitsForActiveRun|TestWebSocket_[A-Za-z0-9_]+'
+cd "$(git rev-parse --show-toplevel)"
+KNOWN_FLAKY='TestManagerShutdown_WaitsForActiveRun'
 for attempt in 1 2 3 4; do
   echo "### test attempt $attempt/4"
   out="$(go test -race -count=1 ./... 2>&1)"; rc=$?

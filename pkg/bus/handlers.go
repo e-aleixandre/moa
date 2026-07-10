@@ -448,10 +448,18 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 
 		if newMode == permission.ModeYolo {
-			if sctx.Approvals != nil {
-				sctx.Approvals.StopPermissionBridge()
+			// Keep the gate and approval bridge alive. ModeYolo approves ordinary
+			// calls, while Gate.Check still routes hard-coded dangerous commands
+			// through an explicit approval.
+			if sctx.GetGate() == nil {
+				g := permission.New(newMode, sctx.GateConfig)
+				sctx.SetGate(g)
+				if sctx.Approvals != nil {
+					sctx.Approvals.StartPermissionBridge(sctx.SessionCtx, g)
+				}
+			} else {
+				sctx.GetGate().SetMode(newMode)
 			}
-			sctx.SetGate(nil)
 			if sctx.PathPolicy != nil {
 				sctx.PathPolicy.SetUnrestricted(true)
 			}
@@ -467,11 +475,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 
 		var modeStr string
-		if g := sctx.GetGate(); g != nil {
-			modeStr = string(g.Mode())
-		} else {
-			modeStr = "yolo"
-		}
+		modeStr = string(sctx.GetGate().Mode())
 		evt := ConfigChanged{
 			SessionID:      sctx.SessionID,
 			PermissionMode: modeStr,
@@ -565,6 +569,13 @@ func RegisterHandlers(sctx *SessionContext) {
 			if err := sctx.Agent.Reset(); err != nil {
 				return fmt.Errorf("reset before execution: %w", err)
 			}
+			// Agent.Reset alone leaves the persisted tree and the syncer's old
+			// baseline behind. Replace both in the same transition so the next
+			// execution turn cannot revive or splice into the planning history.
+			sctx.Tree = session.NewTree()
+			if sctx.treeSyncer != nil {
+				sctx.treeSyncer.Reset(sctx.Tree, 0)
+			}
 			sctx.resetSessionCost()
 		}
 		// StartExecution() calls onChange → publishes PlanModeChanged.
@@ -616,6 +627,13 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.State != nil && sctx.State.Current() == StateRunning {
 			return fmt.Errorf("cannot start a goal while the agent is running")
 		}
+		statePath := cmd.StatePath
+		if statePath == "" {
+			statePath = goal.DefaultStatePath
+		}
+		if !filepath.IsAbs(statePath) {
+			statePath = filepath.Join(sctx.CWD, statePath)
+		}
 		// Lower the compaction threshold for the duration of the goal, remembering
 		// the previous value so we can restore it (not blindly reset to 0) on exit.
 		sctx.goalPrevCompactAt = sctx.Agent.CompactAt()
@@ -650,7 +668,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		// prompt (injecting the directive) and publishes GoalChanged.
 		if err := sctx.Goal.Enter(goal.Options{
 			Objective:     cmd.Objective,
-			StatePath:     cmd.StatePath,
+			StatePath:     statePath,
 			VerifierSpec:  cmd.VerifierSpec,
 			MaxIterations: cmd.MaxIterations,
 			MaxStalled:    cmd.MaxStalled,

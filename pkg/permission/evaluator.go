@@ -51,12 +51,25 @@ func (e *Evaluator) Evaluate(ctx context.Context, toolName string, args map[stri
 	}
 
 	var response strings.Builder
+	done := false
 	for event := range stream {
+		if event.Type == core.ProviderEventError {
+			return DecisionAsk
+		}
 		if event.Type == core.ProviderEventTextDelta {
 			response.WriteString(event.Delta)
 		}
+		if event.Type == core.ProviderEventDone {
+			done = true
+			break
+		}
 	}
-
+	// A provider stream is successful only after its explicit terminal done
+	// event. EOF or a later error must never turn a partial "APPROVE" into an
+	// authorization decision.
+	if !done {
+		return DecisionAsk
+	}
 	return parseDecision(response.String())
 }
 

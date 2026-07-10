@@ -396,3 +396,57 @@ func TestNewOAuth_UsesCodexEndpoint(t *testing.T) {
 		t.Fatal("expected done")
 	}
 }
+
+// TestStream_RequiresResponseCompleted is the provider-stream contract for a
+// Responses API success: transport EOF and the SSE [DONE] marker do not mean
+// the response completed successfully. Only response.completed can produce a
+// done event.
+func TestStream_RequiresResponseCompleted(t *testing.T) {
+	tests := []struct {
+		name string
+		end  string
+	}{
+		{name: "EOF", end: ""},
+		{name: "done marker", end: sseEvent("[DONE]")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w,
+					sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}`)+
+						sseEvent(`{"type":"response.output_text.delta","delta":"partial"}`)+
+						tt.end,
+				)
+			}))
+			defer server.Close()
+
+			prov := NewWithBaseURL("key", server.URL)
+			ch, err := prov.Stream(context.Background(), core.Request{
+				Model:    core.Model{ID: "gpt-5.3-codex"},
+				Messages: []core.Message{core.NewUserMessage("test")},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var terminals []core.AssistantEvent
+			for event := range ch {
+				if event.IsTerminal() {
+					terminals = append(terminals, event)
+				}
+			}
+
+			if len(terminals) != 1 {
+				t.Fatalf("terminal events = %d, want exactly 1", len(terminals))
+			}
+			if terminals[0].Type != core.ProviderEventError {
+				t.Fatalf("terminal event = %q, want error", terminals[0].Type)
+			}
+			if terminals[0].Error == nil {
+				t.Fatal("error terminal must include an error")
+			}
+		})
+	}
+}

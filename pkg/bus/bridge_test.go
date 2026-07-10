@@ -1776,8 +1776,8 @@ func TestHandler_SetPermissionMode_AskToYolo(t *testing.T) {
 	if e.PermissionMode != "yolo" {
 		t.Fatalf("PermissionMode = %q", e.PermissionMode)
 	}
-	if sctx.GetGate() != nil {
-		t.Fatal("expected gate to be nil after yolo")
+	if sctx.GetGate() == nil || sctx.GetGate().Mode() != permission.ModeYolo {
+		t.Fatal("expected yolo gate to remain active for hard-coded safety checks")
 	}
 }
 

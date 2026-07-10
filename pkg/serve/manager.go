@@ -237,6 +237,7 @@ type Manager struct {
 	defaultModel    core.Model
 	workspaceRoot   string
 	moaCfg          core.MoaConfig
+	configLoader    func(cwd string) core.MoaConfig
 	sessionBaseDir  string // root for session stores; empty = default (~/.config/moa/sessions/)
 
 	// savedCache caches the result of session.ListAll to avoid
@@ -261,12 +262,19 @@ type ManagerConfig struct {
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
-	SessionBaseDir  string // root for session stores; empty = default
+	// ConfigLoader loads configuration for an individual session CWD. When
+	// nil, core.LoadMoaConfig preserves the normal global/project lookup.
+	ConfigLoader   func(cwd string) core.MoaConfig
+	SessionBaseDir string // root for session stores; empty = default
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
 // runs — cancelling it aborts every active session.
 func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
+	configLoader := cfg.ConfigLoader
+	if configLoader == nil {
+		configLoader = core.LoadMoaConfig
+	}
 	m := &Manager{
 		sessions:        make(map[string]*ManagedSession),
 		baseCtx:         ctx,
@@ -278,12 +286,17 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		defaultModel:    cfg.DefaultModel,
 		workspaceRoot:   cfg.WorkspaceRoot,
 		moaCfg:          cfg.MoaCfg,
+		configLoader:    configLoader,
 		sessionBaseDir:  cfg.SessionBaseDir,
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
 	}
 	reapStaleAttachments()
 	return m
+}
+
+func (m *Manager) loadConfig(cwd string) core.MoaConfig {
+	return m.configLoader(cwd)
 }
 
 // Send delivers a user message (with optional attachments) to a session.
@@ -345,12 +358,14 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 		}
 	}
 	// Serialize attachment processing per session so the per-session on-disk
-	// quota check (dirSize + running total) is atomic against concurrent
-	// /send requests to the same idle session.
+	// quota check and insertion into conversation are atomic against concurrent
+	// /send requests to the same idle session. Native PDFs only count once the
+	// prompt is accepted, so releasing this before Execute would let multiple
+	// requests each observe the same previous total.
 	sess.attachMu.Lock()
+	defer sess.attachMu.Unlock()
 	priorNativeDoc := countNativeDocBytes(sess.History())
 	content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, supportsDocs, priorNativeDoc)
-	sess.attachMu.Unlock()
 	if err != nil {
 		return "", err
 	}

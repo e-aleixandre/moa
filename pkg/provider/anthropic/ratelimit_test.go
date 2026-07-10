@@ -124,3 +124,49 @@ func TestParseRateLimit_AbsentReturnsNil(t *testing.T) {
 		t.Errorf("expected nil, got %+v", rl)
 	}
 }
+
+// TestStream_StopsAfterTerminalEvent is the provider-stream contract that a
+// returned stream emits exactly one terminal event. Providers can receive
+// malformed trailing frames after message_stop, but they must not turn one
+// completed response into done followed by error (or another done).
+func TestStream_StopsAfterTerminalEvent(t *testing.T) {
+	sse := "event: message_start\n" +
+		`data: {"type":"message_start","message":{"id":"m1","model":"claude-x","usage":{"input_tokens":1,"output_tokens":0}}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n" +
+		"event: error\n" +
+		`data: {"type":"error","error":{"type":"api_error","message":"must be ignored"}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, sse)
+	}))
+	defer srv.Close()
+
+	a := NewWithBaseURL("sk-ant-api03-test", srv.URL)
+	ch, err := a.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "claude-x"},
+		Messages: []core.Message{core.NewUserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var terminals []core.AssistantEvent
+	for event := range ch {
+		if event.IsTerminal() {
+			terminals = append(terminals, event)
+		}
+	}
+
+	if len(terminals) != 1 {
+		t.Fatalf("terminal events = %d, want exactly 1", len(terminals))
+	}
+	if terminals[0].Type != core.ProviderEventDone {
+		t.Fatalf("terminal event = %q, want done", terminals[0].Type)
+	}
+}

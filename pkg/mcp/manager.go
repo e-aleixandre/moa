@@ -26,6 +26,7 @@ const ToolPrefix = "mcp__"
 // Manager owns MCP client sessions and their lifecycle.
 type Manager struct {
 	logger   *slog.Logger
+	cwd      string
 	sessions []*serverSession
 }
 
@@ -36,12 +37,13 @@ type serverSession struct {
 	tools   []core.Tool
 }
 
-// NewManager creates a Manager. Pass nil for default logger.
-func NewManager(logger *slog.Logger) *Manager {
+// NewManager creates a Manager whose servers run in cwd. Pass nil for the
+// default logger; an empty cwd inherits the process working directory.
+func NewManager(logger *slog.Logger, cwd string) *Manager {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Manager{logger: logger}
+	return &Manager{logger: logger, cwd: cwd}
 }
 
 // Start spawns all configured MCP servers, performs handshake, discovers tools.
@@ -63,6 +65,9 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg core.MCPServ
 	defer cancel()
 
 	cmd := exec.Command(cfg.Command, cfg.Args...)
+	if m.cwd != "" {
+		cmd.Dir = m.cwd
+	}
 	if len(cfg.Env) > 0 {
 		cmd.Env = os.Environ()
 		for k, v := range cfg.Env {

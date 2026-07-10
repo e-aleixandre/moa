@@ -45,19 +45,14 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	}
 
 	// Resolve ID + persistence first.
-	var persisted *session.Session
-	var store *session.FileStore
-	id := ""
-	if s, err := session.NewFileStore(m.sessionBaseDir, cwd); err == nil {
-		store = s
-		persisted = store.Create()
-		persisted.Title = opts.Title
-		persisted.TitleSource = titleSource
-		id = persisted.ID
+	store, err := session.NewFileStore(m.sessionBaseDir, cwd)
+	if err != nil {
+		return nil, fmt.Errorf("create session store: %w", err)
 	}
-	if id == "" {
-		id = newID()
-	}
+	persisted := store.Create()
+	persisted.Title = opts.Title
+	persisted.TitleSource = titleSource
+	id := persisted.ID
 
 	var bopts *buildOpts
 	if titleSource != "" {
@@ -68,29 +63,28 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		return nil, err
 	}
 
-	// Attach persistence immediately.
-	if persisted != nil && store != nil {
-		// Get metadata from bus queries.
-		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
-		thinking, _ := bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
-		permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
-
-		persisted.SetRuntimeMetadata(
-			bootstrap.FullModelSpec(model),
-			sess.CWD,
-			permMode,
-			thinking,
-		)
-		_ = store.Save(persisted)
-
-		sp := newServePersister(persisted, store, func() string {
-			sess.mu.Lock()
-			defer sess.mu.Unlock()
-			return sess.Title
-		})
-		sess.persister = sp
-		sess.runtime.AttachPersister(sp)
+	// Persist before exposing the session. A successful create must not turn
+	// into an invisible ephemeral conversation on the next restart.
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+	thinking, _ := bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
+	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
+	persisted.SetRuntimeMetadata(bootstrap.FullModelSpec(model), sess.CWD, permMode, thinking)
+	if err := store.Save(persisted); err != nil {
+		if sess.infra.mcpMgr != nil {
+			sess.infra.mcpMgr.Close()
+		}
+		sess.infra.sessionCancel()
+		sess.runtime.Close()
+		return nil, fmt.Errorf("create session persistence: %w", err)
 	}
+
+	sp := newServePersister(persisted, store, func() string {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.Title
+	})
+	sess.persister = sp
+	sess.runtime.AttachPersister(sp)
 
 	m.invalidateSavedCache()
 	return sess, nil
@@ -134,6 +128,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
+	moaCfg := m.loadConfig(cwd)
 
 	cpStore := checkpoint.New(20)
 	subagentTexts := &sync.Map{}
@@ -146,6 +141,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Model:           model,
 		Provider:        prov,
 		ProviderFactory: m.providerFactory,
+		MoaCfg:          &moaCfg,
 		Ctx:             sessionCtx,
 		EnableAskUser:   true,
 		BeforeWrite:     cpStore.Capture,
@@ -302,7 +298,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		CWD:        cwd,
 		Created:    time.Now(),
 		Updated:    time.Now(),
-		cacheTTL:   core.CacheTTLDuration(m.moaCfg),
+		cacheTTL:   core.CacheTTLDuration(moaCfg),
 		runtime:    rt,
 		subagents:  bs.Subagents,
 		pathPolicy: bs.PathPolicy,
@@ -609,7 +605,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 	var newMgr *mcp.Manager
 	var newTools []core.Tool
 	if len(merged) > 0 {
-		newMgr = mcp.NewManager(nil)
+		newMgr = mcp.NewManager(nil, s.CWD)
 		newMgr.Start(s.infra.sessionCtx, merged)
 		newTools = newMgr.Tools()
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -85,6 +86,12 @@ func errorHandler(err error) mockHandler {
 
 // --- Helpers ---
 
+func isolatedTestConfigLoader(t *testing.T, cfg core.MoaConfig) func(string) core.MoaConfig {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	return func(string) core.MoaConfig { return cfg }
+}
+
 func newTestManager(t *testing.T, ctx context.Context, provider core.Provider) *Manager {
 	t.Helper()
 	return newTestManagerWithRoot(t, ctx, provider, t.TempDir())
@@ -92,11 +99,17 @@ func newTestManager(t *testing.T, ctx context.Context, provider core.Provider) *
 
 func newTestManagerWithRoot(t *testing.T, ctx context.Context, provider core.Provider, root string) *Manager {
 	t.Helper()
+	return newTestManagerWithConfig(t, ctx, provider, root, core.MoaConfig{DisableSandbox: true})
+}
+
+func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.Provider, root string, moaCfg core.MoaConfig) *Manager {
+	t.Helper()
 	mgr := NewManager(ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return provider, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   root,
-		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		MoaCfg:          moaCfg,
+		ConfigLoader:    isolatedTestConfigLoader(t, moaCfg),
 		SessionBaseDir:  t.TempDir(),
 	})
 	// Ensure all sessions are properly shut down before TempDir cleanup.
@@ -169,6 +182,49 @@ func TestCreateSession(t *testing.T) {
 	list := mgr.List()
 	if len(list) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(list))
+	}
+}
+
+func TestManagerConfigLoaderIsUsedForSessionBuild(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	var loadedCWD string
+	loadedCfg := core.MoaConfig{
+		CacheTTL: "1h",
+		Permissions: core.PermissionsConfig{
+			Mode: "ask",
+		},
+	}
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return newMockProvider(), nil },
+		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:   dir,
+		MoaCfg:          core.MoaConfig{Permissions: core.PermissionsConfig{Mode: "yolo"}},
+		ConfigLoader: func(cwd string) core.MoaConfig {
+			loadedCWD = cwd
+			return loadedCfg
+		},
+		SessionBaseDir: t.TempDir(),
+	})
+	defer mgr.Shutdown()
+
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedCWD != sess.CWD {
+		t.Errorf("loader CWD = %q, want %q", loadedCWD, sess.CWD)
+	}
+	if gate := sess.runtime.Context().GetGate(); gate == nil || gate.Mode() != permission.ModeAsk {
+		t.Fatal("session did not use the injected permission config")
+	}
+	if sess.cacheTTL != time.Hour {
+		t.Errorf("cache TTL = %v, want %v", sess.cacheTTL, time.Hour)
+	}
+	if sess.infra.mcpMgr != nil {
+		t.Fatal("injected config without MCP servers started an MCP manager")
 	}
 }
 
@@ -465,9 +521,10 @@ func TestCreateSession_PermissionsFromConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Default permission mode is yolo → gate should be nil.
-	if sess.runtime.Context().GetGate() != nil {
-		t.Fatal("expected nil gate for yolo mode")
+	// Default permission mode is yolo, but its gate stays active to enforce
+	// hard-coded download-and-execute confirmations.
+	if gate := sess.runtime.Context().GetGate(); gate == nil || gate.Mode() != permission.ModeYolo {
+		t.Fatal("expected active yolo gate")
 	}
 }
 
@@ -485,6 +542,7 @@ func TestAutoSave_AfterRun(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 
@@ -626,6 +684,7 @@ func TestList_IncludesSavedSessions(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 
@@ -663,6 +722,7 @@ func TestResumeSession(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 
@@ -713,6 +773,7 @@ func TestResumeSession_AlreadyActive(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 
@@ -737,6 +798,7 @@ func TestResumeSession_NotFound(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   t.TempDir(),
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  t.TempDir(),
 	})
 
@@ -758,6 +820,7 @@ func TestDelete_RemovesSavedFile(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 
@@ -803,6 +866,7 @@ func TestDelete_SavedOnly(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 

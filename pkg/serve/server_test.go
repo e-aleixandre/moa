@@ -564,28 +564,11 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 		return ch, nil
 	}
 
-	// Isolate the global config and trust the workspace so its repo-local
-	// .moa/config.json (mode:ask) is honored — the C1 trust gate ignores
-	// untrusted repo config.
-	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workspace, ".moa"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(workspace, ".moa", "config.json"), []byte(`{"permissions":{"mode":"ask"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
-		c.TrustedProjectPaths = append(c.TrustedProjectPaths, workspace)
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	prov := newMockProvider(toolCallHandler, simpleResponseHandler("done"))
-	// Use the shared helper so its t.Cleanup shuts sessions down (and drains the
-	// async persistence reactors) before t.TempDir removal — otherwise a pending
-	// autosave races RemoveAll and flakes under -race ("directory not empty").
-	mgr := newTestManagerWithRoot(t, ctx, prov, workspace)
+	mgr := newTestManagerWithConfig(t, ctx, prov, workspace, core.MoaConfig{
+		Permissions: core.PermissionsConfig{Mode: "ask"},
+	})
 
 	httpSrv := httptest.NewServer(NewServer(mgr))
 	defer httpSrv.Close()
@@ -781,6 +764,7 @@ func TestResumeEndpoint(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 	srv := httptest.NewServer(NewServer(mgr))
@@ -904,6 +888,7 @@ func TestDeleteEndpoint_SavedSession(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 	srv := httptest.NewServer(NewServer(mgr))
@@ -937,6 +922,7 @@ func TestManagerShutdown_PersistsLastTurn(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 
@@ -988,6 +974,7 @@ func TestManagerShutdown_WaitsForActiveRun(t *testing.T) {
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
 		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
 

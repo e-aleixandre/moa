@@ -19,6 +19,15 @@ const maxFrameBytes = 10 * 1024 * 1024 // 10MB safety limit per SSE frame
 // onFrame is called for each complete SSE frame with the event type and data.
 // The eventType may be empty if no "event:" field was present.
 func parseSSEFrames(r io.Reader, onFrame func(eventType, data string)) error {
+	return parseSSEFramesUntil(r, func(eventType, data string) bool {
+		onFrame(eventType, data)
+		return false
+	})
+}
+
+// parseSSEFramesUntil is parseSSEFrames with a callback that may stop parsing
+// by returning true.
+func parseSSEFramesUntil(r io.Reader, onFrame func(eventType, data string) bool) error {
 	reader := bufio.NewReaderSize(r, 1024*1024) // 1MB buffer
 
 	var eventType string
@@ -31,7 +40,9 @@ func parseSSEFrames(r io.Reader, onFrame func(eventType, data string)) error {
 			if err == io.EOF {
 				// Flush any remaining frame
 				if len(dataLines) > 0 {
-					onFrame(eventType, strings.Join(dataLines, "\n"))
+					if onFrame(eventType, strings.Join(dataLines, "\n")) {
+						return nil
+					}
 				}
 				return nil
 			}
@@ -41,7 +52,9 @@ func parseSSEFrames(r io.Reader, onFrame func(eventType, data string)) error {
 		// Blank line = end of frame
 		if line == "" {
 			if len(dataLines) > 0 {
-				onFrame(eventType, strings.Join(dataLines, "\n"))
+				if onFrame(eventType, strings.Join(dataLines, "\n")) {
+					return nil
+				}
 				eventType = ""
 				dataLines = dataLines[:0]
 				frameBytes = 0

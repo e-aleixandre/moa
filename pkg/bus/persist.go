@@ -87,8 +87,18 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 	tp, hasTree := p.(TreePersister)
 
 	save := func() {
+		sctx.persistMu.RLock()
+		defer sctx.persistMu.RUnlock()
+		if sctx.persistPaused.Load() {
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
+		// A switch may have started while this event was waiting for the save
+		// mutex. Check again so it cannot snapshot mixed old/new session state.
+		if sctx.persistPaused.Load() {
+			return
+		}
 		meta := collectMetadata(sctx)
 
 		// Prefer tree-based persistence when available (even if empty, to clear v2 fields)

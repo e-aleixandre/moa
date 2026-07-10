@@ -117,6 +117,14 @@ type SessionContext struct {
 	// The Gate object itself is immutable between swaps — only the pointer changes.
 	gate atomic.Pointer[permission.Gate]
 
+	// persistPaused suppresses persistence-reactor snapshots while a session is
+	// being restored in place. The final complete state is saved explicitly by
+	// SessionRuntime.SwitchSession.
+	persistPaused atomic.Bool
+	// persistMu prevents a snapshot already in progress from crossing the
+	// persister rebind during a session switch.
+	persistMu sync.RWMutex
+
 	// treeSyncer is set by RegisterTreeSyncer; nil in tests that don't register
 	// one. GetDisplayMessages uses it to append the in-flight turn (agent
 	// messages not yet synced to the tree) so a mid-run reconnect snapshot is
@@ -160,10 +168,16 @@ func (sctx *SessionContext) addSessionCost(delta float64) float64 {
 // SessionCostUpdated with a zero total. Called when the conversation context is
 // reset (clear / clean-context plan execution / session load).
 func (sctx *SessionContext) resetSessionCost() {
+	sctx.clearSessionCost()
+	sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: 0, RunUSD: 0})
+}
+
+// clearSessionCost resets the total without publishing an event. A transactional
+// session switch uses it so observers see only the final SessionLoaded event.
+func (sctx *SessionContext) clearSessionCost() {
 	sctx.costMu.Lock()
 	sctx.sessionCost = 0
 	sctx.costMu.Unlock()
-	sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: 0, RunUSD: 0})
 }
 
 // sessionCostTotal returns the current accumulated session cost.

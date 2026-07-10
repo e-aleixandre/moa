@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -63,6 +64,7 @@ type SessionRuntime struct {
 	State *StateMachine
 
 	sctx              *SessionContext
+	defaults          sessionRuntimeDefaults
 	unsub             func()
 	closeOnce         sync.Once
 	persisterAttached atomic.Bool
@@ -71,6 +73,83 @@ type SessionRuntime struct {
 	// synchronously (bypassing the async event chain) on shutdown.
 	persisterMu sync.Mutex
 	persister   SessionPersister
+}
+
+// sessionRuntimeDefaults is the configuration present when a runtime starts.
+// Missing persisted metadata restores these values, except path policy: old
+// sessions with no path metadata are deliberately restored to workspace-only
+// access rather than inheriting a potentially unrestricted previous session.
+type sessionRuntimeDefaults struct {
+	model          core.Model
+	thinking       string
+	permissionMode permission.Mode
+	gateConfig     permission.Config
+	tasks          tasks.State
+	plan           planmode.State
+}
+
+// SessionRestoreState is the validated, typed runtime state decoded from a
+// persisted session. It centralizes metadata parsing for in-place restores.
+type SessionRestoreState struct {
+	Model             core.Model
+	HasModel          bool
+	Thinking          string
+	HasThinking       bool
+	PermissionMode    permission.Mode
+	HasPermissionMode bool
+	Tasks             tasks.State
+	HasTasks          bool
+	Plan              planmode.State
+	PathScope         string
+	AllowedPaths      []string
+	HasPathPolicy     bool
+}
+
+// NewSessionRestoreState decodes the metadata persisted on sess. Invalid
+// values are treated as absent so callers fall back to runtime defaults.
+func NewSessionRestoreState(sess *session.Session) SessionRestoreState {
+	state := SessionRestoreState{Plan: planmode.State{Mode: planmode.ModeOff}}
+	if sess == nil || sess.Metadata == nil {
+		return state
+	}
+
+	meta := sess.Metadata
+	if modelSpec, ok := meta[session.MetaModel].(string); ok && modelSpec != "" {
+		if model, ok := core.ResolveModel(modelSpec); ok {
+			state.Model = model
+			state.HasModel = true
+		}
+	}
+	if thinking, ok := meta[session.MetaThinking].(string); ok && core.IsValidThinkingLevel(thinking) {
+		state.Thinking = thinking
+		state.HasThinking = true
+	}
+	if mode, ok := meta[session.MetaPermissionMode].(string); ok {
+		switch permission.Mode(strings.ToLower(mode)) {
+		case permission.ModeYolo, permission.ModeAsk, permission.ModeAuto:
+			state.PermissionMode = permission.Mode(strings.ToLower(mode))
+			state.HasPermissionMode = true
+		}
+	}
+	if taskState, ok := tasks.StateFromMetadata(meta); ok {
+		state.Tasks = taskState
+		state.HasTasks = true
+	}
+	state.Plan = planmode.RestoreFromMetadata(meta)
+	if scope, paths := sess.PathMeta(); scope != "" {
+		switch strings.ToLower(scope) {
+		case "unrestricted":
+			state.PathScope = "unrestricted"
+			state.HasPathPolicy = true
+		case "workspace":
+			state.PathScope = "workspace"
+			state.HasPathPolicy = true
+		}
+		if state.HasPathPolicy {
+			state.AllowedPaths = append([]string(nil), paths...)
+		}
+	}
+	return state
 }
 
 // NewSessionRuntime creates a fully wired session runtime.
@@ -204,7 +283,18 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		sctx:  sctx,
 		unsub: unsub,
 	}
-
+	rt.defaults = sessionRuntimeDefaults{
+		model:          cfg.Agent.Model(),
+		thinking:       cfg.Agent.ThinkingLevel(),
+		permissionMode: permission.ModeYolo,
+		gateConfig:     clonePermissionConfig(cfg.GateConfig),
+		tasks:          tasks.State{WidgetMode: tasks.WidgetAll},
+		plan:           planmode.State{Mode: planmode.ModeOff},
+	}
+	if cfg.Gate != nil {
+		rt.defaults.permissionMode = cfg.Gate.Mode()
+		rt.defaults.gateConfig = clonePermissionConfig(cfg.Gate.SnapshotConfig())
+	}
 	if cfg.Persister != nil {
 		rt.persister = cfg.Persister
 		RegisterPersistenceReactor(b, sctx, cfg.Persister)
@@ -266,6 +356,20 @@ func (r *SessionRuntime) AttachPersister(p SessionPersister) {
 // exits, which would lose a turn that finished moments before. Flush is
 // idempotent and safe to call once activity has quiesced.
 func (r *SessionRuntime) Flush() error {
+	return r.flush(false)
+}
+
+// flush persists the current snapshot. Session switching uses force=true while
+// persistence is paused so its one final snapshot cannot be preempted by an
+// event-triggered save.
+func (r *SessionRuntime) flush(force bool) error {
+	if !force {
+		r.sctx.persistMu.RLock()
+		defer r.sctx.persistMu.RUnlock()
+		if r.sctx.persistPaused.Load() {
+			return nil
+		}
+	}
 	r.persisterMu.Lock()
 	p := r.persister
 	r.persisterMu.Unlock()
@@ -353,31 +457,94 @@ func (r *SessionRuntime) Context() *SessionContext {
 	return r.sctx
 }
 
-// LoadSession swaps the runtime to a different persisted session in place: it
-// rebuilds the tree from the session's entries (or an empty tree for a new/v1
-// session), loads the derived state into the agent, re-points the tree syncer
-// at the new tree, and rebinds the persister (if it supports SessionRebinder)
-// so future snapshots write under this session. The agent must be idle.
-//
-// This is the in-place equivalent of constructing a runtime with InitialEntries,
-// used by the TUI which keeps one long-lived runtime across session switches.
-func (r *SessionRuntime) LoadSession(sess *session.Session) error {
+// SwitchSession atomically restores sess into this long-lived runtime. It
+// restores history, runtime metadata, the tree syncer, and cost before
+// rebinding persistence; direct restoration intentionally emits no
+// ConfigChanged events. The agent must be idle.
+func (r *SessionRuntime) SwitchSession(sess *session.Session) error {
 	if s := r.State.Current(); s == StateRunning || s == StatePermission {
-		return fmt.Errorf("bus: cannot load a session while the agent is busy (%s)", s)
+		return fmt.Errorf("bus: cannot switch session while the agent is busy (%s)", s)
 	}
 
 	tree, msgs, epoch, err := sessionState(sess)
 	if err != nil {
-		return fmt.Errorf("bus: LoadSession: %w", err)
+		return fmt.Errorf("bus: SwitchSession: %w", err)
 	}
+	restored := NewSessionRestoreState(sess)
+	model := r.defaults.model
+	if restored.HasModel {
+		model = restored.Model
+	}
+	var provider core.Provider
+	modelChanged := !sameModel(r.sctx.Agent.Model(), model)
+	if modelChanged {
+		if r.sctx.ProviderFactory == nil {
+			return fmt.Errorf("bus: SwitchSession: model switching unavailable")
+		}
+		provider, err = r.sctx.ProviderFactory(model)
+		if err != nil {
+			return fmt.Errorf("bus: SwitchSession: provider for %s: %w", model.ID, err)
+		}
+	}
+
+	r.sctx.persistPaused.Store(true)
+	r.sctx.persistMu.Lock()
+	defer func() {
+		r.sctx.persistMu.Unlock()
+		r.sctx.persistPaused.Store(false)
+	}()
+
 	if err := r.sctx.Agent.LoadState(msgs, epoch); err != nil {
-		return fmt.Errorf("bus: LoadSession LoadState: %w", err)
+		return fmt.Errorf("bus: SwitchSession LoadState: %w", err)
+	}
+	if modelChanged {
+		if err := r.sctx.Agent.SetModel(provider, model); err != nil {
+			return fmt.Errorf("bus: SwitchSession SetModel: %w", err)
+		}
+	}
+	thinking := r.defaults.thinking
+	if restored.HasThinking {
+		thinking = restored.Thinking
+	}
+	if err := r.sctx.Agent.SetThinkingLevel(thinking); err != nil {
+		return fmt.Errorf("bus: SwitchSession SetThinkingLevel: %w", err)
 	}
 	r.sctx.Tree = tree
-	r.sctx.resetSessionCost()
+	r.sctx.clearSessionCost()
 	if r.sctx.treeSyncer != nil {
-		r.sctx.treeSyncer.Reset(tree, len(msgs))
+		r.sctx.treeSyncer.Reset(tree, len(r.sctx.Agent.Messages()))
 	}
+	if r.sctx.TaskStore != nil {
+		if restored.HasTasks {
+			r.sctx.TaskStore.RestoreState(restored.Tasks)
+		} else {
+			r.sctx.TaskStore.RestoreState(r.defaults.tasks)
+		}
+	}
+	if r.sctx.PlanMode != nil {
+		plan := r.defaults.plan
+		if sess != nil && sess.Metadata != nil {
+			plan = restored.Plan
+		}
+		r.sctx.PlanMode.Restore(plan)
+		r.sctx.PlanMode.ApplyRestoredState()
+	}
+	if r.sctx.PathPolicy != nil {
+		// Legacy sessions without explicit path metadata must not inherit the
+		// previous session's unrestricted policy or extra directories.
+		unrestricted := restored.HasPathPolicy && restored.PathScope == "unrestricted"
+		paths := restored.AllowedPaths
+		if !restored.HasPathPolicy {
+			paths = nil
+		}
+		r.sctx.PathPolicy.Restore(paths, unrestricted)
+	}
+	mode := r.defaults.permissionMode
+	if restored.HasPermissionMode {
+		mode = restored.PermissionMode
+	}
+	r.restorePermissionMode(mode)
+	rebuildSystemPrompt(r.sctx)
 
 	// Re-point the persister at the new session so subsequent saves write there
 	// instead of clobbering the previous session under its old ID.
@@ -387,7 +554,49 @@ func (r *SessionRuntime) LoadSession(sess *session.Session) error {
 	if rb, ok := p.(SessionRebinder); ok {
 		rb.RebindSession(sess)
 	}
+
+	loadedID := r.sctx.SessionID
+	if sess != nil && sess.ID != "" {
+		loadedID = sess.ID
+	}
+	r.Bus.Publish(SessionLoaded{SessionID: loadedID})
+	if err := r.flush(true); err != nil {
+		return fmt.Errorf("bus: SwitchSession Flush: %w", err)
+	}
 	return nil
+}
+
+// LoadSession is retained for callers that used the original in-place API.
+// New callers should use SwitchSession.
+func (r *SessionRuntime) LoadSession(sess *session.Session) error {
+	return r.SwitchSession(sess)
+}
+
+func (r *SessionRuntime) restorePermissionMode(mode permission.Mode) {
+	g := r.sctx.GetGate()
+	if g == nil {
+		g = permission.New(mode, clonePermissionConfig(r.defaults.gateConfig))
+		r.sctx.SetGate(g)
+		if r.sctx.Approvals != nil {
+			r.sctx.Approvals.StartPermissionBridge(r.sctx.SessionCtx, g)
+		}
+		return
+	}
+	g.Restore(mode, clonePermissionConfig(r.defaults.gateConfig))
+}
+
+func sameModel(a, b core.Model) bool {
+	return a.ID == b.ID && a.Provider == b.Provider
+}
+
+func clonePermissionConfig(cfg permission.Config) permission.Config {
+	return permission.Config{
+		Allow:     append([]string(nil), cfg.Allow...),
+		Deny:      append([]string(nil), cfg.Deny...),
+		Rules:     append([]string(nil), cfg.Rules...),
+		Evaluator: cfg.Evaluator,
+		Headless:  cfg.Headless,
+	}
 }
 
 // sessionState derives the tree + agent state to load for a session snapshot.

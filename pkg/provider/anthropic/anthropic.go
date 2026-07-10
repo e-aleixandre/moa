@@ -145,35 +145,41 @@ func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<-
 		}
 	}()
 
-	err := parseSSEFrames(body, func(eventType, data string) {
+	err := parseSSEFramesUntil(body, func(eventType, data string) bool {
 		// Check context cancellation
 		if ctx.Err() != nil {
-			return
+			return true
 		}
 
 		event := a.mapEvent(eventType, data, state)
 		if event == nil {
-			return
+			return false
 		}
 
 		ch <- *event
 
 		if event.IsTerminal() {
 			sentTerminal = true
+			return true
 		}
+		return false
 	})
 
-	if err != nil && !sentTerminal {
-		if ctx.Err() != nil {
-			ch <- core.AssistantEvent{
-				Type:  core.ProviderEventError,
-				Error: ctx.Err(),
-			}
-		} else {
-			ch <- core.AssistantEvent{
-				Type:  core.ProviderEventError,
-				Error: fmt.Errorf("SSE parse: %w", err),
-			}
+	if sentTerminal {
+		return
+	}
+	if ctx.Err() != nil {
+		ch <- core.AssistantEvent{
+			Type:  core.ProviderEventError,
+			Error: ctx.Err(),
+		}
+		sentTerminal = true
+		return
+	}
+	if err != nil {
+		ch <- core.AssistantEvent{
+			Type:  core.ProviderEventError,
+			Error: fmt.Errorf("SSE parse: %w", err),
 		}
 		sentTerminal = true
 	}

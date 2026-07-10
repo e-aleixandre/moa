@@ -1,9 +1,23 @@
 package permission
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/ealeixandre/moa/pkg/core"
 )
+
+type evaluatorTestProvider struct{ events []core.AssistantEvent }
+
+func (p evaluatorTestProvider) Stream(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, len(p.events))
+	for _, event := range p.events {
+		ch <- event
+	}
+	close(ch)
+	return ch, nil
+}
 
 func TestParseDecision(t *testing.T) {
 	tests := []struct {
@@ -70,4 +84,22 @@ func TestBuildEvalPrompt_TruncatesLongArgs(t *testing.T) {
 	}
 }
 
-
+func TestEvaluator_FailsClosedWithoutSuccessfulTerminal(t *testing.T) {
+	tests := []struct {
+		name   string
+		events []core.AssistantEvent
+		want   Decision
+	}{
+		{"done", []core.AssistantEvent{{Type: core.ProviderEventTextDelta, Delta: "APPROVE"}, {Type: core.ProviderEventDone}}, DecisionApprove},
+		{"eof after approve", []core.AssistantEvent{{Type: core.ProviderEventTextDelta, Delta: "APPROVE"}}, DecisionAsk},
+		{"error after approve", []core.AssistantEvent{{Type: core.ProviderEventTextDelta, Delta: "APPROVE"}, {Type: core.ProviderEventError}}, DecisionAsk},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := NewEvaluator(evaluatorTestProvider{events: tt.events}, core.Model{})
+			if got := e.Evaluate(context.Background(), "bash", nil, nil); got != tt.want {
+				t.Fatalf("Evaluate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

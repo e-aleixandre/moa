@@ -15,14 +15,14 @@ import (
 
 // Responses API SSE event types we handle.
 const (
-	eventOutputItemAdded    = "response.output_item.added"
-	eventOutputTextDelta    = "response.output_text.delta"
-	eventFuncCallArgsDelta  = "response.function_call_arguments.delta"
-	eventFuncCallArgsDone   = "response.function_call_arguments.done"
-	eventOutputItemDone     = "response.output_item.done"
-	eventCompleted          = "response.completed"
-	eventFailed             = "response.failed"
-	eventError              = "error"
+	eventOutputItemAdded   = "response.output_item.added"
+	eventOutputTextDelta   = "response.output_text.delta"
+	eventFuncCallArgsDelta = "response.function_call_arguments.delta"
+	eventFuncCallArgsDone  = "response.function_call_arguments.done"
+	eventOutputItemDone    = "response.output_item.done"
+	eventCompleted         = "response.completed"
+	eventFailed            = "response.failed"
+	eventError             = "error"
 	// Reasoning summary events (thinking).
 	eventReasoningSummaryDelta = "response.reasoning_summary_text.delta"
 )
@@ -106,7 +106,7 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 		if !sentTerminal {
 			ch <- core.AssistantEvent{
 				Type:  core.ProviderEventError,
-				Error: fmt.Errorf("stream ended without terminal event"),
+				Error: fmt.Errorf("stream ended without response.completed"),
 			}
 		}
 	}()
@@ -123,7 +123,7 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 		line, err := readLine(reader)
 		if err != nil {
 			if err == io.EOF {
-				break
+				return
 			}
 			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("read: %w", err)}
 			sentTerminal = true
@@ -139,7 +139,7 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 		}
 		data := line[6:]
 		if data == "[DONE]" {
-			break
+			return
 		}
 
 		var ev event
@@ -162,14 +162,6 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 			sentTerminal = true
 			return
 		}
-	}
-
-	// If we reach here without a terminal event (unlikely for well-behaved servers),
-	// emit done with what we have.
-	if !sentTerminal {
-		final := state.message
-		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
-		sentTerminal = true
 	}
 }
 

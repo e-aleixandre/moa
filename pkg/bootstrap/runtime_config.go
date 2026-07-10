@@ -21,9 +21,7 @@ import (
 // Persister, SteerFilter, or InitialMessages.
 func (s *Session) RuntimeConfig() bus.RuntimeConfig {
 	// GateConfig: use snapshot if gate exists (preserves allow/deny/rules/headless).
-	// If gate is nil (yolo mode), fall back to Headless from session config —
-	// needed so that switching from yolo to ask/auto at runtime reconstructs
-	// the gate correctly for headless sessions.
+	// The fallback keeps RuntimeConfig safe for callers constructing a partial Session.
 	gateConfig := permission.Config{Headless: s.Headless}
 	if s.Gate != nil {
 		gateConfig = s.Gate.SnapshotConfig()

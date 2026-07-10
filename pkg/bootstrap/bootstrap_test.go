@@ -97,7 +97,7 @@ func TestBuildSession_PermissionModes(t *testing.T) {
 		wantGate bool
 		wantMode permission.Mode
 	}{
-		{"yolo", false, ""},
+		{"yolo", true, permission.ModeYolo},
 		{"ask", true, permission.ModeAsk},
 		{"auto", true, permission.ModeAuto},
 	}

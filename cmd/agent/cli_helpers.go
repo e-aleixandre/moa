@@ -38,6 +38,12 @@ func (p *refreshingProvider) Stream(ctx context.Context, req core.Request) (<-ch
 	return p.base.Stream(ctx, req)
 }
 
+// Unwrap exposes the provider decorated with API-key refreshing so optional
+// provider capabilities remain available to callers.
+func (p *refreshingProvider) Unwrap() core.Provider {
+	return p.base
+}
+
 // buildProvider creates the appropriate provider based on the model's Provider field.
 // Side-effect free — the TUI reuses it while Bubble Tea owns the terminal.
 func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult, error) {

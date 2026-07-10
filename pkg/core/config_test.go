@@ -189,6 +189,20 @@ func TestMergeConfigs_PinnedModelsFromGlobalOnly(t *testing.T) {
 	}
 }
 
+func TestMergeConfigs_GuardrailsCanOnlyTighten(t *testing.T) {
+	base := MoaConfig{MaxTurns: 10, MaxToolCallsPerTurn: 20, MaxRunDurationStr: "30m"}
+	tighter := MoaConfig{MaxTurns: 5, MaxToolCallsPerTurn: 10, MaxRunDurationStr: "10m"}
+	got := mergeConfigs(base, tighter)
+	if got.MaxTurns != 5 || got.MaxToolCallsPerTurn != 10 || got.MaxRunDurationStr != "10m" {
+		t.Fatalf("tightened guardrails = %+v", got)
+	}
+	looser := MoaConfig{MaxTurns: 50, MaxToolCallsPerTurn: 100, MaxRunDurationStr: "1h"}
+	got = mergeConfigs(base, looser)
+	if got.MaxTurns != 10 || got.MaxToolCallsPerTurn != 20 || got.MaxRunDurationStr != "30m" {
+		t.Fatalf("loosened guardrails must retain base: %+v", got)
+	}
+}
+
 func TestLoadMCPFile_Valid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".mcp.json")
@@ -375,11 +389,11 @@ func TestCanonicalizePath(t *testing.T) {
 
 func TestMergeConfigs_MCPServers(t *testing.T) {
 	global := MoaConfig{
-		MCPServers: map[string]MCPServer{"db": {Command: "global-db"}},
+		MCPServers:      map[string]MCPServer{"db": {Command: "global-db"}},
 		TrustedMCPPaths: []string{"/trusted/project"},
 	}
 	project := MoaConfig{
-		MCPServers: map[string]MCPServer{"db": {Command: "project-db"}},
+		MCPServers:      map[string]MCPServer{"db": {Command: "project-db"}},
 		TrustedMCPPaths: []string{"/other"}, // should be ignored (global only)
 	}
 	merged := mergeConfigs(global, project)
@@ -536,7 +550,7 @@ func TestIsMemoryEnabled_ExplicitFalse(t *testing.T) {
 
 func TestMergeConfigs_MemoryEnabled_ProjectOverride(t *testing.T) {
 	v := false
-	base := MoaConfig{}               // nil = default true
+	base := MoaConfig{}                     // nil = default true
 	project := MoaConfig{MemoryEnabled: &v} // explicitly false
 	merged := mergeConfigs(base, project)
 	if IsMemoryEnabled(merged) {
@@ -620,7 +634,7 @@ func TestIsPersistentShellEnabled_ExplicitFalse(t *testing.T) {
 
 func TestMergeConfigs_PersistentShell_ProjectOverride(t *testing.T) {
 	v := false
-	base := MoaConfig{}                      // nil = default true
+	base := MoaConfig{}                       // nil = default true
 	project := MoaConfig{PersistentShell: &v} // explicitly false
 	merged := mergeConfigs(base, project)
 	if IsPersistentShellEnabled(merged) {

@@ -197,6 +197,12 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 			}
 		}
+		// Compaction itself is a provider call and may have consumed the
+		// remaining budget. Check again before issuing the normal turn request.
+		if cfg.maxBudget > 0 && cfg.runCost > cfg.maxBudget {
+			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+			return loopErr
+		}
 
 		// Guardrail: max turns
 		turnCount++
