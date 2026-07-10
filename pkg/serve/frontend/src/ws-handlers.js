@@ -240,6 +240,12 @@ export function handleWsInit(id, data) {
     permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission || null,
     pendingAsk: data.pending_ask || null,
+    // A reconnecting/previously hidden pane may still hold an optimistic
+    // queued steer locally. The server's history snapshot is authoritative:
+    // if that steer was consumed while this pane had no WS, it is already in
+    // messages. Keeping the local chip would make the user send/delete it a
+    // second time when returning to the conversation.
+    pendingSteers: null,
     streamingText: null,
     thinkingText: null,
     tasks: data.tasks || [],

@@ -53,3 +53,18 @@ test('handleWsInit preserves the bounded-history marker', () => {
   expect(session.historyTruncated).toBe(true);
   expect(session.messages).toHaveLength(1);
 });
+
+test('handleWsInit clears a steer consumed while the session was hidden', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: ['Please continue with the tests'] } } });
+
+  // The client did not have a WS while hidden, but the server consumed the
+  // steer and includes it in its authoritative history on reconnect.
+  handleWsInit('s1', {
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'Please continue with the tests' }] }],
+  });
+
+  const session = store.get().sessions.s1;
+  expect(session.pendingSteers).toBeNull();
+  expect(session.messages).toHaveLength(1);
+});
