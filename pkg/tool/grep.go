@@ -111,10 +111,14 @@ func buildGrepArgs(params map[string]any, pattern, searchPath string) []string {
 		return args
 	}
 
-	// Fallback to grep
+	// Fallback to grep. Use extended regular expressions so its pattern
+	// syntax matches ripgrep's (notably `foo|bar` alternation). Plain grep
+	// uses basic regular expressions, where `|` is a literal character.
 	args := []string{"grep", "-rn", "--color=never"}
 	if fixedStrings {
 		args = append(args, "-F")
+	} else {
+		args = append(args, "-E")
 	}
 	if include != "" {
 		args = append(args, "--include="+include)
