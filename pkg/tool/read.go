@@ -85,6 +85,9 @@ func NewRead(cfg ToolConfig) core.Tool {
 			if info.IsDir() {
 				return listDirectory(resolved, cfg.WorkspaceRoot, "[Note: path is a directory, not a file. Showing directory listing instead. Use the ls tool for directory listings.]\n\n")
 			}
+			if !info.Mode().IsRegular() {
+				return core.ErrorResult(fmt.Sprintf("cannot read %s: not a regular file", path)), nil
+			}
 
 			ext := strings.ToLower(filepath.Ext(resolved))
 
