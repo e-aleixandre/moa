@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,6 +112,7 @@ func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.P
 		MoaCfg:          moaCfg,
 		ConfigLoader:    isolatedTestConfigLoader(t, moaCfg),
 		SessionBaseDir:  t.TempDir(),
+		SchedulePath:    filepath.Join(t.TempDir(), "schedules.json"),
 	})
 	// Ensure all sessions are properly shut down before TempDir cleanup.
 	// Without this, async persistence reactors can race with directory removal.

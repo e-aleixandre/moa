@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -254,6 +255,9 @@ type Manager struct {
 	// fileScanner is shared across /api/sessions/{id}/files requests.
 	// Invalidated on successful edit tool completions.
 	fileScanner *files.Scanner
+<<<<<<< HEAD
+=======
+	scheduler *schedulerService
 }
 
 // ManagerConfig configures a Manager.
@@ -270,6 +274,9 @@ type ManagerConfig struct {
 	// nil, core.LoadMoaConfig preserves the normal global/project lookup.
 	ConfigLoader   func(cwd string) core.MoaConfig
 	SessionBaseDir string // root for session stores; empty = default
+	// SchedulePath overrides the durable schedules file. Empty stores it beside
+	// the session base directory.
+	SchedulePath string
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -278,6 +285,28 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	configLoader := cfg.ConfigLoader
 	if configLoader == nil {
 		configLoader = core.LoadMoaConfig
+	}
+	schedulePath := cfg.SchedulePath
+	if schedulePath == "" {
+		baseDir := cfg.SessionBaseDir
+		if baseDir == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				baseDir = filepath.Join(home, ".config", "moa", "sessions")
+			} else {
+				slog.Warn("schedule storage disabled: cannot resolve home directory", "error", err)
+			}
+		}
+		if baseDir != "" {
+			schedulePath = filepath.Join(filepath.Dir(baseDir), "schedules.json")
+		}
+	}
+	var scheduler *schedulerService
+	if schedulePath != "" {
+		var err error
+		scheduler, err = newSchedulerService(schedulePath)
+		if err != nil {
+			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
+		}
 	}
 	m := &Manager{
 		sessions:        make(map[string]*ManagedSession),
@@ -295,6 +324,10 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		sessionBaseDir:  cfg.SessionBaseDir,
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
+		scheduler:       scheduler,
+	}
+	if m.scheduler != nil {
+		m.scheduler.Start(m)
 	}
 	reapStaleAttachments()
 	return m

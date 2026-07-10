@@ -598,6 +598,9 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	if m.scheduler != nil {
+		m.scheduler.Close()
+	}
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))
 	for _, s := range m.sessions {

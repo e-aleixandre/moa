@@ -9,6 +9,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/goal"
+	"github.com/ealeixandre/moa/pkg/schedule"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
@@ -30,6 +31,61 @@ var commandRegistry = map[string]commandHandler{
 	"path":        cmdPath,
 	"verify":      cmdVerify,
 	"rename":      cmdRename,
+	"schedule":    cmdSchedule,
+}
+
+func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
+	if m.scheduler == nil {
+		return &CommandResult{OK: false, Message: "schedule storage is unavailable"}, nil
+	}
+	if len(args) == 0 || args[0] == "list" {
+		var lines []string
+		for _, record := range m.scheduler.list() {
+			if record.SessionID != sess.ID {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("%s %s %s — %s", record.ID, record.Status, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"), record.Text))
+		}
+		if len(lines) == 0 {
+			return &CommandResult{OK: true, Message: "no schedules"}, nil
+		}
+		return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
+	}
+	if args[0] == "cancel" {
+		if len(args) != 2 {
+			return &CommandResult{OK: false, Message: "usage: /schedule cancel <id>"}, nil
+		}
+		var owned bool
+		for _, record := range m.scheduler.list() {
+			if record.ID == args[1] && record.SessionID == sess.ID {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			return &CommandResult{OK: false, Message: "schedule not found"}, nil
+		}
+		record, err := m.scheduler.cancel(args[1])
+		if err != nil {
+			return &CommandResult{OK: false, Message: err.Error()}, nil
+		}
+		return &CommandResult{OK: true, Message: "canceled schedule " + record.ID}, nil
+	}
+
+	parsed, err := schedule.ParseCreateArgs(strings.Join(args, " "), time.Local)
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error() + " — usage: /schedule at YYYY-MM-DD HH:MM [IANA-zone] -- text | in <duration> -- text"}, nil
+	}
+	record, err := m.scheduler.create(schedule.Schedule{
+		SessionID: sess.ID,
+		Text:      parsed.Text,
+		DueAt:     parsed.DueAt,
+		TimeZone:  parsed.TimeZone,
+	})
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
+	return &CommandResult{OK: true, Message: fmt.Sprintf("scheduled %s at %s", record.ID, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"))}, nil
 }
 
 // ExecCommand executes a slash command in a session.
