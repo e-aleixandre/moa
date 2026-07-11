@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/ops"
 )
 
@@ -55,7 +57,7 @@ func TestOpsPulseEndpointValidatesSinceAndHonorsServeAccessPolicy(t *testing.T) 
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.GeneratedAt.IsZero() || body.GeneratedAt.Location() != time.UTC || body.Changes.Requested {
+	if body.GeneratedAt.IsZero() || body.GeneratedAt.Location() != time.UTC || !body.Changes.Requested {
 		t.Fatalf("pulse body = %#v", body)
 	}
 	after, versionAfter := mgr.ops.SnapshotVersion()
@@ -72,6 +74,78 @@ func TestOpsPulseEndpointValidatesSinceAndHonorsServeAccessPolicy(t *testing.T) 
 		if rec := request(http.MethodGet, path, true, false); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: status = %d, body = %s", path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestOpsPulseEndpointUsesOpaqueCursorAndSignalsReset(t *testing.T) {
+	service := ops.New(ops.Config{MaxMilestones: 128})
+	if err := service.UpsertSession(ops.SessionInput{ID: "session", Title: "release", CanonicalCWD: "/work/release", Presence: ops.PresenceActive}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for i := 0; i < 130; i++ {
+		if err := service.RecordMilestone("session", ops.Milestone{Type: ops.MilestoneRunStarted, At: now, RefID: "run-" + string(rune(1000+i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := NewServer(&Manager{ops: service})
+	request := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := request("/api/ops/pulse")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("initial status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Changes struct {
+			NextCursor string `json:"next_cursor"`
+			HasMore    bool   `json:"has_more"`
+		} `json:"changes"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Changes.HasMore || body.Changes.NextCursor == "" {
+		t.Fatalf("initial changes = %#v", body.Changes)
+	}
+	if rec := request("/api/ops/pulse?cursor=" + url.QueryEscape(body.Changes.NextCursor+"x")); rec.Code != http.StatusBadRequest {
+		t.Fatalf("tampered cursor status = %d: %s", rec.Code, rec.Body.String())
+	}
+	for i := 0; i < 65; i++ {
+		if err := service.RecordMilestone("session", ops.Milestone{Type: ops.MilestoneRunStarted, At: now.Add(time.Second), RefID: "later-" + string(rune(2000+i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec = request("/api/ops/pulse?cursor=" + url.QueryEscape(body.Changes.NextCursor))
+	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), `"reset":true`) {
+		t.Fatalf("retained cursor status = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRunStartedClearsPriorVerificationForOpsPulse(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+	sess, err := mgr.CreateSession(CreateOpts{Title: "release"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.ops.UpdateVerification(sess.ID, ops.Verification{State: ops.VerificationPassed, At: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Publish(bus.RunStarted{SessionID: sess.ID, RunGen: 99})
+	deadline := time.Now().Add(time.Second)
+	for {
+		status := mgr.OpsSnapshot().Projects[0].Sessions[0]
+		if status.Verification.State == ops.VerificationUnknown {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("RunStarted retained prior verification: %#v", status.Verification)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
