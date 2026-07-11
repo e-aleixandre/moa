@@ -46,6 +46,7 @@ type conversationResponse struct {
 	SessionID  string                `json:"session_id"`
 	Title      string                `json:"title"`
 	Branch     conversationBranch    `json:"branch"`
+	Order      string                `json:"order"`
 	Messages   []ConversationMessage `json:"messages"`
 	NextCursor string                `json:"next_cursor,omitempty"`
 	HasMore    bool                  `json:"has_more"`
@@ -61,9 +62,7 @@ type conversationSnapshot struct {
 
 type conversationCursor struct {
 	SessionID string `json:"s"`
-	Branch    string `json:"b"`
-	Digest    string `json:"d"`
-	Offset    int    `json:"o"`
+	BeforeID  string `json:"b"`
 }
 
 func handleConversationMessages(m *Manager) http.HandlerFunc {
@@ -86,26 +85,30 @@ func handleConversationMessages(m *Manager) http.HandlerFunc {
 			http.Error(w, "conversation unavailable", http.StatusConflict)
 			return
 		}
-		digest := conversationDigest(snapshot)
-		offset := 0
+		beforeID := ""
 		if raw := r.URL.Query().Get("cursor"); raw != "" {
 			cursor, err := m.decodeConversationCursor(raw)
-			if err != nil || cursor.SessionID != snapshot.id || cursor.Branch != snapshot.leafID || cursor.Digest != digest || cursor.Offset < 0 || cursor.Offset > len(snapshot.messages) {
+			if err != nil || cursor.SessionID != snapshot.id || cursor.BeforeID == "" {
 				http.Error(w, "invalid cursor", http.StatusBadRequest)
 				return
 			}
-			offset = cursor.Offset
+			beforeID = cursor.BeforeID
 		}
-		end := min(offset+limit, len(snapshot.messages))
+		messages, nextBefore, hasMore, ok := conversationPage(snapshot.messages, beforeID, limit)
+		if !ok {
+			http.Error(w, "invalid cursor", http.StatusBadRequest)
+			return
+		}
 		response := conversationResponse{
 			SessionID: snapshot.id,
 			Title:     snapshot.title,
 			Branch:    conversationBranch{LeafID: snapshot.leafID, Source: snapshot.source},
-			Messages:  snapshot.messages[offset:end],
-			HasMore:   end < len(snapshot.messages),
+			Order:     "newest_first",
+			Messages:  messages,
+			HasMore:   hasMore,
 		}
 		if response.HasMore {
-			response.NextCursor, err = m.encodeConversationCursor(conversationCursor{SessionID: snapshot.id, Branch: snapshot.leafID, Digest: digest, Offset: end})
+			response.NextCursor, err = m.encodeConversationCursor(conversationCursor{SessionID: snapshot.id, BeforeID: nextBefore})
 			if err != nil {
 				http.Error(w, "conversation unavailable", http.StatusServiceUnavailable)
 				return
@@ -113,6 +116,35 @@ func handleConversationMessages(m *Manager) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, response)
 	}
+}
+
+// conversationPage returns a newest-first page. A cursor's BeforeID is the
+// oldest item from the prior page, so later pages are strictly older even when
+// live messages append after the first request. If a branch no longer contains
+// that anchor, the cursor is invalid rather than risking a gap or reordering.
+func conversationPage(messages []ConversationMessage, beforeID string, limit int) ([]ConversationMessage, string, bool, bool) {
+	end := len(messages)
+	if beforeID != "" {
+		end = -1
+		for i, message := range messages {
+			if message.ID == beforeID {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			return nil, "", false, false
+		}
+	}
+	start := max(0, end-limit)
+	page := make([]ConversationMessage, 0, end-start)
+	for i := end - 1; i >= start; i-- {
+		page = append(page, messages[i])
+	}
+	if start == 0 {
+		return page, "", false, true
+	}
+	return page, messages[start].ID, true, true
 }
 
 func (m *Manager) conversationSnapshot(id string) (conversationSnapshot, error) {
@@ -150,6 +182,7 @@ func savedConversationMessages(saved *session.Session) ([]ConversationMessage, s
 
 func safeConversationMessages(messages []core.AgentMessage) []ConversationMessage {
 	out := make([]ConversationMessage, 0, len(messages))
+	seenIDs := make(map[string]int, len(messages))
 	for index, msg := range messages {
 		// Custom messages are extensions (shell, subagent and internal injected
 		// notifications), not owner-authored display conversation.
@@ -162,6 +195,13 @@ func safeConversationMessages(messages []core.AgentMessage) []ConversationMessag
 			// ID is deterministic without modifying the persisted transcript.
 			id = fmt.Sprintf("legacy-%d", index)
 		}
+		baseID := id
+		if duplicate := seenIDs[baseID]; duplicate > 0 {
+			// Corrupt/legacy transcripts may have repeated MsgIDs. Keep the wire
+			// cursor anchor unambiguous without modifying persisted state.
+			id = fmt.Sprintf("%s~%d", baseID, duplicate)
+		}
+		seenIDs[baseID]++
 		text, omitted, truncated := safeDisplayText(msg.Content)
 		if strings.TrimSpace(text) == "" && !omitted {
 			continue
@@ -206,18 +246,6 @@ func safeDisplayText(content []core.Content) (text string, omitted, truncated bo
 		b.WriteString(part)
 	}
 	return b.String(), omitted, truncated
-}
-
-func conversationDigest(snapshot conversationSnapshot) string {
-	h := sha256.New()
-	_, _ = h.Write([]byte(snapshot.id))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(snapshot.leafID))
-	for _, message := range snapshot.messages {
-		_, _ = h.Write([]byte{0})
-		_, _ = h.Write([]byte(message.ID))
-	}
-	return base64.RawURLEncoding.EncodeToString(h.Sum(nil)[:12])
 }
 
 func (m *Manager) encodeConversationCursor(cursor conversationCursor) (string, error) {
