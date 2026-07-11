@@ -60,7 +60,7 @@ func TestConversationMessagesActiveFilteringPaginationAndAccess(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
 		t.Fatal(err)
 	}
-	if page.Branch.Source != "active" || len(page.Messages) != 2 || page.Messages[0].ID != "u1" || page.Messages[1].ID != "a1" || !page.Messages[1].Omitted || page.Messages[1].OmittedBlocks != 2 || page.NextCursor == "" || !page.HasMore {
+	if page.Order != "newest_first" || page.Branch.Source != "active" || len(page.Messages) != 2 || page.Messages[0].ID != "u2" || page.Messages[1].ID != "a1" || !page.Messages[1].Omitted || page.Messages[1].OmittedBlocks != 2 || page.NextCursor == "" || !page.HasMore {
 		t.Fatalf("unsafe or unexpected first page: %#v", page)
 	}
 	if strings.Contains(rec.Body.String(), "private thought") || strings.Contains(rec.Body.String(), "secret shell") || strings.Contains(rec.Body.String(), "\"arguments\"") {
@@ -70,11 +70,51 @@ func TestConversationMessagesActiveFilteringPaginationAndAccess(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("next page = %d: %s", rec.Code, rec.Body.String())
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil || len(page.Messages) != 1 || page.Messages[0].ID != "u2" || page.HasMore {
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil || len(page.Messages) != 1 || page.Messages[0].ID != "u1" || page.HasMore {
 		t.Fatalf("next page = %#v, err=%v", page, err)
 	}
 	if got := request("/api/sessions/"+sess.ID+"/messages?cursor=tampered", "localhost", true); got.Code != http.StatusBadRequest {
 		t.Fatalf("invalid cursor = %d", got.Code)
+	}
+}
+
+func TestConversationMessagesCursorContinuesOlderAcrossLiveTail(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "paging"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"one", "two", "three", "four"} {
+		appendConversationTestMessage(sess, id, "user", id, nil)
+	}
+	handler := NewServer(mgr)
+	request := func(path string) conversationResponse {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("page status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var page conversationResponse
+		if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	first := request("/api/sessions/" + sess.ID + "/messages?limit=2")
+	if got := []string{first.Messages[0].ID, first.Messages[1].ID}; strings.Join(got, ",") != "four,three" {
+		t.Fatalf("newest page=%v", got)
+	}
+	// A live append after the first page must not leak into the older page or
+	// shift its anchor; clients dedupe any WS tail overlap by message ID.
+	appendConversationTestMessage(sess, "five", "user", "five", nil)
+	second := request("/api/sessions/" + sess.ID + "/messages?cursor=" + first.NextCursor)
+	if got := []string{second.Messages[0].ID, second.Messages[1].ID}; strings.Join(got, ",") != "two,one" || second.HasMore {
+		t.Fatalf("older continuation=%v has_more=%v", got, second.HasMore)
+	}
+	if current := request("/api/sessions/" + sess.ID + "/messages?limit=2"); current.Messages[0].ID != "five" || current.Messages[1].ID != "four" {
+		t.Fatalf("live tail page=%#v", current.Messages)
 	}
 }
 
