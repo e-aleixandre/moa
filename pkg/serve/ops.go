@@ -303,7 +303,10 @@ func handleOpsPulse(m *Manager) http.HandlerFunc {
 		}
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, ops.ErrRetentionGap) || errors.Is(err, ops.ErrPulseCursorExpired) || errors.Is(err, ops.ErrPulseResetRequired) {
+			// Cursors are intentionally process-local. A service restart cannot
+			// validate an old opaque token, and a client must be able to reseed
+			// safely rather than distinguish restart from tampering.
+			if errors.Is(err, ops.ErrInvalidPulseCursor) || errors.Is(err, ops.ErrRetentionGap) || errors.Is(err, ops.ErrPulseCursorExpired) || errors.Is(err, ops.ErrPulseResetRequired) {
 				status = http.StatusGone
 				writeJSON(w, status, struct {
 					Error string `json:"error"`

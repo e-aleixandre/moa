@@ -264,6 +264,9 @@ type Manager struct {
 	instructionRequests map[string][]instructionRequest
 	instructionRates    map[string][]time.Time
 	instructionGlobal   []time.Time
+	instructionStore    *instructionStore
+	instructionKey      []byte
+	instructionNow      func() time.Time
 
 	providerFactory func(model core.Model) (core.Provider, error)
 	transcriber     core.Transcriber // nil when no speech-to-text is available
@@ -314,6 +317,9 @@ type ManagerConfig struct {
 	// OpsPath overrides the durable safe Ops journal. Empty stores it beside
 	// the session base directory.
 	OpsPath string
+	// InstructionPath overrides the private replay-idempotency store. Empty
+	// stores it beside the session base directory.
+	InstructionPath string
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -377,28 +383,67 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("ops restore failed", "error", err)
 		}
 	}
+	instructionPath := cfg.InstructionPath
+	if instructionPath == "" {
+		baseDir := cfg.SessionBaseDir
+		if baseDir == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				baseDir = filepath.Join(home, ".config", "moa", "sessions")
+			}
+		}
+		if baseDir != "" {
+			instructionPath = filepath.Join(filepath.Dir(baseDir), "instruction-idempotency.json")
+		}
+	}
+	var instructionStore *instructionStore
+	var instructionState durableInstructionState
+	if instructionPath != "" {
+		var err error
+		instructionStore, instructionState, err = openInstructionStore(instructionPath)
+		if err != nil {
+			slog.Warn("instruction idempotency storage disabled", "path", instructionPath, "error", err)
+		}
+	}
+	instructionKey, validInstructionKey := decodeInstructionKey(instructionState.Key)
+	if !validInstructionKey {
+		var err error
+		instructionKey, err = newInstructionKey()
+		if err != nil {
+			slog.Warn("instruction idempotency key unavailable", "error", err)
+			instructionStore = nil
+		}
+	}
 	m := &Manager{
-		sessions:        make(map[string]*ManagedSession),
-		resuming:        make(map[string]struct{}),
-		baseCtx:         ctx,
-		providerFactory: cfg.ProviderFactory,
-		transcriber:     cfg.Transcriber,
-		usagePoller:     cfg.UsagePoller,
-		pushStore:       cfg.PushStore,
-		pushDispatcher:  cfg.PushDispatcher,
-		defaultModel:    cfg.DefaultModel,
-		workspaceRoot:   cfg.WorkspaceRoot,
-		moaCfg:          cfg.MoaCfg,
-		configLoader:    configLoader,
-		sessionBaseDir:  cfg.SessionBaseDir,
-		savedCacheTTL:   30 * time.Second,
-		fileScanner:     files.NewScanner(),
-		scheduler:       scheduler,
-		attention:       attention.New(attention.Config{}),
-		ops:             opsService,
+		sessions:         make(map[string]*ManagedSession),
+		resuming:         make(map[string]struct{}),
+		baseCtx:          ctx,
+		providerFactory:  cfg.ProviderFactory,
+		transcriber:      cfg.Transcriber,
+		usagePoller:      cfg.UsagePoller,
+		pushStore:        cfg.PushStore,
+		pushDispatcher:   cfg.PushDispatcher,
+		defaultModel:     cfg.DefaultModel,
+		workspaceRoot:    cfg.WorkspaceRoot,
+		moaCfg:           cfg.MoaCfg,
+		configLoader:     configLoader,
+		sessionBaseDir:   cfg.SessionBaseDir,
+		savedCacheTTL:    30 * time.Second,
+		fileScanner:      files.NewScanner(),
+		scheduler:        scheduler,
+		attention:        attention.New(attention.Config{}),
+		ops:              opsService,
+		instructionStore: instructionStore,
+		instructionKey:   instructionKey,
+		instructionNow:   time.Now,
 	}
 	m.instructionRequests = make(map[string][]instructionRequest)
 	m.instructionRates = make(map[string][]time.Time)
+	if m.instructionStore != nil {
+		for _, record := range normalizeDurableInstructionRecords(instructionState.Records, m.instructionNow()) {
+			m.instructionRequests[record.SessionID] = append(m.instructionRequests[record.SessionID], instructionRequest{id: record.RequestID, fingerprint: record.Fingerprint, action: record.Action, at: record.At})
+		}
+		m.persistInstructionRequestsLocked()
+	}
 	m.attention.Start()
 	if m.scheduler != nil {
 		m.scheduler.Start(m)

@@ -112,7 +112,7 @@ func TestOpsPulseEndpointUsesOpaqueCursorAndSignalsReset(t *testing.T) {
 	if !body.Changes.HasMore || body.Changes.NextCursor == "" {
 		t.Fatalf("initial changes = %#v", body.Changes)
 	}
-	if rec := request("/api/ops/pulse?cursor=" + url.QueryEscape(body.Changes.NextCursor+"x")); rec.Code != http.StatusBadRequest {
+	if rec := request("/api/ops/pulse?cursor=" + url.QueryEscape(body.Changes.NextCursor+"x")); rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), `"reset":true`) {
 		t.Fatalf("tampered cursor status = %d: %s", rec.Code, rec.Body.String())
 	}
 	for i := 0; i < 65; i++ {
@@ -123,6 +123,32 @@ func TestOpsPulseEndpointUsesOpaqueCursorAndSignalsReset(t *testing.T) {
 	rec = request("/api/ops/pulse?cursor=" + url.QueryEscape(body.Changes.NextCursor))
 	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), `"reset":true`) {
 		t.Fatalf("retained cursor status = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOpsPulseCursorFromPriorServiceInstanceRequiresReset(t *testing.T) {
+	first := ops.New(ops.Config{})
+	if err := first.UpsertSession(ops.SessionInput{ID: "session", CanonicalCWD: "/work/release", Presence: ops.PresenceActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.RecordMilestone("session", ops.Milestone{Type: ops.MilestoneRunStarted, At: time.Now().UTC(), RefID: "run"}); err != nil {
+		t.Fatal(err)
+	}
+	pulse, err := first.PulsePage("", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pulse.Changes.NextCursor == "" {
+		t.Fatal("initial pulse omitted polling cursor")
+	}
+	second := ops.New(ops.Config{})
+	handler := NewServer(&Manager{ops: second})
+	req := httptest.NewRequest(http.MethodGet, "/api/ops/pulse?cursor="+url.QueryEscape(pulse.Changes.NextCursor), nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), `"reset":true`) || strings.Contains(rec.Body.String(), pulse.Changes.NextCursor) {
+		t.Fatalf("restart cursor response = %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
