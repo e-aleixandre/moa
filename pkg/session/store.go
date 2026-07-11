@@ -167,6 +167,36 @@ func (s *FileStore) Load(id string) (*Session, error) {
 	return s.loadLocked(id)
 }
 
+// LoadReadOnly reads a session without performing the legacy v1 migration.
+// Consumers which promise a read-only operation (for example transcript
+// export) must use this method: Load may write a migrated copy to disk.
+func (s *FileStore) LoadReadOnly(id string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadReadOnlyLocked(id)
+}
+
+func (s *FileStore) loadReadOnlyLocked(id string) (*Session, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
+	data, err := os.ReadFile(s.path(id))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+		}
+		return nil, fmt.Errorf("session: read error: %w", err)
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		return nil, fmt.Errorf("session: unmarshal error: %w", err)
+	}
+	if sess.ID != id {
+		return nil, fmt.Errorf("session: ID does not match filename")
+	}
+	return &sess, nil
+}
+
 func (s *FileStore) loadLocked(id string) (*Session, error) {
 	if err := ValidateID(id); err != nil {
 		return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
@@ -511,6 +541,36 @@ func FindSession(baseDir, id string) (*Session, *FileStore, error) {
 		}
 		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
 		sess, err := store.Load(id)
+		if err == nil {
+			return sess, store, nil
+		}
+	}
+	return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+}
+
+// FindSessionReadOnly searches all project stores without migrating or writing
+// the matching session. It is the read-only counterpart to FindSession.
+func FindSessionReadOnly(baseDir, id string) (*Session, *FileStore, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
+	if baseDir == "" {
+		var err error
+		baseDir, err = defaultBaseDir()
+		if err != nil {
+			return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+		}
+	}
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
+		sess, err := store.LoadReadOnly(id)
 		if err == nil {
 			return sess, store, nil
 		}
