@@ -17,17 +17,20 @@ const (
 )
 
 var (
-	ErrUnknownSession    = errors.New("ops: unknown session")
-	ErrInvalidSession    = errors.New("ops: session id and canonical cwd are required")
-	ErrInvalidUpdate     = errors.New("ops: update timestamp is required")
-	ErrInvalidEvent      = errors.New("ops: milestone type, timestamp, and ref id are required")
-	ErrAliasCollision    = errors.New("ops: alias is already assigned")
-	ErrInvalidAlias      = errors.New("ops: alias is required")
-	ErrInvalidCheckpoint = errors.New("ops: invalid checkpoint name or timestamp")
-	ErrCheckpointExists  = errors.New("ops: checkpoint already exists")
-	ErrUnknownCheckpoint = errors.New("ops: unknown checkpoint")
-	ErrInvalidWindow     = errors.New("ops: invalid changes window")
-	ErrRetentionGap      = errors.New("ops: requested changes precede retained journal")
+	ErrUnknownSession     = errors.New("ops: unknown session")
+	ErrInvalidSession     = errors.New("ops: session id and canonical cwd are required")
+	ErrInvalidUpdate      = errors.New("ops: update timestamp is required")
+	ErrInvalidEvent       = errors.New("ops: milestone type, timestamp, and ref id are required")
+	ErrAliasCollision     = errors.New("ops: alias is already assigned")
+	ErrInvalidAlias       = errors.New("ops: alias is required")
+	ErrInvalidCheckpoint  = errors.New("ops: invalid checkpoint name or timestamp")
+	ErrCheckpointExists   = errors.New("ops: checkpoint already exists")
+	ErrUnknownCheckpoint  = errors.New("ops: unknown checkpoint")
+	ErrInvalidWindow      = errors.New("ops: invalid changes window")
+	ErrRetentionGap       = errors.New("ops: requested changes precede retained journal")
+	ErrInvalidPulseCursor = errors.New("ops: invalid pulse cursor")
+	ErrPulseCursorExpired = errors.New("ops: pulse cursor is no longer available")
+	ErrPulseResetRequired = errors.New("ops: pulse changes require reset")
 )
 
 // Presence describes whether a session is currently active or only saved.
@@ -154,33 +157,41 @@ type Session struct {
 	Jobs             JobCounts      `json:"jobs"`
 	Verification     Verification   `json:"verification"`
 	Milestones       []Milestone    `json:"milestones"`
+	RunStartedAt     time.Time      `json:"-"`
 }
 
 // Service is a synchronous actor boundary around the deterministic reducer.
 // Its mutex makes calls safe from independent lifecycle and job producers.
 type Service struct {
-	mu            sync.RWMutex
-	maxMilestones int
-	sessions      map[string]*sessionState
-	version       uint64
-	watchers      map[chan struct{}]struct{}
-	persist       func(DurableState) error
-	checkpoints   map[string]Checkpoint
+	mu                sync.RWMutex
+	maxMilestones     int
+	sessions          map[string]*sessionState
+	version           uint64
+	milestoneSequence uint64
+	watchers          map[chan struct{}]struct{}
+	persist           func(DurableState) error
+	checkpoints       map[string]Checkpoint
+	pulseCursorKey    [32]byte
+	pulseCursors      map[string]pulseCursor
+	pulseCursorOrder  []string
 }
 
 type sessionState struct {
-	input       SessionInput
-	lifecycle   LifecycleUpdate
-	jobs        JobCounts
-	verify      Verification
-	milestones  []sequencedMilestone
-	sequence    uint64
-	retentionAt time.Time
+	input             SessionInput
+	lifecycle         LifecycleUpdate
+	jobs              JobCounts
+	verify            Verification
+	milestones        []sequencedMilestone
+	sequence          uint64
+	retentionAt       time.Time
+	retentionSequence uint64
+	runStartedAt      time.Time
 }
 
 type sequencedMilestone struct {
 	Milestone
-	sequence uint64
+	sequence       uint64
+	globalSequence uint64
 }
 
 // New constructs an empty operational roster.
@@ -192,7 +203,7 @@ func New(cfg Config) *Service {
 	if limit > maxMilestones {
 		limit = maxMilestones
 	}
-	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState), checkpoints: make(map[string]Checkpoint), watchers: make(map[chan struct{}]struct{}), persist: cfg.Persist}
+	return &Service{maxMilestones: limit, sessions: make(map[string]*sessionState), checkpoints: make(map[string]Checkpoint), watchers: make(map[chan struct{}]struct{}), persist: cfg.Persist, pulseCursorKey: newPulseCursorKey(), pulseCursors: make(map[string]pulseCursor)}
 }
 
 // SetSessionAliases replaces the explicit aliases for one session. Aliases
@@ -393,7 +404,14 @@ func (s *Service) RecordMilestone(id string, milestone Milestone) error {
 		}
 	}
 	state.sequence++
-	state.milestones = append(state.milestones, sequencedMilestone{Milestone: milestone, sequence: state.sequence})
+	s.milestoneSequence++
+	state.milestones = append(state.milestones, sequencedMilestone{Milestone: milestone, sequence: state.sequence, globalSequence: s.milestoneSequence})
+	if milestone.Type == MilestoneRunStarted {
+		// A verification result belongs to one run. A new run deliberately has
+		// no result until verification for that run completes.
+		state.verify = Verification{State: VerificationUnknown, At: milestone.At}
+		state.runStartedAt = milestone.At
+	}
 	sort.SliceStable(state.milestones, func(i, j int) bool {
 		return state.milestones[i].At.Before(state.milestones[j].At)
 	})
@@ -401,6 +419,9 @@ func (s *Service) RecordMilestone(id string, milestone Milestone) error {
 		for _, removed := range state.milestones[:excess] {
 			if removed.At.After(state.retentionAt) {
 				state.retentionAt = removed.At.UTC()
+			}
+			if removed.globalSequence > state.retentionSequence {
+				state.retentionSequence = removed.globalSequence
 			}
 		}
 		state.milestones = append([]sequencedMilestone(nil), state.milestones[excess:]...)
@@ -492,6 +513,9 @@ func (s *Service) Restore(d DurableState) error {
 	defer s.mu.Unlock()
 	s.sessions = make(map[string]*sessionState)
 	s.checkpoints = make(map[string]Checkpoint)
+	s.milestoneSequence = 0
+	s.pulseCursors = make(map[string]pulseCursor)
+	s.pulseCursorOrder = nil
 	for _, checkpoint := range d.Checkpoints {
 		if name, ok := validCheckpoint(checkpoint.Name, checkpoint.At); ok {
 			// First occurrence wins so a malformed manually edited store cannot
@@ -514,7 +538,11 @@ func (s *Service) Restore(d DurableState) error {
 			if validMilestone(m) {
 				seenRefs[m.RefID] = struct{}{}
 				state.sequence++
-				state.milestones = append(state.milestones, sequencedMilestone{Milestone: m, sequence: state.sequence})
+				s.milestoneSequence++
+				state.milestones = append(state.milestones, sequencedMilestone{Milestone: m, sequence: state.sequence, globalSequence: s.milestoneSequence})
+				if m.Type == MilestoneRunStarted && (state.runStartedAt.IsZero() || !m.At.Before(state.runStartedAt)) {
+					state.runStartedAt = m.At
+				}
 			}
 		}
 		sort.SliceStable(state.milestones, func(i, j int) bool { return state.milestones[i].At.Before(state.milestones[j].At) })
@@ -522,6 +550,9 @@ func (s *Service) Restore(d DurableState) error {
 			for _, removed := range state.milestones[:n] {
 				if removed.At.After(state.retentionAt) {
 					state.retentionAt = removed.At.UTC()
+				}
+				if removed.globalSequence > state.retentionSequence {
+					state.retentionSequence = removed.globalSequence
 				}
 			}
 			state.milestones = state.milestones[n:]
@@ -562,7 +593,7 @@ func (s *Service) snapshotLocked() Snapshot {
 }
 
 func snapshotSession(state *sessionState) Session {
-	out := Session{ID: state.input.ID, Title: state.input.Title, Aliases: cloneStrings(state.input.Aliases), Presence: state.input.Presence, Lifecycle: state.lifecycle.State, Activity: state.lifecycle.Activity, LastTransitionAt: state.lifecycle.At, Jobs: state.jobs, Verification: state.verify}
+	out := Session{ID: state.input.ID, Title: state.input.Title, Aliases: cloneStrings(state.input.Aliases), Presence: state.input.Presence, Lifecycle: state.lifecycle.State, Activity: state.lifecycle.Activity, LastTransitionAt: state.lifecycle.At, Jobs: state.jobs, Verification: state.verify, RunStartedAt: state.runStartedAt}
 	out.Milestones = make([]Milestone, len(state.milestones))
 	for i, milestone := range state.milestones {
 		out.Milestones[i] = milestone.Milestone

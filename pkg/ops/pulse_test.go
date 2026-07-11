@@ -1,8 +1,10 @@
 package ops
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -67,6 +69,9 @@ func TestPulseActiveWorkDoesNotDescribeUnknownVerificationAsStatus(t *testing.T)
 			t.Fatal(err)
 		}
 	}
+	if err := s.RecordMilestone("passed", Milestone{Type: MilestoneRunStarted, At: stamp(1), RefID: "run"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.UpdateVerification("passed", Verification{State: VerificationPassed, At: stamp(2)}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +92,123 @@ func TestPulseActiveWorkDoesNotDescribeUnknownVerificationAsStatus(t *testing.T)
 	}
 	if strings.Contains(string(encoded), `"verification":"unknown"`) {
 		t.Fatalf("pulse stated unknown verification: %s", encoded)
+	}
+}
+
+func TestPulsePagePaginatesEqualTimestampsWithoutGapsOrDuplicates(t *testing.T) {
+	s := New(Config{MaxMilestones: 256})
+	addSession(t, s, "session", "/work/a")
+	for i := 0; i < 130; i++ {
+		if err := s.RecordMilestone("session", Milestone{Type: MilestoneRunStarted, At: stamp(1), RefID: fmt.Sprintf("event-%03d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cursor := ""
+	seen := make(map[string]struct{})
+	for page := 0; ; page++ {
+		pulse, err := s.PulsePage(cursor, stamp(2))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pulse.Changes.Items) > maxChangesMilestones {
+			t.Fatalf("page has %d items", len(pulse.Changes.Items))
+		}
+		for _, item := range pulse.Changes.Items {
+			want := fmt.Sprintf("event-%03d", len(seen))
+			if got := item.Facts[0].RefID; got != want {
+				t.Fatalf("item order = %q, want %q", got, want)
+			}
+			if _, duplicate := seen[item.ID]; duplicate {
+				t.Fatalf("duplicate item %q on page %d", item.ID, page)
+			}
+			seen[item.ID] = struct{}{}
+		}
+		if !pulse.Changes.HasMore {
+			if pulse.Changes.NextCursor != "" {
+				t.Fatalf("final page supplied continuation %q", pulse.Changes.NextCursor)
+			}
+			break
+		}
+		if pulse.Changes.NextCursor == "" {
+			t.Fatal("non-final page omitted continuation")
+		}
+		cursor = pulse.Changes.NextCursor
+	}
+	if len(seen) != 130 {
+		t.Fatalf("received %d items, want 130", len(seen))
+	}
+}
+
+func TestPulsePageCursorIsOpaqueTamperSafeAndDetectsRetentionGap(t *testing.T) {
+	s := New(Config{MaxMilestones: 128})
+	addSession(t, s, "session", "/work/a")
+	for i := 0; i < 130; i++ {
+		if err := s.RecordMilestone("session", Milestone{Type: MilestoneRunStarted, At: stamp(1), RefID: fmt.Sprintf("first-%03d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pulse, err := s.PulsePage("", stamp(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := pulse.Changes.NextCursor
+	if cursor == "" || strings.Contains(cursor, "session") || strings.Contains(cursor, "first") {
+		t.Fatalf("cursor is not opaque: %q", cursor)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil || len(raw) != 48 {
+		t.Fatalf("cursor wire format = %q, %v", cursor, err)
+	}
+	encoded, err := json.Marshal(pulse)
+	if err != nil || !strings.Contains(string(encoded), cursor) || strings.Contains(string(encoded), "global_sequence") || strings.Contains(string(encoded), "pulse_cursor_key") {
+		t.Fatalf("cursor response leaked internal cursor state: %s, %v", encoded, err)
+	}
+	tampered := cursor[:len(cursor)-1] + "A"
+	if tampered == cursor {
+		tampered = cursor[:len(cursor)-1] + "B"
+	}
+	if _, err := s.PulsePage(tampered, stamp(2)); !errors.Is(err, ErrInvalidPulseCursor) {
+		t.Fatalf("tampered cursor error = %v", err)
+	}
+	for i := 0; i < 65; i++ {
+		if err := s.RecordMilestone("session", Milestone{Type: MilestoneRunStarted, At: stamp(3), RefID: fmt.Sprintf("later-%03d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PulsePage(cursor, stamp(4)); !errors.Is(err, ErrRetentionGap) {
+		t.Fatalf("retained page error = %v", err)
+	}
+}
+
+func TestPulseOnTrackRequiresVerificationForCurrentRun(t *testing.T) {
+	s := New(Config{})
+	addSession(t, s, "session", "/work/a")
+	if err := s.UpdateLifecycle("session", LifecycleUpdate{State: LifecycleRunning, Activity: ActivityRunning, At: stamp(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateVerification("session", Verification{State: VerificationPassed, At: stamp(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordMilestone("session", Milestone{Type: MilestoneRunStarted, At: stamp(2), RefID: "run-2"}); err != nil {
+		t.Fatal(err)
+	}
+	pulse, err := s.PulsePage("", stamp(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pulse.OnTrack) != 0 || len(pulse.InProgress) != 1 || pulse.InProgress[0].Verification != "" {
+		t.Fatalf("prior verification survived new run: %#v", pulse)
+	}
+	if err := s.UpdateVerification("session", Verification{State: VerificationPassed, At: stamp(3)}); err != nil {
+		t.Fatal(err)
+	}
+	pulse, err = s.PulsePage("", stamp(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pulse.OnTrack) != 1 || pulse.OnTrack[0].Facts[2].Kind != "verification" {
+		t.Fatalf("current verification did not produce evidence-backed on_track: %#v", pulse.OnTrack)
 	}
 }
 
@@ -124,7 +246,7 @@ func TestPulseWireContainsOnlySafeProjectionFields(t *testing.T) {
 	if err := s.RecordMilestone("session", Milestone{Type: MilestoneRunStarted, At: stamp(1), RefID: "run-1"}); err != nil {
 		t.Fatal(err)
 	}
-	pulse, err := s.Pulse(ptrStamp(0), stamp(2))
+	pulse, err := s.PulsePage("", stamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +255,7 @@ func TestPulseWireContainsOnlySafeProjectionFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	wire := string(encoded)
-	for _, forbidden := range []string{"canonical_cwd", "milestones", "transcript", "tool_args", "error_message", "log"} {
+	for _, forbidden := range []string{"canonical_cwd", "milestones", "run_started_at", "global_sequence", "pulse_cursor_key", "transcript", "tool_args", "error_message", "log"} {
 		if strings.Contains(wire, forbidden) {
 			t.Fatalf("pulse leaked %q: %s", forbidden, wire)
 		}

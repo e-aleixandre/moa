@@ -112,6 +112,9 @@ func (m *Manager) subscribeOps(sess *ManagedSession) {
 			}
 		case bus.RunStarted:
 			_ = m.ops.UpdateLifecycle(sess.ID, ops.LifecycleUpdate{State: ops.LifecycleRunning, Activity: ops.ActivityRunning, At: now})
+			// A pass belongs to the run that produced it. Never carry a prior
+			// run's verification into a newly started run.
+			_ = m.ops.UpdateVerification(sess.ID, ops.Verification{State: ops.VerificationUnknown, At: now})
 			_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneRunStarted, At: now, RefID: opsRunRef(e.RunGen) + "_started"})
 		case bus.RunEnded:
 			_ = m.ops.RecordMilestone(sess.ID, ops.Milestone{Type: ops.MilestoneRunEnded, At: now, RefID: opsRunRef(e.RunGen) + "_ended"})
@@ -252,9 +255,10 @@ func handleOpsOverview(m *Manager) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-// handleOpsPulse exposes the server-derived mobile briefing. It intentionally
-// accepts only an optional UTC journal cursor; the snapshot and any changes
-// are selected together by Ops without accepting client-provided state.
+// handleOpsPulse exposes the server-derived mobile briefing. cursor is an
+// opaque server-issued continuation token. The absent cursor starts a new
+// retained stream; legacy since remains only for compatibility and cannot be
+// combined with cursor.
 func handleOpsPulse(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if m.ops == nil {
@@ -263,26 +267,49 @@ func handleOpsPulse(m *Manager) http.HandlerFunc {
 		}
 		query := r.URL.Query()
 		for key, values := range query {
-			if key != "since" || len(values) != 1 {
+			if (key != "since" && key != "cursor") || len(values) != 1 {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pulse query"})
 				return
 			}
 		}
+		if _, hasSince := query["since"]; hasSince {
+			if _, hasCursor := query["cursor"]; hasCursor {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cursor and since cannot be combined"})
+				return
+			}
+		}
 
-		var since *time.Time
+		var (
+			pulse ops.Pulse
+			err   error
+		)
 		if values, ok := query["since"]; ok {
 			at, valid := parseOpsUTCTimestamp(values[0])
 			if !valid {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since must be RFC3339 UTC"})
 				return
 			}
-			since = &at
+			pulse, err = m.ops.Pulse(&at, time.Now().UTC())
+		} else {
+			cursor := ""
+			if values, ok := query["cursor"]; ok {
+				if values[0] == "" {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cursor must be opaque and non-empty"})
+					return
+				}
+				cursor = values[0]
+			}
+			pulse, err = m.ops.PulsePage(cursor, time.Now().UTC())
 		}
-		pulse, err := m.ops.Pulse(since, time.Now().UTC())
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, ops.ErrRetentionGap) {
+			if errors.Is(err, ops.ErrRetentionGap) || errors.Is(err, ops.ErrPulseCursorExpired) || errors.Is(err, ops.ErrPulseResetRequired) {
 				status = http.StatusGone
+				writeJSON(w, status, struct {
+					Error string `json:"error"`
+					Reset bool   `json:"reset"`
+				}{Error: err.Error(), Reset: true})
+				return
 			}
 			writeJSON(w, status, map[string]string{"error": err.Error()})
 			return
