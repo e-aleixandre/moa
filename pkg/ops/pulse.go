@@ -32,8 +32,9 @@ type PulseSummary struct {
 }
 
 // PulseChanges reports one page of journal entries. NextCursor is an opaque,
-// server-issued continuation token; clients must not derive a cursor from a
-// timestamp or any displayed item.
+// server-issued continuation token, including after a final page so clients
+// can poll for subsequently accepted milestones. Clients must not derive a
+// cursor from a timestamp or any displayed item.
 type PulseChanges struct {
 	Requested  bool        `json:"requested"`
 	Since      *time.Time  `json:"since,omitempty"`
@@ -167,6 +168,11 @@ func (s *Service) PulsePage(cursor string, generatedAt time.Time) (Pulse, error)
 			return Pulse{}, ErrPulseCursorExpired
 		}
 		after, watermark = state.after, state.watermark
+		if after == watermark {
+			// A completed page cursor is a polling cursor. Start its next
+			// immutable page at the sequence that was fully consumed.
+			watermark = s.milestoneSequence
+		}
 		if s.pulseRetentionGapLocked(after, watermark) {
 			return Pulse{}, ErrRetentionGap
 		}
@@ -180,6 +186,11 @@ func (s *Service) PulsePage(cursor string, generatedAt time.Time) (Pulse, error)
 		page = page[:maxChangesMilestones]
 		pulse.Changes.HasMore = true
 		pulse.Changes.NextCursor = s.issuePulseCursorLocked(page[len(page)-1].sequence, watermark)
+	} else {
+		// This cursor has consumed the frozen stream. Advance its watermark to
+		// the current server sequence so it remains a safe polling cursor for
+		// events accepted after the page that just completed.
+		pulse.Changes.NextCursor = s.issuePulseCursorLocked(watermark, s.milestoneSequence)
 	}
 	for _, change := range page {
 		pulse.Changes.Items = append(pulse.Changes.Items, pulseChangeItem(change.change, generatedAt))

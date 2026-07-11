@@ -106,6 +106,7 @@ func TestPulsePagePaginatesEqualTimestampsWithoutGapsOrDuplicates(t *testing.T) 
 
 	cursor := ""
 	seen := make(map[string]struct{})
+	finalCursor := ""
 	for page := 0; ; page++ {
 		pulse, err := s.PulsePage(cursor, stamp(2))
 		if err != nil {
@@ -125,9 +126,10 @@ func TestPulsePagePaginatesEqualTimestampsWithoutGapsOrDuplicates(t *testing.T) 
 			seen[item.ID] = struct{}{}
 		}
 		if !pulse.Changes.HasMore {
-			if pulse.Changes.NextCursor != "" {
-				t.Fatalf("final page supplied continuation %q", pulse.Changes.NextCursor)
+			if pulse.Changes.NextCursor == "" {
+				t.Fatal("final page omitted polling continuation")
 			}
+			finalCursor = pulse.Changes.NextCursor
 			break
 		}
 		if pulse.Changes.NextCursor == "" {
@@ -137,6 +139,16 @@ func TestPulsePagePaginatesEqualTimestampsWithoutGapsOrDuplicates(t *testing.T) 
 	}
 	if len(seen) != 130 {
 		t.Fatalf("received %d items, want 130", len(seen))
+	}
+	if err := s.RecordMilestone("session", Milestone{Type: MilestoneRunStarted, At: stamp(1), RefID: "event-130"}); err != nil {
+		t.Fatal(err)
+	}
+	pulse, err := s.PulsePage(finalCursor, stamp(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pulse.Changes.Items) != 1 || pulse.Changes.Items[0].Facts[0].RefID != "event-130" {
+		t.Fatalf("polling continuation lost retained event: %#v", pulse.Changes)
 	}
 }
 
