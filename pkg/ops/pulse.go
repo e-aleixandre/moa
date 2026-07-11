@@ -19,6 +19,7 @@ type Pulse struct {
 	Summary        PulseSummary `json:"summary"`
 	NeedsAttention []PulseItem  `json:"needs_attention"`
 	InProgress     []PulseItem  `json:"in_progress"`
+	StaleWork      []PulseItem  `json:"stale_work"`
 	OnTrack        []PulseItem  `json:"on_track"`
 	Changes        PulseChanges `json:"changes"`
 }
@@ -27,6 +28,7 @@ type Pulse struct {
 type PulseSummary struct {
 	NeedsAttention int `json:"needs_attention"`
 	InProgress     int `json:"in_progress"`
+	StaleWork      int `json:"stale_work"`
 	OnTrack        int `json:"on_track"`
 	Changes        int `json:"changes"`
 }
@@ -306,6 +308,7 @@ func pulseFromSnapshot(snapshot Snapshot, generatedAt time.Time) Pulse {
 		GeneratedAt:    generatedAt,
 		NeedsAttention: make([]PulseItem, 0),
 		InProgress:     make([]PulseItem, 0),
+		StaleWork:      make([]PulseItem, 0),
 		OnTrack:        make([]PulseItem, 0),
 	}
 	for _, project := range snapshot.Projects {
@@ -320,13 +323,18 @@ func pulseFromSnapshot(snapshot Snapshot, generatedAt time.Time) Pulse {
 					pulse.InProgress = append(pulse.InProgress, item)
 				}
 			}
+			if item, ok := pulseStaleWorkItem(project.CanonicalCWD, session, generatedAt); ok {
+				pulse.StaleWork = append(pulse.StaleWork, item)
+			}
 		}
 	}
 	sortPulseAttention(pulse.NeedsAttention)
 	sortPulseItems(pulse.InProgress)
+	sortPulseItems(pulse.StaleWork)
 	sortPulseItems(pulse.OnTrack)
 	pulse.Summary.NeedsAttention = len(pulse.NeedsAttention)
 	pulse.Summary.InProgress = len(pulse.InProgress)
+	pulse.Summary.StaleWork = len(pulse.StaleWork)
 	pulse.Summary.OnTrack = len(pulse.OnTrack)
 	return pulse
 }
@@ -387,6 +395,32 @@ func pulseActiveItem(project string, session Session, generatedAt time.Time) (Pu
 		ID: pulseItemID("active", session.ID, category), Session: pulseSession(project, session), Category: category,
 		Lifecycle: session.Lifecycle, Activity: session.Activity, Verification: pulseDisplayVerification(session, generatedAt),
 		ObservedAt: observedAt, Freshness: PulseFresh, Facts: facts, DirectedInstruction: pulseInstruction(session),
+	}, true
+}
+
+// pulseStaleWorkItem makes uncertainty visible without inventing a blocker or
+// claiming verification. It is deliberately separate from attention: the
+// server only knows that an active run has not been observed recently.
+func pulseStaleWorkItem(project string, session Session, generatedAt time.Time) (PulseItem, bool) {
+	if session.Presence != PresenceActive || session.Lifecycle != LifecycleRunning || session.Activity != ActivityRunning {
+		return PulseItem{}, false
+	}
+	observedAt := latestPulseObservation(session)
+	freshness := pulseFreshness(observedAt, generatedAt)
+	if freshness == PulseFresh {
+		return PulseItem{}, false
+	}
+	facts := []PulseFact{
+		{Kind: "lifecycle", Value: string(session.Lifecycle), At: session.LastTransitionAt, Provenance: PulseObserved},
+		{Kind: "activity", Value: string(session.Activity), At: session.LastTransitionAt, Provenance: PulseObserved},
+	}
+	if milestone, ok := latestPulseMilestone(session); ok {
+		facts = append(facts, PulseFact{Kind: "milestone", Value: string(milestone.Type), At: milestone.At, RefID: milestone.RefID, Provenance: PulseObserved})
+	}
+	return PulseItem{
+		ID: pulseItemID("stale_work", session.ID), Session: pulseSession(project, session), Category: "stale_work",
+		Lifecycle: session.Lifecycle, Activity: session.Activity, ObservedAt: observedAt, Freshness: freshness,
+		Facts: facts, DirectedInstruction: pulseInstruction(session),
 	}, true
 }
 

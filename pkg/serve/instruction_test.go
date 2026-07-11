@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 func TestVoiceInstructionPermissionHasNoEffect(t *testing.T) {
@@ -24,6 +28,67 @@ func TestVoiceInstructionPermissionHasNoEffect(t *testing.T) {
 	}
 	if state := sess.runtime.State.Current(); state != bus.StatePermission {
 		t.Fatalf("state = %s, want permission (instruction must have no effect)", state)
+	}
+}
+
+func TestVoiceInstructionIdempotencySurvivesRestartWithoutTextPersistence(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "instruction-idempotency.json")
+	provider := newMockProvider(simpleResponseHandler("ok"))
+	// Build managers directly so both simulated processes use the same private
+	// idempotency store while the session itself remains a test runtime.
+	first := NewManager(context.Background(), ManagerConfig{ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil }, DefaultModel: core.Model{ID: "test", Provider: "mock"}, WorkspaceRoot: root, MoaCfg: core.MoaConfig{DisableSandbox: true}, ConfigLoader: isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}), SessionBaseDir: filepath.Join(root, "sessions"), InstructionPath: path})
+	t.Cleanup(first.Shutdown)
+	sess, err := first.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action, err := first.VoiceInstruction(sess.ID, "secret instruction text", "request-1"); err != nil || action != "send" {
+		t.Fatalf("initial instruction = %q, %v", action, err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("instruction store permissions = %v, want 0600", info.Mode().Perm())
+	}
+	if strings.Contains(string(raw), "secret instruction text") || strings.Contains(string(raw), "transcript") {
+		t.Fatalf("instruction store contains raw content: %s", raw)
+	}
+	first.Shutdown()
+
+	second := NewManager(context.Background(), ManagerConfig{ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil }, DefaultModel: core.Model{ID: "test", Provider: "mock"}, WorkspaceRoot: root, MoaCfg: core.MoaConfig{DisableSandbox: true}, ConfigLoader: isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}), SessionBaseDir: filepath.Join(root, "sessions"), InstructionPath: path})
+	t.Cleanup(second.Shutdown)
+	if _, err := second.ResumeSession(sess.ID); err != nil {
+		t.Fatalf("resume after restart: %v", err)
+	}
+	if action, err := second.VoiceInstruction(sess.ID, "secret instruction text", "request-1"); err != nil || action != "send" {
+		t.Fatalf("restart replay = %q, %v", action, err)
+	}
+	if _, err := second.VoiceInstruction(sess.ID, "different text", "request-1"); err != ErrInstructionConflict {
+		t.Fatalf("restart mismatch = %v, want conflict", err)
+	}
+}
+
+func TestVoiceInstructionIdempotencyExpiresAfterTTL(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	mgr.instructionNow = func() time.Time { return now }
+	if _, err := mgr.VoiceInstruction(sess.ID, "first", "request-1"); err != nil {
+		t.Fatal(err)
+	}
+	mgr.instructionNow = func() time.Time { return now.Add(instructionTTL + time.Second) }
+	if _, err := mgr.VoiceInstruction(sess.ID, "different", "request-1"); err == ErrInstructionConflict {
+		t.Fatal("expired request id remained conflicted")
 	}
 }
 

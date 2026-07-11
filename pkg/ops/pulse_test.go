@@ -224,6 +224,33 @@ func TestPulseOnTrackRequiresVerificationForCurrentRun(t *testing.T) {
 	}
 }
 
+func TestPulseStaleWorkPreventsUnobservedActiveRunFromDisappearing(t *testing.T) {
+	s := New(Config{})
+	addSession(t, s, "stale", "/work/a")
+	addSession(t, s, "fresh", "/work/b")
+	for _, id := range []string{"stale", "fresh"} {
+		if err := s.UpdateLifecycle(id, LifecycleUpdate{State: LifecycleRunning, Activity: ActivityRunning, At: stamp(1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RecordMilestone("fresh", Milestone{Type: MilestoneRunStarted, At: stamp(100000), RefID: "fresh-run"}); err != nil {
+		t.Fatal(err)
+	}
+	pulse, err := s.PulsePage("", stamp(100001))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pulse.StaleWork) != 1 || pulse.StaleWork[0].Session.ID != "stale" || pulse.StaleWork[0].Category != "stale_work" || pulse.StaleWork[0].Freshness != PulseStale {
+		t.Fatalf("stale work = %#v", pulse.StaleWork)
+	}
+	if pulse.Summary.StaleWork != 1 || len(pulse.NeedsAttention) != 0 || len(pulse.OnTrack) != 0 {
+		t.Fatalf("stale work summary/classification = %#v", pulse)
+	}
+	if len(pulse.InProgress) != 1 || pulse.InProgress[0].Session.ID != "fresh" {
+		t.Fatalf("fresh work was not distinct progress: %#v", pulse.InProgress)
+	}
+}
+
 func TestPulseChangesUseBoundedJournalAndRetention(t *testing.T) {
 	s := New(Config{MaxMilestones: 2})
 	addSession(t, s, "session", "/work/a")
