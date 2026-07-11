@@ -252,6 +252,45 @@ func handleOpsOverview(m *Manager) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
+// handleOpsPulse exposes the server-derived mobile briefing. It intentionally
+// accepts only an optional UTC journal cursor; the snapshot and any changes
+// are selected together by Ops without accepting client-provided state.
+func handleOpsPulse(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if m.ops == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops unavailable"})
+			return
+		}
+		query := r.URL.Query()
+		for key, values := range query {
+			if key != "since" || len(values) != 1 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pulse query"})
+				return
+			}
+		}
+
+		var since *time.Time
+		if values, ok := query["since"]; ok {
+			at, valid := parseOpsUTCTimestamp(values[0])
+			if !valid {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since must be RFC3339 UTC"})
+				return
+			}
+			since = &at
+		}
+		pulse, err := m.ops.Pulse(since, time.Now().UTC())
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ops.ErrRetentionGap) {
+				status = http.StatusGone
+			}
+			writeJSON(w, status, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, pulse)
+	}
+}
+
 type opsInstructionBody struct {
 	Target    string `json:"target"`
 	Text      string `json:"text"`
