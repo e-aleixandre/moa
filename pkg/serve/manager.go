@@ -245,6 +245,7 @@ type Manager struct {
 	instructionStore    *instructionStore
 	instructionKey      []byte
 	instructionNow      func() time.Time
+	conversationKey     []byte // process-local HMAC key for read cursors
 
 	providerFactory func(model core.Model) (core.Provider, error)
 	transcriber     core.Transcriber // nil when no speech-to-text is available
@@ -391,6 +392,12 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			instructionStore = nil
 		}
 	}
+	conversationKey, err := newInstructionKey()
+	if err != nil {
+		// A nil key only makes cursors unusable; reads without a cursor remain
+		// safe. Do not reuse a user-provided secret or persist transcript state.
+		slog.Warn("conversation cursor key unavailable", "error", err)
+	}
 	m := &Manager{
 		sessions:         make(map[string]*ManagedSession),
 		resuming:         make(map[string]struct{}),
@@ -413,6 +420,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		instructionStore: instructionStore,
 		instructionKey:   instructionKey,
 		instructionNow:   time.Now,
+		conversationKey:  conversationKey,
 	}
 	m.instructionRequests = make(map[string][]instructionRequest)
 	m.instructionRates = make(map[string][]time.Time)
