@@ -299,7 +299,7 @@ func (s *Service) UpsertSession(in SessionInput) error {
 		s.changedLocked()
 		return nil
 	}
-	s.sessions[in.ID] = &sessionState{input: in, lifecycle: LifecycleUpdate{State: LifecycleIdle, Activity: ActivityIdle}}
+	s.sessions[in.ID] = &sessionState{input: in, lifecycle: LifecycleUpdate{State: LifecycleIdle, Activity: ActivityIdle}, verify: Verification{State: VerificationUnknown}}
 	s.changedLocked()
 	return nil
 }

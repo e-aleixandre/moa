@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -55,6 +56,31 @@ func TestStateUpdatesAreProjected(t *testing.T) {
 	session := service.Snapshot().Projects[0].Sessions[0]
 	if session.Lifecycle != LifecycleRunning || session.Activity != ActivityRunning || !session.LastTransitionAt.Equal(stamp(1)) || session.Jobs != (JobCounts{Subagents: 2, Bash: 3}) || session.Verification.State != VerificationPassed {
 		t.Fatalf("unexpected state: %#v", session)
+	}
+}
+
+func TestNewSessionSerializesUnknownVerificationState(t *testing.T) {
+	service := New(Config{})
+	addSession(t, service, "s", "/work/a")
+
+	encoded, err := json.Marshal(service.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Projects []struct {
+			Sessions []struct {
+				Verification struct {
+					State string `json:"state"`
+				} `json:"verification"`
+			} `json:"sessions"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if got := wire.Projects[0].Sessions[0].Verification.State; got != string(VerificationUnknown) {
+		t.Fatalf("verification.state = %q, want %q", got, VerificationUnknown)
 	}
 }
 
