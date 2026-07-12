@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -332,6 +333,10 @@ func (m *Manager) confirmPulseOperation(ctx context.Context, devices *deviceStor
 		return pulseOperationReceipt{}, errOperationStoreUnavailable
 	}
 	if !m.instructionLedgerAvailable() {
+		if start.Recover && start.Operation.Attempted {
+			receipt := indeterminateOperationReceipt(start.Operation, time.Now().UTC(), "canonical_ledger_unavailable")
+			return m.finishPulseConfirmation(id, receipt)
+		}
 		receipt := rejectedOperationReceipt(start.Operation, time.Now().UTC(), "delivery_unavailable")
 		return m.finishPulseConfirmation(id, receipt)
 	}
@@ -467,23 +472,32 @@ func indeterminateOperationReceipt(operation durableOperation, now time.Time, re
 
 // recoverPulseConfirmations never performs delivery. It can turn a durable
 // canonical accepted record into a receipt, or settle a known uncertain
-// attempt as indeterminate. A still-valid confirming review without a ledger
-// attempt remains available for an explicit retry; that retry first writes
-// both operation and canonical write-ahead records before it can execute.
+// attempt as indeterminate. If the canonical ledger itself is unavailable,
+// every durable Attempted marker is terminally indeterminate: it must not be
+// retried or recast as a rejection. A still-valid confirming review without an
+// attempt remains available for an explicit retry once the ledger returns.
 func (m *Manager) recoverPulseConfirmations() {
-	if m.pulseOperations == nil || !m.instructionLedgerAvailable() {
+	if m.pulseOperations == nil {
 		return
 	}
 	for _, operation := range m.pulseOperations.confirmingOperations() {
 		receipt, settled := m.recoverPulseConfirmation(operation)
 		if settled {
-			_ = m.pulseOperations.finalizeRecovered(operation.ID, receipt)
+			if err := m.pulseOperations.finalizeRecovered(operation.ID, receipt); err != nil {
+				slog.Warn("Pulse operation recovery receipt persistence failed", "operation_id", operation.ID, "error", err)
+			}
 		}
 	}
 }
 
 func (m *Manager) recoverPulseConfirmation(operation durableOperation) (pulseOperationReceipt, bool) {
 	now := time.Now().UTC()
+	if !m.instructionLedgerAvailable() {
+		if operation.Attempted {
+			return indeterminateOperationReceipt(operation, now, "canonical_ledger_unavailable"), true
+		}
+		return pulseOperationReceipt{}, false
+	}
 	outcome := m.pulseInstructionOutcome(operation.Target.ID, "pulse."+operation.ID)
 	switch outcome.state {
 	case "accepted":
@@ -491,6 +505,13 @@ func (m *Manager) recoverPulseConfirmation(operation durableOperation) (pulseOpe
 	case "attempting", "unknown":
 		return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown"), true
 	case "absent":
+		// The operation's own durable Attempted marker is written immediately
+		// before canonical delivery. An absent ledger record cannot prove that
+		// delivery did not occur, so it is not safe to retry even before the
+		// review expiry.
+		if operation.Attempted {
+			return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown"), true
+		}
 		if !operation.ExpiresAt.After(now) {
 			return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown"), true
 		}
