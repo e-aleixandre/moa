@@ -271,8 +271,9 @@ id/título/texto y si la entrega será `send` o `steer`. Al confirmar se reutili
 la política e idempotencia canónicas de instrucciones; si cambia ese estado,
 la revisión caduca.
 
-`permission_decision` acepta exclusivamente `target`, `decision`
-(`approve_once` o `deny`) y una nota `feedback` opcional, breve y no sensible.
+`permission_decision` acepta exclusivamente `target` y `decision`
+(`approve_once` o `deny`). Rechaza `feedback`, incluso texto inocuo, para que
+Pulse no pueda inyectar texto visible al agente mediante una decisión de permiso.
 El destino debe resolver una única sesión y debe tener exactamente una petición
 de permiso pendiente. Moa toma una instantánea privada ligada al id de sesión,
 id efímero del permiso, generación de ejecución, herramienta, alcance y digest

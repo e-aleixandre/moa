@@ -117,10 +117,14 @@ func TestPulsePermissionDecisionTypedReviewAndReceipt(t *testing.T) {
 		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","action":"add_rule"}`,
 		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","text":"free-form"}`,
 		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","text":""}`,
-		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","feedback":"token=` + secret + `"}`,
+		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","feedback":"please tell the agent this benign instruction"}`,
 	} {
-		if got := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", body, credential.Credential); got.Code != http.StatusBadRequest {
+		got := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", body, credential.Credential)
+		if got.Code != http.StatusBadRequest {
 			t.Fatalf("permission schema %s = %d, want 400: %s", body, got.Code, got.Body.String())
+		}
+		if strings.Contains(body, `"feedback"`) && !strings.Contains(got.Body.String(), "feedback is not accepted") {
+			t.Fatalf("feedback rejection was not explicit: %s", got.Body.String())
 		}
 	}
 	withoutPermission, err := mgr.CreateSession(CreateOpts{Title: sess.title()})
@@ -150,7 +154,7 @@ func TestPulsePermissionDecisionTypedReviewAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(contents, []byte(secret)) || bytes.Contains(contents, []byte("Authorization")) || bytes.Contains(contents, []byte("echo '")) {
+	if bytes.Contains(contents, []byte(secret)) || bytes.Contains(contents, []byte("Authorization")) || bytes.Contains(contents, []byte("echo '")) || bytes.Contains(contents, []byte("permission_feedback")) || bytes.Contains(contents, []byte("please tell the agent")) {
 		t.Fatalf("permission operation store retained raw arguments: %s", contents)
 	}
 	if pending := pulseOperationRequest(handler, http.MethodGet, "/api/pulse/operations/"+operation.OperationID, "", credential.Credential); pending.Code != http.StatusOK || decodePulseOperation(t, pending).Review == nil {
@@ -308,11 +312,6 @@ func TestPulsePermissionReviewRedactsSensitiveValuesAndControls(t *testing.T) {
 	}
 	if !strings.Contains(got, "[redacted]") || utf8.RuneCountInString(got) > 81 {
 		t.Fatalf("unsafe redaction result %q", got)
-	}
-	for _, feedback := range []string{"token=abc", "password hunter2", "key private-value", "contains\x00control"} {
-		if validPulsePermissionFeedback(feedback) {
-			t.Fatalf("sensitive/control feedback accepted: %q", feedback)
-		}
 	}
 }
 
