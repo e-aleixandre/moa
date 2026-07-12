@@ -332,6 +332,12 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			m.s.blocks = append(m.s.blocks, messageBlock{
 				Type: "status", Raw: "✂ (conversation compacted)",
 			})
+		case "goal":
+			// Persistent goal-lifecycle marker (start / iteration verdict / end).
+			// Rendered as a status block, matching the live goal event styling.
+			if text := firstTextContent(msg.Content); text != "" {
+				m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: text})
+			}
 		case "session_event":
 			if eventType(msg.Custom) == "model_switch" {
 				if text := firstTextContent(msg.Content); text != "" {

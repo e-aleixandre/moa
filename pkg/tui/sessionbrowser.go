@@ -390,6 +390,8 @@ func previewMessage(msg core.AgentMessage) (string, string) {
 		return "TOOL", text
 	case "session_event":
 		return "EVENT", firstTextContent(msg.Content)
+	case "goal":
+		return "GOAL", firstTextContent(msg.Content)
 	case "compaction_summary":
 		return "EVENT", "conversation compacted"
 	}

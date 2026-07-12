@@ -1519,6 +1519,61 @@ func TestRebuildFromMessages_RendersModelSwitchSessionEvent(t *testing.T) {
 	}
 }
 
+// Regression for bug #7: persisted goal-lifecycle markers (role "goal") must
+// rebuild as status blocks so a reopened conversation shows the goal record.
+func TestRebuildFromMessages_RendersGoalMarkers(t *testing.T) {
+	m := newTestModel()
+
+	m.rebuildFromMessages([]core.AgentMessage{
+		{
+			Message: core.Message{
+				Role:    "goal",
+				Content: []core.Content{core.TextContent("🎯 Goal started: ship it")},
+			},
+			Custom: map[string]any{"goal": true, "phase": "start"},
+		},
+		core.WrapMessage(core.NewUserMessage("hello")),
+		{
+			Message: core.Message{
+				Role:    "goal",
+				Content: []core.Content{core.TextContent("🎯 Goal ended: objective met")},
+			},
+			Custom: map[string]any{"goal": true, "phase": "end"},
+		},
+	})
+
+	if len(m.s.blocks) != 3 {
+		t.Fatalf("blocks = %d, want 3", len(m.s.blocks))
+	}
+	if got := m.s.blocks[0]; got.Type != "status" || got.Raw != "🎯 Goal started: ship it" {
+		t.Fatalf("blocks[0] = %+v, want goal start status", got)
+	}
+	if got := m.s.blocks[2]; got.Type != "status" || got.Raw != "🎯 Goal ended: objective met" {
+		t.Fatalf("blocks[2] = %+v, want goal end status", got)
+	}
+}
+
+// Bug #7 parity: a fresh goal activation shows a live start line (matching the
+// persisted marker rendered on reopen); a re-announcement must not duplicate it.
+func TestHandleGoalChanged_AddsLiveStartLineOnce(t *testing.T) {
+	m := newTestModel()
+	m.statusBar = NewStatusLine(statusLineStyle)
+
+	m.handleGoalChanged(bus.GoalChanged{Active: true, Objective: "ship it", Iteration: 0})
+	if len(m.s.blocks) != 1 {
+		t.Fatalf("blocks = %d, want 1 after activation", len(m.s.blocks))
+	}
+	if got := m.s.blocks[0]; got.Type != "status" || got.Raw != "🎯 Goal started: ship it" {
+		t.Fatalf("blocks[0] = %+v, want goal start status", got)
+	}
+
+	// Already active / later iteration must not re-add the start line.
+	m.handleGoalChanged(bus.GoalChanged{Active: true, Objective: "ship it", Iteration: 1})
+	if len(m.s.blocks) != 1 {
+		t.Fatalf("blocks = %d, want 1 (no duplicate start line)", len(m.s.blocks))
+	}
+}
+
 // --- Layout system tests ---
 
 func saveAndRestoreLayout(t *testing.T) {

@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -67,4 +67,38 @@ test('handleWsInit clears a steer consumed while the session was hidden', () => 
   const session = store.get().sessions.s1;
   expect(session.pendingSteers).toBeNull();
   expect(session.messages).toHaveLength(1);
+});
+
+// Regression for bug #7: persisted goal-lifecycle markers (role "goal") must
+// rebuild as system lines so a reopened conversation shows the goal record.
+test('normalizeHistory renders role "goal" markers as system lines', () => {
+  const out = normalizeHistory([
+    { role: 'goal', custom: { goal: true, phase: 'start' }, content: [{ type: 'text', text: '🎯 Goal started: ship it' }] },
+    { role: 'assistant', msg_id: 'a1', content: [{ type: 'text', text: 'working' }] },
+    { role: 'goal', custom: { goal: true, phase: 'iteration' }, content: [{ type: 'text', text: '🎯 Goal iteration 1 — not done yet\nkeep going' }] },
+    { role: 'goal', custom: { goal: true, phase: 'end' }, content: [{ type: 'text', text: '🎯 Goal ended: objective met' }] },
+  ]);
+  const systems = out.filter(m => m._type === 'system');
+  expect(systems).toHaveLength(3);
+  expect(systems[0].text).toContain('Goal started');
+  expect(systems[1].text).toContain('iteration 1');
+  expect(systems[2].text).toContain('Goal ended');
+});
+
+// Bug #7 parity: a fresh goal activation shows a live "start" line (matching the
+// persisted marker rendered on reopen); a re-announcement must not duplicate it.
+test('handleWsGoalChange adds a live start line once on fresh activation', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+
+  handleWsGoalChange('s1', { active: true, objective: 'ship it', iteration: 0 });
+  let msgs = store.get().sessions.s1.messages;
+  expect(msgs).toHaveLength(1);
+  expect(msgs[0]._type).toBe('system');
+  expect(msgs[0].text).toContain('Goal started');
+
+  // A later goal_change echo (already active, or iteration > 0) must not re-add.
+  handleWsGoalChange('s1', { active: true, objective: 'ship it', iteration: 1 });
+  msgs = store.get().sessions.s1.messages;
+  expect(msgs).toHaveLength(1);
 });

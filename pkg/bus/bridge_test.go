@@ -55,6 +55,10 @@ type fakeAgent struct {
 	sendDelay   time.Duration // simulates slow agent
 	sendContent []core.Content
 	steerQueue  []string
+
+	// appendBusy > 0 makes AppendMessage fail (simulating a live run) and
+	// decrements once per call, so a deferred append can succeed on retry.
+	appendBusy int
 }
 
 func (f *fakeAgent) Abort() {
@@ -183,6 +187,10 @@ func (f *fakeAgent) SendWithCustom(ctx context.Context, prompt string, custom ma
 func (f *fakeAgent) AppendMessage(msg core.AgentMessage) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.appendBusy > 0 {
+		f.appendBusy--
+		return fmt.Errorf("cannot append message while agent is running")
+	}
 	f.messages = append(f.messages, msg)
 	return nil
 }

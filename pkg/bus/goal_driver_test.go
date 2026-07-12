@@ -11,6 +11,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/goal"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 // verdictProvider streams a fixed assistant text (used as the verifier's reply).
@@ -96,6 +97,149 @@ func TestGoalDriver_FiniteSatisfied_Stops(t *testing.T) {
 	}
 	if fa.compactAt != 0 {
 		t.Fatalf("compaction threshold should be restored to 0, got %d", fa.compactAt)
+	}
+}
+
+// TestGoalDriver_PersistsMarkers is the regression guard for bug #7: goal
+// lifecycle events must leave a persistent record in the conversation (role
+// "goal") so they survive a reload — not just ephemeral in-memory frontend
+// state. A finite satisfied goal produces a start marker, an iteration marker,
+// and an end marker. It wires a real Tree + TreeSyncer so the assertion is on
+// the persisted tree (what a reload rebuilds from), not just agent state, and
+// checks the markers are excluded from the LLM context.
+func TestGoalDriver_PersistsMarkers(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newGoalDriverContext(b, fa, `{"satisfied":true,"feedback":"all green"}`)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	// The end marker is appended inside stopGoal, after GoalEnded is published,
+	// on the driver goroutine. Wait for its CommandExecuted so the assertion is
+	// deterministic rather than racing the async append.
+	endMarker := make(chan struct{}, 4)
+	b.Subscribe(func(e CommandExecuted) {
+		if e.Command != "goal" {
+			return
+		}
+		for _, m := range e.Messages {
+			if m.Role == "goal" {
+				if phase, _ := m.Custom["phase"].(string); phase == "end" {
+					endMarker <- struct{}{}
+					return
+				}
+			}
+		}
+	})
+
+	if err := b.Execute(EnterGoal{
+		SessionID: "test-session",
+		Objective: "make the build green",
+		StatePath: filepath.Join(t.TempDir(), "STATE.md"),
+	}); err != nil {
+		t.Fatalf("EnterGoal: %v", err)
+	}
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "done"})
+
+	select {
+	case <-endMarker:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the end goal marker")
+	}
+	b.Drain(time.Second)
+
+	// Assert on the persisted tree — this is what a reopen rebuilds from.
+	var goalMarkers []core.AgentMessage
+	for _, m := range sctx.Tree.AllMessages() {
+		if m.Role != "goal" {
+			continue
+		}
+		goalMarkers = append(goalMarkers, m)
+		if m.IsLLMMessage() {
+			t.Fatalf("goal marker must not be an LLM message: %+v", m)
+		}
+	}
+	if len(goalMarkers) < 3 {
+		t.Fatalf("expected at least 3 goal markers (start, iteration, end) in the tree, got %d: %+v", len(goalMarkers), goalMarkers)
+	}
+
+	phase := func(m core.AgentMessage) string { s, _ := m.Custom["phase"].(string); return s }
+	if got := phase(goalMarkers[0]); got != "start" {
+		t.Fatalf("first marker phase = %q, want start", got)
+	}
+	if got := phase(goalMarkers[len(goalMarkers)-1]); got != "end" {
+		t.Fatalf("last marker phase = %q, want end", got)
+	}
+	sawIteration := false
+	for _, m := range goalMarkers {
+		if phase(m) == "iteration" {
+			sawIteration = true
+		}
+	}
+	if !sawIteration {
+		t.Fatal("expected an iteration-phase goal marker")
+	}
+
+	// The markers must be excluded from the LLM context the tree builds.
+	llm, _ := sctx.Tree.BuildContext()
+	for _, m := range llm {
+		if m.Role == "goal" {
+			t.Fatalf("goal marker leaked into LLM context: %+v", m)
+		}
+	}
+}
+
+// TestAppendGoalMarker_DeferredWhenBusy covers the busy → RunEnded deferral: if
+// AppendMessage is rejected because a run is live, appendGoalMarker must retry
+// once on the next RunEnded and then publish, appending the marker exactly once.
+func TestAppendGoalMarker_DeferredWhenBusy(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	// First AppendMessage fails (busy); the deferred retry on RunEnded succeeds.
+	fa := &fakeAgent{appendBusy: 1}
+	sctx := newTestSessionContext(b, fa)
+
+	cmdCh := make(chan CommandExecuted, 4)
+	b.Subscribe(func(e CommandExecuted) {
+		if e.Command == "goal" {
+			cmdCh <- e
+		}
+	})
+
+	appendGoalMarker(sctx, "🎯 Goal ended: stopped by user", map[string]any{"phase": "end"})
+
+	// Nothing appended yet (the agent was busy) and no CommandExecuted published.
+	b.Drain(500 * time.Millisecond)
+	select {
+	case <-cmdCh:
+		t.Fatal("marker published while agent was busy; should have deferred")
+	default:
+	}
+	if got := len(fa.Messages()); got != 0 {
+		t.Fatalf("agent messages = %d, want 0 before RunEnded", got)
+	}
+
+	// The run ends: the deferred append fires exactly once.
+	b.Publish(RunEnded{SessionID: "test-session"})
+	select {
+	case <-cmdCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the deferred goal marker")
+	}
+	// A second RunEnded must NOT append the marker again.
+	b.Publish(RunEnded{SessionID: "test-session"})
+	b.Drain(500 * time.Millisecond)
+
+	var goalCount int
+	for _, m := range fa.Messages() {
+		if m.Role == "goal" {
+			goalCount++
+		}
+	}
+	if goalCount != 1 {
+		t.Fatalf("goal markers appended = %d, want exactly 1", goalCount)
 	}
 }
 

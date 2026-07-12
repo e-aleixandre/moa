@@ -64,6 +64,11 @@ export function normalizeHistory(raw) {
         status: 'done',
         result: output,
       });
+    } else if (msg.role === 'goal') {
+      // Persistent goal-lifecycle marker (start / iteration verdict / end).
+      // Rendered as a system line, matching the live goal event styling.
+      const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+      result.push({ _type: 'system', text });
     } else if (msg.role === 'user') {
       if (msg.custom?.source === 'subagent') {
         result.push({
@@ -980,13 +985,21 @@ function parseSubagentNotification(text) {
 }
 
 export function handleWsGoalChange(id, data) {
-  updateSession(id, {
+  const sess = store.get().sessions[id];
+  const patch = {
     goalActive: !!data.active,
     goalObjective: data.active ? (data.objective || '') : null,
     goalWorkDir: data.active ? (data.work_dir || '') : null,
     goalIteration: data.iteration || 0,
     goalStalled: data.stalled || 0,
-  });
+  };
+  // Live start line, matching the persisted "start" marker shown on reopen.
+  // Only on a fresh activation (iteration 0) so a reconnect's goal_change echo
+  // doesn't re-announce an already-running goal.
+  if (sess && data.active && !sess.goalActive && (data.iteration || 0) === 0) {
+    patch.messages = [...sess.messages, { _type: 'system', text: `🎯 Goal started: ${data.objective || ''}` }];
+  }
+  updateSession(id, patch);
 }
 
 export function handleWsGoalIteration(id, data) {

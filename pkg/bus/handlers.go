@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -669,6 +670,12 @@ func RegisterHandlers(sctx *SessionContext) {
 		if workDir != "" {
 			sctx.Goal.SetLastCommit(runGit(sctx.SessionCtx, workDir, "rev-parse", "HEAD"))
 		}
+		// Persistent start marker in the conversation (survives reload). Appended
+		// while the agent is still idle, before the first kick starts a run.
+		appendGoalMarker(sctx, "🎯 Goal started: "+cmd.Objective, map[string]any{
+			"phase":     "start",
+			"objective": cmd.Objective,
+		})
 		// Kick the first iteration. The driver takes over from RunEnded on.
 		return sctx.Bus.Execute(SendPrompt{
 			SessionID: sctx.SessionID,
@@ -1109,6 +1116,11 @@ func RegisterHandlers(sctx *SessionContext) {
 					Feedback:  "verifier unavailable: " + err.Error(),
 					Err:       err,
 				})
+				appendGoalMarker(sctx, goalIterationMarkerText(it, false, "verifier unavailable: "+err.Error()), map[string]any{
+					"phase":     "iteration",
+					"iteration": it,
+					"satisfied": false,
+				})
 				stopGoal(sctx, "verifier unavailable (paused): "+err.Error())
 				return
 			}
@@ -1118,6 +1130,11 @@ func RegisterHandlers(sctx *SessionContext) {
 				Iteration: it,
 				Satisfied: verdict.Satisfied,
 				Feedback:  verdict.Feedback,
+			})
+			appendGoalMarker(sctx, goalIterationMarkerText(it, verdict.Satisfied, verdict.Feedback), map[string]any{
+				"phase":     "iteration",
+				"iteration": it,
+				"satisfied": verdict.Satisfied,
 			})
 
 			if verdict.Satisfied {
@@ -1176,6 +1193,101 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 }
 
+// goalIterationMarkerText formats an iteration verdict for the persistent goal
+// marker, matching the wording the frontends use for the live event so the
+// in-memory render and the reloaded render read identically.
+func goalIterationMarkerText(iteration int, satisfied bool, feedback string) string {
+	verdict := "not done yet"
+	if satisfied {
+		verdict = "satisfied"
+	}
+	text := fmt.Sprintf("🎯 Goal iteration %d — %s", iteration, verdict)
+	if fb := strings.TrimSpace(feedback); fb != "" {
+		text += "\n" + fb
+	}
+	return text
+}
+
+// appendGoalMarker records a goal-lifecycle event (start, iteration verdict,
+// end) as a persistent marker message in the conversation so it survives a
+// reload — the live GoalChanged/GoalIterationEnded/GoalEnded events are only
+// rendered in-memory by the frontends and are lost on reopen.
+//
+// The marker uses role "goal", which IsLLMMessage/isLLMRole exclude, so it never
+// enters the LLM context (same approach as role "shell"). It is appended via
+// AppendMessage and followed by a CommandExecuted{Command:"goal"} publish so the
+// TreeSyncer persists it and the web frontend receives the refreshed history.
+//
+// AppendMessage is rejected while a run is live (e.g. a start marker fired from
+// EnterGoal's first kick, or /goal stop mid-turn). In that case the append is
+// deferred to the next RunEnded, when the agent is idle again.
+func appendGoalMarker(sctx *SessionContext, text string, custom map[string]any) {
+	c := map[string]any{"goal": true}
+	for k, v := range custom {
+		c[k] = v
+	}
+	msg := core.AgentMessage{
+		Message: core.Message{
+			Role:      "goal",
+			Content:   []core.Content{core.TextContent(text)},
+			Timestamp: time.Now().Unix(),
+		},
+		Custom: c,
+	}
+	publish := func() {
+		// Refreshed history lets the web re-render; TreeSynced (from the
+		// CommandExecuted re-sync) drives persistence.
+		sctx.Bus.Publish(CommandExecuted{
+			SessionID: sctx.SessionID,
+			Command:   "goal",
+			Messages:  sctx.Agent.Messages(),
+		})
+	}
+	if err := sctx.Agent.AppendMessage(msg); err != nil {
+		// Busy: defer to the next RunEnded, when the agent is idle again. The
+		// RunEnded handler may fire on another goroutine the instant Subscribe
+		// registers it — before the returned unsub is stored. Guard the
+		// append+publish with sync.Once (runs exactly once), and record that the
+		// handler fired; whichever side observes both "fired" and a stored unsub
+		// performs the teardown, so the subscription never leaks and never
+		// double-unsubscribes.
+		var (
+			mu    sync.Mutex
+			fired bool
+			unsub func()
+		)
+		tearDown := func() {
+			// caller holds mu
+			if fired && unsub != nil {
+				u := unsub
+				unsub = nil
+				u()
+			}
+		}
+		handler := func(e RunEnded) {
+			mu.Lock()
+			alreadyFired := fired
+			fired = true
+			mu.Unlock()
+			if !alreadyFired {
+				if appendErr := sctx.Agent.AppendMessage(msg); appendErr == nil {
+					publish()
+				}
+			}
+			mu.Lock()
+			tearDown()
+			mu.Unlock()
+		}
+		u := sctx.Bus.Subscribe(handler)
+		mu.Lock()
+		unsub = u
+		tearDown() // in case the handler already fired before u was stored
+		mu.Unlock()
+		return
+	}
+	publish()
+}
+
 // stopGoal ends goal mode: it exits the Goal (which removes the directive via
 // onChange), restores the previous compaction threshold, and announces the
 // reason.
@@ -1214,6 +1326,10 @@ func stopGoal(sctx *SessionContext, reason string) {
 		})
 	}
 	sctx.Bus.Publish(GoalEnded{SessionID: sctx.SessionID, Reason: reason})
+	appendGoalMarker(sctx, "🎯 Goal ended: "+reason, map[string]any{
+		"phase":  "end",
+		"reason": reason,
+	})
 }
 
 // deliverQueuedSteers drains steer messages that were queued while a non-run

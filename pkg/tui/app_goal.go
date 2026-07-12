@@ -84,9 +84,17 @@ func goalStatusText(info bus.GoalInfo) string {
 }
 
 func (m *appModel) handleGoalChanged(e bus.GoalChanged) []tea.Cmd {
+	wasActive := m.s.goalActive
 	m.s.goalActive = e.Active
 	if e.Active {
 		m.statusBar.UpdateGoalSegment("active")
+		// Live start line, matching the persisted "start" marker shown on
+		// reopen. Only on a fresh activation (iteration 0) so a re-announcement
+		// can't duplicate it for an already-running goal.
+		if !wasActive && e.Iteration == 0 {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: "🎯 Goal started: " + e.Objective})
+			m.s.viewportDirty = true
+		}
 	} else {
 		m.statusBar.UpdateGoalSegment("")
 	}
