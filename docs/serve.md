@@ -102,8 +102,9 @@ The supported kinds are `directed_instruction` and `permission_decision`.
 `directed_instruction` accepts bounded `target` and `text`; prepare resolves an
 exact Ops destination or returns `409` candidates.
 
-`permission_decision` accepts only a bounded `target`, `decision`
-(`approve_once` or `deny`), and optional bounded non-sensitive `feedback`.
+`permission_decision` accepts only a bounded `target` and `decision`
+(`approve_once` or `deny`). `feedback` is rejected, including benign text, so
+Pulse cannot inject agent-visible text through a permission decision.
 The target must resolve to one session with exactly one current permission.
 Prepare binds the private review to that session, the runtime permission ID,
 run generation, tool, allow scope, and a canonical digest of raw arguments.

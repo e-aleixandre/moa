@@ -95,6 +95,9 @@ func TestApprovalManager_ResolvePermission(t *testing.T) {
 		if !resp.Approved {
 			t.Fatal("expected approved")
 		}
+		if resp.Feedback != "ok" {
+			t.Fatalf("legacy feedback = %q, want ok", resp.Feedback)
+		}
 		if resp.Allow != "write(*)" {
 			t.Fatalf("Allow = %q", resp.Allow)
 		}
@@ -422,7 +425,7 @@ func TestApprovalManager_ConcurrentResolve(t *testing.T) {
 	}
 }
 
-func TestApprovalManager_PermissionDecisionSnapshotIsExactAndDoesNotExposeArgs(t *testing.T) {
+func TestApprovalManager_PermissionDecisionSnapshotIsExactAndDoesNotExposeArgsOrInjectFeedback(t *testing.T) {
 	am, _ := newTestApprovalManager(t)
 	response := make(chan permission.Response, 1)
 	am.mu.Lock()
@@ -448,18 +451,18 @@ func TestApprovalManager_PermissionDecisionSnapshotIsExactAndDoesNotExposeArgs(t
 		t.Fatalf("snapshot exposed raw permission data: %#v", snapshot)
 	}
 
-	if err := am.ResolvePermissionExact(snapshot, true, "reviewed"); err != nil {
+	if err := am.ResolvePermissionExact(snapshot, true); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case got := <-response:
-		if !got.Approved || got.Allow != "" || got.Feedback != "reviewed" {
-			t.Fatalf("exact response = %#v", got)
+		if !got.Approved || got.Allow != "" || got.Feedback != "" {
+			t.Fatalf("Pulse exact response injected policy or feedback: %#v", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("exact resolution did not reach canonical response")
 	}
-	if err := am.ResolvePermissionExact(snapshot, true, ""); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
+	if err := am.ResolvePermissionExact(snapshot, true); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
 		t.Fatalf("replay exact resolve = %v, want mismatch", err)
 	}
 }
@@ -492,7 +495,7 @@ func TestApprovalManager_PermissionDecisionSnapshotRejectsAmbiguityAndChanges(t 
 	p.Args = map[string]any{"path": "replaced.go"}
 	p.AllowPattern = "write(replaced.go)"
 	am.mu.Unlock()
-	if err := am.ResolvePermissionExact(snapshot, true, ""); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
+	if err := am.ResolvePermissionExact(snapshot, true); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
 		t.Fatalf("changed exact resolve = %v, want mismatch", err)
 	}
 	select {
@@ -507,7 +510,7 @@ func TestApprovalManager_PermissionDecisionSnapshotRejectsAmbiguityAndChanges(t 
 	delete(am.perms, "first")
 	am.perms["replacement"] = &PendingPermission{ID: "replacement", ToolName: "write", Args: map[string]any{"path": "fresh.go"}, AllowPattern: "write", RunGen: 3, response: secondResponse}
 	am.mu.Unlock()
-	if err := am.ResolvePermissionExact(snapshot, true, ""); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
+	if err := am.ResolvePermissionExact(snapshot, true); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
 		t.Fatalf("replacement exact resolve = %v, want mismatch", err)
 	}
 	select {

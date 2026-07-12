@@ -489,7 +489,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.Approvals == nil {
 			return fmt.Errorf("approvals not available")
 		}
-		return sctx.Approvals.ResolvePermissionExact(cmd.Snapshot, cmd.Approved, cmd.Feedback)
+		return sctx.Approvals.ResolvePermissionExact(cmd.Snapshot, cmd.Approved)
 	})
 
 	b.OnCommand(func(cmd AddPermissionRule) error {

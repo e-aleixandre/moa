@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -36,11 +39,9 @@ type pulseOperationPrepareBody struct {
 	Target   string `json:"target"`
 	Text     string `json:"text"`
 	Decision string `json:"decision"`
-	Feedback string `json:"feedback"`
 
 	textProvided     bool
 	decisionProvided bool
-	feedbackProvided bool
 }
 
 type pulseOperationPrepareWire struct {
@@ -48,7 +49,6 @@ type pulseOperationPrepareWire struct {
 	Target   string  `json:"target"`
 	Text     *string `json:"text"`
 	Decision *string `json:"decision"`
-	Feedback *string `json:"feedback"`
 }
 
 type pulseOperationReview struct {
@@ -141,8 +141,38 @@ func handlePulseOperationPrepare(mgr *Manager) http.HandlerFunc {
 }
 
 func decodePulseOperationPrepareBody(w http.ResponseWriter, r *http.Request) (pulseOperationPrepareBody, bool) {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return pulseOperationPrepareBody{}, false
+	}
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, instructionBodyLimit))
+	if err != nil {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return pulseOperationPrepareBody{}, false
+	}
+	if !utf8.Valid(bodyBytes) {
+		http.Error(w, "request body must be valid UTF-8", http.StatusBadRequest)
+		return pulseOperationPrepareBody{}, false
+	}
+	trimmed := strings.TrimSpace(string(bodyBytes))
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return pulseOperationPrepareBody{}, false
+	}
 	var wire pulseOperationPrepareWire
-	if !decodeInstructionBody(w, r, &wire) {
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		if strings.Contains(err.Error(), `unknown field "feedback"`) {
+			http.Error(w, "feedback is not accepted for Pulse permission decisions", http.StatusBadRequest)
+			return pulseOperationPrepareBody{}, false
+		}
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return pulseOperationPrepareBody{}, false
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return pulseOperationPrepareBody{}, false
 	}
 	body := pulseOperationPrepareBody{Kind: wire.Kind, Target: wire.Target}
@@ -153,10 +183,6 @@ func decodePulseOperationPrepareBody(w http.ResponseWriter, r *http.Request) (pu
 	if wire.Decision != nil {
 		body.Decision = *wire.Decision
 		body.decisionProvided = true
-	}
-	if wire.Feedback != nil {
-		body.Feedback = *wire.Feedback
-		body.feedbackProvided = true
 	}
 	return body, true
 }
@@ -245,7 +271,7 @@ func (m *Manager) preparePulseOperation(deviceID string, body pulseOperationPrep
 	body.Kind = strings.TrimSpace(body.Kind)
 	switch body.Kind {
 	case pulseOperationDirectedInstruction:
-		if body.decisionProvided || body.feedbackProvided {
+		if body.decisionProvided {
 			return pulseOperationResponse{}, nil, errors.New("invalid directed instruction operation")
 		}
 		if !m.instructionLedgerAvailable() {
@@ -256,7 +282,7 @@ func (m *Manager) preparePulseOperation(deviceID string, body pulseOperationPrep
 		if body.textProvided || !body.decisionProvided {
 			return pulseOperationResponse{}, nil, errors.New("invalid permission decision operation")
 		}
-		return m.preparePulsePermissionDecision(deviceID, body.Target, body.Decision, body.Feedback)
+		return m.preparePulsePermissionDecision(deviceID, body.Target, body.Decision)
 	default:
 		return pulseOperationResponse{}, nil, errors.New("unsupported Pulse operation kind")
 	}
@@ -332,18 +358,14 @@ func (m *Manager) preparePulseDirectedInstruction(deviceID, target, text string)
 	return pulseOperationResponse{OperationID: stored.ID, Kind: stored.Kind, Status: "pending_confirmation", ExpiresAt: stored.ExpiresAt, Review: directedInstructionReview(stored)}, nil, nil
 }
 
-func (m *Manager) preparePulsePermissionDecision(deviceID, target, decision, feedback string) (pulseOperationResponse, []opsInstructionTarget, error) {
+func (m *Manager) preparePulsePermissionDecision(deviceID, target, decision string) (pulseOperationResponse, []opsInstructionTarget, error) {
 	target = strings.TrimSpace(target)
 	decision = strings.TrimSpace(decision)
-	feedback = strings.TrimSpace(feedback)
 	if !validPulseReference(target, pulseOperationTargetLimit) {
 		return pulseOperationResponse{}, nil, errors.New("target must be non-empty and no more than 256 safe runes")
 	}
 	if decision != "approve_once" && decision != "deny" {
 		return pulseOperationResponse{}, nil, errors.New("decision must be approve_once or deny")
-	}
-	if !validPulsePermissionFeedback(feedback) {
-		return pulseOperationResponse{}, nil, errors.New("feedback must be a bounded non-sensitive note")
 	}
 	if m.ops == nil {
 		return pulseOperationResponse{}, nil, errPulseOperationUnavailable
@@ -375,7 +397,7 @@ func (m *Manager) preparePulsePermissionDecision(deviceID, target, decision, fee
 	if !validPulsePermissionTool(snapshot.ToolName) {
 		return pulseOperationResponse{}, nil, errPulseOperationReviewStale
 	}
-	digest, err := m.permissionDecisionDigest(candidate.ID, snapshot, decision, feedback)
+	digest, err := m.permissionDecisionDigest(candidate.ID, snapshot, decision)
 	if err != nil {
 		return pulseOperationResponse{}, nil, err
 	}
@@ -395,7 +417,6 @@ func (m *Manager) preparePulsePermissionDecision(deviceID, target, decision, fee
 		PermissionAllowPatternDigest: snapshot.AllowPatternDigest,
 		PermissionArgsDigest:         snapshot.ArgsDigest,
 		PermissionDecision:           decision,
-		PermissionFeedback:           feedback,
 	}
 	if err := m.pulseOperations.create(operation); err != nil {
 		return pulseOperationResponse{}, nil, err
@@ -407,7 +428,7 @@ func (m *Manager) preparePulsePermissionDecision(deviceID, target, decision, fee
 	return pulseOperationResponse{OperationID: stored.ID, Kind: stored.Kind, Status: "pending_confirmation", ExpiresAt: stored.ExpiresAt, Review: permissionDecisionReview(stored)}, nil, nil
 }
 
-func (m *Manager) permissionDecisionDigest(sessionID string, snapshot bus.PermissionDecisionSnapshot, decision, feedback string) (string, error) {
+func (m *Manager) permissionDecisionDigest(sessionID string, snapshot bus.PermissionDecisionSnapshot, decision string) (string, error) {
 	return m.pulseOperations.digest(
 		pulseOperationPermissionDecision,
 		sessionID,
@@ -417,7 +438,6 @@ func (m *Manager) permissionDecisionDigest(sessionID string, snapshot bus.Permis
 		snapshot.ArgsDigest,
 		stringifyRunGen(snapshot.RunGen),
 		decision,
-		feedback,
 	)
 }
 
@@ -464,23 +484,10 @@ func permissionDecisionReview(operation durableOperation) *pulseOperationReview 
 	}
 }
 
-const pulsePermissionFeedbackLimit = 256
-
 var pulseReviewSecretValue = regexp.MustCompile(`(?i)(["']?(?:secret|token|password|authorization|api[_-]?key|access[_-]?key|private[_-]?key|key)["']?\s*[:=]\s*["']?)([^\s,;\]\}\)"']+)`)
 var pulseReviewAuthorizationValue = regexp.MustCompile(`(?i)(\bauthorization\b\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?)([^\s,;\]\}\)"']+)`)
 var pulseReviewCredentialValue = regexp.MustCompile(`(?i)(\b(?:authorization|bearer|basic|token)\b\s+)([^\s,;\]\}\)"']+)`)
 var pulseReviewSensitiveWordValue = regexp.MustCompile(`(?i)(\b(?:secret|token|password|authorization|(?:api|access|private)[_-]?key|key)\b\s+)([^\s,;\]\}\)"']+)`)
-var pulseFeedbackSensitiveWord = regexp.MustCompile(`(?i)\b(?:secret|token|password|authorization|api[_-]?key|access[_-]?key|private[_-]?key|key)\b`)
-
-func validPulsePermissionFeedback(value string) bool {
-	if value == "" {
-		return true
-	}
-	if !validPulseReference(value, pulsePermissionFeedbackLimit) {
-		return false
-	}
-	return !pulseReviewSecretValue.MatchString(value) && !pulseReviewCredentialValue.MatchString(value) && !pulseFeedbackSensitiveWord.MatchString(value)
-}
 
 // redactPulseReviewText is intentionally conservative: a review never needs
 // raw tool arguments, and any incidental sensitive key/value notation is
@@ -663,7 +670,7 @@ func (m *Manager) executePulsePermissionDecision(operation durableOperation, now
 		ArgsDigest:         operation.PermissionArgsDigest,
 		RunGen:             operation.PermissionRunGen,
 	}
-	digest, err := m.permissionDecisionDigest(operation.Target.ID, snapshot, operation.PermissionDecision, operation.PermissionFeedback)
+	digest, err := m.permissionDecisionDigest(operation.Target.ID, snapshot, operation.PermissionDecision)
 	if err != nil || digest != operation.PayloadDigest {
 		return rejectedOperationReceipt(operation, now, "review_expired")
 	}
@@ -671,7 +678,6 @@ func (m *Manager) executePulsePermissionDecision(operation durableOperation, now
 		SessionID: session.ID,
 		Snapshot:  snapshot,
 		Approved:  operation.PermissionDecision == "approve_once",
-		Feedback:  operation.PermissionFeedback,
 	})
 	if err != nil {
 		return rejectedOperationReceipt(operation, now, "review_expired")
@@ -703,8 +709,7 @@ func validPulsePermissionOperation(operation durableOperation) bool {
 		validPulsePermissionTool(operation.PermissionTool) &&
 		operation.PermissionAllowPatternDigest != "" &&
 		operation.PermissionArgsDigest != "" &&
-		(operation.PermissionDecision == "approve_once" || operation.PermissionDecision == "deny") &&
-		validPulsePermissionFeedback(operation.PermissionFeedback)
+		(operation.PermissionDecision == "approve_once" || operation.PermissionDecision == "deny")
 }
 
 func validPulsePermissionTool(value string) bool {

@@ -249,8 +249,9 @@ func (am *ApprovalManager) PendingPermissionDecisionSnapshot() (PermissionDecisi
 // ResolvePermissionExact resolves only the request represented by snapshot.
 // Identity validation and removal happen while the approval map is locked, so
 // a legacy UI resolution or a new run cannot turn a reviewed Pulse decision
-// into a decision for another request.
-func (am *ApprovalManager) ResolvePermissionExact(snapshot PermissionDecisionSnapshot, approved bool, feedback string) error {
+// into a decision for another request. This one-off primitive intentionally
+// sends no feedback, allow pattern, or other agent-visible text.
+func (am *ApprovalManager) ResolvePermissionExact(snapshot PermissionDecisionSnapshot, approved bool) error {
 	am.mu.Lock()
 	p, ok := am.perms[snapshot.PermissionID]
 	if !ok || p.resolved {
@@ -268,7 +269,7 @@ func (am *ApprovalManager) ResolvePermissionExact(snapshot PermissionDecisionSna
 	am.mu.Unlock()
 
 	select {
-	case resp <- permission.Response{Approved: approved, Feedback: feedback}:
+	case resp <- permission.Response{Approved: approved}:
 	default:
 	}
 

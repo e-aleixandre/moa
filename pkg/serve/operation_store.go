@@ -69,7 +69,6 @@ type durableOperation struct {
 	PermissionAllowPatternDigest string                 `json:"permission_allow_pattern_digest,omitempty"`
 	PermissionArgsDigest         string                 `json:"permission_args_digest,omitempty"`
 	PermissionDecision           string                 `json:"permission_decision,omitempty"`
-	PermissionFeedback           string                 `json:"permission_feedback,omitempty"`
 	CreatedAt                    time.Time              `json:"created_at"`
 	ExpiresAt                    time.Time              `json:"expires_at"`
 	UpdatedAt                    time.Time              `json:"updated_at"`
@@ -454,7 +453,6 @@ func (s *operationStore) finalizeLocked(index int, receipt pulseOperationReceipt
 	// Instruction text is only needed to execute a still-pending review. It
 	// never remains in a replay record after the receipt is durable.
 	operation.Text = ""
-	operation.PermissionFeedback = ""
 	s.state.Operations[index] = operation
 }
 
@@ -471,7 +469,6 @@ func (s *operationStore) pruneLocked(now time.Time) bool {
 			operation.UpdatedAt = now
 			operation.Receipt = &receipt
 			operation.Text = ""
-			operation.PermissionFeedback = ""
 			changed = true
 		}
 		if operation.State == "final" && operation.Receipt != nil && !operation.Receipt.At.After(now.Add(-pulseOperationReceiptTTL)) {
