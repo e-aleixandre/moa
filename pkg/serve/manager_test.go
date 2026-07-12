@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -822,6 +823,89 @@ func TestResumeSession(t *testing.T) {
 	}
 	if !found {
 		t.Error("resumed session not found as idle in list")
+	}
+}
+
+// TestResumeSession_KeepsSystemPrompt guards against the serve regression where
+// ResumeSession wiped the agent's system prompt to "" (via SyncPlanMode →
+// rebuildSystemPrompt with an empty BaseSystemPrompt), leaving resumed serve
+// sessions running with no identity / tool guidance / Persistence section. That
+// made OpenAI (and other) models behave erratically and stall. The base prompt
+// must survive a resume and reach the provider.
+func TestResumeSession_KeepsSystemPrompt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	sessionBase := t.TempDir()
+
+	store, err := session.NewFileStore(sessionBase, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := store.Create()
+	saved.Title = "resume-prompt"
+	// planmode present + mode "off" is the common case that triggered the wipe.
+	saved.Metadata = map[string]any{
+		"model":    "test-model",
+		"cwd":      dir,
+		"planmode": map[string]any{"mode": "off"},
+	}
+	saved.Messages = []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("prior message")),
+	}
+	_ = store.Save(saved)
+
+	// Capture the system prompt the provider actually receives on the next run.
+	var gotSystem atomic.Value // string
+	captureHandler := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		gotSystem.Store(req.System)
+		return simpleResponse("ok"), nil
+	}
+	prov := newMockProvider(captureHandler)
+
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
+		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:   dir,
+		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
+		SessionBaseDir:  sessionBase,
+	})
+
+	sess, err := mgr.ResumeSession(saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Drive one run so the provider is invoked and records req.System.
+	done := make(chan struct{})
+	unsub := sess.runtime.Bus.Subscribe(func(e bus.StateChanged) {
+		if e.State == string(bus.StateIdle) {
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
+		}
+	})
+	defer unsub()
+
+	if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: "go"}); err != nil {
+		t.Fatalf("SendPrompt: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not reach idle in time")
+	}
+
+	sys, _ := gotSystem.Load().(string)
+	if sys == "" {
+		t.Fatal("resumed session ran with an EMPTY system prompt (wipe regression)")
+	}
+	if !strings.Contains(sys, "# Persistence") {
+		t.Errorf("system prompt missing Persistence section after resume; got %d bytes:\n%s", len(sys), sys)
 	}
 }
 

@@ -266,7 +266,14 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	rcfg.Ctx = sessionCtx
 	rcfg.Checkpoints = cpStore
 	rcfg.ProviderFactory = m.providerFactory
-	rcfg.BaseSystemPrompt = "" // serve: plan mode prompts don't include base (pre-existing behavior)
+	// Keep the full base system prompt (identity + tool guidance + Persistence).
+	// RuntimeConfig() already set it from the agent's prompt; do NOT wipe it.
+	// rebuildSystemPrompt composes BaseSystemPrompt + mode fragments and *replaces*
+	// the whole prompt, so an empty base makes every mode transition — and every
+	// ResumeSession (SyncPlanMode) — call SetSystemPrompt("") and strip the agent
+	// down to no system prompt at all. That left resumed serve sessions (i.e. any
+	// session after a reconnect/redeploy) running with an empty prompt, which is
+	// exactly why models behaved erratically and stalled. TUI never wiped it.
 	rcfg.SteerFilter = func(text string) bool {
 		_, was := subagentTexts.LoadAndDelete(text)
 		return !was
