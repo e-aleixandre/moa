@@ -208,20 +208,38 @@ cinco minutos un payload opaco `moa-pair-v1:<pairing-id>:<secret>` apto para
 codificar como QR. Pulse escanea ese payload y lo presenta una única vez, por
 JSON, a `POST /api/pulse/pairings/claim`; la respuesta contiene una credencial
 de dispositivo que Pulse guarda solo en Keychain. La credencial nunca aparece
-en una URL. Serve guarda únicamente verificadores HMAC, metadatos de emisión,
-caducidad, revocación y último uso en un fichero privado (0600). Las
-credenciales duran 180 días por defecto (el propietario puede pedir 1–365 al
-crear el pairing). Serve limita la creación a 5 pairings por hora y los claims
-a 12 por minuto; cinco secretos incorrectos bloquean ese pairing. Las
-credenciales se envían en `Authorization: Moa-Device <device-id>.<secret>` y
-autentican REST y WebSocket como un terminal del propietario, no como un rol
-de solo lectura. `GET /api/pulse/devices` y
-`POST /api/pulse/devices/{id}/revoke` permiten al propietario revisar y
-revocar terminales. El emparejamiento y las credenciales de dispositivo se
-aceptan sin TLS solo cuando el par TCP que ve Serve es loopback; fuera de
-loopback Serve exige TLS. Un proxy local solo puede usar esa excepción si es un
-límite de confianza que ya exige TLS; Serve no confía en encabezados
-`X-Forwarded-*` para rebajarla.
+en una URL. El secreto de pairing aparece **solo** dentro de `payload` (no hay
+un segundo campo secreto): Pulse extrae el `pairing-id` y el secreto del
+payload para el claim. Serve guarda una clave HMAC privada y verificadores HMAC
+no reversibles, además de metadatos de emisión, caducidad, revocación y último
+uso, en un directorio 0700 y fichero 0600. Las credenciales duran 180 días por
+defecto (el propietario puede pedir 1–365 al crear el pairing).
+
+Las peticiones de pairing y claim son JSON estricto (`Content-Type:
+application/json`, sin campos desconocidos) y todos los POST requieren
+`X-Moa-Request`, incluido el claim sin autenticar. El propietario usa la cookie
+existente de `--token`; un dispositivo usa
+`Authorization: Moa-Device <device-id>.<secret>` para REST y WebSocket. Es un
+terminal del propietario, no un rol de solo lectura. `GET /api/pulse/devices`
+y `POST /api/pulse/devices/{id}/revoke` permiten revisar y revocar terminales.
+Al revocar o caducar una credencial, Serve cierra inmediatamente sus WebSocket
+activos; las conexiones autenticadas por cookie/token no se ven afectadas.
+
+Serve limita la creación a 5 pairings por hora y los claims a 12 por minuto y
+por IP del par TCP directo. No confía en `X-Forwarded-For`; un proxy debe ser
+un límite de confianza real, no una cabecera. Esos límites son deliberadamente
+locales al proceso (un reinicio los reinicia), pero cinco secretos incorrectos
+bloquean el pairing de forma durable. Serve mantiene un bloqueo exclusivo del
+fichero de dispositivos durante su vida: un segundo proceso no puede abrir ni
+reclamar contra el mismo almacén. Este bloqueo usa `flock` en los Unix
+soportados; en plataformas sin ese bloqueo seguro el auth de dispositivos se
+deshabilita de forma cerrada. Las escrituras usan rename atómico y sincronizan
+el directorio padre después del rename.
+
+El emparejamiento y las credenciales de dispositivo se aceptan sin TLS solo
+cuando el par TCP que ve Serve es loopback; fuera de loopback Serve exige TLS.
+Un proxy local solo puede usar esa excepción si es un límite de confianza que
+ya exige TLS; Serve no confía en encabezados `X-Forwarded-*` para rebajarla.
 
 ## Producto por etapas
 

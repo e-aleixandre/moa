@@ -519,6 +519,20 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+		lease, err := deviceLeaseForWebSocket(r, func(string) {
+			_ = conn.CloseNow() //nolint:staticcheck // revoke/expiry must not wait for a peer close handshake
+		})
+		if err != nil {
+			_ = conn.CloseNow() //nolint:staticcheck
+			return
+		}
+		if lease != nil {
+			defer lease.release()
+		}
+		var leaseDone <-chan struct{}
+		if lease != nil {
+			leaseDone = lease.Done()
+		}
 
 		// Track live viewers of this session — gates "run finished / errored"
 		// push notifications (see subscribePush): if a browser is watching, no push.
@@ -539,7 +553,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		cut := sess.runtime.Bus.LastSeq()
 		initData := buildInitData(sess)
 		initData.LastSeq = cut
-		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}); err != nil {
+		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
 			return
 		}
 
@@ -568,6 +582,9 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 				if evt.Seq <= cut {
 					continue
 				}
+				if deviceLeaseClosed(lease) {
+					return
+				}
 				if err := wsWriteJSON(ctx, conn, evt); err != nil {
 					return
 				}
@@ -580,6 +597,8 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 				}
 			case <-reactor.Done():
 				conn.Close(websocket.StatusGoingAway, "session closed") //nolint:errcheck,staticcheck
+				return
+			case <-leaseDone:
 				return
 			case <-ctx.Done():
 				return

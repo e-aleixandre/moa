@@ -33,13 +33,27 @@ func handleOpsWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+		lease, err := deviceLeaseForWebSocket(r, func(string) {
+			_ = conn.CloseNow() //nolint:staticcheck // revoke/expiry must not wait for a peer close handshake
+		})
+		if err != nil {
+			_ = conn.CloseNow() //nolint:staticcheck
+			return
+		}
+		if lease != nil {
+			defer lease.release()
+		}
+		var leaseDone <-chan struct{}
+		if lease != nil {
+			leaseDone = lease.Done()
+		}
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 		updates, unsubscribe := mgr.ops.Subscribe()
 		defer unsubscribe()
 
 		snapshot, version := mgr.ops.SnapshotVersion()
-		if err := wsWriteJSON(ctx, conn, opsWireEvent{Type: "init", Version: version, Snapshot: snapshot}); err != nil {
+		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, opsWireEvent{Type: "init", Version: version, Snapshot: snapshot}) != nil {
 			return
 		}
 
@@ -55,6 +69,9 @@ func handleOpsWebSocket(mgr *Manager) http.HandlerFunc {
 				if nextVersion <= version {
 					continue
 				}
+				if deviceLeaseClosed(lease) {
+					return
+				}
 				if err := wsWriteJSON(ctx, conn, opsWireEvent{Type: "snapshot", Version: nextVersion, Snapshot: snapshot}); err != nil {
 					return
 				}
@@ -66,6 +83,8 @@ func handleOpsWebSocket(mgr *Manager) http.HandlerFunc {
 				if err != nil {
 					return
 				}
+			case <-leaseDone:
+				return
 			case <-ctx.Done():
 				return
 			}
