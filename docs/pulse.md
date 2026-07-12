@@ -199,7 +199,7 @@ En todos los modos, Pulse debe permitir interrumpir: «para», «repite», «cu�
 - Si Moa no está disponible, Pulse puede responder con una instantánea local marcada con su antigüedad; todas las escrituras fallan claramente. No se encolan acciones de forma silenciosa para ejecutar más tarde.
 - Si el proveedor no está disponible pero Moa sí, Pulse degrada a un panorama y frases deterministas, o a una vista de revisión, sin fingir conversación inteligente.
 
-### Contrato inicial de emparejamiento y operaciones
+### Contrato inicial de emparejamiento
 
 El fundamento de Serve para Pulse no es un endpoint de conversación ni llama a
 un proveedor. Requiere que Serve tenga `--token`/`MOA_SERVE_TOKEN`: el
@@ -212,7 +212,7 @@ en una URL. Serve guarda únicamente verificadores HMAC, metadatos de emisión,
 caducidad, revocación y último uso en un fichero privado (0600). Las
 credenciales duran 180 días por defecto (el propietario puede pedir 1–365 al
 crear el pairing). Serve limita la creación a 5 pairings por hora y los claims
-a 12 por minuto; cinco secretos incorrectos bloquean ese pairing.
+a 12 por minuto; cinco secretos incorrectos bloquean ese pairing. Las
 credenciales se envían en `Authorization: Moa-Device <device-id>.<secret>` y
 autentican REST y WebSocket como un terminal del propietario, no como un rol
 de solo lectura. `GET /api/pulse/devices` y
@@ -222,20 +222,6 @@ aceptan sin TLS solo cuando el par TCP que ve Serve es loopback; fuera de
 loopback Serve exige TLS. Un proxy local solo puede usar esa excepción si es un
 límite de confianza que ya exige TLS; Serve no confía en encabezados
 `X-Forwarded-*` para rebajarla.
-
-Las dos primeras escrituras tipadas son
-`POST /api/pulse/operations/directed-instruction/prepare` y
-`POST /api/pulse/operations/permission/prepare`. Cada una devuelve un objeto
-privado, durable y de cinco minutos con destino resuelto, estado actual,
-alcance, riesgo, copia de revisión y `operation_id`. La confirmación es
-`POST /api/pulse/operations/{id}/confirm` con `{}`: no acepta un
-`confirmed:true`, texto ni alcance del cliente. Serve vuelve a comprobar el
-estado y la política y devuelve un recibo consultable en
-`GET /api/pulse/operations/{id}`. El recibo distingue aceptación/entrega del
-estado observado y nunca afirma que el trabajo terminó. La ruta de permiso
-solo resuelve exactamente la solicitud pendiente y ejecuta una única decisión
-approve/deny mediante el handler canónico; no admite patrones `allow` ni
-`add_rule`.
 
 ## Producto por etapas
 
