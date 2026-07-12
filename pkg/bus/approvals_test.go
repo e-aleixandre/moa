@@ -2,6 +2,8 @@ package bus
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -418,4 +420,108 @@ func TestApprovalManager_ConcurrentResolve(t *testing.T) {
 	if successCount != 1 {
 		t.Fatalf("expected exactly 1 success, got %d", successCount)
 	}
+}
+
+func TestApprovalManager_PermissionDecisionSnapshotIsExactAndDoesNotExposeArgs(t *testing.T) {
+	am, _ := newTestApprovalManager(t)
+	response := make(chan permission.Response, 1)
+	am.mu.Lock()
+	am.perms["p1"] = &PendingPermission{
+		ID:           "p1",
+		ToolName:     "bash",
+		Args:         map[string]any{"command": "curl -H 'Authorization: Bearer raw_secret'"},
+		AllowPattern: "Bash(curl -H 'Authorization: Bearer raw_secret')",
+		RunGen:       7,
+		response:     response,
+	}
+	am.mu.Unlock()
+	am.state.ForceState(StatePermission)
+
+	snapshot, err := am.PendingPermissionDecisionSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.PermissionID != "p1" || snapshot.ToolName != "bash" || snapshot.RunGen != 7 || snapshot.ArgsDigest == "" || snapshot.AllowPatternDigest == "" {
+		t.Fatalf("incomplete snapshot: %#v", snapshot)
+	}
+	if got := snapshot.ArgsDigest + snapshot.AllowPatternDigest; containsAny(got, "raw_secret", "Authorization", "curl") {
+		t.Fatalf("snapshot exposed raw permission data: %#v", snapshot)
+	}
+
+	if err := am.ResolvePermissionExact(snapshot, true, "reviewed"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-response:
+		if !got.Approved || got.Allow != "" || got.Feedback != "reviewed" {
+			t.Fatalf("exact response = %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("exact resolution did not reach canonical response")
+	}
+	if err := am.ResolvePermissionExact(snapshot, true, ""); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
+		t.Fatalf("replay exact resolve = %v, want mismatch", err)
+	}
+}
+
+func TestApprovalManager_PermissionDecisionSnapshotRejectsAmbiguityAndChanges(t *testing.T) {
+	am, _ := newTestApprovalManager(t)
+	firstResponse := make(chan permission.Response, 1)
+	secondResponse := make(chan permission.Response, 1)
+	am.mu.Lock()
+	am.perms["first"] = &PendingPermission{ID: "first", ToolName: "write", Args: map[string]any{"path": "one.go"}, AllowPattern: "write", RunGen: 2, response: firstResponse}
+	am.perms["second"] = &PendingPermission{ID: "second", ToolName: "write", Args: map[string]any{"path": "two.go"}, AllowPattern: "write", RunGen: 2, response: secondResponse}
+	am.mu.Unlock()
+	if _, err := am.PendingPermissionDecisionSnapshot(); !errors.Is(err, ErrPermissionDecisionSnapshotUnavailable) {
+		t.Fatalf("ambiguous snapshot = %v, want unavailable", err)
+	}
+
+	am.mu.Lock()
+	delete(am.perms, "second")
+	am.mu.Unlock()
+	snapshot, err := am.PendingPermissionDecisionSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Changing a request's run, args, or scope alters an exact binding and must
+	// not resolve the reviewed request.
+	am.mu.Lock()
+	p := am.perms["first"]
+	p.RunGen++
+	p.Args = map[string]any{"path": "replaced.go"}
+	p.AllowPattern = "write(replaced.go)"
+	am.mu.Unlock()
+	if err := am.ResolvePermissionExact(snapshot, true, ""); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
+		t.Fatalf("changed exact resolve = %v, want mismatch", err)
+	}
+	select {
+	case <-firstResponse:
+		t.Fatal("changed request was resolved")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// A new runtime-only permission ID is a replacement, not a continuation of
+	// the reviewed request.
+	am.mu.Lock()
+	delete(am.perms, "first")
+	am.perms["replacement"] = &PendingPermission{ID: "replacement", ToolName: "write", Args: map[string]any{"path": "fresh.go"}, AllowPattern: "write", RunGen: 3, response: secondResponse}
+	am.mu.Unlock()
+	if err := am.ResolvePermissionExact(snapshot, true, ""); !errors.Is(err, ErrPermissionDecisionSnapshotMismatch) {
+		t.Fatalf("replacement exact resolve = %v, want mismatch", err)
+	}
+	select {
+	case <-secondResponse:
+		t.Fatal("replacement request was resolved")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func containsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }

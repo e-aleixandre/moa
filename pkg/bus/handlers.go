@@ -648,6 +648,13 @@ func RegisterHandlers(sctx *SessionContext) {
 		return nil
 	})
 
+	b.OnCommand(func(cmd ResolvePermissionExact) error {
+		if sctx.Approvals == nil {
+			return fmt.Errorf("approvals not available")
+		}
+		return sctx.Approvals.ResolvePermissionExact(cmd.Snapshot, cmd.Approved, cmd.Feedback)
+	})
+
 	b.OnCommand(func(cmd AddPermissionRule) error {
 		g := sctx.GetGate()
 		if g == nil {
@@ -934,6 +941,13 @@ func RegisterHandlers(sctx *SessionContext) {
 			return PendingApprovalInfo{}, nil
 		}
 		return sctx.Approvals.PendingInfo(), nil
+	})
+
+	b.OnQuery(func(q GetPermissionDecisionSnapshot) (PermissionDecisionSnapshot, error) {
+		if sctx.Approvals == nil {
+			return PermissionDecisionSnapshot{}, ErrPermissionDecisionSnapshotUnavailable
+		}
+		return sctx.Approvals.PendingPermissionDecisionSnapshot()
 	})
 
 	// -------------------------------------------------------------------
