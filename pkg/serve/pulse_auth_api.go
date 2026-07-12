@@ -9,7 +9,7 @@ import (
 
 func requirePulseDeviceStore(w http.ResponseWriter, r *http.Request, store *deviceStore) (authIdentity, bool) {
 	if store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing requires configured token authentication"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing unavailable"})
 		return authIdentity{}, false
 	}
 	if !deviceTransportAllowed(r) {
@@ -50,6 +50,10 @@ func handlePulsePairing(store *deviceStore) http.HandlerFunc {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "pairing rate limit exceeded"})
 			return
 		}
+		if errors.Is(err, errDeviceStoreUnavailable) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing temporarily unavailable"})
+			return
+		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to create pairing"})
 			return
@@ -61,7 +65,7 @@ func handlePulsePairing(store *deviceStore) http.HandlerFunc {
 func handlePulsePairingClaim(store *deviceStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing requires configured token authentication"})
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing unavailable"})
 			return
 		}
 		if !deviceTransportAllowed(r) {
@@ -83,7 +87,7 @@ func handlePulsePairingClaim(store *deviceStore) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pairing claim"})
 			return
 		}
-		credential, err := store.claim(body.PairingID, body.PairingSecret, body.DeviceLabel)
+		credential, err := store.claim(deviceClaimSource(r), body.PairingID, body.PairingSecret, body.DeviceLabel)
 		if errors.Is(err, errDeviceRateLimit) {
 			w.Header().Set("Retry-After", "60")
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "pairing claim rate limit exceeded"})
@@ -91,6 +95,10 @@ func handlePulsePairingClaim(store *deviceStore) http.HandlerFunc {
 		}
 		if errors.Is(err, errInvalidPairing) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired pairing"})
+			return
+		}
+		if errors.Is(err, errDeviceStoreUnavailable) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing temporarily unavailable"})
 			return
 		}
 		if err != nil {
@@ -129,6 +137,8 @@ func handlePulseDeviceRevoke(store *deviceStore) http.HandlerFunc {
 		}
 		if err := store.revoke(id, identity.auditID()); errors.Is(err, errDeviceNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "device not found"})
+		} else if errors.Is(err, errDeviceStoreUnavailable) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing temporarily unavailable"})
 		} else if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to revoke device"})
 		} else {

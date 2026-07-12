@@ -37,7 +37,19 @@ func pairingRequest(handler http.Handler, method, path, body string, cookie *htt
 	return rec
 }
 
+func pairingPayloadSecret(t *testing.T, pairing pairingResult) string {
+	t.Helper()
+	parts := strings.Split(pairing.Payload, ":")
+	if len(parts) != 3 || parts[0] != "moa-pair-v1" || parts[1] != pairing.PairingID || parts[2] == "" {
+		t.Fatalf("invalid pairing payload: %#v", pairing)
+	}
+	return parts[2]
+}
+
 func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
 	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
 	sess, err := mgr.CreateSession(CreateOpts{Title: "paired"})
 	if err != nil {
@@ -69,21 +81,31 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	if err := json.NewDecoder(pairRec.Body).Decode(&pairing); err != nil {
 		t.Fatal(err)
 	}
-	if pairing.PairingID == "" || pairing.Secret == "" || !strings.Contains(pairing.Payload, pairing.Secret) || !pairing.ExpiresAt.After(time.Now()) {
+	secret := pairingPayloadSecret(t, pairing)
+	if pairing.PairingID == "" || !pairing.ExpiresAt.After(time.Now()) || strings.Contains(pairRec.Body.String(), "pairing_secret") {
 		t.Fatalf("bad pairing result: %#v", pairing)
 	}
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(contents), pairing.Secret) {
-		t.Fatal("pairing secret persisted raw")
+	if strings.Contains(string(contents), secret) || strings.Contains(string(contents), `"owner"`) {
+		t.Fatal("pairing secret or shared auth token persisted raw")
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("device store permissions = %v, err=%v", info.Mode().Perm(), err)
 	}
 
-	claimBody := `{"pairing_id":"` + pairing.PairingID + `","pairing_secret":"` + pairing.Secret + `","device_label":"Moa phone"}`
+	claimBody := `{"pairing_id":"` + pairing.PairingID + `","pairing_secret":"` + secret + `","device_label":"Moa phone"}`
+	claimWithoutCSRF := httptest.NewRequest(http.MethodPost, "/api/pulse/pairings/claim", strings.NewReader(claimBody))
+	claimWithoutCSRF.Host = "localhost"
+	claimWithoutCSRF.RemoteAddr = "127.0.0.1:12345"
+	claimWithoutCSRF.Header.Set("Content-Type", "application/json")
+	claimWithoutCSRFRec := httptest.NewRecorder()
+	handler.ServeHTTP(claimWithoutCSRFRec, claimWithoutCSRF)
+	if claimWithoutCSRFRec.Code != http.StatusForbidden {
+		t.Fatalf("claim without CSRF = %d", claimWithoutCSRFRec.Code)
+	}
 	claimRec := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings/claim", claimBody, nil, "")
 	if claimRec.Code != http.StatusCreated {
 		t.Fatalf("claim = %d: %s", claimRec.Code, claimRec.Body.String())
@@ -95,11 +117,14 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	if credential.DeviceID == "" || credential.Credential == "" || !strings.HasPrefix(credential.Credential, credential.DeviceID+".") {
 		t.Fatalf("bad credential result: %#v", credential)
 	}
+	if location := claimRec.Header().Get("Location"); location != "" && strings.Contains(location, credential.Credential) {
+		t.Fatalf("claim credential appeared in redirect URL: %q", location)
+	}
 	contents, err = os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(contents), credential.Credential) || strings.Contains(string(contents), pairing.Secret) {
+	if strings.Contains(string(contents), credential.Credential) || strings.Contains(string(contents), secret) {
 		t.Fatal("raw pairing or device credential persisted")
 	}
 	if replayClaim := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings/claim", claimBody, nil, ""); replayClaim.Code != http.StatusUnauthorized {
@@ -108,6 +133,9 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 
 	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, credential.Credential); got.Code != http.StatusOK {
 		t.Fatalf("device REST auth = %d: %s", got.Code, got.Body.String())
+	}
+	if got := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, credential.Credential); got.Code != http.StatusOK {
+		t.Fatalf("device list auth = %d: %s", got.Code, got.Body.String())
 	}
 	devices := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", owner, "")
 	if devices.Code != http.StatusOK || !strings.Contains(devices.Body.String(), credential.DeviceID) || strings.Contains(devices.Body.String(), credential.Credential) || strings.Contains(devices.Body.String(), "verifier") {
@@ -141,10 +169,14 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 }
 
 func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
 	store, err := openDeviceStore(filepath.Join(t.TempDir(), "devices.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 	now := time.Now().UTC()
 	store.now = func() time.Time { return now }
 	pairing, err := store.createPairing("token", deviceCredentialTTL)
@@ -152,7 +184,7 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.now = func() time.Time { return now.Add(devicePairingTTL + time.Second) }
-	if _, err := store.claim(pairing.PairingID, pairing.Secret, "expired phone"); !errors.Is(err, errInvalidPairing) {
+	if _, err := store.claim("192.0.2.1", pairing.PairingID, pairingPayloadSecret(t, pairing), "expired phone"); !errors.Is(err, errInvalidPairing) {
 		t.Fatalf("expired pairing error = %v", err)
 	}
 	store.now = func() time.Time { return now }
@@ -160,7 +192,7 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	liveCredential, err := store.claim(livePairing.PairingID, livePairing.Secret, "short lived")
+	liveCredential, err := store.claim("192.0.2.1", livePairing.PairingID, pairingPayloadSecret(t, livePairing), "short lived")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +205,7 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 	for i := 0; i < devicePairingRate; i++ {
 		if _, err := store.createPairing("token", deviceCredentialTTL); err != nil {
 			t.Fatalf("pairing %d: %v", i, err)
@@ -186,17 +219,43 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 	locked, err := store.createPairing("token", deviceCredentialTTL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < devicePairingAttempts; i++ {
-		if _, err := store.claim(locked.PairingID, "wrong-secret", "phone"); !errors.Is(err, errInvalidPairing) {
+		if _, err := store.claim("192.0.2.1", locked.PairingID, "wrong-secret", "phone"); !errors.Is(err, errInvalidPairing) {
 			t.Fatalf("failed claim %d error = %v", i, err)
 		}
 	}
-	if _, err := store.claim(locked.PairingID, locked.Secret, "phone"); !errors.Is(err, errInvalidPairing) {
+	if _, err := store.claim("192.0.2.1", locked.PairingID, pairingPayloadSecret(t, locked), "phone"); !errors.Is(err, errInvalidPairing) {
 		t.Fatalf("locked pairing error = %v", err)
+	}
+
+	store, err = openDeviceStore(filepath.Join(t.TempDir(), "per-source-devices.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	attacked, err := store.createPairing("token", deviceCredentialTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := store.createPairing("token", deviceCredentialTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < deviceClaimRate; i++ {
+		if _, err := store.claim("192.0.2.10", attacked.PairingID, "wrong-secret", "phone"); !errors.Is(err, errInvalidPairing) {
+			t.Fatalf("source-limited claim %d error = %v", i, err)
+		}
+	}
+	if _, err := store.claim("192.0.2.10", attacked.PairingID, "wrong-secret", "phone"); !errors.Is(err, errDeviceRateLimit) {
+		t.Fatalf("source rate error = %v", err)
+	}
+	if _, err := store.claim("192.0.2.11", other.PairingID, pairingPayloadSecret(t, other), "other phone"); err != nil {
+		t.Fatalf("one source throttled another source: %v", err)
 	}
 
 	mgr := newTestManager(t, context.Background(), newMockProvider())
@@ -235,5 +294,14 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("rebinding host pairing = %d", rec.Code)
+	}
+}
+
+func TestDeviceClaimSourceUsesDirectPeerNotForwardedHeaders(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/pulse/pairings/claim", nil)
+	request.RemoteAddr = "198.51.100.4:12345"
+	request.Header.Set("X-Forwarded-For", "203.0.113.9")
+	if got := deviceClaimSource(request); got != "198.51.100.4" {
+		t.Fatalf("claim source = %q", got)
 	}
 }

@@ -165,7 +165,21 @@ func handleCompanionWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
-		ctx := conn.CloseRead(r.Context())                  //nolint:staticcheck
+		lease, err := deviceLeaseForWebSocket(r, func(string) {
+			_ = conn.CloseNow() //nolint:staticcheck // revoke/expiry must not wait for a peer close handshake
+		})
+		if err != nil {
+			_ = conn.CloseNow() //nolint:staticcheck
+			return
+		}
+		if lease != nil {
+			defer lease.release()
+		}
+		var leaseDone <-chan struct{}
+		if lease != nil {
+			leaseDone = lease.Done()
+		}
+		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 
 		reactor := newCompanionReactor(sess.runtime.Bus, sess.infra.sessionCtx)
 		defer reactor.cleanup()
@@ -175,7 +189,7 @@ func handleCompanionWebSocket(mgr *Manager) http.HandlerFunc {
 			conn.Close(websocket.StatusInternalError, "companion init unavailable") //nolint:errcheck,staticcheck
 			return
 		}
-		if err := wsWriteJSON(ctx, conn, CompanionWireEvent{Type: "init", Seq: cut, Init: &init}); err != nil {
+		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, CompanionWireEvent{Type: "init", Seq: cut, Init: &init}) != nil {
 			return
 		}
 
@@ -186,6 +200,9 @@ func handleCompanionWebSocket(mgr *Manager) http.HandlerFunc {
 			case event := <-reactor.ch:
 				if event.Seq <= cut {
 					continue
+				}
+				if deviceLeaseClosed(lease) {
+					return
 				}
 				if err := wsWriteJSON(ctx, conn, event); err != nil {
 					return
@@ -199,6 +216,8 @@ func handleCompanionWebSocket(mgr *Manager) http.HandlerFunc {
 				}
 			case <-reactor.done:
 				conn.Close(websocket.StatusGoingAway, "session closed") //nolint:errcheck,staticcheck
+				return
+			case <-leaseDone:
 				return
 			case <-ctx.Done():
 				return
