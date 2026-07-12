@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -914,5 +915,194 @@ func TestStream_RefusalIsSubstantive(t *testing.T) {
 	}
 	if got != "I can't help with that." {
 		t.Errorf("refusal text = %q", got)
+	}
+}
+
+// TestStream_EndTurnFalseContinues verifies response.completed with
+// end_turn:false and no items yields a Done with StopReason "continue" (the
+// loop resubmits), preceded by a Start for bracketing.
+func TestStream_EndTurnFalseContinues(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed","end_turn":false}}`),
+	)
+	defer server.Close()
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStart bool
+	var final *core.Message
+	var errEv *core.AssistantEvent
+	for ev := range ch {
+		switch ev.Type {
+		case core.ProviderEventStart:
+			sawStart = true
+		case core.ProviderEventDone:
+			final = ev.Message
+		case core.ProviderEventError:
+			e := ev
+			errEv = &e
+		}
+	}
+	if errEv != nil {
+		t.Fatalf("end_turn:false must not error: %v", errEv.Error)
+	}
+	if final == nil || final.StopReason != "continue" {
+		t.Fatalf("expected Done with StopReason continue, got %+v", final)
+	}
+	if !sawStart {
+		t.Error("expected a Start event before Done for bracketing")
+	}
+}
+
+// TestStream_EndTurnFalseWithText verifies a continuation that also carried text
+// keeps the text and still marks "continue".
+func TestStream_EndTurnFalseWithText(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
+			sseEvent(`{"type":"response.output_text.delta","output_index":0,"delta":"working"}`)+
+			sseEvent(`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"working"}],"status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed","end_turn":false}}`),
+	)
+	defer server.Close()
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
+	}
+	if final.StopReason != "continue" {
+		t.Errorf("StopReason = %q, want continue", final.StopReason)
+	}
+	var text string
+	for _, c := range final.Content {
+		if c.Type == "text" {
+			text = c.Text
+		}
+	}
+	if text != "working" {
+		t.Errorf("text = %q, want working", text)
+	}
+}
+
+// TestStream_EndTurnFalseWithToolCall verifies a tool call takes precedence over
+// end_turn:false (StopReason stays tool_use so the loop executes the tool).
+func TestStream_EndTurnFalseWithToolCall(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":""}}`)+
+			sseEvent(`{"type":"response.function_call_arguments.done","output_index":0,"arguments":"{\"command\":\"ls\"}"}`)+
+			sseEvent(`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":"{\"command\":\"ls\"}","status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed","end_turn":false}}`),
+	)
+	defer server.Close()
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
+	}
+	if final.StopReason != "tool_use" {
+		t.Errorf("StopReason = %q, want tool_use (tool call wins over end_turn)", final.StopReason)
+	}
+}
+
+// TestStream_EmptyIsTypedError verifies an empty completed response with no
+// end_turn signal surfaces a typed *core.EmptyResponseError (so the loop can
+// re-sample once).
+func TestStream_EmptyIsTypedError(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if final != nil {
+		t.Fatal("empty response must not produce a Done")
+	}
+	if errEv == nil {
+		t.Fatal("expected an error event")
+	}
+	var empty *core.EmptyResponseError
+	if !errors.As(errEv.Error, &empty) {
+		t.Fatalf("expected *core.EmptyResponseError, got %T: %v", errEv.Error, errEv.Error)
+	}
+}
+
+// TestStream_EndTurnTrueEmptyIsError verifies end_turn:true with empty content
+// is still a typed empty error (not a continuation).
+func TestStream_EndTurnTrueEmptyIsError(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed","end_turn":true}}`),
+	)
+	defer server.Close()
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if final != nil {
+		t.Fatal("empty response must not produce a Done")
+	}
+	var empty *core.EmptyResponseError
+	if errEv == nil || !errors.As(errEv.Error, &empty) {
+		t.Fatalf("expected *core.EmptyResponseError, got %v", errEv)
+	}
+}
+
+// TestStream_EmptyErrorCarriesUsage verifies the typed empty error propagates
+// the reported usage so the loop can charge it to the budget before retrying.
+func TestStream_EmptyErrorCarriesUsage(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":1234,"output_tokens":0,"total_tokens":1234}}}`),
+	)
+	defer server.Close()
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, errEv := collectStream(t, ch)
+	if errEv == nil {
+		t.Fatal("expected empty error")
+	}
+	var empty *core.EmptyResponseError
+	if !errors.As(errEv.Error, &empty) {
+		t.Fatalf("expected *core.EmptyResponseError, got %v", errEv.Error)
+	}
+	if empty.Usage == nil {
+		t.Fatal("empty error should carry usage")
+	}
+	if empty.Usage.Input != 1234 {
+		t.Errorf("usage input = %d, want 1234", empty.Usage.Input)
 	}
 }

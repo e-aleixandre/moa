@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +26,20 @@ const doomLoopThreshold = 3
 // automatically (per the API's documented guidance), but cap it so a provider
 // that keeps pausing without finishing can't spin forever burning tokens.
 const maxPauseTurnResubmits = 5
+
+// maxEmptyContinuations caps consecutive OpenAI end_turn:false continuations
+// that make no progress. The backend can complete a response with
+// end_turn:false ("not done, resend as-is to continue"); we resubmit like
+// pause_turn, but cap consecutive no-progress continuations so a stuck backend
+// can't loop forever.
+const maxEmptyContinuations = 5
+
+// maxEmptyRetries caps how many times a single stall point re-samples the same
+// request after an empty (no text, no tool call) completion with no continue
+// signal. One retry absorbs a transient empty turn (common while polling) without
+// adding any message to the history; a second consecutive empty surfaces the
+// error. Reset whenever a stream succeeds, so it caps *consecutive* empties.
+const maxEmptyRetries = 1
 
 // Hooks is the interface the agent loop needs from the extension system.
 // Defined here (consumer-side) so the loop doesn't depend on extension internals.
@@ -137,6 +153,12 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// paused message and lose the continuation).
 	pauseResubmits := 0
 	justPaused := false
+
+	// OpenAI end_turn:false continuations (StopReason "continue"): count
+	// consecutive no-progress continuations, and re-sample once on a typed empty
+	// response with no continue signal.
+	emptyContinuations := 0
+	emptyRetries := 0
 
 	var loopErr error
 	defer func() {
@@ -275,6 +297,25 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Consume stream, build assistant message, emit events
 		assistantMsg, err := consumeStream(ctx, ch, cfg.emitter)
 		if err != nil {
+			// A typed empty-response error (completed with no text/tool call and
+			// no continue signal) is often transient during polling. Re-sample
+			// the SAME request once — nothing is appended to the history, so the
+			// next iteration rebuilds the identical request — before surfacing
+			// it. Not a fabricated "continue": no message is injected.
+			var emptyErr *core.EmptyResponseError
+			if errors.As(err, &emptyErr) {
+				// An empty response can still bill input tokens; account for it
+				// so retries (and the eventual error) can't slip past the budget.
+				if cfg.maxBudget > 0 && emptyErr.Usage != nil {
+					cfg.runCost += cfg.model.Pricing.Cost(*emptyErr.Usage)
+				}
+				if ctx.Err() == nil && emptyRetries < maxEmptyRetries {
+					emptyRetries++
+					inTurn = false
+					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+					continue
+				}
+			}
 			// On cancellation, save partial content so it persists in session.
 			if assistantMsg != nil && ctx.Err() != nil {
 				cfg.appendState(core.WrapMessage(*assistantMsg))
@@ -282,6 +323,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			loopErr = fmt.Errorf("stream: %w", err)
 			return loopErr
 		}
+		// A stream succeeded: reset the consecutive-empty counter so the retry
+		// budget applies per stall point, not per run.
+		emptyRetries = 0
 
 		// Stamp assistant message with current compaction epoch for usage tracking.
 		wrapped := core.WrapMessage(*assistantMsg)
@@ -296,7 +340,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// include this lifecycle event must also include its stable MsgID.
 		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventMessageEnd, Message: wrapped})
 
-		// === STOP-REASON HANDLING (Anthropic pause_turn / refusal) ===
+		// === STOP-REASON HANDLING (Anthropic pause_turn / refusal; OpenAI continue) ===
 		// Runs after the message is committed and MessageEnd emitted, so any
 		// partial text/thinking is already persisted and visible in both
 		// frontends before we act on the stop reason.
@@ -326,6 +370,35 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 			continue // resubmit the paused conversation as-is
 
+		case "continue":
+			// OpenAI Responses completed with end_turn:false — the backend says
+			// the turn is not over and wants the conversation resent as-is to
+			// let the model keep going (codex turn.rs:2298→418). The assistant
+			// message (its reasoning/text, if any) is already persisted, so the
+			// next iteration replays it verbatim. Reset the streak on real
+			// progress (substantive text this turn); otherwise count it so a
+			// backend that keeps saying "not done" without output can't loop
+			// forever. Like pause_turn: no steering drain, skip compaction on the
+			// resubmit so the message the model wants to continue isn't dropped.
+			if hasSubstantiveText(assistantMsg) {
+				emptyContinuations = 0
+			} else {
+				emptyContinuations++
+			}
+			if emptyContinuations >= maxEmptyContinuations {
+				loopErr = fmt.Errorf("model requested continuation %d consecutive times without progress", emptyContinuations)
+				inTurn = false
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+				return loopErr
+			}
+			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
+				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
+			}
+			justPaused = true
+			inTurn = false
+			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+			continue // resubmit the conversation as-is to continue the turn
+
 		case "refusal", "sensitive":
 			// The model declined (policy refusal) or was cut by safety filters.
 			// Surface a visible error with the provider's explanation instead of
@@ -343,8 +416,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 			return loopErr
 		}
-		// Any other stop reason: a real turn boundary — reset the pause streak.
+		// Any other stop reason: a real turn boundary — reset the streaks.
 		pauseResubmits = 0
+		emptyContinuations = 0
 
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
@@ -564,6 +638,19 @@ func extractToolCalls(msg *core.Message) []core.Content {
 		}
 	}
 	return calls
+}
+
+// hasSubstantiveText reports whether an assistant message carries visible text
+// output (non-blank). Used to tell a "continue" turn that made real progress
+// from an empty/reasoning-only continuation, so a no-progress streak can be
+// capped. Tool calls never reach this path (they end the turn as tool_use).
+func hasSubstantiveText(msg *core.Message) bool {
+	for _, c := range msg.Content {
+		if c.Type == "text" && strings.TrimSpace(c.Text) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // toolExecSlot holds the state for one tool call during parallel execution.

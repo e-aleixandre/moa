@@ -2445,3 +2445,192 @@ func TestLoop_UnknownStopReasonCompletes(t *testing.T) {
 		t.Errorf("unexpected messages: %+v", msgs)
 	}
 }
+
+// emptyResponseProvider returns a handler that emits a typed EmptyResponseError
+// (optionally carrying usage) via a stream error (no Done), like the openai
+// provider does for an empty turn.
+func emptyResponseProvider(usage *core.Usage) func(req core.Request) (<-chan core.AssistantEvent, error) {
+	return func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 4)
+		go func() {
+			defer close(ch)
+			msg := core.Message{Role: "assistant", Timestamp: time.Now().Unix()}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: &core.EmptyResponseError{Provider: "openai", Usage: usage}}
+		}()
+		return ch, nil
+	}
+}
+
+// TestLoop_ContinueResubmits verifies StopReason "continue" (OpenAI
+// end_turn:false) resubmits the conversation until a normal turn ends the run.
+func TestLoop_ContinueResubmits(t *testing.T) {
+	provider := NewMockProvider(
+		stopReasonResponse("", "continue", "", nil),
+		stopReasonResponse("Here is the final answer.", "end_turn", "", nil),
+	)
+	ag := newTestAgent(provider)
+	events := collectEvents(ag)
+
+	msgs, err := ag.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Errorf("expected 2 provider calls, got %d", provider.calls)
+	}
+	if msgs[len(msgs)-1].Content[0].Text != "Here is the final answer." {
+		t.Errorf("final message missing: %+v", msgs[len(msgs)-1])
+	}
+	if waitForEvent(events, core.AgentEventError, 200*time.Millisecond) {
+		t.Error("continue must not raise an error event")
+	}
+}
+
+// TestLoop_ContinueCapNoProgress verifies an endless no-progress "continue" loop
+// is capped and surfaces an error.
+func TestLoop_ContinueCapNoProgress(t *testing.T) {
+	handlers := make([]func(core.Request) (<-chan core.AssistantEvent, error), 20)
+	for i := range handlers {
+		handlers[i] = stopReasonResponse("", "continue", "", nil)
+	}
+	provider := NewMockProvider(handlers...)
+	ag := newTestAgent(provider)
+	ag.config.MaxTurns = 100
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("expected continuation cap error")
+	}
+	if !strings.Contains(err.Error(), "continuation") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider.calls != maxEmptyContinuations {
+		t.Errorf("expected %d calls, got %d", maxEmptyContinuations, provider.calls)
+	}
+}
+
+// TestLoop_ContinueProgressResetsStreak verifies a "continue" that carries text
+// resets the no-progress streak, so continuations with progress never trip the
+// cap. Without the reset, 6 continuations would exceed maxEmptyContinuations.
+func TestLoop_ContinueProgressResetsStreak(t *testing.T) {
+	var handlers []func(core.Request) (<-chan core.AssistantEvent, error)
+	for i := 0; i < 6; i++ {
+		handlers = append(handlers, stopReasonResponse("progress chunk", "continue", "", nil))
+	}
+	handlers = append(handlers, stopReasonResponse("done", "end_turn", "", nil))
+	provider := NewMockProvider(handlers...)
+	ag := newTestAgent(provider)
+	ag.config.MaxTurns = 100
+	_, err := ag.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("progress should reset the streak, got: %v", err)
+	}
+	if provider.calls != 7 {
+		t.Errorf("expected 7 provider calls, got %d", provider.calls)
+	}
+}
+
+// TestLoop_EmptyResponseRetriesOnce verifies a typed empty response is
+// re-sampled once (same request, nothing added to history) and then succeeds.
+func TestLoop_EmptyResponseRetriesOnce(t *testing.T) {
+	provider := NewMockProvider(
+		emptyResponseProvider(nil),
+		simpleTextResponse("recovered"),
+	)
+	ag := newTestAgent(provider)
+	events := collectEvents(ag)
+
+	msgs, err := ag.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("empty response should be retried, got: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Errorf("expected 2 provider calls (1 empty + 1 retry), got %d", provider.calls)
+	}
+	// user + the recovered assistant message only; the empty turn adds nothing.
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[1].Content[0].Text != "recovered" {
+		t.Errorf("unexpected final message: %+v", msgs[1])
+	}
+	if waitForEvent(events, core.AgentEventError, 200*time.Millisecond) {
+		t.Error("a retried empty response must not raise an error event")
+	}
+}
+
+// TestLoop_EmptyResponseTwiceErrors verifies two consecutive empty responses
+// (retry exhausted) surface a visible error.
+func TestLoop_EmptyResponseTwiceErrors(t *testing.T) {
+	provider := NewMockProvider(
+		emptyResponseProvider(nil),
+		emptyResponseProvider(nil),
+	)
+	ag := newTestAgent(provider)
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("expected empty-response error after retry exhausted")
+	}
+	if !strings.Contains(err.Error(), "empty response") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Errorf("expected exactly 2 provider calls, got %d", provider.calls)
+	}
+}
+
+// TestLoop_EmptyRetryResetsAfterSuccess verifies the retry budget is per stall
+// point: empty → success → empty → success uses one retry per empty.
+func TestLoop_EmptyRetryResetsAfterSuccess(t *testing.T) {
+	provider := NewMockProvider(
+		emptyResponseProvider(nil),
+		toolCallResponse("call_1", "noop", map[string]any{}),
+		emptyResponseProvider(nil),
+		simpleTextResponse("done"),
+	)
+	noopTool := core.Tool{
+		Name:       "noop",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+	ag := newTestAgent(provider, noopTool)
+	_, err := ag.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("each empty should get its own retry, got: %v", err)
+	}
+	if provider.calls != 4 {
+		t.Errorf("expected 4 provider calls, got %d", provider.calls)
+	}
+}
+
+// TestLoop_EmptyResponseAccountsCostBeforeRetry verifies the token usage of an
+// empty response is charged to the budget, so a stall can't bypass MaxBudget by
+// looping through empty turns. The first empty response's usage alone exceeds
+// the budget → the run stops without the retry provider call.
+func TestLoop_EmptyResponseAccountsCostBeforeRetry(t *testing.T) {
+	bigUsage := &core.Usage{Input: 1_000_000, Output: 0}
+	provider := NewMockProvider(
+		emptyResponseProvider(bigUsage),
+		simpleTextResponse("should not reach"),
+	)
+	ag := newTestAgent(provider)
+	ag.config.MaxBudget = 0.0001
+	ag.config.Model = core.Model{ID: "test-model", Provider: "mock",
+		Pricing: &core.Pricing{Input: 100, Output: 100}}
+
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("expected an error (budget or empty)")
+	}
+	// The empty usage (1M input @ $100/M = $100) blows the $0.0001 budget, so
+	// the run must stop at the budget pre-check before the retry provider call.
+	var budgetErr *BudgetExceededError
+	if !errors.As(err, &budgetErr) {
+		t.Fatalf("expected BudgetExceededError, got %v", err)
+	}
+	if provider.calls != 1 {
+		t.Errorf("expected exactly 1 provider call (no retry after budget blown), got %d", provider.calls)
+	}
+}

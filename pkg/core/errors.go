@@ -60,6 +60,39 @@ func AsQuotaExceeded(err error) (*QuotaExceededError, bool) {
 	return nil, false
 }
 
+// EmptyResponseError is returned by a provider when a turn completed with no
+// substantive content (no text and no tool call) and the backend gave no
+// signal that it intends to continue. It is a distinct, typed condition so the
+// agent loop can re-sample the same request once (a transient empty turn during
+// polling often self-corrects) before surfacing it as a visible error, rather
+// than ending the run in silence or failing on the first occurrence.
+type EmptyResponseError struct {
+	// Provider is the provider name (e.g. "openai").
+	Provider string
+	// Usage carries the token usage the provider reported for the empty
+	// response, if any. An empty completed response can still bill input
+	// tokens; the loop must account for this before retrying so a stall can't
+	// silently bypass the budget. nil when the provider reported no usage.
+	Usage *Usage
+}
+
+func (e *EmptyResponseError) Error() string {
+	prefix := "model returned an empty response (no text or tool call)"
+	if e.Provider != "" {
+		return e.Provider + ": " + prefix
+	}
+	return prefix
+}
+
+// Is enables errors.Is(err, core.ErrEmptyResponse).
+func (e *EmptyResponseError) Is(target error) bool {
+	_, ok := target.(*EmptyResponseError)
+	return ok
+}
+
+// ErrEmptyResponse is a sentinel for errors.Is(err, core.ErrEmptyResponse).
+var ErrEmptyResponse = &EmptyResponseError{}
+
 // humanizeDuration renders a duration as a compact "2h 36m" / "45m" / "30s"
 // string for user-facing quota messages.
 func humanizeDuration(d time.Duration) string {

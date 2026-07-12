@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -88,15 +89,15 @@ func mapReasoningEffort(level string) string {
 func convertMessages(msgs []core.Message, supportsDocuments bool, modelID string) []map[string]any {
 	var result []map[string]any
 
-	for _, msg := range msgs {
-		items := convertMessage(msg, supportsDocuments, modelID)
+	for i, msg := range msgs {
+		items := convertMessage(msg, supportsDocuments, modelID, i)
 		result = append(result, items...)
 	}
 
 	return result
 }
 
-func convertMessage(msg core.Message, supportsDocuments bool, modelID string) []map[string]any {
+func convertMessage(msg core.Message, supportsDocuments bool, modelID string, msgIndex int) []map[string]any {
 	switch msg.Role {
 	case "user":
 		return []map[string]any{
@@ -107,7 +108,7 @@ func convertMessage(msg core.Message, supportsDocuments bool, modelID string) []
 		}
 
 	case "assistant":
-		return convertAssistantMessage(msg, modelID)
+		return convertAssistantMessage(msg, modelID, msgIndex)
 
 	case "tool_result":
 		text := extractTextParts(msg.Content)
@@ -137,17 +138,19 @@ func convertMessage(msg core.Message, supportsDocuments bool, modelID string) []
 //
 // modelID is the current request's model. When an assistant message in history
 // was produced by a DIFFERENT model (the user switched models mid-session), the
-// provider-assigned output-item ids (message "id", function_call "fc_...")
-// belong to that other model's response and OpenAI's pairing validation can
-// reject them. In that case we omit the ids (keeping call_id/name/args/text) —
-// the same conservative choice pi makes. Legacy messages with no recorded model
-// keep the prior behavior.
-func convertAssistantMessage(msg core.Message, modelID string) []map[string]any {
+// function_call's provider-assigned fc_ id belongs to that other model's
+// response and OpenAI's reasoning-pairing validation can reject it, so it is
+// omitted (keeping call_id/name/args). Message items instead get a stable
+// synthetic id (msgIndex-based) when no real signature id is available or the
+// message is cross-model — a message id is not pairing-validated, and always
+// sending one reduces early stopping (matches pi).
+func convertAssistantMessage(msg core.Message, modelID string, msgIndex int) []map[string]any {
 	// Foreign model: message carries a model tag that differs from the target.
 	// Empty msg.Model (legacy/unknown) is treated as same-model.
 	foreignModel := msg.Model != "" && modelID != "" && msg.Model != modelID
 
 	var items []map[string]any
+	textBlockIndex := 0
 
 	for _, c := range msg.Content {
 		switch c.Type {
@@ -160,14 +163,27 @@ func convertAssistantMessage(msg core.Message, modelID string) []map[string]any 
 				},
 				"status": "completed",
 			}
-			if id, phase := parseTextSignature(c.TextSignature); id != "" || phase != "" {
-				if id != "" && !foreignModel {
-					m["id"] = id
-				}
-				if phase != "" {
-					m["phase"] = phase
+			id, phase := parseTextSignature(c.TextSignature)
+			// Message items should always carry an id: OpenAI documents that
+			// replaying assistant text without it contributes to early
+			// stopping. When we have a real signature id (same model), use it;
+			// otherwise synthesize a stable id from the message position — the
+			// same fallback pi uses (openai-responses-shared.ts:188). Unlike a
+			// function_call's fc_ id, a message id is not subject to reasoning
+			// pairing validation, so a synthetic one is safe even cross-model.
+			// (phase is not recoverable when absent, so it stays omitted.)
+			if id == "" || foreignModel {
+				if textBlockIndex == 0 {
+					id = fmt.Sprintf("msg_moa_%d", msgIndex)
+				} else {
+					id = fmt.Sprintf("msg_moa_%d_%d", msgIndex, textBlockIndex)
 				}
 			}
+			m["id"] = id
+			if phase != "" {
+				m["phase"] = phase
+			}
+			textBlockIndex++
 			items = append(items, m)
 
 		case "tool_call":

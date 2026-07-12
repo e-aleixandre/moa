@@ -113,7 +113,7 @@ func TestBuildRequestBody_ReasoningEffort(t *testing.T) {
 
 func TestConvertMessage_ToolResult(t *testing.T) {
 	msg := core.NewToolResultMessage("call-1", "bash", []core.Content{core.TextContent("output")}, false)
-	result := convertMessage(msg, true, "gpt-5.3-codex")
+	result := convertMessage(msg, true, "gpt-5.3-codex", 0)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(result))
 	}
@@ -134,7 +134,7 @@ func TestConvertMessage_AssistantWithToolCalls(t *testing.T) {
 			core.ToolCallContent("tc-1", "bash", map[string]any{"command": "ls"}),
 		},
 	}
-	items := convertMessage(msg, true, "gpt-5.3-codex")
+	items := convertMessage(msg, true, "gpt-5.3-codex", 0)
 	// Should produce 2 items: a message item and a function_call item.
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
@@ -158,7 +158,7 @@ func TestConvertAssistantMessage_NilArguments(t *testing.T) {
 			core.ToolCallContent("tc-1", "pwd", nil),
 		},
 	}
-	items := convertAssistantMessage(msg, "gpt-5.3-codex")
+	items := convertAssistantMessage(msg, "gpt-5.3-codex", 0)
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
@@ -251,7 +251,7 @@ func TestConvertAssistantMessage_RoundTripsSignatures(t *testing.T) {
 				Arguments: map[string]any{"command": "ls"}, ToolCallItemID: "fc_77"},
 		},
 	}
-	items := convertAssistantMessage(msg, "gpt-5.3-codex")
+	items := convertAssistantMessage(msg, "gpt-5.3-codex", 0)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -271,9 +271,10 @@ func TestConvertAssistantMessage_RoundTripsSignatures(t *testing.T) {
 	}
 }
 
-// TestConvertAssistantMessage_NoSignatureNoIDs verifies legacy content (no
-// signatures) does NOT inject empty id/phase keys, keeping the request clean.
-func TestConvertAssistantMessage_NoSignatureNoIDs(t *testing.T) {
+// TestConvertAssistantMessage_NoSignatureSyntheticID verifies legacy content
+// (no signatures) gets a stable synthetic message id (never omitted) while
+// phase stays absent and the function_call fc_ id stays omitted.
+func TestConvertAssistantMessage_NoSignatureSyntheticID(t *testing.T) {
 	msg := core.Message{
 		Role: "assistant",
 		Content: []core.Content{
@@ -282,23 +283,24 @@ func TestConvertAssistantMessage_NoSignatureNoIDs(t *testing.T) {
 				Arguments: map[string]any{"command": "ls"}},
 		},
 	}
-	items := convertAssistantMessage(msg, "gpt-5.3-codex")
-	if _, ok := items[0]["id"]; ok {
-		t.Error("legacy message item must not carry an id key")
+	items := convertAssistantMessage(msg, "gpt-5.3-codex", 7)
+	if items[0]["id"] != "msg_moa_7" {
+		t.Errorf("legacy message item should get a synthetic id, got %v", items[0]["id"])
 	}
 	if _, ok := items[0]["phase"]; ok {
 		t.Error("legacy message item must not carry a phase key")
 	}
 	if _, ok := items[1]["id"]; ok {
-		t.Error("legacy function_call must not carry an id key")
+		t.Error("legacy function_call must not carry an fc_ id key")
 	}
 }
 
-// TestConvertAssistantMessage_ForeignModelOmitsIDs verifies that when a history
-// message was produced by a different model, its provider-assigned item ids
-// (message id, function_call fc_ id) are omitted to avoid pairing validation,
-// while call_id/name/args/phase are preserved.
-func TestConvertAssistantMessage_ForeignModelOmitsIDs(t *testing.T) {
+// TestConvertAssistantMessage_ForeignModelIDs verifies that when a history
+// message was produced by a different model, the function_call fc_ id is
+// omitted (pairing validation), but the message item still gets a synthetic id
+// (not pairing-validated) instead of the foreign real id, while
+// call_id/name/args/phase are preserved.
+func TestConvertAssistantMessage_ForeignModelIDs(t *testing.T) {
 	msg := core.Message{
 		Role:  "assistant",
 		Model: "gpt-5.6-terra",
@@ -309,9 +311,10 @@ func TestConvertAssistantMessage_ForeignModelOmitsIDs(t *testing.T) {
 		},
 	}
 	// Target model differs from msg.Model.
-	items := convertAssistantMessage(msg, "gpt-5.3-codex")
-	if _, ok := items[0]["id"]; ok {
-		t.Error("foreign-model message must omit item id")
+	items := convertAssistantMessage(msg, "gpt-5.3-codex", 3)
+	// Foreign real id is replaced by a synthetic one (never the foreign msg_42).
+	if items[0]["id"] != "msg_moa_3" {
+		t.Errorf("foreign-model message should get a synthetic id, got %v", items[0]["id"])
 	}
 	// phase is model-agnostic guidance, safe to keep.
 	if items[0]["phase"] != "final_answer" {
@@ -324,7 +327,7 @@ func TestConvertAssistantMessage_ForeignModelOmitsIDs(t *testing.T) {
 		t.Errorf("call_id must be preserved, got %v", items[1]["call_id"])
 	}
 	// Same-model keeps the ids.
-	same := convertAssistantMessage(msg, "gpt-5.6-terra")
+	same := convertAssistantMessage(msg, "gpt-5.6-terra", 0)
 	if same[0]["id"] != "msg_42" || same[1]["id"] != "fc_77" {
 		t.Errorf("same-model must keep ids: %v / %v", same[0]["id"], same[1]["id"])
 	}

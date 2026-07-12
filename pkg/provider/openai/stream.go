@@ -54,6 +54,12 @@ type event struct {
 		IncompleteDetails *struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
+		// EndTurn mirrors codex's ResponseCompleted.end_turn (Option<bool>): the
+		// backend can mark a completed response as "not the end of the turn —
+		// resend the conversation as-is to continue". nil means the field was
+		// absent (the common case on the current backend). A *bool is required
+		// to tell absent (nil) from false.
+		EndTurn *bool `json:"end_turn"`
 	} `json:"response,omitempty"`
 	// For function_call_arguments.done
 	Arguments string `json:"arguments,omitempty"`
@@ -82,6 +88,7 @@ type item struct {
 		Text string `json:"text"`
 	} `json:"summary,omitempty"`
 }
+
 // slot tracks one output item of a response, keyed by its output_index. The
 // Responses API interleaves events from multiple concurrent output items
 // (reasoning, message, function_call), each carrying an output_index; keeping a
@@ -480,10 +487,16 @@ func (s *streamState) finalizeToolCall(sl *slot, argsStr string, ch chan<- core.
 	}
 }
 
-// finalize handles response.completed: usage/model, incomplete-status guard,
-// empty-turn guard, and the terminal Done.
+// finalize handles response.completed. Precedence, matching the reference
+// clients (codex): (1) incomplete → visible error; (2) tool calls → tool_use;
+// (3) end_turn:false → "continue" (the backend wants the conversation resent
+// as-is to keep going — codex turn.rs:2298); (4) no substantive content and no
+// continue signal → typed EmptyResponseError (the loop re-samples once before
+// surfacing it); (5) normal Done.
 func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
+	var endTurn *bool
 	if ev.Response != nil {
+		endTurn = ev.Response.EndTurn
 		s.message.StopReason = mapStatus(ev.Response.Status)
 		if ev.Response.Usage != nil {
 			u := ev.Response.Usage
@@ -513,11 +526,12 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 			s.message.Model = ev.Response.Model
 		}
 
-		// A response that ran out of output budget (status "incomplete") did
-		// NOT finish the turn. Surfacing it as a normal Done makes the agent
-		// loop treat a truncated turn as a clean completion and stop silently —
-		// one of the "the model just went quiet" symptoms. Match the reference
-		// clients (codex) and turn it into a visible error.
+		// (1) A response that ran out of output budget (status "incomplete")
+		// did NOT finish the turn. Surfacing it as a normal Done makes the
+		// agent loop treat a truncated turn as a clean completion and stop
+		// silently — one of the "the model just went quiet" symptoms. Match the
+		// reference clients (codex) and turn it into a visible error. This wins
+		// over end_turn: a truncated turn is not a continuation.
 		if ev.Response.Status == "incomplete" {
 			reason := "output limit reached"
 			if ev.Response.IncompleteDetails != nil && ev.Response.IncompleteDetails.Reason != "" {
@@ -530,24 +544,48 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 			return true
 		}
 	}
-	// If any tool calls, stop reason should be tool_use.
+
+	// (2) Any tool call → tool_use. This wins over end_turn: the loop must run
+	// the tools and reply with their results (which is itself the continuation),
+	// so it must NOT short-circuit to a bare "continue" that skips execution.
+	hasToolCall := false
 	for _, c := range s.message.Content {
 		if c.Type == "tool_call" {
 			s.message.StopReason = "tool_use"
+			hasToolCall = true
 			break
 		}
 	}
-	// A "completed" response with no substantive content (no text and no tool
-	// call; reasoning-only counts as empty) is not a legitimate end-of-turn for
-	// an agent — it is the empty/stalled turn we kept mis-reading as "done".
-	// Surface it as a visible error instead of ending the run in silence.
+
+	// (3) end_turn == false (backend explicitly says "not done"): mark the turn
+	// as a continuation so the loop resends the conversation as-is and lets the
+	// model keep going, whether or not this response carried text. Skips the
+	// empty guard below — an empty/reasoning-only response with end_turn:false
+	// is a legitimate mid-turn pause, not a stall. (On the current backend
+	// end_turn is usually absent, so this rarely fires; it's the correct,
+	// forward-compatible behavior and mirrors codex.)
+	if !hasToolCall && endTurn != nil && !*endTurn {
+		s.message.StopReason = "continue"
+		s.ensureStarted(ch) // guarantee Start/End bracketing even with no items
+		final := s.message
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
+		return true
+	}
+
+	// (4) A "completed" response with no substantive content (no text and no
+	// tool call; reasoning-only counts as empty) and no continue signal is the
+	// empty/stalled turn. Surface it as a TYPED error so the loop can re-sample
+	// once (a transient empty turn during polling self-corrects) before ending
+	// the run — instead of dying in silence or failing on the first occurrence.
 	if !hasSubstantiveContent(s.message.Content) {
 		ch <- core.AssistantEvent{
 			Type:  core.ProviderEventError,
-			Error: fmt.Errorf("openai: model returned an empty response (no text or tool call)"),
+			Error: &core.EmptyResponseError{Provider: "openai", Usage: s.message.Usage},
 		}
 		return true
 	}
+
+	// (5) Normal end of turn.
 	final := s.message
 	ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
 	return true
@@ -596,9 +634,6 @@ func appendOrUpdateText(blocks []core.Content, text string) []core.Content {
 	}
 	return append(blocks, core.TextContent(text))
 }
-
-
-
 
 // encodeTextSignature packs an output-message item id and phase into a compact
 // JSON blob stored on the text block's TextSignature. Returns "" when there is
