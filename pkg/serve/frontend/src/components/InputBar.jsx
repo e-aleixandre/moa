@@ -175,6 +175,18 @@ export function InputBar({ sessionId, session, tileId }) {
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
 
+  // clickSuppressTimer holds the pending self-clear of pointerDrivenRef (see the
+  // locked-stop path). Cancelling it when the click is consumed or a new pointer
+  // sequence starts prevents a stale timeout from clearing a later interaction's
+  // flag (bug #1 review).
+  const clickSuppressTimer = useRef(null);
+  const clearClickSuppressTimer = useCallback(() => {
+    if (clickSuppressTimer.current != null) {
+      clearTimeout(clickSuppressTimer.current);
+      clickSuppressTimer.current = null;
+    }
+  }, []);
+
   // endHold tears down the active hold gesture (timer, pointer capture, window
   // fallback listeners). Safe to call multiple times.
   const endHold = useCallback((e) => {
@@ -251,7 +263,29 @@ export function InputBar({ sessionId, session, tileId }) {
         window.removeEventListener('pointercancel', onUp);
         try { el.releasePointerCapture?.(pid); } catch (_) { /* ignore */ }
       };
-      const onUp = () => { done(); pointerDrivenRef.current = false; setVoiceLocked(false); stopVoice(); };
+      const onUp = (ev) => {
+        done();
+        setVoiceLocked(false);
+        stopVoice();
+        // A tap on the button to stop a locked recording. If this pointerup
+        // lands on the button (capture honored), the browser synthesizes a
+        // click afterwards; keep pointerDrivenRef true so onClick swallows it
+        // instead of falling through to handleSend and sending stale text
+        // (bug #1). A pointercancel — or a pointerup that lands off the button —
+        // synthesizes no click, so clear the flag immediately to avoid
+        // swallowing a later legitimate activation.
+        const onButton = ev?.type === 'pointerup' && el.contains?.(ev.target);
+        if (onButton) {
+          pointerDrivenRef.current = true;
+          clearClickSuppressTimer();
+          clickSuppressTimer.current = setTimeout(() => {
+            pointerDrivenRef.current = false;
+            clickSuppressTimer.current = null;
+          }, 700);
+        } else {
+          pointerDrivenRef.current = false;
+        }
+      };
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onUp);
       return;
@@ -297,7 +331,7 @@ export function InputBar({ sessionId, session, tileId }) {
   }, [handleGestureCancel]);
 
   // Tear down any dangling gesture on unmount.
-  useEffect(() => () => { endHold(); }, [endHold]);
+  useEffect(() => () => { endHold(); clearClickSuppressTimer(); }, [endHold, clearClickSuppressTimer]);
 
   // Register in global map so keyboard shortcuts can trigger voice toggle
   useEffect(() => {
@@ -1105,6 +1139,7 @@ export function InputBar({ sessionId, session, tileId }) {
                 // Suppress WebKit's long-press callout/selection before it can
                 // start (it later fires pointercancel and kills recording).
                 if (e.pointerType === 'touch' && e.cancelable) e.preventDefault();
+                clearClickSuppressTimer();
                 pointerDrivenRef.current = true;
                 onSendPointerDown(e);
               },
@@ -1117,11 +1152,15 @@ export function InputBar({ sessionId, session, tileId }) {
               // after pointerup, which already handled them; the ref suppresses
               // that duplicate.
               onClick: () => {
-                if (pointerDrivenRef.current) { pointerDrivenRef.current = false; return; }
+                if (pointerDrivenRef.current) { pointerDrivenRef.current = false; clearClickSuppressTimer(); return; }
                 // Keyboard activation (no pointer sequence): stop if recording,
-                // otherwise send.
-                if (recording) { setVoiceLocked(false); stopVoice(); }
-                else handleSendRef.current();
+                // otherwise send. Use the ref (not the `recording` state, which
+                // may have already re-rendered to false) and never send while a
+                // transcription is still in flight — that click must not submit
+                // the stale textarea contents (bug #1).
+                if (recordingRef.current) { setVoiceLocked(false); stopVoice(); return; }
+                if (transcribing) return;
+                handleSendRef.current();
               },
             } : {
               onClick: handleSend,
