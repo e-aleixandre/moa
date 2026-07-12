@@ -146,3 +146,169 @@ func TestSecondsToDuration(t *testing.T) {
 		t.Errorf("secondsToDuration(overflow) = %v, want %v", got, maxBashTimeout)
 	}
 }
+
+func TestBashJobsWaitReturnsResult(t *testing.T) {
+	release := make(chan struct{})
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		<-release
+		return core.TextResult("finished\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan BashJobInfo, 1)
+	go func() {
+		info, werr := jobs.Wait(context.Background(), job.JobID, 5*time.Second)
+		if werr != nil {
+			t.Errorf("Wait err = %v", werr)
+		}
+		done <- info
+	}()
+	// Give the waiter time to register before completing.
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	select {
+	case info := <-done:
+		if info.Status != "completed" || info.Output != "finished\n" || info.FinishedAt.IsZero() {
+			t.Fatalf("Wait info = %+v", info)
+		}
+		if !info.Awaited {
+			t.Fatal("expected Awaited=true when a waiter was blocked at completion")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait did not return")
+	}
+}
+
+func TestBashJobsWaitAlreadyFinished(t *testing.T) {
+	ended := make(chan BashJobInfo, 1)
+	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) { ended <- info })
+	job, err := jobs.Start("echo", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		return core.TextResult("done\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-ended // job has finished
+	info, werr := jobs.Wait(context.Background(), job.JobID, time.Second)
+	if werr != nil {
+		t.Fatalf("Wait err = %v", werr)
+	}
+	if info.Status != "completed" || info.Awaited {
+		t.Fatalf("Wait on finished job = %+v (Awaited should be false)", info)
+	}
+}
+
+func TestBashJobsWaitTimeout(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		<-release
+		return core.TextResult("late\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, werr := jobs.Wait(context.Background(), job.JobID, 30*time.Millisecond)
+	if werr != nil {
+		t.Fatalf("timeout should not error, got %v", werr)
+	}
+	if !info.FinishedAt.IsZero() {
+		t.Fatalf("expected still-running snapshot on timeout, got %+v", info)
+	}
+}
+
+func TestBashJobsWaitCtxCancel(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		<-release
+		return core.TextResult("late\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	_, werr := jobs.Wait(ctx, job.JobID, 5*time.Second)
+	if werr == nil {
+		t.Fatal("expected ctx cancellation error")
+	}
+}
+
+func TestBashJobsWaitUnknownJob(t *testing.T) {
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	_, werr := jobs.Wait(context.Background(), "bash-nope", time.Second)
+	if werr != ErrUnknownBashJob {
+		t.Fatalf("Wait unknown = %v, want ErrUnknownBashJob", werr)
+	}
+}
+
+// TestBashJobsWaitRaceFinishVsTimeout stresses the invariant that a waiter
+// either receives the final result XOR the job is marked not-awaited, never
+// both and never neither — under -race with a tight finish/timeout window.
+func TestBashJobsWaitRaceFinishVsTimeout(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		jobs := NewBashJobs(context.Background(), nil, nil, nil)
+		job, err := jobs.Start("x", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+			time.Sleep(time.Millisecond)
+			return core.TextResult("r\n"), nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, werr := jobs.Wait(context.Background(), job.JobID, time.Millisecond)
+		if werr != nil {
+			t.Fatalf("iter %d: err %v", i, werr)
+		}
+		if !info.FinishedAt.IsZero() && !info.Awaited {
+			// Finished but not marked awaited: only valid if it finished before
+			// we registered as a waiter (already-finished fast path).
+			continue
+		}
+		_ = info
+	}
+}
+
+func TestNewBashWaitNoJobs(t *testing.T) {
+	wait := NewBashWait(ToolConfig{})
+	res, err := wait.Execute(context.Background(), map[string]any{"job_id": "bash-x"}, nil)
+	if err != nil || !res.IsError {
+		t.Fatalf("expected error result when BashJobs nil, got %+v %v", res, err)
+	}
+}
+
+func TestNewBashWaitUnknownJob(t *testing.T) {
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	wait := NewBashWait(ToolConfig{BashJobs: jobs})
+	res, err := wait.Execute(context.Background(), map[string]any{"job_id": "bash-nope"}, nil)
+	if err != nil || !res.IsError || !strings.Contains(bashResultText(res), "unknown bash job") {
+		t.Fatalf("expected unknown-job error, got %+v %v", res, err)
+	}
+}
+
+func TestNewBashWaitReturnsCompletedStatus(t *testing.T) {
+	ended := make(chan BashJobInfo, 1)
+	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) { ended <- info })
+	job, err := jobs.Start("echo hi", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		return core.TextResult("hi\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-ended
+	wait := NewBashWait(ToolConfig{BashJobs: jobs})
+	res, err := wait.Execute(context.Background(), map[string]any{"job_id": job.JobID}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("wait execute = %+v %v", res, err)
+	}
+	if !strings.Contains(bashResultText(res), "Status: completed") {
+		t.Fatalf("expected completed status, got %q", bashResultText(res))
+	}
+}

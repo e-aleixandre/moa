@@ -232,8 +232,42 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			}
 		},
 		OnBashJobEnd: func(job tool.BashJobInfo) {
-			if s := sess; s != nil {
-				s.runtime.Bus.Publish(bus.BashJobEnded{SessionID: s.ID, JobID: job.JobID, Status: job.Status, Output: job.Output})
+			s := sess
+			if s == nil {
+				return
+			}
+			b := s.runtime.Bus
+			// Always publish BashJobEnded first (tray/quiescence), before any
+			// reinjection prompt.
+			b.Publish(bus.BashJobEnded{SessionID: s.ID, JobID: job.JobID, Status: job.Status, Output: job.Output})
+			// A bash_wait already consumed this job's result — don't deliver
+			// it twice (single delivery lane).
+			if job.Awaited {
+				return
+			}
+			agentText := bootstrap.FormatBashNotification(job.JobID, job.Command, job.Status, job.Output)
+			if agentText == "" {
+				return
+			}
+			b.Publish(bus.BashCompleted{SessionID: s.ID, JobID: job.JobID, Command: job.Command, Status: job.Status, Text: agentText})
+
+			if s.runtime.State.Current() == bus.StateRunning {
+				subagentTexts.Store(agentText, struct{}{})
+				_ = b.Execute(bus.SteerAgent{Text: agentText})
+			} else {
+				err := b.Execute(bus.SendPrompt{
+					Text: agentText,
+					Custom: map[string]any{
+						"source":       "bash_job",
+						"bash_job_id":  job.JobID,
+						"bash_command": job.Command,
+						"bash_status":  job.Status,
+					},
+				})
+				if err != nil {
+					subagentTexts.Store(agentText, struct{}{})
+					_ = b.Execute(bus.SteerAgent{Text: agentText})
+				}
 			}
 		},
 		SubagentTranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {

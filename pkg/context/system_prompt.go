@@ -25,6 +25,7 @@ var toolSnippets = map[string]string{
 	"ls":              "List directory contents. Sorted alphabetically. Directories have '/' suffix.",
 	"subagent":        "Spawn a child agent with its own context for parallel investigation or focused subtasks.",
 	"subagent_status": "Check the status of an async subagent job.",
+	"subagent_wait":   "Block until an async subagent job finishes and return its result. Use instead of polling subagent_status.",
 	"subagent_cancel": "Cancel a running async subagent job.",
 	"verify":          "Run project verification checks (build, test, lint) from .moa/verify.json.",
 	"memory":          "Manage cross-session memory as typed single-fact notes (list/read/write/delete). Only the index is in context; read facts on demand.",
@@ -128,6 +129,7 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
   • Investigating how a feature works (exploring code without polluting your context)
   • Parallel independent tasks (use async=true)
   Each subagent gets a fresh context, so your own window stays focused on the main task.
+- After launching async work (a subagent or a background bash job), if you need its result to continue, call subagent_wait / bash_wait to block on it — never poll subagent_status / bash_status in a loop. You are also notified automatically when async jobs finish.
 `)
 	}
 

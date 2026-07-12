@@ -25,11 +25,17 @@ type BashJobInfo struct {
 	Output     string
 	StartedAt  time.Time
 	FinishedAt time.Time
+	// Awaited is set on the snapshot delivered to onEnd when a bash_wait call
+	// was blocked on this job at completion time. It signals the completion
+	// handler to suppress result reinjection (the waiter already consumed it).
+	Awaited bool
 }
 
 type bashJob struct {
 	BashJobInfo
-	cancel context.CancelFunc
+	cancel  context.CancelFunc
+	done    chan struct{}
+	waiters int
 }
 
 // BashJobs owns session-scoped background bash processes. Jobs deliberately do
@@ -62,7 +68,7 @@ func (j *BashJobs) Start(command, cwd string, run func(context.Context, func(cor
 		return BashJobInfo{}, ErrTooManyBashJobs
 	}
 	ctx, cancel := context.WithCancel(j.ctx)
-	job := &bashJob{BashJobInfo: BashJobInfo{JobID: newBashJobID(), Command: command, CWD: cwd, Status: "running", StartedAt: time.Now()}, cancel: cancel}
+	job := &bashJob{BashJobInfo: BashJobInfo{JobID: newBashJobID(), Command: command, CWD: cwd, Status: "running", StartedAt: time.Now()}, cancel: cancel, done: make(chan struct{})}
 	j.jobs[job.JobID] = job
 	info := job.BashJobInfo
 	j.mu.Unlock()
@@ -101,8 +107,11 @@ func (j *BashJobs) Start(command, cwd string, run func(context.Context, func(cor
 		}
 		live.Output = bashResultText(result)
 		live.FinishedAt = time.Now()
+		live.Awaited = live.waiters > 0
 		info := live.BashJobInfo
+		done := live.done
 		j.mu.Unlock()
+		close(done)
 		if j.onEnd != nil {
 			j.onEnd(info)
 		}
@@ -158,6 +167,64 @@ func (j *BashJobs) Get(jobID string) (BashJobInfo, bool) {
 	return job.BashJobInfo, true
 }
 
+// Wait blocks until the job finishes, the context is cancelled, or timeout
+// elapses (timeout <= 0 waits indefinitely). It returns the job snapshot. If
+// the job finishes, the snapshot is final regardless of what woke the wait. On
+// timeout it returns the current (still-running) snapshot without an error; the
+// caller distinguishes via FinishedAt. While blocked, the job is marked so its
+// completion handler suppresses duplicate result reinjection.
+func (j *BashJobs) Wait(ctx context.Context, jobID string, timeout time.Duration) (BashJobInfo, error) {
+	if j == nil {
+		return BashJobInfo{}, ErrUnknownBashJob
+	}
+	j.mu.Lock()
+	job := j.jobs[jobID]
+	if job == nil {
+		j.mu.Unlock()
+		return BashJobInfo{}, ErrUnknownBashJob
+	}
+	if !job.FinishedAt.IsZero() {
+		info := job.BashJobInfo
+		j.mu.Unlock()
+		return info, nil
+	}
+	job.waiters++
+	done := job.done
+	j.mu.Unlock()
+
+	var timer *time.Timer
+	var timeoutCh <-chan time.Time
+	if timeout > 0 {
+		timer = time.NewTimer(timeout)
+		timeoutCh = timer.C
+	}
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-timeoutCh:
+	}
+	if timer != nil {
+		timer.Stop()
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if job.waiters > 0 {
+		job.waiters--
+	}
+	// Re-check under the same mutex that sets FinishedAt: if the job finished
+	// (even if ctx/timeout also fired), deliver the final snapshot as success.
+	if !job.FinishedAt.IsZero() {
+		return job.BashJobInfo, nil
+	}
+	if ctx.Err() != nil {
+		return job.BashJobInfo, ctx.Err()
+	}
+	// Timed out while still running: partial snapshot, no error.
+	return job.BashJobInfo, nil
+}
+
 func (j *BashJobs) runningLocked() int {
 	count := 0
 	for _, job := range j.jobs {
@@ -205,6 +272,9 @@ func newBashJobID() string {
 
 // ErrTooManyBashJobs is returned when the session background-job cap is hit.
 var ErrTooManyBashJobs = &bashJobError{"too many concurrent background bash jobs"}
+
+// ErrUnknownBashJob is returned when a job ID is not found.
+var ErrUnknownBashJob = &bashJobError{"unknown bash job ID"}
 
 type bashJobError struct{ text string }
 

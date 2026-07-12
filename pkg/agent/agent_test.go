@@ -434,6 +434,110 @@ func TestLoop_DoomLoopDetection(t *testing.T) {
 	}
 }
 
+// toolCallHandler builds a provider handler that emits exactly the given tool
+// calls in one assistant turn.
+func toolCallHandler(calls ...core.Content) func(core.Request) (<-chan core.AssistantEvent, error) {
+	return func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 5)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role:       "assistant",
+				Content:    calls,
+				StopReason: "tool_use",
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+}
+
+func readOnlyTool(name string) core.Tool {
+	return core.Tool{
+		Name:       name,
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Effect:     core.EffectReadOnly,
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+}
+
+// TestLoop_DoomLoop_IgnoresStatusPolling verifies that repeatedly polling an
+// exempt status tool never trips the doom-loop detector.
+func TestLoop_DoomLoop_IgnoresStatusPolling(t *testing.T) {
+	poll := core.ToolCallContent("tc-poll", "bash_status", map[string]any{"job_id": "j1"})
+	handlers := make([]func(core.Request) (<-chan core.AssistantEvent, error), 10)
+	for i := range handlers {
+		handlers[i] = toolCallHandler(poll)
+	}
+	provider := NewMockProvider(handlers...)
+	ag := newTestAgent(provider, readOnlyTool("bash_status"))
+	ag.config.MaxTurns = 8 // lower than the number of polls: run ends by MaxTurns, not doom loop
+
+	_, err := ag.Run(context.Background(), "poll forever")
+	if err == nil {
+		t.Fatal("expected an error (MaxTurns), got nil")
+	}
+	if strings.Contains(err.Error(), "doom loop") {
+		t.Fatalf("status polling should not trip doom loop, got: %v", err)
+	}
+}
+
+// TestLoop_DoomLoop_MixedStatusAndEdit verifies a real repeated edit still trips
+// the detector even when identical status polls are interleaved in each turn.
+func TestLoop_DoomLoop_MixedStatusAndEdit(t *testing.T) {
+	poll := core.ToolCallContent("tc-poll", "bash_status", map[string]any{"job_id": "j1"})
+	edit := core.ToolCallContent("tc-edit", "noop", map[string]any{"x": "same"})
+	handlers := make([]func(core.Request) (<-chan core.AssistantEvent, error), 10)
+	for i := range handlers {
+		handlers[i] = toolCallHandler(poll, edit)
+	}
+	provider := NewMockProvider(handlers...)
+	noopTool := core.Tool{
+		Name:       "noop",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+	ag := newTestAgent(provider, readOnlyTool("bash_status"), noopTool)
+	ag.config.MaxTurns = 100
+
+	_, err := ag.Run(context.Background(), "edit + poll")
+	if err == nil || !strings.Contains(err.Error(), "doom loop") {
+		t.Fatalf("expected doom loop despite interleaved polling, got: %v", err)
+	}
+}
+
+// TestLoop_DoomLoop_InterleavedPollingDoesNotReset verifies exempt-only turns
+// between identical edits do not reset the streak: edit, poll, edit, poll, edit
+// must still trip on the third edit.
+func TestLoop_DoomLoop_InterleavedPollingDoesNotReset(t *testing.T) {
+	poll := toolCallHandler(core.ToolCallContent("tc-poll", "bash_status", map[string]any{"job_id": "j1"}))
+	edit := toolCallHandler(core.ToolCallContent("tc-edit", "noop", map[string]any{"x": "same"}))
+	handlers := []func(core.Request) (<-chan core.AssistantEvent, error){
+		edit, poll, edit, poll, edit, poll, edit,
+	}
+	provider := NewMockProvider(handlers...)
+	noopTool := core.Tool{
+		Name:       "noop",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+	ag := newTestAgent(provider, readOnlyTool("bash_status"), noopTool)
+	ag.config.MaxTurns = 100
+
+	_, err := ag.Run(context.Background(), "edit/poll interleaved")
+	if err == nil || !strings.Contains(err.Error(), "doom loop") {
+		t.Fatalf("interleaved polling must not reset streak, expected doom loop, got: %v", err)
+	}
+}
+
 func TestLoop_ContextCancellation(t *testing.T) {
 	// Provider that blocks until context is cancelled
 	slowProvider := func(req core.Request) (<-chan core.AssistantEvent, error) {

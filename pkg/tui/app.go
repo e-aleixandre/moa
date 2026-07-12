@@ -1423,6 +1423,8 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 				SubagentStatus: status,
 				SubagentResult: result,
 			})
+		} else if command, status, ok := parseBashNotification(e.Text); ok {
+			m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, e.Text))
 		} else {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
 		}
@@ -1569,6 +1571,9 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	case bus.SubagentCompleted:
 		return m.handleSubagentCompleted(e)
 
+	case bus.BashCompleted:
+		return m.handleBashCompleted(e)
+
 	case bus.BashJobStarted:
 		m.handleBashJobStarted(e)
 
@@ -1667,6 +1672,58 @@ func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.C
 		return nil
 	}
 	return []tea.Cmd{cmd, renderTick(), m.status.spinner.Tick}
+}
+
+// handleBashCompleted reinjects an async background bash job's result: as a
+// steer while the agent is running, or as a notification run when idle. Mirrors
+// handleSubagentCompleted.
+func (m *appModel) handleBashCompleted(e bus.BashCompleted) []tea.Cmd {
+	if m.s.running {
+		_ = m.runtime.Bus.Execute(bus.SteerAgent{Text: e.Text})
+		return nil
+	}
+	return m.startBashNotificationRun(e)
+}
+
+func (m *appModel) startBashNotificationRun(e bus.BashCompleted) []tea.Cmd {
+	if err := m.commitPendingTimelineEvent(); err != nil {
+		m.s.pendingStatus = "✗ " + err.Error()
+		return nil
+	}
+
+	m.s.pendingStatus = ""
+	m.s.blocks = append(m.s.blocks, bashNotificationBlock(e.Command, e.Status, e.Text))
+
+	m.prepareRun(truncateLabel(e.Command))
+	m.updateViewport()
+
+	b := m.runtime.Bus
+	custom := map[string]any{
+		"source":       "bash_job",
+		"bash_job_id":  e.JobID,
+		"bash_command": e.Command,
+		"bash_status":  e.Status,
+	}
+	cmd := func() tea.Msg {
+		err := b.Execute(bus.SendPrompt{Text: e.Text, Custom: custom})
+		if err != nil {
+			return agentSendErrorMsg{Err: err}
+		}
+		return nil
+	}
+	return []tea.Cmd{cmd, renderTick(), m.status.spinner.Tick}
+}
+
+// bashNotificationBlock renders an async bash completion as a tool block.
+func bashNotificationBlock(command, status, text string) messageBlock {
+	return messageBlock{
+		Type:       "tool",
+		ToolName:   "bash",
+		ToolArgs:   map[string]any{"command": command},
+		ToolResult: text,
+		ToolDone:   true,
+		IsError:    status == "failed",
+	}
 }
 
 // runErrorText renders a run-end error for the transcript. A usage/quota limit

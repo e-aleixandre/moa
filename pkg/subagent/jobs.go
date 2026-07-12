@@ -50,6 +50,7 @@ type job struct {
 	startedAt  time.Time
 	finishedAt time.Time
 	sync       bool // true when this job runs synchronously (blocking the parent tool call)
+	waiters    int  // number of subagent_wait calls currently blocked on this job
 	childAgent *agent.Agent
 	messages   []core.AgentMessage
 	usage      *core.Usage
@@ -338,6 +339,64 @@ func (s *jobStore) promote(id string) error {
 	j.sync = false
 	close(j.promoted)
 	return nil
+}
+
+// hasWaiters reports whether any subagent_wait call is currently blocked on
+// this job. Read under j.mu.
+func (j *job) hasWaiters() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.waiters > 0
+}
+
+// wait blocks until the job finishes, the context is cancelled, or timeout
+// elapses (timeout <= 0 waits indefinitely). It returns the job snapshot. If
+// the job finished (even if ctx/timeout also fired) the snapshot is terminal.
+// While blocked, the job's waiters count is raised so its completion handler
+// suppresses duplicate result reinjection (single delivery lane).
+func (s *jobStore) wait(ctx context.Context, id string, timeout time.Duration) (jobSnapshot, error) {
+	j, ok := s.get(id)
+	if !ok {
+		return jobSnapshot{}, ErrUnknownJob
+	}
+	j.mu.Lock()
+	if j.status == statusCompleted || j.status == statusFailed || j.status == statusCancelled {
+		snap := snapshotLocked(j)
+		j.mu.Unlock()
+		return snap, nil
+	}
+	j.waiters++
+	done := j.done
+	j.mu.Unlock()
+
+	var timer *time.Timer
+	var timeoutCh <-chan time.Time
+	if timeout > 0 {
+		timer = time.NewTimer(timeout)
+		timeoutCh = timer.C
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-timeoutCh:
+	}
+	if timer != nil {
+		timer.Stop()
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.waiters > 0 {
+		j.waiters--
+	}
+	snap := snapshotLocked(j)
+	if j.status == statusCompleted || j.status == statusFailed || j.status == statusCancelled {
+		return snap, nil
+	}
+	if ctx.Err() != nil {
+		return snap, ctx.Err()
+	}
+	return snap, nil
 }
 
 func (s *jobStore) cleanup(olderThan time.Duration) {

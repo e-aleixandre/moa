@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsBashComplete } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -129,4 +129,41 @@ test('handleWsStateChange does not toast on a normal idle end', () => {
   const before = getToasts().length;
   handleWsStateChange('s1', { state: 'idle' });
   expect(getToasts().length).toBe(before);
+});
+
+test('handleWsBashComplete adds a bash card to the chat', () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
+  handleWsBashComplete('s1', { job_id: 'bash-1', command: 'sleep 5; echo done', status: 'completed', text: '[bash job completed] Job bash-1 finished.\nCommand: sleep 5; echo done\n\nOutput:\ndone' });
+  const msgs = store.get().sessions.s1.messages;
+  const card = msgs[msgs.length - 1];
+  expect(card._type).toBe('tool_start');
+  expect(card.tool_name).toBe('bash');
+  expect(card.status).toBe('done');
+  expect(card.args.command).toBe('sleep 5; echo done');
+});
+
+test('normalizeHistory reloads a bash_job custom notification as a bash card', () => {
+  const raw = [{
+    role: 'user',
+    custom: { source: 'bash_job', bash_command: 'make build', bash_status: 'completed' },
+    content: [{ type: 'text', text: '[bash job completed] Job bash-9 finished.\nCommand: make build\n\nOutput:\nok' }],
+  }];
+  const out = normalizeHistory(raw);
+  expect(out.length).toBe(1);
+  expect(out[0]._type).toBe('tool_start');
+  expect(out[0].tool_name).toBe('bash');
+  expect(out[0].args.command).toBe('make build');
+  expect(out[0].status).toBe('done');
+});
+
+test('normalizeHistory reloads a prefix-based bash notification (no custom)', () => {
+  const raw = [{
+    role: 'user',
+    content: [{ type: 'text', text: '[bash job failed] Job bash-2 failed.\nCommand: false\nOutput:\nboom' }],
+  }];
+  const out = normalizeHistory(raw);
+  expect(out[0]._type).toBe('tool_start');
+  expect(out[0].tool_name).toBe('bash');
+  expect(out[0].args.command).toBe('false');
+  expect(out[0].status).toBe('error');
 });

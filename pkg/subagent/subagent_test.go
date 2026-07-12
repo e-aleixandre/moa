@@ -1605,3 +1605,145 @@ func TestSyncSubagentPromoteVsFinishRaceDeliversExactlyOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestSubagentWaitReturnsResult verifies subagent_wait blocks until an async
+// job finishes and returns its completed status.
+func TestSubagentWaitReturnsResult(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "child result"))
+
+	reg := core.NewRegistry()
+	cfg := Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	}
+	cfg.ParentTools = reg
+	jobs := newJobStore()
+	sub := newSubagent(cfg, jobs)
+	wait := newSubagentWait(jobs)
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "t", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+
+	done := make(chan string, 1)
+	go func() {
+		r, _ := wait.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+		done <- textOf(r)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+
+	select {
+	case out := <-done:
+		if !strings.Contains(out, "Status: completed") || !strings.Contains(out, "child result") {
+			t.Fatalf("subagent_wait result = %q", out)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("subagent_wait did not return")
+	}
+}
+
+// TestSubagentWaitSuppressesAsyncComplete verifies that when a subagent_wait is
+// blocked on a job, OnAsyncComplete is NOT fired (the waiter consumes the
+// result — single delivery lane).
+func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "child result"))
+
+	var mu sync.Mutex
+	completeN := 0
+	reg := core.NewRegistry()
+	cfg := Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			mu.Lock()
+			completeN++
+			mu.Unlock()
+		},
+	}
+	cfg.ParentTools = reg
+	jobs := newJobStore()
+	sub := newSubagent(cfg, jobs)
+	wait := newSubagentWait(jobs)
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "t", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = wait.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	<-done
+
+	// Give any (erroneous) async-complete callback a chance to fire.
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if completeN != 0 {
+		t.Fatalf("OnAsyncComplete fired %d times while a waiter was blocked, want 0", completeN)
+	}
+}
+
+// TestSubagentWaitNoWaiterStillNotifies verifies OnAsyncComplete DOES fire
+// when no subagent_wait is blocked (normal async reinjection path).
+func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "child result"))
+
+	var mu sync.Mutex
+	completeN := 0
+	reg := core.NewRegistry()
+	cfg := Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			mu.Lock()
+			completeN++
+			mu.Unlock()
+		},
+	}
+	cfg.ParentTools = reg
+	jobs := newJobStore()
+	sub := newSubagent(cfg, jobs)
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "t", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = jobIDFromResult(t, res)
+	<-started
+	close(release)
+
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return completeN == 1
+	})
+}
+
+func TestSubagentWaitUnknownJob(t *testing.T) {
+	jobs := newJobStore()
+	wait := newSubagentWait(jobs)
+	res, err := wait.Execute(context.Background(), map[string]any{"job_id": "sa-nope"}, nil)
+	if err != nil || !res.IsError || !strings.Contains(textOf(res), "unknown job ID") {
+		t.Fatalf("expected unknown-job error, got %+v %v", res, err)
+	}
+}

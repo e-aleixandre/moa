@@ -133,6 +133,9 @@ func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) error {
 		if err := reg.Register(NewBashStatus(cfg)); err != nil {
 			return fmt.Errorf("builtin: %w", err)
 		}
+		if err := reg.Register(NewBashWait(cfg)); err != nil {
+			return fmt.Errorf("builtin: %w", err)
+		}
 		if err := reg.Register(NewBashCancel(cfg)); err != nil {
 			return fmt.Errorf("builtin: %w", err)
 		}

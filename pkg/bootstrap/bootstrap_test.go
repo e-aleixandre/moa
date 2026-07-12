@@ -2,6 +2,8 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -181,5 +183,67 @@ func TestFormatSubagentNotification(t *testing.T) {
 				t.Error("expected non-empty notification")
 			}
 		})
+	}
+}
+
+func TestFormatBashNotification(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      string
+		output      string
+		wantEmpty   bool
+		wantContain string
+	}{
+		{"completed", "completed", "hello world", false, "[bash job completed]"},
+		{"failed", "failed", "boom", false, "[bash job failed]"},
+		{"cancelled", "cancelled", "", false, "[bash job cancelled]"},
+		{"unknown", "unknown_status", "", true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatBashNotification("bash-1", "echo hi", tt.status, tt.output)
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("expected empty, got %q", result)
+				}
+				return
+			}
+			if result == "" {
+				t.Fatal("expected non-empty notification")
+			}
+			if !strings.Contains(result, tt.wantContain) {
+				t.Errorf("expected %q in %q", tt.wantContain, result)
+			}
+			if !strings.Contains(result, "Command: echo hi") {
+				t.Errorf("expected command header in %q", result)
+			}
+		})
+	}
+}
+
+func TestFormatBashNotificationTruncates(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 200; i++ {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+	out := FormatBashNotification("bash-2", "seq 200", "completed", sb.String())
+	if !strings.Contains(out, "truncated — use bash_status for full output") {
+		t.Errorf("expected truncation pointer, got %q", out)
+	}
+	if strings.Contains(out, "line 0\n") {
+		t.Error("expected earliest lines to be dropped")
+	}
+}
+
+func TestFormatBashNotificationLongCommand(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	out := FormatBashNotification("bash-3", long+"\nsecond line", "completed", "ok")
+	// Header must be a single capped line (no embedded newline from command).
+	header := strings.SplitN(out, "\n", 3)
+	if len(header) < 2 || !strings.HasPrefix(header[1], "Command: ") {
+		t.Fatalf("unexpected header layout: %q", out)
+	}
+	if strings.Contains(header[1], "second line") {
+		t.Error("multi-line command must be reduced to first line")
 	}
 }

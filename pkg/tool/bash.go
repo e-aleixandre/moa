@@ -38,7 +38,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 		description = "Execute a bash command. Working directory and exported environment variables persist across calls (cd, export, venv activation carry over). Returns stdout, stderr, and exit code. Output is truncated to 50KB."
 	}
 	if cfg.BashJobs != nil {
-		description += " Set async:true before launching long-running work to run it in the background. A synchronous bash call cannot be promoted safely after launch; cancel it and relaunch with async:true instead."
+		description += " Set async:true before launching long-running work to run it in the background. If you need its result to continue, block on it with bash_wait instead of polling bash_status in a loop. A synchronous bash call cannot be promoted safely after launch; cancel it and relaunch with async:true instead."
 	}
 	return core.Tool{
 		Name:        "bash",
@@ -61,7 +61,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 				},
 				"async": {
 					"type": "boolean",
-					"description": "Run in the background and return a job ID. Use bash_status to inspect it and bash_cancel to stop it. Background jobs do not persist cd/export changes."
+					"description": "Run in the background and return a job ID. Use bash_wait to block until it finishes, bash_status to peek at output, and bash_cancel to stop it. Background jobs do not persist cd/export changes."
 				}
 			},
 			"required": ["command"]
@@ -138,7 +138,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 				if err != nil {
 					return core.ErrorResult(err.Error()), nil
 				}
-				return core.TextResult("Bash job started in background.\nJob ID: " + job.JobID + "\nUse bash_status to inspect output or bash_cancel to stop it."), nil
+				return core.TextResult("Bash job started in background.\nJob ID: " + job.JobID + "\nUse bash_wait to block until it finishes, bash_status to peek at output, or bash_cancel to stop it. You will also be notified when it completes."), nil
 			}
 
 			return executeBash(ctx, cfg, command, cwd, persistedEnv, agentID, timeout, cfg.BashState != nil, onUpdate)
@@ -301,7 +301,41 @@ func NewBashStatus(cfg ToolConfig) core.Tool {
 			if !ok {
 				return core.ErrorResult("unknown bash job ID: " + jobID), nil
 			}
-			return core.TextResult(fmt.Sprintf("Status: %s\nCommand: %s\nCWD: %s\n\nOutput:\n%s", job.Status, job.Command, job.CWD, job.Output)), nil
+			return core.TextResult(formatBashJobStatus(job)), nil
+		},
+	}
+}
+
+func formatBashJobStatus(job BashJobInfo) string {
+	return fmt.Sprintf("Status: %s\nCommand: %s\nCWD: %s\n\nOutput:\n%s", job.Status, job.Command, job.CWD, job.Output)
+}
+
+// NewBashWait creates the blocking-wait tool paired with async bash. It lets
+// the model block on a background job's completion instead of polling
+// bash_status in a loop (which would burn turns and trip the doom-loop guard).
+func NewBashWait(cfg ToolConfig) core.Tool {
+	return core.Tool{
+		Name: "bash_wait", Label: "Bash Wait",
+		Description: "Wait for a background bash job to finish and return its result. Use this instead of polling bash_status when you need the result to continue.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","description":"Background bash job ID"},"timeout":{"type":"integer","description":"Max seconds to wait (default 600). On timeout returns the current status without failing."}},"required":["job_id"]}`),
+		Effect:      core.EffectReadOnly,
+		Execute: func(ctx context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
+			jobID := getString(params, "job_id", "")
+			if cfg.BashJobs == nil {
+				return core.ErrorResult("background bash jobs are not configured"), nil
+			}
+			timeout := secondsToDuration(getInt(params, "timeout", 600))
+			job, err := cfg.BashJobs.Wait(ctx, jobID, timeout)
+			if err != nil {
+				if err == ErrUnknownBashJob {
+					return core.ErrorResult("unknown bash job ID: " + jobID), nil
+				}
+				return core.ErrorResult("bash_wait cancelled"), nil
+			}
+			if job.FinishedAt.IsZero() {
+				return core.TextResult(fmt.Sprintf("Job %s still running after timeout.\nCommand: %s\n\nCall bash_wait again to keep waiting, or bash_cancel to stop it.", job.JobID, job.Command)), nil
+			}
+			return core.TextResult(formatBashJobStatus(job)), nil
 		},
 	}
 }

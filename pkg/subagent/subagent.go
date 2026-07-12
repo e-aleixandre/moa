@@ -43,6 +43,7 @@ const (
 var excludedTools = map[string]bool{
 	"subagent":        true,
 	"subagent_status": true,
+	"subagent_wait":   true,
 	"subagent_cancel": true,
 	"memory":          true,
 	"ask_user":        true,
@@ -122,6 +123,7 @@ func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 	for _, t := range []core.Tool{
 		newSubagent(cfg, jobs),
 		newSubagentStatus(jobs),
+		newSubagentWait(jobs),
 		newSubagentCancel(jobs),
 	} {
 		if err := reg.Register(t); err != nil {
@@ -166,7 +168,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"async": {
 					"type": "boolean",
-					"description": "Run in background and return a job ID. Use subagent_status to poll progress and subagent_cancel to stop."
+					"description": "Run in background and return a job ID. Use subagent_wait to block until it finishes, subagent_status to peek at progress, and subagent_cancel to stop."
 				}
 			},
 			"required": ["task"]
@@ -241,7 +243,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil)
-				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_status to check progress, subagent_cancel to stop."), nil
+				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), nil
 			}
 
 			// Sync: the child still runs in its own goroutine (unified with
@@ -274,6 +276,7 @@ func newSubagentStatus(jobs *jobStore) core.Tool {
 		Name:        "subagent_status",
 		Label:       "Subagent Status",
 		Description: "Check the status of an async subagent job.",
+		Effect:      core.EffectReadOnly,
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -294,6 +297,66 @@ func newSubagentStatus(jobs *jobStore) core.Tool {
 			return core.TextResult(formatStatus(snap)), nil
 		},
 	}
+}
+
+// subagentWaitMaxTimeout caps an explicit timeout so a huge value can't
+// overflow time.Duration into a negative "wait forever" sentinel.
+const subagentWaitMaxTimeout = 24 * time.Hour
+
+func newSubagentWait(jobs *jobStore) core.Tool {
+	return core.Tool{
+		Name:        "subagent_wait",
+		Label:       "Subagent Wait",
+		Description: "Wait for an async subagent job to finish and return its result. Use this instead of polling subagent_status when you need the result to continue.",
+		Effect:      core.EffectReadOnly,
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"job_id": {
+					"type": "string",
+					"description": "The job ID returned by an async subagent call"
+				},
+				"timeout": {
+					"type": "integer",
+					"description": "Max seconds to wait (default 600). On timeout returns the current status without failing."
+				}
+			},
+			"required": ["job_id"]
+		}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			jobs.cleanup(jobTTL)
+			jobID, _ := params["job_id"].(string)
+			timeout := subagentWaitTimeout(params)
+			snap, err := jobs.wait(ctx, jobID, timeout)
+			if err != nil {
+				if errors.Is(err, ErrUnknownJob) {
+					return core.ErrorResult("unknown job ID: " + jobID), nil
+				}
+				return core.ErrorResult("subagent_wait cancelled"), nil
+			}
+			if snap.Status == statusRunning || snap.Status == statusCancelling {
+				return core.TextResult(formatStatus(snap) + "\n\n(still running after timeout; call subagent_wait again to keep waiting, or subagent_cancel to stop it)"), nil
+			}
+			return core.TextResult(formatStatus(snap)), nil
+		},
+	}
+}
+
+func subagentWaitTimeout(params map[string]any) time.Duration {
+	secs := 600
+	switch v := params["timeout"].(type) {
+	case float64:
+		secs = int(v)
+	case int:
+		secs = v
+	}
+	if secs <= 0 {
+		return 0
+	}
+	if time.Duration(secs) > subagentWaitMaxTimeout/time.Second {
+		return subagentWaitMaxTimeout
+	}
+	return time.Duration(secs) * time.Second
 }
 
 func newSubagentCancel(jobs *jobStore) core.Tool {
@@ -399,7 +462,7 @@ func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())
 		}
-		return core.TextResult("Subagent promoted to background.\nJob ID: " + j.id + "\nYou'll be notified when it finishes; use subagent_status to check progress."), nil
+		return core.TextResult("Subagent promoted to background.\nJob ID: " + j.id + "\nYou'll be notified when it finishes; use subagent_wait to block on it or subagent_status to peek at progress."), nil
 	}
 
 	snap, ok := jobs.snapshot(j.id)
@@ -440,7 +503,12 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		// parent's return value in awaitSyncResult instead, and must not
 		// also fire these callbacks (single delivery lane).
 		if !j.isSync() {
-			if cfg.OnAsyncComplete != nil {
+			// If a subagent_wait is blocked on this job, that call consumes
+			// the result instead — suppress the async reinjection so it isn't
+			// delivered twice. hasWaiters() is stable here because this defer
+			// runs before close(j.done) (registered later), so no waiter has
+			// woken yet. UI/count callbacks still fire below.
+			if cfg.OnAsyncComplete != nil && !j.hasWaiters() {
 				snap, ok := jobs.snapshot(j.id)
 				if ok {
 					tail, wasTruncated := tailLinesWithFlag(snap.Result, asyncResultTailLines)

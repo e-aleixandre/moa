@@ -259,6 +259,10 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "bash_job_output", Data: BashJobOutputData{JobID: e.JobID, Delta: e.Delta}}, true
 	case bus.BashJobEnded:
 		return Event{Type: "bash_job_end", Data: BashJobEndData{JobID: e.JobID, Status: e.Status, Output: e.Output}}, true
+	case bus.BashCompleted:
+		return Event{Type: "bash_complete", Data: BashCompleteData{
+			JobID: e.JobID, Command: e.Command, Status: e.Status, Text: e.Text,
+		}}, true
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
 	case bus.CompactionEnded:

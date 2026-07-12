@@ -267,6 +267,31 @@ func parseSubagentNotification(text string) (task, status, result string, ok boo
 	return "", "", "", false
 }
 
+// parseBashNotification detects steer messages formatted as async bash
+// completion notifications and extracts the command + status. Returns false for
+// anything else.
+func parseBashNotification(text string) (command, status string, ok bool) {
+	prefixes := map[string]string{
+		"[bash job completed] ": "completed",
+		"[bash job failed] ":    "failed",
+		"[bash job cancelled] ": "cancelled",
+	}
+	for prefix, s := range prefixes {
+		if strings.HasPrefix(text, prefix) {
+			rest := text[len(prefix):]
+			lines := strings.SplitN(rest, "\n", 3)
+			if len(lines) >= 2 {
+				cmdLine := lines[1]
+				if strings.HasPrefix(cmdLine, "Command: ") {
+					command = strings.TrimPrefix(cmdLine, "Command: ")
+				}
+			}
+			return command, s, true
+		}
+	}
+	return "", "", false
+}
+
 // Cached styles for renderQueuedSteers — built once per theme.
 var (
 	steerTextStyle  = lipgloss.NewStyle()

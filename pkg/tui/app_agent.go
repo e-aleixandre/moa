@@ -262,6 +262,10 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 						SubagentStatus: status,
 						SubagentResult: result,
 					})
+				} else if source == "bash_job" {
+					command, _ := msg.Custom["bash_command"].(string)
+					status, _ := msg.Custom["bash_status"].(string)
+					m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, text))
 				} else if task, status, result, ok := parseSubagentNotification(text); ok {
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type:           "subagent",
@@ -269,6 +273,8 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 						SubagentStatus: status,
 						SubagentResult: result,
 					})
+				} else if command, status, ok := parseBashNotification(text); ok {
+					m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, text))
 				} else {
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type: "user", Raw: text,

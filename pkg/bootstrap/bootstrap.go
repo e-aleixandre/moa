@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -557,4 +558,62 @@ func FormatSubagentNotification(jobID, task, status, resultTail string, truncate
 	default:
 		return ""
 	}
+}
+
+// bashNotificationTailLines is how many trailing lines of a completed async
+// bash job's output are reinjected into the agent's conversation. Mirrors the
+// subagent async result tail.
+const bashNotificationTailLines = 50
+
+// FormatBashNotification produces the text injected into the agent's
+// conversation when an async background bash job completes. Mirrors
+// FormatSubagentNotification so the CLI and serve reinjection paths stay
+// symmetric. output is the job's full captured output (already capped at 50KB
+// by BashJobs); it is truncated here to the trailing lines with a pointer to
+// bash_status for the rest.
+func FormatBashNotification(jobID, command, status, output string) string {
+	command = firstLine(command)
+	switch status {
+	case "completed":
+		tail, truncated := tailLines(output, bashNotificationTailLines)
+		label := "Output:\n"
+		if truncated {
+			label = "Output (truncated — use bash_status for full output):\n"
+		}
+		if tail == "" {
+			tail = "(no output)"
+		}
+		return fmt.Sprintf("[bash job completed] Job %s finished.\nCommand: %s\n\n%s%s", jobID, command, label, tail)
+	case "failed":
+		tail, truncated := tailLines(output, bashNotificationTailLines)
+		label := "Output:\n"
+		if truncated {
+			label = "Output (truncated — use bash_status for full output):\n"
+		}
+		return fmt.Sprintf("[bash job failed] Job %s failed.\nCommand: %s\n%s%s", jobID, command, label, tail)
+	case "cancelled":
+		return fmt.Sprintf("[bash job cancelled] Job %s was cancelled.\nCommand: %s", jobID, command)
+	default:
+		return ""
+	}
+}
+
+// firstLine returns the first line of s, capped to ~120 runes, so a multi-line
+// or very long command stays a stable single-line header.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 120 {
+		s = s[:120] + "…"
+	}
+	return s
+}
+
+func tailLines(s string, n int) (string, bool) {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s, false
+	}
+	return strings.Join(lines[len(lines)-n:], "\n"), true
 }

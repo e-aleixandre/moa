@@ -301,6 +301,19 @@ func main() {
 		},
 		OnBashJobEnd: func(job tool.BashJobInfo) {
 			preBus.Publish(bus.BashJobEnded{JobID: job.JobID, Status: job.Status, Output: job.Output})
+			if job.Awaited {
+				return
+			}
+			agentText := bootstrap.FormatBashNotification(job.JobID, job.Command, job.Status, job.Output)
+			if agentText == "" {
+				return
+			}
+			preBus.Publish(bus.BashCompleted{
+				JobID:   job.JobID,
+				Command: job.Command,
+				Status:  job.Status,
+				Text:    agentText,
+			})
 		},
 	})
 	if err != nil {
@@ -503,6 +516,25 @@ func main() {
 		}); err != nil {
 			// A concurrent run may have won the idle→running transition. Queue it
 			// for that run rather than dropping the completion.
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+		}
+	})
+
+	// Same delivery discipline for async background bash jobs.
+	rt.Bus.Subscribe(func(e bus.BashCompleted) {
+		if rt.State.Current() == bus.StateRunning {
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+			return
+		}
+		if err := rt.Bus.Execute(bus.SendPrompt{
+			Text: e.Text,
+			Custom: map[string]any{
+				"source":       "bash_job",
+				"bash_job_id":  e.JobID,
+				"bash_command": e.Command,
+				"bash_status":  e.Status,
+			},
+		}); err != nil {
 			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
 		}
 	})

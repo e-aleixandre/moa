@@ -20,6 +20,19 @@ import (
 // that triggers a forced stop. Prevents infinite loops burning tokens.
 const doomLoopThreshold = 3
 
+// doomLoopExemptTools are read-only status/wait tools that legitimately repeat
+// while a model waits on background async work. Polling them (or blocking on a
+// wait) must not trip the doom-loop detector, which would abort an otherwise
+// healthy long-running task. Turns whose tool calls are *entirely* exempt are
+// transparent to the detector: they neither increment nor reset the streak, so
+// a genuine edit/status/edit loop is still caught across intervening polls.
+var doomLoopExemptTools = map[string]bool{
+	"bash_status":     true,
+	"subagent_status": true,
+	"bash_wait":       true,
+	"subagent_wait":   true,
+}
+
 // maxPauseTurnResubmits caps consecutive pause_turn continuations. Anthropic
 // pauses a long-running turn (stop_reason "pause_turn") and expects the client
 // to resubmit the conversation as-is to let the model continue. We do that
@@ -424,9 +437,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		toolCalls := extractToolCalls(assistantMsg)
 
 		// Doom loop detection: if tool calls are identical to the previous
-		// turn N times in a row, stop to prevent infinite token burn.
-		if len(toolCalls) > 0 {
-			sig := toolCallSignature(toolCalls)
+		// turn N times in a row, stop to prevent infinite token burn. Turns
+		// consisting only of exempt status/wait tools (polling background async
+		// work) are skipped entirely so they neither trip nor reset the streak.
+		if nonExempt := filterDoomLoopCalls(toolCalls); len(nonExempt) > 0 {
+			sig := toolCallSignature(nonExempt)
 			if sig == lastToolSig {
 				repeatCount++
 			} else {
@@ -436,7 +451,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			if repeatCount >= doomLoopThreshold {
 				// Log the repeated tool calls for debugging
 				var callNames []string
-				for _, tc := range toolCalls {
+				for _, tc := range nonExempt {
 					callNames = append(callNames, fmt.Sprintf("%s(%v)", tc.ToolName, tc.Arguments))
 				}
 				loopErr = fmt.Errorf("doom loop detected: identical tool calls repeated %d times in a row: %v", repeatCount, callNames)
@@ -971,6 +986,20 @@ func injectErrorToolResults(cfg *loopConfig, toolCalls []core.Content, errMsg st
 		))
 		cfg.appendState(msg)
 	}
+}
+
+// filterDoomLoopCalls drops exempt status/wait tool calls from a turn's tool
+// set for doom-loop accounting. Polling background async work (or blocking on a
+// wait) is legitimate repetition and must not trip the detector.
+func filterDoomLoopCalls(calls []core.Content) []core.Content {
+	var out []core.Content
+	for _, c := range calls {
+		if doomLoopExemptTools[c.ToolName] {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // toolCallSignature produces a stable hash of a set of tool calls (name + args)

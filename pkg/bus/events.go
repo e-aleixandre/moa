@@ -387,6 +387,18 @@ type BashJobEnded struct {
 	Output    string
 }
 
+// BashCompleted is published when an async background bash job finishes and its
+// result is reinjected into the agent's conversation. Distinct from
+// BashJobEnded (which drives the tray/quiescence): BashCompleted carries the
+// formatted notification text the agent (and chat UI) sees.
+type BashCompleted struct {
+	SessionID string
+	JobID     string
+	Command   string
+	Status    string
+	Text      string
+}
+
 // ---------------------------------------------------------------------------
 // Permission
 // ---------------------------------------------------------------------------

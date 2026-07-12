@@ -79,6 +79,16 @@ export function normalizeHistory(raw) {
           status: (msg.custom.subagent_status || '') === 'completed' ? 'done' : 'error',
           result: msg.custom.subagent_result || '',
         });
+      } else if (msg.custom?.source === 'bash_job') {
+        const bashText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+        result.push({
+          _type: 'tool_start',
+          tool_call_id: 'bash_complete_' + result.length,
+          tool_name: 'bash',
+          args: { command: msg.custom.bash_command || '' },
+          status: (msg.custom.bash_status || '') === 'failed' ? 'error' : 'done',
+          result: bashText,
+        });
       } else {
         // Backwards compatibility: detect prefix-based notifications
         // from sessions saved before custom metadata was introduced.
@@ -94,7 +104,19 @@ export function normalizeHistory(raw) {
             result: subagent.result,
           });
         } else {
-          result.push(msg);
+          const bash = parseBashNotification(userText);
+          if (bash) {
+            result.push({
+              _type: 'tool_start',
+              tool_call_id: 'bash_complete_' + result.length,
+              tool_name: 'bash',
+              args: { command: bash.command },
+              status: bash.status === 'failed' ? 'error' : 'done',
+              result: userText,
+            });
+          } else {
+            result.push(msg);
+          }
         }
       }
     }
@@ -740,6 +762,32 @@ export function handleWsSubagentComplete(id, data) {
   markUnseen(id);
 }
 
+export function handleWsBashComplete(id, data) {
+  const statusIcon = data.status === 'completed' ? '✓' : data.status === 'failed' ? '✗' : '⊘';
+  const cmdLine = (data.command || data.job_id || '').split('\n')[0];
+  addToast({
+    sessionId: id,
+    title: `Bash ${statusIcon} ${data.status}`,
+    detail: truncateText(cmdLine, 140),
+    type: data.status === 'completed' ? 'done' : 'attention',
+  });
+
+  // Add a bash card to the chat (mirrors TUI's bash notification block).
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  const messages = [...(sess.messages || [])];
+  messages.push({
+    _type: 'tool_start',
+    tool_call_id: `bash-complete-${data.job_id}`,
+    tool_name: 'bash',
+    args: { command: data.command || '' },
+    status: data.status === 'failed' ? 'error' : 'done',
+    result: data.text || '',
+  });
+  updateSession(id, { messages });
+  markUnseen(id);
+}
+
 // --- Live subagent sub-conversations (agent tray) ---
 //
 // Each subagent's transcript lives at session.subagents[jobId] and is fed by
@@ -991,6 +1039,27 @@ function parseSubagentNotification(text) {
         }
       }
       return { task, status, result };
+    }
+  }
+  return null;
+}
+
+/** Parse an async bash completion notification from a user message text (mirrors TUI's parseBashNotification). */
+function parseBashNotification(text) {
+  const prefixes = {
+    '[bash job completed] ': 'completed',
+    '[bash job failed] ': 'failed',
+    '[bash job cancelled] ': 'cancelled',
+  };
+  for (const [prefix, status] of Object.entries(prefixes)) {
+    if (text.startsWith(prefix)) {
+      const rest = text.slice(prefix.length);
+      const lines = rest.split('\n');
+      let command = '';
+      if (lines.length >= 2 && lines[1].startsWith('Command: ')) {
+        command = lines[1].slice('Command: '.length);
+      }
+      return { command, status };
     }
   }
   return null;

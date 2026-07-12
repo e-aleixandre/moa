@@ -274,3 +274,12 @@ type BashJobEndData struct {
 	Status string `json:"status"`
 	Output string `json:"output"`
 }
+
+// BashCompleteData is sent when an async background bash job finishes and its
+// formatted result is reinjected into the conversation.
+type BashCompleteData struct {
+	JobID   string `json:"job_id"`
+	Command string `json:"command"`
+	Status  string `json:"status"`
+	Text    string `json:"text"`
+}
