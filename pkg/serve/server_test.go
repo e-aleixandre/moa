@@ -354,7 +354,7 @@ func TestServer_RejectsRebindingHost(t *testing.T) {
 func TestAuthMiddleware(t *testing.T) {
 	const secret = "s3cr3t"
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	h := authMiddleware(secret, false, next)
+	h := authMiddleware(secret, false, nil, next)
 
 	t.Run("no credentials -> 401", func(t *testing.T) {
 		rec := httptest.NewRecorder()
