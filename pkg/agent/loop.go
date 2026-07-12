@@ -18,6 +18,13 @@ import (
 // that triggers a forced stop. Prevents infinite loops burning tokens.
 const doomLoopThreshold = 3
 
+// maxPauseTurnResubmits caps consecutive pause_turn continuations. Anthropic
+// pauses a long-running turn (stop_reason "pause_turn") and expects the client
+// to resubmit the conversation as-is to let the model continue. We do that
+// automatically (per the API's documented guidance), but cap it so a provider
+// that keeps pausing without finishing can't spin forever burning tokens.
+const maxPauseTurnResubmits = 5
+
 // Hooks is the interface the agent loop needs from the extension system.
 // Defined here (consumer-side) so the loop doesn't depend on extension internals.
 type Hooks interface {
@@ -124,6 +131,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	var lastToolSig string
 	repeatCount := 0
 
+	// pause_turn tracking: count consecutive pause_turn continuations, and note
+	// when the previous iteration was a pause so we can skip compaction on the
+	// resubmit (compacting between a pause and its resubmit would replace the
+	// paused message and lose the continuation).
+	pauseResubmits := 0
+	justPaused := false
+
 	var loopErr error
 	defer func() {
 		// Close open turn if needed
@@ -158,7 +172,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// === COMPACTION CHECK ===
 		// Invariant: runs once per iteration, before provider call, after
 		// prior turn is fully committed to cfg.state.Messages.
-		if cfg.compaction != nil && cfg.compaction.Enabled && cfg.model.MaxInput > 0 {
+		// Skipped on a pause_turn resubmit: the continuation must resend the
+		// paused conversation as-is, and compacting it away here would drop the
+		// message the model is waiting to continue.
+		if !justPaused && cfg.compaction != nil && cfg.compaction.Enabled && cfg.model.MaxInput > 0 {
 			estimate := core.EstimateContextTokens(
 				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
@@ -278,6 +295,56 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// MessageEnd is a state-observable boundary: reconnect snapshots that
 		// include this lifecycle event must also include its stable MsgID.
 		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventMessageEnd, Message: wrapped})
+
+		// === STOP-REASON HANDLING (Anthropic pause_turn / refusal) ===
+		// Runs after the message is committed and MessageEnd emitted, so any
+		// partial text/thinking is already persisted and visible in both
+		// frontends before we act on the stop reason.
+		justPaused = false
+		switch assistantMsg.StopReason {
+		case "pause_turn":
+			// The provider paused a long-running turn and expects us to resend
+			// the conversation as-is to continue. The assistant message is
+			// already in cfg.state.Messages, so the next iteration replays it
+			// verbatim — a natural resubmit. We do NOT drain steering here: the
+			// continuation must go back unchanged; queued steers wait for the
+			// next tool cycle or become follow-ups.
+			pauseResubmits++
+			if pauseResubmits >= maxPauseTurnResubmits {
+				loopErr = fmt.Errorf("model paused %d consecutive times (pause_turn) without finishing the turn", pauseResubmits)
+				inTurn = false
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+				return loopErr
+			}
+			// Account for the paused response's cost; the pre-check at the top
+			// of the next iteration enforces the budget before resubmitting.
+			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
+				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
+			}
+			justPaused = true
+			inTurn = false
+			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+			continue // resubmit the paused conversation as-is
+
+		case "refusal", "sensitive":
+			// The model declined (policy refusal) or was cut by safety filters.
+			// Surface a visible error with the provider's explanation instead of
+			// ending the turn in silence. The refusal's partial text is already
+			// persisted/shown via the MessageEnd above.
+			reason := assistantMsg.ErrorMessage
+			if reason == "" {
+				reason = "the model refused to complete the request"
+			}
+			if assistantMsg.StopReason == "sensitive" {
+				reason = "content flagged by safety filters: " + reason
+			}
+			loopErr = fmt.Errorf("model stopped (%s): %s", assistantMsg.StopReason, reason)
+			inTurn = false
+			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+			return loopErr
+		}
+		// Any other stop reason: a real turn boundary — reset the pause streak.
+		pauseResubmits = 0
 
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)

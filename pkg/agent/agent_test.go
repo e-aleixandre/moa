@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -2226,4 +2227,221 @@ type testExtension struct {
 
 func (e *testExtension) Init(api extension.API) error {
 	return e.initFunc(api)
+}
+
+// stopReasonResponse returns a handler that streams a text message with a given
+// stop reason (and optional ErrorMessage/Usage), for exercising pause_turn and
+// refusal handling in the loop.
+func stopReasonResponse(text, stopReason, errorMessage string, usage *core.Usage) func(req core.Request) (<-chan core.AssistantEvent, error) {
+	return func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 10)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role:         "assistant",
+				Content:      []core.Content{core.TextContent(text)},
+				StopReason:   stopReason,
+				ErrorMessage: errorMessage,
+				Usage:        usage,
+				Timestamp:    time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, ContentIndex: 0, Delta: text}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+}
+
+// TestLoop_PauseTurnResubmits verifies a pause_turn triggers an automatic
+// resubmit: the paused message is kept and the conversation continues to a
+// clean completion, with both assistant messages in state.
+func TestLoop_PauseTurnResubmits(t *testing.T) {
+	provider := NewMockProvider(
+		stopReasonResponse("Thinking...", "pause_turn", "", nil),
+		stopReasonResponse("Here is the answer.", "end_turn", "", nil),
+	)
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Run(context.Background(), "Do a long task")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// user + paused assistant + final assistant.
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[1].Role != "assistant" || msgs[1].Content[0].Text != "Thinking..." {
+		t.Errorf("paused message not preserved: %+v", msgs[1])
+	}
+	if msgs[2].Role != "assistant" || msgs[2].Content[0].Text != "Here is the answer." {
+		t.Errorf("continuation missing: %+v", msgs[2])
+	}
+	if provider.calls != 2 {
+		t.Errorf("provider should be called twice, got %d", provider.calls)
+	}
+}
+
+// TestLoop_PauseTurnCap verifies an endless pause_turn loop is capped and
+// surfaces an error rather than spinning forever.
+func TestLoop_PauseTurnCap(t *testing.T) {
+	handlers := make([]func(core.Request) (<-chan core.AssistantEvent, error), 20)
+	for i := range handlers {
+		handlers[i] = stopReasonResponse("still pausing", "pause_turn", "", nil)
+	}
+	provider := NewMockProvider(handlers...)
+	ag := newTestAgent(provider)
+	ag.config.MaxTurns = 100 // ensure the pause cap fires first
+	events := collectEvents(ag)
+
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("expected pause_turn cap error")
+	}
+	if !strings.Contains(err.Error(), "pause_turn") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider.calls != maxPauseTurnResubmits {
+		t.Errorf("expected exactly %d provider calls, got %d", maxPauseTurnResubmits, provider.calls)
+	}
+	if !waitForEvent(events, core.AgentEventError, 500*time.Millisecond) {
+		t.Error("missing agent_error event")
+	}
+}
+
+// TestLoop_PauseTurnResetsCounter verifies the pause streak resets after a
+// normal (non-pause) turn, so an occasional pause never trips the cap. Without
+// the reset, the 2 early pauses + 4 later pauses would total 6 >= the cap and
+// error; with the reset the tool_use turn clears the streak so the run finishes.
+func TestLoop_PauseTurnResetsCounter(t *testing.T) {
+	resetTool := core.Tool{
+		Name:       "noop",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+	provider := NewMockProvider(
+		stopReasonResponse("p1", "pause_turn", "", nil),
+		stopReasonResponse("p2", "pause_turn", "", nil),
+		toolCallResponse("call_1", "noop", map[string]any{}), // tool_use → resets streak
+		stopReasonResponse("p3", "pause_turn", "", nil),
+		stopReasonResponse("p4", "pause_turn", "", nil),
+		stopReasonResponse("p5", "pause_turn", "", nil),
+		stopReasonResponse("p6", "pause_turn", "", nil),
+		stopReasonResponse("done", "end_turn", "", nil),
+	)
+	ag := newTestAgent(provider, resetTool)
+	ag.config.MaxTurns = 100
+
+	_, err := ag.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("streak should have reset after tool_use, got: %v", err)
+	}
+	if provider.calls != 8 {
+		t.Errorf("expected 8 provider calls, got %d", provider.calls)
+	}
+}
+
+// TestLoop_PauseTurnAccumulatesBudget verifies the paused response's cost counts
+// toward the budget so a pause loop can't bypass the limit.
+func TestLoop_PauseTurnAccumulatesBudget(t *testing.T) {
+	bigUsage := &core.Usage{Input: 1_000_000, Output: 1_000_000}
+	provider := NewMockProvider(
+		stopReasonResponse("pausing", "pause_turn", "", bigUsage),
+		stopReasonResponse("should not reach", "end_turn", "", nil),
+	)
+	ag := newTestAgent(provider)
+	ag.config.MaxBudget = 0.0001
+	ag.config.Model = core.Model{ID: "test-model", Provider: "mock",
+		Pricing: &core.Pricing{Input: 100, Output: 100}}
+
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("expected budget exceeded error")
+	}
+	var budgetErr *BudgetExceededError
+	if !errors.As(err, &budgetErr) {
+		t.Fatalf("expected BudgetExceededError, got %v", err)
+	}
+	// Only the first (paused) call should have run before the budget tripped.
+	if provider.calls != 1 {
+		t.Errorf("expected 1 provider call before budget trip, got %d", provider.calls)
+	}
+}
+
+// TestLoop_RefusalSurfacesError verifies a refusal ends the run with a visible
+// error carrying the explanation, while the partial refusal text stays in state.
+func TestLoop_RefusalSurfacesError(t *testing.T) {
+	provider := NewMockProvider(
+		stopReasonResponse("I can't help with that.", "refusal", "This violates the policy.", nil),
+	)
+	ag := newTestAgent(provider)
+	events := collectEvents(ag)
+
+	msgs, err := ag.Run(context.Background(), "do something bad")
+	if err == nil {
+		t.Fatal("expected refusal error")
+	}
+	if !strings.Contains(err.Error(), "This violates the policy.") {
+		t.Fatalf("error should carry explanation, got: %v", err)
+	}
+	// The refusal text must remain visible in history.
+	if len(msgs) < 2 || msgs[1].Content[0].Text != "I can't help with that." {
+		t.Errorf("refusal text should be preserved: %+v", msgs)
+	}
+	if !waitForEvent(events, core.AgentEventError, 500*time.Millisecond) {
+		t.Error("missing agent_error event")
+	}
+	if !waitForEvent(events, core.AgentEventMessageEnd, 500*time.Millisecond) {
+		t.Error("message_end should fire before the error")
+	}
+}
+
+// TestLoop_RefusalNoExplanationFallback verifies a refusal with no explanation
+// still produces a meaningful error.
+func TestLoop_RefusalNoExplanationFallback(t *testing.T) {
+	provider := NewMockProvider(
+		stopReasonResponse("No.", "refusal", "", nil),
+	)
+	ag := newTestAgent(provider)
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("expected fallback 'refused' text, got: %v", err)
+	}
+}
+
+// TestLoop_SensitiveSurfacesError verifies a "sensitive" stop reason surfaces a
+// safety-filter error.
+func TestLoop_SensitiveSurfacesError(t *testing.T) {
+	provider := NewMockProvider(
+		stopReasonResponse("partial", "sensitive", "", nil),
+	)
+	ag := newTestAgent(provider)
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "safety filters") {
+		t.Fatalf("expected safety-filter error, got: %v", err)
+	}
+}
+
+// TestLoop_UnknownStopReasonCompletes verifies an unrecognized stop reason with
+// no tool calls ends the run cleanly (no crash, no error).
+func TestLoop_UnknownStopReasonCompletes(t *testing.T) {
+	provider := NewMockProvider(
+		stopReasonResponse("all done", "weird_future_value", "", nil),
+	)
+	ag := newTestAgent(provider)
+	msgs, err := ag.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("unknown stop reason should complete cleanly, got: %v", err)
+	}
+	if len(msgs) != 2 || msgs[1].Content[0].Text != "all done" {
+		t.Errorf("unexpected messages: %+v", msgs)
+	}
 }

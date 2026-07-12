@@ -310,3 +310,105 @@ func assertEventTypes(t *testing.T, events []core.AssistantEvent, expected []str
 		}
 	}
 }
+
+// TestMapEvents_PauseTurn verifies stop_reason "pause_turn" is passed through
+// intact on the final message (the loop resubmits on it).
+func TestMapEvents_PauseTurn(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/sse/pause_turn.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := mapSSEToEvents(t, string(data))
+	done := events[len(events)-1]
+	if done.Type != core.ProviderEventDone || done.Message == nil {
+		t.Fatalf("expected Done with message, got %s", done.Type)
+	}
+	if done.Message.StopReason != "pause_turn" {
+		t.Errorf("StopReason: got %q, want pause_turn", done.Message.StopReason)
+	}
+	if len(done.Message.Content) != 1 || done.Message.Content[0].Text != "Working on it" {
+		t.Errorf("partial content should be preserved: %+v", done.Message.Content)
+	}
+	if done.Message.Usage == nil || done.Message.Usage.Output != 7 {
+		t.Errorf("usage should be present: %+v", done.Message.Usage)
+	}
+}
+
+// TestMapEvents_RefusalWithExplanation verifies stop_details.explanation is
+// captured into Message.ErrorMessage and the turn is still delivered as Done
+// (not a provider error) so the partial refusal text survives.
+func TestMapEvents_RefusalWithExplanation(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/sse/refusal.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := mapSSEToEvents(t, string(data))
+	for _, e := range events {
+		if e.Type == core.ProviderEventError {
+			t.Fatalf("refusal must not surface as a provider error: %v", e.Error)
+		}
+	}
+	done := events[len(events)-1]
+	if done.Type != core.ProviderEventDone || done.Message == nil {
+		t.Fatalf("expected Done with message, got %s", done.Type)
+	}
+	if done.Message.StopReason != "refusal" {
+		t.Errorf("StopReason: got %q, want refusal", done.Message.StopReason)
+	}
+	if done.Message.ErrorMessage != "This request violates the usage policy." {
+		t.Errorf("ErrorMessage: got %q", done.Message.ErrorMessage)
+	}
+}
+
+// TestMapEvents_RefusalNullDetails verifies a refusal with stop_details:null
+// leaves ErrorMessage empty (the loop supplies a fallback).
+func TestMapEvents_RefusalNullDetails(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/sse/refusal_null_details.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := mapSSEToEvents(t, string(data))
+	done := events[len(events)-1]
+	if done.Message == nil || done.Message.StopReason != "refusal" {
+		t.Fatalf("expected refusal message, got %+v", done.Message)
+	}
+	if done.Message.ErrorMessage != "" {
+		t.Errorf("ErrorMessage should be empty, got %q", done.Message.ErrorMessage)
+	}
+}
+
+// TestMapEvents_SensitiveStopReason verifies the untyped "sensitive" stop_reason
+// is passed through as a raw string.
+func TestMapEvents_SensitiveStopReason(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/sse/sensitive.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := mapSSEToEvents(t, string(data))
+	done := events[len(events)-1]
+	if done.Type != core.ProviderEventDone || done.Message == nil {
+		t.Fatalf("expected Done, got %s", done.Type)
+	}
+	if done.Message.StopReason != "sensitive" {
+		t.Errorf("StopReason: got %q, want sensitive", done.Message.StopReason)
+	}
+}
+
+// TestMapEvents_UnknownStopReason verifies an unrecognized stop_reason is passed
+// through without error (no crash, defensive default).
+func TestMapEvents_UnknownStopReason(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/sse/unknown_stop.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := mapSSEToEvents(t, string(data))
+	for _, e := range events {
+		if e.Type == core.ProviderEventError {
+			t.Fatalf("unknown stop_reason must not error: %v", e.Error)
+		}
+	}
+	done := events[len(events)-1]
+	if done.Message == nil || done.Message.StopReason != "totally_new_value" {
+		t.Errorf("unknown stop reason should pass through: %+v", done.Message)
+	}
+}

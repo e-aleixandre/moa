@@ -488,6 +488,12 @@ func (a *Anthropic) handleMessageDelta(data string, state *streamState) *core.As
 	var payload struct {
 		Delta struct {
 			StopReason string `json:"stop_reason"`
+			// stop_details carries the human-readable reason on a refusal (and
+			// potentially other safety stops). category is "cyber"/"bio"/null;
+			// explanation may be null. See Anthropic Messages API RefusalStopDetails.
+			StopDetails *struct {
+				Explanation string `json:"explanation"`
+			} `json:"stop_details"`
 		} `json:"delta"`
 		Usage struct {
 			OutputTokens int `json:"output_tokens"`
@@ -500,7 +506,16 @@ func (a *Anthropic) handleMessageDelta(data string, state *streamState) *core.As
 		}
 	}
 
-	state.message.StopReason = payload.Delta.StopReason
+	// Guard against a stray message_delta with no stop_reason wiping a value we
+	// may already have captured.
+	if payload.Delta.StopReason != "" {
+		state.message.StopReason = payload.Delta.StopReason
+	}
+	// Preserve the refusal explanation for the loop to surface as a visible
+	// error. The turn's partial content (already streamed) stays intact.
+	if payload.Delta.StopDetails != nil && payload.Delta.StopDetails.Explanation != "" {
+		state.message.ErrorMessage = payload.Delta.StopDetails.Explanation
+	}
 	if state.message.Usage != nil {
 		state.message.Usage.Output = payload.Usage.OutputTokens
 		state.message.Usage.TotalTokens = state.message.Usage.Input +
