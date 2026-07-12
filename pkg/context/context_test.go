@@ -158,6 +158,9 @@ func TestBuildSystemPrompt_Empty(t *testing.T) {
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role even with no AGENTS.md")
 	}
+	if !strings.Contains(prompt, "# Persistence") {
+		t.Error("expected # Persistence section even with empty options (always emitted)")
+	}
 }
 
 func TestBuildSystemPrompt_WithSkills(t *testing.T) {
@@ -222,10 +225,13 @@ func TestBuildSystemPrompt_Sections_FullToolSet(t *testing.T) {
 	}
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
 
-	for _, want := range []string{"# Style", "# Conventions", "# Git", "(interrupted by user)"} {
+	for _, want := range []string{"# Persistence", "# Style", "# Conventions", "# Git", "(interrupted by user)"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected prompt to contain %q", want)
 		}
+	}
+	if idx, sidx := strings.Index(prompt, "# Persistence"), strings.Index(prompt, "# Style"); idx == -1 || sidx == -1 || idx > sidx {
+		t.Errorf("expected # Persistence before # Style (persistence=%d style=%d)", idx, sidx)
 	}
 	if strings.Contains(prompt, "Be concise in your responses") {
 		t.Error("expected the old 'Be concise' guideline to be removed")
