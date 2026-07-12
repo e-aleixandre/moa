@@ -92,6 +92,28 @@ By default `moa serve` has **no authentication** — anyone who can reach the po
 
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
 
+### Pulse typed write transactions
+
+Paired Pulse devices can use a separate, device-only transaction surface:
+
+- `POST /api/pulse/operations/prepare`
+- `POST /api/pulse/operations/{id}/confirm` with an empty JSON object
+- `GET /api/pulse/operations/{id}`
+
+These routes require `Authorization: Moa-Device <device-id>.<secret>`; legacy
+`--token` cookie/query authentication is deliberately rejected for them. They
+also require normal Host validation, no query parameters, `X-Moa-Request` for
+POSTs, strict JSON, and TLS unless Serve sees a direct loopback peer. They do
+not alter the legacy web/TUI routes.
+
+The initial and only kind is `directed_instruction` (`target`, bounded `text`).
+Prepare resolves an exact Ops destination or returns `409` candidates. Confirm
+binds the same paired device and immutable review; it never accepts a
+client-supplied confirmation flag, endpoint/method, free-form command or new
+text. Pending reviews expire after five minutes. Receipts are idempotent and
+say whether Moa accepted/rejected and delivered the instruction; they do not
+claim that agent work is complete unless that is separately observed.
+
 ## Frontend development
 
 Override embedded assets for live development:

@@ -155,6 +155,12 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/pulse/pairings/claim", handlePulsePairingClaim(devices))
 	mux.HandleFunc("GET /api/pulse/devices", handlePulseDevices(devices))
 	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))
+	// Pulse operation transactions are intentionally separate from legacy web
+	// and terminal writes: these are paired-device-only typed adapters, not a
+	// generic command surface.
+	mux.HandleFunc("POST /api/pulse/operations/prepare", handlePulseOperationPrepare(manager))
+	mux.HandleFunc("POST /api/pulse/operations/{id}/confirm", handlePulseOperationConfirm(manager))
+	mux.HandleFunc("GET /api/pulse/operations/{id}", handlePulseOperationGet(manager))
 
 	handler := csrfMiddleware(bodyTimeoutMiddleware(mux))
 	// Token auth (when configured) sits under the Host check but above CSRF, so

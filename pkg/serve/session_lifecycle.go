@@ -685,6 +685,11 @@ func (m *Manager) Shutdown() {
 	if m.attention != nil {
 		m.attention.Close()
 	}
+	if m.pulseOperations != nil {
+		if err := m.pulseOperations.Close(); err != nil {
+			slog.Warn("Pulse operation storage close failed", "error", err)
+		}
+	}
 }
 
 // flushLiveSubagentTranscripts persists the transcript of every still-live
