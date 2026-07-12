@@ -329,6 +329,59 @@ func TestPulseRecoveryDoesNotRetryUnknownConfirmation(t *testing.T) {
 	}
 }
 
+func TestPulsePermissionRecoveryAfterAttemptIsIndeterminateAndNeverReruns(t *testing.T) {
+	provider := newMockProvider(simpleResponseHandler("unexpected"))
+	mgr := newTestManager(t, context.Background(), provider)
+	sess, err := mgr.CreateSession(CreateOpts{Title: "permission crash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := newPulseOperationID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := durableOperation{
+		ID:                           id,
+		DeviceID:                     "device",
+		Kind:                         pulseOperationPermissionDecision,
+		PayloadDigest:                "private-binding",
+		Target:                       opsInstructionTarget{ID: sess.ID, Title: "permission crash"},
+		PermissionID:                 "runtime_only_permission",
+		PermissionRunGen:             4,
+		PermissionTool:               "bash",
+		PermissionAllowPatternDigest: "private-scope-digest",
+		PermissionArgsDigest:         "private-args-digest",
+		PermissionDecision:           "approve_once",
+	}
+	if err := mgr.pulseOperations.create(op); err != nil {
+		t.Fatal(err)
+	}
+	if start, err := mgr.pulseOperations.beginConfirm(id, "device"); err != nil || !start.Execute {
+		t.Fatalf("begin permission confirmation = %#v, %v", start, err)
+	}
+	if err := mgr.pulseOperations.markAttempt(id); err != nil {
+		t.Fatal(err)
+	}
+
+	path := mgr.pulseOperations.path
+	if err := mgr.pulseOperations.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openOperationStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.pulseOperations = store
+	mgr.recoverPulseConfirmations()
+	response, err := mgr.pulseOperationStatus("device", id)
+	if err != nil || response.Receipt == nil || response.Receipt.Status != "indeterminate" || response.Receipt.Delivery != "indeterminate" || response.Receipt.Completion != "" {
+		t.Fatalf("permission crash receipt = %#v, %v", response, err)
+	}
+	if calls := provider.calls.Load(); calls != 0 {
+		t.Fatalf("permission recovery invoked provider %d times", calls)
+	}
+}
+
 func TestDeviceRevokeAndExpiryInvalidateOperationsAtExecutionBoundary(t *testing.T) {
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")

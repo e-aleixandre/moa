@@ -264,33 +264,49 @@ devuelve la revisión pendiente o el recibo. Estos tres endpoints requieren
 sirve para ellos. También rechazan parámetros query y heredan Host, CSRF y el
 requisito TLS fuera de loopback.
 
-Por ahora el único `kind` es `directed_instruction`, que acepta `target` y
-`text` acotados. Moa resuelve el destino con Ops; una ambigüedad devuelve
-`409` con candidatos y nunca se elige por Pulse o el modelo. La revisión fija
+Existen dos `kind` tipados. `directed_instruction` acepta `target` y `text`
+acotados. Moa resuelve el destino con Ops; una ambigüedad devuelve `409` con
+candidatos y nunca se elige por Pulse o el modelo. La revisión fija
 id/título/texto y si la entrega será `send` o `steer`. Al confirmar se reutiliza
 la política e idempotencia canónicas de instrucciones; si cambia ese estado,
-la revisión caduca. Las decisiones de permisos no forman parte todavía de este
-contrato.
+la revisión caduca.
 
-Las operaciones pendientes vencen en cinco minutos; los recibos se retienen una
-hora para reintentos. El almacén privado de operaciones y recibos usa
+`permission_decision` acepta exclusivamente `target`, `decision`
+(`approve_once` o `deny`) y una nota `feedback` opcional, breve y no sensible.
+El destino debe resolver una única sesión y debe tener exactamente una petición
+de permiso pendiente. Moa toma una instantánea privada ligada al id de sesión,
+id efímero del permiso, generación de ejecución, herramienta, alcance y digest
+canónico de los argumentos; la vuelve a comprobar dentro de la resolución
+atómica. Una nueva ejecución, un permiso sustituido, argumentos/alcance
+cambiados o una resolución legacy hacen que la revisión falle de forma segura.
+La revisión pública solo muestra destino, herramienta, decisión de una vez y un
+alcance genérico seguro; no devuelve argumentos, outputs, ids internos de
+permiso ni errores internos. El esquema no admite `allow`, reglas permanentes,
+`add_rule`, comandos ni configuración. Estas revisiones vencen a los dos
+minutos.
+
+Las revisiones de instrucciones vencen en cinco minutos; los recibos se retienen
+una hora para reintentos. El almacén privado de operaciones y recibos usa
 directorio `0700`, fichero `0600`, bloqueo exclusivo por proceso, rename
 atómico y sincronización durable; el texto de una instrucción solo vive
-mientras la revisión está pendiente. No se expulsa una revisión pendiente/en
-confirmación ni un recibo antes de esa hora: la admisión limita las revisiones
-pendientes por dispositivo y globalmente, y la capacidad de recibos devuelve
-`429` en vez de perder un recibo joven. Un recibo es inmutable y reintentable:
-distingue `accepted` de `rejected`, entrega y observación. Si un crash o un
-fallo durable deja incierto si la entrega alcanzó al agente, el recibo terminal
-es `indeterminate` con `delivery: "indeterminate"`; nunca se reescribe como
-`rejected` ni se reintenta en segundo plano. La recuperación consulta el
-ledger canónico de instrucciones `pulse.<operation_id>` antes de reconstruir
-un recibo, por lo que no vuelve a enviar/dirigir una instrucción conocida. Ese
-ledger canónico se bloquea de forma exclusiva durante toda la vida del proceso:
+mientras la revisión está pendiente. Tampoco se persisten argumentos brutos de
+un permiso; sus digests privados fijan la identidad. No se expulsa una revisión
+pendiente/en confirmación ni un recibo antes de esa hora: la admisión limita las
+revisiones pendientes por dispositivo y globalmente, y la capacidad de recibos
+devuelve `429` en vez de perder un recibo joven. Un recibo es inmutable y
+reintentable. Para una instrucción distingue `accepted` de `rejected`, entrega
+y observación. Para un permiso informa solo la decisión aceptada/rechazada o
+`indeterminate` y si la resolución fue observada; nunca afirma que el trabajo
+posterior terminó. Si un crash o un fallo durable deja incierto si la entrega
+alcanzó al agente, el recibo terminal es `indeterminate` con
+`delivery: "indeterminate"`; nunca se reescribe como `rejected` ni se reintenta
+en segundo plano. Las instrucciones se recuperan consultando el ledger canónico
+`pulse.<operation_id>` antes de reconstruir un recibo. Los permisos no tienen
+un ledger replayable: tras su marcador durable de intento, un reinicio produce
+`indeterminate` y nunca vuelve a aprobar o denegar a ciegas. Ese ledger de
+instrucciones se bloquea de forma exclusiva durante toda la vida del proceso:
 si otro Serve ya lo posee, tanto las instrucciones legacy como Pulse fallan de
-forma cerrada y no pueden sobrescribir una instantánea obsoleta. `delivered_to_agent`
-**no** significa que el trabajo haya terminado; el resultado sigue siendo
-`not_observed` hasta que exista evidencia canónica posterior.
+forma cerrada y no pueden sobrescribir una instantánea obsoleta.
 
 ## Producto por etapas
 

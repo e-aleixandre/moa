@@ -103,6 +103,10 @@ type GetSessionError struct{ SessionID string }
 // Handler returns: PendingApprovalInfo
 type GetPendingApproval struct{ SessionID string }
 
+// GetPermissionDecisionSnapshot returns the safe exact identity of the one
+// current pending permission. It fails when there are none or more than one.
+type GetPermissionDecisionSnapshot struct{ SessionID string }
+
 // GetDisplayMessages returns the full message history for display (from tree).
 // Unlike GetMessages, this includes pre-compaction messages.
 // Handler returns: []core.AgentMessage

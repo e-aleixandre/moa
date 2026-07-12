@@ -13,8 +13,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
 )
 
 func pulseOperationDevice(t *testing.T, handler http.Handler, owner *http.Cookie, label string) deviceCredentialResult {
@@ -61,6 +63,257 @@ func decodePulseOperation(t *testing.T, rec *httptest.ResponseRecorder) pulseOpe
 		t.Fatalf("decode Pulse operation response: %v; body=%s", err, rec.Body.String())
 	}
 	return response
+}
+
+func pendingPulsePermissionOperation(t *testing.T, command string) (*Manager, *ManagedSession, http.Handler, deviceCredentialResult) {
+	t.Helper()
+	toolCall := func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 2)
+		message := core.Message{
+			Role:       "assistant",
+			Content:    []core.Content{core.ToolCallContent("permission-call", "bash", map[string]any{"command": command})},
+			StopReason: "tool_use",
+			Timestamp:  time.Now().Unix(),
+		}
+		ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &message}
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &message}
+		close(ch)
+		return ch, nil
+	}
+	mgr := newTestManagerWithConfig(t, context.Background(), newMockProvider(toolCall, simpleResponseHandler("done")), t.TempDir(), core.MoaConfig{
+		DisableSandbox: true,
+		Permissions:    core.PermissionsConfig{Mode: "ask"},
+	})
+	sess, err := mgr.CreateSession(CreateOpts{Title: "permission target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.Send(sess.ID, "request permission", nil); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 3*time.Second, "pending permission", func() bool {
+		_, err := bus.QueryTyped[bus.GetPermissionDecisionSnapshot, bus.PermissionDecisionSnapshot](sess.runtime.Bus, bus.GetPermissionDecisionSnapshot{SessionID: sess.ID})
+		return err == nil
+	})
+	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
+	credential := pulseOperationDevice(t, handler, &http.Cookie{Name: authCookieName, Value: "owner"}, "permission phone")
+	return mgr, sess, handler, credential
+}
+
+func TestPulsePermissionDecisionTypedReviewAndReceipt(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	secret := "permission_raw_secret_123"
+	mgr, sess, handler, credential := pendingPulsePermissionOperation(t, "echo 'Authorization: Bearer "+secret+"'")
+
+	owner := &http.Cookie{Name: authCookieName, Value: "owner"}
+	if got := pairingRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"permission_decision","target":"`+sess.ID+`","decision":"deny"}`, owner, ""); got.Code != http.StatusForbidden {
+		t.Fatalf("owner permission operation = %d, want 403", got.Code)
+	}
+	for _, body := range []string{
+		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"allow"}`,
+		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","allow":"Bash(*)"}`,
+		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","action":"add_rule"}`,
+		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","text":"free-form"}`,
+		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","text":""}`,
+		`{"kind":"permission_decision","target":"` + sess.ID + `","decision":"approve_once","feedback":"token=` + secret + `"}`,
+	} {
+		if got := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", body, credential.Credential); got.Code != http.StatusBadRequest {
+			t.Fatalf("permission schema %s = %d, want 400: %s", body, got.Code, got.Body.String())
+		}
+	}
+	withoutPermission, err := mgr.CreateSession(CreateOpts{Title: sess.title()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ambiguous := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"permission_decision","target":"permission target","decision":"deny"}`, credential.Credential); ambiguous.Code != http.StatusConflict {
+		t.Fatalf("ambiguous permission target = %d, want 409: %s", ambiguous.Code, ambiguous.Body.String())
+	}
+	if noPending := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"permission_decision","target":"`+withoutPermission.ID+`","decision":"deny"}`, credential.Credential); noPending.Code != http.StatusConflict {
+		t.Fatalf("permission prepare without pending request = %d, want 409: %s", noPending.Code, noPending.Body.String())
+	}
+
+	prepared := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"permission_decision","target":"`+sess.ID+`","decision":"deny"}`, credential.Credential)
+	if prepared.Code != http.StatusCreated {
+		t.Fatalf("prepare permission = %d: %s", prepared.Code, prepared.Body.String())
+	}
+	operation := decodePulseOperation(t, prepared)
+	remaining := operation.ExpiresAt.Sub(time.Now())
+	if operation.Kind != pulseOperationPermissionDecision || operation.Review == nil || operation.Review.Target.ID != sess.ID || operation.Review.Decision != "deny" || operation.Review.Action != "deny" || operation.Review.Tool != "bash" || operation.Review.Scope != "one-time permission request" || remaining > pulsePermissionOperationTTL || remaining < pulsePermissionOperationTTL-time.Second {
+		t.Fatalf("unsafe or incomplete permission review: %#v", operation)
+	}
+	if strings.Contains(strings.ToLower(prepared.Body.String()), strings.ToLower(secret)) || strings.Contains(prepared.Body.String(), "Authorization") || strings.Contains(prepared.Body.String(), "echo '") {
+		t.Fatalf("permission review exposed raw arguments: %s", prepared.Body.String())
+	}
+	contents, err := os.ReadFile(mgr.pulseOperations.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(contents, []byte(secret)) || bytes.Contains(contents, []byte("Authorization")) || bytes.Contains(contents, []byte("echo '")) {
+		t.Fatalf("permission operation store retained raw arguments: %s", contents)
+	}
+	if pending := pulseOperationRequest(handler, http.MethodGet, "/api/pulse/operations/"+operation.OperationID, "", credential.Credential); pending.Code != http.StatusOK || decodePulseOperation(t, pending).Review == nil {
+		t.Fatalf("pending permission query = %d: %s", pending.Code, pending.Body.String())
+	}
+
+	if mutable := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/"+operation.OperationID+"/confirm", `{"approved":true}`, credential.Credential); mutable.Code != http.StatusBadRequest {
+		t.Fatalf("permission mutable confirm = %d, want 400", mutable.Code)
+	}
+	resolved := make(chan bus.PermissionResolved, 2)
+	sess.runtime.Bus.Subscribe(func(event bus.PermissionResolved) { resolved <- event })
+	confirmed := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/"+operation.OperationID+"/confirm", `{}`, credential.Credential)
+	if confirmed.Code != http.StatusOK {
+		t.Fatalf("confirm permission = %d: %s", confirmed.Code, confirmed.Body.String())
+	}
+	receipt := decodePulseOperation(t, confirmed).Receipt
+	if receipt == nil || receipt.Status != "rejected" || receipt.Action != "deny" || receipt.Delivery != "not_applicable" || receipt.Observation != "permission_resolved" || receipt.Completion != "" {
+		t.Fatalf("permission receipt = %#v", receipt)
+	}
+	if strings.Contains(confirmed.Body.String(), "completion") {
+		t.Fatalf("permission receipt must not claim completion: %s", confirmed.Body.String())
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	select {
+	case event := <-resolved:
+		if event.ID == "" {
+			t.Fatal("permission resolution event omitted id")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canonical permission resolver was not invoked")
+	}
+	replay := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/"+operation.OperationID+"/confirm", `{}`, credential.Credential)
+	if replay.Code != http.StatusOK || decodePulseOperation(t, replay).Receipt == nil {
+		t.Fatalf("permission replay = %d: %s", replay.Code, replay.Body.String())
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	select {
+	case event := <-resolved:
+		t.Fatalf("permission resolver replayed: %#v", event)
+	default:
+	}
+}
+
+func TestPulsePermissionDecisionApproveOnceConcurrentConfirmIsCanonicalOnce(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	_, sess, handler, credential := pendingPulsePermissionOperation(t, "true")
+	prepared := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"permission_decision","target":"`+sess.ID+`","decision":"approve_once"}`, credential.Credential)
+	if prepared.Code != http.StatusCreated {
+		t.Fatalf("prepare approve_once = %d: %s", prepared.Code, prepared.Body.String())
+	}
+	operation := decodePulseOperation(t, prepared)
+	resolved := make(chan bus.PermissionResolved, 2)
+	sess.runtime.Bus.Subscribe(func(event bus.PermissionResolved) { resolved <- event })
+
+	const confirms = 8
+	results := make(chan pulseOperationReceipt, confirms)
+	errs := make(chan string, confirms)
+	var wg sync.WaitGroup
+	for range confirms {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response := pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/"+operation.OperationID+"/confirm", `{}`, credential.Credential)
+			if response.Code != http.StatusOK {
+				errs <- response.Body.String()
+				return
+			}
+			receipt := decodePulseOperation(t, response).Receipt
+			if receipt == nil {
+				errs <- "missing receipt"
+				return
+			}
+			results <- *receipt
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent permission confirm failed: %s", err)
+	}
+	for receipt := range results {
+		if receipt.Status != "accepted" || receipt.Action != "approve_once" || receipt.Observation != "permission_resolved" || receipt.Completion != "" {
+			t.Fatalf("concurrent permission receipt = %#v", receipt)
+		}
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	select {
+	case <-resolved:
+	case <-time.After(time.Second):
+		t.Fatal("approve_once did not invoke the canonical resolver")
+	}
+	select {
+	case event := <-resolved:
+		t.Fatalf("approve_once invoked canonical resolver more than once: %#v", event)
+	default:
+	}
+}
+
+func TestPulsePermissionDecisionExpiryAndDeviceRevokeDoNotResolve(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+
+	expiryMgr, expirySession, expiryHandler, expiryDevice := pendingPulsePermissionOperation(t, "true")
+	expiring := pulseOperationRequest(expiryHandler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"permission_decision","target":"`+expirySession.ID+`","decision":"approve_once"}`, expiryDevice.Credential)
+	if expiring.Code != http.StatusCreated {
+		t.Fatalf("prepare expiring permission = %d: %s", expiring.Code, expiring.Body.String())
+	}
+	expiringOperation := decodePulseOperation(t, expiring)
+	// The store's injectable clock is the same authoritative expiry boundary
+	// used by beginConfirm; a stale review must not resolve the still-pending
+	// canonical permission.
+	expiryMgr.pulseOperations.now = func() time.Time { return expiringOperation.ExpiresAt.Add(time.Second) }
+	expired := pulseOperationRequest(expiryHandler, http.MethodPost, "/api/pulse/operations/"+expiringOperation.OperationID+"/confirm", `{}`, expiryDevice.Credential)
+	if expired.Code != http.StatusOK {
+		t.Fatalf("confirm expired permission = %d: %s", expired.Code, expired.Body.String())
+	}
+	receipt := decodePulseOperation(t, expired).Receipt
+	if receipt == nil || receipt.Status != "rejected" || receipt.Reason != "review_expired" {
+		t.Fatalf("expired permission receipt = %#v", receipt)
+	}
+	if _, err := bus.QueryTyped[bus.GetPermissionDecisionSnapshot, bus.PermissionDecisionSnapshot](expirySession.runtime.Bus, bus.GetPermissionDecisionSnapshot{SessionID: expirySession.ID}); err != nil {
+		t.Fatalf("expiry resolved the permission: %v", err)
+	}
+
+	owner := &http.Cookie{Name: authCookieName, Value: "owner"}
+	revokeDevice := pulseOperationDevice(t, expiryHandler, owner, "revoked permission phone")
+	prepared := pulseOperationRequest(expiryHandler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"permission_decision","target":"`+expirySession.ID+`","decision":"approve_once"}`, revokeDevice.Credential)
+	if prepared.Code != http.StatusCreated {
+		t.Fatalf("prepare revoked permission = %d: %s", prepared.Code, prepared.Body.String())
+	}
+	operation := decodePulseOperation(t, prepared)
+	if revoked := pairingRequest(expiryHandler, http.MethodPost, "/api/pulse/devices/"+revokeDevice.DeviceID+"/revoke", `{}`, owner, ""); revoked.Code != http.StatusNoContent {
+		t.Fatalf("revoke device = %d: %s", revoked.Code, revoked.Body.String())
+	}
+	stored, err := expiryMgr.pulseOperations.get(operation.OperationID, revokeDevice.DeviceID)
+	if err != nil || stored.Receipt == nil || stored.Receipt.Status != "rejected" || stored.Receipt.Reason != "device_inactive" {
+		t.Fatalf("revoked permission operation = %#v, %v", stored, err)
+	}
+	if _, err := bus.QueryTyped[bus.GetPermissionDecisionSnapshot, bus.PermissionDecisionSnapshot](expirySession.runtime.Bus, bus.GetPermissionDecisionSnapshot{SessionID: expirySession.ID}); err != nil {
+		t.Fatalf("device revoke resolved the permission: %v", err)
+	}
+}
+
+func TestPulsePermissionReviewRedactsSensitiveValuesAndControls(t *testing.T) {
+	input := "tool\x00 password hunter2 authorization: Bearer secret-token key=private-value"
+	got := redactPulseReviewText(input, 80)
+	for _, secret := range []string{"hunter2", "secret-token", "private-value", "\x00"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("redaction retained %q in %q", secret, got)
+		}
+	}
+	if !strings.Contains(got, "[redacted]") || utf8.RuneCountInString(got) > 81 {
+		t.Fatalf("unsafe redaction result %q", got)
+	}
+	for _, feedback := range []string{"token=abc", "password hunter2", "key private-value", "contains\x00control"} {
+		if validPulsePermissionFeedback(feedback) {
+			t.Fatalf("sensitive/control feedback accepted: %q", feedback)
+		}
+	}
 }
 
 func TestPulseOperationDeviceOnlyStrictInstructionReceiptAndReplay(t *testing.T) {

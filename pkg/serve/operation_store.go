@@ -16,11 +16,12 @@ import (
 )
 
 const (
-	pulseOperationTTL         = 5 * time.Minute
-	pulseOperationReceiptTTL  = time.Hour
-	maxPulseOperationRecords  = 512
-	maxPulsePendingOperations = 128
-	maxPulsePendingPerDevice  = 32
+	pulseOperationTTL           = 5 * time.Minute
+	pulsePermissionOperationTTL = 2 * time.Minute
+	pulseOperationReceiptTTL    = time.Hour
+	maxPulseOperationRecords    = 512
+	maxPulsePendingOperations   = 128
+	maxPulsePendingPerDevice    = 32
 )
 
 var (
@@ -55,19 +56,26 @@ type durableOperationState struct {
 }
 
 type durableOperation struct {
-	ID             string                 `json:"id"`
-	DeviceID       string                 `json:"device_id"`
-	Kind           string                 `json:"kind"`
-	PayloadDigest  string                 `json:"payload_digest"`
-	Target         opsInstructionTarget   `json:"target,omitempty"`
-	Text           string                 `json:"text,omitempty"`
-	ExpectedAction string                 `json:"expected_action,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	ExpiresAt      time.Time              `json:"expires_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
-	State          string                 `json:"state"`
-	Attempted      bool                   `json:"attempted,omitempty"`
-	Receipt        *pulseOperationReceipt `json:"receipt,omitempty"`
+	ID                           string                 `json:"id"`
+	DeviceID                     string                 `json:"device_id"`
+	Kind                         string                 `json:"kind"`
+	PayloadDigest                string                 `json:"payload_digest"`
+	Target                       opsInstructionTarget   `json:"target,omitempty"`
+	Text                         string                 `json:"text,omitempty"`
+	ExpectedAction               string                 `json:"expected_action,omitempty"`
+	PermissionID                 string                 `json:"permission_id,omitempty"`
+	PermissionRunGen             uint64                 `json:"permission_run_gen,omitempty"`
+	PermissionTool               string                 `json:"permission_tool,omitempty"`
+	PermissionAllowPatternDigest string                 `json:"permission_allow_pattern_digest,omitempty"`
+	PermissionArgsDigest         string                 `json:"permission_args_digest,omitempty"`
+	PermissionDecision           string                 `json:"permission_decision,omitempty"`
+	PermissionFeedback           string                 `json:"permission_feedback,omitempty"`
+	CreatedAt                    time.Time              `json:"created_at"`
+	ExpiresAt                    time.Time              `json:"expires_at"`
+	UpdatedAt                    time.Time              `json:"updated_at"`
+	State                        string                 `json:"state"`
+	Attempted                    bool                   `json:"attempted,omitempty"`
+	Receipt                      *pulseOperationReceipt `json:"receipt,omitempty"`
 }
 
 func openOperationStore(path string) (*operationStore, error) {
@@ -177,7 +185,7 @@ func (s *operationStore) create(operation durableOperation) error {
 	}
 	operation.CreatedAt = now
 	operation.UpdatedAt = now
-	operation.ExpiresAt = now.Add(pulseOperationTTL)
+	operation.ExpiresAt = now.Add(pulseOperationDuration(operation.Kind))
 	operation.State = "pending"
 	s.state.Operations = append(s.state.Operations, operation)
 	return s.saveLocked()
@@ -377,7 +385,11 @@ func (s *operationStore) invalidateDevice(deviceID string) {
 		}
 		var receipt pulseOperationReceipt
 		if operation.State == "confirming" && operation.Attempted {
-			receipt = indeterminateOperationReceipt(operation, now, "device_deactivated_during_delivery")
+			if operation.Kind == pulseOperationPermissionDecision {
+				receipt = indeterminatePermissionOperationReceipt(operation, now, "device_deactivated_during_delivery")
+			} else {
+				receipt = indeterminateOperationReceipt(operation, now, "device_deactivated_during_delivery")
+			}
 		} else {
 			receipt = rejectedOperationReceipt(operation, now, "device_inactive")
 		}
@@ -442,6 +454,7 @@ func (s *operationStore) finalizeLocked(index int, receipt pulseOperationReceipt
 	// Instruction text is only needed to execute a still-pending review. It
 	// never remains in a replay record after the receipt is durable.
 	operation.Text = ""
+	operation.PermissionFeedback = ""
 	s.state.Operations[index] = operation
 }
 
@@ -458,6 +471,7 @@ func (s *operationStore) pruneLocked(now time.Time) bool {
 			operation.UpdatedAt = now
 			operation.Receipt = &receipt
 			operation.Text = ""
+			operation.PermissionFeedback = ""
 			changed = true
 		}
 		if operation.State == "final" && operation.Receipt != nil && !operation.Receipt.At.After(now.Add(-pulseOperationReceiptTTL)) {
@@ -471,6 +485,13 @@ func (s *operationStore) pruneLocked(now time.Time) bool {
 	}
 	s.state.Operations = kept
 	return changed
+}
+
+func pulseOperationDuration(kind string) time.Duration {
+	if kind == pulseOperationPermissionDecision {
+		return pulsePermissionOperationTTL
+	}
+	return pulseOperationTTL
 }
 
 func (s *operationStore) saveLocked() (err error) {

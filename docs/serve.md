@@ -98,20 +98,41 @@ also require normal Host validation, no query parameters, `X-Moa-Request` for
 POSTs, strict JSON, and TLS unless Serve sees a direct loopback peer. They do
 not alter the legacy web/TUI routes.
 
-The initial and only kind is `directed_instruction` (`target`, bounded `text`).
-Prepare resolves an exact Ops destination or returns `409` candidates. Confirm
-binds the same paired device and immutable review; it never accepts a
-client-supplied confirmation flag, endpoint/method, free-form command or new
-text. Pending reviews expire after five minutes. Receipts are immutable and
-idempotent, retained for one hour, and are never evicted early to make room for
-a newer operation: admission returns `429` when pending or receipt capacity is
-full. A receipt says whether Moa accepted/rejected and delivered the
+The supported kinds are `directed_instruction` and `permission_decision`.
+`directed_instruction` accepts bounded `target` and `text`; prepare resolves an
+exact Ops destination or returns `409` candidates.
+
+`permission_decision` accepts only a bounded `target`, `decision`
+(`approve_once` or `deny`), and optional bounded non-sensitive `feedback`.
+The target must resolve to one session with exactly one current permission.
+Prepare binds the private review to that session, the runtime permission ID,
+run generation, tool, allow scope, and a canonical digest of raw arguments.
+Confirm atomically revalidates that exact snapshot before using the canonical
+one-off resolver. A changed/replaced request, new run, missing permission, or
+legacy resolution is rejected safely. Its review contains only a bounded,
+redacted target/tool and generic one-time scope; it never contains raw tool
+arguments, tool output, permission IDs, or internal errors. `allow`, permanent
+rules, `add_rule`, shell/command/config fields, and arbitrary decisions are
+strict-schema errors. Permission reviews expire after two minutes; instruction
+reviews expire after five.
+
+Confirm binds the same paired device and immutable review; it never accepts a
+client-supplied confirmation flag, endpoint/method, free-form command, new
+text, or changed decision. Receipts are immutable and idempotent, retained for
+one hour, and are never evicted early to make room for a newer operation:
+admission returns `429` when pending or receipt capacity is full. An
+instruction receipt says whether Moa accepted/rejected and delivered the
 instruction; it does not claim that agent work is complete unless that is
-separately observed. `status: "indeterminate"` and
+separately observed. A permission receipt reports only `accepted`, `rejected`,
+or `indeterminate` and whether permission resolution was observed; it never
+claims completion of subsequent agent work. Raw permission args are never
+persisted in the operation store. `status: "indeterminate"` and
 `delivery: "indeterminate"` mean a crash or durable-storage window prevents
-Moa from truthfully determining whether canonical delivery reached the agent;
-Pulse must present that uncertainty and may not treat it as rejection. Serve
-never retries such delivery in the background. Revoke/expiry synchronously
+Moa from truthfully determining the result; Pulse must present that uncertainty and may
+not treat it as rejection. Serve never retries such delivery in the background.
+Instruction recovery consults its canonical ledger. Permission resolution has
+no replay ledger: after its durable attempt marker, restart recovery is terminal
+`indeterminate`, never a blind retry or approval. Revoke/expiry synchronously
 invalidates pending operations and confirmation rechecks the active device at
 the execution boundary.
 

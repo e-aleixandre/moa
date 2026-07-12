@@ -2,6 +2,10 @@ package bus
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -9,6 +13,14 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/askuser"
 	"github.com/ealeixandre/moa/pkg/permission"
+)
+
+var (
+	// ErrPermissionDecisionSnapshotMismatch means the pending request changed,
+	// was replaced, or was resolved after a caller reviewed its snapshot.
+	// It intentionally has no request details: those may be sensitive tool args.
+	ErrPermissionDecisionSnapshotMismatch    = errors.New("permission decision snapshot no longer matches")
+	ErrPermissionDecisionSnapshotUnavailable = errors.New("permission decision snapshot unavailable")
 )
 
 // ApprovalManager manages pending permission and ask_user requests.
@@ -57,6 +69,18 @@ type PendingPermission struct {
 	RunGen       uint64
 	response     chan<- permission.Response
 	resolved     bool
+}
+
+// PermissionDecisionSnapshot is the non-sensitive, exact identity of one
+// pending permission request. It deliberately excludes raw Args and the raw
+// allow pattern: callers can bind them by digest without exposing or persisting
+// tool arguments outside the approval manager.
+type PermissionDecisionSnapshot struct {
+	PermissionID       string
+	ToolName           string
+	AllowPatternDigest string
+	ArgsDigest         string
+	RunGen             uint64
 }
 
 // PendingAsk tracks a single pending ask_user request.
@@ -196,6 +220,96 @@ func (am *ApprovalManager) ResolvePermission(id string, approved bool, feedback,
 	}
 	am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id})
 	return nil
+}
+
+// PendingPermissionDecisionSnapshot returns the exact identity of the sole
+// current permission request. A Pulse decision cannot choose among multiple
+// requests, because a human review of "the pending permission" would then be
+// ambiguous.
+func (am *ApprovalManager) PendingPermissionDecisionSnapshot() (PermissionDecisionSnapshot, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	var pending *PendingPermission
+	for _, p := range am.perms {
+		if p.resolved {
+			continue
+		}
+		if pending != nil {
+			return PermissionDecisionSnapshot{}, ErrPermissionDecisionSnapshotUnavailable
+		}
+		pending = p
+	}
+	if pending == nil {
+		return PermissionDecisionSnapshot{}, ErrPermissionDecisionSnapshotUnavailable
+	}
+	return permissionDecisionSnapshot(pending)
+}
+
+// ResolvePermissionExact resolves only the request represented by snapshot.
+// Identity validation and removal happen while the approval map is locked, so
+// a legacy UI resolution or a new run cannot turn a reviewed Pulse decision
+// into a decision for another request.
+func (am *ApprovalManager) ResolvePermissionExact(snapshot PermissionDecisionSnapshot, approved bool, feedback string) error {
+	am.mu.Lock()
+	p, ok := am.perms[snapshot.PermissionID]
+	if !ok || p.resolved {
+		am.mu.Unlock()
+		return ErrPermissionDecisionSnapshotMismatch
+	}
+	current, err := permissionDecisionSnapshot(p)
+	if err != nil || current != snapshot {
+		am.mu.Unlock()
+		return ErrPermissionDecisionSnapshotMismatch
+	}
+	p.resolved = true
+	resp := p.response
+	delete(am.perms, p.ID)
+	am.mu.Unlock()
+
+	select {
+	case resp <- permission.Response{Approved: approved, Feedback: feedback}:
+	default:
+	}
+
+	if am.state.Current() == StatePermission {
+		_ = am.state.Transition(StateRunning)
+	}
+	am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: p.ID})
+	return nil
+}
+
+func permissionDecisionSnapshot(p *PendingPermission) (PermissionDecisionSnapshot, error) {
+	if p == nil {
+		return PermissionDecisionSnapshot{}, ErrPermissionDecisionSnapshotUnavailable
+	}
+	argsDigest, err := canonicalPermissionDigest(p.Args)
+	if err != nil {
+		return PermissionDecisionSnapshot{}, ErrPermissionDecisionSnapshotUnavailable
+	}
+	allowDigest, err := canonicalPermissionDigest(p.AllowPattern)
+	if err != nil {
+		return PermissionDecisionSnapshot{}, ErrPermissionDecisionSnapshotUnavailable
+	}
+	return PermissionDecisionSnapshot{
+		PermissionID:       p.ID,
+		ToolName:           p.ToolName,
+		AllowPatternDigest: allowDigest,
+		ArgsDigest:         argsDigest,
+		RunGen:             p.RunGen,
+	}, nil
+}
+
+// canonicalPermissionDigest uses encoding/json's deterministic map-key order
+// to bind a full request without retaining raw argument values in callers or
+// durable Pulse records.
+func canonicalPermissionDigest(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return base64.RawURLEncoding.EncodeToString(digest[:]), nil
 }
 
 // ValidatePending checks that a permission request is currently pending and not resolved.
