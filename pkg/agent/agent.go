@@ -227,6 +227,7 @@ func (a *Agent) LoadMessages(msgs []core.AgentMessage) error {
 	if a.cancel != nil {
 		return fmt.Errorf("cannot load messages while agent is running")
 	}
+	ensureMsgIDs(msgs)
 	a.state = AgentState{
 		Messages: msgs,
 		Model:    a.config.Model,
@@ -242,6 +243,7 @@ func (a *Agent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
 	if a.cancel != nil {
 		return fmt.Errorf("cannot load state while agent is running")
 	}
+	ensureMsgIDs(msgs)
 	a.state = AgentState{
 		Messages:        msgs,
 		Model:           a.config.Model,
@@ -258,6 +260,7 @@ func (a *Agent) AppendMessage(msg core.AgentMessage) error {
 	if a.cancel != nil {
 		return fmt.Errorf("cannot append message while agent is running")
 	}
+	msg.EnsureMsgID()
 	a.state.Messages = append(a.state.Messages, msg)
 	if a.state.Model.ID == "" {
 		a.state.Model = a.config.Model
@@ -650,6 +653,18 @@ func (a *Agent) Abort() {
 	}
 }
 
+// ensureMsgIDs assigns a stable MsgID to any message lacking one. It mutates the
+// given slice's elements in place; callers passing externally-owned slices (e.g.
+// LoadMessages/LoadState) intentionally leave the caller's copy consistent too.
+// Callers must hold a.mu (or otherwise own the slice). Kept as a package helper
+// so every state-mutating entry point can enforce the "no anonymous message in
+// state" invariant that the tree syncer relies on for deduplication.
+func ensureMsgIDs(msgs []core.AgentMessage) {
+	for i := range msgs {
+		msgs[i].EnsureMsgID()
+	}
+}
+
 // execute runs the agent loop. prepare is called under a.mu to mutate state
 // atomically with the "not running" check. This prevents races where concurrent
 // callers could mutate state before getting the "already running" error.
@@ -662,6 +677,14 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 
 	// Mutate state atomically with the running check
 	prepare()
+
+	// Invariant: every message in state carries a stable MsgID before it can be
+	// synced to the tree. The Run/Send* entry points build user messages without
+	// one (core.NewUserMessage leaves MsgID empty), so they would first sync under
+	// a positional "legacy:<index>" identity and later be re-appended when
+	// compaction assigns them a real MsgID — duplicating them after the compaction
+	// marker. Normalizing here, under a.mu, closes that gap for every ingress path.
+	ensureMsgIDs(a.state.Messages)
 
 	// Apply run duration limit
 	if a.config.MaxRunDuration > 0 {
@@ -724,8 +747,9 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		// concurrently until the deferred cancel-cleanup clears a.cancel.
 		for _, msg := range append(followUps, steered...) {
 			a.mu.Lock()
-			a.state.Messages = append(a.state.Messages,
-				core.WrapMessage(core.NewUserMessage(msg)))
+			um := core.WrapMessage(core.NewUserMessage(msg))
+			um.EnsureMsgID()
+			a.state.Messages = append(a.state.Messages, um)
 			a.mu.Unlock()
 			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
 		}
@@ -746,10 +770,12 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	// sees "2+2=" instead of four separate turns.
 	if err != nil && len(a.state.Messages) > 0 && a.state.Messages[len(a.state.Messages)-1].Role == "user" {
 		a.mu.Lock()
-		a.state.Messages = append(a.state.Messages, core.WrapMessage(core.Message{
+		interrupted := core.WrapMessage(core.Message{
 			Role:    "assistant",
 			Content: []core.Content{core.TextContent("(interrupted by user)")},
-		}))
+		})
+		interrupted.EnsureMsgID()
+		a.state.Messages = append(a.state.Messages, interrupted)
 		a.mu.Unlock()
 	}
 

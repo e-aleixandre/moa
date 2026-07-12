@@ -38,6 +38,27 @@ func (m *MockProvider) Stream(ctx context.Context, req core.Request) (<-chan cor
 	return m.handlers[idx](req)
 }
 
+// alwaysProvider streams the same short text response on every call, without a
+// fixed handler budget. Useful when a test drives many turns plus a compaction.
+type alwaysProvider struct{ text string }
+
+func (p *alwaysProvider) Stream(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 5)
+	msg := core.Message{
+		Role:       "assistant",
+		Content:    []core.Content{core.TextContent(p.text)},
+		StopReason: "end_turn",
+		Timestamp:  time.Now().Unix(),
+	}
+	go func() {
+		defer close(ch)
+		ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+		ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, ContentIndex: 0, Delta: p.text}
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+	}()
+	return ch, nil
+}
+
 // simpleTextResponse returns a handler that streams a text response.
 func simpleTextResponse(text string) func(req core.Request) (<-chan core.AssistantEvent, error) {
 	return func(req core.Request) (<-chan core.AssistantEvent, error) {
@@ -173,6 +194,104 @@ func TestLoop_SimpleTextResponse(t *testing.T) {
 	if !waitForEvent(events, core.AgentEventEnd, 500*time.Millisecond) {
 		t.Fatal("missing agent_end event")
 	}
+}
+
+// TestIngress_AllUserMessagesGetMsgID is the contract guard for bug #13
+// (compact duplicating retained user messages). Every path that inserts a
+// message into agent state must leave it with a non-empty MsgID before it can
+// be synced to the tree — otherwise the tree syncer first records it under a
+// positional "legacy:<index>" identity, then compaction assigns it a real
+// MsgID, and the next sync re-appends it as a duplicate after the compaction
+// marker. Assert the invariant across Run/Send/SendWithCustom/SendWithContent
+// without ever calling Messages() first (which must not be what assigns IDs).
+func TestIngress_AllUserMessagesGetMsgID(t *testing.T) {
+	assertAllHaveMsgID := func(t *testing.T, msgs []core.AgentMessage) {
+		t.Helper()
+		for i, m := range msgs {
+			if m.MsgID == "" {
+				t.Fatalf("message %d (role=%s) has empty MsgID", i, m.Role)
+			}
+		}
+	}
+
+	t.Run("Run", func(t *testing.T) {
+		ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+		if _, err := ag.Run(context.Background(), "hi"); err != nil {
+			t.Fatal(err)
+		}
+		assertAllHaveMsgID(t, ag.Messages())
+	})
+
+	t.Run("Send", func(t *testing.T) {
+		ag := newTestAgent(NewMockProvider(
+			simpleTextResponse("a"), simpleTextResponse("b")))
+		if _, err := ag.Run(context.Background(), "first"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ag.Send(context.Background(), "second"); err != nil {
+			t.Fatal(err)
+		}
+		assertAllHaveMsgID(t, ag.Messages())
+	})
+
+	t.Run("SendWithCustom", func(t *testing.T) {
+		ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+		_, err := ag.SendWithCustom(context.Background(), "hi",
+			map[string]any{"source": "subagent"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgs := ag.Messages()
+		assertAllHaveMsgID(t, msgs)
+		// Custom metadata must survive alongside the assigned MsgID.
+		if msgs[0].Custom["source"] != "subagent" {
+			t.Fatalf("custom metadata lost: %+v", msgs[0].Custom)
+		}
+	})
+
+	t.Run("SendWithContent", func(t *testing.T) {
+		ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+		_, err := ag.SendWithContent(context.Background(),
+			[]core.Content{core.TextContent("hi")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAllHaveMsgID(t, ag.Messages())
+	})
+
+	t.Run("LoadMessages normalizes legacy", func(t *testing.T) {
+		ag := newTestAgent(NewMockProvider())
+		// Restore a session whose persisted user message predates stable IDs.
+		err := ag.LoadMessages([]core.AgentMessage{
+			{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("legacy")}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAllHaveMsgID(t, ag.Messages())
+	})
+
+	t.Run("LoadState normalizes legacy", func(t *testing.T) {
+		ag := newTestAgent(NewMockProvider())
+		err := ag.LoadState([]core.AgentMessage{
+			{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("legacy")}}},
+		}, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAllHaveMsgID(t, ag.Messages())
+	})
+
+	t.Run("AppendMessage", func(t *testing.T) {
+		ag := newTestAgent(NewMockProvider())
+		err := ag.AppendMessage(core.AgentMessage{
+			Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("appended")}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAllHaveMsgID(t, ag.Messages())
+	})
 }
 
 func TestLoop_ToolCallAndResult(t *testing.T) {
@@ -1383,6 +1502,87 @@ func TestCompact_SerializesAgainstRun(t *testing.T) {
 	// The compacted transcript replaced the seeded messages; no orphan/stomp.
 	if got := len(ag.state.Messages); got == 0 {
 		t.Fatal("compaction produced no messages")
+	}
+}
+
+// TestCompact_RetainedUserKeepsStableMsgID is the faithful integration guard for
+// bug #13. It drives real ingress (Send) followed by a real Compact() and checks
+// that a user message retained across compaction keeps the SAME, non-empty MsgID
+// it had once synced. The bug: Send inserted the user without a MsgID, so the
+// tree syncer first recorded it under a positional "legacy:<index>" identity,
+// then Compact's EnsureMsgID minted a fresh MsgID for the still-anonymous state
+// copy — a different id than the tree held — and the next sync re-appended it as
+// a duplicate after the compaction marker. With ingress normalization, the id is
+// assigned at Send time and Compact preserves it (EnsureMsgID is idempotent).
+func TestCompact_RetainedUserKeepsStableMsgID(t *testing.T) {
+	msgText := func(m core.AgentMessage) string {
+		if len(m.Content) == 0 {
+			return ""
+		}
+		return m.Content[0].Text
+	}
+	// Provider answers every call (each Send runs the loop; plus the summary).
+	// Auto-compaction is DISABLED (Enabled:false) so the seeded user messages
+	// stay in state exactly as ingress left them — otherwise a mid-seed
+	// auto-compaction would normalize their ids and mask the bug. The manual
+	// Compact() below ignores Enabled and still cuts.
+	ag, err := New(AgentConfig{
+		Provider:            &alwaysProvider{text: "ok"},
+		Model:               core.Model{ID: "test-model", Provider: "mock", MaxInput: 100},
+		SystemPrompt:        "test",
+		Tools:               core.NewRegistry(),
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+		Compaction:          &core.CompactionSettings{Enabled: false, ReserveTokens: 10, KeepRecent: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed a long history of user turns via the real ingress path, then mark the
+	// LAST one (which will be retained past the cut point) with a sentinel we can
+	// find after compaction. Simulate the "already synced" turns having assistant
+	// replies so the cut lands on a clean boundary.
+	for i := 0; i < 30; i++ {
+		if _, e := ag.SendWithContent(context.Background(),
+			[]core.Content{core.TextContent(fmt.Sprintf("message number %d", i))}); e != nil {
+			t.Fatal(e)
+		}
+	}
+
+	// Capture the retained tail's user MsgIDs as ingress assigned them.
+	before := map[string]string{} // text -> MsgID
+	for _, m := range ag.Messages() {
+		if m.Role == "user" && m.MsgID == "" {
+			t.Fatalf("ingress left a user message without MsgID: %q", msgText(m))
+		}
+		if m.Role == "user" {
+			before[msgText(m)] = m.MsgID
+		}
+	}
+
+	if _, err := ag.Compact(context.Background()); err != nil {
+		t.Fatalf("compaction failed: %v", err)
+	}
+
+	// Every retained user message must keep the exact MsgID it had before the
+	// compaction. A changed id is what the syncer would treat as a new message.
+	for _, m := range ag.Messages() {
+		if m.Role != "user" {
+			continue
+		}
+		txt := msgText(m)
+		prev, ok := before[txt]
+		if !ok {
+			continue // summarized away
+		}
+		if m.MsgID == "" {
+			t.Fatalf("retained user %q lost its MsgID after compaction", txt)
+		}
+		if m.MsgID != prev {
+			t.Fatalf("retained user %q changed MsgID across compaction: %q -> %q (would duplicate on next sync)", txt, prev, m.MsgID)
+		}
 	}
 }
 
