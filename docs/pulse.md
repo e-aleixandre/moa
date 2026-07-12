@@ -241,6 +241,38 @@ cuando el par TCP que ve Serve es loopback; fuera de loopback Serve exige TLS.
 Un proxy local solo puede usar esa excepción si es un límite de confianza que
 ya exige TLS; Serve no confía en encabezados `X-Forwarded-*` para rebajarla.
 
+### Operaciones de escritura tipadas iniciales
+
+Pulse no recibe una ruta, método HTTP, herramienta ni comando genérico para
+escribir. Un dispositivo emparejado prepara una operación con JSON estricto y
+`X-Moa-Request` en `POST /api/pulse/operations/prepare`; Moa guarda una
+revisión privada, ligada al `device_id`, y responde con `operation_id`,
+`expires_at` y el alcance inmutable. La confirmación es únicamente
+`POST /api/pulse/operations/{operation_id}/confirm` con `{}`; no acepta
+`confirmed`, texto nuevo ni cambios de alcance. `GET /api/pulse/operations/{operation_id}`
+devuelve la revisión pendiente o el recibo. Estos tres endpoints requieren
+`Authorization: Moa-Device ...`; la cookie o query `--token` de Serve no
+sirve para ellos. También rechazan parámetros query y heredan Host, CSRF y el
+requisito TLS fuera de loopback.
+
+Por ahora el único `kind` es `directed_instruction`, que acepta `target` y
+`text` acotados. Moa resuelve el destino con Ops; una ambigüedad devuelve
+`409` con candidatos y nunca se elige por Pulse o el modelo. La revisión fija
+id/título/texto y si la entrega será `send` o `steer`. Al confirmar se reutiliza
+la política e idempotencia canónicas de instrucciones; si cambia ese estado,
+la revisión caduca. Las decisiones de permisos no forman parte todavía de este
+contrato.
+
+Las operaciones pendientes vencen en cinco minutos; los recibos se retienen una
+hora para reintentos. El almacén privado de operaciones y recibos usa
+directorio `0700`, fichero `0600`, bloqueo exclusivo por proceso, rename
+atómico y sincronización durable; el texto de una
+instrucción solo vive mientras la revisión está pendiente. Un recibo es
+inmutable y reintentable: distingue `accepted` de `rejected`, entrega y
+observación. `delivered_to_agent` **no** significa que el trabajo haya
+terminado; el resultado sigue siendo `not_observed` hasta que exista evidencia
+canónica posterior.
+
 ## Producto por etapas
 
 ### Primera experiencia completa: Call Moa

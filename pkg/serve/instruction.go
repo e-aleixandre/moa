@@ -29,9 +29,10 @@ const (
 )
 
 var (
-	ErrInstructionPermission = errors.New("session is waiting for permission")
-	ErrInstructionConflict   = errors.New("request_id was already used with different text")
-	ErrInstructionRateLimit  = errors.New("instruction rate limit exceeded")
+	ErrInstructionPermission   = errors.New("session is waiting for permission")
+	ErrInstructionConflict     = errors.New("request_id was already used with different text")
+	ErrInstructionRateLimit    = errors.New("instruction rate limit exceeded")
+	ErrInstructionScopeChanged = errors.New("instruction delivery scope changed since review")
 )
 
 type instructionRequest struct {
@@ -44,6 +45,17 @@ type instructionRequest struct {
 // VoiceInstruction delivers a normalized voice instruction without inheriting
 // Send's permission-steering behavior. It is safe for concurrent retries.
 func (m *Manager) VoiceInstruction(sessionID, text, requestID string) (string, error) {
+	return m.voiceInstruction(sessionID, text, requestID, "")
+}
+
+// voiceInstructionExpected is the scope-bound counterpart to VoiceInstruction.
+// Pulse reviews whether an instruction will send or steer; confirmation must
+// not silently switch that reviewed delivery mode.
+func (m *Manager) voiceInstructionExpected(sessionID, text, requestID, expectedAction string) (string, error) {
+	return m.voiceInstruction(sessionID, text, requestID, expectedAction)
+}
+
+func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction string) (string, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", ErrNotFound
@@ -78,6 +90,9 @@ func (m *Manager) VoiceInstruction(sessionID, text, requestID string) (string, e
 	var action string
 	switch sess.runtime.State.Current() {
 	case bus.StateIdle, bus.StateError:
+		if expectedAction != "" && expectedAction != "send" {
+			return "", ErrInstructionScopeChanged
+		}
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
 			Text: text,
 			Custom: map[string]any{
@@ -89,6 +104,9 @@ func (m *Manager) VoiceInstruction(sessionID, text, requestID string) (string, e
 		}
 		action = "send"
 	case bus.StateRunning:
+		if expectedAction != "" && expectedAction != "steer" {
+			return "", ErrInstructionScopeChanged
+		}
 		if err := sess.runtime.Bus.Execute(bus.SteerAgent{Text: text}); err != nil {
 			return "", err
 		}
@@ -215,7 +233,12 @@ func decodeInstructionBody(w http.ResponseWriter, r *http.Request, body any) boo
 		http.Error(w, "request body must be valid UTF-8", http.StatusBadRequest)
 		return false
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(bodyBytes)))
+	trimmed := strings.TrimSpace(string(bodyBytes))
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return false
+	}
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(body); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)

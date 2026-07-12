@@ -245,6 +245,7 @@ type Manager struct {
 	instructionStore    *instructionStore
 	instructionKey      []byte
 	instructionNow      func() time.Time
+	pulseOperations     *operationStore
 	conversationKey     []byte // process-local HMAC key for read cursors
 
 	providerFactory func(model core.Model) (core.Provider, error)
@@ -299,6 +300,9 @@ type ManagerConfig struct {
 	// InstructionPath overrides the private replay-idempotency store. Empty
 	// stores it beside the session base directory.
 	InstructionPath string
+	// PulseOperationPath overrides the private Pulse prepare/confirm store.
+	// Empty stores it beside the session base directory.
+	PulseOperationPath string
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -383,6 +387,26 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("instruction idempotency storage disabled", "path", instructionPath, "error", err)
 		}
 	}
+	pulseOperationPath := cfg.PulseOperationPath
+	if pulseOperationPath == "" {
+		baseDir := cfg.SessionBaseDir
+		if baseDir == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				baseDir = filepath.Join(home, ".config", "moa", "sessions")
+			}
+		}
+		if baseDir != "" {
+			pulseOperationPath = filepath.Join(filepath.Dir(baseDir), "pulse-operations.json")
+		}
+	}
+	var pulseOperations *operationStore
+	if pulseOperationPath != "" {
+		var err error
+		pulseOperations, err = openOperationStore(pulseOperationPath)
+		if err != nil {
+			slog.Warn("Pulse operation storage disabled", "path", pulseOperationPath, "error", err)
+		}
+	}
 	instructionKey, validInstructionKey := decodeInstructionKey(instructionState.Key)
 	if !validInstructionKey {
 		var err error
@@ -418,6 +442,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		attention:        attention.New(attention.Config{}),
 		ops:              opsService,
 		instructionStore: instructionStore,
+		pulseOperations:  pulseOperations,
 		instructionKey:   instructionKey,
 		instructionNow:   time.Now,
 		conversationKey:  conversationKey,
