@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,11 +16,15 @@ import (
 
 const maxDurableInstructionRecords = 1024
 
+var errInstructionLedgerUnavailable = errors.New("canonical instruction ledger unavailable")
+
 // instructionStore persists replay metadata and Pulse's write-ahead delivery
 // state. It never writes instruction text, transcripts, or message content.
 type instructionStore struct {
 	mu          sync.Mutex
 	path        string
+	lock        io.Closer
+	closed      bool
 	unavailable bool
 }
 
@@ -39,35 +44,64 @@ type durableInstructionRequest struct {
 }
 
 func openInstructionStore(path string) (*instructionStore, durableInstructionState, error) {
-	store := &instructionStore{path: path}
+	if path == "" {
+		return nil, durableInstructionState{}, errors.New("canonical instruction ledger path unavailable")
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, durableInstructionState{}, fmt.Errorf("create instruction directory: %w", err)
 	}
 	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
 		return nil, durableInstructionState{}, fmt.Errorf("secure instruction directory: %w", err)
 	}
+	lock, err := acquireInstructionStoreLock(path)
+	if err != nil {
+		return nil, durableInstructionState{}, err
+	}
+	store := &instructionStore{path: path, lock: lock}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return store, durableInstructionState{}, nil
 	}
 	if err != nil {
+		_ = lock.Close()
 		return nil, durableInstructionState{}, fmt.Errorf("read instruction store: %w", err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
+		_ = lock.Close()
 		return nil, durableInstructionState{}, fmt.Errorf("secure instruction store: %w", err)
 	}
 	var state durableInstructionState
 	if err := json.Unmarshal(b, &state); err != nil {
+		_ = lock.Close()
 		return nil, durableInstructionState{}, fmt.Errorf("decode instruction store: %w", err)
 	}
 	return store, state, nil
 }
 
+// Close releases the ledger's lifetime-exclusive process lock. Manager owns
+// this for its whole lifetime so another process cannot persist a stale
+// snapshot over a Pulse write-ahead record.
+func (s *instructionStore) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	lock := s.lock
+	s.lock = nil
+	s.mu.Unlock()
+	if lock != nil {
+		return lock.Close()
+	}
+	return nil
+}
+
 func (s *instructionStore) save(state durableInstructionState) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.unavailable {
-		return errors.New("instruction idempotency store unavailable")
+	if s.closed || s.unavailable {
+		return errInstructionLedgerUnavailable
 	}
 	defer func() {
 		if err != nil {
@@ -111,7 +145,7 @@ func (s *instructionStore) save(state durableInstructionState) (err error) {
 func (s *instructionStore) available() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return !s.unavailable
+	return !s.closed && !s.unavailable
 }
 
 func newInstructionKey() ([]byte, error) {

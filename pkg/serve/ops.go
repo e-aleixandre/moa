@@ -385,6 +385,8 @@ func handleOpsInstruction(m *Manager) http.HandlerFunc {
 		case errors.Is(err, ErrInstructionRateLimit):
 			w.Header().Set("Retry-After", "60")
 			http.Error(w, err.Error(), http.StatusTooManyRequests)
+		case errors.Is(err, errInstructionLedgerUnavailable):
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "instruction delivery temporarily unavailable"})
 		case err != nil:
 			http.Error(w, "unable to apply instruction", http.StatusInternalServerError)
 		default:

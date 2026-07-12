@@ -647,6 +647,11 @@ func (m *Manager) Shutdown() {
 			slog.Warn("Pulse operation storage close failed", "error", err)
 		}
 	}
+	if m.instructionStore != nil {
+		if err := m.instructionStore.Close(); err != nil {
+			slog.Warn("canonical instruction ledger close failed", "error", err)
+		}
+	}
 }
 
 // flushLiveSubagentTranscripts persists the transcript of every still-live

@@ -285,10 +285,12 @@ fallo durable deja incierto si la entrega alcanzó al agente, el recibo terminal
 es `indeterminate` con `delivery: "indeterminate"`; nunca se reescribe como
 `rejected` ni se reintenta en segundo plano. La recuperación consulta el
 ledger canónico de instrucciones `pulse.<operation_id>` antes de reconstruir
-un recibo, por lo que no vuelve a enviar/dirigir una instrucción conocida.
-`delivered_to_agent` **no** significa que el trabajo haya terminado; el
-resultado sigue siendo `not_observed` hasta que exista evidencia canónica
-posterior.
+un recibo, por lo que no vuelve a enviar/dirigir una instrucción conocida. Ese
+ledger canónico se bloquea de forma exclusiva durante toda la vida del proceso:
+si otro Serve ya lo posee, tanto las instrucciones legacy como Pulse fallan de
+forma cerrada y no pueden sobrescribir una instantánea obsoleta. `delivered_to_agent`
+**no** significa que el trabajo haya terminado; el resultado sigue siendo
+`not_observed` hasta que exista evidencia canónica posterior.
 
 ## Producto por etapas
 

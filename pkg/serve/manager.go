@@ -384,7 +384,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		var err error
 		instructionStore, instructionState, err = openInstructionStore(instructionPath)
 		if err != nil {
-			slog.Warn("instruction idempotency storage disabled", "path", instructionPath, "error", err)
+			slog.Warn("canonical instruction ledger unavailable; instructions fail closed", "path", instructionPath, "error", err)
 		}
 	}
 	pulseOperationPath := cfg.PulseOperationPath
@@ -413,6 +413,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		instructionKey, err = newInstructionKey()
 		if err != nil {
 			slog.Warn("instruction idempotency key unavailable", "error", err)
+			if instructionStore != nil {
+				_ = instructionStore.Close()
+			}
 			instructionStore = nil
 		}
 	}
@@ -456,7 +459,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 				at: record.At, state: durableInstructionStateOf(record), pulse: record.Pulse,
 			})
 		}
-		m.persistInstructionRequestsLocked()
+		if err := m.persistInstructionRequestsLocked(); err != nil {
+			slog.Warn("canonical instruction ledger initialization failed; instructions fail closed", "error", err)
+		}
 	}
 	m.recoverPulseConfirmations()
 	m.attention.Start()
