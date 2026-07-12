@@ -4,12 +4,20 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"nhooyr.io/websocket"        //nolint:staticcheck // paired-device route coverage
+	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // paired-device route coverage
+
+	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 func TestPairedDeviceRouteClampdownKeepsOwnerLegacySurface(t *testing.T) {
@@ -24,16 +32,51 @@ func TestPairedDeviceRouteClampdownKeepsOwnerLegacySurface(t *testing.T) {
 	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
 	owner := &http.Cookie{Name: authCookieName, Value: "owner"}
 	device := pulseOperationDevice(t, handler, owner, "clamped phone")
+	store := mgr.subagentStoreFor(sess.ID)
+	if store == nil {
+		t.Fatal("expected subagent store")
+	}
+	if err := store.Save(session.SubagentTranscript{
+		JobID: "raw-transcript", Task: "private task", Messages: []core.AgentMessage{{Message: core.Message{
+			Role: "assistant", Content: []core.Content{core.ThinkingContent("private thinking")},
+		}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every formerly device-readable legacy route is now owner-only. These
+	// include raw state, filesystem, and transcript surfaces; a device must use
+	// the dedicated projections below instead of receiving client-filtered data.
+	for _, path := range []string{
+		"/api/models",
+		"/api/fs/complete",
+		"/api/attention",
+		"/api/sessions",
+		"/api/sessions/" + sess.ID,
+		"/api/sessions/" + sess.ID + "/subagents",
+		"/api/sessions/" + sess.ID + "/subagents/raw-transcript",
+		"/api/sessions/" + sess.ID + "/branches",
+		"/api/sessions/" + sess.ID + "/files",
+		"/api/commands",
+		"/api/capabilities",
+		"/api/usage",
+	} {
+		if got := pairingRequest(handler, http.MethodGet, path, "", nil, device.Credential); got.Code != http.StatusForbidden {
+			t.Fatalf("device raw read %s = %d, want 403: %s", path, got.Code, got.Body.String())
+		}
+		if got := pairingRequest(handler, http.MethodGet, path, "", owner, ""); got.Code != http.StatusOK {
+			t.Fatalf("owner legacy read %s = %d, want 200: %s", path, got.Code, got.Body.String())
+		}
+	}
 
 	for _, path := range []string{
-		"/api/sessions",
+		"/api/ops?view=sitrep",
 		"/api/ops/overview",
-		"/api/sessions/" + sess.ID,
+		"/api/ops/pulse",
 		"/api/sessions/" + sess.ID + "/messages",
-		"/api/sessions/" + sess.ID + "/subagents",
 	} {
 		if got := pairingRequest(handler, http.MethodGet, path, "", nil, device.Credential); got.Code != http.StatusOK {
-			t.Fatalf("device safe read %s = %d: %s", path, got.Code, got.Body.String())
+			t.Fatalf("device safe projection %s = %d: %s", path, got.Code, got.Body.String())
 		}
 	}
 
@@ -70,6 +113,55 @@ func TestPairedDeviceRouteClampdownKeepsOwnerLegacySurface(t *testing.T) {
 	if ownerInstruction.Code != http.StatusAccepted {
 		t.Fatalf("owner legacy instruction = %d: %s", ownerInstruction.Code, ownerInstruction.Body.String())
 	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, response, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + device.Credential}},
+	}) //nolint:staticcheck
+	if response != nil {
+		defer response.Body.Close()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("device raw session websocket err=%v status=%v, want 403", err, responseStatus(response))
+	}
+	ownerWS, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Cookie": []string{authCookieName + "=owner"}},
+	}) //nolint:staticcheck
+	if err != nil {
+		t.Fatalf("owner raw session websocket = %v", err)
+	}
+	defer ownerWS.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var ownerInit Event
+	if err := wsjson.Read(ctx, ownerWS, &ownerInit); err != nil { //nolint:staticcheck
+		t.Fatal(err)
+	}
+	if ownerInit.Type != "init" {
+		t.Fatalf("owner raw session websocket init = %q", ownerInit.Type)
+	}
+	companion, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/companion-ws", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + device.Credential}},
+	}) //nolint:staticcheck
+	if err != nil {
+		t.Fatalf("device companion websocket = %v", err)
+	}
+	defer companion.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var companionInit CompanionWireEvent
+	if err := wsjson.Read(ctx, companion, &companionInit); err != nil { //nolint:staticcheck
+		t.Fatal(err)
+	}
+	if companionInit.Type != "init" {
+		t.Fatalf("device companion websocket init = %q", companionInit.Type)
+	}
+}
+
+func responseStatus(response *http.Response) any {
+	if response == nil {
+		return nil
+	}
+	return response.StatusCode
 }
 
 func TestOperationStoreAdmissionNeverEvictsYoungRecords(t *testing.T) {
@@ -477,6 +569,240 @@ func TestDeviceRevokeAndExpiryInvalidateOperationsAtExecutionBoundary(t *testing
 	}
 	if operation, err := operations.get(expiringOperation, expiring.DeviceID); err != nil || operation.Receipt == nil || operation.Receipt.Status != "rejected" {
 		t.Fatalf("expiry did not invalidate pending operation: %#v, %v", operation, err)
+	}
+}
+
+type delayedPulsePrepareBody struct {
+	reader  *strings.Reader
+	started chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (b *delayedPulsePrepareBody) Read(p []byte) (int, error) {
+	b.once.Do(func() {
+		close(b.started)
+		<-b.release
+	})
+	return b.reader.Read(p)
+}
+
+func (*delayedPulsePrepareBody) Close() error { return nil }
+
+func TestPulsePrepareBodyRaceWithRevokeRejectsBeforeCapacityAdmission(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+	if _, err := mgr.CreateSession(CreateOpts{Title: "prepare body race"}); err != nil {
+		t.Fatal(err)
+	}
+	// A live request would receive 429. Once the already-authenticated device
+	// is revoked while its body is delayed, it must fail at the lifecycle
+	// boundary instead and must not create any record.
+	mgr.pulseOperations.maxPending = 0
+	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
+	owner := &http.Cookie{Name: authCookieName, Value: "owner"}
+	device := pulseOperationDevice(t, handler, owner, "body race phone")
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseBody := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseBody()
+	body := &delayedPulsePrepareBody{
+		reader:  strings.NewReader(`{"kind":"directed_instruction","target":"prepare body race","text":"must not be admitted"}`),
+		started: make(chan struct{}),
+		release: release,
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/pulse/operations/prepare", nil)
+	req.Host = "localhost"
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Body = body
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Moa-Request", "1")
+	req.Header.Set("Authorization", deviceAuthorizationScheme+" "+device.Credential)
+	prepared := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		prepared <- recorder
+	}()
+	select {
+	case <-body.started:
+	case <-time.After(time.Second):
+		t.Fatal("prepare did not reach delayed body")
+	}
+	if revoked := pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+device.DeviceID+"/revoke", `{}`, owner, ""); revoked.Code != http.StatusNoContent {
+		t.Fatalf("revoke during prepare body = %d: %s", revoked.Code, revoked.Body.String())
+	}
+	releaseBody()
+	select {
+	case response := <-prepared:
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("revoked delayed prepare = %d, want 403: %s", response.Code, response.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("revoked delayed prepare did not finish")
+	}
+	mgr.pulseOperations.mu.Lock()
+	count := len(mgr.pulseOperations.state.Operations)
+	mgr.pulseOperations.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("revoked delayed prepare created %d operations", count)
+	}
+}
+
+func TestPulsePrepareRaceWithRevokeInvalidatesCreatedReview(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+	if _, err := mgr.CreateSession(CreateOpts{Title: "prepare revoke race"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
+	owner := &http.Cookie{Name: authCookieName, Value: "owner"}
+	device := pulseOperationDevice(t, handler, owner, "prepare race phone")
+	enteredCreate := make(chan struct{})
+	releaseCreate := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCreate) }) }
+	defer release()
+	mgr.pulseOperations.beforeCreate = func() {
+		close(enteredCreate)
+		<-releaseCreate
+	}
+	prepared := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		prepared <- pulseOperationRequest(handler, http.MethodPost, "/api/pulse/operations/prepare", `{"kind":"directed_instruction","target":"prepare revoke race","text":"created before revoke"}`, device.Credential)
+	}()
+	select {
+	case <-enteredCreate:
+	case <-time.After(time.Second):
+		t.Fatal("prepare did not reach admission")
+	}
+	revoked := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		revoked <- pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+device.DeviceID+"/revoke", `{}`, owner, "")
+	}()
+	release()
+	var response *httptest.ResponseRecorder
+	select {
+	case response = <-prepared:
+	case <-time.After(time.Second):
+		t.Fatal("prepare blocked after admission release")
+	}
+	if response.Code != http.StatusCreated {
+		t.Fatalf("prepare racing revoke = %d: %s", response.Code, response.Body.String())
+	}
+	operation := decodePulseOperation(t, response)
+	select {
+	case response := <-revoked:
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("revoke racing prepare = %d: %s", response.Code, response.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("revoke blocked after prepare lifecycle boundary released")
+	}
+	stored, err := mgr.pulseOperations.get(operation.OperationID, device.DeviceID)
+	if err != nil || stored.Receipt == nil || stored.Receipt.Status != "rejected" || stored.Receipt.Reason != "device_inactive" {
+		t.Fatalf("revoke returned with pending prepare: %#v, %v", stored, err)
+	}
+}
+
+func TestPulsePrepareRaceWithExpiryInvalidatesCreatedReview(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+	if _, err := mgr.CreateSession(CreateOpts{Title: "prepare expiry race"}); err != nil {
+		t.Fatal(err)
+	}
+	devices, err := openDeviceStore(filepath.Join(t.TempDir(), "devices.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devices.Close()
+	devices.setDeactivationHook(mgr.invalidatePulseDeviceOperations)
+	pairing, err := devices.createPairing("token", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := devices.claim("127.0.0.1", pairing.PairingID, pairingPayloadSecret(t, pairing), "expiry race phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC()
+	var nowNanos atomic.Int64
+	nowNanos.Store(base.UnixNano())
+	devices.mu.Lock()
+	for i := range devices.state.Devices {
+		if devices.state.Devices[i].ID == device.DeviceID {
+			devices.state.Devices[i].ExpiresAt = base.Add(time.Minute)
+		}
+	}
+	devices.now = func() time.Time { return time.Unix(0, nowNanos.Load()).UTC() }
+	devices.mu.Unlock()
+
+	enteredCreate := make(chan struct{})
+	releaseCreate := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCreate) }) }
+	defer release()
+	mgr.pulseOperations.beforeCreate = func() {
+		close(enteredCreate)
+		<-releaseCreate
+	}
+	type prepareResult struct {
+		response pulseOperationResponse
+		err      error
+	}
+	prepared := make(chan prepareResult, 1)
+	go func() {
+		var response pulseOperationResponse
+		err := devices.withActiveDevice(device.DeviceID, func() error {
+			var prepareErr error
+			response, _, prepareErr = mgr.preparePulseOperation(device.DeviceID, pulseOperationPrepareBody{
+				Kind: pulseOperationDirectedInstruction, Target: "prepare expiry race", Text: "created before expiry",
+			})
+			return prepareErr
+		})
+		prepared <- prepareResult{response: response, err: err}
+	}()
+	select {
+	case <-enteredCreate:
+	case <-time.After(time.Second):
+		t.Fatal("prepare did not reach expiry-race admission")
+	}
+	nowNanos.Store(base.Add(2 * time.Minute).UnixNano())
+	expired := make(chan struct{})
+	go func() {
+		devices.expireDevice(device.DeviceID)
+		close(expired)
+	}()
+	release()
+	var result prepareResult
+	select {
+	case result = <-prepared:
+		if result.err != nil || result.response.OperationID == "" {
+			t.Fatalf("prepare racing expiry = %#v, %v", result.response, result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prepare blocked after expiry race admission release")
+	}
+	select {
+	case <-expired:
+	case <-time.After(time.Second):
+		t.Fatal("expiry blocked after prepare lifecycle boundary released")
+	}
+	stored, err := mgr.pulseOperations.get(result.response.OperationID, device.DeviceID)
+	if err != nil || stored.Receipt == nil || stored.Receipt.Status != "rejected" || stored.Receipt.Reason != "device_inactive" {
+		t.Fatalf("expiry returned with pending prepare: %#v, %v", stored, err)
+	}
+	if err := devices.withActiveDevice(device.DeviceID, func() error {
+		t.Fatal("expired device entered prepare admission")
+		return nil
+	}); !errors.Is(err, errInvalidDeviceCredential) {
+		t.Fatalf("expired prepare admission guard = %v", err)
 	}
 }
 

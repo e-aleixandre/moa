@@ -117,8 +117,27 @@ func handlePulseOperationPrepare(mgr *Manager) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		response, candidates, err := mgr.preparePulseOperation(identity.DeviceID, body)
+		devices, _ := requestDeviceStore(r)
+		var (
+			response   pulseOperationResponse
+			candidates []opsInstructionTarget
+			err        error
+		)
+		// Authentication is intentionally not the admission boundary: a device
+		// can be revoked or expire while its body is still arriving. Hold the
+		// device lifecycle lock across review creation and capacity admission.
+		// revoke/expiry release that lock before invalidating operation records,
+		// so this ordering is device -> operation and cannot deadlock with their
+		// operation-only invalidation. If creation won the race, deactivation
+		// invalidates its pending record before it returns.
+		err = devices.withActiveDevice(identity.DeviceID, func() error {
+			var prepareErr error
+			response, candidates, prepareErr = mgr.preparePulseOperation(identity.DeviceID, body)
+			return prepareErr
+		})
 		switch {
+		case errors.Is(err, errInvalidDeviceCredential):
+			http.Error(w, "device credential is no longer active", http.StatusForbidden)
 		case errors.Is(err, errPulseOperationAmbiguous):
 			writeJSON(w, http.StatusConflict, struct {
 				Candidates []opsInstructionTarget `json:"candidates"`

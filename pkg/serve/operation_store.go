@@ -48,6 +48,9 @@ type operationStore struct {
 	maxRecords          int
 	maxPending          int
 	maxPendingPerDevice int
+	// beforeCreate is a test-only synchronization hook. It runs while the
+	// operation lock is held immediately before admission and persistence.
+	beforeCreate func()
 }
 
 type durableOperationState struct {
@@ -174,6 +177,9 @@ func (s *operationStore) create(operation durableOperation) error {
 	}
 	now := s.now().UTC()
 	changed := s.pruneLocked(now)
+	if s.beforeCreate != nil {
+		s.beforeCreate()
+	}
 	if s.admissionBlockedLocked(operation.DeviceID) {
 		if changed {
 			if err := s.saveLocked(); err != nil {

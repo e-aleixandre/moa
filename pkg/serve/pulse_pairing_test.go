@@ -131,8 +131,8 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 		t.Fatalf("used pairing claim = %d", replayClaim.Code)
 	}
 
-	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, credential.Credential); got.Code != http.StatusOK {
-		t.Fatalf("device REST auth = %d: %s", got.Code, got.Body.String())
+	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, credential.Credential); got.Code != http.StatusForbidden {
+		t.Fatalf("device raw sessions auth = %d, want 403: %s", got.Code, got.Body.String())
 	}
 	if got := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, credential.Credential); got.Code != http.StatusForbidden {
 		t.Fatalf("device list auth = %d, want 403: %s", got.Code, got.Body.String())
@@ -146,17 +146,17 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential.Credential}}}) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/companion-ws", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential.Credential}}}) //nolint:staticcheck
 	if err != nil {
-		t.Fatalf("device WS auth: %v", err)
+		t.Fatalf("device companion WS auth: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
-	var event Event
+	var event CompanionWireEvent
 	if err := wsjson.Read(ctx, conn, &event); err != nil { //nolint:staticcheck
 		t.Fatal(err)
 	}
 	if event.Type != "init" {
-		t.Fatalf("device WS event = %q", event.Type)
+		t.Fatalf("device companion WS event = %q", event.Type)
 	}
 
 	revokeRec := pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+credential.DeviceID+"/revoke", `{}`, owner, "")

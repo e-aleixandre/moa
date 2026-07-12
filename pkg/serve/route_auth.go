@@ -7,8 +7,8 @@ import (
 
 // routeAccess is the Serve authorization policy for an HTTP route. Token
 // owners retain the established Serve surface. A paired device is deliberately
-// narrower: it may read the safe operational projection and use typed Pulse
-// operations, but cannot reach a legacy mutation endpoint.
+// narrower: it may read a small, server-projected companion surface and use
+// typed Pulse operations, but cannot reach a legacy endpoint.
 type routeAccess uint8
 
 const (
@@ -62,13 +62,15 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 }
 
 // serveRouteAccess is the route authorization metadata. The default is the
-// established owner surface, which makes adding a new mutation fail closed for
-// devices until it is deliberately classified here.
+// established owner surface, which makes every new route fail closed for
+// devices until it is deliberately classified here. Device reads must be
+// projections with an explicit safe wire contract, never a filtered legacy
+// dashboard endpoint.
 func serveRouteAccess(r *http.Request) routeAccess {
 	if r.Method == http.MethodPost && r.URL.Path == "/api/pulse/operations/prepare" {
 		return routeDeviceOperation
 	}
-	if isPulseOperationRoute(r.URL.Path) && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
+	if isPulseOperationRoute(r) {
 		return routeDeviceOperation
 	}
 	switch {
@@ -87,17 +89,18 @@ func serveRouteAccess(r *http.Request) routeAccess {
 	}
 }
 
-func isPulseOperationRoute(path string) bool {
+func isPulseOperationRoute(r *http.Request) bool {
 	prefix := "/api/pulse/operations/"
-	if !strings.HasPrefix(path, prefix) {
+	if !strings.HasPrefix(r.URL.Path, prefix) {
 		return false
 	}
-	rest := strings.TrimPrefix(path, prefix)
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
 	if rest == "" || strings.Contains(rest, "//") {
 		return false
 	}
 	parts := strings.Split(rest, "/")
-	return len(parts) == 1 || (len(parts) == 2 && parts[1] == "confirm")
+	return (len(parts) == 1 && r.Method == http.MethodGet) ||
+		(len(parts) == 2 && parts[1] == "confirm" && r.Method == http.MethodPost)
 }
 
 func isPulseDeviceRevokeRoute(path string) bool {
@@ -114,7 +117,9 @@ func isDeviceSafeReadRoute(r *http.Request) bool {
 		return false
 	}
 	switch r.URL.Path {
-	case "/api/models", "/api/fs/complete", "/api/attention", "/api/ops", "/api/ops/overview", "/api/ops/pulse", "/api/ops/ws", "/api/sessions", "/api/commands", "/api/capabilities", "/api/usage", "/api/push/vapid-public-key":
+	// These Ops routes are server-derived operational projections. They have
+	// no generic event, tool, permission, filesystem, or transcript payload.
+	case "/api/ops", "/api/ops/overview", "/api/ops/pulse", "/api/ops/ws":
 		return true
 	}
 
@@ -123,19 +128,13 @@ func isDeviceSafeReadRoute(r *http.Request) bool {
 		return false
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, sessionsPrefix), "/")
-	if len(parts) == 1 && parts[0] != "" {
-		return true
-	}
 	if len(parts) == 2 && parts[0] != "" {
 		switch parts[1] {
-		case "messages", "companion-ws", "subagents", "branches", "files", "ws":
+		// /messages and /companion-ws have dedicated display-only DTOs and
+		// strict event allowlists. The generic /ws stream is intentionally
+		// owner-only because it serializes raw dashboard events.
+		case "messages", "companion-ws":
 			return true
-		}
-	}
-	if len(parts) == 3 && parts[0] != "" {
-		switch parts[1] {
-		case "subagents", "files":
-			return parts[2] != ""
 		}
 	}
 	return false

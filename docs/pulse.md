@@ -220,19 +220,29 @@ application/json`, sin campos desconocidos) y todos los POST requieren
 `X-Moa-Request`, incluido el claim sin autenticar. El propietario usa la cookie
 existente de `--token`; un dispositivo usa
 `Authorization: Moa-Device <device-id>.<secret>` para REST y WebSocket. La
-credencial de dispositivo no es un segundo token web: solo puede consultar una
-lista explícita de proyecciones seguras de lectura (Ops, sesiones,
-conversación/archivos acotados y streams de solo lectura) y las operaciones
-Pulse tipadas. No puede usar ninguna ruta legacy de mutación (`/send`,
-`/instruction`, permisos, shell, comandos, configuración, ramas, subagentes,
-cancelación, etc.), ni crear/listar/revocar pairings; esas rutas administrativas
-son exclusivamente del propietario. Es un terminal del propietario, no un rol
-de solo lectura. `GET /api/pulse/devices` y
+credencial de dispositivo no es un segundo token web: su lista de lectura es
+explícita y por defecto niega todo salvo las proyecciones seguras de Ops
+(`GET /api/ops`, `/api/ops/overview` y `/api/ops/pulse`), su stream de solo
+lectura (`/api/ops/ws`), los mensajes de conversación display-only
+(`GET /api/sessions/{id}/messages`) y el stream companion dedicado y
+display-only (`/api/sessions/{id}/companion-ws`), además de las operaciones
+Pulse tipadas. No puede leer `/api/attention`, listas/detalles genéricos de
+sesión, `/api/sessions/{id}/ws`, transcripciones de subagentes, archivos,
+ramas, completado de filesystem, modelos, capacidades, uso, logs ni payloads
+de herramientas o permisos. Tampoco puede usar ninguna ruta legacy de mutación
+(`/send`, `/instruction`, permisos, shell, comandos, configuración, ramas,
+subagentes, cancelación, etc.), ni crear/listar/revocar pairings; esas rutas
+administrativas son exclusivamente del propietario. Es un terminal del
+propietario, no un rol de solo lectura. `GET /api/pulse/devices` y
 `POST /api/pulse/devices/{id}/revoke` permiten revisar y revocar terminales.
 Al revocar o caducar una credencial, Serve invalida sincrónicamente sus
 operaciones pendientes y cierra inmediatamente sus WebSocket activos; una
 confirmación vuelve a comprobar la credencial en el límite atómico anterior a
-la ejecución. Las conexiones autenticadas por cookie/token no se ven afectadas.
+la ejecución. La admisión de `prepare` está ligada al mismo límite: una
+credencial revocada o caducada mientras llega el body o se prepara la revisión
+no puede crear una revisión pendiente; si la creación gana la carrera, la
+invalidación la finaliza antes de devolver la revocación/caducidad. Las
+conexiones autenticadas por cookie/token no se ven afectadas.
 
 Serve limita la creación a 5 pairings por hora y los claims a 12 por minuto y
 por IP del par TCP directo. No confía en `X-Forwarded-For`; un proxy debe ser

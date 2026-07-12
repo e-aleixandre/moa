@@ -90,13 +90,19 @@ You don't have to wait for a run to finish before lining up your next move. What
 
 By default `moa serve` has **no authentication** — anyone who can reach the port controls your agents. For access beyond `127.0.0.1`, pass `--token <secret>` (or set `MOA_SERVE_TOKEN`) to require a session cookie or `?token=<secret>` on every request; visiting that URL once sets an `HttpOnly` cookie for subsequent requests. An authenticated owner can additionally pair a revocable Pulse device. A claimed device authenticates REST and WebSocket requests with `Authorization: Moa-Device <device-id>.<secret>`; its credential is separate from the owner token and is rejected outside direct loopback unless the request uses TLS. Pairing and device credentials are not accepted in URLs.
 
-The device credential is **not** a second owner token. Its legacy access is a
-small explicit read-only allowlist (safe Ops/session/conversation/file
-projections and read-only WebSocket streams); every other legacy route is
-owner-only. In particular a device cannot call `/send`, `/instruction`,
-permission, shell, command, config, branch, subagent, cancel, pairing, device
-list, or revoke endpoints. New owner capabilities must get a typed Pulse
-adapter rather than being added to this allowlist.
+The device credential is **not** a second owner token. Its legacy access is an
+explicit default-deny allowlist: the safe Ops projections (`GET /api/ops`,
+`/api/ops/overview`, and `/api/ops/pulse`), the read-only Ops WebSocket
+(`/api/ops/ws`), the display-only owner conversation endpoint
+(`/api/sessions/{id}/messages`), and the dedicated display-only companion
+WebSocket (`/api/sessions/{id}/companion-ws`). Every other legacy route is
+owner-only. In particular a device cannot read `/api/attention`, generic
+session lists/details, `/api/sessions/{id}/ws`, subagent transcripts, files,
+branches, filesystem completion, models, capabilities, usage, logs, tool or
+permission payloads; nor can it call `/send`, `/instruction`, permission,
+shell, command, config, branch, subagent, cancel, pairing, device list, or
+revoke endpoints. New owner capabilities must get a typed Pulse adapter rather
+than being added to this allowlist.
 
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
 
@@ -150,8 +156,11 @@ not treat it as rejection. Serve never retries such delivery in the background.
 Instruction recovery consults its canonical ledger. Permission resolution has
 no replay ledger: after its durable attempt marker, restart recovery is terminal
 `indeterminate`, never a blind retry or approval. Revoke/expiry synchronously
-invalidates pending operations and confirmation rechecks the active device at
-the execution boundary.
+invalidates pending operations. Prepare admission is also bound to the active
+device lifecycle boundary: a credential that expires or is revoked while its
+body/review is delayed cannot create a pending review; if creation wins the
+race, deactivation invalidates it before returning. Confirmation rechecks the
+same boundary at execution.
 
 ## Frontend development
 

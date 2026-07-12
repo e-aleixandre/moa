@@ -52,7 +52,6 @@ func createStoredDeviceCredential(t *testing.T, path string, expiresAt time.Time
 }
 
 type deviceWSSet struct {
-	normal    *websocket.Conn
 	companion *websocket.Conn
 	ops       *websocket.Conn
 }
@@ -69,16 +68,8 @@ func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, cred
 		return conn
 	}
 	set := deviceWSSet{
-		normal:    dial("/api/sessions/" + sessionID + "/ws"),
 		companion: dial("/api/sessions/" + sessionID + "/companion-ws"),
 		ops:       dial("/api/ops/ws"),
-	}
-	var normal Event
-	if err := wsjson.Read(ctx, set.normal, &normal); err != nil { //nolint:staticcheck
-		t.Fatal(err)
-	}
-	if normal.Type != "init" {
-		t.Fatalf("normal init = %q", normal.Type)
 	}
 	var companion CompanionWireEvent
 	if err := wsjson.Read(ctx, set.companion, &companion); err != nil { //nolint:staticcheck
@@ -98,7 +89,6 @@ func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, cred
 }
 
 func (set deviceWSSet) close() {
-	_ = set.normal.Close(websocket.StatusNormalClosure, "")    //nolint:errcheck,staticcheck
 	_ = set.companion.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
 	_ = set.ops.Close(websocket.StatusNormalClosure, "")       //nolint:errcheck,staticcheck
 }
@@ -152,7 +142,6 @@ func TestDeviceRevokeClosesEveryWebSocketAndLeavesTokenSocketAlive(t *testing.T)
 	}
 	sess.runtime.Bus.Publish(bus.TextDelta{SessionID: sess.ID, RunGen: 1, Delta: "after revoke"})
 
-	expectDeviceWSClose(t, deviceSockets.normal, "normal")
 	expectDeviceWSClose(t, deviceSockets.companion, "companion")
 	expectDeviceWSClose(t, deviceSockets.ops, "ops")
 
@@ -184,7 +173,6 @@ func TestDeviceCredentialExpiryClosesEveryWebSocketWhileIdle(t *testing.T) {
 	deviceSockets := dialDeviceWebSockets(t, server, sess.ID, credential.Credential)
 	defer deviceSockets.close()
 
-	expectDeviceWSClose(t, deviceSockets.normal, "normal expiry")
 	expectDeviceWSClose(t, deviceSockets.companion, "companion expiry")
 	expectDeviceWSClose(t, deviceSockets.ops, "ops expiry")
 }
