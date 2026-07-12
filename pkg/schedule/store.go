@@ -264,8 +264,9 @@ func save(path string, records []Schedule) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err == nil {
+	defer func() { _ = os.Remove(tmpName) }()
+	err = tmp.Chmod(0o600)
+	if err == nil {
 		_, err = tmp.Write(data)
 	}
 	if err == nil {
@@ -280,10 +281,9 @@ func save(path string, records []Schedule) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	if directory, err := os.Open(dir); err == nil {
+	if directory, derr := os.Open(dir); derr == nil {
 		err = directory.Sync()
-		closeErr := directory.Close()
-		if err == nil {
+		if closeErr := directory.Close(); err == nil {
 			err = closeErr
 		}
 	}
