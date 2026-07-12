@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
@@ -212,5 +213,129 @@ func TestInstructionLedgerLockFailsClosedWithoutStalePulseWALOverwrite(t *testin
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAttemptedPulseRecoveryWithUnavailableLedgerIsIndeterminate(t *testing.T) {
+	if !instructionStoreLockSupported() {
+		t.Skip("canonical instruction ledger fails closed where advisory process locks are unavailable")
+	}
+	root := t.TempDir()
+	instructionPath := filepath.Join(root, "instruction-idempotency.json")
+	operationPath := filepath.Join(root, "pulse-operations.json")
+	provider := newMockProvider(simpleResponseHandler("unexpected"))
+
+	first := instructionLockManager(t, root, instructionPath, operationPath, filepath.Join(root, "first-sessions"), provider)
+	if _, err := first.CreateSession(CreateOpts{Title: "attempted recovery"}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, _, err := first.preparePulseOperation("device-attempted", pulseOperationPrepareBody{
+		Kind:   pulseOperationDirectedInstruction,
+		Target: "attempted recovery",
+		Text:   "must not be retried without the ledger",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start, err := first.pulseOperations.beginConfirm(prepared.OperationID, "device-attempted"); err != nil || !start.Execute {
+		t.Fatalf("begin attempted confirmation = %#v, %v", start, err)
+	}
+	if err := first.pulseOperations.markAttempt(prepared.OperationID); err != nil {
+		t.Fatalf("durably mark attempted = %v", err)
+	}
+	// Keep the first Manager's instruction ledger lock while releasing only the
+	// operation store, modelling a restarted process whose canonical ledger is
+	// currently locked/unavailable to the recovery process.
+	if err := first.pulseOperations.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := instructionLockManager(t, root, instructionPath, operationPath, filepath.Join(root, "second-sessions"), provider)
+	if second.instructionLedgerAvailable() {
+		t.Fatal("recovery manager unexpectedly acquired the locked canonical ledger")
+	}
+	status, err := second.pulseOperationStatus("device-attempted", prepared.OperationID)
+	if err != nil || status.Receipt == nil {
+		t.Fatalf("attempted recovery did not preserve a queryable receipt: %#v, %v", status, err)
+	}
+	receipt := *status.Receipt
+	if receipt.Status != "indeterminate" || receipt.Delivery != "indeterminate" || receipt.Reason != "canonical_ledger_unavailable" {
+		t.Fatalf("attempted recovery receipt = %#v, want canonical-ledger indeterminate", receipt)
+	}
+	if receipt.Delivery == "not_delivered" || receipt.Status == "rejected" {
+		t.Fatalf("attempted recovery falsely rejected a possibly delivered action: %#v", receipt)
+	}
+	// Both query and retry return exactly the terminal receipt; neither may
+	// invoke canonical delivery while the ledger remains unavailable.
+	retry, err := second.confirmPulseOperation(context.Background(), &deviceStore{}, "device-attempted", prepared.OperationID)
+	if err != nil || retry != receipt {
+		t.Fatalf("attempted recovery retry = %#v, %v; want %#v", retry, err, receipt)
+	}
+	again, err := second.pulseOperationStatus("device-attempted", prepared.OperationID)
+	if err != nil || again.Receipt == nil || *again.Receipt != receipt {
+		t.Fatalf("attempted recovery query changed = %#v, %v", again, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if calls := provider.calls.Load(); calls != 0 {
+		t.Fatalf("unavailable-ledger recovery retried SendPrompt/steer: provider calls=%d", calls)
+	}
+
+	// A genuinely new, non-attempted operation remains a truthful rejection
+	// when delivery cannot start; only an existing durable Attempted marker is
+	// elevated to indeterminate.
+	newID, err := newPulseOperationID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.pulseOperations.create(durableOperation{ID: newID, DeviceID: "device-new", Kind: pulseOperationDirectedInstruction, PayloadDigest: "digest"}); err != nil {
+		t.Fatal(err)
+	}
+	newReceipt, err := second.confirmPulseOperation(context.Background(), &deviceStore{}, "device-new", newID)
+	if err != nil || newReceipt.Status != "rejected" || newReceipt.Delivery != "not_delivered" || newReceipt.Reason != "delivery_unavailable" {
+		t.Fatalf("new non-attempted unavailable delivery = %#v, %v", newReceipt, err)
+	}
+
+	second.Shutdown()
+	first.Shutdown()
+	third := instructionLockManager(t, root, instructionPath, operationPath, filepath.Join(root, "third-sessions"), provider)
+	stable, err := third.pulseOperationStatus("device-attempted", prepared.OperationID)
+	if err != nil || stable.Receipt == nil || *stable.Receipt != receipt {
+		t.Fatalf("attempted indeterminate receipt did not survive recovery restart: %#v, %v", stable, err)
+	}
+	if calls := provider.calls.Load(); calls != 0 {
+		t.Fatalf("post-lock recovery retried SendPrompt/steer: provider calls=%d", calls)
+	}
+}
+
+func TestNewNonAttemptedPulsePolicyRejectionRemainsRejected(t *testing.T) {
+	provider := newMockProvider(simpleResponseHandler("unexpected"))
+	mgr := newTestManager(t, context.Background(), provider)
+	sess, err := mgr.CreateSession(CreateOpts{Title: "new policy rejection"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, _, err := mgr.preparePulseOperation("device-new", pulseOperationPrepareBody{
+		Kind:   pulseOperationDirectedInstruction,
+		Target: "new policy rejection",
+		Text:   "reviewed as send",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := mgr.pulseOperations.beginConfirm(prepared.OperationID, "device-new")
+	if err != nil || !start.Execute || start.Operation.Attempted {
+		t.Fatalf("new non-attempted confirmation = %#v, %v", start, err)
+	}
+	// The reviewed send cannot silently become a steer. This ordinary new
+	// policy rejection is still rejected/not_delivered, unlike recovery of an
+	// already durable Attempted marker.
+	sess.runtime.State.ForceState(bus.StateRunning)
+	receipt := mgr.executePulseOperation(start.Operation)
+	if receipt.Status != "rejected" || receipt.Delivery != "not_delivered" || receipt.Reason != "review_expired" {
+		t.Fatalf("new policy rejection receipt = %#v", receipt)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if calls := provider.calls.Load(); calls != 0 {
+		t.Fatalf("new policy rejection delivered a prompt: provider calls=%d", calls)
 	}
 }
