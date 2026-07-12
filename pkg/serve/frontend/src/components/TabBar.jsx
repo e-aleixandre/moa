@@ -1,5 +1,6 @@
 import { Plus } from 'lucide-preact';
 import { setActiveSession } from '../tile-actions.js';
+import { sessionDotState } from '../util/format.js';
 
 export function TabBar({ state, onOpenPalette }) {
   const sessions = Object.values(state.sessions)
@@ -27,7 +28,7 @@ export function TabBar({ state, onOpenPalette }) {
             class={classes.join(' ')}
             onClick={() => setActiveSession(sess.id)}
           >
-            <span class={`state-dot ${sess.state}`} />
+            <span class={`state-dot ${sessionDotState(sess)}`} />
             {sess.title || 'Untitled'}
             {unseen && <span class="tab-unseen" title="Unread activity" />}
           </button>

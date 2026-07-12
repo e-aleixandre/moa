@@ -4,7 +4,7 @@ import { setActiveSession } from '../tile-actions.js';
 import { resumeSession, deleteSession } from '../session-actions.js';
 import { setState } from '../store.js';
 import { addToast } from '../notifications.js';
-import { shortModel, shortPath, projectKey, projectLabel } from '../util/format.js';
+import { shortModel, shortPath, projectKey, projectLabel, sessionDotState } from '../util/format.js';
 
 export function SessionOverview({ state, onSelect, onNewSession }) {
   const touchStart = useRef(null);
@@ -75,7 +75,7 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
         onClick={() => handleSelect(sess.id)}
       >
         <div class="overview-card-header">
-          <span class={`state-dot ${sess.state}`} />
+          <span class={`state-dot ${sessionDotState(sess)}`} />
           <span class="overview-card-title">{sess.title || 'Untitled'}</span>
           {unseen && <span class="overview-card-unseen" title="Unread activity" />}
         </div>

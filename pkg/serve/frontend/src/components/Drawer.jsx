@@ -4,6 +4,7 @@ import { sessionsByGroup } from '../store.js';
 import { setActiveSession } from '../tile-actions.js';
 import { deleteSession, resumeSession } from '../session-actions.js';
 import { addToast } from '../notifications.js';
+import { sessionDotState } from '../util/format.js';
 
 // toggleDrawer was previously an unused import — the Drawer is mobile-only
 // and currently not rendered. Stub to avoid reference errors until cleanup.
@@ -104,7 +105,7 @@ export function Drawer({ state, onOpenPalette }) {
                       </div>
                     ) : (
                       <>
-                        <span class={`state-dot ${sess.state}`} />
+                        <span class={`state-dot ${sessionDotState(sess)}`} />
                         <span class="drawer-item-title">{sess.title || 'Untitled'}</span>
                         {(sess.state === 'permission' || sess.state === 'error') && (
                           <span class="sidebar-attention" />

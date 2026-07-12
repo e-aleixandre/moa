@@ -10,6 +10,7 @@ import { NotificationSettings } from './NotificationSettings.jsx';
 import { ModelPill } from './ModelPill.jsx';
 import { TaskBar } from './TaskBar.jsx';
 import { RewindSheet } from './RewindSheet.jsx';
+import { sessionDotState } from '../util/format.js';
 
 export function ChatView({ state, onToggleOverview, onOpenPalette }) {
   const session = state.activeSession ? state.sessions[state.activeSession] : null;
@@ -57,7 +58,7 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        <span class={`state-dot ${session.state}`} />
+        <span class={`state-dot ${sessionDotState(session)}`} />
         <button class="chat-header-title-btn" onClick={onToggleOverview}>
           <span class="chat-header-title">{session.title || 'Untitled'}</span>
           <ChevronDown class="chat-header-chevron" />

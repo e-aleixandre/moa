@@ -5,6 +5,7 @@ import { assignToTile } from '../tile-actions.js';
 import { resumeSession, createSession, unarchiveSession } from '../session-actions.js';
 import { allTileIds, findTile } from '../tileTree.js';
 import { addToast } from '../notifications.js';
+import { sessionDotState } from '../util/format.js';
 
 // Cached capabilities from server
 let _caps = null;
@@ -119,6 +120,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
           type: 'session', id: sess.id,
           title: sess.title || 'Untitled',
           model: sess.model, state: sess.state,
+          dotState: sessionDotState(sess),
           cwd: cwdLabel, inTile,
           saved: sess.state === 'saved',
           archived: !!sess.archived,
@@ -318,7 +320,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
                 onClick={() => handleSelect(item)}
                 onMouseEnter={() => setSelectedIdx(i)}
               >
-                <span class={`state-dot ${item.state}`} />
+                <span class={`state-dot ${item.dotState || item.state}`} />
                 <span class="palette-item-label">{item.title}</span>
                 {item.archived && <span class="palette-archived-badge">archived</span>}
                 <span class="palette-item-meta">{item.model}</span>

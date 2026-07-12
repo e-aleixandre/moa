@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview } from './format.js';
+import { formatDiff, toolPreview, sessionDotState } from './format.js';
 
 test('formatDiff numbers lines from startLine', () => {
   const out = formatDiff('old line\nsecond', 'new line\nsecond', 260);
@@ -45,4 +45,29 @@ test('toolPreview edit prefers server diff over fallback', () => {
   const result = '@@ -257 +257 @@\n 257  ctx';
   const p = toolPreview('edit', { oldText: 'foo', newText: 'bar' }, result, 'done', 42);
   expect(p.text).toBe(result);
+});
+
+test('sessionDotState: idle main with live subagents shows running', () => {
+  expect(sessionDotState({ state: 'idle', subagentCount: 2 })).toBe('running');
+  expect(sessionDotState({ state: 'idle', subagents: { j1: { status: 'running' } } })).toBe('running');
+});
+
+test('sessionDotState: idle with no subagents stays idle', () => {
+  expect(sessionDotState({ state: 'idle', subagentCount: 0 })).toBe('idle');
+  expect(sessionDotState({ state: 'idle', subagents: { j1: { status: 'completed' } } })).toBe('idle');
+  expect(sessionDotState({ state: 'idle' })).toBe('idle');
+});
+
+test('sessionDotState: a non-idle main state always wins', () => {
+  expect(sessionDotState({ state: 'permission', subagentCount: 0 })).toBe('permission');
+  expect(sessionDotState({ state: 'error' })).toBe('error');
+  expect(sessionDotState({ state: 'running', subagentCount: 5 })).toBe('running');
+});
+
+test('sessionDotState: null-safe', () => {
+  expect(sessionDotState(null)).toBe('idle');
+});
+
+test('sessionDotState: saved with subagent data stays saved', () => {
+  expect(sessionDotState({ state: 'saved', subagentCount: 1 })).toBe('saved');
 });

@@ -4,6 +4,7 @@ import { MessageSquarePlus, GripHorizontal, GitFork, Columns2, Rows2, X } from '
 import { focusTile, assignToTile, swapTiles, splitTile, closeTile } from '../tile-actions.js';
 import { getTileCount } from '../store.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
+import { sessionDotState } from '../util/format.js';
 import { useTouchDrag, registerDropTarget } from '../hooks/useTouchDrag.js';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
@@ -137,7 +138,7 @@ function TileView({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
       <div class="tile-header" draggable onDragStart={handleDragStart} {...touchDragProps}>
         <GripHorizontal class="drag-handle" />
         <span class="tile-number" title={formatShortcut(String(tileIndex + 1), { mod: true })}>{tileIndex + 1}</span>
-        <span class={`state-dot ${session.state}`} />
+        <span class={`state-dot ${sessionDotState(session)}`} />
         <span class="tile-title">{session.title || 'Untitled'}</span>
         {session.subagentCount > 0 && (
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>

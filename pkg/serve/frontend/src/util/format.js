@@ -239,3 +239,27 @@ export function shortPath(cwd, maxLen = 42) {
   return '…' + p.slice(-(maxLen - 1));
 }
 
+
+/** Returns the state used to color a session's status dot. It mirrors the
+ *  session's own state, except that an idle main agent which has live
+ *  subagents still counts as 'running' — otherwise a session waiting on a
+ *  delegated subagent shows green (idle) despite work being in progress.
+ *  A non-idle main state (running/permission/error) always wins. */
+export function sessionDotState(sess) {
+  if (!sess) return 'idle';
+  if (sess.state && sess.state !== 'idle') return sess.state;
+  if (hasLiveSubagents(sess)) return 'running';
+  return sess.state || 'idle';
+}
+
+function hasLiveSubagents(sess) {
+  if (sess.subagentCount > 0) return true;
+  const subs = sess.subagents;
+  if (subs) {
+    for (const k in subs) {
+      const st = subs[k] && subs[k].status;
+      if (st === 'running' || st === 'cancelling') return true;
+    }
+  }
+  return false;
+}
