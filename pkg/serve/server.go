@@ -36,6 +36,7 @@ type serverOptions struct {
 	allowedHosts []string
 	token        string
 	secureCookie bool
+	devicePath   string
 }
 
 // ServerOption configures optional NewServer behavior.
@@ -58,6 +59,13 @@ func WithAuthToken(token string, secureCookie bool) ServerOption {
 	}
 }
 
+// WithDeviceStorePath overrides the private device credential store. It is
+// primarily useful for embedded deployments and tests; normal Serve uses
+// ~/.config/moa/devices.json (or MOA_CONFIG_DIR/devices.json).
+func WithDeviceStorePath(path string) ServerOption {
+	return func(o *serverOptions) { o.devicePath = path }
+}
+
 // NewServer returns an http.Handler wired to the given manager.
 func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	var o serverOptions
@@ -74,7 +82,10 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/ops/overview", handleOpsOverview(manager))
 	mux.HandleFunc("GET /api/ops/pulse", handleOpsPulse(manager))
 	mux.HandleFunc("POST /api/ops/ask", handleOpsAsk(manager))
-	mux.HandleFunc("POST /api/briefings/ops", handleOpsBriefing(manager))
+	mux.HandleFunc("POST /api/pulse/operations/directed-instruction/prepare", handlePulsePrepareInstruction(manager))
+	mux.HandleFunc("POST /api/pulse/operations/permission/prepare", handlePulsePreparePermission(manager))
+	mux.HandleFunc("POST /api/pulse/operations/{id}/confirm", handlePulseConfirmOperation(manager))
+	mux.HandleFunc("GET /api/pulse/operations/{id}", handlePulseGetOperation(manager))
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
@@ -129,11 +140,30 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	}
 	mux.Handle("GET /", staticHandler)
 
+	var devices *deviceStore
+	if o.token != "" {
+		path := o.devicePath
+		if path == "" {
+			path = defaultDeviceStorePath()
+		}
+		var err error
+		devices, err = openDeviceStore(path)
+		if err != nil {
+			slog.Warn("device authentication disabled", "error", err)
+		}
+	}
+	// Device handlers receive the store selected above; the rest of Serve stays
+	// independent of device pairing.
+	mux.HandleFunc("POST /api/pulse/pairings", handlePulsePairing(devices))
+	mux.HandleFunc("POST /api/pulse/pairings/claim", handlePulsePairingClaim(devices))
+	mux.HandleFunc("GET /api/pulse/devices", handlePulseDevices(devices))
+	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))
+
 	handler := csrfMiddleware(bodyTimeoutMiddleware(mux))
 	// Token auth (when configured) sits under the Host check but above CSRF, so
 	// it also guards the WebSocket, push, and static routes via the cookie.
 	if o.token != "" {
-		handler = authMiddleware(o.token, o.secureCookie, handler)
+		handler = authMiddleware(o.token, o.secureCookie, devices, handler)
 	}
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
@@ -167,41 +197,9 @@ const authCookieName = "moa_auth"
 // acceptably sporadic.
 const authCookieMaxAge = int(90 * 24 * time.Hour / time.Second)
 
-// authMiddleware gates every request behind an opt-in shared token. A request
-// passes if it carries a valid auth cookie or a correct ?token=<secret> query
-// param. In the query case it sets an HttpOnly cookie and redirects to the same
-// URL without the param, so the token does not linger in history/logs and every
-// later request (WebSocket and push endpoints included) authenticates via the
-// cookie — no frontend changes needed. Anything else gets 401. The token is
-// compared in constant time.
-func authMiddleware(token string, secureCookie bool, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if c, err := r.Cookie(authCookieName); err == nil && tokenEqual(c.Value, token) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if tok := r.URL.Query().Get("token"); tok != "" && tokenEqual(tok, token) {
-			http.SetCookie(w, &http.Cookie{
-				Name:     authCookieName,
-				Value:    token,
-				Path:     "/",
-				MaxAge:   authCookieMaxAge,
-				HttpOnly: true,
-				SameSite: http.SameSiteLaxMode,
-				Secure:   secureCookie,
-			})
-			// Redirect to the same URL without the token query param.
-			u := *r.URL
-			params := u.Query()
-			params.Del("token")
-			u.RawQuery = params.Encode()
-			http.Redirect(w, r, u.RequestURI(), http.StatusFound)
-			return
-		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	})
-}
-
+// authMiddleware accepts the existing shared-token cookie/query flow and, when
+// configured, a revocable device credential. Query-token authentication keeps
+// its redirect behavior so the shared secret does not remain in a URL.
 func tokenEqual(got, want string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
