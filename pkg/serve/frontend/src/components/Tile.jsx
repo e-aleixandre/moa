@@ -95,13 +95,28 @@ function TileView({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
 
   const stop = (e, fn) => { e.stopPropagation(); fn(); };
 
+  // Clicking a tile focuses it and pulls focus into its main input — a desktop
+  // convenience so Cmd+1/2/3 lands the cursor ready to type. But a click that
+  // lands on an editable control (e.g. the ask_user answer input, a permission
+  // feedback field) or inside the ask_user card already has an intended focus
+  // target; stealing it back to the main textarea would fight the user. In that
+  // case just mark the tile focused without moving the caret.
+  const handleTileClick = (e) => {
+    const t = e.target;
+    if (t && t.closest && t.closest('input, textarea, [contenteditable="true"], .ask-user-card')) {
+      focusTile(tileId, { focusInput: false });
+      return;
+    }
+    focusTile(tileId, { respectSelection: true });
+  };
+
   if (!session) {
     return (
       <div
         ref={tileRef}
         class={classes.join(' ')}
         data-tile-id={tileId}
-        onClick={() => focusTile(tileId, { respectSelection: true })}
+        onClick={handleTileClick}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -130,7 +145,7 @@ function TileView({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
       ref={tileRef}
       class={classes.join(' ')}
       data-tile-id={tileId}
-      onClick={() => focusTile(tileId, { respectSelection: true })}
+      onClick={handleTileClick}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
