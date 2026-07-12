@@ -68,16 +68,18 @@ func (i authIdentity) auditID() string {
 }
 
 type deviceStore struct {
-	mu          sync.Mutex
-	path        string
-	lock        io.Closer
-	state       durableDeviceState
-	now         func() time.Time
-	closed      bool
-	unavailable bool
-	pairRate    []time.Time
-	claimRates  map[string]deviceClaimBucket
-	leases      map[string]map[*deviceLease]struct{}
+	mu           sync.Mutex
+	path         string
+	lock         io.Closer
+	state        durableDeviceState
+	now          func() time.Time
+	closed       bool
+	unavailable  bool
+	pairRate     []time.Time
+	claimRates   map[string]deviceClaimBucket
+	leases       map[string]map[*deviceLease]struct{}
+	expiryTimers map[string]*time.Timer
+	onDeactivate func(string)
 }
 
 type deviceClaimBucket struct {
@@ -180,11 +182,12 @@ func openDeviceStore(path string) (*deviceStore, error) {
 		return nil, err
 	}
 	store := &deviceStore{
-		path:       path,
-		lock:       lock,
-		now:        time.Now,
-		claimRates: make(map[string]deviceClaimBucket),
-		leases:     make(map[string]map[*deviceLease]struct{}),
+		path:         path,
+		lock:         lock,
+		now:          time.Now,
+		claimRates:   make(map[string]deviceClaimBucket),
+		leases:       make(map[string]map[*deviceLease]struct{}),
+		expiryTimers: make(map[string]*time.Timer),
 	}
 	contents, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -228,6 +231,10 @@ func (s *deviceStore) Close() error {
 	}
 	s.closed = true
 	leases := s.detachAllLeasesLocked()
+	for id, timer := range s.expiryTimers {
+		timer.Stop()
+		delete(s.expiryTimers, id)
+	}
 	lock := s.lock
 	s.lock = nil
 	s.mu.Unlock()
@@ -416,6 +423,7 @@ func (s *deviceStore) claim(source, pairingID, pairingSecret, label string) (dev
 		if err := s.saveLocked(); err != nil {
 			return deviceCredentialResult{}, err
 		}
+		s.scheduleExpiryLocked(s.state.Devices[len(s.state.Devices)-1])
 		return deviceCredentialResult{DeviceID: deviceID, Credential: deviceID + "." + secretText, ExpiresAt: pairing.DeviceExpiresAt}, nil
 	}
 	return deviceCredentialResult{}, errInvalidPairing
@@ -461,8 +469,8 @@ func (s *deviceStore) authenticate(credential string) (authIdentity, error) {
 		return authIdentity{}, errInvalidDeviceCredential
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed || s.unavailable {
+		s.mu.Unlock()
 		return authIdentity{}, errDeviceStoreUnavailable
 	}
 	now := s.now().UTC()
@@ -471,17 +479,37 @@ func (s *deviceStore) authenticate(credential string) (authIdentity, error) {
 		if device.ID != deviceID {
 			continue
 		}
-		if device.RevokedAt != nil || !device.ExpiresAt.After(now) || !hmac.Equal([]byte(device.Verifier), []byte(s.verifier("device", deviceID, secret))) {
+		if device.RevokedAt != nil || !hmac.Equal([]byte(device.Verifier), []byte(s.verifier("device", deviceID, secret))) {
+			s.mu.Unlock()
+			return authIdentity{}, errInvalidDeviceCredential
+		}
+		if !device.ExpiresAt.After(now) {
+			if timer := s.expiryTimers[deviceID]; timer != nil {
+				timer.Stop()
+				delete(s.expiryTimers, deviceID)
+			}
+			leases := s.detachDeviceLeasesLocked(deviceID)
+			onDeactivate := s.onDeactivate
+			s.mu.Unlock()
+			if onDeactivate != nil {
+				onDeactivate(deviceID)
+			}
+			for _, lease := range leases {
+				lease.shutdown("device credential expired")
+			}
 			return authIdentity{}, errInvalidDeviceCredential
 		}
 		if device.LastUsedAt == nil || now.Sub(*device.LastUsedAt) >= time.Minute {
 			device.LastUsedAt = &now
 			if err := s.saveLocked(); err != nil {
+				s.mu.Unlock()
 				return authIdentity{}, err
 			}
 		}
+		s.mu.Unlock()
 		return authIdentity{Kind: "device", DeviceID: deviceID, ExpiresAt: device.ExpiresAt}, nil
 	}
+	s.mu.Unlock()
 	return authIdentity{}, errInvalidDeviceCredential
 }
 
@@ -519,8 +547,16 @@ func (s *deviceStore) revoke(id, actor string) error {
 				return err
 			}
 		}
+		if timer := s.expiryTimers[id]; timer != nil {
+			timer.Stop()
+			delete(s.expiryTimers, id)
+		}
 		leases := s.detachDeviceLeasesLocked(id)
+		onDeactivate := s.onDeactivate
 		s.mu.Unlock()
+		if onDeactivate != nil {
+			onDeactivate(id)
+		}
 		for _, lease := range leases {
 			lease.shutdown("device credential revoked")
 		}
@@ -528,6 +564,109 @@ func (s *deviceStore) revoke(id, actor string) error {
 	}
 	s.mu.Unlock()
 	return errDeviceNotFound
+}
+
+// setDeactivationHook connects credential lifecycle to the Pulse operation
+// ledger. It is installed by NewServer after both stores exist. Revocation
+// waits for this hook, so returning from revoke means pending operations have
+// already been invalidated.
+func (s *deviceStore) setDeactivationHook(hook func(string)) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.onDeactivate = hook
+	now := s.now().UTC()
+	inactive := make([]string, 0)
+	for _, device := range s.state.Devices {
+		if device.RevokedAt == nil && device.ExpiresAt.After(now) {
+			s.scheduleExpiryLocked(device)
+		} else {
+			inactive = append(inactive, device.ID)
+		}
+	}
+	s.mu.Unlock()
+	for _, id := range inactive {
+		hook(id)
+	}
+}
+
+func (s *deviceStore) scheduleExpiryLocked(device durableDevice) {
+	if s.closed || device.ID == "" || device.RevokedAt != nil {
+		return
+	}
+	if timer := s.expiryTimers[device.ID]; timer != nil {
+		timer.Stop()
+	}
+	delay := time.Until(device.ExpiresAt)
+	if delay < 0 {
+		delay = 0
+	}
+	s.expiryTimers[device.ID] = time.AfterFunc(delay, func() { s.expireDevice(device.ID) })
+}
+
+func (s *deviceStore) expireDevice(id string) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.expiryTimers, id)
+	now := s.now().UTC()
+	var expired bool
+	for _, device := range s.state.Devices {
+		if device.ID == id && device.RevokedAt == nil && !device.ExpiresAt.After(now) {
+			expired = true
+			break
+		}
+	}
+	if !expired {
+		s.mu.Unlock()
+		return
+	}
+	leases := s.detachDeviceLeasesLocked(id)
+	onDeactivate := s.onDeactivate
+	s.mu.Unlock()
+	if onDeactivate != nil {
+		onDeactivate(id)
+	}
+	for _, lease := range leases {
+		lease.shutdown("device credential expired")
+	}
+}
+
+// withActiveDevice holds the device lifecycle boundary while fn begins the
+// protected operation. revoke and expiry acquire this same lock, so no Pulse
+// execution can begin after revoke returns.
+func (s *deviceStore) withActiveDevice(id string, fn func() error) error {
+	s.mu.Lock()
+	if s.closed || s.unavailable {
+		s.mu.Unlock()
+		return errDeviceStoreUnavailable
+	}
+	now := s.now().UTC()
+	for _, device := range s.state.Devices {
+		if device.ID != id {
+			continue
+		}
+		if device.RevokedAt == nil && device.ExpiresAt.After(now) {
+			err := fn()
+			s.mu.Unlock()
+			return err
+		}
+		break
+	}
+	leases := s.detachDeviceLeasesLocked(id)
+	onDeactivate := s.onDeactivate
+	s.mu.Unlock()
+	if onDeactivate != nil {
+		onDeactivate(id)
+	}
+	for _, lease := range leases {
+		lease.shutdown("device credential inactive")
+	}
+	return errInvalidDeviceCredential
 }
 
 func (s *deviceStore) registerWebSocketLease(identity authIdentity, closeFn func(string)) (*deviceLease, error) {

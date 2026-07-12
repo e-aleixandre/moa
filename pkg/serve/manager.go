@@ -473,10 +473,14 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	m.instructionRates = make(map[string][]time.Time)
 	if m.instructionStore != nil {
 		for _, record := range normalizeDurableInstructionRecords(instructionState.Records, m.instructionNow()) {
-			m.instructionRequests[record.SessionID] = append(m.instructionRequests[record.SessionID], instructionRequest{id: record.RequestID, fingerprint: record.Fingerprint, action: record.Action, at: record.At})
+			m.instructionRequests[record.SessionID] = append(m.instructionRequests[record.SessionID], instructionRequest{
+				id: record.RequestID, fingerprint: record.Fingerprint, action: record.Action,
+				at: record.At, state: durableInstructionStateOf(record), pulse: record.Pulse,
+			})
 		}
 		m.persistInstructionRequestsLocked()
 	}
+	m.recoverPulseConfirmations()
 	m.attention.Start()
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
