@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -33,6 +32,8 @@ var (
 	ErrInstructionConflict     = errors.New("request_id was already used with different text")
 	ErrInstructionRateLimit    = errors.New("instruction rate limit exceeded")
 	ErrInstructionScopeChanged = errors.New("instruction delivery scope changed since review")
+	errPulseInstructionLedger  = errors.New("Pulse instruction delivery ledger unavailable")
+	errPulseInstructionUnknown = errors.New("Pulse instruction delivery outcome is indeterminate")
 )
 
 type instructionRequest struct {
@@ -40,40 +41,61 @@ type instructionRequest struct {
 	fingerprint string
 	action      string
 	at          time.Time
+	state       string
+	pulse       bool
 }
 
-// VoiceInstruction delivers a normalized voice instruction without inheriting
-// Send's permission-steering behavior. It is safe for concurrent retries.
+type pulseInstructionPersistenceError struct {
+	delivered bool
+}
+
+func (e *pulseInstructionPersistenceError) Error() string {
+	return "Pulse instruction delivery was not durably recorded"
+}
+
+// VoiceInstruction delivers a normalized legacy voice instruction without
+// changing its established best-effort persistence behavior. It is safe for
+// concurrent retries in this process.
 func (m *Manager) VoiceInstruction(sessionID, text, requestID string) (string, error) {
-	return m.voiceInstruction(sessionID, text, requestID, "")
+	return m.voiceInstruction(sessionID, text, requestID, "", false)
 }
 
-// voiceInstructionExpected is the scope-bound counterpart to VoiceInstruction.
-// Pulse reviews whether an instruction will send or steer; confirmation must
-// not silently switch that reviewed delivery mode.
+// voiceInstructionExpected is the scope-bound counterpart used only by the
+// Pulse typed transaction. Pulse delivery uses a durable write-ahead ledger;
+// legacy /instruction callers retain their historical best-effort behavior.
 func (m *Manager) voiceInstructionExpected(sessionID, text, requestID, expectedAction string) (string, error) {
-	return m.voiceInstruction(sessionID, text, requestID, expectedAction)
+	return m.voiceInstruction(sessionID, text, requestID, expectedAction, true)
 }
 
-func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction string) (string, error) {
+func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction string, pulse bool) (string, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", ErrNotFound
 	}
 
-	now := m.instructionNow()
+	now := m.instructionNow().UTC()
 	fingerprint := m.instructionFingerprint(text)
 	m.instructionMu.Lock()
 	defer m.instructionMu.Unlock()
 
 	records := pruneInstructionRequests(m.instructionRequests[sessionID], now)
 	m.instructionRequests[sessionID] = records
-	m.persistInstructionRequestsLocked()
+	// Legacy pruning remains best effort. For Pulse an unavailable store stops
+	// before any execution is possible.
+	if !pulse {
+		m.persistInstructionRequestsLocked()
+	}
 	for _, record := range records {
 		if record.id != requestID {
 			continue
 		}
-		if !hmac.Equal([]byte(record.fingerprint), []byte(fingerprint)) {
+		if record.pulse != pulse || !hmac.Equal([]byte(record.fingerprint), []byte(fingerprint)) {
+			return "", ErrInstructionConflict
+		}
+		if record.state == "attempting" {
+			if pulse {
+				return "", errPulseInstructionUnknown
+			}
 			return "", ErrInstructionConflict
 		}
 		slog.Info("voice instruction replayed", "session_id", sessionID, "request_id", requestID, "action", record.action)
@@ -85,6 +107,20 @@ func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction st
 	m.instructionRates[sessionID] = sessionRate
 	if len(m.instructionGlobal) >= instructionRate || len(sessionRate) >= instructionSessionRate {
 		return "", ErrInstructionRateLimit
+	}
+
+	if pulse {
+		if m.instructionStore == nil || !m.instructionStore.available() {
+			return "", errPulseInstructionLedger
+		}
+		records = append(records, instructionRequest{id: requestID, fingerprint: fingerprint, at: now, state: "attempting", pulse: true})
+		m.instructionRequests[sessionID] = records
+		if err := m.persistInstructionRequestsLocked(); err != nil {
+			// The write-ahead entry was not durably accepted, so no canonical
+			// bus event is issued. Leave the in-memory attempt in place: a retry
+			// cannot accidentally turn a persistence failure into a duplicate.
+			return "", errPulseInstructionLedger
+		}
 	}
 
 	var action string
@@ -100,6 +136,9 @@ func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction st
 				"request_id": requestID,
 			},
 		}); err != nil {
+			if pulse {
+				return "", errPulseInstructionUnknown
+			}
 			return "", err
 		}
 		action = "send"
@@ -108,23 +147,41 @@ func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction st
 			return "", ErrInstructionScopeChanged
 		}
 		if err := sess.runtime.Bus.Execute(bus.SteerAgent{Text: text}); err != nil {
+			if pulse {
+				return "", errPulseInstructionUnknown
+			}
 			return "", err
 		}
 		action = "steer"
 	case bus.StatePermission:
 		return "", ErrInstructionPermission
 	default:
+		if pulse {
+			return "", errPulseInstructionUnknown
+		}
 		return "", errors.New("unknown session state")
 	}
 
 	m.instructionGlobal = append(m.instructionGlobal, now)
 	m.instructionRates[sessionID] = append(sessionRate, now)
-	records = append(records, instructionRequest{id: requestID, fingerprint: fingerprint, action: action, at: now})
-	if len(records) > instructionHistory {
-		records = records[len(records)-instructionHistory:]
+	if pulse {
+		for i := range records {
+			if records[i].id == requestID && records[i].pulse {
+				records[i].state = "accepted"
+				records[i].action = action
+				break
+			}
+		}
+	} else {
+		records = append(records, instructionRequest{id: requestID, fingerprint: fingerprint, action: action, at: now, state: "accepted"})
 	}
-	m.instructionRequests[sessionID] = records
-	m.persistInstructionRequestsLocked()
+	m.instructionRequests[sessionID] = trimInstructionRequestRecords(records)
+	if err := m.persistInstructionRequestsLocked(); err != nil {
+		if pulse {
+			return action, &pulseInstructionPersistenceError{delivered: true}
+		}
+		slog.Warn("instruction idempotency persistence failed", "error", err)
+	}
 	slog.Info("voice instruction applied", "session_id", sessionID, "request_id", requestID, "action", action)
 	return action, nil
 }
@@ -135,73 +192,65 @@ func (m *Manager) instructionFingerprint(text string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// persistInstructionRequestsLocked writes the bounded replay records after an
-// accepted instruction. Failures do not expose text and leave in-memory replay
-// protection intact for this process; callers retain normal instruction
-// liveness while the server logs the durable-recovery degradation.
-func (m *Manager) persistInstructionRequestsLocked() {
+// persistInstructionRequestsLocked writes replay metadata and Pulse's
+// write-ahead state. The caller holds instructionMu.
+func (m *Manager) persistInstructionRequestsLocked() error {
 	m.trimInstructionRequestsLocked()
 	if m.instructionStore == nil {
-		return
+		return errPulseInstructionLedger
 	}
 	state := durableInstructionState{Key: encodeInstructionKey(m.instructionKey)}
 	for sessionID, records := range m.instructionRequests {
 		for _, record := range records {
-			state.Records = append(state.Records, durableInstructionRequest{SessionID: sessionID, RequestID: record.id, Fingerprint: record.fingerprint, Action: record.action, At: record.at})
+			state.Records = append(state.Records, durableInstructionRequest{
+				SessionID: sessionID, RequestID: record.id, Fingerprint: record.fingerprint,
+				Action: record.action, State: record.state, Pulse: record.pulse, At: record.at,
+			})
 		}
 	}
-	state.Records = normalizeDurableInstructionRecords(state.Records, m.instructionNow())
-	if err := m.instructionStore.save(state); err != nil {
-		slog.Warn("instruction idempotency persistence failed", "error", err)
-	}
+	state.Records = normalizeDurableInstructionRecords(state.Records, m.instructionNow().UTC())
+	return m.instructionStore.save(state)
 }
 
 func (m *Manager) trimInstructionRequestsLocked() {
-	type recordRef struct {
-		sessionID string
-		index     int
-		at        time.Time
-	}
-	refs := make([]recordRef, 0)
 	for sessionID, records := range m.instructionRequests {
-		for index, record := range records {
-			refs = append(refs, recordRef{sessionID: sessionID, index: index, at: record.at})
-		}
-	}
-	if len(refs) <= maxDurableInstructionRecords {
-		return
-	}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].at.Before(refs[j].at) })
-	drop := make(map[string]map[int]struct{}, len(refs)-maxDurableInstructionRecords)
-	for _, ref := range refs[:len(refs)-maxDurableInstructionRecords] {
-		if drop[ref.sessionID] == nil {
-			drop[ref.sessionID] = make(map[int]struct{})
-		}
-		drop[ref.sessionID][ref.index] = struct{}{}
-	}
-	for sessionID, indexes := range drop {
-		records := m.instructionRequests[sessionID]
-		kept := records[:0]
-		for index, record := range records {
-			if _, remove := indexes[index]; !remove {
-				kept = append(kept, record)
-			}
-		}
-		if len(kept) == 0 {
+		records = trimInstructionRequestRecords(pruneInstructionRequests(records, m.instructionNow().UTC()))
+		if len(records) == 0 {
 			delete(m.instructionRequests, sessionID)
 		} else {
-			m.instructionRequests[sessionID] = kept
+			m.instructionRequests[sessionID] = records
 		}
 	}
 }
 
-func pruneInstructionRequests(records []instructionRequest, now time.Time) []instructionRequest {
-	cutoff := now.Add(-instructionTTL)
-	first := 0
-	for first < len(records) && !records[first].at.After(cutoff) {
-		first++
+func trimInstructionRequestRecords(records []instructionRequest) []instructionRequest {
+	legacy := make([]instructionRequest, 0, len(records))
+	pulse := make([]instructionRequest, 0, len(records))
+	for _, record := range records {
+		if record.pulse {
+			pulse = append(pulse, record)
+		} else {
+			legacy = append(legacy, record)
+		}
 	}
-	return records[first:]
+	if len(legacy) > instructionHistory {
+		legacy = legacy[len(legacy)-instructionHistory:]
+	}
+	return append(legacy, pulse...)
+}
+
+func pruneInstructionRequests(records []instructionRequest, now time.Time) []instructionRequest {
+	kept := records[:0]
+	for _, record := range records {
+		ttl := instructionTTL
+		if record.pulse {
+			ttl = pulseOperationReceiptTTL
+		}
+		if record.at.After(now.Add(-ttl)) {
+			kept = append(kept, record)
+		}
+	}
+	return kept
 }
 
 func pruneInstructionRate(timestamps []time.Time, now time.Time) []time.Time {
@@ -211,6 +260,29 @@ func pruneInstructionRate(timestamps []time.Time, now time.Time) []time.Time {
 		first++
 	}
 	return timestamps[first:]
+}
+
+type pulseDeliveryOutcome struct {
+	state  string
+	action string
+	at     time.Time
+}
+
+// pulseInstructionOutcome reads only the canonical durable Pulse ledger. It
+// is used after restart to turn a known delivery into a receipt without a
+// second SendPrompt/steer call.
+func (m *Manager) pulseInstructionOutcome(sessionID, requestID string) pulseDeliveryOutcome {
+	m.instructionMu.Lock()
+	defer m.instructionMu.Unlock()
+	if m.instructionStore == nil || !m.instructionStore.available() {
+		return pulseDeliveryOutcome{state: "unknown"}
+	}
+	for _, record := range m.instructionRequests[sessionID] {
+		if record.id == requestID && record.pulse {
+			return pulseDeliveryOutcome{state: record.state, action: record.action, at: record.at}
+		}
+	}
+	return pulseDeliveryOutcome{state: "absent"}
 }
 
 type instructionBody struct {

@@ -74,6 +74,14 @@ In the conversation history, each attachment is tagged so you can tell which pat
 
 By default `moa serve` has **no authentication** — anyone who can reach the port controls your agents. For access beyond `127.0.0.1`, pass `--token <secret>` (or set `MOA_SERVE_TOKEN`) to require a session cookie or `?token=<secret>` on every request; visiting that URL once sets an `HttpOnly` cookie for subsequent requests. An authenticated owner can additionally pair a revocable Pulse device. A claimed device authenticates REST and WebSocket requests with `Authorization: Moa-Device <device-id>.<secret>`; its credential is separate from the owner token and is rejected outside direct loopback unless the request uses TLS. Pairing and device credentials are not accepted in URLs.
 
+The device credential is **not** a second owner token. Its legacy access is a
+small explicit read-only allowlist (safe Ops/session/conversation/file
+projections and read-only WebSocket streams); every other legacy route is
+owner-only. In particular a device cannot call `/send`, `/instruction`,
+permission, shell, command, config, branch, subagent, cancel, pairing, device
+list, or revoke endpoints. New owner capabilities must get a typed Pulse
+adapter rather than being added to this allowlist.
+
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
 
 ### Pulse typed write transactions
@@ -94,9 +102,18 @@ The initial and only kind is `directed_instruction` (`target`, bounded `text`).
 Prepare resolves an exact Ops destination or returns `409` candidates. Confirm
 binds the same paired device and immutable review; it never accepts a
 client-supplied confirmation flag, endpoint/method, free-form command or new
-text. Pending reviews expire after five minutes. Receipts are idempotent and
-say whether Moa accepted/rejected and delivered the instruction; they do not
-claim that agent work is complete unless that is separately observed.
+text. Pending reviews expire after five minutes. Receipts are immutable and
+idempotent, retained for one hour, and are never evicted early to make room for
+a newer operation: admission returns `429` when pending or receipt capacity is
+full. A receipt says whether Moa accepted/rejected and delivered the
+instruction; it does not claim that agent work is complete unless that is
+separately observed. `status: "indeterminate"` and
+`delivery: "indeterminate"` mean a crash or durable-storage window prevents
+Moa from truthfully determining whether canonical delivery reached the agent;
+Pulse must present that uncertainty and may not treat it as rejection. Serve
+never retries such delivery in the background. Revoke/expiry synchronously
+invalidates pending operations and confirmation rechecks the active device at
+the execution boundary.
 
 ## Frontend development
 

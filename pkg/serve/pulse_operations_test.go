@@ -412,7 +412,7 @@ func TestPulseOperationStoreDurabilityAndConcurrentConfirm(t *testing.T) {
 		t.Fatalf("concurrent confirms executors=%d waiters=%d", executor, len(waiters))
 	}
 	receipt := pulseOperationReceipt{OperationID: concurrentID, Kind: pulseOperationDirectedInstruction, Status: "accepted", Delivery: "delivered_to_agent", Observation: "not_observed", Completion: "not_observed", At: time.Now().UTC()}
-	if err := store.finishConfirm(concurrentID, receipt); err != nil {
+	if _, err := store.finishConfirm(concurrentID, receipt); err != nil {
 		t.Fatal(err)
 	}
 	for _, waiter := range waiters {

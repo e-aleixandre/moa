@@ -105,6 +105,9 @@ func handlePulseOperationPrepare(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 		case errors.Is(err, ErrInstructionPermission), errors.Is(err, errPulseOperationReviewStale):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "operation cannot be reviewed in the target's current state"})
+		case errors.Is(err, errOperationAdmission):
+			w.Header().Set("Retry-After", "60")
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Pulse operation capacity reached; retry after existing reviews or receipts expire"})
 		case errors.Is(err, errPulseOperationUnavailable), errors.Is(err, errOperationStoreUnavailable):
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Pulse operations temporarily unavailable"})
 		case err != nil:
@@ -133,7 +136,8 @@ func handlePulseOperationConfirm(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "invalid operation id", http.StatusBadRequest)
 			return
 		}
-		receipt, err := mgr.confirmPulseOperation(r.Context(), identity.DeviceID, id)
+		devices, _ := requestDeviceStore(r)
+		receipt, err := mgr.confirmPulseOperation(r.Context(), devices, identity.DeviceID, id)
 		switch {
 		case errors.Is(err, errOperationNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -299,8 +303,11 @@ func directedInstructionReview(operation durableOperation) *pulseOperationReview
 	}
 }
 
-func (m *Manager) confirmPulseOperation(ctx context.Context, deviceID, id string) (pulseOperationReceipt, error) {
+func (m *Manager) confirmPulseOperation(ctx context.Context, devices *deviceStore, deviceID, id string) (pulseOperationReceipt, error) {
 	if m.pulseOperations == nil {
+		return pulseOperationReceipt{}, errPulseOperationUnavailable
+	}
+	if devices == nil {
 		return pulseOperationReceipt{}, errPulseOperationUnavailable
 	}
 	start, err := m.pulseOperations.beginConfirm(id, deviceID)
@@ -321,11 +328,46 @@ func (m *Manager) confirmPulseOperation(ctx context.Context, deviceID, id string
 	if !start.Execute {
 		return pulseOperationReceipt{}, errOperationStoreUnavailable
 	}
-	receipt := m.executePulseOperation(start.Operation)
-	if err := m.pulseOperations.finishConfirm(id, receipt); err != nil {
+	if start.Recover {
+		if receipt, settled := m.recoverPulseConfirmation(start.Operation); settled {
+			return m.finishPulseConfirmation(id, receipt)
+		}
+	}
+
+	var receipt pulseOperationReceipt
+	err = devices.withActiveDevice(deviceID, func() error {
+		// This write-ahead marker is inside the device lifecycle boundary and
+		// immediately precedes the canonical primitive. Once revoke returns no
+		// later protected execution can begin.
+		if err := m.pulseOperations.markAttempt(id); err != nil {
+			return err
+		}
+		receipt = m.executePulseOperation(start.Operation)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errInvalidDeviceCredential) {
+			receipt = rejectedOperationReceipt(start.Operation, time.Now().UTC(), "device_inactive")
+			return m.finishPulseConfirmation(id, receipt)
+		}
 		return pulseOperationReceipt{}, err
 	}
-	return receipt, nil
+	return m.finishPulseConfirmation(id, receipt)
+}
+
+func (m *Manager) finishPulseConfirmation(id string, receipt pulseOperationReceipt) (pulseOperationReceipt, error) {
+	stored, err := m.pulseOperations.finishConfirm(id, receipt)
+	if err != nil {
+		// finishConfirm keeps the in-memory final receipt and refuses further
+		// prepares after a persistence failure. Returning the known receipt is
+		// more truthful than converting an already delivered instruction into
+		// an HTTP failure.
+		if stored.OperationID != "" {
+			return stored, nil
+		}
+		return pulseOperationReceipt{}, err
+	}
+	return stored, nil
 }
 
 func (m *Manager) executePulseOperation(operation durableOperation) pulseOperationReceipt {
@@ -356,13 +398,23 @@ func (m *Manager) executePulseDirectedInstruction(operation durableOperation, no
 	}
 	action, err := m.voiceInstructionExpected(operation.Target.ID, operation.Text, "pulse."+operation.ID, operation.ExpectedAction)
 	if err != nil {
+		var persistence *pulseInstructionPersistenceError
+		if errors.As(err, &persistence) {
+			m.pulseOperations.markDegraded()
+			return indeterminateOperationReceipt(operation, now, "canonical_delivery_not_durable")
+		}
 		switch {
 		case errors.Is(err, ErrNotFound), errors.Is(err, ErrInstructionPermission), errors.Is(err, ErrInstructionScopeChanged):
 			return rejectedOperationReceipt(operation, now, "review_expired")
 		case errors.Is(err, ErrInstructionRateLimit):
 			return rejectedOperationReceipt(operation, now, "policy_rejected")
+		case errors.Is(err, errPulseInstructionLedger):
+			m.pulseOperations.markDegraded()
+			return rejectedOperationReceipt(operation, now, "delivery_unavailable")
+		case errors.Is(err, errPulseInstructionUnknown):
+			return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown")
 		default:
-			return rejectedOperationReceipt(operation, now, "delivery_rejected")
+			return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown")
 		}
 	}
 	return pulseOperationReceipt{
@@ -374,6 +426,73 @@ func (m *Manager) executePulseDirectedInstruction(operation durableOperation, no
 		Observation: "not_observed",
 		Completion:  "not_observed",
 		At:          now,
+	}
+}
+
+func acceptedOperationReceipt(operation durableOperation, action string, at time.Time) pulseOperationReceipt {
+	return pulseOperationReceipt{
+		OperationID: operation.ID,
+		Kind:        operation.Kind,
+		Status:      "accepted",
+		Action:      action,
+		Delivery:    "delivered_to_agent",
+		Observation: "not_observed",
+		Completion:  "not_observed",
+		At:          at,
+	}
+}
+
+func indeterminateOperationReceipt(operation durableOperation, now time.Time, reason string) pulseOperationReceipt {
+	return pulseOperationReceipt{
+		OperationID: operation.ID,
+		Kind:        operation.Kind,
+		Status:      "indeterminate",
+		Delivery:    "indeterminate",
+		Observation: "not_observed",
+		Completion:  "not_observed",
+		Reason:      reason,
+		At:          now,
+	}
+}
+
+// recoverPulseConfirmations never performs delivery. It can turn a durable
+// canonical accepted record into a receipt, or settle a known uncertain
+// attempt as indeterminate. A still-valid confirming review without a ledger
+// attempt remains available for an explicit retry; that retry first writes
+// both operation and canonical write-ahead records before it can execute.
+func (m *Manager) recoverPulseConfirmations() {
+	if m.pulseOperations == nil {
+		return
+	}
+	for _, operation := range m.pulseOperations.confirmingOperations() {
+		receipt, settled := m.recoverPulseConfirmation(operation)
+		if settled {
+			_ = m.pulseOperations.finalizeRecovered(operation.ID, receipt)
+		}
+	}
+}
+
+func (m *Manager) recoverPulseConfirmation(operation durableOperation) (pulseOperationReceipt, bool) {
+	now := time.Now().UTC()
+	outcome := m.pulseInstructionOutcome(operation.Target.ID, "pulse."+operation.ID)
+	switch outcome.state {
+	case "accepted":
+		return acceptedOperationReceipt(operation, outcome.action, outcome.at), true
+	case "attempting", "unknown":
+		return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown"), true
+	case "absent":
+		if !operation.ExpiresAt.After(now) {
+			return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown"), true
+		}
+		return pulseOperationReceipt{}, false
+	default:
+		return indeterminateOperationReceipt(operation, now, "delivery_outcome_unknown"), true
+	}
+}
+
+func (m *Manager) invalidatePulseDeviceOperations(deviceID string) {
+	if m.pulseOperations != nil {
+		m.pulseOperations.invalidateDevice(deviceID)
 	}
 }
 

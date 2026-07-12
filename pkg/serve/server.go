@@ -146,6 +146,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 		devices, err = openDeviceStore(path)
 		if err != nil {
 			slog.Warn("device authentication disabled", "error", err)
+		} else {
+			devices.setDeactivationHook(manager.invalidatePulseDeviceOperations)
 		}
 	}
 	// Device handlers receive the store selected above; the rest of Serve stays
@@ -161,9 +163,10 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/pulse/operations/{id}/confirm", handlePulseOperationConfirm(manager))
 	mux.HandleFunc("GET /api/pulse/operations/{id}", handlePulseOperationGet(manager))
 
-	handler := csrfMiddleware(bodyTimeoutMiddleware(mux))
-	// Token auth (when configured) sits under the Host check but above CSRF, so
-	// it also guards the WebSocket, push, and static routes via the cookie.
+	handler := routeAuthorizationMiddleware(csrfMiddleware(bodyTimeoutMiddleware(mux)))
+	// Token auth (when configured) sits under the Host check but above route
+	// authorization and CSRF, so it also guards the WebSocket, push, and static
+	// routes via the cookie.
 	if o.token != "" {
 		handler = authMiddleware(o.token, o.secureCookie, devices, handler)
 	}

@@ -219,11 +219,20 @@ Las peticiones de pairing y claim son JSON estricto (`Content-Type:
 application/json`, sin campos desconocidos) y todos los POST requieren
 `X-Moa-Request`, incluido el claim sin autenticar. El propietario usa la cookie
 existente de `--token`; un dispositivo usa
-`Authorization: Moa-Device <device-id>.<secret>` para REST y WebSocket. Es un
-terminal del propietario, no un rol de solo lectura. `GET /api/pulse/devices`
-y `POST /api/pulse/devices/{id}/revoke` permiten revisar y revocar terminales.
-Al revocar o caducar una credencial, Serve cierra inmediatamente sus WebSocket
-activos; las conexiones autenticadas por cookie/token no se ven afectadas.
+`Authorization: Moa-Device <device-id>.<secret>` para REST y WebSocket. La
+credencial de dispositivo no es un segundo token web: solo puede consultar una
+lista explícita de proyecciones seguras de lectura (Ops, sesiones,
+conversación/archivos acotados y streams de solo lectura) y las operaciones
+Pulse tipadas. No puede usar ninguna ruta legacy de mutación (`/send`,
+`/instruction`, permisos, shell, comandos, configuración, ramas, subagentes,
+cancelación, etc.), ni crear/listar/revocar pairings; esas rutas administrativas
+son exclusivamente del propietario. Es un terminal del propietario, no un rol
+de solo lectura. `GET /api/pulse/devices` y
+`POST /api/pulse/devices/{id}/revoke` permiten revisar y revocar terminales.
+Al revocar o caducar una credencial, Serve invalida sincrónicamente sus
+operaciones pendientes y cierra inmediatamente sus WebSocket activos; una
+confirmación vuelve a comprobar la credencial en el límite atómico anterior a
+la ejecución. Las conexiones autenticadas por cookie/token no se ven afectadas.
 
 Serve limita la creación a 5 pairings por hora y los claims a 12 por minuto y
 por IP del par TCP directo. No confía en `X-Forwarded-For`; un proxy debe ser
@@ -266,12 +275,20 @@ contrato.
 Las operaciones pendientes vencen en cinco minutos; los recibos se retienen una
 hora para reintentos. El almacén privado de operaciones y recibos usa
 directorio `0700`, fichero `0600`, bloqueo exclusivo por proceso, rename
-atómico y sincronización durable; el texto de una
-instrucción solo vive mientras la revisión está pendiente. Un recibo es
-inmutable y reintentable: distingue `accepted` de `rejected`, entrega y
-observación. `delivered_to_agent` **no** significa que el trabajo haya
-terminado; el resultado sigue siendo `not_observed` hasta que exista evidencia
-canónica posterior.
+atómico y sincronización durable; el texto de una instrucción solo vive
+mientras la revisión está pendiente. No se expulsa una revisión pendiente/en
+confirmación ni un recibo antes de esa hora: la admisión limita las revisiones
+pendientes por dispositivo y globalmente, y la capacidad de recibos devuelve
+`429` en vez de perder un recibo joven. Un recibo es inmutable y reintentable:
+distingue `accepted` de `rejected`, entrega y observación. Si un crash o un
+fallo durable deja incierto si la entrega alcanzó al agente, el recibo terminal
+es `indeterminate` con `delivery: "indeterminate"`; nunca se reescribe como
+`rejected` ni se reintenta en segundo plano. La recuperación consulta el
+ledger canónico de instrucciones `pulse.<operation_id>` antes de reconstruir
+un recibo, por lo que no vuelve a enviar/dirigir una instrucción conocida.
+`delivered_to_agent` **no** significa que el trabajo haya terminado; el
+resultado sigue siendo `not_observed` hasta que exista evidencia canónica
+posterior.
 
 ## Producto por etapas
 

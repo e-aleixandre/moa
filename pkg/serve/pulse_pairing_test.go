@@ -134,8 +134,8 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, credential.Credential); got.Code != http.StatusOK {
 		t.Fatalf("device REST auth = %d: %s", got.Code, got.Body.String())
 	}
-	if got := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, credential.Credential); got.Code != http.StatusOK {
-		t.Fatalf("device list auth = %d: %s", got.Code, got.Body.String())
+	if got := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, credential.Credential); got.Code != http.StatusForbidden {
+		t.Fatalf("device list auth = %d, want 403: %s", got.Code, got.Body.String())
 	}
 	devices := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", owner, "")
 	if devices.Code != http.StatusOK || !strings.Contains(devices.Body.String(), credential.DeviceID) || strings.Contains(devices.Body.String(), credential.Credential) || strings.Contains(devices.Body.String(), "verifier") {
