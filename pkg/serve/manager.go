@@ -245,11 +245,6 @@ type Manager struct {
 	instructionStore    *instructionStore
 	instructionKey      []byte
 	instructionNow      func() time.Time
-	operationMu         sync.Mutex
-	operations          map[string]*pulseOperation
-	operationStore      *operationStore
-	operationKey        []byte
-	operationNow        func() time.Time
 	conversationKey     []byte // process-local HMAC key for read cursors
 
 	providerFactory func(model core.Model) (core.Provider, error)
@@ -304,9 +299,6 @@ type ManagerConfig struct {
 	// InstructionPath overrides the private replay-idempotency store. Empty
 	// stores it beside the session base directory.
 	InstructionPath string
-	// OperationPath overrides the private Pulse pending-operation and receipt
-	// store. Empty stores it beside the session base directory.
-	OperationPath string
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -400,36 +392,6 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			instructionStore = nil
 		}
 	}
-	operationPath := cfg.OperationPath
-	if operationPath == "" {
-		baseDir := cfg.SessionBaseDir
-		if baseDir == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				baseDir = filepath.Join(home, ".config", "moa", "sessions")
-			}
-		}
-		if baseDir != "" {
-			operationPath = filepath.Join(filepath.Dir(baseDir), "pulse-operations.json")
-		}
-	}
-	var operationStore *operationStore
-	var operationState durableOperationState
-	if operationPath != "" {
-		var err error
-		operationStore, operationState, err = openOperationStore(operationPath)
-		if err != nil {
-			slog.Warn("pulse operation storage disabled", "path", operationPath, "error", err)
-		}
-	}
-	operationKey, validOperationKey := decodeInstructionKey(operationState.Key)
-	if !validOperationKey {
-		var err error
-		operationKey, err = newInstructionKey()
-		if err != nil {
-			slog.Warn("pulse operation key unavailable", "error", err)
-			operationStore = nil
-		}
-	}
 	conversationKey, err := newInstructionKey()
 	if err != nil {
 		// A nil key only makes cursors unusable; reads without a cursor remain
@@ -458,10 +420,6 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		instructionStore: instructionStore,
 		instructionKey:   instructionKey,
 		instructionNow:   time.Now,
-		operations:       make(map[string]*pulseOperation),
-		operationStore:   operationStore,
-		operationKey:     operationKey,
-		operationNow:     time.Now,
 		conversationKey:  conversationKey,
 	}
 	m.instructionRequests = make(map[string][]instructionRequest)
@@ -471,10 +429,6 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			m.instructionRequests[record.SessionID] = append(m.instructionRequests[record.SessionID], instructionRequest{id: record.RequestID, fingerprint: record.Fingerprint, action: record.Action, at: record.At})
 		}
 		m.persistInstructionRequestsLocked()
-	}
-	if m.operationStore != nil {
-		m.restorePulseOperations(operationState.Operations)
-		m.persistPulseOperationsLocked()
 	}
 	m.attention.Start()
 	if m.scheduler != nil {
