@@ -7,30 +7,54 @@ const MAX_RENDERED_MESSAGES = 200;
 
 export function MessageList({ session }) {
   const containerRef = useRef(null);
-  const [atBottom, setAtBottom] = useState(true);
   const [showNewBtn, setShowNewBtn] = useState(false);
+  // stickToBottom is a ref (not state) so the new-content effect reads the
+  // user's intent synchronously, without a render lag that would let a delta
+  // re-anchor the view mid-gesture. It starts true (follow the latest output)
+  // and flips false as soon as the user scrolls away from the bottom; it flips
+  // back true when they return to the bottom (manually or via the button).
+  const stickToBottom = useRef(true);
 
+  const AT_BOTTOM_PX = 80;
+
+  const maxScrollTop = (el) => Math.max(0, el.scrollHeight - el.clientHeight);
+
+  const scrollToBottomNow = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const target = maxScrollTop(el);
+    if (el.scrollTop >= target) return; // already at the bottom
+    el.scrollTop = target;
+  }, []);
+
+  // Decide stick-to-bottom purely from position: our own auto-scroll lands at
+  // the bottom (isAtBottom → stays true); only a real gesture that moves
+  // meaningfully away from the bottom clears the intent. No programmatic flag
+  // is needed, so there's no race where a user scroll gets swallowed.
   const checkScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    setAtBottom(isAtBottom);
+    const isAtBottom = maxScrollTop(el) - el.scrollTop < AT_BOTTOM_PX;
+    stickToBottom.current = isAtBottom;
     setShowNewBtn(!isAtBottom);
   }, []);
 
-  // Auto-scroll when at bottom and new content arrives
+  // When new content arrives, only follow it if the user hasn't scrolled up.
   useEffect(() => {
-    if (atBottom && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-    }
-  }, [atBottom, session?.messages?.length, session?.streamingText, session?.thinkingText]);
+    if (stickToBottom.current) scrollToBottomNow();
+  }, [scrollToBottomNow, session?.messages?.length, session?.streamingText, session?.thinkingText]);
+
+  // Switching to another session starts pinned to the latest again.
+  useEffect(() => {
+    stickToBottom.current = true;
+    setShowNewBtn(false);
+    scrollToBottomNow();
+  }, [session?.id, scrollToBottomNow]);
 
   const scrollToBottom = () => {
-    const el = containerRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-      setShowNewBtn(false);
-    }
+    stickToBottom.current = true;
+    scrollToBottomNow();
+    setShowNewBtn(false);
   };
 
   if (!session) return <div class="messages-wrap"><div class="messages" /></div>;
