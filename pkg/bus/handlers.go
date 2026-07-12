@@ -1579,7 +1579,7 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 		// State transition.
 		if sctx.State != nil {
 			if err != nil && !cancelled {
-				_ = sctx.State.TransitionWithError(StateError, err.Error())
+				_ = sctx.State.TransitionWithError(StateError, cleanRunError(err))
 			} else {
 				_ = sctx.State.Transition(StateIdle)
 			}
@@ -1610,6 +1610,25 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 		})
 	}()
 	return nil
+}
+
+// cleanRunError renders a run error for user-facing display. It unwraps the
+// internal "stream: provider: …" plumbing prefixes and, for a usage/quota
+// limit, uses the typed error's clean message ("… quota exceeded: … (resets in
+// X)") so the user sees an actionable reason instead of raw HTTP noise or —
+// worse — a false "interrupted" label.
+func cleanRunError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if qe, ok := core.AsQuotaExceeded(err); ok {
+		return qe.Error()
+	}
+	msg := err.Error()
+	for _, prefix := range []string{"stream: ", "provider: "} {
+		msg = strings.TrimPrefix(msg, prefix)
+	}
+	return msg
 }
 
 // hasSuccessfulEdits checks tool_result messages for successful file-editing tools.

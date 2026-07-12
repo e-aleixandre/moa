@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -118,6 +119,112 @@ func TestDo_NonRetryableStatus(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != 401 {
 		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+// TestDo_RetryableVeto covers the caller veto: a normally-retryable 429 that the
+// caller recognizes as terminal (a usage-limit exhaustion) must be returned
+// immediately — not retried — with its body intact so the caller can parse it.
+func TestDo_RetryableVeto(t *testing.T) {
+	var calls atomic.Int32
+	const body = `{"error":{"type":"usage_limit_reached"}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(429)
+		_, _ = fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	var vetoBody string
+	policy := Policy{
+		MaxRetries: 3, BaseDelay: 10 * time.Millisecond, MaxDelay: 50 * time.Millisecond,
+		Retryable: func(resp *http.Response, b []byte) bool {
+			vetoBody = string(b)
+			return false // terminal — don't retry
+		},
+	}
+	resp, err := Do(context.Background(), srv.Client(), func() (*http.Request, error) {
+		return http.NewRequest("GET", srv.URL, nil)
+	}, policy, nil)
+	if err != nil {
+		t.Fatalf("veto should return the response, got error: %v", err)
+	}
+	if resp.StatusCode != 429 {
+		t.Fatalf("expected 429, got %d", resp.StatusCode)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected exactly 1 call (no retries), got %d", calls.Load())
+	}
+	if vetoBody != body {
+		t.Fatalf("veto received body %q, want %q", vetoBody, body)
+	}
+	// The body must be restored so the caller can read it.
+	got, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if string(got) != body {
+		t.Fatalf("response body = %q, want %q (must be restored after veto)", string(got), body)
+	}
+}
+
+// TestDo_RetryableVetoAllows confirms returning true keeps the normal retry
+// behaviour (the veto is opt-out per response, not a blanket disable).
+func TestDo_RetryableVetoAllows(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 1 {
+			w.WriteHeader(429)
+			_, _ = fmt.Fprint(w, "transient")
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	policy := Policy{
+		MaxRetries: 3, BaseDelay: 10 * time.Millisecond, MaxDelay: 50 * time.Millisecond,
+		Retryable: func(resp *http.Response, b []byte) bool { return true },
+	}
+	resp, err := Do(context.Background(), srv.Client(), func() (*http.Request, error) {
+		return http.NewRequest("GET", srv.URL, nil)
+	}, policy, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 after retry, got %d", resp.StatusCode)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected 2 calls (1 retry), got %d", calls.Load())
+	}
+}
+
+// TestDo_RetryableVetoPreservedWithZeroPolicy guards that the veto callback
+// survives the "zero MaxRetries → DefaultPolicy" defaulting path (the veto is
+// not one of the fields that "zero means default" should discard).
+func TestDo_RetryableVetoPreservedWithZeroPolicy(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(429)
+		_, _ = fmt.Fprint(w, "terminal")
+	}))
+	defer srv.Close()
+
+	// Zero-value except the veto: MaxRetries==0 triggers DefaultPolicy.
+	policy := Policy{Retryable: func(resp *http.Response, b []byte) bool { return false }}
+	resp, err := Do(context.Background(), srv.Client(), func() (*http.Request, error) {
+		return http.NewRequest("GET", srv.URL, nil)
+	}, policy, nil)
+	if err != nil {
+		t.Fatalf("veto should return the response, got error: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != 429 {
+		t.Fatalf("expected 429, got %d", resp.StatusCode)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("veto must survive defaulting — expected 1 call, got %d", calls.Load())
 	}
 }
 

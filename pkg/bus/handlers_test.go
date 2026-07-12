@@ -1,11 +1,31 @@
 package bus
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
 )
+
+// TestCleanRunError guards the user-facing rendering of run errors: a usage
+// limit shows its typed, actionable message, while a generic error is stripped
+// of the internal "stream: provider:" plumbing prefixes.
+func TestCleanRunError(t *testing.T) {
+	quota := &core.QuotaExceededError{Provider: "openai", Message: "The usage limit has been reached"}
+	wrapped := fmt.Errorf("stream: %w", fmt.Errorf("provider: %w", quota))
+	if got := cleanRunError(wrapped); got != "openai quota exceeded: The usage limit has been reached" {
+		t.Fatalf("quota clean = %q", got)
+	}
+	generic := errors.New("stream: provider: openai: HTTP 500: boom")
+	if got := cleanRunError(generic); got != "openai: HTTP 500: boom" {
+		t.Fatalf("generic clean = %q", got)
+	}
+	if got := cleanRunError(nil); got != "" {
+		t.Fatalf("nil clean = %q, want empty", got)
+	}
+}
 
 func TestHasSuccessfulEdits_True(t *testing.T) {
 	msgs := []core.AgentMessage{

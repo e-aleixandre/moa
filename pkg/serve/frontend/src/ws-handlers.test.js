@@ -102,3 +102,31 @@ test('handleWsGoalChange adds a live start line once on fresh activation', () =>
   msgs = store.get().sessions.s1.messages;
   expect(msgs).toHaveLength(1);
 });
+
+import { handleWsStateChange } from './ws-handlers.js';
+import { getToasts } from './notifications.js';
+
+// Bug: an OpenAI usage-limit (429) ends the run in the "error" state. The web
+// must surface the reason (parity with the TUI's run-end error block), not stay
+// silent. The session is kept visible so the focused-tile path runs (no
+// navigator-dependent attention notification).
+test('handleWsStateChange surfaces a quota error as a toast', () => {
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {} } }, isMobile: true, activeSession: 's1' });
+  const before = getToasts().length;
+
+  handleWsStateChange('s1', { state: 'error', error: 'openai quota exceeded: The usage limit has been reached (resets in 2h 36m)' });
+
+  const toasts = getToasts();
+  expect(toasts.length).toBe(before + 1);
+  const t = toasts[toasts.length - 1];
+  expect(t.title).toBe('Usage limit reached');
+  expect(t.detail).toContain('resets in 2h 36m');
+});
+
+// A clean idle end must NOT produce an error toast.
+test('handleWsStateChange does not toast on a normal idle end', () => {
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {} } }, isMobile: true, activeSession: 's1' });
+  const before = getToasts().length;
+  handleWsStateChange('s1', { state: 'idle' });
+  expect(getToasts().length).toBe(before);
+});

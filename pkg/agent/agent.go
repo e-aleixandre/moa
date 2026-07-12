@@ -653,6 +653,37 @@ func (a *Agent) Abort() {
 	}
 }
 
+// interruptedMarkerText returns the text for the synthetic assistant message
+// inserted when a run ends before the model replied. It reflects the actual
+// cause so a provider failure is never mislabeled as a user interruption.
+//
+// The run context is the authoritative signal for user intent: Agent.Abort
+// cancels it (context.Canceled) and a MaxRunDuration timeout trips its deadline
+// (context.DeadlineExceeded). A provider failure (e.g. a 429 usage limit) leaves
+// the context live (ctx.Err() == nil). We therefore decide user-vs-provider from
+// ctx.Err() ALONE — never from err's chain, which could wrap a context error
+// while the context is still active — and in priority order:
+//
+//	deadline (timeout) → cancel (user abort) → quota → other error.
+//
+// A genuine abort wins even if a provider error also arrived in the same
+// unwind: the user's explicit stop is the intent to record.
+func interruptedMarkerText(ctx context.Context, err error) string {
+	switch ctx.Err() {
+	case context.DeadlineExceeded:
+		return "(run timed out)"
+	case context.Canceled:
+		return "(interrupted by user)"
+	}
+	if qe, ok := core.AsQuotaExceeded(err); ok {
+		return "(stopped: " + qe.Error() + ")"
+	}
+	if err != nil {
+		return "(stopped: " + err.Error() + ")"
+	}
+	return "(interrupted by user)"
+}
+
 // ensureMsgIDs assigns a stable MsgID to any message lacking one. It mutates the
 // given slice's elements in place; callers passing externally-owned slices (e.g.
 // LoadMessages/LoadState) intentionally leave the caller's copy consistent too.
@@ -763,16 +794,21 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		drainSteer(a.steerCh)
 	}
 
-	// On abort: if the last message is a user message with no assistant reply,
-	// insert a synthetic assistant "(interrupted)" to maintain role alternation.
-	// Without this, the next Send appends another user message, creating
-	// consecutive user messages that providers merge into one — the model
-	// sees "2+2=" instead of four separate turns.
+	// If the run ended before the model replied (last message is still the
+	// user's), insert a synthetic assistant message to maintain role
+	// alternation. Without it, the next Send appends another user message,
+	// creating consecutive user turns that providers merge into one — the model
+	// sees "2+2=" instead of separate turns.
+	//
+	// The marker text must reflect WHY the run ended: only a genuine user abort
+	// gets "(interrupted by user)". A provider failure (e.g. a ChatGPT usage
+	// limit / 429) must NOT be mislabeled as a user interruption — that both
+	// confuses the user ("I didn't stop it") and lies to the model on replay.
 	if err != nil && len(a.state.Messages) > 0 && a.state.Messages[len(a.state.Messages)-1].Role == "user" {
 		a.mu.Lock()
 		interrupted := core.WrapMessage(core.Message{
 			Role:    "assistant",
-			Content: []core.Content{core.TextContent("(interrupted by user)")},
+			Content: []core.Content{core.TextContent(interruptedMarkerText(ctx, err))},
 		})
 		interrupted.EnsureMsgID()
 		a.state.Messages = append(a.state.Messages, interrupted)

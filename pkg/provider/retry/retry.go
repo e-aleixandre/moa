@@ -3,6 +3,7 @@
 package retry
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -21,6 +22,13 @@ type Policy struct {
 	BaseDelay  time.Duration // initial wait (default 1s)
 	MaxDelay   time.Duration // cap per wait (default 32s)
 	Disabled   bool          // true = no retries, single attempt only
+
+	// Retryable optionally vetoes retrying an otherwise-retryable response.
+	// It receives the response (headers available) and its body; returning
+	// false stops retries and returns the response to the caller with its body
+	// restored, so the caller can parse it (e.g. a usage-limit 429 that a retry
+	// will never clear). Only consulted for statuses isRetryable already allows.
+	Retryable func(resp *http.Response, body []byte) bool
 }
 
 // DefaultPolicy is the default retry policy.
@@ -33,12 +41,12 @@ var DefaultPolicy = Policy{
 // isRetryable returns true for HTTP status codes that warrant a retry.
 func isRetryable(code int) bool {
 	switch code {
-	case http.StatusTooManyRequests,     // 429
-		http.StatusInternalServerError,  // 500
-		http.StatusBadGateway,           // 502
-		http.StatusServiceUnavailable,   // 503
-		http.StatusGatewayTimeout,       // 504
-		529:                             // Anthropic overloaded
+	case http.StatusTooManyRequests, // 429
+		http.StatusInternalServerError, // 500
+		http.StatusBadGateway,          // 502
+		http.StatusServiceUnavailable,  // 503
+		http.StatusGatewayTimeout,      // 504
+		529:                            // Anthropic overloaded
 		return true
 	}
 	return false
@@ -87,7 +95,12 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 	if p.Disabled {
 		p.MaxRetries = 0
 	} else if p.MaxRetries == 0 {
+		// Apply default retry counts/delays without discarding caller-set fields
+		// that don't participate in the "zero means default" rule (e.g. the
+		// Retryable veto).
+		retryable := p.Retryable
 		p = DefaultPolicy
+		p.Retryable = retryable
 	}
 	if p.BaseDelay == 0 {
 		p.BaseDelay = DefaultPolicy.BaseDelay
@@ -127,6 +140,16 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 		// Retryable status — drain body and retry.
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close() //nolint:errcheck
+
+		// Caller veto: a status that is normally retryable but which the caller
+		// recognizes as terminal (e.g. a usage-limit 429) should be returned as
+		// a response, not retried. Restore the drained body so the caller can
+		// parse it.
+		if p.Retryable != nil && !p.Retryable(resp, errBody) {
+			resp.Body = io.NopCloser(bytes.NewReader(errBody))
+			return resp, nil
+		}
+
 		lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(errBody))
 
 		if attempt == p.MaxRetries {

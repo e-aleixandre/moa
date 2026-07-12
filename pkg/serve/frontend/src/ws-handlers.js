@@ -566,6 +566,18 @@ export function handleWsStateChange(id, data) {
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
       markUnseen(id);
+      // Surface the reason for an error end so it's visible even when the tile
+      // isn't focused — parity with the TUI's run-end error block. A usage/quota
+      // limit reads as an actionable "resets in X" line rather than a fault.
+      if (data.state === 'error' && data.error) {
+        const isQuota = /quota exceeded|usage limit/i.test(data.error);
+        addToast({
+          sessionId: id,
+          title: isQuota ? 'Usage limit reached' : 'Run failed',
+          detail: data.error,
+          type: 'attention',
+        });
+      }
       const visible = visibleSessionIds(store.get());
       if (!visible.includes(id) && sess) {
         if (data.state === 'error') {

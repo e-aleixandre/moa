@@ -1669,6 +1669,20 @@ func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.C
 	return []tea.Cmd{cmd, renderTick(), m.status.spinner.Tick}
 }
 
+// runErrorText renders a run-end error for the transcript. A usage/quota limit
+// is surfaced with a clear "⚠ …" banner (and reset time) rather than a raw
+// "Error:" line, since it's an expected, actionable condition — not a fault.
+func runErrorText(err error) string {
+	if qe, ok := core.AsQuotaExceeded(err); ok {
+		return "⚠ " + qe.Error()
+	}
+	msg := err.Error()
+	for _, prefix := range []string{"stream: ", "provider: "} {
+		msg = strings.TrimPrefix(msg, prefix)
+	}
+	return "Error: " + msg
+}
+
 // handleRunEnded processes the completion of an agent run.
 func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 	// No gen bump needed — RunStarted sets the gen for the next run.
@@ -1719,7 +1733,7 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 
 	if e.Err != nil {
 		m.s.blocks = append(m.s.blocks, messageBlock{
-			Type: "error", Raw: "Error: " + e.Err.Error(),
+			Type: "error", Raw: runErrorText(e.Err),
 		})
 	}
 

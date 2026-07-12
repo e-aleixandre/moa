@@ -107,7 +107,16 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		return r, nil
 	}
 
-	resp, err := retry.Do(ctx, o.client, buildReq, retry.DefaultPolicy, nil)
+	// Don't burn retries on a usage-limit 429 — the limit won't clear for
+	// hours, and we want the response back so we can build a typed quota error.
+	policy := retry.DefaultPolicy
+	policy.Retryable = func(resp *http.Response, body []byte) bool {
+		if resp.StatusCode == http.StatusTooManyRequests && isUsageLimitBody(body) {
+			return false // terminal — return to caller, don't retry
+		}
+		return true
+	}
+	resp, err := retry.Do(ctx, o.client, buildReq, policy, nil)
 	if err != nil {
 		return nil, fmt.Errorf("openai: %w", err)
 	}
@@ -115,6 +124,12 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close() //nolint:errcheck
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// Usage-limit exhaustion is a distinct, actionable condition (not a
+		// generic error and not a user interruption): surface it typed so the
+		// UI can show "limit reached, resets in X".
+		if resp.StatusCode == http.StatusTooManyRequests && isUsageLimitBody(errBody) {
+			return nil, quotaErrorFrom(resp, errBody)
+		}
 		return nil, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, string(errBody))
 	}
 
