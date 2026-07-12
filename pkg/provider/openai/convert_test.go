@@ -113,7 +113,7 @@ func TestBuildRequestBody_ReasoningEffort(t *testing.T) {
 
 func TestConvertMessage_ToolResult(t *testing.T) {
 	msg := core.NewToolResultMessage("call-1", "bash", []core.Content{core.TextContent("output")}, false)
-	result := convertMessage(msg, true)
+	result := convertMessage(msg, true, "gpt-5.3-codex")
 	if len(result) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(result))
 	}
@@ -134,7 +134,7 @@ func TestConvertMessage_AssistantWithToolCalls(t *testing.T) {
 			core.ToolCallContent("tc-1", "bash", map[string]any{"command": "ls"}),
 		},
 	}
-	items := convertMessage(msg, true)
+	items := convertMessage(msg, true, "gpt-5.3-codex")
 	// Should produce 2 items: a message item and a function_call item.
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
@@ -158,7 +158,7 @@ func TestConvertAssistantMessage_NilArguments(t *testing.T) {
 			core.ToolCallContent("tc-1", "pwd", nil),
 		},
 	}
-	items := convertAssistantMessage(msg)
+	items := convertAssistantMessage(msg, "gpt-5.3-codex")
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
@@ -237,5 +237,119 @@ func TestSupportsDocuments(t *testing.T) {
 	}
 	if NewOAuth("tok", "acct").SupportsDocuments() {
 		t.Error("expected SupportsDocuments false for OAuth provider")
+	}
+}
+
+// TestConvertAssistantMessage_RoundTripsSignatures verifies the message item id
+// and phase and the function_call fc_ item id are replayed on the next request.
+func TestConvertAssistantMessage_RoundTripsSignatures(t *testing.T) {
+	msg := core.Message{
+		Role: "assistant",
+		Content: []core.Content{
+			{Type: "text", Text: "done", TextSignature: `{"v":1,"id":"msg_42","phase":"final_answer"}`},
+			{Type: "tool_call", ToolCallID: "call_1", ToolName: "bash",
+				Arguments: map[string]any{"command": "ls"}, ToolCallItemID: "fc_77"},
+		},
+	}
+	items := convertAssistantMessage(msg, "gpt-5.3-codex")
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	// message item carries id + phase.
+	if items[0]["id"] != "msg_42" {
+		t.Errorf("message id = %v, want msg_42", items[0]["id"])
+	}
+	if items[0]["phase"] != "final_answer" {
+		t.Errorf("message phase = %v, want final_answer", items[0]["phase"])
+	}
+	// function_call carries the fc_ item id (distinct from call_id).
+	if items[1]["id"] != "fc_77" {
+		t.Errorf("function_call id = %v, want fc_77", items[1]["id"])
+	}
+	if items[1]["call_id"] != "call_1" {
+		t.Errorf("function_call call_id = %v, want call_1", items[1]["call_id"])
+	}
+}
+
+// TestConvertAssistantMessage_NoSignatureNoIDs verifies legacy content (no
+// signatures) does NOT inject empty id/phase keys, keeping the request clean.
+func TestConvertAssistantMessage_NoSignatureNoIDs(t *testing.T) {
+	msg := core.Message{
+		Role: "assistant",
+		Content: []core.Content{
+			{Type: "text", Text: "hi"},
+			{Type: "tool_call", ToolCallID: "call_1", ToolName: "bash",
+				Arguments: map[string]any{"command": "ls"}},
+		},
+	}
+	items := convertAssistantMessage(msg, "gpt-5.3-codex")
+	if _, ok := items[0]["id"]; ok {
+		t.Error("legacy message item must not carry an id key")
+	}
+	if _, ok := items[0]["phase"]; ok {
+		t.Error("legacy message item must not carry a phase key")
+	}
+	if _, ok := items[1]["id"]; ok {
+		t.Error("legacy function_call must not carry an id key")
+	}
+}
+
+// TestConvertAssistantMessage_ForeignModelOmitsIDs verifies that when a history
+// message was produced by a different model, its provider-assigned item ids
+// (message id, function_call fc_ id) are omitted to avoid pairing validation,
+// while call_id/name/args/phase are preserved.
+func TestConvertAssistantMessage_ForeignModelOmitsIDs(t *testing.T) {
+	msg := core.Message{
+		Role:  "assistant",
+		Model: "gpt-5.6-terra",
+		Content: []core.Content{
+			{Type: "text", Text: "done", TextSignature: `{"v":1,"id":"msg_42","phase":"final_answer"}`},
+			{Type: "tool_call", ToolCallID: "call_1", ToolName: "bash",
+				Arguments: map[string]any{"command": "ls"}, ToolCallItemID: "fc_77"},
+		},
+	}
+	// Target model differs from msg.Model.
+	items := convertAssistantMessage(msg, "gpt-5.3-codex")
+	if _, ok := items[0]["id"]; ok {
+		t.Error("foreign-model message must omit item id")
+	}
+	// phase is model-agnostic guidance, safe to keep.
+	if items[0]["phase"] != "final_answer" {
+		t.Errorf("phase should be preserved, got %v", items[0]["phase"])
+	}
+	if _, ok := items[1]["id"]; ok {
+		t.Error("foreign-model function_call must omit fc_ id")
+	}
+	if items[1]["call_id"] != "call_1" {
+		t.Errorf("call_id must be preserved, got %v", items[1]["call_id"])
+	}
+	// Same-model keeps the ids.
+	same := convertAssistantMessage(msg, "gpt-5.6-terra")
+	if same[0]["id"] != "msg_42" || same[1]["id"] != "fc_77" {
+		t.Errorf("same-model must keep ids: %v / %v", same[0]["id"], same[1]["id"])
+	}
+}
+
+// TestParseTextSignature_ValidatesPhase verifies a corrupt/foreign phase is
+// dropped on parse (only commentary/final_answer echo back).
+func TestParseTextSignature_ValidatesPhase(t *testing.T) {
+	cases := []struct {
+		sig       string
+		wantID    string
+		wantPhase string
+	}{
+		{`{"v":1,"id":"m1","phase":"final_answer"}`, "m1", "final_answer"},
+		{`{"v":1,"id":"m1","phase":"commentary"}`, "m1", "commentary"},
+		{`{"v":1,"id":"m1","phase":"garbage"}`, "m1", ""},
+		{`{"v":1,"id":"m1"}`, "m1", ""},
+		{`legacy_bare_id`, "legacy_bare_id", ""},
+		{``, "", ""},
+		{`{not json`, "", ""},
+	}
+	for _, c := range cases {
+		id, phase := parseTextSignature(c.sig)
+		if id != c.wantID || phase != c.wantPhase {
+			t.Errorf("parseTextSignature(%q) = %q/%q, want %q/%q", c.sig, id, phase, c.wantID, c.wantPhase)
+		}
 	}
 }

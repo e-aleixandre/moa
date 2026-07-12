@@ -450,3 +450,469 @@ func TestStream_RequiresResponseCompleted(t *testing.T) {
 		})
 	}
 }
+
+// collectStream drains a provider stream, returning the final Done message (if
+// any) and whether a terminal error was seen.
+func collectStream(t *testing.T, ch <-chan core.AssistantEvent) (*core.Message, *core.AssistantEvent) {
+	t.Helper()
+	var final *core.Message
+	var errEv *core.AssistantEvent
+	for event := range ch {
+		switch event.Type {
+		case core.ProviderEventDone:
+			m := event.Message
+			final = m
+		case core.ProviderEventError:
+			e := event
+			errEv = &e
+		}
+	}
+	return final, errEv
+}
+
+func serveSSE(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		_, _ = fmt.Fprint(w, body)
+	}))
+}
+
+// TestStream_MessageCarriesTextSignature verifies the message item's id and
+// phase survive as a TextSignature so they can be replayed next request. Losing
+// phase makes OpenAI stop early on later turns.
+func TestStream_MessageCarriesTextSignature(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":""}]}}`)+
+			sseEvent(`{"type":"response.output_text.delta","delta":"Hello"}`)+
+			sseEvent(`{"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Hello"}],"status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
+	}
+	if final == nil {
+		t.Fatal("expected final message")
+	}
+	var text *core.Content
+	for i := range final.Content {
+		if final.Content[i].Type == "text" {
+			text = &final.Content[i]
+		}
+	}
+	if text == nil {
+		t.Fatal("expected text content")
+	}
+	id, phase := parseTextSignature(text.TextSignature)
+	if id != "msg_1" {
+		t.Errorf("signature id = %q, want msg_1", id)
+	}
+	if phase != "final_answer" {
+		t.Errorf("signature phase = %q, want final_answer", phase)
+	}
+}
+
+// TestStream_ToolCallCarriesItemID verifies the function_call's fc_ output-item
+// id is preserved (distinct from the call_id) for faithful replay.
+func TestStream_ToolCallCarriesItemID(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_9","call_id":"call_x","name":"bash","arguments":""}}`)+
+			sseEvent(`{"type":"response.function_call_arguments.done","arguments":"{\"command\":\"ls\"}"}`)+
+			sseEvent(`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_9","call_id":"call_x","name":"bash","arguments":"{\"command\":\"ls\"}","status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("ls")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
+	}
+	var tc *core.Content
+	toolEnds := 0
+	for i := range final.Content {
+		if final.Content[i].Type == "tool_call" {
+			tc = &final.Content[i]
+		}
+	}
+	_ = toolEnds
+	if tc == nil {
+		t.Fatal("expected tool_call")
+	}
+	if tc.ToolCallID != "call_x" {
+		t.Errorf("call_id = %q, want call_x", tc.ToolCallID)
+	}
+	if tc.ToolCallItemID != "fc_9" {
+		t.Errorf("item id = %q, want fc_9", tc.ToolCallItemID)
+	}
+}
+
+// TestStream_ToolCallReconciledFromItemDone verifies that a function call whose
+// arguments.done event never arrives is still recovered from the authoritative
+// output_item.done (the pi/codex behavior). Without this the call is lost and
+// the turn silently ends.
+func TestStream_ToolCallReconciledFromItemDone(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_2","call_id":"call_y","name":"bash","arguments":""}}`)+
+			// NOTE: no function_call_arguments.done — only the item.done.
+			sseEvent(`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_2","call_id":"call_y","name":"bash","arguments":"{\"command\":\"pwd\"}","status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("pwd")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
+	}
+	var tc *core.Content
+	for i := range final.Content {
+		if final.Content[i].Type == "tool_call" {
+			tc = &final.Content[i]
+		}
+	}
+	if tc == nil {
+		t.Fatal("tool_call not reconciled from output_item.done")
+	}
+	if tc.ToolName != "bash" || tc.ToolCallID != "call_y" {
+		t.Errorf("reconciled call wrong: %+v", tc)
+	}
+	if cmd, _ := tc.Arguments["command"].(string); cmd != "pwd" {
+		t.Errorf("reconciled args = %v", tc.Arguments)
+	}
+}
+
+// TestStream_ToolCallNotDoubled verifies the dedupe: when both
+// arguments.done AND output_item.done arrive, exactly one tool_call and one
+// ToolCallEnd are produced.
+func TestStream_ToolCallNotDoubled(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_3","call_id":"call_z","name":"bash","arguments":""}}`)+
+			sseEvent(`{"type":"response.function_call_arguments.done","arguments":"{\"command\":\"id\"}"}`)+
+			sseEvent(`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_3","call_id":"call_z","name":"bash","arguments":"{\"command\":\"id\"}","status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("id")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var toolEnds, toolCalls int
+	for event := range ch {
+		if event.Type == core.ProviderEventToolCallEnd {
+			toolEnds++
+		}
+		if event.Type == core.ProviderEventDone {
+			for _, c := range event.Message.Content {
+				if c.Type == "tool_call" {
+					toolCalls++
+				}
+			}
+		}
+	}
+	if toolEnds != 1 {
+		t.Errorf("ToolCallEnd events = %d, want 1 (dedupe failed)", toolEnds)
+	}
+	if toolCalls != 1 {
+		t.Errorf("tool_call content blocks = %d, want 1 (dedupe failed)", toolCalls)
+	}
+}
+
+// TestStream_IncompleteIsError verifies an incomplete (out-of-tokens) response
+// surfaces as a visible error, not a silent success.
+func TestStream_IncompleteIsError(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
+			sseEvent(`{"type":"response.output_text.delta","delta":"partial"}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv == nil {
+		t.Fatal("expected incomplete to surface as error")
+	}
+	if final != nil {
+		t.Fatal("incomplete must not produce a Done message")
+	}
+}
+
+// TestStream_EmptyCompletedIsError verifies a completed response with no
+// substantive content (no text, no tool call; reasoning-only counts as empty)
+// surfaces as a visible error rather than a silent stall.
+func TestStream_EmptyCompletedIsError(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1"}}`)+
+			sseEvent(`{"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","encrypted_content":"enc","summary":[]}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv == nil {
+		t.Fatal("expected empty completed to surface as error")
+	}
+	if final != nil {
+		t.Fatal("empty completed must not produce a Done message")
+	}
+}
+
+// TestStream_ToolCallOnlyIsNotEmpty verifies a turn with a tool call but no text
+// is a legitimate completion (substantive), not an empty-turn error.
+func TestStream_ToolCallOnlyIsNotEmpty(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_a","name":"bash","arguments":""}}`)+
+			sseEvent(`{"type":"response.function_call_arguments.done","arguments":"{\"command\":\"ls\"}"}`)+
+			sseEvent(`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_a","name":"bash","arguments":"{\"command\":\"ls\"}","status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("ls")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("tool-call-only turn wrongly errored: %v", errEv.Error)
+	}
+	if final == nil || final.StopReason != "tool_use" {
+		t.Fatalf("expected tool_use stop, got %+v", final)
+	}
+}
+
+// TestStream_InterleavedToolCalls verifies two function calls whose events are
+// interleaved (both added before either finishes) each produce exactly one
+// tool_call with the right args/ids — the per-output_index slot behavior. A
+// single global state would cross the wires or double-execute.
+func TestStream_InterleavedToolCalls(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":""}}`)+
+			sseEvent(`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_b","call_id":"call_b","name":"read","arguments":""}}`)+
+			sseEvent(`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":"}`)+
+			sseEvent(`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"path\":"}`)+
+			sseEvent(`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"ls\"}"}`)+
+			sseEvent(`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"\"/tmp\"}"}`)+
+			sseEvent(`{"type":"response.function_call_arguments.done","output_index":1,"arguments":"{\"path\":\"/tmp\"}"}`)+
+			sseEvent(`{"type":"response.function_call_arguments.done","output_index":0,"arguments":"{\"command\":\"ls\"}"}`)+
+			sseEvent(`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":"{\"command\":\"ls\"}","status":"completed"}}`)+
+			sseEvent(`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_b","call_id":"call_b","name":"read","arguments":"{\"path\":\"/tmp\"}","status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var toolEnds int
+	final, errEv := func() (*core.Message, *core.AssistantEvent) {
+		var f *core.Message
+		var e *core.AssistantEvent
+		for ev := range ch {
+			switch ev.Type {
+			case core.ProviderEventToolCallEnd:
+				toolEnds++
+			case core.ProviderEventDone:
+				f = ev.Message
+			case core.ProviderEventError:
+				ee := ev
+				e = &ee
+			}
+		}
+		return f, e
+	}()
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
+	}
+	if toolEnds != 2 {
+		t.Fatalf("ToolCallEnd = %d, want 2", toolEnds)
+	}
+	var calls []core.Content
+	for _, c := range final.Content {
+		if c.Type == "tool_call" {
+			calls = append(calls, c)
+		}
+	}
+	if len(calls) != 2 {
+		t.Fatalf("tool_calls = %d, want 2", len(calls))
+	}
+	// call_a → bash ls ; call_b → read /tmp, matched by id (order preserved).
+	byID := map[string]core.Content{}
+	for _, c := range calls {
+		byID[c.ToolCallID] = c
+	}
+	if a := byID["call_a"]; a.ToolName != "bash" || a.ToolCallItemID != "fc_a" || a.Arguments["command"] != "ls" {
+		t.Errorf("call_a wrong: %+v", a)
+	}
+	if b := byID["call_b"]; b.ToolName != "read" || b.ToolCallItemID != "fc_b" || b.Arguments["path"] != "/tmp" {
+		t.Errorf("call_b wrong: %+v", b)
+	}
+}
+
+// TestStream_MultipleMessagesPreserved verifies two message items in one
+// response keep their own text and signatures (no collapse into the first).
+func TestStream_MultipleMessagesPreserved(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_a","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":""}]}}`)+
+			sseEvent(`{"type":"response.output_text.delta","output_index":0,"delta":"first"}`)+
+			sseEvent(`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_a","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"first"}],"status":"completed"}}`)+
+			sseEvent(`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_b","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":""}]}}`)+
+			sseEvent(`{"type":"response.output_text.delta","output_index":1,"delta":"second"}`)+
+			sseEvent(`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"msg_b","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"second"}],"status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
+	}
+	var texts []core.Content
+	for _, c := range final.Content {
+		if c.Type == "text" {
+			texts = append(texts, c)
+		}
+	}
+	if len(texts) != 2 {
+		t.Fatalf("text blocks = %d, want 2", len(texts))
+	}
+	if texts[0].Text != "first" {
+		t.Errorf("block0 text = %q", texts[0].Text)
+	}
+	if texts[1].Text != "second" {
+		t.Errorf("block1 text = %q", texts[1].Text)
+	}
+	if id, phase := parseTextSignature(texts[0].TextSignature); id != "msg_a" || phase != "commentary" {
+		t.Errorf("block0 sig = %q/%q", id, phase)
+	}
+	if id, phase := parseTextSignature(texts[1].TextSignature); id != "msg_b" || phase != "final_answer" {
+		t.Errorf("block1 sig = %q/%q", id, phase)
+	}
+}
+
+// TestStream_IncompleteEvent verifies the distinct response.incomplete terminal
+// event surfaces as a visible error carrying its reason.
+func TestStream_IncompleteEvent(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
+			sseEvent(`{"type":"response.output_text.delta","output_index":0,"delta":"partial"}`)+
+			sseEvent(`{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv == nil {
+		t.Fatal("expected response.incomplete to surface as error")
+	}
+	if final != nil {
+		t.Fatal("incomplete must not produce a Done message")
+	}
+}
+
+// TestStream_RefusalIsSubstantive verifies a message whose only content is a
+// refusal is treated as real content (not an empty-turn error).
+func TestStream_RefusalIsSubstantive(t *testing.T) {
+	server := serveSSE(t,
+		sseEvent(`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"refusal","refusal":""}]}}`)+
+			sseEvent(`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"refusal","refusal":"I can't help with that."}],"status":"completed"}}`)+
+			sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	)
+	defer server.Close()
+
+	prov := NewWithBaseURL("key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, errEv := collectStream(t, ch)
+	if errEv != nil {
+		t.Fatalf("refusal wrongly errored: %v", errEv.Error)
+	}
+	if final == nil {
+		t.Fatal("expected final message")
+	}
+	var got string
+	for _, c := range final.Content {
+		if c.Type == "text" {
+			got = c.Text
+		}
+	}
+	if got != "I can't help with that." {
+		t.Errorf("refusal text = %q", got)
+	}
+}

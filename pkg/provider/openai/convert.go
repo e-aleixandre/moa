@@ -37,7 +37,7 @@ func buildRequestBody(req core.Request, supportsDocuments bool) ([]byte, error) 
 		Include:      []string{"reasoning.encrypted_content"},
 	}
 
-	r.Input = convertMessages(req.Messages, supportsDocuments)
+	r.Input = convertMessages(req.Messages, supportsDocuments, req.Model.ID)
 
 	if len(req.Tools) > 0 {
 		r.Tools = convertToolSpecs(req.Tools)
@@ -82,18 +82,21 @@ func mapReasoningEffort(level string) string {
 // supportsDocuments gates native "document" blocks: when false (e.g. the codex
 // OAuth path), any persisted document block is degraded to a text note instead
 // of being emitted as an input_file the provider would reject or silently drop.
-func convertMessages(msgs []core.Message, supportsDocuments bool) []map[string]any {
+// modelID is the target model of THIS request; assistant items produced by a
+// different model omit their provider-assigned output-item ids to avoid pairing
+// validation errors (see convertAssistantMessage).
+func convertMessages(msgs []core.Message, supportsDocuments bool, modelID string) []map[string]any {
 	var result []map[string]any
 
 	for _, msg := range msgs {
-		items := convertMessage(msg, supportsDocuments)
+		items := convertMessage(msg, supportsDocuments, modelID)
 		result = append(result, items...)
 	}
 
 	return result
 }
 
-func convertMessage(msg core.Message, supportsDocuments bool) []map[string]any {
+func convertMessage(msg core.Message, supportsDocuments bool, modelID string) []map[string]any {
 	switch msg.Role {
 	case "user":
 		return []map[string]any{
@@ -104,7 +107,7 @@ func convertMessage(msg core.Message, supportsDocuments bool) []map[string]any {
 		}
 
 	case "assistant":
-		return convertAssistantMessage(msg)
+		return convertAssistantMessage(msg, modelID)
 
 	case "tool_result":
 		text := extractTextParts(msg.Content)
@@ -124,20 +127,48 @@ func convertMessage(msg core.Message, supportsDocuments bool) []map[string]any {
 // convertAssistantMessage converts an assistant message to Responses API items.
 // In the Responses API, assistant content is represented as individual output items
 // (message, function_call, reasoning) at the top level of the input array.
-func convertAssistantMessage(msg core.Message) []map[string]any {
+//
+// Round-trip fidelity matters: the API keeps no server-side state (store:false),
+// so replaying an assistant turn means reconstructing each output item as
+// faithfully as the model emitted it. In particular the message item's id/phase
+// and the function_call item's id are preserved — OpenAI documents that dropping
+// them on manual replay causes "early stopping and other misbehavior" (empty or
+// stalled turns on later requests).
+//
+// modelID is the current request's model. When an assistant message in history
+// was produced by a DIFFERENT model (the user switched models mid-session), the
+// provider-assigned output-item ids (message "id", function_call "fc_...")
+// belong to that other model's response and OpenAI's pairing validation can
+// reject them. In that case we omit the ids (keeping call_id/name/args/text) —
+// the same conservative choice pi makes. Legacy messages with no recorded model
+// keep the prior behavior.
+func convertAssistantMessage(msg core.Message, modelID string) []map[string]any {
+	// Foreign model: message carries a model tag that differs from the target.
+	// Empty msg.Model (legacy/unknown) is treated as same-model.
+	foreignModel := msg.Model != "" && modelID != "" && msg.Model != modelID
+
 	var items []map[string]any
 
 	for _, c := range msg.Content {
 		switch c.Type {
 		case "text":
-			items = append(items, map[string]any{
+			m := map[string]any{
 				"type": "message",
 				"role": "assistant",
 				"content": []map[string]any{
 					{"type": "output_text", "text": c.Text, "annotations": []any{}},
 				},
 				"status": "completed",
-			})
+			}
+			if id, phase := parseTextSignature(c.TextSignature); id != "" || phase != "" {
+				if id != "" && !foreignModel {
+					m["id"] = id
+				}
+				if phase != "" {
+					m["phase"] = phase
+				}
+			}
+			items = append(items, m)
 
 		case "tool_call":
 			args := c.Arguments
@@ -145,12 +176,16 @@ func convertAssistantMessage(msg core.Message) []map[string]any {
 				args = map[string]any{}
 			}
 			argsJSON, _ := json.Marshal(args)
-			items = append(items, map[string]any{
+			fc := map[string]any{
 				"type":      "function_call",
 				"call_id":   c.ToolCallID,
 				"name":      c.ToolName,
 				"arguments": string(argsJSON),
-			})
+			}
+			if c.ToolCallItemID != "" && !foreignModel {
+				fc["id"] = c.ToolCallItemID
+			}
+			items = append(items, fc)
 
 		case "thinking":
 			// Re-serialize the encrypted reasoning item if we have a signature.

@@ -20,6 +20,14 @@ type Content struct {
 
 	// text
 	Text string `json:"text,omitempty"`
+	// TextSignature carries provider round-trip metadata for a text/message
+	// block so the exact item can be replayed on the next request. For the
+	// OpenAI Responses API this is a small JSON blob {id, phase} — the model's
+	// output message id and its phase ("commentary"/"final_answer"). OpenAI
+	// warns that dropping the phase when replaying manually causes "early
+	// stopping and other misbehavior", which manifests as empty/stalled turns.
+	// Opaque to everything except the provider that produced it.
+	TextSignature string `json:"text_signature,omitempty"`
 
 	// thinking
 	Thinking          string `json:"thinking,omitempty"`
@@ -35,6 +43,13 @@ type Content struct {
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolName   string         `json:"tool_name,omitempty"`
 	Arguments  map[string]any `json:"arguments,omitempty"`
+	// ToolCallItemID is the provider's output-item id for a tool_call (OpenAI
+	// Responses: the "fc_..." id, distinct from ToolCallID which is the
+	// "call_id" that pairs the call with its function_call_output). Preserved
+	// so the function_call item can be replayed with its original id, matching
+	// how the reasoning item that preceded it was paired. Empty for providers
+	// that don't use a separate item id.
+	ToolCallItemID string `json:"tool_call_item_id,omitempty"`
 }
 
 // Constructors for clarity.

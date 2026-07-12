@@ -21,6 +21,7 @@ const (
 	eventFuncCallArgsDone  = "response.function_call_arguments.done"
 	eventOutputItemDone    = "response.output_item.done"
 	eventCompleted         = "response.completed"
+	eventIncomplete        = "response.incomplete"
 	eventFailed            = "response.failed"
 	eventError             = "error"
 	// Reasoning summary events (thinking).
@@ -29,11 +30,12 @@ const (
 
 // event is the raw SSE JSON payload from the Responses API.
 type event struct {
-	Type     string          `json:"type"`
-	Item     *item           `json:"item,omitempty"`
-	ItemRaw  json.RawMessage `json:"-"` // full JSON of item (set during parsing)
-	Delta    string          `json:"delta,omitempty"`
-	Response *struct {
+	Type        string          `json:"type"`
+	Item        *item           `json:"item,omitempty"`
+	ItemRaw     json.RawMessage `json:"-"` // full JSON of item (set during parsing)
+	Delta       string          `json:"delta,omitempty"`
+	OutputIndex int             `json:"output_index"`
+	Response    *struct {
 		ID     string `json:"id"`
 		Model  string `json:"model"`
 		Status string `json:"status"`
@@ -49,6 +51,9 @@ type event struct {
 			Message string `json:"message"`
 			Code    string `json:"code"`
 		} `json:"error"`
+		IncompleteDetails *struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
 	} `json:"response,omitempty"`
 	// For function_call_arguments.done
 	Arguments string `json:"arguments,omitempty"`
@@ -64,14 +69,42 @@ type item struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	Status    string `json:"status,omitempty"`
-	Content   []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+	// Phase is the output-message phase ("commentary"/"final_answer"). OpenAI
+	// warns that dropping it when replaying manually causes early stopping.
+	Phase   string `json:"phase,omitempty"`
+	Content []struct {
+		Type    string `json:"type"` // "output_text" | "refusal" | reasoning "text"
+		Text    string `json:"text"`
+		Refusal string `json:"refusal"`
 	} `json:"content,omitempty"`
 	Summary []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"summary,omitempty"`
+}
+// slot tracks one output item of a response, keyed by its output_index. The
+// Responses API interleaves events from multiple concurrent output items
+// (reasoning, message, function_call), each carrying an output_index; keeping a
+// per-index slot — as the reference clients (pi, codex) do — is the only way to
+// route deltas and finalizations to the right content block without collapsing
+// or duplicating them.
+type slot struct {
+	kind         string // "message" | "function_call" | "reasoning"
+	contentIndex int    // index into message.Content this slot owns
+
+	// function_call
+	callID   string
+	callName string
+	callItem string // "fc_..." output-item id
+	argsJSON strings.Builder
+	// partial JSON parsing for streaming tool call arguments
+	partialParser jsonutil.PartialParser
+	lastParseLen  int
+	done          bool // materialized already (dedupe args.done vs item.done)
+
+	// message
+	msgItemID string
+	msgPhase  string
 }
 
 // streamState tracks the evolving message across SSE events.
@@ -79,15 +112,17 @@ type streamState struct {
 	message core.Message
 	started bool
 
-	// Current function call being streamed.
-	currentCallID   string
-	currentCallName string
-	currentArgsJSON strings.Builder
-	contentIndex    int
+	// slots holds the in-flight output items keyed by output_index.
+	slots map[int]*slot
+}
 
-	// Partial JSON parsing for streaming tool call arguments.
-	partialParser jsonutil.PartialParser
-	lastParseLen  int
+// getSlot returns the slot for an output index if it matches kind.
+func (s *streamState) getSlot(idx int, kind string) *slot {
+	sl := s.slots[idx]
+	if sl != nil && sl.kind == kind {
+		return sl
+	}
+	return nil
 }
 
 // consumeStream parses Responses API SSE and emits normalized AssistantEvents.
@@ -98,7 +133,7 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 			Provider:  "openai",
 			Timestamp: time.Now().Unix(),
 		},
-		contentIndex: -1,
+		slots: make(map[int]*slot),
 	}
 	sentTerminal := false
 
@@ -172,95 +207,92 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		if ev.Item == nil {
 			return false
 		}
-		if !state.started {
-			state.started = true
-			partial := state.message
-			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &partial}
-		}
+		state.ensureStarted(ch)
 		switch ev.Item.Type {
 		case "function_call":
-			state.contentIndex++
-			state.currentCallID = ev.Item.CallID
-			state.currentCallName = ev.Item.Name
-			state.currentArgsJSON.Reset()
-			state.partialParser.Reset()
-			state.lastParseLen = 0
-			if ev.Item.Arguments != "" {
-				state.currentArgsJSON.WriteString(ev.Item.Arguments)
+			sl := &slot{
+				kind:     "function_call",
+				callID:   ev.Item.CallID,
+				callName: ev.Item.Name,
+				callItem: ev.Item.ID,
 			}
+			if ev.Item.Arguments != "" {
+				sl.argsJSON.WriteString(ev.Item.Arguments)
+			}
+			// Reserve a content block now so the call keeps a stable index even
+			// when other output items interleave; arguments are filled on done.
+			tc := core.ToolCallContent(sl.callID, sl.callName, nil)
+			tc.ToolCallItemID = sl.callItem
+			sl.contentIndex = state.appendBlock(tc)
+			state.slots[ev.OutputIndex] = sl
 			ch <- core.AssistantEvent{
 				Type:         core.ProviderEventToolCallStart,
-				ContentIndex: state.contentIndex,
-				ToolCallID:   ev.Item.CallID,
-				ToolName:     ev.Item.Name,
+				ContentIndex: sl.contentIndex,
+				ToolCallID:   sl.callID,
+				ToolName:     sl.callName,
 			}
 		case "message":
-			state.contentIndex++
+			sl := &slot{kind: "message", msgItemID: ev.Item.ID, msgPhase: ev.Item.Phase}
+			sl.contentIndex = state.appendBlock(core.TextContent(""))
+			state.slots[ev.OutputIndex] = sl
 		case "reasoning":
-			state.contentIndex++
+			sl := &slot{kind: "reasoning"}
+			sl.contentIndex = state.appendBlock(core.Content{Type: "thinking"})
+			state.slots[ev.OutputIndex] = sl
 		}
 
 	case eventOutputTextDelta:
-		if !state.started {
-			state.started = true
-			partial := state.message
-			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &partial}
+		state.ensureStarted(ch)
+		if ev.Delta == "" {
+			return false
 		}
-		if ev.Delta != "" {
+		sl := state.getSlot(ev.OutputIndex, "message")
+		if sl != nil {
+			state.message.Content[sl.contentIndex].Text += ev.Delta
+		} else {
+			// Fallback: a text delta without a preceding message item.
 			state.message.Content = appendOrUpdateText(state.message.Content, ev.Delta)
-			ch <- core.AssistantEvent{
-				Type:  core.ProviderEventTextDelta,
-				Delta: ev.Delta,
-			}
 		}
+		ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: ev.Delta}
 
 	case eventReasoningSummaryDelta:
 		if ev.Delta != "" {
-			ch <- core.AssistantEvent{
-				Type:  core.ProviderEventThinkingDelta,
-				Delta: ev.Delta,
-			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: ev.Delta}
 		}
 
 	case eventFuncCallArgsDelta:
-		if ev.Delta != "" {
-			state.currentArgsJSON.WriteString(ev.Delta)
-			evt := core.AssistantEvent{
-				Type:         core.ProviderEventToolCallDelta,
-				ContentIndex: state.contentIndex,
-				Delta:        ev.Delta,
-				ToolCallID:   state.currentCallID,
-				ToolName:     state.currentCallName,
-			}
-			// Throttled partial parse: only every 200 bytes to cap CPU cost.
-			accumulated := state.currentArgsJSON.String()
-			if len(accumulated)-state.lastParseLen >= 200 {
-				if parsed := state.partialParser.Parse(accumulated); parsed != nil {
-					evt.PartialArgs = parsed
-				}
-				state.lastParseLen = len(accumulated)
-			}
-			ch <- evt
+		sl := state.getSlot(ev.OutputIndex, "function_call")
+		if sl == nil || ev.Delta == "" {
+			return false
 		}
+		sl.argsJSON.WriteString(ev.Delta)
+		evt := core.AssistantEvent{
+			Type:         core.ProviderEventToolCallDelta,
+			ContentIndex: sl.contentIndex,
+			Delta:        ev.Delta,
+			ToolCallID:   sl.callID,
+			ToolName:     sl.callName,
+		}
+		// Throttled partial parse: only every 200 bytes to cap CPU cost.
+		accumulated := sl.argsJSON.String()
+		if len(accumulated)-sl.lastParseLen >= 200 {
+			if parsed := sl.partialParser.Parse(accumulated); parsed != nil {
+				evt.PartialArgs = parsed
+			}
+			sl.lastParseLen = len(accumulated)
+		}
+		ch <- evt
 
 	case eventFuncCallArgsDone:
+		sl := state.getSlot(ev.OutputIndex, "function_call")
+		if sl == nil {
+			return false
+		}
 		argsStr := ev.Arguments
 		if argsStr == "" {
-			argsStr = state.currentArgsJSON.String()
+			argsStr = sl.argsJSON.String()
 		}
-		var args map[string]any
-		if argsStr != "" {
-			_ = json.Unmarshal([]byte(argsStr), &args)
-		}
-		state.message.Content = append(state.message.Content,
-			core.ToolCallContent(state.currentCallID, state.currentCallName, args),
-		)
-		ch <- core.AssistantEvent{
-			Type:         core.ProviderEventToolCallEnd,
-			ContentIndex: state.contentIndex,
-			ToolCallID:   state.currentCallID,
-			ToolName:     state.currentCallName,
-		}
+		state.finalizeToolCall(sl, argsStr, ch)
 
 	case eventOutputItemDone:
 		if ev.Item == nil {
@@ -268,18 +300,63 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		}
 		switch ev.Item.Type {
 		case "message":
-			// Reconcile final text from the done event.
+			sl := state.getSlot(ev.OutputIndex, "message")
+			if sl == nil {
+				delete(state.slots, ev.OutputIndex)
+				return false
+			}
+			// Reconcile final text (output_text and refusal) from the
+			// authoritative done event, and carry the item id + phase so the
+			// message can be replayed verbatim next request. Dropping phase
+			// makes OpenAI stop early on later turns.
 			var text string
 			for _, c := range ev.Item.Content {
-				if c.Type == "output_text" {
+				switch c.Type {
+				case "output_text":
 					text += c.Text
+				case "refusal":
+					text += c.Refusal
 				}
 			}
-			if text != "" {
-				// Overwrite accumulated text with final authoritative version.
-				replaceText(&state.message, text)
+			id := ev.Item.ID
+			if id == "" {
+				id = sl.msgItemID
 			}
+			phase := ev.Item.Phase
+			if phase == "" {
+				phase = sl.msgPhase
+			}
+			if text != "" {
+				state.message.Content[sl.contentIndex].Text = text
+			}
+			state.message.Content[sl.contentIndex].TextSignature = encodeTextSignature(id, phase)
+			delete(state.slots, ev.OutputIndex)
+		case "function_call":
+			sl := state.getSlot(ev.OutputIndex, "function_call")
+			// Reconcile from the authoritative item in case
+			// function_call_arguments.done never arrived (a stream variant or a
+			// dropped event). Without this the call is silently lost and the
+			// loop sees "no tools" and ends the turn — a stall. Dedupe if
+			// arguments.done already finalized it.
+			if sl != nil && !sl.done {
+				if ev.Item.CallID != "" {
+					sl.callID = ev.Item.CallID
+				}
+				if ev.Item.Name != "" {
+					sl.callName = ev.Item.Name
+				}
+				if ev.Item.ID != "" {
+					sl.callItem = ev.Item.ID
+				}
+				argsStr := ev.Item.Arguments
+				if argsStr == "" {
+					argsStr = sl.argsJSON.String()
+				}
+				state.finalizeToolCall(sl, argsStr, ch)
+			}
+			delete(state.slots, ev.OutputIndex)
 		case "reasoning":
+			sl := state.getSlot(ev.OutputIndex, "reasoning")
 			// Store the raw item JSON as ThinkingSignature so it can be sent
 			// back verbatim in future requests (preserves encrypted_content,
 			// summary[].type, and any other fields the API requires).
@@ -290,6 +367,8 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 					signature = string(raw)
 				}
 			}
+			// Prefer the summary; fall back to reasoning content text for the
+			// human-visible thinking (matches pi: summary || content).
 			var thinkingText string
 			for _, s := range ev.Item.Summary {
 				if thinkingText != "" {
@@ -297,55 +376,44 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 				}
 				thinkingText += s.Text
 			}
-			state.message.Content = append(state.message.Content,
-				core.Content{
-					Type:              "thinking",
-					Thinking:          thinkingText,
-					ThinkingSignature: signature,
-				},
-			)
+			if thinkingText == "" {
+				for _, c := range ev.Item.Content {
+					if c.Text == "" {
+						continue
+					}
+					if thinkingText != "" {
+						thinkingText += "\n\n"
+					}
+					thinkingText += c.Text
+				}
+			}
+			if sl != nil {
+				state.message.Content[sl.contentIndex].Thinking = thinkingText
+				state.message.Content[sl.contentIndex].ThinkingSignature = signature
+			} else {
+				state.message.Content = append(state.message.Content, core.Content{
+					Type: "thinking", Thinking: thinkingText, ThinkingSignature: signature,
+				})
+			}
+			delete(state.slots, ev.OutputIndex)
 		}
 
 	case eventCompleted:
-		if ev.Response != nil {
-			state.message.StopReason = mapStatus(ev.Response.Status)
-			if ev.Response.Usage != nil {
-				u := ev.Response.Usage
-				// Responses API input_tokens INCLUDES cached tokens; the cost
-				// model bills Input and CacheRead as separate buckets (cache
-				// reads are ~10x cheaper), so split them out. Without this the
-				// whole prompt is billed at full input price — up to ~10x the
-				// real cost on cache-heavy runs, tripping max_budget early.
-				cached := 0
-				if u.InputTokensDetails != nil {
-					cached = u.InputTokensDetails.CachedTokens
-				}
-				nonCached := u.InputTokens - cached
-				if nonCached < 0 {
-					nonCached = 0
-				}
-				state.message.Usage = &core.Usage{
-					Input:       nonCached,
-					Output:      u.OutputTokens,
-					CacheRead:   cached,
-					TotalTokens: u.TotalTokens,
-				}
-			}
-			// Response.Model is the actual model used (e.g. "gpt-5.5"); Response.ID
-			// is "resp_..." and would poison per-model cost attribution/ResolveModel.
-			if ev.Response.Model != "" {
-				state.message.Model = ev.Response.Model
-			}
+		return state.finalize(ev, ch)
+
+	case eventIncomplete:
+		// Distinct terminal event (the canonical form; some backends send it
+		// instead of response.completed with status "incomplete"). The turn was
+		// cut off before finishing — surface it as a visible error rather than
+		// a silent success.
+		reason := "output limit reached"
+		if ev.Response != nil && ev.Response.IncompleteDetails != nil && ev.Response.IncompleteDetails.Reason != "" {
+			reason = ev.Response.IncompleteDetails.Reason
 		}
-		// If any tool calls, stop reason should be tool_use.
-		for _, c := range state.message.Content {
-			if c.Type == "tool_call" {
-				state.message.StopReason = "tool_use"
-				break
-			}
+		ch <- core.AssistantEvent{
+			Type:  core.ProviderEventError,
+			Error: fmt.Errorf("openai: response incomplete (%s) — the model was cut off before finishing the turn", reason),
 		}
-		final := state.message
-		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
 		return true
 
 	case eventFailed:
@@ -371,6 +439,120 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 	return false
 }
 
+// appendBlock appends a content block and returns its index.
+func (s *streamState) appendBlock(c core.Content) int {
+	s.message.Content = append(s.message.Content, c)
+	return len(s.message.Content) - 1
+}
+
+// ensureStarted emits the ProviderEventStart exactly once.
+func (s *streamState) ensureStarted(ch chan<- core.AssistantEvent) {
+	if s.started {
+		return
+	}
+	s.started = true
+	partial := s.message
+	ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &partial}
+}
+
+// finalizeToolCall fills a slot's reserved tool_call block with parsed arguments
+// and emits ToolCallEnd once, marking the slot done so the same call is not
+// finalized twice (args.done then item.done).
+func (s *streamState) finalizeToolCall(sl *slot, argsStr string, ch chan<- core.AssistantEvent) {
+	if sl.done {
+		return
+	}
+	var args map[string]any
+	if argsStr != "" {
+		_ = json.Unmarshal([]byte(argsStr), &args)
+	}
+	blk := &s.message.Content[sl.contentIndex]
+	blk.ToolCallID = sl.callID
+	blk.ToolName = sl.callName
+	blk.ToolCallItemID = sl.callItem
+	blk.Arguments = args
+	sl.done = true
+	ch <- core.AssistantEvent{
+		Type:         core.ProviderEventToolCallEnd,
+		ContentIndex: sl.contentIndex,
+		ToolCallID:   sl.callID,
+		ToolName:     sl.callName,
+	}
+}
+
+// finalize handles response.completed: usage/model, incomplete-status guard,
+// empty-turn guard, and the terminal Done.
+func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
+	if ev.Response != nil {
+		s.message.StopReason = mapStatus(ev.Response.Status)
+		if ev.Response.Usage != nil {
+			u := ev.Response.Usage
+			// Responses API input_tokens INCLUDES cached tokens; the cost
+			// model bills Input and CacheRead as separate buckets (cache
+			// reads are ~10x cheaper), so split them out. Without this the
+			// whole prompt is billed at full input price — up to ~10x the
+			// real cost on cache-heavy runs, tripping max_budget early.
+			cached := 0
+			if u.InputTokensDetails != nil {
+				cached = u.InputTokensDetails.CachedTokens
+			}
+			nonCached := u.InputTokens - cached
+			if nonCached < 0 {
+				nonCached = 0
+			}
+			s.message.Usage = &core.Usage{
+				Input:       nonCached,
+				Output:      u.OutputTokens,
+				CacheRead:   cached,
+				TotalTokens: u.TotalTokens,
+			}
+		}
+		// Response.Model is the actual model used (e.g. "gpt-5.5"); Response.ID
+		// is "resp_..." and would poison per-model cost attribution/ResolveModel.
+		if ev.Response.Model != "" {
+			s.message.Model = ev.Response.Model
+		}
+
+		// A response that ran out of output budget (status "incomplete") did
+		// NOT finish the turn. Surfacing it as a normal Done makes the agent
+		// loop treat a truncated turn as a clean completion and stop silently —
+		// one of the "the model just went quiet" symptoms. Match the reference
+		// clients (codex) and turn it into a visible error.
+		if ev.Response.Status == "incomplete" {
+			reason := "output limit reached"
+			if ev.Response.IncompleteDetails != nil && ev.Response.IncompleteDetails.Reason != "" {
+				reason = ev.Response.IncompleteDetails.Reason
+			}
+			ch <- core.AssistantEvent{
+				Type:  core.ProviderEventError,
+				Error: fmt.Errorf("openai: response incomplete (%s) — the model was cut off before finishing the turn", reason),
+			}
+			return true
+		}
+	}
+	// If any tool calls, stop reason should be tool_use.
+	for _, c := range s.message.Content {
+		if c.Type == "tool_call" {
+			s.message.StopReason = "tool_use"
+			break
+		}
+	}
+	// A "completed" response with no substantive content (no text and no tool
+	// call; reasoning-only counts as empty) is not a legitimate end-of-turn for
+	// an agent — it is the empty/stalled turn we kept mis-reading as "done".
+	// Surface it as a visible error instead of ending the run in silence.
+	if !hasSubstantiveContent(s.message.Content) {
+		ch <- core.AssistantEvent{
+			Type:  core.ProviderEventError,
+			Error: fmt.Errorf("openai: model returned an empty response (no text or tool call)"),
+		}
+		return true
+	}
+	final := s.message
+	ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
+	return true
+}
+
 func mapStatus(status string) string {
 	switch status {
 	case "completed":
@@ -386,6 +568,24 @@ func mapStatus(status string) string {
 	}
 }
 
+// hasSubstantiveContent reports whether an assistant message contains anything
+// the agent can act on or show: a non-blank text block or a tool call. A message
+// with only empty/whitespace text or only reasoning is NOT substantive — that is
+// the empty/stalled turn we must not treat as a legitimate completion.
+func hasSubstantiveContent(blocks []core.Content) bool {
+	for _, c := range blocks {
+		switch c.Type {
+		case "text":
+			if strings.TrimSpace(c.Text) != "" {
+				return true
+			}
+		case "tool_call":
+			return true
+		}
+	}
+	return false
+}
+
 // appendOrUpdateText appends text to the last text content block, or creates one.
 func appendOrUpdateText(blocks []core.Content, text string) []core.Content {
 	for i := len(blocks) - 1; i >= 0; i-- {
@@ -397,15 +597,55 @@ func appendOrUpdateText(blocks []core.Content, text string) []core.Content {
 	return append(blocks, core.TextContent(text))
 }
 
-// replaceText overwrites all text content with the final authoritative version.
-func replaceText(msg *core.Message, text string) {
-	for i := range msg.Content {
-		if msg.Content[i].Type == "text" {
-			msg.Content[i].Text = text
-			return
-		}
+
+
+
+// encodeTextSignature packs an output-message item id and phase into a compact
+// JSON blob stored on the text block's TextSignature. Returns "" when there is
+// nothing worth round-tripping (mirrors pi's encodeTextSignatureV1).
+func encodeTextSignature(id, phase string) string {
+	if id == "" && phase == "" {
+		return ""
 	}
-	msg.Content = append(msg.Content, core.TextContent(text))
+	sig := textSignatureV1{V: 1, ID: id}
+	if phase == "commentary" || phase == "final_answer" {
+		sig.Phase = phase
+	}
+	raw, err := json.Marshal(sig)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// textSignatureV1 is the JSON shape stored in core.Content.TextSignature for
+// OpenAI Responses message items.
+type textSignatureV1 struct {
+	V     int    `json:"v"`
+	ID    string `json:"id,omitempty"`
+	Phase string `json:"phase,omitempty"`
+}
+
+// parseTextSignature decodes a TextSignature blob back into id/phase. Tolerates
+// empty/legacy values.
+func parseTextSignature(sig string) (id, phase string) {
+	if sig == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(sig, "{") {
+		var v textSignatureV1
+		if json.Unmarshal([]byte(sig), &v) == nil && v.V == 1 {
+			// Only echo back a phase OpenAI accepts; a corrupt/foreign phase
+			// would make the replayed request invalid.
+			if v.Phase != "commentary" && v.Phase != "final_answer" {
+				return v.ID, ""
+			}
+			return v.ID, v.Phase
+		}
+		return "", ""
+	}
+	// Legacy: bare id string.
+	return sig, ""
 }
 
 // readLine reads a single line handling long lines.
