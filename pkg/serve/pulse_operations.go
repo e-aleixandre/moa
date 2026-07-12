@@ -108,7 +108,7 @@ func handlePulseOperationPrepare(mgr *Manager) http.HandlerFunc {
 		case errors.Is(err, errOperationAdmission):
 			w.Header().Set("Retry-After", "60")
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Pulse operation capacity reached; retry after existing reviews or receipts expire"})
-		case errors.Is(err, errPulseOperationUnavailable), errors.Is(err, errOperationStoreUnavailable):
+		case errors.Is(err, errPulseOperationUnavailable), errors.Is(err, errPulseInstructionLedger), errors.Is(err, errOperationStoreUnavailable):
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Pulse operations temporarily unavailable"})
 		case err != nil:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -198,6 +198,9 @@ var errPulseOperationAmbiguous = errors.New("Pulse operation target is ambiguous
 func (m *Manager) preparePulseOperation(deviceID string, body pulseOperationPrepareBody) (pulseOperationResponse, []opsInstructionTarget, error) {
 	if m.pulseOperations == nil {
 		return pulseOperationResponse{}, nil, errPulseOperationUnavailable
+	}
+	if !m.instructionLedgerAvailable() {
+		return pulseOperationResponse{}, nil, errPulseInstructionLedger
 	}
 	body.Kind = strings.TrimSpace(body.Kind)
 	if body.Kind != pulseOperationDirectedInstruction {
@@ -328,6 +331,10 @@ func (m *Manager) confirmPulseOperation(ctx context.Context, devices *deviceStor
 	if !start.Execute {
 		return pulseOperationReceipt{}, errOperationStoreUnavailable
 	}
+	if !m.instructionLedgerAvailable() {
+		receipt := rejectedOperationReceipt(start.Operation, time.Now().UTC(), "delivery_unavailable")
+		return m.finishPulseConfirmation(id, receipt)
+	}
 	if start.Recover {
 		if receipt, settled := m.recoverPulseConfirmation(start.Operation); settled {
 			return m.finishPulseConfirmation(id, receipt)
@@ -372,6 +379,9 @@ func (m *Manager) finishPulseConfirmation(id string, receipt pulseOperationRecei
 
 func (m *Manager) executePulseOperation(operation durableOperation) pulseOperationReceipt {
 	now := time.Now().UTC()
+	if !m.instructionLedgerAvailable() {
+		return rejectedOperationReceipt(operation, now, "delivery_unavailable")
+	}
 	switch operation.Kind {
 	case pulseOperationDirectedInstruction:
 		return m.executePulseDirectedInstruction(operation, now)
@@ -461,7 +471,7 @@ func indeterminateOperationReceipt(operation durableOperation, now time.Time, re
 // attempt remains available for an explicit retry; that retry first writes
 // both operation and canonical write-ahead records before it can execute.
 func (m *Manager) recoverPulseConfirmations() {
-	if m.pulseOperations == nil {
+	if m.pulseOperations == nil || !m.instructionLedgerAvailable() {
 		return
 	}
 	for _, operation := range m.pulseOperations.confirmingOperations() {

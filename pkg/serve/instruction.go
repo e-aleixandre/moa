@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -32,7 +33,7 @@ var (
 	ErrInstructionConflict     = errors.New("request_id was already used with different text")
 	ErrInstructionRateLimit    = errors.New("instruction rate limit exceeded")
 	ErrInstructionScopeChanged = errors.New("instruction delivery scope changed since review")
-	errPulseInstructionLedger  = errors.New("Pulse instruction delivery ledger unavailable")
+	errPulseInstructionLedger  = errInstructionLedgerUnavailable
 	errPulseInstructionUnknown = errors.New("Pulse instruction delivery outcome is indeterminate")
 )
 
@@ -53,16 +54,17 @@ func (e *pulseInstructionPersistenceError) Error() string {
 	return "Pulse instruction delivery was not durably recorded"
 }
 
-// VoiceInstruction delivers a normalized legacy voice instruction without
-// changing its established best-effort persistence behavior. It is safe for
-// concurrent retries in this process.
+// VoiceInstruction delivers a normalized legacy voice instruction. It is safe
+// for concurrent retries while this Manager exclusively owns the durable
+// canonical instruction ledger.
 func (m *Manager) VoiceInstruction(sessionID, text, requestID string) (string, error) {
 	return m.voiceInstruction(sessionID, text, requestID, "", false)
 }
 
 // voiceInstructionExpected is the scope-bound counterpart used only by the
-// Pulse typed transaction. Pulse delivery uses a durable write-ahead ledger;
-// legacy /instruction callers retain their historical best-effort behavior.
+// Pulse typed transaction. Pulse typed delivery uses a durable write-ahead
+// ledger; legacy callers keep their normal delivery behavior while this
+// Manager is the sole ledger owner.
 func (m *Manager) voiceInstructionExpected(sessionID, text, requestID, expectedAction string) (string, error) {
 	return m.voiceInstruction(sessionID, text, requestID, expectedAction, true)
 }
@@ -77,13 +79,19 @@ func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction st
 	fingerprint := m.instructionFingerprint(text)
 	m.instructionMu.Lock()
 	defer m.instructionMu.Unlock()
+	if !m.instructionLedgerAvailable() {
+		return "", errInstructionLedgerUnavailable
+	}
 
 	records := pruneInstructionRequests(m.instructionRequests[sessionID], now)
 	m.instructionRequests[sessionID] = records
-	// Legacy pruning remains best effort. For Pulse an unavailable store stops
-	// before any execution is possible.
+	// Keep legacy pruning durable before delivery too. This also turns an I/O
+	// failure into a clear fail-closed error before a new legacy instruction can
+	// be sent.
 	if !pulse {
-		m.persistInstructionRequestsLocked()
+		if err := m.persistInstructionRequestsLocked(); err != nil {
+			return "", err
+		}
 	}
 	for _, record := range records {
 		if record.id != requestID {
@@ -110,9 +118,6 @@ func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction st
 	}
 
 	if pulse {
-		if m.instructionStore == nil || !m.instructionStore.available() {
-			return "", errPulseInstructionLedger
-		}
 		records = append(records, instructionRequest{id: requestID, fingerprint: fingerprint, at: now, state: "attempting", pulse: true})
 		m.instructionRequests[sessionID] = records
 		if err := m.persistInstructionRequestsLocked(); err != nil {
@@ -180,7 +185,7 @@ func (m *Manager) voiceInstruction(sessionID, text, requestID, expectedAction st
 		if pulse {
 			return action, &pulseInstructionPersistenceError{delivered: true}
 		}
-		slog.Warn("instruction idempotency persistence failed", "error", err)
+		return action, err
 	}
 	slog.Info("voice instruction applied", "session_id", sessionID, "request_id", requestID, "action", action)
 	return action, nil
@@ -192,12 +197,16 @@ func (m *Manager) instructionFingerprint(text string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+func (m *Manager) instructionLedgerAvailable() bool {
+	return m.instructionStore != nil && m.instructionStore.available()
+}
+
 // persistInstructionRequestsLocked writes replay metadata and Pulse's
 // write-ahead state. The caller holds instructionMu.
 func (m *Manager) persistInstructionRequestsLocked() error {
 	m.trimInstructionRequestsLocked()
-	if m.instructionStore == nil {
-		return errPulseInstructionLedger
+	if !m.instructionLedgerAvailable() {
+		return errInstructionLedgerUnavailable
 	}
 	state := durableInstructionState{Key: encodeInstructionKey(m.instructionKey)}
 	for sessionID, records := range m.instructionRequests {
@@ -209,7 +218,10 @@ func (m *Manager) persistInstructionRequestsLocked() error {
 		}
 	}
 	state.Records = normalizeDurableInstructionRecords(state.Records, m.instructionNow().UTC())
-	return m.instructionStore.save(state)
+	if err := m.instructionStore.save(state); err != nil {
+		return fmt.Errorf("%w: %v", errInstructionLedgerUnavailable, err)
+	}
+	return nil
 }
 
 func (m *Manager) trimInstructionRequestsLocked() {
@@ -348,6 +360,8 @@ func handleInstruction(mgr *Manager) http.HandlerFunc {
 		case errors.Is(err, ErrInstructionRateLimit):
 			w.Header().Set("Retry-After", "60")
 			http.Error(w, err.Error(), http.StatusTooManyRequests)
+		case errors.Is(err, errInstructionLedgerUnavailable):
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "instruction delivery temporarily unavailable"})
 		case err != nil:
 			http.Error(w, "unable to apply instruction", http.StatusInternalServerError)
 		default:
