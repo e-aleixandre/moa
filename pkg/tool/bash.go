@@ -122,8 +122,18 @@ func NewBash(cfg ToolConfig) core.Tool {
 				// The cwd/env are captured above before the goroutine starts. Do not
 				// write them back: async completion must never clobber foreground
 				// shell state after later bash calls have continued.
+				//
+				// Pass timeout 0 so the background process is NOT bounded by the
+				// synchronous invocation timeout — an async job is meant to outlive
+				// the turn that launched it. It stays cancellable via bash_cancel
+				// (BashJobs derives its ctx from the session, not the turn). An
+				// explicit `timeout` param still applies when the caller set one.
+				jobTimeout := timeout
+				if t := getInt(params, "timeout", 0); t <= 0 {
+					jobTimeout = 0
+				}
 				job, err := cfg.BashJobs.Start(command, cwd, func(jobCtx context.Context, update func(core.Result)) (core.Result, error) {
-					return executeBash(jobCtx, cfg, command, cwd, persistedEnv, agentID, timeout, false, update)
+					return executeBash(jobCtx, cfg, command, cwd, persistedEnv, agentID, jobTimeout, false, update)
 				})
 				if err != nil {
 					return core.ErrorResult(err.Error()), nil
@@ -139,8 +149,15 @@ func NewBash(cfg ToolConfig) core.Tool {
 // executeBash is shared by synchronous and background invocations. persistState
 // is false for jobs because their launch snapshot is intentionally isolated.
 func executeBash(ctx context.Context, cfg ToolConfig, command, cwd string, persistedEnv []string, agentID string, timeout time.Duration, persistState bool, onUpdate func(core.Result)) (core.Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	// timeout <= 0 means "no deadline": the process lives until it finishes or
+	// is cancelled through ctx (e.g. bash_cancel or session shutdown). Async
+	// jobs use this so a background command isn't killed by the invocation
+	// timeout meant for synchronous calls.
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 
 	// When persisting state, prepend an EXIT trap that dumps the final
 	// cwd and exported env to temp files, then re-apply them on the next
@@ -328,6 +345,17 @@ func captureShellState(st *BashState, agentID, cwdFile, envFile string) {
 	st.Update(agentID, newCwd, parseNullSepEnv(envRaw))
 }
 
+// maxBashTimeout caps an explicit `timeout` param so a huge value can't
+// overflow time.Duration (which would wrap negative and be mistaken for the
+// "no deadline" sentinel of executeBash). 24h is far beyond any real command.
+const maxBashTimeout = 24 * time.Hour
+
 func secondsToDuration(s int) time.Duration {
+	if s <= 0 {
+		return 0
+	}
+	if time.Duration(s) > maxBashTimeout/time.Second {
+		return maxBashTimeout
+	}
 	return time.Duration(s) * time.Second
 }

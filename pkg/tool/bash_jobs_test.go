@@ -87,3 +87,62 @@ func TestAsyncBashDoesNotPersistShellState(t *testing.T) {
 		t.Fatalf("async job changed shell state: cwd=%q env=%v", cwd, env)
 	}
 }
+
+// TestAsyncBashOutlivesInvocationTimeout guards the #9 fix: a background job
+// must not be killed by the synchronous invocation timeout. With a 200ms
+// BashTimeout, a sync command sleeping 600ms would time out, but the same
+// command launched async (no explicit timeout param) must run to completion.
+func TestAsyncBashOutlivesInvocationTimeout(t *testing.T) {
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	bash := NewBash(ToolConfig{WorkspaceRoot: "/tmp", BashJobs: jobs, BashTimeout: 200 * time.Millisecond})
+	result, err := bash.Execute(context.Background(), map[string]any{"command": "sleep 0.6; echo done", "async": true}, nil)
+	if err != nil || result.IsError {
+		t.Fatalf("start = %+v, %v", result, err)
+	}
+	var jobID string
+	for _, field := range strings.Fields(bashResultText(result)) {
+		if strings.HasPrefix(field, "bash-") {
+			jobID = field
+			break
+		}
+	}
+	if jobID == "" {
+		t.Fatalf("missing job ID in %q", bashResultText(result))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	var final BashJobInfo
+	for {
+		job, ok := jobs.Get(jobID)
+		if ok && job.Status != "running" && job.Status != "cancelling" {
+			final = job
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("job did not finish")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if final.Status != "completed" || !strings.Contains(final.Output, "done") {
+		t.Fatalf("async job was killed by invocation timeout: status=%q output=%q", final.Status, final.Output)
+	}
+}
+
+// TestSecondsToDuration covers the clamp/overflow guard: a normal value maps
+// straight, a huge value is capped (not wrapped negative into the "no deadline"
+// sentinel), and non-positive maps to 0.
+func TestSecondsToDuration(t *testing.T) {
+	if got := secondsToDuration(30); got != 30*time.Second {
+		t.Errorf("secondsToDuration(30) = %v, want 30s", got)
+	}
+	if got := secondsToDuration(0); got != 0 {
+		t.Errorf("secondsToDuration(0) = %v, want 0", got)
+	}
+	if got := secondsToDuration(-5); got != 0 {
+		t.Errorf("secondsToDuration(-5) = %v, want 0", got)
+	}
+	// A value that would overflow time.Duration must clamp to a positive cap,
+	// never a negative (which executeBash would treat as "no deadline").
+	if got := secondsToDuration(9223372037); got <= 0 || got != maxBashTimeout {
+		t.Errorf("secondsToDuration(overflow) = %v, want %v", got, maxBashTimeout)
+	}
+}
