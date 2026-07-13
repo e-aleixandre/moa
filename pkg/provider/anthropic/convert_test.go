@@ -182,6 +182,57 @@ func TestBuildRequestBody_WithThinkingManualLegacy(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBody_ManualThinkingRespectsOutputCap(t *testing.T) {
+	maxTokens := 8_192
+	req := core.Request{
+		Model: core.Model{ID: "claude-haiku-4-5-20251001", MaxOutput: 16_384},
+		Messages: []core.Message{
+			core.NewUserMessage("Think hard"),
+		},
+		Options: core.StreamOptions{ThinkingLevel: "high", MaxTokens: &maxTokens},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := int(body["max_tokens"].(float64)); got != maxTokens {
+		t.Fatalf("max_tokens: got %d, want %d", got, maxTokens)
+	}
+	thinking := body["thinking"].(map[string]any)
+	if budget := int(thinking["budget_tokens"].(float64)); budget != maxTokens-1024 {
+		t.Fatalf("thinking budget: got %d, want %d", budget, maxTokens-1024)
+	}
+}
+
+func TestBuildRequestBody_DisablesManualThinkingWhenCapCannotFitIt(t *testing.T) {
+	maxTokens := 1_500
+	req := core.Request{
+		Model:    core.Model{ID: "claude-haiku-4-5-20251001"},
+		Messages: []core.Message{core.NewUserMessage("Think hard")},
+		Options:  core.StreamOptions{ThinkingLevel: "high", MaxTokens: &maxTokens},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["thinking"] != nil {
+		t.Fatalf("thinking = %v, want omitted", body["thinking"])
+	}
+	if got := int(body["max_tokens"].(float64)); got != maxTokens {
+		t.Fatalf("max_tokens: got %d, want %d", got, maxTokens)
+	}
+}
+
 func TestResolveThinking_XHighNotDisabled(t *testing.T) {
 	// Regression: "xhigh" (the max UI level) fell through to default and returned
 	// nil on manual-thinking models (Haiku 4.5, Fable) — disabling thinking

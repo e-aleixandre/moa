@@ -650,9 +650,9 @@ func TestStream_ToolCallNotDoubled(t *testing.T) {
 	}
 }
 
-// TestStream_IncompleteIsError verifies an incomplete (out-of-tokens) response
-// surfaces as a visible error, not a silent success.
-func TestStream_IncompleteIsError(t *testing.T) {
+// TestStream_IncompleteProducesMaxTokens verifies an incomplete
+// (out-of-tokens) response reaches the agent as a persisted max_tokens result.
+func TestStream_IncompleteProducesMaxTokens(t *testing.T) {
 	server := serveSSE(t,
 		sseEvent(`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
 			sseEvent(`{"type":"response.output_text.delta","delta":"partial"}`)+
@@ -669,11 +669,11 @@ func TestStream_IncompleteIsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	final, errEv := collectStream(t, ch)
-	if errEv == nil {
-		t.Fatal("expected incomplete to surface as error")
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
 	}
-	if final != nil {
-		t.Fatal("incomplete must not produce a Done message")
+	if final == nil || final.StopReason != "max_tokens" {
+		t.Fatalf("stop reason = %v, want max_tokens", final)
 	}
 }
 
@@ -856,7 +856,7 @@ func TestStream_MultipleMessagesPreserved(t *testing.T) {
 }
 
 // TestStream_IncompleteEvent verifies the distinct response.incomplete terminal
-// event surfaces as a visible error carrying its reason.
+// event is handled the same way as response.completed with status incomplete.
 func TestStream_IncompleteEvent(t *testing.T) {
 	server := serveSSE(t,
 		sseEvent(`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}}`)+
@@ -874,11 +874,11 @@ func TestStream_IncompleteEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	final, errEv := collectStream(t, ch)
-	if errEv == nil {
-		t.Fatal("expected response.incomplete to surface as error")
+	if errEv != nil {
+		t.Fatalf("unexpected error: %v", errEv.Error)
 	}
-	if final != nil {
-		t.Fatal("incomplete must not produce a Done message")
+	if final == nil || final.StopReason != "max_tokens" {
+		t.Fatalf("stop reason = %v, want max_tokens", final)
 	}
 }
 

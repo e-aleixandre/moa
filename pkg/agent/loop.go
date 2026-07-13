@@ -386,6 +386,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 				continue
 			}
+			if len(toolCalls) > 0 {
+				injectErrorToolResults(cfg, toolCalls, "tool call not executed: model output was truncated")
+			}
 			loopErr = fmt.Errorf("model output truncated after reaching max tokens")
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})

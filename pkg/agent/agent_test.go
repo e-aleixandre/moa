@@ -2357,6 +2357,24 @@ func stopReasonResponse(text, stopReason, errorMessage string, usage *core.Usage
 	}
 }
 
+func stopReasonToolCallResponse(id, name, stopReason string) func(req core.Request) (<-chan core.AssistantEvent, error) {
+	return func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 2)
+		go func() {
+			defer close(ch)
+			msg := core.Message{
+				Role:       "assistant",
+				Content:    []core.Content{core.ToolCallContent(id, name, nil)},
+				StopReason: stopReason,
+				Timestamp:  time.Now().Unix(),
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}
+}
+
 // TestLoop_PauseTurnResubmits verifies a pause_turn triggers an automatic
 // resubmit: the paused message is kept and the conversation continues to a
 // clean completion, with both assistant messages in state.
@@ -2579,6 +2597,19 @@ func TestLoop_MaxTokensWithTextErrors(t *testing.T) {
 	}
 	if provider.calls != 1 {
 		t.Fatalf("expected 1 provider call, got %d", provider.calls)
+	}
+}
+
+func TestLoop_MaxTokensWithToolCallKeepsTranscriptValid(t *testing.T) {
+	provider := NewMockProvider(stopReasonToolCallResponse("call_1", "noop", "max_tokens"))
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Run(context.Background(), "go")
+	if err == nil || !strings.Contains(err.Error(), "output truncated") {
+		t.Fatalf("expected truncation error, got: %v", err)
+	}
+	if len(msgs) != 3 || msgs[2].Role != "tool_result" || !msgs[2].IsError {
+		t.Fatalf("truncated tool call must receive an error result, got: %+v", msgs)
 	}
 }
 

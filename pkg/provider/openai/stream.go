@@ -410,18 +410,9 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 
 	case eventIncomplete:
 		// Distinct terminal event (the canonical form; some backends send it
-		// instead of response.completed with status "incomplete"). The turn was
-		// cut off before finishing — surface it as a visible error rather than
-		// a silent success.
-		reason := "output limit reached"
-		if ev.Response != nil && ev.Response.IncompleteDetails != nil && ev.Response.IncompleteDetails.Reason != "" {
-			reason = ev.Response.IncompleteDetails.Reason
-		}
-		ch <- core.AssistantEvent{
-			Type:  core.ProviderEventError,
-			Error: fmt.Errorf("openai: response incomplete (%s) — the model was cut off before finishing the turn", reason),
-		}
-		return true
+		// instead of response.completed with status "incomplete"). Handle it
+		// identically so the agent receives the persisted max_tokens result.
+		return state.finalize(ev, ch)
 
 	case eventFailed:
 		errMsg := "response failed"
@@ -487,8 +478,9 @@ func (s *streamState) finalizeToolCall(sl *slot, argsStr string, ch chan<- core.
 	}
 }
 
-// finalize handles response.completed. Precedence, matching the reference
-// clients (codex): (1) incomplete → visible error; (2) tool calls → tool_use;
+// finalize handles response.completed or response.incomplete. Precedence,
+// matching the reference clients (codex): (1) incomplete → max_tokens;
+// (2) tool calls → tool_use;
 // (3) end_turn:false → "continue" (the backend wants the conversation resent
 // as-is to keep going — codex turn.rs:2298); (4) no substantive content and no
 // continue signal → typed EmptyResponseError (the loop re-samples once before
@@ -527,20 +519,13 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 		}
 
 		// (1) A response that ran out of output budget (status "incomplete")
-		// did NOT finish the turn. Surfacing it as a normal Done makes the
-		// agent loop treat a truncated turn as a clean completion and stop
-		// silently — one of the "the model just went quiet" symptoms. Match the
-		// reference clients (codex) and turn it into a visible error. This wins
-		// over end_turn: a truncated turn is not a continuation.
+		// did NOT finish the turn. Deliver it as Done with stop_reason
+		// max_tokens so the agent can persist/account for the partial response,
+		// avoid executing incomplete tool calls, and apply its bounded retry.
 		if ev.Response.Status == "incomplete" {
-			reason := "output limit reached"
-			if ev.Response.IncompleteDetails != nil && ev.Response.IncompleteDetails.Reason != "" {
-				reason = ev.Response.IncompleteDetails.Reason
-			}
-			ch <- core.AssistantEvent{
-				Type:  core.ProviderEventError,
-				Error: fmt.Errorf("openai: response incomplete (%s) — the model was cut off before finishing the turn", reason),
-			}
+			s.ensureStarted(ch)
+			final := s.message
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &final}
 			return true
 		}
 	}

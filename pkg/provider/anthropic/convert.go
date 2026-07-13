@@ -114,13 +114,21 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 		}
 	} else if t := resolveThinking(req); t != nil {
 		ar.Thinking = t
-		// Anthropic manual thinking requires: max_tokens > budget_tokens.
-		minMaxTokens := t.BudgetTokens + 1
-		if minMaxTokens < 16000 {
-			minMaxTokens = 16000
-		}
-		if ar.MaxTokens < minMaxTokens {
-			ar.MaxTokens = minMaxTokens
+		// Anthropic manual thinking requires max_tokens > budget_tokens. Keep
+		// the resolved output cap authoritative and reduce the thinking budget
+		// instead, reserving room for a visible response.
+		const (
+			minVisibleOutputTokens  = 1024
+			minThinkingBudgetTokens = 1024
+		)
+		maxBudget := ar.MaxTokens - minVisibleOutputTokens
+		if maxBudget < minThinkingBudgetTokens {
+			// A cap this small cannot satisfy Anthropic's manual-thinking
+			// minimum while leaving a usable visible response. Prefer a valid
+			// non-thinking request to an API-rejected one.
+			ar.Thinking = nil
+		} else if t.BudgetTokens > maxBudget {
+			t.BudgetTokens = maxBudget
 		}
 	}
 
