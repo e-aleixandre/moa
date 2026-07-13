@@ -239,6 +239,17 @@ export function shortPath(cwd, maxLen = 42) {
   return '…' + p.slice(-(maxLen - 1));
 }
 
+/** Default window (days) for "recent" session lists. Older sessions are hidden
+ *  from the lists to avoid overload but remain findable via search. */
+export const RECENT_DAYS = 7;
+
+/** Whether a session counts as "recent" (updated within RECENT_DAYS). Sessions
+ *  with no timestamp are treated as recent so they never silently vanish. */
+export function isRecentSession(sess, days = RECENT_DAYS) {
+  if (!sess || !sess.updated) return true;
+  return Date.now() - sess.updated <= days * 24 * 60 * 60 * 1000;
+}
+
 
 /** Returns the state used to color a session's status dot. It mirrors the
  *  session's own state, except that an idle main agent which has live

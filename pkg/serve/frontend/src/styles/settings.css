@@ -29,10 +29,26 @@
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   min-width: 280px;
   max-height: 400px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   z-index: 200;
-  padding: 8px 0;
+  overflow: hidden;
+}
+/* Single scroll region for all the settings sections; the footer below stays
+   pinned so "Close session" is always visible (no nested-scroll trap). */
+.settings-body {
+  overflow-y: auto;
   scrollbar-width: none;
+  padding: 8px 0;
+  flex: 1;
+  min-height: 0;
+}
+.settings-body::-webkit-scrollbar { display: none; }
+/* Pinned footer, outside the scroll area. */
+.settings-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--surface0);
+  padding: 6px;
 }
 .settings-dropdown::-webkit-scrollbar { display: none; }
 
@@ -127,12 +143,11 @@
 }
 
 .settings-archive-btn {
-  width: calc(100% - 20px);
-  margin: 4px 10px 0;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 9px 10px;
   font-size: 12px;
   font-weight: 500;
   background: var(--surface0);

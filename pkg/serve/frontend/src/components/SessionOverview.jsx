@@ -1,36 +1,41 @@
 import { useCallback, useRef, useMemo } from 'preact/hooks';
-import { Plus, Sparkles, Archive, Trash2, FolderTree } from 'lucide-preact';
+import { Plus, Archive, Trash2, FolderTree } from 'lucide-preact';
 import { setActiveSession } from '../tile-actions.js';
-import { resumeSession, deleteSession } from '../session-actions.js';
+import { resumeSession, deleteSession, archiveSession } from '../session-actions.js';
 import { setState } from '../store.js';
 import { addToast } from '../notifications.js';
-import { shortModel, shortPath, projectKey, projectLabel, sessionDotState } from '../util/format.js';
+import { shortPath, projectKey, projectLabel, sessionDotState, isRecentSession } from '../util/format.js';
 
 export function SessionOverview({ state, onSelect, onNewSession }) {
   const touchStart = useRef(null);
 
-  const onTouchStart = useCallback((e) => {
+  // Close-gesture handlers live ONLY on the header/grabber, not the scrollable
+  // list — otherwise a fast flick while scrolling the sessions is mistaken for
+  // "close" and dismisses the dashboard. The grabber (and a tap) are the sole
+  // ways to close by gesture; the content is free to scroll.
+  const onGrabberTouchStart = useCallback((e) => {
     touchStart.current = { y: e.touches[0].clientY, t: Date.now() };
   }, []);
 
-  const onTouchEnd = useCallback((e) => {
+  const onGrabberTouchEnd = useCallback((e) => {
     if (!touchStart.current) return;
     const dy = touchStart.current.y - e.changedTouches[0].clientY;
     const dt = Date.now() - touchStart.current.t;
     touchStart.current = null;
-    if (dy > 50 && dt < 400) onSelect();
+    // Swipe up (or a quick tap) on the grabber closes the dashboard.
+    if (dy > 40 || (Math.abs(dy) < 10 && dt < 250)) onSelect();
   }, [onSelect]);
 
   const activeSessions = useMemo(() =>
     Object.values(state.sessions)
-      .filter(s => s.state !== 'saved')
+      .filter(s => s.state !== 'saved' && !s.archived)
       .sort((a, b) => (b.updated || 0) - (a.updated || 0)),
     [state.sessions]
   );
 
   const savedSessions = useMemo(() =>
     Object.values(state.sessions)
-      .filter(s => s.state === 'saved')
+      .filter(s => s.state === 'saved' && !s.archived && isRecentSession(s))
       .sort((a, b) => (b.updated || 0) - (a.updated || 0)),
     [state.sessions]
   );
@@ -54,6 +59,13 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
     const label = sess.title || 'Untitled';
     if (!window.confirm(`Delete session "${label}"? This cannot be undone.`)) return;
     deleteSession(sess.id).catch(err => console.error('Delete failed:', err));
+  }, []);
+
+  const handleArchive = useCallback((e, sess) => {
+    e.stopPropagation();
+    archiveSession(sess.id)
+      .then(() => addToast({ title: 'Session closed', message: sess.title || 'Untitled', type: 'info' }))
+      .catch(err => addToast({ title: 'Could not close session', message: err.message, type: 'error' }));
   }, []);
 
   const groupByProject = state.groupByProject;
@@ -86,9 +98,14 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
           {lastMsg || <span class="overview-card-empty">No messages yet</span>}
         </div>
         <div class="overview-card-footer">
-          <span class="overview-card-model">
-            <Sparkles />{shortModel(sess.model)}
-          </span>
+          <button
+            class="overview-card-close"
+            title="Close session (hides it; reopen later)"
+            aria-label="Close session"
+            onClick={(e) => handleArchive(e, sess)}
+          >
+            <Archive />Cerrar
+          </button>
           <button
             class="overview-card-delete"
             title="Delete session"
@@ -116,7 +133,6 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
             <span class="overview-saved-path" title={sess.cwd}>{path}</span>
           )}
         </div>
-        <span class="overview-saved-model">{shortModel(sess.model)}</span>
         <button
           class="overview-saved-delete"
           title="Delete session"
@@ -147,7 +163,18 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
   }, [groupByProject, activeSessions, savedSessions]);
 
   return (
-    <div class="session-overview" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <div class="session-overview">
+      <div
+        class="overview-grabber"
+        onTouchStart={onGrabberTouchStart}
+        onTouchEnd={onGrabberTouchEnd}
+        onClick={onSelect}
+        role="button"
+        aria-label="Close sessions"
+        title="Close"
+      >
+        <span class="overview-grabber-handle" />
+      </div>
       <div class="overview-header">
         <span class="overview-title">Sessions</span>
         <div class="overview-header-actions">

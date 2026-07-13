@@ -11,6 +11,20 @@ import (
 
 const maxSessionPreviewMessages = 4
 
+// recentSessionWindow bounds which sessions appear in the browser without an
+// active filter: older ones are hidden to keep the list scannable but remain
+// findable by typing a filter. Mirrors the web RECENT_DAYS window.
+const recentSessionWindow = 7 * 24 * time.Hour
+
+// isRecentSummary reports whether a session was updated within the recent
+// window. A zero timestamp counts as recent so it never silently vanishes.
+func isRecentSummary(sum session.Summary) bool {
+	if sum.Updated.IsZero() {
+		return true
+	}
+	return time.Since(sum.Updated) <= recentSessionWindow
+}
+
 type sessionBrowser struct {
 	active     bool
 	loading    bool
@@ -200,6 +214,12 @@ func (b *sessionBrowser) rebuildMatches() {
 	b.matches = b.matches[:0]
 	for i, sum := range b.summaries {
 		if sum.Archived && !b.showArchived {
+			continue
+		}
+		// With no filter, hide sessions older than the recent window to keep the
+		// list scannable; typing a filter searches everything so old sessions
+		// stay findable. (Parity with the web session lists.)
+		if needle == "" && !isRecentSummary(sum) {
 			continue
 		}
 		title := sessionTitle(sum)

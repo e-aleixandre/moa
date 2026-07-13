@@ -17,6 +17,30 @@
   to   { opacity: 1; transform: scale(1); }
 }
 
+/* Sticky drag zone: the ONLY area that closes the dashboard by gesture, so a
+   fast flick while scrolling the list below can't dismiss it by accident. */
+.overview-grabber {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding-top: env(safe-area-inset-top);
+  background: var(--crust);
+  cursor: pointer;
+  flex-shrink: 0;
+  touch-action: none;
+}
+.overview-grabber-handle {
+  width: 36px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--surface2);
+}
+.overview-grabber:active .overview-grabber-handle { background: var(--overlay0); }
+
 .overview-header {
   padding: 20px 16px 8px;
   display: flex;
@@ -111,18 +135,21 @@
 }
 .overview-card-empty { color: var(--surface2); font-style: italic; }
 .overview-card-footer { display: flex; align-items: center; justify-content: space-between; }
-.overview-card-model {
+.overview-card-close {
   display: flex;
   align-items: center;
-  gap: 3px;
-  font-size: 9px;
+  gap: 4px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--overlay0);
+  color: var(--subtext0);
   background: var(--surface0);
-  padding: 2px 6px;
+  border: none;
+  padding: 4px 10px;
   border-radius: 9999px;
+  cursor: pointer;
 }
-.overview-card-model .lucide { width: 9px; height: 9px; }
+.overview-card-close .lucide { width: 12px; height: 12px; }
+.overview-card-close:active { color: var(--text); background: var(--surface1); }
 
 .overview-card-delete {
   display: flex;
@@ -206,12 +233,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-}
-.overview-saved-model {
-  font-size: 11px;
-  color: var(--overlay0);
-  font-family: var(--mono);
-  flex-shrink: 0;
 }
 .overview-saved-delete {
   display: flex;
@@ -297,9 +318,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  padding: 6px 10px;
   background: var(--mantle);
+  border-top: 1px solid var(--surface0);
   overflow-x: auto;
   flex-shrink: 0;
   -webkit-overflow-scrolling: touch;

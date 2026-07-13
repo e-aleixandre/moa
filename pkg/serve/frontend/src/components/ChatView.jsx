@@ -9,6 +9,7 @@ import { SettingsDropdown } from './SettingsDropdown.jsx';
 import { NotificationSettings } from './NotificationSettings.jsx';
 import { ModelPill } from './ModelPill.jsx';
 import { TaskBar } from './TaskBar.jsx';
+import { TabBar } from './TabBar.jsx';
 import { RewindSheet } from './RewindSheet.jsx';
 import { sessionDotState } from '../util/format.js';
 
@@ -86,6 +87,7 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
         : <MessageList session={session} />}
       <TaskBar session={session} usage={state.usage} />
       <AgentTray sessionId={state.activeSession} session={session} />
+      <TabBar state={state} onOpenPalette={onOpenPalette} />
       <InputBar sessionId={state.activeSession} session={session} />
 
       <RewindSheet

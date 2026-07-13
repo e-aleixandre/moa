@@ -10,7 +10,6 @@ import { inputBarRegistry } from './components/InputBar.jsx';
 import { registerServiceWorker } from './pwa.js';
 import { refreshPushState } from './push-client.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
-import { TabBar } from './components/TabBar.jsx';
 import { TileTree } from './components/TileTree.jsx';
 import { ChatView } from './components/ChatView.jsx';
 import { SessionOverview } from './components/SessionOverview.jsx';
@@ -140,10 +139,7 @@ function App() {
             onNewSession={() => { setOverview(false); openPalette('create'); }}
           />
         ) : (
-          <>
-            <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} />
-            <TabBar state={state} onOpenPalette={() => openPalette('create')} />
-          </>
+          <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} />
         )}
         <ToastContainer />
         <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} />

@@ -92,6 +92,7 @@ export function SettingsDropdown({ sessionId, session }) {
 
       {open && (
         <div class="settings-dropdown" onClick={(e) => e.stopPropagation()}>
+          <div class="settings-body">
           {busy && (
             <div class="settings-busy-note">
               Settings locked while agent is running
@@ -154,8 +155,9 @@ export function SettingsDropdown({ sessionId, session }) {
               })}
             </div>
           </div>
+          </div>
 
-          <div class="settings-section">
+          <div class="settings-footer">
             <button class="settings-archive-btn" onClick={handleArchiveToggle}>
               {session?.archived
                 ? (<><ArchiveRestore /> Reopen session</>)

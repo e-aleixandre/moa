@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'preact/hooks';
 import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft, ChevronRight } from 'lucide-preact';
-import { store, sessionsByGroup, isSessionInTile } from '../store.js';
 import { assignToTile } from '../tile-actions.js';
 import { resumeSession, createSession, unarchiveSession } from '../session-actions.js';
 import { allTileIds, findTile } from '../tileTree.js';
 import { addToast } from '../notifications.js';
-import { sessionDotState } from '../util/format.js';
+import { sessionDotState, isRecentSession } from '../util/format.js';
 
 // Cached capabilities from server
 let _caps = null;
@@ -94,38 +93,45 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
   // --- SEARCH MODE: session list ---
   const searchItems = useMemo(() => {
     if (mode !== 'search') return [];
-    const groups = sessionsByGroup(state);
     const result = [];
 
     result.push({ type: 'action', id: '__new', label: 'New session…' });
 
     const q = query.toLowerCase().trim();
-    for (const [cwd, sessions] of Object.entries(groups)) {
+    // Order by most-recently-used first (consistent with the mobile dashboard),
+    // not grouped by project. With no query, hide archived ("closed") sessions
+    // and anything older than the recent window to keep the list scannable; a
+    // query searches everything so old sessions stay findable.
+    const sessions = Object.values(state.sessions)
+      .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    for (const sess of sessions) {
+      const cwd = sess.cwd || '';
       const cwdLabel = cwd.split('/').pop() || cwd;
-      for (const sess of sessions) {
-        if (q) {
-          const haystack = `${sess.title || ''} ${sess.model || ''} ${cwdLabel} ${cwd}`.toLowerCase();
-          if (!fuzzyMatch(q, haystack)) continue;
-        }
-        const ids = allTileIds(state.tileTree);
-        let inTile = null;
-        for (const tid of ids) {
-          const t = findTile(state.tileTree, tid);
-          if (t && t.sessionId === sess.id) {
-            inTile = ids.indexOf(tid) + 1;
-            break;
-          }
-        }
-        result.push({
-          type: 'session', id: sess.id,
-          title: sess.title || 'Untitled',
-          model: sess.model, state: sess.state,
-          dotState: sessionDotState(sess),
-          cwd: cwdLabel, inTile,
-          saved: sess.state === 'saved',
-          archived: !!sess.archived,
-        });
+      if (q) {
+        const haystack = `${sess.title || ''} ${sess.model || ''} ${cwdLabel} ${cwd}`.toLowerCase();
+        if (!fuzzyMatch(q, haystack)) continue;
+      } else {
+        if (sess.archived) continue;
+        if (!isRecentSession(sess)) continue;
       }
+      const ids = allTileIds(state.tileTree);
+      let inTile = null;
+      for (const tid of ids) {
+        const t = findTile(state.tileTree, tid);
+        if (t && t.sessionId === sess.id) {
+          inTile = ids.indexOf(tid) + 1;
+          break;
+        }
+      }
+      result.push({
+        type: 'session', id: sess.id,
+        title: sess.title || 'Untitled',
+        model: sess.model, state: sess.state,
+        dotState: sessionDotState(sess),
+        cwd: cwdLabel, inTile,
+        saved: sess.state === 'saved',
+        archived: !!sess.archived,
+      });
     }
     return result;
   }, [state.sessions, state.tileTree, query, mode]);
