@@ -818,9 +818,23 @@ func handleUsage(mgr *Manager) http.HandlerFunc {
 }
 
 func handleTranscribe(mgr *Manager) http.HandlerFunc {
+	// Bound how many audio uploads can hold the extended 3-minute read deadline
+	// at once. Each upload is capped at 25 MB, but the longer deadline widens the
+	// slowloris window (dribble an incomplete multipart to pin a connection), so
+	// without a ceiling a handful of clients could tie up goroutines/connections.
+	// A small non-blocking limit sheds excess load with 503 rather than queueing.
+	const maxConcurrentTranscribes = 4
+	sem := make(chan struct{}, maxConcurrentTranscribes)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if mgr.transcriber == nil {
 			http.Error(w, "transcription not available (no OpenAI API key configured)", http.StatusServiceUnavailable)
+			return
+		}
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+		default:
+			http.Error(w, "too many transcriptions in progress, try again in a moment", http.StatusServiceUnavailable)
 			return
 		}
 		// Audio uploads are large (up to 25 MB) and reach us over Tailscale from
@@ -828,8 +842,9 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 		// body-read deadline (bodyTimeoutMiddleware) to arrive — a longer voice
 		// note then fails mid-upload inside ParseMultipartForm. Extend the read
 		// deadline for this route only. Slowloris stays bounded: MaxBytesReader
-		// caps the body at 25 MB, so a stalled client can pin a connection for at
-		// most this window, not indefinitely.
+		// caps the body at 25 MB and the semaphore above caps concurrency, so a
+		// stalled client can pin at most a few connections for this window, not
+		// unboundedly and not indefinitely.
 		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(3 * time.Minute))
 		r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
 		if err := r.ParseMultipartForm(25 << 20); err != nil {
