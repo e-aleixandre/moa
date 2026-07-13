@@ -75,6 +75,12 @@ export async function loadSessions() {
         autoVerifying: existing ? existing.autoVerifying : false,
         compacting: existing ? existing.compacting : false,
         onOverage: existing ? existing.onOverage : false,
+        // Per-request rate-limit percents (the only usage source for OpenAI,
+        // which has no poller) are WS/live-only state; the poll doesn't carry
+        // them, so preserve them or the OpenAI usage pills flicker away on every
+        // poll tick.
+        rlFiveHourPct: existing ? existing.rlFiveHourPct : undefined,
+        rlSevenDayPct: existing ? existing.rlSevenDayPct : undefined,
         tasks: existing ? existing.tasks : [],
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),

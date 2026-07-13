@@ -16,7 +16,8 @@ function escapeHtml(s) {
   }[c]));
 }
 
-// Customize renderer: wrap code blocks for CodeBlock component
+// Customize renderer: wrap code blocks for CodeBlock component, and wrap GFM
+// tables in a horizontal-scroll container.
 const renderer = {
   code({ text, lang }) {
     let highlighted;
@@ -34,6 +35,30 @@ const renderer = {
       </div>
       <pre><code class="hljs">${highlighted}</code></pre>
     </div>`;
+  },
+  // Wrap the default table rendering in a scrollable container so wide tables
+  // scroll horizontally on narrow screens (mobile) instead of squashing their
+  // columns into tall, unreadable wrapped cells. Rendering through marked's own
+  // table token (rather than post-processing the HTML string) keeps cell
+  // content correctly escaped and can't mismatch on raw-HTML tables.
+  table(token) {
+    let header = '';
+    let cell = '';
+    for (let j = 0; j < token.header.length; j++) {
+      cell += this.tablecell(token.header[j]);
+    }
+    header += this.tablerow({ text: cell });
+    let body = '';
+    for (let j = 0; j < token.rows.length; j++) {
+      const row = token.rows[j];
+      cell = '';
+      for (let k = 0; k < row.length; k++) {
+        cell += this.tablecell(row[k]);
+      }
+      body += this.tablerow({ text: cell });
+    }
+    if (body) body = `<tbody>${body}</tbody>`;
+    return '<div class="md-table-wrap"><table>\n<thead>\n' + header + '</thead>\n' + body + '</table></div>\n';
   },
 };
 
@@ -62,19 +87,8 @@ if (typeof document !== 'undefined') {
   });
 }
 
-// Wrap GFM tables in a horizontally-scrollable container so wide tables scroll
-// sideways on narrow screens (mobile) instead of squashing their columns into
-// tall, unreadable wrapped cells. marked emits well-formed, non-nested
-// <table>…</table>, so a plain string wrap is safe here (and the wrapper div +
-// class are already on the DOMPurify allow-list below).
-export function wrapTables(html) {
-  return html
-    .replace(/<table>/g, '<div class="md-table-wrap"><table>')
-    .replace(/<\/table>/g, '</table></div>');
-}
-
 export function renderMarkdown(text) {
-  const raw = wrapTables(marked.parse(text));
+  const raw = marked.parse(text);
   return DOMPurify.sanitize(raw, {
     ADD_TAGS: ['div', 'button', 'span'],
     ADD_ATTR: ['class', 'data-lang'],

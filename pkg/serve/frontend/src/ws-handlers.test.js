@@ -224,3 +224,24 @@ test('handleWsRateLimit ignores unknown windows (pct < 0)', () => {
   expect(sess.rlFiveHourPct).toBe(40);
   expect(sess.rlSevenDayPct).toBeUndefined();
 });
+
+test('handleWsRateLimit isolates providers in a mixed layout', () => {
+  setState({
+    sessions: {
+      a: { id: 'a', provider: 'anthropic', subagents: {} },
+      o: { id: 'o', provider: 'openai', subagents: {} },
+    },
+    usage: { available: true, five_hour: { utilization: 5 }, seven_day: { utilization: 6 } },
+  });
+
+  // OpenAI session updates only its own per-session pcts, not the global snapshot.
+  handleWsRateLimit('o', { five_hour_pct: 80, seven_day_pct: 90, on_overage: false });
+  expect(store.get().sessions.o.rlFiveHourPct).toBe(80);
+  expect(store.get().usage.five_hour.utilization).toBe(5);
+
+  // Anthropic session patches the global snapshot; OpenAI's per-session values stay put.
+  handleWsRateLimit('a', { five_hour_pct: 30, seven_day_pct: 40, on_overage: false });
+  expect(store.get().usage.five_hour.utilization).toBe(30);
+  expect(store.get().sessions.o.rlFiveHourPct).toBe(80);
+  expect(store.get().sessions.a.rlFiveHourPct).toBe(30);
+});

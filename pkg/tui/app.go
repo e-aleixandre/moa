@@ -162,6 +162,11 @@ type appModel struct {
 
 	// Plan usage (account-global; shared poller, refreshed on a timer)
 	usagePoller *usage.Poller
+	// Last-known plan-quota percents (-1 = unknown), so a per-request rate-limit
+	// header carrying only one window updates that window without wiping the
+	// other — matching the web widget's per-window behavior.
+	lastFiveHPct int
+	lastWeekPct  int
 
 	// Voice input
 	voice voiceRecorder
@@ -252,6 +257,8 @@ func New(ctx context.Context, cfg Config) appModel {
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		promptTemplates:      cfg.PromptTemplates,
 		usagePoller:          cfg.UsagePoller,
+		lastFiveHPct:         -1,
+		lastWeekPct:          -1,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber, language: cfg.STTLanguage},
 	}
 	m.filePicker.SetWorkDir(cfg.CWD)
@@ -342,6 +349,7 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 	if snap == nil {
 		m.statusBar.UpdateUsageSegment(-1, -1)
 		m.statusBar.UpdateUsageExtraSegment(0, "", false)
+		m.lastFiveHPct, m.lastWeekPct = -1, -1
 		return
 	}
 	five, week := -1, -1
@@ -351,6 +359,7 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 	if snap.SevenDay != nil {
 		week = int(snap.SevenDay.Utilization + 0.5)
 	}
+	m.lastFiveHPct, m.lastWeekPct = five, week
 	m.statusBar.UpdateUsageSegment(five, week)
 	used, _ := snap.Extra.UsedAmount()
 	m.statusBar.UpdateUsageExtraSegment(used, snap.Extra.CurrencySymbol(), snap.Extra.IsEnabled)
@@ -365,12 +374,19 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 // OAuth backend, so no provider check is needed here — an API key never
 // produces it. Run-generation filtering upstream keeps stale runs from writing.
 func (m *appModel) applyRateLimit(rl core.RateLimit) {
-	// Refresh the quota segment only when both window utilizations are known
-	// (>= 0); a -1 means the header was absent, and we must not clobber a known
-	// value (the poller's, for Anthropic) with a fake 0%.
-	if rl.FiveHourUtil >= 0 && rl.SevenDayUtil >= 0 {
-		pct := func(f float64) int { return int(f*100 + 0.5) }
-		m.statusBar.UpdateUsageSegment(pct(rl.FiveHourUtil), pct(rl.SevenDayUtil))
+	// Update each window independently: a header may carry only one window
+	// (the other is -1 = unknown), and we must not wipe a known value (the
+	// poller's, for Anthropic) with it. Track the last-known percents so a
+	// partial update keeps the other window visible — matching the web widget.
+	pct := func(f float64) int { return int(f*100 + 0.5) }
+	if rl.FiveHourUtil >= 0 {
+		m.lastFiveHPct = pct(rl.FiveHourUtil)
+	}
+	if rl.SevenDayUtil >= 0 {
+		m.lastWeekPct = pct(rl.SevenDayUtil)
+	}
+	if rl.FiveHourUtil >= 0 || rl.SevenDayUtil >= 0 {
+		m.statusBar.UpdateUsageSegment(m.lastFiveHPct, m.lastWeekPct)
 	}
 	m.statusBar.UpdateOverageSegment(rl.OnOverage())
 }
