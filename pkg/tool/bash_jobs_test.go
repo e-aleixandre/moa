@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -219,6 +220,59 @@ func TestBashJobsWaitAlreadyFinished(t *testing.T) {
 	}
 	if info.Status != "completed" || info.Awaited {
 		t.Fatalf("Wait on finished job = %+v (Awaited should be false)", info)
+	}
+}
+
+// TestBashJobsWaitMultipleWaitersSingleDelivery verifies that when several
+// waiters block on the same job, exactly one owns the full-output delivery
+// (delivered=true) and the async notification is suppressed; every other
+// waiter gets delivered=false.
+func TestBashJobsWaitMultipleWaitersSingleDelivery(t *testing.T) {
+	release := make(chan struct{})
+	var notifications atomic.Int32
+	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) {
+		if !info.Awaited {
+			notifications.Add(1)
+		}
+	})
+	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		<-release
+		return core.TextResult("finished\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 4
+	var deliveredCount atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			info, delivered, werr := jobs.Wait(context.Background(), job.JobID, 5*time.Second)
+			if werr != nil {
+				t.Errorf("Wait err = %v", werr)
+				return
+			}
+			if info.Status != "completed" {
+				t.Errorf("Wait status = %s", info.Status)
+			}
+			if delivered {
+				deliveredCount.Add(1)
+			}
+		}()
+	}
+	// Let all waiters register before completion.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := deliveredCount.Load(); got != 1 {
+		t.Fatalf("delivered=true count = %d, want exactly 1", got)
+	}
+	if got := notifications.Load(); got != 0 {
+		t.Fatalf("async notification count = %d, want 0 when waiters are blocked", got)
 	}
 }
 

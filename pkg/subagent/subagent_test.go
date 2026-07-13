@@ -1770,6 +1770,55 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 	}
 }
 
+// TestSubagentWaitFastPathToolReturnsAck verifies the subagent_wait TOOL emits
+// a brief acknowledgment (not a re-dump of the result) when the async
+// notification already delivered the result to the conversation.
+func TestSubagentWaitFastPathToolReturnsAck(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "child result"))
+
+	var mu sync.Mutex
+	completeN := 0
+	reg := core.NewRegistry()
+	cfg := Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			mu.Lock()
+			completeN++
+			mu.Unlock()
+		},
+	}
+	cfg.ParentTools = reg
+	jobs := newJobStore()
+	sub := newSubagent(cfg, jobs)
+	wait := newSubagentWait(jobs)
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "t", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+	close(release)
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return completeN == 1
+	})
+
+	waitRes, err := wait.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+	if err != nil || waitRes.IsError {
+		t.Fatalf("subagent_wait execute = %+v %v", waitRes, err)
+	}
+	text := textOf(waitRes)
+	if !strings.Contains(text, "already finished") || strings.Contains(text, "child result") {
+		t.Fatalf("expected brief ack without result re-dump, got %q", text)
+	}
+}
+
 func TestSubagentWaitUnknownJob(t *testing.T) {
 	jobs := newJobStore()
 	wait := newSubagentWait(jobs)
