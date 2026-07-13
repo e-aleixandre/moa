@@ -293,8 +293,11 @@ export function handleWsInit(id, data) {
     // only if its client-minted ID is not yet in the snapshot (its POST was
     // still in flight when the cut was taken) so a just-sent steer isn't lost.
     pendingSteers: mergeSteers(data.pending_steers, store.get().sessions[id]?.pendingSteers),
-    streamingText: null,
-    thinkingText: null,
+    // Restore the in-flight streamed reply from the snapshot so a reconnect
+    // during generation shows the whole partial message, not just the deltas
+    // that land after the cut. Empty when nothing is streaming.
+    streamingText: data.streaming_text || null,
+    thinkingText: data.streaming_thinking || null,
     // Authoritative compacting flag from the snapshot: if the compaction
     // finished while this pane had no WS, the stale local spinner is cleared;
     // if one is still running, it is restored.

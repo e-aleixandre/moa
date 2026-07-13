@@ -128,6 +128,20 @@ type SessionContext struct {
 	// value consistent with the events streamed after the cut.
 	compacting atomic.Bool
 
+	// streamMu guards the authoritative in-flight streaming aggregate below.
+	// The agent appends an assistant message to state only after the provider
+	// turn completes, so mid-stream the partial text/thinking lives only in the
+	// deltas already sent. A reconnect during generation would otherwise miss
+	// everything streamed before the cut and render the reply "from the middle".
+	// bridgeEvent maintains this aggregate serially (in the subscriber
+	// goroutine), holding streamMu across both the mutation and the derived
+	// publish so SnapshotStreamingWithCut can pair it with the sequence cut for
+	// the reconnect snapshot.
+	streamMu       sync.Mutex
+	streamText     string
+	streamThinking string
+	streamMsgID    string
+
 	// persistPaused suppresses persistence-reactor snapshots while a session is
 	// being restored in place. The final complete state is saved explicitly by
 	// SessionRuntime.SwitchSession.
@@ -251,6 +265,62 @@ func (sctx *SessionContext) Compacting() bool {
 // events.
 func (sctx *SessionContext) setCompacting(v bool) {
 	sctx.compacting.Store(v)
+}
+
+// StreamingAggregate returns the in-flight partial assistant text/thinking and
+// the current message ID, for a reconnect snapshot during generation. Empty
+// strings mean nothing is streaming right now.
+func (sctx *SessionContext) StreamingAggregate() (text, thinking, msgID string) {
+	sctx.streamMu.Lock()
+	defer sctx.streamMu.Unlock()
+	return sctx.streamText, sctx.streamThinking, sctx.streamMsgID
+}
+
+// SnapshotStreamingWithCut atomically captures the in-flight streaming aggregate
+// together with the current bus sequence, both under streamMu. bridgeEvent
+// holds streamMu across the aggregate mutation AND the derived Bus.Publish, so
+// this pairing gives a total order for the accumulative (non-idempotent)
+// aggregate: a streamed delta is either already folded into the returned text
+// AND at/below the returned cut, or absent AND published above it — never both.
+// Without this atomicity a delta could be seeded into the reconnect snapshot and
+// ALSO replayed live (seq > cut), double-rendering the partial reply.
+func (sctx *SessionContext) SnapshotStreamingWithCut() (text, thinking, msgID string, cut uint64) {
+	sctx.streamMu.Lock()
+	defer sctx.streamMu.Unlock()
+	return sctx.streamText, sctx.streamThinking, sctx.streamMsgID, sctx.Bus.LastSeq()
+}
+
+// The mutators below assume the caller already holds streamMu (bridgeEvent holds
+// it across the aggregate update and the derived publish); they never lock.
+
+// resetStreamingLocked clears the streaming aggregate. Called when a message
+// completes (its text is now a real message in state) and defensively on
+// turn/run end. Caller must hold streamMu.
+func (sctx *SessionContext) resetStreamingLocked() {
+	sctx.streamText = ""
+	sctx.streamThinking = ""
+	sctx.streamMsgID = ""
+}
+
+// setStreamMsgIDLocked records the ID of the assistant message currently
+// streaming, resetting the accumulated deltas for the new message. Caller must
+// hold streamMu.
+func (sctx *SessionContext) setStreamMsgIDLocked(id string) {
+	sctx.streamText = ""
+	sctx.streamThinking = ""
+	sctx.streamMsgID = id
+}
+
+// appendStreamTextLocked accumulates a streamed text delta. Caller must hold
+// streamMu.
+func (sctx *SessionContext) appendStreamTextLocked(delta string) {
+	sctx.streamText += delta
+}
+
+// appendStreamThinkingLocked accumulates a streamed thinking delta. Caller must
+// hold streamMu.
+func (sctx *SessionContext) appendStreamThinkingLocked(delta string) {
+	sctx.streamThinking += delta
 }
 
 // GetGate returns the current permission gate (may be nil for yolo mode).
@@ -412,9 +482,79 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	case core.AgentEventCompactionEnd, core.AgentEventEnd, core.AgentEventError:
 		sctx.setCompacting(false)
 	}
-	for _, ev := range TranslateAgentEvent(sid, gen, e, sctx.TaskStore) {
+
+	translated := TranslateAgentEvent(sid, gen, e, sctx.TaskStore)
+
+	// Maintain the authoritative in-flight streaming aggregate in lockstep with
+	// the deltas we publish, so a reconnect snapshot during generation restores
+	// the whole partial reply instead of only post-cut deltas. Cleared when the
+	// message completes (now a real message in state) or the turn/run ends.
+	//
+	// The aggregate is accumulative (concatenated deltas), so — unlike the
+	// idempotent compacting flag — the mutation and the publish of its derived
+	// events must be atomic with respect to the snapshot cut: streamMu is held
+	// across BOTH, and SnapshotStreamingWithCut reads the aggregate and
+	// Bus.LastSeq under the same lock. That gives a total order so a streamed
+	// delta is never both folded into the snapshot AND replayed live (seq>cut).
+	if delta, mutates := streamAggregateDelta(e); mutates {
+		sctx.streamMu.Lock()
+		switch delta.kind {
+		case streamKindStart:
+			sctx.setStreamMsgIDLocked(delta.msgID)
+		case streamKindText:
+			sctx.appendStreamTextLocked(delta.text)
+		case streamKindThinking:
+			sctx.appendStreamThinkingLocked(delta.text)
+		case streamKindReset:
+			sctx.resetStreamingLocked()
+		}
+		for _, ev := range translated {
+			sctx.Bus.Publish(ev)
+		}
+		sctx.streamMu.Unlock()
+		return
+	}
+	for _, ev := range translated {
 		sctx.Bus.Publish(ev)
 	}
+}
+
+type streamDeltaKind int
+
+const (
+	streamKindStart streamDeltaKind = iota
+	streamKindText
+	streamKindThinking
+	streamKindReset
+)
+
+type streamDelta struct {
+	kind  streamDeltaKind
+	msgID string
+	text  string
+}
+
+// streamAggregateDelta reports how an AgentEvent mutates the in-flight streaming
+// aggregate, and whether it mutates it at all. Only these events take streamMu
+// in bridgeEvent; everything else publishes without it.
+func streamAggregateDelta(e core.AgentEvent) (streamDelta, bool) {
+	switch e.Type {
+	case core.AgentEventMessageStart:
+		return streamDelta{kind: streamKindStart, msgID: e.Message.MsgID}, true
+	case core.AgentEventMessageUpdate:
+		if e.AssistantEvent != nil {
+			switch e.AssistantEvent.Type {
+			case core.ProviderEventTextDelta:
+				return streamDelta{kind: streamKindText, text: e.AssistantEvent.Delta}, true
+			case core.ProviderEventThinkingDelta:
+				return streamDelta{kind: streamKindThinking, text: e.AssistantEvent.Delta}, true
+			}
+		}
+		return streamDelta{}, false
+	case core.AgentEventMessageEnd, core.AgentEventTurnEnd, core.AgentEventEnd, core.AgentEventError:
+		return streamDelta{kind: streamKindReset}, true
+	}
+	return streamDelta{}, false
 }
 
 // TranslateAgentEvent translates a single core.AgentEvent into 0..n typed bus

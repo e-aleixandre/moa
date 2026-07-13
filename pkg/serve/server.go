@@ -532,11 +532,16 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD)
 		defer reactor.cleanup()
 
-		// The sequence cut is captured before assembling the snapshot. Events at
-		// or before it are represented by init and must not be replayed; events
-		// after it are already queued in the reactor, even during a slow write.
-		cut := sess.runtime.Bus.LastSeq()
-		initData := buildInitData(sess)
+		// The sequence cut and the in-flight streaming aggregate are captured
+		// TOGETHER under the session's streamMu (SnapshotStreamingWithCut), so
+		// an accumulative streamed delta is either already folded into the
+		// aggregate AND at/below the cut, or absent AND published above it —
+		// never both (which would double-render the partial reply). Events at or
+		// before the cut are represented by init and must not be replayed;
+		// events after it are already queued in the reactor, even during a slow
+		// write.
+		sText, sThinking, _, cut := sess.runtime.Context().SnapshotStreamingWithCut()
+		initData := buildInitData(sess, bus.StreamingAggregate{Text: sText, Thinking: sThinking})
 		initData.LastSeq = cut
 		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}); err != nil {
 			return

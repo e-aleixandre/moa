@@ -35,6 +35,8 @@ type InitData struct {
 	GoalStalled       int                 `json:"goal_stalled,omitempty"`
 	GoalVerifying     bool                `json:"goal_verifying,omitempty"`
 	Compacting        bool                `json:"compacting,omitempty"`
+	StreamingText     string              `json:"streaming_text,omitempty"`
+	StreamingThinking string              `json:"streaming_thinking,omitempty"`
 	PendingSteers     []PendingSteerData  `json:"pending_steers,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
 	Subagents         []SubagentInitData  `json:"subagents,omitempty"`

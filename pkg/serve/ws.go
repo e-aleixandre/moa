@@ -328,8 +328,12 @@ func (r *wsReactor) cleanup() {
 	})
 }
 
-// buildInitData constructs the WS init payload from bus queries.
-func buildInitData(sess *ManagedSession) InitData {
+// buildInitData constructs the WS init payload from bus queries. The streaming
+// aggregate is passed in (captured atomically with the sequence cut by the
+// caller via SnapshotStreamingWithCut) rather than queried here, so an
+// accumulative streamed delta can't be both seeded into the snapshot and
+// replayed live after the cut.
+func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
@@ -350,15 +354,17 @@ func buildInitData(sess *ManagedSession) InitData {
 
 	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
-		Messages:         msgs,
-		HistoryTruncated: historyTruncated,
-		State:            state,
-		ContextPercent:   ctxPct,
-		PermissionMode:   permMode,
-		Tasks:            taskList,
-		PathScope:        pathInfo.Scope,
-		CostUSD:          cost,
-		Compacting:       compacting,
+		Messages:          msgs,
+		HistoryTruncated:  historyTruncated,
+		State:             state,
+		ContextPercent:    ctxPct,
+		PermissionMode:    permMode,
+		Tasks:             taskList,
+		PathScope:         pathInfo.Scope,
+		CostUSD:           cost,
+		Compacting:        compacting,
+		StreamingText:     truncateHistoryString(streaming.Text),
+		StreamingThinking: truncateHistoryString(streaming.Thinking),
 	}
 
 	if len(pendingSteers) > 0 {

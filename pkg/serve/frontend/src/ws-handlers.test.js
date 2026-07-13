@@ -206,6 +206,32 @@ test('handleWsInit restores an in-progress compacting spinner from the snapshot'
   expect(store.get().sessions.s1.compacting).toBe(true);
 });
 
+// Regression for bug #3: a reconnect during generation must restore the whole
+// streamed-so-far reply from the snapshot, not start from the next delta.
+test('handleWsInit restores the in-flight streamed reply from the snapshot', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    streaming_text: 'partial reply',
+    streaming_thinking: 'partial thought',
+  });
+
+  expect(store.get().sessions.s1.streamingText).toBe('partial reply');
+  expect(store.get().sessions.s1.thinkingText).toBe('partial thought');
+});
+
+// A reconnect when nothing is streaming must leave the buffers empty (null),
+// not carry stale streaming text over from a previous connection.
+test('handleWsInit clears streaming buffers when nothing is in flight', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, streamingText: 'stale', thinkingText: 'stale' } } });
+
+  handleWsInit('s1', { messages: [] });
+
+  expect(store.get().sessions.s1.streamingText).toBe(null);
+  expect(store.get().sessions.s1.thinkingText).toBe(null);
+});
+
 // Regression for bug #7: persisted goal-lifecycle markers (role "goal") must
 // rebuild as system lines so a reopened conversation shows the goal record.
 test('normalizeHistory renders role "goal" markers as system lines', () => {

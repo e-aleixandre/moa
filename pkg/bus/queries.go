@@ -75,6 +75,18 @@ type GetCompactionEpoch struct{ SessionID string }
 // Handler returns: bool
 type GetCompacting struct{ SessionID string }
 
+// StreamingAggregate is the in-flight partial assistant text/thinking and its
+// message ID, surfaced in the reconnect snapshot so a reconnect during
+// generation restores the whole streamed-so-far reply instead of only post-cut
+// deltas. Captured atomically with the sequence cut via
+// SessionContext.SnapshotStreamingWithCut. Empty Text and Thinking mean nothing
+// is streaming right now.
+type StreamingAggregate struct {
+	Text     string
+	Thinking string
+	MsgID    string
+}
+
 // GetPendingSteers returns the authoritative queue of steer messages not yet
 // delivered, so a reconnect snapshot can restore the queued-message chips.
 // Handler returns: []core.SteerItem

@@ -559,6 +559,145 @@ func TestBridgeEvent_MessageUpdate_NilAssistantEvent(t *testing.T) {
 	expectNone(got, b, t)
 }
 
+// Regression for bug #3 (reconnect renders the reply from mid-stream): the
+// authoritative streaming aggregate must accumulate the partial text/thinking
+// as deltas are published and clear once the message ends, so a snapshot taken
+// mid-generation (GetStreamingAggregate) restores the whole streamed-so-far
+// reply rather than only the deltas that land after the cut.
+func TestBridgeEvent_StreamingAggregate(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContext(b, nil)
+
+	aggregate := func() StreamingAggregate {
+		text, thinking, msgID := sctx.StreamingAggregate()
+		return StreamingAggregate{Text: text, Thinking: thinking, MsgID: msgID}
+	}
+
+	if a := aggregate(); a.Text != "" || a.Thinking != "" || a.MsgID != "" {
+		t.Fatalf("aggregate not empty before streaming: %+v", a)
+	}
+
+	bridgeEvent(sctx, core.AgentEvent{
+		Type:    core.AgentEventMessageStart,
+		Message: core.AgentMessage{Message: core.Message{Role: "assistant", MsgID: "m1"}},
+	})
+	bridgeEvent(sctx, core.AgentEvent{
+		Type:           core.AgentEventMessageUpdate,
+		AssistantEvent: &core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "hmm "},
+	})
+	bridgeEvent(sctx, core.AgentEvent{
+		Type:           core.AgentEventMessageUpdate,
+		AssistantEvent: &core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "hel"},
+	})
+	bridgeEvent(sctx, core.AgentEvent{
+		Type:           core.AgentEventMessageUpdate,
+		AssistantEvent: &core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "lo"},
+	})
+
+	if a := aggregate(); a.Text != "hello" || a.Thinking != "hmm " || a.MsgID != "m1" {
+		t.Fatalf("mid-stream aggregate = %+v, want text=hello thinking='hmm ' msgID=m1", a)
+	}
+
+	// MessageEnd clears the aggregate: the reply is now a real message in state.
+	bridgeEvent(sctx, core.AgentEvent{
+		Type:    core.AgentEventMessageEnd,
+		Message: core.AgentMessage{Message: core.Message{Role: "assistant", MsgID: "m1"}},
+	})
+	if a := aggregate(); a.Text != "" || a.Thinking != "" || a.MsgID != "" {
+		t.Fatalf("aggregate not cleared after MessageEnd: %+v", a)
+	}
+
+	// A new MessageStart resets the accumulated deltas for the next message.
+	bridgeEvent(sctx, core.AgentEvent{
+		Type:    core.AgentEventMessageStart,
+		Message: core.AgentMessage{Message: core.Message{Role: "assistant", MsgID: "m2"}},
+	})
+	bridgeEvent(sctx, core.AgentEvent{
+		Type:           core.AgentEventMessageUpdate,
+		AssistantEvent: &core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "next"},
+	})
+	if a := aggregate(); a.Text != "next" || a.MsgID != "m2" {
+		t.Fatalf("second-message aggregate = %+v, want text=next msgID=m2", a)
+	}
+
+	// A run that dies without a MessageEnd must not leave a stale aggregate.
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventEnd})
+	if a := aggregate(); a.Text != "" || a.MsgID != "" {
+		t.Fatalf("aggregate not cleared on run end: %+v", a)
+	}
+}
+
+// Regression for the atomicity blocker (bug #3, Terra pass 1): because the
+// aggregate is accumulative (concatenated deltas), the snapshot cut and the
+// aggregate text must be captured together under streamMu, or a delta folded
+// into the snapshot text could ALSO carry a seq > cut and be replayed live,
+// duplicating it. bridgeEvent publishes exactly one event per call in lock
+// order, so seqs are deterministic: with L0 = LastSeq before MessageStart,
+// MessageStart takes L0+1 and text delta i takes L0+2+i. A snapshot whose text
+// holds k deltas is only consistent if cut == L0+1+k. This drives deltas from
+// one goroutine while another snapshots concurrently and asserts exactly that —
+// a non-atomic capture (text then cut read separately) makes cut outrun the
+// text and fails.
+func TestBridgeEvent_StreamingSnapshotCutIsAtomic(t *testing.T) {
+	const nDeltas = 400
+	deltaFor := func(i int) string { return fmt.Sprintf("%d.", i) }
+	cumulative := make([]string, nDeltas+1)
+	for i := 0; i < nDeltas; i++ {
+		cumulative[i+1] = cumulative[i] + deltaFor(i)
+	}
+
+	for iter := 0; iter < 60; iter++ {
+		b := NewLocalBus()
+		sctx := newTestSessionContext(b, nil)
+
+		l0 := b.LastSeq()
+		bridgeEvent(sctx, core.AgentEvent{
+			Type:    core.AgentEventMessageStart,
+			Message: core.AgentMessage{Message: core.Message{Role: "assistant", MsgID: "m1"}},
+		})
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; i < nDeltas; i++ {
+				bridgeEvent(sctx, core.AgentEvent{
+					Type:           core.AgentEventMessageUpdate,
+					AssistantEvent: &core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: deltaFor(i)},
+				})
+			}
+		}()
+
+		// Sample many (text, cut) pairs across the whole stream and assert each
+		// one is internally consistent: cut implies exactly k deltas, so the
+		// captured text must equal the k-delta prefix. A non-atomic capture lets
+		// cut outrun the text for some sample.
+		var samples int
+		for {
+			text, _, _, cut := sctx.SnapshotStreamingWithCut()
+			k := int(cut) - int(l0) - 1
+			if k >= 0 && k <= nDeltas {
+				if text != cumulative[k] {
+					t.Fatalf("iter %d: cut=%d implies %d deltas (len %d) but snapshot text len %d",
+						iter, cut, k, len(cumulative[k]), len(text))
+				}
+			}
+			if k >= 0 {
+				samples++
+			}
+			select {
+			case <-done:
+				if text == cumulative[nDeltas] || samples > nDeltas {
+					goto next
+				}
+			default:
+			}
+		}
+	next:
+		b.Close()
+	}
+}
+
 func TestBridgeEvent_MessageEnded(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
