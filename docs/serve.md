@@ -92,11 +92,15 @@ By default `moa serve` has **no authentication** — anyone who can reach the po
 
 When a normal OpenAI API key (not OpenAI OAuth) is configured, a paired device
 may call `POST /api/pulse/realtime/client-secret` with exactly `{}` to receive a
-60-second Realtime client secret. This is a device-only route: owner cookies and
+Realtime client secret requested for 60 seconds (Moa accepts at most an additional
+5 seconds for OpenAI clock/transport skew). This is a device-only route: owner cookies and
 tokens cannot mint it. Moa sends only server-controlled Realtime configuration
 to OpenAI and returns a minimal credential DTO; Pulse then talks directly to
 OpenAI. Moa does not proxy, store, or log audio, SDP, conversation data, the
-client secret, or the permanent API key. The route has the same Host, CSRF,
+client secret, or the permanent API key. Revocation prevents a subsequent mint
+from being delivered once it wins the device lifecycle boundary; it cannot recall
+a client secret already delivered, which may remain usable until its OpenAI expiry.
+The route has the same Host, CSRF,
 TLS/loopback, revocation, concurrency, and rate-limit protections as other
 paired-device operations.
 

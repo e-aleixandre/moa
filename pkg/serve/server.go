@@ -189,7 +189,18 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	}
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
-	return hostMiddleware(o.allowedHosts, handler)
+	return realtimeNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler))
+}
+
+// realtimeNoStoreMiddleware covers the broker before authentication and Host
+// validation, including errors emitted by those outer security boundaries.
+func realtimeNoStoreMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/pulse/realtime/client-secret" {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // bodyTimeoutMiddleware bounds how long a request body may take to arrive,

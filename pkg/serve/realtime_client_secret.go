@@ -14,12 +14,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	realtimeClientSecretBodyLimit = 128
 	realtimeModel                 = "gpt-realtime-mini"
 	realtimeEndpoint              = "wss://api.openai.com/v1/realtime"
+	realtimeSecretLimit           = 4096
+	realtimeResponseLimit         = 16 << 10
+	// OpenAI creates the credential at its clock. This permits only the small
+	// clock and transport delay around the requested one-minute lifetime.
+	realtimeExpirySkew = 5 * time.Second
 )
 
 // realtimeAdmission is intentionally in-memory: client secrets are never
@@ -81,10 +87,14 @@ func retryAfter(now time.Time, times []time.Time) int {
 
 func handleRealtimeClientSecret(store *deviceStore, keyFn RealtimeAPIKeyFunc, client *http.Client) http.HandlerFunc {
 	admission := newRealtimeAdmission()
+	now := time.Now
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		// This applies to every broker response produced by this handler. The
+		// route wrapper also covers authentication, CSRF, and Host rejections.
+		w.Header().Set("Cache-Control", "no-store")
 		identity, ok := requirePulseDeviceStore(w, r, store)
 		if !ok || identity.Kind != "device" || identity.DeviceID == "" {
 			http.Error(w, "paired device authentication required", http.StatusForbidden)
@@ -96,7 +106,11 @@ func handleRealtimeClientSecret(store *deviceStore, keyFn RealtimeAPIKeyFunc, cl
 			return
 		}
 		defer admission.release()
-		if r.URL.RawQuery != "" || !decodeRealtimeEmptyBody(w, r) {
+		if r.URL.RawQuery != "" {
+			http.Error(w, "query parameters are not allowed", http.StatusBadRequest)
+			return
+		}
+		if !decodeRealtimeEmptyBody(w, r) {
 			return
 		}
 		// Revalidate before spending an upstream credential request.
@@ -117,7 +131,7 @@ func handleRealtimeClientSecret(store *deviceStore, keyFn RealtimeAPIKeyFunc, cl
 			realtimeUnavailable(w)
 			return
 		}
-		secret, expires, status, retry := mintRealtimeClientSecret(r.Context(), client, key, safetyID)
+		secret, expires, status, retry := mintRealtimeClientSecret(r.Context(), client, key, safetyID, now)
 		if status == http.StatusTooManyRequests {
 			w.Header().Set("Retry-After", strconv.Itoa(retry))
 			writeJSON(w, status, map[string]string{"error": "realtime provider rate limit exceeded"})
@@ -127,19 +141,23 @@ func handleRealtimeClientSecret(store *deviceStore, keyFn RealtimeAPIKeyFunc, cl
 			realtimeUnavailable(w)
 			return
 		}
-		// Do not return a secret after a concurrent revocation or expiry.
-		if !activeRealtimeDevice(store, identity.DeviceID) {
+		// Writing the response is inside the same lifecycle lock used by revoke.
+		// Therefore either this delivery starts first and revoke follows it, or a
+		// completed revoke wins and no newly minted secret is delivered. A secret
+		// already delivered to a device cannot be recalled.
+		if err := store.withActiveDevice(identity.DeviceID, func() error {
+			writeJSON(w, http.StatusCreated, struct {
+				ClientSecret string `json:"client_secret"`
+				ExpiresAt    int64  `json:"expires_at"`
+				Transport    string `json:"transport"`
+				Endpoint     string `json:"endpoint"`
+				Model        string `json:"model"`
+			}{secret, expires, "websocket", realtimeEndpoint, realtimeModel})
+			return nil
+		}); err != nil {
 			http.Error(w, "device credential is no longer active", http.StatusForbidden)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusCreated, struct {
-			ClientSecret string `json:"client_secret"`
-			ExpiresAt    int64  `json:"expires_at"`
-			Transport    string `json:"transport"`
-			Endpoint     string `json:"endpoint"`
-			Model        string `json:"model"`
-		}{secret, expires, "websocket", realtimeEndpoint, realtimeModel})
 	}
 }
 
@@ -189,7 +207,7 @@ func realtimeUnavailable(w http.ResponseWriter) {
 	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "realtime credentials unavailable"})
 }
 
-func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key, safetyID string) (string, int64, int, int) {
+func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key, safetyID string, now func() time.Time) (string, int64, int, int) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	body, _ := json.Marshal(map[string]any{"expires_after": map[string]any{"anchor": "created_at", "seconds": 60}, "session": map[string]any{"type": "realtime", "model": realtimeModel, "output_modalities": []string{"audio"}, "audio": map[string]any{"output": map[string]any{"voice": "marin"}}, "max_output_tokens": 1024, "safety_identifier": safetyID}})
@@ -217,16 +235,24 @@ func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key, saf
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", 0, 1, 0
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
-	if err != nil {
+	b, err := io.ReadAll(io.LimitReader(resp.Body, realtimeResponseLimit+1))
+	if err != nil || len(b) > realtimeResponseLimit {
 		return "", 0, 1, 0
 	}
-	var result struct {
-		Value     string `json:"value"`
-		ExpiresAt int64  `json:"expires_at"`
-	}
-	if json.Unmarshal(b, &result) != nil || strings.TrimSpace(result.Value) == "" || result.ExpiresAt <= time.Now().Unix() {
+	var result map[string]json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	if err := decoder.Decode(&result); err != nil || result == nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return "", 0, 1, 0
 	}
-	return result.Value, result.ExpiresAt, 0, 0
+	var value string
+	var expiresAt int64
+	if json.Unmarshal(result["value"], &value) != nil || json.Unmarshal(result["expires_at"], &expiresAt) != nil ||
+		strings.TrimSpace(value) == "" || !utf8.ValidString(value) || len(value) > realtimeSecretLimit {
+		return "", 0, 1, 0
+	}
+	issued := now().UTC()
+	if expiresAt <= issued.Unix() || expiresAt > issued.Add(time.Minute+realtimeExpirySkew).Unix() {
+		return "", 0, 1, 0
+	}
+	return value, expiresAt, 0, 0
 }
