@@ -325,7 +325,7 @@ func NewBashWait(cfg ToolConfig) core.Tool {
 				return core.ErrorResult("background bash jobs are not configured"), nil
 			}
 			timeout := secondsToDuration(getInt(params, "timeout", 600))
-			job, err := cfg.BashJobs.Wait(ctx, jobID, timeout)
+			job, delivered, err := cfg.BashJobs.Wait(ctx, jobID, timeout)
 			if err != nil {
 				if err == ErrUnknownBashJob {
 					return core.ErrorResult("unknown bash job ID: " + jobID), nil
@@ -334,6 +334,11 @@ func NewBashWait(cfg ToolConfig) core.Tool {
 			}
 			if job.FinishedAt.IsZero() {
 				return core.TextResult(fmt.Sprintf("Job %s still running after timeout.\nCommand: %s\n\nCall bash_wait again to keep waiting, or bash_cancel to stop it.", job.JobID, job.Command)), nil
+			}
+			if !delivered {
+				// The async completion notification already delivered this job's
+				// full output to the conversation; don't repeat it.
+				return core.TextResult(fmt.Sprintf("Job %s already finished (status: %s); its output was delivered above.", job.JobID, job.Status)), nil
 			}
 			return core.TextResult(formatBashJobStatus(job)), nil
 		},

@@ -1748,31 +1748,25 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 		return completeN == 1
 	})
 
-	// Completion won the mutex before this fast-path wait. The wait can still
-	// inspect its explicitly requested status, but cannot create another async
-	// completion notification for the same terminal transition.
-	result, err := jobs.wait(context.Background(), jobID, time.Second)
+	// Completion won the mutex before this fast-path wait, and delivered the
+	// full result via OnAsyncComplete. The wait must report delivered=false so
+	// the subagent_wait tool returns a brief ack instead of re-dumping the same
+	// result the model already saw.
+	result, delivered, err := jobs.wait(context.Background(), jobID, time.Second)
 	if err != nil {
 		t.Fatalf("wait result = %v", err)
 	}
 	if result.Status != statusCompleted || result.Result != "child result" {
 		t.Fatalf("fast-path wait = %+v", result)
 	}
+	if delivered {
+		t.Fatal("fast-path wait after async notification must report delivered=false")
+	}
 	mu.Lock()
 	gotCompleteN := completeN
 	mu.Unlock()
 	if gotCompleteN != 1 {
 		t.Fatalf("OnAsyncComplete called %d times after fast-path wait, want 1", gotCompleteN)
-	}
-	j, ok := jobs.get(jobID)
-	if !ok {
-		t.Fatal("job disappeared")
-	}
-	j.mu.Lock()
-	claimed := j.resultClaimed
-	j.mu.Unlock()
-	if !claimed {
-		t.Fatal("completion notification did not claim terminal result")
 	}
 }
 

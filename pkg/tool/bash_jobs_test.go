@@ -167,9 +167,12 @@ func TestBashJobsWaitReturnsResult(t *testing.T) {
 	}
 	done := make(chan BashJobInfo, 1)
 	go func() {
-		info, werr := jobs.Wait(context.Background(), job.JobID, 5*time.Second)
+		info, delivered, werr := jobs.Wait(context.Background(), job.JobID, 5*time.Second)
 		if werr != nil {
 			t.Errorf("Wait err = %v", werr)
+		}
+		if !delivered {
+			t.Error("a blocked waiter must own the one-time output delivery")
 		}
 		done <- info
 	}()
@@ -210,7 +213,7 @@ func TestBashJobsWaitAlreadyFinished(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-ended // job has finished
-	info, werr := jobs.Wait(context.Background(), job.JobID, time.Second)
+	info, _, werr := jobs.Wait(context.Background(), job.JobID, time.Second)
 	if werr != nil {
 		t.Fatalf("Wait err = %v", werr)
 	}
@@ -219,11 +222,11 @@ func TestBashJobsWaitAlreadyFinished(t *testing.T) {
 	}
 }
 
-// TestBashJobsWaitFastPathKeepsCompletionClaim verifies the finish-before-wait
-// race: completion claims the async notification while holding the job mutex,
-// and a later Wait only reads the terminal snapshot rather than opening a
-// second completion-notification lane.
-func TestBashJobsWaitFastPathKeepsCompletionClaim(t *testing.T) {
+// TestBashJobsWaitFastPathDoesNotRedeliver verifies the finish-before-wait
+// race: completion delivers the full output via the async notification (no
+// waiter blocked), and a later fast-path Wait reports delivered=false so the
+// bash_wait tool returns a brief ack instead of re-dumping the same output.
+func TestBashJobsWaitFastPathDoesNotRedeliver(t *testing.T) {
 	ended := make(chan BashJobInfo, 1)
 	var notifications atomic.Int32
 	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) {
@@ -243,18 +246,15 @@ func TestBashJobsWaitFastPathKeepsCompletionClaim(t *testing.T) {
 		t.Fatal("completion should own notification with no registered waiter")
 	}
 
-	info, err := jobs.Wait(context.Background(), job.JobID, time.Second)
+	info, delivered, err := jobs.Wait(context.Background(), job.JobID, time.Second)
 	if err != nil {
 		t.Fatalf("Wait err = %v", err)
 	}
 	if info.Output != "done\n" {
 		t.Fatalf("Wait output = %q", info.Output)
 	}
-	jobs.mu.Lock()
-	claimed := jobs.jobs[job.JobID].resultClaimed
-	jobs.mu.Unlock()
-	if !claimed {
-		t.Fatal("fast-path Wait left terminal result unclaimed")
+	if delivered {
+		t.Fatal("fast-path Wait after async notification must report delivered=false")
 	}
 	if got := notifications.Load(); got != 1 {
 		t.Fatalf("async notification count = %d, want exactly 1", got)
@@ -272,7 +272,7 @@ func TestBashJobsWaitTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, werr := jobs.Wait(context.Background(), job.JobID, 30*time.Millisecond)
+	info, _, werr := jobs.Wait(context.Background(), job.JobID, 30*time.Millisecond)
 	if werr != nil {
 		t.Fatalf("timeout should not error, got %v", werr)
 	}
@@ -297,7 +297,7 @@ func TestBashJobsWaitCtxCancel(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
-	_, werr := jobs.Wait(ctx, job.JobID, 5*time.Second)
+	_, _, werr := jobs.Wait(ctx, job.JobID, 5*time.Second)
 	if werr == nil {
 		t.Fatal("expected ctx cancellation error")
 	}
@@ -305,7 +305,7 @@ func TestBashJobsWaitCtxCancel(t *testing.T) {
 
 func TestBashJobsWaitUnknownJob(t *testing.T) {
 	jobs := NewBashJobs(context.Background(), nil, nil, nil)
-	_, werr := jobs.Wait(context.Background(), "bash-nope", time.Second)
+	_, _, werr := jobs.Wait(context.Background(), "bash-nope", time.Second)
 	if werr != ErrUnknownBashJob {
 		t.Fatalf("Wait unknown = %v, want ErrUnknownBashJob", werr)
 	}
@@ -324,7 +324,7 @@ func TestBashJobsWaitRaceFinishVsTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		info, werr := jobs.Wait(context.Background(), job.JobID, time.Millisecond)
+		info, _, werr := jobs.Wait(context.Background(), job.JobID, time.Millisecond)
 		if werr != nil {
 			t.Fatalf("iter %d: err %v", i, werr)
 		}
@@ -354,7 +354,7 @@ func TestNewBashWaitUnknownJob(t *testing.T) {
 	}
 }
 
-func TestNewBashWaitReturnsCompletedStatus(t *testing.T) {
+func TestNewBashWaitFastPathReturnsAck(t *testing.T) {
 	ended := make(chan BashJobInfo, 1)
 	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) { ended <- info })
 	job, err := jobs.Start("echo hi", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
@@ -363,13 +363,49 @@ func TestNewBashWaitReturnsCompletedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-ended
+	<-ended // completion (no waiter) owned the full-output delivery
 	wait := NewBashWait(ToolConfig{BashJobs: jobs})
 	res, err := wait.Execute(context.Background(), map[string]any{"job_id": job.JobID}, nil)
 	if err != nil || res.IsError {
 		t.Fatalf("wait execute = %+v %v", res, err)
 	}
-	if !strings.Contains(bashResultText(res), "Status: completed") {
-		t.Fatalf("expected completed status, got %q", bashResultText(res))
+	text := bashResultText(res)
+	if !strings.Contains(text, "already finished") || strings.Contains(text, "Output:") {
+		t.Fatalf("expected brief ack without output re-dump, got %q", text)
+	}
+}
+
+func TestNewBashWaitBlockedWaiterReturnsStatus(t *testing.T) {
+	release := make(chan struct{})
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	job, err := jobs.Start("echo hi", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		<-release
+		return core.TextResult("hi\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := NewBashWait(ToolConfig{BashJobs: jobs})
+	type outcome struct {
+		text string
+		err  error
+	}
+	got := make(chan outcome, 1)
+	go func() {
+		res, werr := wait.Execute(context.Background(), map[string]any{"job_id": job.JobID}, nil)
+		got <- outcome{bashResultText(res), werr}
+	}()
+	time.Sleep(20 * time.Millisecond) // let the waiter register before completion
+	close(release)
+	select {
+	case o := <-got:
+		if o.err != nil {
+			t.Fatalf("wait execute err = %v", o.err)
+		}
+		if !strings.Contains(o.text, "Status: completed") || !strings.Contains(o.text, "hi\n") {
+			t.Fatalf("blocked waiter should get full output, got %q", o.text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bash_wait did not return")
 	}
 }

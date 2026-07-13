@@ -108,12 +108,16 @@ func (j *BashJobs) Start(command, cwd string, run func(context.Context, func(cor
 		}
 		live.Output = bashResultText(result)
 		live.FinishedAt = time.Now()
-		// Completion and Wait share this mutex, so exactly one lane claims the
-		// completion result before done is closed: a blocked waiter, or onEnd's
-		// async notification. A later fast-path Wait only reads that result.
-		notify := live.waiters == 0 && !live.resultClaimed
-		live.resultClaimed = true
+		// resultClaimed is the single one-time token for delivering the full
+		// output to the model. Exactly one lane claims it: the async completion
+		// notification (when no wait is blocked) or a bash_wait call. When a
+		// waiter is already blocked, the notification is suppressed (Awaited)
+		// and the waiter claims on wake; otherwise the notification claims now.
+		notify := live.waiters == 0
 		live.Awaited = !notify
+		if notify {
+			live.resultClaimed = true
+		}
 		info := live.BashJobInfo
 		done := live.done
 		j.mu.Unlock()
@@ -174,30 +178,35 @@ func (j *BashJobs) Get(jobID string) (BashJobInfo, bool) {
 }
 
 // Wait blocks until the job finishes, the context is cancelled, or timeout
-// elapses (timeout <= 0 waits indefinitely). It returns the job snapshot. If
-// the job finishes, the snapshot is final regardless of what woke the wait. On
-// timeout it returns the current (still-running) snapshot without an error; the
-// caller distinguishes via FinishedAt. While blocked, the job is marked so its
-// completion handler suppresses duplicate result reinjection.
-func (j *BashJobs) Wait(ctx context.Context, jobID string, timeout time.Duration) (BashJobInfo, error) {
+// elapses (timeout <= 0 waits indefinitely). It returns the job snapshot and a
+// delivered flag. If the job finishes, the snapshot is final regardless of what
+// woke the wait. On timeout it returns the current (still-running) snapshot
+// without an error; the caller distinguishes via FinishedAt.
+//
+// delivered reports whether THIS call owns the one-time full-output delivery to
+// the model. It is true when the wait consumes the completion result (a blocked
+// waiter, or the first caller to reach a terminal job before the async
+// notification claimed it). It is false when the async notification already
+// delivered the output — the caller should then return a brief acknowledgment
+// instead of re-dumping the same output the model already saw.
+func (j *BashJobs) Wait(ctx context.Context, jobID string, timeout time.Duration) (BashJobInfo, bool, error) {
 	if j == nil {
-		return BashJobInfo{}, ErrUnknownBashJob
+		return BashJobInfo{}, false, ErrUnknownBashJob
 	}
 	j.mu.Lock()
 	job := j.jobs[jobID]
 	if job == nil {
 		j.mu.Unlock()
-		return BashJobInfo{}, ErrUnknownBashJob
+		return BashJobInfo{}, false, ErrUnknownBashJob
 	}
 	if !job.FinishedAt.IsZero() {
-		// Completion normally claims first, before closing done. Retain the
-		// claim here for terminal jobs constructed by future callers as well.
-		if !job.resultClaimed {
-			job.resultClaimed = true
-		}
+		// Already terminal: this wait delivers the full output only if no lane
+		// has claimed it yet (i.e. the async notification hasn't run).
+		delivered := !job.resultClaimed
+		job.resultClaimed = true
 		info := job.BashJobInfo
 		j.mu.Unlock()
-		return info, nil
+		return info, delivered, nil
 	}
 	job.waiters++
 	done := job.done
@@ -226,17 +235,18 @@ func (j *BashJobs) Wait(ctx context.Context, jobID string, timeout time.Duration
 	}
 	// Re-check under the same mutex that sets FinishedAt: if the job finished
 	// (even if ctx/timeout also fired), deliver the final snapshot as success.
+	// A registered waiter suppressed the async notification (Awaited), so it
+	// owns delivery unless another wait already claimed it.
 	if !job.FinishedAt.IsZero() {
-		if !job.resultClaimed {
-			job.resultClaimed = true
-		}
-		return job.BashJobInfo, nil
+		delivered := !job.resultClaimed
+		job.resultClaimed = true
+		return job.BashJobInfo, delivered, nil
 	}
 	if ctx.Err() != nil {
-		return job.BashJobInfo, ctx.Err()
+		return job.BashJobInfo, false, ctx.Err()
 	}
 	// Timed out while still running: partial snapshot, no error.
-	return job.BashJobInfo, nil
+	return job.BashJobInfo, false, nil
 }
 
 func (j *BashJobs) runningLocked() int {

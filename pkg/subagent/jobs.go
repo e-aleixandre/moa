@@ -309,11 +309,16 @@ func (s *jobStore) setCancelled(id string) {
 }
 
 func claimTerminalResultLocked(j *job) {
-	// This is deliberately coupled to the terminal state transition. A waiter
-	// that registered before the transition owns the result; otherwise the
-	// async callback does. A fast-path wait after the transition only reads it.
-	j.resultClaimed = true
-	j.notifyAsyncCompletion = j.waiters == 0
+	// resultClaimed is the single one-time token for delivering the full result
+	// to the model, shared by the async notification lane and subagent_wait.
+	// When no waiter is registered, the async notification owns delivery and
+	// claims now; when a waiter is blocked, the notification is suppressed and
+	// the waiter claims on wake.
+	notify := j.waiters == 0
+	j.notifyAsyncCompletion = notify
+	if notify {
+		j.resultClaimed = true
+	}
 }
 
 func (s *jobStore) requestCancel(id string) (*job, jobSnapshot, bool) {
@@ -368,23 +373,28 @@ func (j *job) claimAsyncCompletion() bool {
 }
 
 // wait blocks until the job finishes, the context is cancelled, or timeout
-// elapses (timeout <= 0 waits indefinitely). It returns the job snapshot. If
-// the job finished (even if ctx/timeout also fired) the snapshot is terminal.
-// While blocked, the job's waiters count is raised so its completion handler
-// suppresses duplicate result reinjection (single delivery lane).
-func (s *jobStore) wait(ctx context.Context, id string, timeout time.Duration) (jobSnapshot, error) {
+// elapses (timeout <= 0 waits indefinitely). It returns the job snapshot and a
+// delivered flag. If the job finished (even if ctx/timeout also fired) the
+// snapshot is terminal.
+//
+// delivered reports whether THIS call owns the one-time full-result delivery to
+// the model. It is true when the wait consumes the completion result (a blocked
+// waiter, or the first caller to reach a terminal job before the async
+// notification claimed it). It is false when the async notification already
+// delivered the result — the caller returns a brief acknowledgment instead of
+// re-dumping the same result the model already saw.
+func (s *jobStore) wait(ctx context.Context, id string, timeout time.Duration) (jobSnapshot, bool, error) {
 	j, ok := s.get(id)
 	if !ok {
-		return jobSnapshot{}, ErrUnknownJob
+		return jobSnapshot{}, false, ErrUnknownJob
 	}
 	j.mu.Lock()
 	if j.status == statusCompleted || j.status == statusFailed || j.status == statusCancelled {
-		if !j.resultClaimed {
-			j.resultClaimed = true
-		}
+		delivered := !j.resultClaimed
+		j.resultClaimed = true
 		snap := snapshotLocked(j)
 		j.mu.Unlock()
-		return snap, nil
+		return snap, delivered, nil
 	}
 	j.waiters++
 	done := j.done
@@ -412,15 +422,14 @@ func (s *jobStore) wait(ctx context.Context, id string, timeout time.Duration) (
 	}
 	snap := snapshotLocked(j)
 	if j.status == statusCompleted || j.status == statusFailed || j.status == statusCancelled {
-		if !j.resultClaimed {
-			j.resultClaimed = true
-		}
-		return snap, nil
+		delivered := !j.resultClaimed
+		j.resultClaimed = true
+		return snap, delivered, nil
 	}
 	if ctx.Err() != nil {
-		return snap, ctx.Err()
+		return snap, false, ctx.Err()
 	}
-	return snap, nil
+	return snap, false, nil
 }
 
 func (s *jobStore) cleanup(olderThan time.Duration) {

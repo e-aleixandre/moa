@@ -327,7 +327,7 @@ func newSubagentWait(jobs *jobStore) core.Tool {
 			jobs.cleanup(jobTTL)
 			jobID, _ := params["job_id"].(string)
 			timeout := subagentWaitTimeout(params)
-			snap, err := jobs.wait(ctx, jobID, timeout)
+			snap, delivered, err := jobs.wait(ctx, jobID, timeout)
 			if err != nil {
 				if errors.Is(err, ErrUnknownJob) {
 					return core.ErrorResult("unknown job ID: " + jobID), nil
@@ -336,6 +336,11 @@ func newSubagentWait(jobs *jobStore) core.Tool {
 			}
 			if snap.Status == statusRunning || snap.Status == statusCancelling {
 				return core.TextResult(formatStatus(snap) + "\n\n(still running after timeout; call subagent_wait again to keep waiting, or subagent_cancel to stop it)"), nil
+			}
+			if !delivered {
+				// The async completion notification already delivered this
+				// subagent's full result to the conversation; don't repeat it.
+				return core.TextResult(fmt.Sprintf("Subagent %s already finished (status: %s); its result was delivered above.", snap.ID, snap.Status)), nil
 			}
 			return core.TextResult(formatStatus(snap)), nil
 		},
