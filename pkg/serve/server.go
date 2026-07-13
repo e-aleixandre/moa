@@ -37,6 +37,21 @@ type serverOptions struct {
 	token        string
 	secureCookie bool
 	devicePath   string
+	realtimeKey  RealtimeAPIKeyFunc
+	realtimeHTTP *http.Client
+}
+
+// RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
+// for missing credentials and OAuth credentials.
+type RealtimeAPIKeyFunc func() (key string, ok bool)
+
+// WithRealtimeClientSecretBroker supplies the narrowly scoped capability used
+// to mint OpenAI Realtime client secrets. The key is never retained by Serve.
+func WithRealtimeClientSecretBroker(key RealtimeAPIKeyFunc, client *http.Client) ServerOption {
+	return func(o *serverOptions) {
+		o.realtimeKey = key
+		o.realtimeHTTP = client
+	}
 }
 
 // ServerOption configures optional NewServer behavior.
@@ -163,6 +178,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/pulse/operations/prepare", handlePulseOperationPrepare(manager))
 	mux.HandleFunc("POST /api/pulse/operations/{id}/confirm", handlePulseOperationConfirm(manager))
 	mux.HandleFunc("GET /api/pulse/operations/{id}", handlePulseOperationGet(manager))
+	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))
 
 	handler := routeAuthorizationMiddleware(csrfMiddleware(bodyTimeoutMiddleware(mux)))
 	// Token auth (when configured) sits under the Host check but above route

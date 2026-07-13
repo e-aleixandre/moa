@@ -90,6 +90,16 @@ You don't have to wait for a run to finish before lining up your next move. What
 
 By default `moa serve` has **no authentication** — anyone who can reach the port controls your agents. For access beyond `127.0.0.1`, pass `--token <secret>` (or set `MOA_SERVE_TOKEN`) to require a session cookie or `?token=<secret>` on every request; visiting that URL once sets an `HttpOnly` cookie for subsequent requests. An authenticated owner can additionally pair a revocable Pulse device. A claimed device authenticates REST and WebSocket requests with `Authorization: Moa-Device <device-id>.<secret>`; its credential is separate from the owner token and is rejected outside direct loopback unless the request uses TLS. Pairing and device credentials are not accepted in URLs.
 
+When a normal OpenAI API key (not OpenAI OAuth) is configured, a paired device
+may call `POST /api/pulse/realtime/client-secret` with exactly `{}` to receive a
+60-second Realtime client secret. This is a device-only route: owner cookies and
+tokens cannot mint it. Moa sends only server-controlled Realtime configuration
+to OpenAI and returns a minimal credential DTO; Pulse then talks directly to
+OpenAI. Moa does not proxy, store, or log audio, SDP, conversation data, the
+client secret, or the permanent API key. The route has the same Host, CSRF,
+TLS/loopback, revocation, concurrency, and rate-limit protections as other
+paired-device operations.
+
 The device credential is **not** a second owner token. Its legacy access is an
 explicit default-deny allowlist: the safe Ops projections (`GET /api/ops`,
 `/api/ops/overview`, and `/api/ops/pulse`), the read-only Ops WebSocket

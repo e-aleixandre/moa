@@ -67,6 +67,9 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 // projections with an explicit safe wire contract, never a filtered legacy
 // dashboard endpoint.
 func serveRouteAccess(r *http.Request) routeAccess {
+	if r.Method == http.MethodPost && r.URL.Path == "/api/pulse/realtime/client-secret" {
+		return routeDeviceOperation
+	}
 	if r.Method == http.MethodPost && r.URL.Path == "/api/pulse/operations/prepare" {
 		return routeDeviceOperation
 	}

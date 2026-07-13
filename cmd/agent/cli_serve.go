@@ -100,6 +100,13 @@ func runServe(args []string) {
 	srv := serve.NewServer(mgr,
 		serve.WithAllowedHosts(splitCSV(*allowedHosts)),
 		serve.WithAuthToken(token, false),
+		serve.WithRealtimeClientSecretBroker(func() (string, bool) {
+			if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+				return key, !auth.IsOAuthToken(key)
+			}
+			credential, ok := authStore.Get("openai")
+			return credential.Key, ok && credential.Type == "api_key" && credential.Key != ""
+		}, nil),
 	)
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)

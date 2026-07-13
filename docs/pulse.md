@@ -44,7 +44,13 @@ Pulse tiene **paridad funcional con el propietario**: debe poder hacer, mediante
 
 ### El proveedor/modelo: razonador y narrador sin autoridad
 
-El proveedor de IA se conecta directamente desde Pulse. Sus credenciales son propias de Pulse y viven en el almacenamiento seguro del dispositivo; nunca se guardan en Moa ni se incluyen en URLs, logs o preferencias ordinarias.
+El proveedor de IA se conecta directamente desde Pulse. Cuando Pulse usa
+Realtime, Moa puede intercambiar su API key normal de OpenAI por un client secret
+efímero y limitado para un dispositivo emparejado; Pulse guarda ese secreto solo
+el tiempo necesario y se conecta directamente a OpenAI. Moa no hace de proxy ni
+guarda o registra audio, SDP, conversación, el client secret o la clave
+permanente. OAuth de OpenAI no sirve para este broker. Las credenciales de Pulse
+nunca se incluyen en URLs, logs o preferencias ordinarias.
 
 El modelo puede:
 
