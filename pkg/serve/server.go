@@ -823,6 +823,14 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "transcription not available (no OpenAI API key configured)", http.StatusServiceUnavailable)
 			return
 		}
+		// Audio uploads are large (up to 25 MB) and reach us over Tailscale from
+		// mobile networks, so the whole body can take well past the global 30s
+		// body-read deadline (bodyTimeoutMiddleware) to arrive — a longer voice
+		// note then fails mid-upload inside ParseMultipartForm. Extend the read
+		// deadline for this route only. Slowloris stays bounded: MaxBytesReader
+		// caps the body at 25 MB, so a stalled client can pin a connection for at
+		// most this window, not indefinitely.
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(3 * time.Minute))
 		r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
 		if err := r.ParseMultipartForm(25 << 20); err != nil {
 			http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
