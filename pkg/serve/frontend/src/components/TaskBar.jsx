@@ -75,10 +75,12 @@ export function TaskBar({ session, usage }) {
   const extraOn = showExtra && (extra.used_credits ?? 0) > 0;
   const oaFiveHPct = isOpenAI && session.rlFiveHourPct >= 0 ? session.rlFiveHourPct : null;
   const oaWeekPct = isOpenAI && session.rlSevenDayPct >= 0 ? session.rlSevenDayPct : null;
-  const hasUsage = !!(fiveH || week || showExtra || oaFiveHPct != null || oaWeekPct != null);
   const onOverage = !!session.onOverage;
 
-  if (!hasPlan && !goalActive && !hasTasks && !hasContext && !hasUsage && !onOverage && !hasCost) return null;
+  // Always render (at least the permission pill): this is the app's bottom
+  // status strip, mirroring the TUI statusline, and it owns the bottom
+  // safe-area inset so the interactive input/pills sit clear of the iOS
+  // home-indicator gesture zone.
 
   const done = tasks.filter(t => t.status === 'done').length;
   const total = tasks.length;

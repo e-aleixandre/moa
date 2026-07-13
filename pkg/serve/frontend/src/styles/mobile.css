@@ -447,7 +447,10 @@
 /* ─── Mobile responsive overrides ──────────────────────────── */
 
 @media (max-width: 768px) {
-  .input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  /* The TaskBar is the bottom-most, non-interactive status strip: it owns the
+     safe-area inset so the input and session pills above it stay clear of the
+     iOS home-indicator gesture zone. */
+  .task-bar { padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
   .input-bar textarea { font-size: 16px; padding: 10px 38px 10px 16px; }
   /* iOS/Safari auto-zooms into any focused text field whose font-size is < 16px,
      leaving the whole PWA zoomed in until you pinch back out. Force a 16px

@@ -85,10 +85,10 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
       {session.viewingSubagent
         ? <SubagentView sessionId={state.activeSession} session={session} />
         : <MessageList session={session} />}
-      <TaskBar session={session} usage={state.usage} />
       <AgentTray sessionId={state.activeSession} session={session} />
       <TabBar state={state} onOpenPalette={onOpenPalette} />
       <InputBar sessionId={state.activeSession} session={session} />
+      <TaskBar session={session} usage={state.usage} />
 
       <RewindSheet
         sessionId={state.activeSession}
