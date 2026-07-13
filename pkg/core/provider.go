@@ -80,6 +80,25 @@ type Model struct {
 	Pricing   *Pricing `json:"pricing,omitempty"`
 }
 
+// DefaultMaxOutputTokens bounds a single model response when the caller has
+// not selected a smaller cap. It leaves room for reasoning without allowing
+// one request to consume a model's entire output allowance.
+const DefaultMaxOutputTokens = 32_000
+
+// ResolveMaxOutputTokens returns the effective output cap for a request. An
+// explicit caller value wins, subject to the model's advertised capability;
+// otherwise the shared operational default is used.
+func ResolveMaxOutputTokens(model Model, requested *int) int {
+	maxTokens := DefaultMaxOutputTokens
+	if requested != nil && *requested > 0 {
+		maxTokens = *requested
+	}
+	if model.MaxOutput > 0 && maxTokens > model.MaxOutput {
+		return model.MaxOutput
+	}
+	return maxTokens
+}
+
 // Pricing holds per-token costs in USD per million tokens.
 //
 // Some providers (e.g. OpenAI's long-context GPT models) charge a different

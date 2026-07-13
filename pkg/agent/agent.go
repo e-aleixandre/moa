@@ -58,7 +58,7 @@ type AgentConfig struct {
 	SystemPrompt  string
 	ThinkingLevel string
 	CacheTTL      string // Prompt-cache TTL: "" (5m default) or "1h". Interactive agent only.
-	MaxTokens     int    // Max output tokens per LLM call. 0 = provider default.
+	MaxTokens     int    // Max output tokens per LLM call. 0 = shared model-aware default.
 	Tools         *core.Registry
 	Extensions    []extension.Extension
 	WorkspaceRoot string

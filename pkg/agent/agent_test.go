@@ -2550,6 +2550,38 @@ func TestLoop_UnknownStopReasonCompletes(t *testing.T) {
 	}
 }
 
+func TestLoop_EmptyMaxTokensResubmitsOnce(t *testing.T) {
+	provider := NewMockProvider(
+		stopReasonResponse("", "max_tokens", "", nil),
+		stopReasonResponse("recovered", "end_turn", "", nil),
+	)
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("empty max_tokens should be retried, got: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("expected 2 provider calls, got %d", provider.calls)
+	}
+	if got := msgs[len(msgs)-1].Content[0].Text; got != "recovered" {
+		t.Fatalf("final message = %q, want recovered", got)
+	}
+}
+
+func TestLoop_MaxTokensWithTextErrors(t *testing.T) {
+	provider := NewMockProvider(stopReasonResponse("partial", "max_tokens", "", nil))
+	ag := newTestAgent(provider)
+
+	_, err := ag.Run(context.Background(), "go")
+	if err == nil || !strings.Contains(err.Error(), "output truncated") {
+		t.Fatalf("expected truncation error, got: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("expected 1 provider call, got %d", provider.calls)
+	}
+}
+
 // emptyResponseProvider returns a handler that emits a typed EmptyResponseError
 // (optionally carrying usage) via a stream error (no Done), like the openai
 // provider does for an empty turn.

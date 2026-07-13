@@ -33,6 +33,9 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 	if body["stream"] != true {
 		t.Error("expected stream=true")
 	}
+	if got := int(body["max_tokens"].(float64)); got != core.DefaultMaxOutputTokens {
+		t.Errorf("max_tokens: got %d, want %d", got, core.DefaultMaxOutputTokens)
+	}
 
 	msgs, ok := body["messages"].([]any)
 	if !ok || len(msgs) != 1 {
@@ -42,6 +45,27 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 	msg := msgs[0].(map[string]any)
 	if msg["role"] != "user" {
 		t.Errorf("message role: got %v", msg["role"])
+	}
+}
+
+func TestBuildRequestBody_ClampsMaxTokensToModel(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "small", MaxOutput: 16_384},
+		Messages: []core.Message{
+			core.NewUserMessage("Hello"),
+		},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := int(body["max_tokens"].(float64)); got != 16_384 {
+		t.Errorf("max_tokens: got %d, want 16384", got)
 	}
 }
 

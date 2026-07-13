@@ -36,6 +36,9 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 	if parsed["instructions"] != "You are helpful." {
 		t.Fatalf("instructions: %v", parsed["instructions"])
 	}
+	if got := int(parsed["max_output_tokens"].(float64)); got != core.DefaultMaxOutputTokens {
+		t.Fatalf("max_output_tokens: got %d, want %d", got, core.DefaultMaxOutputTokens)
+	}
 
 	input, _ := parsed["input"].([]any)
 	if len(input) != 1 {
@@ -45,6 +48,27 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 	first := input[0].(map[string]any)
 	if first["role"] != "user" {
 		t.Fatalf("first input role: %v", first["role"])
+	}
+}
+
+func TestBuildRequestBody_ClampsOutputTokensToModel(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "small", MaxOutput: 16_384},
+		Messages: []core.Message{
+			core.NewUserMessage("Hello"),
+		},
+	}
+
+	body, err := buildRequestBody(req, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if got := int(parsed["max_output_tokens"].(float64)); got != 16_384 {
+		t.Fatalf("max_output_tokens: got %d, want 16384", got)
 	}
 }
 

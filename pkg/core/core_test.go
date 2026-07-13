@@ -83,6 +83,27 @@ func TestAgentMessage_IsLLMMessage(t *testing.T) {
 	}
 }
 
+func TestResolveMaxOutputTokens(t *testing.T) {
+	explicit := 48_000
+	for _, tt := range []struct {
+		name      string
+		model     Model
+		requested *int
+		want      int
+	}{
+		{name: "default", want: DefaultMaxOutputTokens},
+		{name: "model cap", model: Model{MaxOutput: 16_384}, want: 16_384},
+		{name: "explicit", model: Model{MaxOutput: 128_000}, requested: &explicit, want: 48_000},
+		{name: "explicit capped", model: Model{MaxOutput: 16_384}, requested: &explicit, want: 16_384},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveMaxOutputTokens(tt.model, tt.requested); got != tt.want {
+				t.Fatalf("ResolveMaxOutputTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToolResultMessage(t *testing.T) {
 	m := NewToolResultMessage("call-1", "bash", []Content{TextContent("output")}, false)
 	if m.Role != "tool_result" || m.ToolCallID != "call-1" || m.ToolName != "bash" || m.IsError {

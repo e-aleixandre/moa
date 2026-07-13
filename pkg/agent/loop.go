@@ -54,6 +54,10 @@ const maxEmptyContinuations = 5
 // error. Reset whenever a stream succeeds, so it caps *consecutive* empties.
 const maxEmptyRetries = 1
 
+// maxTruncationRetries caps resubmits after a response exhausts its output
+// limit before yielding visible text or a complete tool call.
+const maxTruncationRetries = 1
+
 // Hooks is the interface the agent loop needs from the extension system.
 // Defined here (consumer-side) so the loop doesn't depend on extension internals.
 type Hooks interface {
@@ -172,6 +176,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// response with no continue signal.
 	emptyContinuations := 0
 	emptyRetries := 0
+	truncationRetries := 0
 
 	var loopErr error
 	defer func() {
@@ -359,6 +364,33 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// frontends before we act on the stop reason.
 		justPaused = false
 		switch assistantMsg.StopReason {
+		case "max_tokens":
+			// A capped response can contain partial tool arguments, so never
+			// execute tools from it. When no user-visible output was produced,
+			// resubmit the persisted response once; this lets providers continue
+			// from their signed reasoning state without injecting fake user text.
+			toolCalls := extractToolCalls(assistantMsg)
+			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
+				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
+				if cfg.runCost > cfg.maxBudget {
+					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+					inTurn = false
+					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+					return loopErr
+				}
+			}
+			if len(toolCalls) == 0 && !hasSubstantiveText(assistantMsg) && truncationRetries < maxTruncationRetries {
+				truncationRetries++
+				justPaused = true
+				inTurn = false
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+				continue
+			}
+			loopErr = fmt.Errorf("model output truncated after reaching max tokens")
+			inTurn = false
+			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+			return loopErr
+
 		case "pause_turn":
 			// The provider paused a long-running turn and expects us to resend
 			// the conversation as-is to continue. The assistant message is
@@ -432,6 +464,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Any other stop reason: a real turn boundary — reset the streaks.
 		pauseResubmits = 0
 		emptyContinuations = 0
+		truncationRetries = 0
 
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)

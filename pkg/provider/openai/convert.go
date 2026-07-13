@@ -44,9 +44,8 @@ func buildRequestBody(req core.Request, supportsDocuments bool) ([]byte, error) 
 		r.Tools = convertToolSpecs(req.Tools)
 	}
 
-	if req.Options.MaxTokens != nil {
-		r.MaxTokens = req.Options.MaxTokens
-	}
+	maxTokens := core.ResolveMaxOutputTokens(req.Model, req.Options.MaxTokens)
+	r.MaxTokens = &maxTokens
 	if req.Options.Temperature != nil {
 		r.Temperature = req.Options.Temperature
 	}

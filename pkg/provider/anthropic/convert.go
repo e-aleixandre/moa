@@ -327,10 +327,7 @@ func convertToolSpecs(specs []core.ToolSpec, isOAuth bool) []map[string]any {
 }
 
 func resolveMaxTokens(req core.Request) int {
-	if req.Options.MaxTokens != nil {
-		return *req.Options.MaxTokens
-	}
-	return 8192
+	return core.ResolveMaxOutputTokens(req.Model, req.Options.MaxTokens)
 }
 
 // supportsAdaptiveThinking reports whether a model supports Anthropic adaptive
