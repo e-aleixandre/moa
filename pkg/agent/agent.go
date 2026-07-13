@@ -847,9 +847,10 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	return msgs, err
 }
 
-// RunCost returns the USD cost accumulated by the most recent Run/Send. It
-// reflects everything the loop billed against MaxBudget, including usage from
-// empty or failed turns that never became an assistant message.
+// RunCost returns the USD cost accumulated by the most recent Run/Send. It is a
+// faithful measure of real spend whenever the model has pricing — including
+// usage from empty or failed turns that never became an assistant message —
+// regardless of whether a MaxBudget cap was active.
 func (a *Agent) RunCost() float64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()

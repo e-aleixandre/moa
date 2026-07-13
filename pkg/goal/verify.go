@@ -385,8 +385,9 @@ func newVerifierRegistry(workDir string) (*core.Registry, error) {
 
 // verifyOneShot is the legacy tool-less verifier: a single call with objective +
 // evidence, no history and no tools. Kept for --verify-oneshot. It reports the
-// usage/cost of the attempt that produced the verdict so the driver charges it
-// against the goal budget, and shares one wall-clock deadline across retries.
+// TOTAL usage/cost across all attempts (including billed failed retries) so the
+// driver charges the goal for everything spent, and shares one wall-clock
+// deadline across retries.
 func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, objective, evidence string, timeout time.Duration) (Verdict, VerifyStats, error) {
 	user := fmt.Sprintf("OBJECTIVE:\n%s\n\nEVIDENCE:\n%s", strings.TrimSpace(objective), strings.TrimSpace(evidence))
 	req := core.Request{

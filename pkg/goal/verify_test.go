@@ -503,16 +503,25 @@ func TestVerify_OneShotTimeoutIsCap(t *testing.T) {
 	if !strings.Contains(strings.ToLower(v.Feedback), "time") {
 		t.Fatalf("feedback should mention running out of time, got %q", v.Feedback)
 	}
+	// The cap must have been reached on the LAST retry, not short-circuited on an
+	// earlier one — otherwise the pre-3624e74 bug (deadline on the last attempt
+	// returned as an infra error) wouldn't be exercised.
+	if got := prov.calls(); got != oneShotMaxAttempts {
+		t.Fatalf("expected the deadline to be hit on the last of %d attempts, got %d calls", oneShotMaxAttempts, got)
+	}
 }
 
 // TestVerify_OneShotChargesFailedAttempts: an attempt that fails with a billed
 // empty-response error still contributes its cost to the returned stats, so the
 // goal is charged for retries (P3, one-shot path).
 func TestVerify_OneShotChargesFailedAttempts(t *testing.T) {
+	failedUsage := &core.Usage{Input: 100, Output: 0, TotalTokens: 100}
+	successUsage := &core.Usage{Input: 10, Output: 5, TotalTokens: 15}
 	prov := &oneShotSeqProvider{
-		emptyErrUsage: &core.Usage{Input: 100, Output: 0, TotalTokens: 100},
+		emptyErrUsage: failedUsage,
 		successAfter:  1, // first attempt fails (billed), second succeeds
 		successText:   `{"satisfied": true, "feedback": "ok"}`,
+		successUsage:  successUsage,
 	}
 	factory := func(core.Model) (core.Provider, error) { return prov, nil }
 	cfg := baseCfg(factory, "obj")
@@ -525,9 +534,19 @@ func TestVerify_OneShotChargesFailedAttempts(t *testing.T) {
 	if !v.Satisfied {
 		t.Fatalf("expected satisfied verdict from the succeeding attempt, got %+v", v)
 	}
-	// Cost must cover BOTH the billed failed attempt and the successful one.
-	if stats.CostUSD <= 0 {
-		t.Fatalf("expected the failed billed attempt to be charged, got cost %v", stats.CostUSD)
+	if prov.calls() != 2 {
+		t.Fatalf("expected exactly 2 attempts (1 billed failure + 1 success), got %d", prov.calls())
+	}
+	// Cost must cover BOTH the billed failed attempt and the successful one — not
+	// just the success (which alone would pass a naive > 0 check).
+	model, _ := core.ResolveModel(DefaultVerifierSpec)
+	want := model.Pricing.Cost(*failedUsage) + model.Pricing.Cost(*successUsage)
+	if diff := stats.CostUSD - want; diff < -1e-9 || diff > 1e-9 {
+		t.Fatalf("cost should sum both attempts: got %v want %v", stats.CostUSD, want)
+	}
+	// And strictly more than the successful attempt alone.
+	if stats.CostUSD <= model.Pricing.Cost(*successUsage) {
+		t.Fatalf("cost must exceed the success-only cost, got %v", stats.CostUSD)
 	}
 }
 
@@ -544,6 +563,14 @@ type oneShotSeqProvider struct {
 	emptyErrUsage *core.Usage
 	successAfter  int
 	successText   string
+	successUsage  *core.Usage
+}
+
+// calls returns how many times Stream has been invoked (thread-safe).
+func (p *oneShotSeqProvider) calls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.call
 }
 
 func (p *oneShotSeqProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
@@ -561,7 +588,7 @@ func (p *oneShotSeqProvider) Stream(ctx context.Context, req core.Request) (<-ch
 				ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: &core.EmptyResponseError{Usage: p.emptyErrUsage}}
 				return
 			}
-			msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent(p.successText)}, StopReason: "end_turn", Usage: &core.Usage{Input: 10, Output: 5, TotalTokens: 15}}
+			msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent(p.successText)}, StopReason: "end_turn", Usage: p.successUsage}
 			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: p.successText}
 			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
 			return
@@ -599,6 +626,33 @@ func TestVerify_EmptyWorkDirRejected(t *testing.T) {
 	cfg.OneShot = true
 	if _, _, err := Verify(context.Background(), cfg); err != nil {
 		t.Fatalf("one-shot Verify should not require a WorkDir, got %v", err)
+	}
+}
+
+// TestVerify_InvalidWorkDirRejected: the agentic verifier also refuses a
+// WorkDir that doesn't exist or isn't a directory, so it can't emit a verdict
+// without ever inspecting the workspace.
+func TestVerify_InvalidWorkDirRejected(t *testing.T) {
+	prov := &scriptedProvider{steps: []scriptStep{
+		{text: `{"satisfied": true, "feedback": "ok"}`},
+	}}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+
+	// Non-existent path.
+	cfg := baseCfg(factory, "obj")
+	cfg.WorkDir = filepath.Join(t.TempDir(), "does-not-exist")
+	if _, _, err := Verify(context.Background(), cfg); err == nil {
+		t.Fatal("Verify must reject a non-existent WorkDir")
+	}
+
+	// A regular file, not a directory.
+	f := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.WorkDir = f
+	if _, _, err := Verify(context.Background(), cfg); err == nil {
+		t.Fatal("Verify must reject a WorkDir that is a regular file")
 	}
 }
 

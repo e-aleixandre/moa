@@ -180,6 +180,13 @@ func TestBudget_Unlimited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	// Even with no budget cap, RunCost must reflect real spend (pricing is set):
+	// cost accumulation is gated on pricing, not on MaxBudget > 0.
+	want := testPricing().Cost(*testUsage())
+	if got := ag.RunCost(); got != want {
+		t.Fatalf("RunCost with unlimited budget: got %v want %v", got, want)
+	}
 }
 
 func TestBudget_NoPricing_RejectsAtCreation(t *testing.T) {
@@ -270,5 +277,3 @@ func TestBudget_ExceededOnToolCallTurn(t *testing.T) {
 		t.Error("expected tool_result messages before budget abort")
 	}
 }
-
-
