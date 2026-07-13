@@ -8,6 +8,8 @@ type AgentEvent struct {
 	Message        AgentMessage       // message_start, message_end
 	AssistantEvent *AssistantEvent    // message_update (streaming deltas)
 	Text           string             // steer
+	SteerID        string             // steer
+	MsgID          string             // steer (MsgID of the injected user message, for client dedup)
 	ToolCallID     string             // tool_execution_*
 	ToolName       string             // tool_execution_*
 	Args           map[string]any     // tool_execution_start

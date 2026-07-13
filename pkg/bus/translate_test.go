@@ -90,8 +90,8 @@ func TestTranslateAgentEvent_ParityWithBridge(t *testing.T) {
 		},
 		{
 			name: "steer",
-			in:   core.AgentEvent{Type: core.AgentEventSteer, Text: "steer msg"},
-			want: []any{Steered{SessionID: sid, RunGen: gen, Text: "steer msg"}},
+			in:   core.AgentEvent{Type: core.AgentEventSteer, SteerID: "st1", Text: "steer msg"},
+			want: []any{Steered{SessionID: sid, RunGen: gen, ID: "st1", Text: "steer msg"}},
 		},
 	}
 

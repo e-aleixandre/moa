@@ -69,7 +69,7 @@ type state struct {
 	runStartBlockIdx   int                            // block index at start of current run (patch boundary)
 	pendingImage       []byte                         // raw image bytes waiting to be sent with next message
 	pendingImageMime   string                         // mime type of pending image
-	queuedSteers       []string                       // steer messages waiting to be processed by the agent
+	queuedSteers       []core.SteerItem               // steer messages waiting to be processed by the agent
 	chromeCache        string                         // cached bottom chrome string (built once per frame)
 	chromeCacheDirty   bool                           // chrome needs rebuild
 	viewportCache      string                         // cached viewport.View() output
@@ -1001,8 +1001,16 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
-			m.s.queuedSteers = append(m.s.queuedSteers, text)
-			_ = m.runtime.Bus.Execute(bus.SteerAgent{Text: text})
+			id := core.NewSteerID()
+			// Only reflect the chip if the agent actually accepted it: a full
+			// steer queue returns ErrSteerQueueFull, and showing an accepted
+			// chip that will never be delivered would be a lie (parity with the
+			// web 503 path).
+			if err := m.runtime.Bus.Execute(bus.SteerAgent{ID: id, Text: text}); err != nil {
+				m.status.SetText("Queue full — message not sent")
+				return m, nil
+			}
+			m.s.queuedSteers = append(m.s.queuedSteers, core.SteerItem{ID: id, Text: text})
 			return m, nil
 		}
 
@@ -1110,7 +1118,11 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Alt && len(m.s.queuedSteers) > 0 {
 			// Alt+Up: pull queued steers back into the input for editing/cancelling.
-			combined := strings.Join(m.s.queuedSteers, "\n")
+			texts := make([]string, len(m.s.queuedSteers))
+			for i, s := range m.s.queuedSteers {
+				texts[i] = s.Text
+			}
+			combined := strings.Join(texts, "\n")
 			m.s.queuedSteers = nil
 			// The steers were already sent to the agent's channel; cancel the
 			// not-yet-delivered ones so re-submitting the edited text doesn't
@@ -1426,10 +1438,29 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		if e.RunGen != m.s.runGen {
 			return nil
 		}
-		for i, s := range m.s.queuedSteers {
-			if s == e.Text {
-				m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
-				break
+		// Reconcile by authoritative ID, not text: two queued messages with
+		// identical text must not collapse into one chip. e.IDs (a batch) is set
+		// when several queued steers were folded into one delivered message
+		// (deliverQueuedSteers); clear every chip in the batch. Fall back to a
+		// single e.ID, then to text for steers that predate IDs (empty ID).
+		if len(e.IDs) > 0 {
+			drop := make(map[string]bool, len(e.IDs))
+			for _, id := range e.IDs {
+				drop[id] = true
+			}
+			kept := m.s.queuedSteers[:0]
+			for _, s := range m.s.queuedSteers {
+				if !drop[s.ID] {
+					kept = append(kept, s)
+				}
+			}
+			m.s.queuedSteers = kept
+		} else {
+			for i, s := range m.s.queuedSteers {
+				if (e.ID != "" && s.ID == e.ID) || (e.ID == "" && s.Text == e.Text) {
+					m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
+					break
+				}
 			}
 		}
 		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
@@ -1445,6 +1476,14 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
 		}
 		m.s.viewportDirty = true
+
+	case bus.SteersCanceled:
+		// The shared queue was dropped (e.g. another client dequeued for
+		// editing). Clear our chips too — parity with the web client.
+		if len(m.s.queuedSteers) > 0 {
+			m.s.queuedSteers = nil
+			m.s.viewportDirty = true
+		}
 
 	case bus.CompactionStarted:
 		m.status.SetText("compacting context...")
@@ -1654,7 +1693,7 @@ func (m *appModel) handlePlanModeChanged(e bus.PlanModeChanged) []tea.Cmd {
 func (m *appModel) handleSubagentCompleted(e bus.SubagentCompleted) []tea.Cmd {
 	if m.s.running {
 		// Agent is mid-run — inject as steer.
-		_ = m.runtime.Bus.Execute(bus.SteerAgent{Text: e.Text})
+		_ = m.runtime.Bus.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: e.Text, Internal: true})
 		return nil
 	}
 	// Agent is idle — start a notification run.
@@ -1701,7 +1740,7 @@ func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.C
 // handleSubagentCompleted.
 func (m *appModel) handleBashCompleted(e bus.BashCompleted) []tea.Cmd {
 	if m.s.running {
-		_ = m.runtime.Bus.Execute(bus.SteerAgent{Text: e.Text})
+		_ = m.runtime.Bus.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: e.Text, Internal: true})
 		return nil
 	}
 	return m.startBashNotificationRun(e)
@@ -1800,10 +1839,10 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
-	for _, s := range m.s.queuedSteers {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: s})
-	}
-	m.s.queuedSteers = nil
+	// Keep queuedSteers: a steer that arrived during the run's last turn is
+	// still genuinely queued on the agent (it will be delivered on the next run
+	// and reconciled by its Steered event). Dumping it into the transcript here
+	// would show it as consumed while it is still pending (mostrar la verdad).
 	m.status.SetText("")
 	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 	m.input.SetEnabled(true)

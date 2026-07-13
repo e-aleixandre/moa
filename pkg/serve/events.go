@@ -35,11 +35,20 @@ type InitData struct {
 	GoalStalled       int                 `json:"goal_stalled,omitempty"`
 	GoalVerifying     bool                `json:"goal_verifying,omitempty"`
 	Compacting        bool                `json:"compacting,omitempty"`
+	PendingSteers     []PendingSteerData  `json:"pending_steers,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
 	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
 	BashJobs          []BashJobInitData   `json:"bash_jobs,omitempty"`
 	LastSeq           uint64              `json:"last_seq,omitempty"`
 	HistoryTruncated  bool                `json:"history_truncated,omitempty"`
+}
+
+// PendingSteerData is one queued (not yet delivered) steer message, with its
+// authoritative ID so a reconnecting client reconciles its optimistic chip by
+// ID instead of by text.
+type PendingSteerData struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients
@@ -175,7 +184,10 @@ func pctOf(frac float64) int {
 
 // SteerData is sent when the user steers a running agent.
 type SteerData struct {
-	Text string `json:"text"`
+	ID    string   `json:"id,omitempty"`
+	IDs   []string `json:"ids,omitempty"`
+	MsgID string   `json:"msg_id,omitempty"`
+	Text  string   `json:"text"`
 }
 
 // PlanModeData is sent on plan mode state changes.

@@ -11,6 +11,19 @@ import { allSessionIds, clearSession } from './tileTree.js';
 
 let pollTimer = null;
 
+// newSteerId mints a client-side stable ID for an optimistic steer chip. The
+// same ID is sent to the server and echoed back on the Steered event, so the
+// chip has an authoritative identity from the moment it appears — no window
+// where it must be reconciled by text. crypto.randomUUID is available in the
+// secure contexts this app runs in (localhost / Tailscale HTTPS); the fallback
+// keeps it working if that ever changes.
+function newSteerId() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return 'c-' + crypto.randomUUID();
+  } catch { /* fall through */ }
+  return 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
 // cacheExpiresAtMs parses the server's cache_expires_at into an epoch-ms number,
 // returning 0 for absent/unparseable/non-positive values. The backend omits the
 // field when not applicable (omitzero), but a defensive guard keeps a stray Go
@@ -254,6 +267,8 @@ export async function sendMessage(id, text, attachments = []) {
 
   const isIdle = sess.state === 'idle' || sess.state === 'error';
   let optimisticMsg = null;
+  let optimisticSteer = null;
+  let steerId = '';
   if (isIdle) {
     // Attachment blocks first, text last — matches the order the server sends
     // to the agent (see Manager.Send).
@@ -269,14 +284,39 @@ export async function sendMessage(id, text, attachments = []) {
   } else {
     const current = store.get().sessions[id];
     const steers = current?.pendingSteers || [];
-    updateSession(id, { pendingSteers: [...steers, text] });
+    // Mint the steer ID on the client so the optimistic chip has its
+    // authoritative identity immediately — there is no id == null window. The
+    // same ID is sent to the server (steer_id) and echoed on the Steered event,
+    // so reconnect snapshots and cross-device events reconcile by identity, not
+    // by text (closes the double-send and cancel-vs-in-flight races).
+    steerId = newSteerId();
+    optimisticSteer = { id: steerId, text };
+    updateSession(id, { pendingSteers: [...steers, optimisticSteer] });
   }
 
   try {
     const res = await api('POST', `/api/sessions/${id}/send`, {
       text,
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
+      steer_id: steerId || undefined,
     });
+    // Mark the chip confirmed now that the server accepted it: from here on it
+    // is part of the authoritative queue, so a reconnect snapshot that omits it
+    // means "delivered/cancelled" (drop it) rather than "in flight" (keep it).
+    // Reconcile by ID: if a concurrent authoritative event already removed the
+    // chip (a Steered delivery, or another device's steers_canceled), that
+    // removal is the truth — do NOT re-add it. Resurrecting here would show a
+    // steer that was actually delivered or cancelled, which is exactly the
+    // phantom this whole change removes.
+    if (steerId) {
+      const cur = store.get().sessions[id];
+      const list = cur?.pendingSteers;
+      if (list && list.some((s) => s.id === steerId)) {
+        updateSession(id, {
+          pendingSteers: list.map((s) => (s.id === steerId ? { ...s, confirmed: true } : s)),
+        });
+      }
+    }
     return res?.action || 'send';
   } catch (e) {
     // Roll back the optimistic echo so a rejected send (e.g. 400 on a bad
@@ -294,12 +334,30 @@ export async function sendMessage(id, text, attachments = []) {
         });
       }
     }
+    // Roll back the optimistic steer chip too: a rejected steer (e.g. 503 queue
+    // full, or a network error) must not leave a phantom chip. Its client-minted
+    // ID was never accepted by the server, so mergeSteers would keep resurrecting
+    // it on reconnect until removed here.
+    if (optimisticSteer) {
+      const cur = store.get().sessions[id];
+      if (cur?.pendingSteers) {
+        const kept = cur.pendingSteers.filter((s) => s !== optimisticSteer);
+        updateSession(id, { pendingSteers: kept.length > 0 ? kept : null });
+      }
+    }
     throw e;
   }
 }
 
 export async function cancelRun(id) {
   await api('POST', `/api/sessions/${id}/cancel`);
+}
+
+// cancelSteers drops every steer message still queued (not yet delivered) on
+// the server. Called when the user pulls queued messages back into the input to
+// edit them, so the agent doesn't also deliver the originals (double-delivery).
+export async function cancelSteers(id) {
+  await api('POST', `/api/sessions/${id}/steers/cancel`);
 }
 
 export async function cancelSubagent(id, jobId) {

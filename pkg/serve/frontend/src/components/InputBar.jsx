@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
 import { SendHorizonal, Mic, MicOff, Square, Loader2, Paperclip, X, ChevronUp } from 'lucide-preact';
-import { sendMessage, cancelRun, execCommand, execShell, resolvePermission, addPermissionRule, steerSubagent } from '../session-actions.js';
+import { sendMessage, cancelRun, cancelSteers, execCommand, execShell, resolvePermission, addPermissionRule, steerSubagent } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';
@@ -520,11 +520,21 @@ export function InputBar({ sessionId, session, tileId }) {
     const el = textareaRef.current;
     if (!el) return;
 
-    const combined = sess.pendingSteers.join('\n');
+    // Every chip has a client-minted ID and is queued (or in flight) on the
+    // agent, so pull them all into the textarea for editing.
+    const combined = sess.pendingSteers.map((s) => s.text).join('\n');
     const current = el.value;
     el.value = current ? current + '\n' + combined : combined;
 
-    updateSession(sessionId, { pendingSteers: null });
+    // Cancel the not-yet-delivered steers on the server so re-submitting the
+    // edited text doesn't deliver both the originals and the edit. The server
+    // broadcasts steers_canceled to every client (shared queue), which clears
+    // the chips. On failure the chips stay, reflecting the still-queued truth.
+    // Mirrors the TUI's Alt+Up dequeue.
+    cancelSteers(sessionId).catch((e) => {
+      console.error('cancelSteers failed:', e);
+      addToast({ sessionId, title: 'Could not cancel queued messages', detail: e.message, type: 'error' });
+    });
 
     autoResize();
     el.focus();
@@ -1019,8 +1029,8 @@ export function InputBar({ sessionId, session, tileId }) {
           {!subagentMode && pendingSteers && pendingSteers.length > 0 && (
             <button class="input-steers" onClick={handleDequeueSteers} title="Click or Alt+↑ to edit queued messages">
               {pendingSteers.length === 1
-                ? <span class="input-steer-text">{pendingSteers[0]}</span>
-                : <span class="input-steer-text">{pendingSteers[pendingSteers.length - 1]} <span class="input-steer-count">+{pendingSteers.length - 1}</span></span>
+                ? <span class="input-steer-text">{pendingSteers[0].text}</span>
+                : <span class="input-steer-text">{pendingSteers[pendingSteers.length - 1].text} <span class="input-steer-count">+{pendingSteers.length - 1}</span></span>
               }
               <span class="input-steer-badge">queued · click to edit</span>
             </button>

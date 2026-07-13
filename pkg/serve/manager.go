@@ -338,11 +338,16 @@ func (m *Manager) loadConfig(cwd string) core.MoaConfig {
 // Send delivers a user message (with optional attachments) to a session.
 // If idle: starts a new agent run via bus.
 // If running/permission: steers the running agent (attachments not allowed there).
-// Returns the action taken: "send" or "steer".
-func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error) {
+// steerID, when non-empty, is the client-minted stable ID for the queued
+// message: the client shows its optimistic chip under that same ID, so there is
+// no window where a chip lacks an authoritative identity (closes the
+// double-send and cancel-vs-in-flight races). When empty (e.g. CLI), the
+// handler mints one. Returns the action taken ("send" or "steer") and the ID
+// the message was queued under so the caller can reconcile by ID.
+func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string) (action, id string, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
-		return "", ErrNotFound
+		return "", "", ErrNotFound
 	}
 
 	sess.mu.Lock()
@@ -357,11 +362,20 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 	state := sess.runtime.State.Current()
 	if state == bus.StateRunning || state == bus.StatePermission {
 		if len(atts) > 0 {
-			return "", ErrAttachmentsWhileRunning
+			return "", "", ErrAttachmentsWhileRunning
 		}
-		// Steer the running agent.
-		_ = sess.runtime.Bus.Execute(bus.SteerAgent{Text: text})
-		return "steer", nil
+		// Steer the running agent under the client-minted ID (the handler mints
+		// one if the client didn't). Every client reconciles the queued chip by
+		// ID, and the reconnect snapshot lists it under the same ID. A full queue
+		// is surfaced as an error so the client doesn't confirm a message that
+		// would never be delivered.
+		if steerID == "" {
+			steerID = core.NewSteerID()
+		}
+		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text}); err != nil {
+			return "", "", err
+		}
+		return "steer", steerID, nil
 	}
 
 	// Set title on first message: from the text, or from the first
@@ -382,9 +396,9 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
-			return "", err
+			return "", "", err
 		}
-		return "send", nil
+		return "send", "", nil
 	}
 
 	// Serialize attachment processing per session so the per-session on-disk
@@ -397,7 +411,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 	priorNativeDoc := countNativeDocBytes(sess.History())
 	content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if text != "" {
 		content = append(content, core.TextContent(text))
@@ -408,9 +422,9 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment) (string, error
 		for _, p := range writtenFiles {
 			_ = os.Remove(p)
 		}
-		return "", err
+		return "", "", err
 	}
-	return "send", nil
+	return "send", "", nil
 }
 
 // List returns info for all sessions, sorted by updated time descending.

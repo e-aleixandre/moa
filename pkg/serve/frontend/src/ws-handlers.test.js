@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -54,12 +54,14 @@ test('handleWsInit preserves the bounded-history marker', () => {
   expect(session.messages).toHaveLength(1);
 });
 
-test('handleWsInit clears a steer consumed while the session was hidden', () => {
+test('handleWsInit replaces server-ID steers with the authoritative snapshot', () => {
   seedSession('s1');
-  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: ['Please continue with the tests'] } } });
+  // A chip that already carries a server ID and was confirmed by its POST: the
+  // snapshot is authoritative.
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [{ id: 'srv1', text: 'Please continue with the tests', confirmed: true }] } } });
 
-  // The client did not have a WS while hidden, but the server consumed the
-  // steer and includes it in its authoritative history on reconnect.
+  // The server consumed the steer while this pane was hidden, so the snapshot
+  // no longer lists it.
   handleWsInit('s1', {
     messages: [{ role: 'user', content: [{ type: 'text', text: 'Please continue with the tests' }] }],
   });
@@ -67,6 +69,120 @@ test('handleWsInit clears a steer consumed while the session was hidden', () => 
   const session = store.get().sessions.s1;
   expect(session.pendingSteers).toBeNull();
   expect(session.messages).toHaveLength(1);
+});
+
+test('handleWsInit keeps an in-flight local chip (ID not yet in snapshot) but adopts snapshot steers', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [{ id: 'c-local1', text: 'just typed' }] } } });
+
+  handleWsInit('s1', {
+    messages: [],
+    pending_steers: [{ id: 'srv9', text: 'queued elsewhere' }],
+  });
+
+  const steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(2);
+  expect(steers[0]).toEqual({ id: 'srv9', text: 'queued elsewhere', confirmed: true });
+  expect(steers[1]).toEqual({ id: 'c-local1', text: 'just typed' });
+});
+
+test('handleWsInit drops a confirmed local chip whose ID the server already dropped', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [{ id: 'c-gone', text: 'delivered already', confirmed: true }] } } });
+
+  // The chip was confirmed (POST returned) but the snapshot no longer lists it,
+  // so the server delivered/cancelled it — the stale local chip must not linger.
+  handleWsInit('s1', { messages: [], pending_steers: [] });
+
+  expect(store.get().sessions.s1.pendingSteers).toBeNull();
+});
+
+test('handleWsInit keeps an unconfirmed in-flight chip absent from the snapshot', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [{ id: 'c-inflight', text: 'just sent' }] } } });
+
+  // The POST hasn't returned (confirmed !== true) and the snapshot predates it,
+  // so the chip must survive the reconnect.
+  handleWsInit('s1', { messages: [], pending_steers: [] });
+
+  const steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0].id).toBe('c-inflight');
+});
+
+test('handleWsSteer removes the queued chip by ID, not by text', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], pendingSteers: [
+    { id: 'a', text: 'same text' },
+    { id: 'b', text: 'same text' },
+  ] } } });
+
+  handleWsSteer('s1', { id: 'b', text: 'same text' });
+
+  const steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0].id).toBe('a');
+});
+
+test('handleWsSteer clears a whole batch of chips via data.ids and dedups by MsgID', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], pendingSteers: [
+    { id: 'q1', text: 'a', confirmed: true },
+    { id: 'q2', text: 'b', confirmed: true },
+    { id: 'q3', text: 'unrelated' },
+  ] } } });
+
+  // deliverQueuedSteers folds q1+q2 into one joined message and announces both
+  // IDs at once with a shared MsgID.
+  handleWsSteer('s1', { ids: ['q1', 'q2'], msg_id: 'joined1', text: 'a\nb' });
+
+  const sess = store.get().sessions.s1;
+  expect(sess.pendingSteers).toHaveLength(1);
+  expect(sess.pendingSteers[0].id).toBe('q3');
+  expect(sess.messages).toHaveLength(1);
+  expect(sess.messages[0]._msg_id).toBe('joined1');
+
+  // A reconnect that replays the same event must not duplicate the message.
+  handleWsSteer('s1', { ids: ['q1', 'q2'], msg_id: 'joined1', text: 'a\nb' });
+  expect(store.get().sessions.s1.messages).toHaveLength(1);
+});
+
+test('handleWsSteer dedups the injected user message by MsgID', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [
+    { role: 'user', _msg_id: 'm1', content: [{ type: 'text', text: 'already here' }] },
+  ], pendingSteers: [{ id: 'z', text: 'already here' }] } } });
+
+  // The reconnect snapshot already contained the message; the Steered event
+  // (seq > cut) must not add it a second time, but must still clear the chip.
+  handleWsSteer('s1', { id: 'z', msg_id: 'm1', text: 'already here' });
+
+  const sess = store.get().sessions.s1;
+  expect(sess.messages).toHaveLength(1);
+  expect(sess.pendingSteers).toBeNull();
+});
+
+test('handleWsSteersCanceled clears the shared queue on every client', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [
+    { id: 'srv', text: 'queued' },
+    { id: 'c-local', text: 'just typed' },
+  ] } } });
+
+  handleWsSteersCanceled('s1');
+
+  expect(store.get().sessions.s1.pendingSteers).toBeNull();
+});
+
+test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], state: 'running', pendingSteers: [{ id: 'q1', text: 'do this next' }] } } });
+
+  handleWsRunEnd('s1');
+
+  const steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0].id).toBe('q1');
 });
 
 // Regression for bug #2: a stale "compacting" spinner must be cleared by the

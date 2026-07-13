@@ -181,7 +181,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 			if s.runtime.State.Current() == bus.StateRunning {
 				subagentTexts.Store(agentText, struct{}{})
-				_ = b.Execute(bus.SteerAgent{Text: agentText})
+				_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
 			} else {
 				err := b.Execute(bus.SendPrompt{
 					Text: agentText,
@@ -195,7 +195,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 				if err != nil {
 					subagentTexts.Store(agentText, struct{}{})
-					_ = b.Execute(bus.SteerAgent{Text: agentText})
+					_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
 				}
 			}
 		},
@@ -255,7 +255,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 			if s.runtime.State.Current() == bus.StateRunning {
 				subagentTexts.Store(agentText, struct{}{})
-				_ = b.Execute(bus.SteerAgent{Text: agentText})
+				_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
 			} else {
 				err := b.Execute(bus.SendPrompt{
 					Text: agentText,
@@ -268,7 +268,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 				if err != nil {
 					subagentTexts.Store(agentText, struct{}{})
-					_ = b.Execute(bus.SteerAgent{Text: agentText})
+					_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
 				}
 			}
 		},

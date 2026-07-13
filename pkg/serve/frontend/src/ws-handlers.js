@@ -115,7 +115,10 @@ export function normalizeHistory(raw) {
               result: userText,
             });
           } else {
-            result.push(msg);
+            // Preserve the server's msg_id as _msg_id so a later Steered event
+            // (seq > snapshot cut) can dedup this same user message by identity
+            // instead of appending it a second time.
+            result.push(msg.msg_id ? { ...msg, _msg_id: msg.msg_id } : msg);
           }
         }
       }
@@ -252,6 +255,24 @@ function flushDeltas() {
 
 // --- WS event handlers ---
 
+// mergeSteers reconciles the authoritative server queue from an init snapshot
+// with any local optimistic chips. The snapshot (each item carrying its
+// client-minted ID) is authoritative. A local chip is kept only if it is still
+// in flight (its POST hasn't returned, so confirmed !== true) and not already
+// in the snapshot: that covers a steer sent moments before the cut. A confirmed
+// chip absent from the snapshot was delivered or cancelled server-side, so it is
+// dropped rather than resurrected.
+function mergeSteers(snapshot, local) {
+  // Snapshot steers are authoritative and already accepted by the server, so
+  // they are confirmed: a later snapshot that omits them means delivered/
+  // cancelled, not in-flight.
+  const server = (snapshot || []).map(s => ({ id: s.id, text: s.text, confirmed: true }));
+  const serverIds = new Set(server.map(s => s.id));
+  const inFlightLocal = (local || []).filter(s => s && s.id && s.confirmed !== true && !serverIds.has(s.id));
+  const merged = [...server, ...inFlightLocal];
+  return merged.length > 0 ? merged : null;
+}
+
 export function handleWsInit(id, data) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
@@ -267,12 +288,11 @@ export function handleWsInit(id, data) {
     permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission || null,
     pendingAsk: data.pending_ask || null,
-    // A reconnecting/previously hidden pane may still hold an optimistic
-    // queued steer locally. The server's history snapshot is authoritative:
-    // if that steer was consumed while this pane had no WS, it is already in
-    // messages. Keeping the local chip would make the user send/delete it a
-    // second time when returning to the conversation.
-    pendingSteers: null,
+    // The server's steer queue is authoritative and shared across all of this
+    // session's clients. The snapshot replaces the queue; a local chip is kept
+    // only if its client-minted ID is not yet in the snapshot (its POST was
+    // still in flight when the cut was taken) so a just-sent steer isn't lost.
+    pendingSteers: mergeSteers(data.pending_steers, store.get().sessions[id]?.pendingSteers),
     streamingText: null,
     thinkingText: null,
     // Authoritative compacting flag from the snapshot: if the compaction
@@ -589,7 +609,9 @@ export function handleWsStateChange(id, data) {
   updateSession(id, { state: data.state, error: data.error || null });
   if (data.state === 'idle' || data.state === 'error') {
     const sess = store.get().sessions[id];
-    if (sess) updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, compacting: false });
+    // Keep pendingSteers: a steer queued during the last turn stays genuinely
+    // queued (mostrar la verdad). It's cleared only by Steered or a snapshot.
+    if (sess) updateSession(id, { streamingText: null, thinkingText: null, compacting: false });
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
       markUnseen(id);
@@ -982,26 +1004,52 @@ export function handleWsRunEnd(id) {
       messages: changed ? messages : sess.messages,
       streamingText: null,
       thinkingText: null,
-      pendingSteers: null,
+      // Do NOT clear pendingSteers here: a steer that arrived during the run's
+      // last turn stays genuinely queued (it will be delivered on the next
+      // run). The chip must reflect the truth and is removed only by a Steered
+      // event (real consumption) or the authoritative reconnect snapshot.
       runningTool: null,
       compacting: false,
     });
   } else {
-    updateSession(id, { streamingText: null, thinkingText: null, pendingSteers: null, runningTool: null, compacting: false });
+    updateSession(id, { streamingText: null, thinkingText: null, runningTool: null, compacting: false });
   }
 }
 
 export function handleWsSteer(id, data) {
   const sess = store.get().sessions[id];
   if (!sess) return;
-  const userMsg = { role: 'user', content: [{ type: 'text', text: data.text }] };
-  const steers = [...(sess.pendingSteers || [])];
-  const idx = steers.indexOf(data.text);
-  if (idx >= 0) steers.splice(idx, 1);
-  updateSession(id, {
-    messages: [...sess.messages, userMsg],
-    pendingSteers: steers.length > 0 ? steers : null,
-  });
+  let steers = [...(sess.pendingSteers || [])];
+  // Reconcile purely by authoritative ID. Steer IDs are minted client-side
+  // before the chip appears, so every chip already has its final identity and
+  // two queued messages with identical text never collapse into one chip. A
+  // steer from another device carries an ID this client never had, so it just
+  // appends the message without touching local chips. data.ids (a batch) is
+  // used when several queued steers were folded into one delivered message
+  // (deliverQueuedSteers): clear every chip in the batch at once.
+  const consumed = data.ids && data.ids.length ? data.ids : (data.id ? [data.id] : []);
+  if (consumed.length) {
+    const drop = new Set(consumed);
+    steers = steers.filter(s => !drop.has(s.id));
+  }
+  // Dedup the injected user message by MsgID: a non-atomic reconnect snapshot
+  // may already contain it (the agent appended it to state before the cut),
+  // and this Steered event (seq > cut) would otherwise add it a second time.
+  const already = data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id);
+  const patch = { pendingSteers: steers.length > 0 ? steers : null };
+  if (!already) {
+    const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content: [{ type: 'text', text: data.text }] };
+    patch.messages = [...sess.messages, userMsg];
+  }
+  updateSession(id, patch);
+}
+
+// handleWsSteersCanceled clears the shared queue on every client when the
+// queued (not yet delivered) steers were dropped (e.g. dequeued for editing).
+export function handleWsSteersCanceled(id) {
+  const sess = store.get().sessions[id];
+  if (!sess || !sess.pendingSteers) return;
+  updateSession(id, { pendingSteers: null });
 }
 
 export function handleWsTasksUpdate(id, data) {

@@ -316,7 +316,7 @@ func (m appModel) renderQueuedSteers() string {
 	badge := steerBadgeStyle
 
 	n := len(m.s.queuedSteers)
-	last := m.s.queuedSteers[n-1]
+	last := m.s.queuedSteers[n-1].Text
 
 	// Truncate long messages to one line.
 	last = truncateDisplay(last, 58)

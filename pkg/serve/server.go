@@ -75,6 +75,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/archive", handleArchiveSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/steers/cancel", handleCancelSteers(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
@@ -351,6 +352,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 		var body struct {
 			Text        string       `json:"text"`
 			Attachments []Attachment `json:"attachments"`
+			SteerID     string       `json:"steer_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -360,7 +362,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "text required", http.StatusBadRequest)
 			return
 		}
-		action, err := mgr.Send(r.PathValue("id"), body.Text, body.Attachments)
+		action, steerID, err := mgr.Send(r.PathValue("id"), body.Text, body.Attachments, body.SteerID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -368,10 +370,16 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, ErrBadAttachment):
 			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, bus.ErrSteerQueueFull):
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
-			writeJSON(w, http.StatusAccepted, map[string]string{"action": action})
+			resp := map[string]string{"action": action}
+			if steerID != "" {
+				resp["steer_id"] = steerID
+			}
+			writeJSON(w, http.StatusAccepted, resp)
 		}
 	}
 }
@@ -652,6 +660,22 @@ func handleCancel(mgr *Manager) http.HandlerFunc {
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
+	}
+}
+
+// handleCancelSteers drops all steer messages still queued (not yet delivered)
+// for a session's agent. The web client calls this when the user pulls queued
+// messages back into the input to edit them, so the agent doesn't also deliver
+// the originals (double-delivery). Mirrors the TUI's Alt+Up dequeue.
+func handleCancelSteers(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_ = sess.runtime.Bus.Execute(bus.CancelSteer{})
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

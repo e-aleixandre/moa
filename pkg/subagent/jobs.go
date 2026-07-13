@@ -607,6 +607,8 @@ func (j *Jobs) Steer(jobID string, text string) bool {
 	if child == nil {
 		return false
 	}
-	child.Steer(text)
+	// A user-initiated steer to a subagent child: not Internal (the Internal
+	// flag is only for system-generated completions folded into a snapshot).
+	child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text})
 	return true
 }

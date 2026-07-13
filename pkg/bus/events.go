@@ -167,7 +167,20 @@ type CompactionEnded struct {
 type Steered struct {
 	SessionID string
 	RunGen    uint64
-	Text      string
+	ID        string
+	// IDs, when non-empty, lists every queued-steer chip ID this single event
+	// consumes at once — used when several queued steers are folded into one
+	// delivered message (deliverQueuedSteers). Clients clear all of them; ID is
+	// left empty in that case.
+	IDs   []string
+	MsgID string
+	Text  string
+}
+
+// SteersCanceled is published when all queued (not yet delivered) steers are
+// dropped, so every client of the shared session queue clears its chips.
+type SteersCanceled struct {
+	SessionID string
 }
 
 // ---------------------------------------------------------------------------

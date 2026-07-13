@@ -42,7 +42,77 @@ var ErrMaxTurnsExceeded = errors.New("max turns exceeded")
 // tool calls (a doom loop). The concrete error wraps it via fmt.Errorf("%w").
 var ErrDoomLoop = errors.New("doom loop detected")
 
-const steerBufferSize = 32 // capacity of the inter-step steering channel
+const steerBufferSize = 32 // capacity of the steer queue
+
+// steerQueue is an inspectable, order-preserving queue of steer items,
+// replacing the old unbuffered-inspection chan string. Safe for concurrent
+// use.
+type steerQueue struct {
+	mu    sync.Mutex
+	items []core.SteerItem
+}
+
+// push appends an item, returning false (dropping it) if the queue is already
+// at steerBufferSize (mirrors the old non-blocking channel send). The bool lets
+// callers surface a "queue full" rejection instead of silently confirming.
+func (q *steerQueue) push(it core.SteerItem) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) >= steerBufferSize {
+		return false
+	}
+	q.items = append(q.items, it)
+	return true
+}
+
+// pushFront re-inserts items at the head of the queue, preserving their order.
+// Used to hand back items that were drained but then lost the race to start a
+// run (deliverQueuedSteers): the concurrent run that won the slot drains them on
+// its next step, so this is a transient, self-healing state. It does NOT drop to
+// steerBufferSize: these items were already accepted (a caller was told the
+// steer is queued), so truncating would silently lose an accepted user message.
+// The overflow is bounded — at most the drained batch plus what one concurrent
+// run accepted (<=steerBufferSize) — and clears on the next drain. push() still
+// enforces the hard bound for fresh steers, which is where flooding is possible.
+func (q *steerQueue) pushFront(items []core.SteerItem) {
+	if len(items) == 0 {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.items = append(append([]core.SteerItem{}, items...), q.items...)
+}
+
+// drain removes and returns all queued items, in order.
+func (q *steerQueue) drain() []core.SteerItem {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) == 0 {
+		return nil
+	}
+	items := q.items
+	q.items = nil
+	return items
+}
+
+// snapshot returns a copy of the queued items without removing them.
+func (q *steerQueue) snapshot() []core.SteerItem {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) == 0 {
+		return nil
+	}
+	items := make([]core.SteerItem, len(q.items))
+	copy(items, q.items)
+	return items
+}
+
+// clear drops all queued items without returning them.
+func (q *steerQueue) clear() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.items = nil
+}
 
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
 // It's a library — no I/O, no TUI, no filesystem opinions.
@@ -55,7 +125,7 @@ type Agent struct {
 	cancel  context.CancelFunc
 	mu      sync.Mutex
 
-	steerCh    chan string // buffered, drained by agentLoop between steps
+	steers     steerQueue // inspectable queue, drained by agentLoop between steps
 	followUpMu sync.Mutex
 	followUps  []string // consumed after agentLoop returns in execute()
 
@@ -143,7 +213,6 @@ func New(cfg AgentConfig) (*Agent, error) {
 		tools:   cfg.Tools,
 		hooks:   ext,
 		emitter: NewEmitter(cfg.Logger),
-		steerCh: make(chan string, steerBufferSize),
 	}, nil
 }
 
@@ -186,6 +255,23 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 	})
 }
 
+// SendWithMsgID is Send with a caller-supplied MsgID for the user message,
+// letting the caller correlate a later event (e.g. a Steered announcement for a
+// batch of queued steers folded into this one prompt) with the message that
+// lands in state — so reconnect snapshots dedup it by that shared MsgID.
+func (a *Agent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
+	return a.execute(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		if msgID != "" {
+			msg.MsgID = msgID
+		}
+		a.state.Messages = append(a.state.Messages, msg)
+	})
+}
+
 // SendWithCustom appends a user message with custom metadata and runs the agent loop.
 // The custom map is attached to the AgentMessage (persisted in session, available
 // to frontends for rendering decisions) but does not affect LLM behavior.
@@ -225,7 +311,7 @@ func (a *Agent) Reset() error {
 	if a.cancel != nil {
 		return fmt.Errorf("cannot reset while agent is running")
 	}
-	drainSteer(a.steerCh) // drop steers queued for the old conversation
+	a.steers.clear() // drop steers queued for the old conversation
 	a.state = AgentState{}
 	return nil
 }
@@ -611,12 +697,10 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 
 // Steer queues a message for inter-step delivery. The agent sees it
 // at the next gap between tool executions. Safe to call while running.
-// No-op if the buffer is full (non-blocking send).
-func (a *Agent) Steer(msg string) {
-	select {
-	case a.steerCh <- msg:
-	default:
-	}
+// Returns false if the queue is full (the message was dropped), so callers can
+// surface a rejection instead of confirming a message that will never arrive.
+func (a *Agent) Steer(it core.SteerItem) bool {
+	return a.steers.push(it)
 }
 
 // CancelSteer drops all steer messages still queued for inter-step delivery.
@@ -624,15 +708,38 @@ func (a *Agent) Steer(msg string) {
 // the agent doesn't also deliver the originals (double-delivery). Safe to call
 // while running; already-delivered steers cannot be recalled.
 func (a *Agent) CancelSteer() {
-	drainSteer(a.steerCh)
+	a.steers.clear()
 }
 
 // DrainSteers removes and returns all steer messages still queued for
 // inter-step delivery. Used to hand queued messages to a new run when the
 // operation that accepted them (e.g. a manual compaction) finishes without
 // running the agent loop, which would otherwise leave them undelivered.
-func (a *Agent) DrainSteers() []string {
-	return drainSteer(a.steerCh)
+func (a *Agent) DrainSteers() []core.SteerItem {
+	return a.steers.drain()
+}
+
+// PushSteersFront re-inserts items at the head of the steer queue, preserving
+// their order. Used to hand drained items back when a delivery attempt loses a
+// race for the run slot, so FIFO order (oldest first) survives.
+func (a *Agent) PushSteersFront(items []core.SteerItem) {
+	a.steers.pushFront(items)
+}
+
+// PendingSteers returns a snapshot of the user-visible steer messages still
+// queued for inter-step delivery, without removing them. Used to report
+// authoritative queue state (e.g. reconnect snapshots) without disturbing
+// delivery order. Internal steers (system-generated, with suppressed delivery
+// events) are excluded so they never surface as phantom "queued" chips.
+func (a *Agent) PendingSteers() []core.SteerItem {
+	all := a.steers.snapshot()
+	out := all[:0:0]
+	for _, it := range all {
+		if !it.Internal {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // Enqueue queues a message for post-turn delivery. It will be processed
@@ -770,7 +877,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		convertToLLM:        a.config.ConvertToLLM,
 		permissionCheck:     a.config.PermissionCheck,
 		compaction:          a.config.Compaction,
-		steerCh:             a.steerCh,
+		drainSteers:         a.steers.drain,
 	}
 
 	var err error
@@ -780,29 +887,39 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 			break
 		}
 		followUps := a.drainFollowUps()
-		steered := drainSteer(a.steerCh)
+		steered := a.steers.drain()
 		if len(followUps) == 0 && len(steered) == 0 {
 			break
 		}
 		// Deterministic order: follow-ups first, then steered.
 		// Lock each append: external readers (Messages/CompactionEpoch) may run
 		// concurrently until the deferred cancel-cleanup clears a.cancel.
-		for _, msg := range append(followUps, steered...) {
+		for _, msg := range followUps {
 			a.mu.Lock()
 			um := core.WrapMessage(core.NewUserMessage(msg))
 			um.EnsureMsgID()
+			mid := um.MsgID
 			a.state.Messages = append(a.state.Messages, um)
 			a.mu.Unlock()
-			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
+			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, MsgID: mid, Text: msg})
+		}
+		for _, item := range steered {
+			a.mu.Lock()
+			um := core.WrapMessage(core.NewUserMessage(item.Text))
+			um.EnsureMsgID()
+			mid := um.MsgID
+			a.state.Messages = append(a.state.Messages, um)
+			a.mu.Unlock()
+			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: mid, Text: item.Text})
 		}
 	}
 
 	// On abort, discard any steer messages still queued for the now-cancelled
-	// run. Left in the buffered channel they would be drained by the next
-	// Send/Run and injected as a stale user turn — possibly into a different
-	// conversation after Reset.
+	// run. Left in the queue they would be drained by the next Send/Run and
+	// injected as a stale user turn — possibly into a different conversation
+	// after Reset.
 	if err != nil {
-		drainSteer(a.steerCh)
+		a.steers.clear()
 	}
 
 	// If the run ended before the model replied (last message is still the

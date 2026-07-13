@@ -30,9 +30,10 @@ type AgentSubscriber interface {
 type AgentController interface {
 	// Commands
 	Abort()
-	Steer(msg string)
+	Steer(it core.SteerItem) bool
 	CancelSteer()
-	DrainSteers() []string
+	DrainSteers() []core.SteerItem
+	PushSteersFront(items []core.SteerItem)
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
@@ -41,6 +42,7 @@ type AgentController interface {
 	Reset() error
 	Compact(ctx context.Context) (*core.CompactionPayload, error)
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
+	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
 	AppendMessage(msg core.AgentMessage) error
@@ -56,6 +58,7 @@ type AgentController interface {
 	MaxBudget() float64
 	CompactionEpoch() int
 	IsRunning() bool
+	PendingSteers() []core.SteerItem
 }
 
 // ---------------------------------------------------------------------------
@@ -544,7 +547,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return events
 
 	case core.AgentEventSteer:
-		return []any{Steered{SessionID: sid, RunGen: gen, Text: e.Text}}
+		return []any{Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}}
 
 	case core.AgentEventCompactionStart:
 		return []any{CompactionStarted{SessionID: sid, RunGen: gen}}

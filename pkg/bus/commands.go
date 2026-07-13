@@ -1,10 +1,16 @@
 package bus
 
 import (
+	"errors"
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
+
+// ErrSteerQueueFull is returned by the SteerAgent command when the agent's
+// steer queue is at capacity, so callers surface a rejection instead of
+// confirming a message that would never be delivered.
+var ErrSteerQueueFull = errors.New("steer queue full")
 
 // ---------------------------------------------------------------------------
 // Agent interaction
@@ -16,6 +22,11 @@ type SendPrompt struct {
 	SessionID string
 	Text      string
 	Custom    map[string]any
+	// MsgID, when set, is used as the user message's stable identifier instead
+	// of an auto-minted one, so a caller that later announces this prompt (e.g.
+	// deliverQueuedSteers folding queued steers into one message) can reference
+	// it by a shared MsgID for reconnect dedup. Ignored when Custom is set.
+	MsgID string
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).
@@ -27,7 +38,12 @@ type SendPromptWithContent struct {
 // SteerAgent injects a steering message into a running agent.
 type SteerAgent struct {
 	SessionID string
+	ID        string
 	Text      string
+	// Internal marks a system-generated steer (subagent/bash completion) so it
+	// is delivered to the agent but excluded from the user-visible queue
+	// snapshot. Its delivery event is separately suppressed via SteerFilter.
+	Internal bool
 }
 
 // CancelSteer drops steer messages still queued (not yet delivered) for the

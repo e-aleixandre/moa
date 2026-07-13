@@ -110,7 +110,7 @@ type loopConfig struct {
 	compaction *core.CompactionSettings
 
 	// Steering messages injected between steps
-	steerCh <-chan string
+	drainSteers func() []core.SteerItem
 }
 
 // emitLifecycle emits a lifecycle event to both the emitter (subscribers)
@@ -118,22 +118,6 @@ type loopConfig struct {
 func emitLifecycle(cfg *loopConfig, evt core.AgentEvent) {
 	cfg.emitter.Emit(evt)
 	cfg.hooks.FireObserver(evt)
-}
-
-// drainSteer non-blocking drains all pending steer messages.
-func drainSteer(ch <-chan string) []string {
-	if ch == nil {
-		return nil
-	}
-	var msgs []string
-	for {
-		select {
-		case msg := <-ch:
-			msgs = append(msgs, msg)
-		default:
-			return msgs
-		}
-	}
 }
 
 // agentLoop is the core loop.
@@ -513,10 +497,17 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		executeTools(ctx, cfg, toolCalls)
 
 		// Inject steering messages between steps.
-		if steered := drainSteer(cfg.steerCh); len(steered) > 0 {
-			for _, msg := range steered {
-				cfg.appendState(core.WrapMessage(core.NewUserMessage(msg)))
-				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, Text: msg})
+		if cfg.drainSteers != nil {
+			if steered := cfg.drainSteers(); len(steered) > 0 {
+				for _, item := range steered {
+					um := core.WrapMessage(core.NewUserMessage(item.Text))
+					um.EnsureMsgID()
+					cfg.appendState(um)
+					// Carry the message's MsgID so serve can publish it on the
+					// Steered event; clients dedup the user message by MsgID
+					// (the reconnect snapshot may already contain it).
+					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: um.MsgID, Text: item.Text})
+				}
 			}
 		}
 

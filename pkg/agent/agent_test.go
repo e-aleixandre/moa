@@ -593,7 +593,7 @@ func TestAbort_DiscardsQueuedSteer(t *testing.T) {
 	go func() { defer close(done); ag.Run(ctx, "first") }() //nolint: errcheck
 
 	<-providerCalled
-	ag.Steer("stale steer that should be discarded")
+	ag.Steer(core.SteerItem{ID: "stale", Text: "stale steer that should be discarded"})
 	cancel()
 	<-done
 
@@ -613,15 +613,15 @@ func TestAbort_DiscardsQueuedSteer(t *testing.T) {
 func TestAgent_CancelSteer_DrainsQueuedSteers(t *testing.T) {
 	ag := newTestAgent(NewMockProvider())
 
-	ag.Steer("uno")
-	ag.Steer("dos")
-	if len(ag.steerCh) != 2 {
-		t.Fatalf("expected 2 queued steers, got %d", len(ag.steerCh))
+	ag.Steer(core.SteerItem{ID: "uno", Text: "uno"})
+	ag.Steer(core.SteerItem{ID: "dos", Text: "dos"})
+	if len(ag.PendingSteers()) != 2 {
+		t.Fatalf("expected 2 queued steers, got %d", len(ag.PendingSteers()))
 	}
 
 	ag.CancelSteer()
-	if len(ag.steerCh) != 0 {
-		t.Fatalf("expected 0 queued steers after CancelSteer, got %d", len(ag.steerCh))
+	if len(ag.PendingSteers()) != 0 {
+		t.Fatalf("expected 0 queued steers after CancelSteer, got %d", len(ag.PendingSteers()))
 	}
 }
 

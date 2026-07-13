@@ -76,12 +76,22 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SteerAgent) error {
-		sctx.Agent.Steer(cmd.Text)
+		// Centralize the ID invariant: every queued steer has a stable ID even
+		// if a caller (CLI, internal) forgot to mint one.
+		if cmd.ID == "" {
+			cmd.ID = core.NewSteerID()
+		}
+		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Internal: cmd.Internal}) {
+			return ErrSteerQueueFull
+		}
 		return nil
 	})
 
 	b.OnCommand(func(cmd CancelSteer) error {
 		sctx.Agent.CancelSteer()
+		// Broadcast the invalidation so every client of this session clears its
+		// queued chips (the queue is shared/authoritative).
+		sctx.Bus.Publish(SteersCanceled{SessionID: sctx.SessionID})
 		return nil
 	})
 
@@ -318,6 +328,10 @@ func RegisterHandlers(sctx *SessionContext) {
 		return sctx.Compacting(), nil
 	})
 
+	b.OnQuery(func(q GetPendingSteers) ([]core.SteerItem, error) {
+		return sctx.Agent.PendingSteers(), nil
+	})
+
 	b.OnQuery(func(q GetPermissionMode) (string, error) {
 		if g := sctx.GetGate(); g != nil {
 			return string(g.Mode()), nil
@@ -391,6 +405,9 @@ func RegisterHandlers(sctx *SessionContext) {
 		return startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
+			}
+			if cmd.MsgID != "" {
+				return sctx.Agent.SendWithMsgID(ctx, cmd.Text, cmd.MsgID)
 			}
 			return sctx.Agent.Send(ctx, cmd.Text)
 		})
@@ -1405,34 +1422,49 @@ func deliverQueuedSteers(sctx *SessionContext) {
 	// Start a run that consumes the queued messages as its prompt. Go through
 	// the SendPrompt command (not startRun directly) so it keeps the same
 	// semantics as any user prompt: auto-verify reset, goal-verify cancel, etc.
+	// The N queued steers are folded into ONE joined message, so we mint one
+	// MsgID up front: the message lands in state under it, and the single
+	// announcement below carries the same MsgID so a reconnect snapshot dedups
+	// the joined message by identity (live and reload both show one message).
+	texts := make([]string, len(queued))
+	ids := make([]string, len(queued))
+	for i, q := range queued {
+		texts[i] = q.Text
+		ids[i] = q.ID
+	}
+	joinedText := strings.Join(texts, "\n")
+	msgID := core.NewMsgID()
 	if err := sctx.Bus.Execute(SendPrompt{
 		SessionID: sctx.SessionID,
-		Text:      strings.Join(queued, "\n"),
+		Text:      joinedText,
+		MsgID:     msgID,
 	}); err != nil {
 		// A concurrent run won the race for the run slot — hand the messages
-		// back to the steer buffer so that run delivers them between steps. That
-		// run's loop emits its own Steered as it drains them, so we must publish
-		// nothing here or the text would appear twice in the transcript.
-		for _, q := range queued {
-			sctx.Agent.Steer(q)
-		}
+		// back to the front of the steer buffer so that run delivers them
+		// between steps, preserving FIFO order. That run's loop emits its own
+		// Steered as it drains them, so we must publish nothing here or the text
+		// would appear twice in the transcript.
+		sctx.Agent.PushSteersFront(queued)
 		return
 	}
 	// The run started. Its loop won't emit Steered for a prompt (these were
 	// delivered as the prompt, not as mid-run steers), so announce the dequeue
 	// ourselves — that moves the text from the frontend's "queued" strip into
-	// the transcript. Reading the atomic here is safe: SendPrompt transitioned
-	// the session to running synchronously, and the transition table forbids
-	// any other run from starting (and ours can't finish synchronously — it
-	// runs in a goroutine), so the gen can't change under us on this goroutine.
+	// the transcript. A SINGLE event carries the joined text, the shared MsgID
+	// (so a reconnect snapshot that already contains the joined message dedups
+	// it instead of appending a duplicate), and every consumed chip ID so all
+	// queued chips clear at once. Reading the atomic here is safe: SendPrompt
+	// synchronously, and the transition table forbids any other run from
+	// starting (and ours can't finish synchronously — it runs in a goroutine),
+	// so the gen can't change under us on this goroutine.
 	gen := sctx.RunGenAtomic.Load()
-	for _, q := range queued {
-		sctx.Bus.Publish(Steered{
-			SessionID: sctx.SessionID,
-			RunGen:    gen,
-			Text:      q,
-		})
-	}
+	sctx.Bus.Publish(Steered{
+		SessionID: sctx.SessionID,
+		RunGen:    gen,
+		IDs:       ids,
+		MsgID:     msgID,
+		Text:      joinedText,
+	})
 }
 
 // resolveGoalWorkDir validates and resolves EnterGoal's --cwd override. An

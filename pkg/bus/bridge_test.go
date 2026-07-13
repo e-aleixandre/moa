@@ -54,7 +54,9 @@ type fakeAgent struct {
 	sendErr     error
 	sendDelay   time.Duration // simulates slow agent
 	sendContent []core.Content
-	steerQueue  []string
+	sendMsgID   string
+	steerQueue  []core.SteerItem
+	steerFull   bool // when true, Steer rejects (queue full)
 
 	// appendBusy > 0 makes AppendMessage fail (simulating a live run) and
 	// decrements once per call, so a deferred append can succeed on retry.
@@ -67,21 +69,43 @@ func (f *fakeAgent) Abort() {
 	f.aborted = true
 }
 
-func (f *fakeAgent) Steer(msg string) {
+func (f *fakeAgent) Steer(it core.SteerItem) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.steered = msg
-	f.steerQueue = append(f.steerQueue, msg)
+	if f.steerFull {
+		return false
+	}
+	f.steered = it.Text
+	f.steerQueue = append(f.steerQueue, it)
+	return true
 }
 
 func (f *fakeAgent) CancelSteer() {}
 
-func (f *fakeAgent) DrainSteers() []string {
+func (f *fakeAgent) DrainSteers() []core.SteerItem {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	q := f.steerQueue
 	f.steerQueue = nil
 	return q
+}
+
+func (f *fakeAgent) PushSteersFront(items []core.SteerItem) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.steerQueue = append(append([]core.SteerItem{}, items...), f.steerQueue...)
+}
+
+func (f *fakeAgent) PendingSteers() []core.SteerItem {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]core.SteerItem, 0, len(f.steerQueue))
+	for _, it := range f.steerQueue {
+		if !it.Internal {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func (f *fakeAgent) Model() core.Model {
@@ -181,6 +205,13 @@ func (f *fakeAgent) Send(ctx context.Context, prompt string) ([]core.AgentMessag
 }
 
 func (f *fakeAgent) SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return f.Send(ctx, prompt)
+}
+
+func (f *fakeAgent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
+	f.mu.Lock()
+	f.sendMsgID = msgID
+	f.mu.Unlock()
 	return f.Send(ctx, prompt)
 }
 
@@ -862,12 +893,93 @@ func TestHandler_SteerAgent(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	RegisterHandlers(sctx)
 
-	if err := b.Execute(SteerAgent{Text: "focus here"}); err != nil {
+	if err := b.Execute(SteerAgent{ID: "st1", Text: "focus here"}); err != nil {
 		t.Fatal(err)
 	}
 	if fa.getSteered() != "focus here" {
 		t.Fatalf("steered = %q", fa.getSteered())
 	}
+	// The queue must be inspectable with the authoritative ID so a reconnect
+	// snapshot can reconcile the chip by ID (bug #5).
+	pending, err := QueryTyped[GetPendingSteers, []core.SteerItem](b, GetPendingSteers{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].ID != "st1" || pending[0].Text != "focus here" {
+		t.Fatalf("GetPendingSteers = %+v, want [{st1 focus here}]", pending)
+	}
+}
+
+// A steer without an explicit ID must still get one (the handler mints it), so
+// the API invariant "every queued steer has an ID" holds for all callers.
+func TestHandler_SteerAgent_MintsMissingID(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(SteerAgent{Text: "no id"}); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := QueryTyped[GetPendingSteers, []core.SteerItem](b, GetPendingSteers{})
+	if len(pending) != 1 || pending[0].ID == "" {
+		t.Fatalf("GetPendingSteers = %+v, want one item with a non-empty ID", pending)
+	}
+}
+
+// A full steer queue must surface ErrSteerQueueFull so the caller doesn't
+// confirm a message that would never be delivered (bug #5, Terra #7).
+func TestHandler_SteerAgent_QueueFull(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{steerFull: true}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	err := b.Execute(SteerAgent{ID: "x", Text: "overflow"})
+	if !errors.Is(err, ErrSteerQueueFull) {
+		t.Fatalf("err = %v, want ErrSteerQueueFull", err)
+	}
+}
+
+// Internal steers (subagent/bash completions) are delivered but must not appear
+// in the user-visible queue snapshot (bug #5, Terra #3).
+func TestHandler_SteerAgent_InternalExcludedFromSnapshot(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(SteerAgent{ID: "u1", Text: "user msg"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Execute(SteerAgent{ID: "i1", Text: "subagent done", Internal: true}); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := QueryTyped[GetPendingSteers, []core.SteerItem](b, GetPendingSteers{})
+	if len(pending) != 1 || pending[0].ID != "u1" {
+		t.Fatalf("GetPendingSteers = %+v, want only the user steer", pending)
+	}
+}
+
+// Canceling the queue must broadcast SteersCanceled so every client of the
+// shared queue clears its chips (bug #5, Terra #5).
+func TestHandler_CancelSteer_PublishesEvent(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	got := make(chan SteersCanceled, 1)
+	b.Subscribe(func(e SteersCanceled) { got <- e })
+
+	if err := b.Execute(CancelSteer{}); err != nil {
+		t.Fatal(err)
+	}
+	drainChan(got, b, t)
 }
 
 func TestHandler_SetThinking(t *testing.T) {
@@ -1067,19 +1179,25 @@ func TestHandler_CompactSession_DeliversQueuedSteers(t *testing.T) {
 	defer b.Close()
 	fa := &fakeAgent{}
 	sctx := newTestSessionContextWithState(b, fa)
-	// Simulate a user message arriving mid-compaction: it gets queued as a steer.
-	fa.compactHook = func() { fa.Steer("queued while compacting") }
+	// Simulate two user messages arriving mid-compaction: each queued as a steer.
+	fa.compactHook = func() {
+		fa.Steer(core.SteerItem{ID: "s1", Text: "first while compacting"})
+		fa.Steer(core.SteerItem{ID: "s2", Text: "second while compacting"})
+	}
+	// Capture the single announcement the handler publishes for the batch.
+	got := make(chan Steered, 4)
+	b.Subscribe(func(e Steered) { got <- e })
 	RegisterHandlers(sctx)
 
 	if err := b.Execute(CompactSession{}); err != nil {
 		t.Fatal(err)
 	}
 	// deliverQueuedSteers issues a SendPrompt, which startRun runs the agent
-	// with asynchronously — poll until Send receives the queued text.
+	// asynchronously — poll until Send receives the joined queued text.
 	deadline := time.After(2 * time.Second)
 	for {
 		if fa.wasSendCalled() {
-			if got := fa.getSendPrompt(); got != "queued while compacting" {
+			if got := fa.getSendPrompt(); got != "first while compacting\nsecond while compacting" {
 				t.Fatalf("delivered prompt = %q", got)
 			}
 			break
@@ -1089,6 +1207,31 @@ func TestHandler_CompactSession_DeliversQueuedSteers(t *testing.T) {
 			t.Fatal("queued steer was never delivered as a run after compaction")
 		case <-time.After(5 * time.Millisecond):
 		}
+	}
+	// Exactly one Steered announcement, carrying both chip IDs and the same
+	// MsgID the joined message was sent under (so reconnect dedups by identity).
+	select {
+	case e := <-got:
+		if len(e.IDs) != 2 || e.IDs[0] != "s1" || e.IDs[1] != "s2" {
+			t.Fatalf("Steered.IDs = %v, want [s1 s2]", e.IDs)
+		}
+		if e.MsgID == "" {
+			t.Fatal("Steered.MsgID is empty; batch announcement needs a shared MsgID")
+		}
+		fa.mu.Lock()
+		sentMsgID := fa.sendMsgID
+		fa.mu.Unlock()
+		if e.MsgID != sentMsgID {
+			t.Fatalf("Steered.MsgID = %q but message was sent under %q", e.MsgID, sentMsgID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no Steered announcement for the delivered batch")
+	}
+	// And only that one — no extra per-item events.
+	select {
+	case e := <-got:
+		t.Fatalf("unexpected second Steered event: %+v", e)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

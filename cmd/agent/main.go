@@ -504,7 +504,7 @@ func main() {
 	// it stranded in the steer buffer.
 	rt.Bus.Subscribe(func(e bus.SubagentCompleted) {
 		if rt.State.Current() == bus.StateRunning {
-			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text, Internal: true})
 			return
 		}
 		if err := rt.Bus.Execute(bus.SendPrompt{
@@ -518,7 +518,7 @@ func main() {
 		}); err != nil {
 			// A concurrent run may have won the idle→running transition. Queue it
 			// for that run rather than dropping the completion.
-			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text, Internal: true})
 		}
 	})
 
@@ -526,7 +526,7 @@ func main() {
 	rt.Bus.Subscribe(func(e bus.BashCompleted) {
 		defer rt.Bus.Publish(bus.BashJobSettled{JobID: e.JobID})
 		if rt.State.Current() == bus.StateRunning {
-			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text, Internal: true})
 			return
 		}
 		if err := rt.Bus.Execute(bus.SendPrompt{
@@ -538,7 +538,7 @@ func main() {
 				"bash_status":  e.Status,
 			},
 		}); err != nil {
-			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
+			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text, Internal: true})
 		}
 	})
 

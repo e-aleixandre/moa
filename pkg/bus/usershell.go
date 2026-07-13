@@ -110,7 +110,7 @@ func RunUserShell(ctx context.Context, sctx *SessionContext, command string, sil
 	case running && !silent:
 		body := fmt.Sprintf("Shell output (from user):\n$ %s\n%s", command, outputOrPlaceholder(output))
 		result.Delivered = UserShellDeliverySteer
-		if err := sctx.Bus.Execute(SteerAgent{SessionID: sctx.SessionID, Text: body}); err != nil {
+		if err := sctx.Bus.Execute(SteerAgent{SessionID: sctx.SessionID, ID: core.NewSteerID(), Text: body, Internal: true}); err != nil {
 			result.DeliveryErr = fmt.Errorf("bus: delivering shell output via steer: %w", err)
 		}
 	case running && silent:

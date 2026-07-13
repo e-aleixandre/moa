@@ -1816,8 +1816,8 @@ func TestSteerQueue(t *testing.T) {
 	m.s.streamText = "I'll help you"
 
 	// User queues two steers.
-	m.s.queuedSteers = append(m.s.queuedSteers, "do X instead")
-	m.s.queuedSteers = append(m.s.queuedSteers, "and also Y")
+	m.s.queuedSteers = append(m.s.queuedSteers, core.SteerItem{ID: "sx", Text: "do X instead"})
+	m.s.queuedSteers = append(m.s.queuedSteers, core.SteerItem{ID: "sy", Text: "and also Y"})
 
 	// Steers must NOT be in blocks.
 	for _, b := range m.s.blocks {
@@ -1843,7 +1843,7 @@ func TestSteerQueue(t *testing.T) {
 	})
 
 	// Agent processes the steers.
-	m.handleBusEvent(bus.Steered{RunGen: gen, Text: "do X instead"})
+	m.handleBusEvent(bus.Steered{RunGen: gen, ID: "sx", Text: "do X instead"})
 
 	if len(m.s.queuedSteers) != 1 {
 		t.Fatalf("after first steer event: queuedSteers = %d, want 1", len(m.s.queuedSteers))
@@ -1859,7 +1859,7 @@ func TestSteerQueue(t *testing.T) {
 		t.Error("first steer not added to blocks after AgentEventSteer")
 	}
 
-	m.handleBusEvent(bus.Steered{RunGen: gen, Text: "and also Y"})
+	m.handleBusEvent(bus.Steered{RunGen: gen, ID: "sy", Text: "and also Y"})
 	if len(m.s.queuedSteers) != 0 {
 		t.Fatalf("after second steer event: queuedSteers = %d, want 0", len(m.s.queuedSteers))
 	}
@@ -1915,6 +1915,39 @@ func TestSteerQueue(t *testing.T) {
 	}
 	if texts[1] != "Full second response from server" {
 		t.Errorf("second assistant after patch: %q", texts[1])
+	}
+}
+
+// TestSteerQueue_BatchReconcile verifies that a single Steered event carrying a
+// batch of IDs (deliverQueuedSteers folding several queued steers into one
+// delivered message) clears every chip in the batch — TUI parity with the web
+// client's data.ids handling.
+func TestSteerQueue_BatchReconcile(t *testing.T) {
+	m := newTestModel()
+	m.s.running = true
+	gen := m.s.runGen
+
+	m.s.queuedSteers = append(m.s.queuedSteers,
+		core.SteerItem{ID: "s1", Text: "first"},
+		core.SteerItem{ID: "s2", Text: "second"},
+		core.SteerItem{ID: "s3", Text: "unrelated"},
+	)
+
+	// One announcement consuming s1 and s2 at once with the joined text.
+	m.handleBusEvent(bus.Steered{RunGen: gen, IDs: []string{"s1", "s2"}, Text: "first\nsecond"})
+
+	if len(m.s.queuedSteers) != 1 || m.s.queuedSteers[0].ID != "s3" {
+		t.Fatalf("queuedSteers = %+v, want only s3", m.s.queuedSteers)
+	}
+	// The joined text lands as a single user block.
+	found := false
+	for _, b := range m.s.blocks {
+		if b.Type == "user" && b.Raw == "first\nsecond" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("joined batch text not added to blocks")
 	}
 }
 

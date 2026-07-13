@@ -102,6 +102,39 @@ func (m *Message) EnsureMsgID() {
 	m.MsgID = time.Now().UTC().Format("20060102150405.000000000")
 }
 
+// SteerItem is a queued steering message with a stable, authoritative ID.
+type SteerItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+	// Internal marks a system-generated steer (e.g. a subagent/bash completion
+	// injected into the parent run) as opposed to a user-typed message. Internal
+	// steers are delivered to the agent but excluded from the authoritative
+	// queue snapshot, since their delivery event is suppressed and they must not
+	// surface as user-visible "queued" chips.
+	Internal bool `json:"-"`
+}
+
+// NewSteerID mints a random identifier for a steer item, using the same
+// crypto/rand mechanism as Message.EnsureMsgID.
+func NewSteerID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err == nil {
+		return hex.EncodeToString(b)
+	}
+	return time.Now().UTC().Format("20060102150405.000000000")
+}
+
+// NewMsgID mints a stable message identifier, using the same mechanism as
+// Message.EnsureMsgID. Used when a caller needs a message's ID before the
+// message is built (e.g. to correlate a later event with it).
+func NewMsgID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err == nil {
+		return hex.EncodeToString(b)
+	}
+	return time.Now().UTC().Format("20060102150405.000000000")
+}
+
 // NewUserMessage creates a user message with text content.
 func NewUserMessage(text string) Message {
 	return Message{

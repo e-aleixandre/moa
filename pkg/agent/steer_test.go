@@ -46,7 +46,7 @@ func TestSteerInjectsMessageBetweenSteps(t *testing.T) {
 	}
 
 	// Steer a message while the tool is blocked.
-	ag.Steer("course correction")
+	ag.Steer(core.SteerItem{ID: "steer-1", Text: "course correction"})
 
 	// Release the tool.
 	close(release)
@@ -96,7 +96,7 @@ func TestSteerEmitsEvent(t *testing.T) {
 	}()
 
 	<-started
-	ag.Steer("redirect")
+	ag.Steer(core.SteerItem{ID: "steer-1", Text: "redirect"})
 	close(release)
 	<-done
 
@@ -179,12 +179,12 @@ func TestSteerDropsWhenChannelFull(t *testing.T) {
 
 	// Fill the buffer (capacity 32).
 	for i := 0; i < 32; i++ {
-		ag.Steer("msg")
+		ag.Steer(core.SteerItem{ID: "msg", Text: "msg"})
 	}
 	// 33rd must not block.
 	done := make(chan struct{})
 	go func() {
-		ag.Steer("overflow")
+		ag.Steer(core.SteerItem{ID: "overflow", Text: "overflow"})
 		close(done)
 	}()
 	select {
@@ -209,7 +209,7 @@ func TestSteerAndFollowUpCombined(t *testing.T) {
 
 	provider := NewMockProvider(
 		toolCallResponse("tc-1", "block", nil),
-		simpleTextResponse("After steer."),   // response to steer
+		simpleTextResponse("After steer."),    // response to steer
 		simpleTextResponse("After followup."), // response to follow-up
 	)
 	ag := newTestAgent(provider, blockTool)
@@ -223,7 +223,7 @@ func TestSteerAndFollowUpCombined(t *testing.T) {
 	}()
 
 	<-started
-	ag.Steer("steer msg")
+	ag.Steer(core.SteerItem{ID: "steer-1", Text: "steer msg"})
 	ag.Enqueue("followup msg")
 	close(release)
 	<-done
@@ -293,7 +293,7 @@ func TestSteerTextOnlyTurnStillInjected(t *testing.T) {
 	}
 
 	// Steer while in text-only streaming (no tool calls).
-	ag.Steer("text-only steer")
+	ag.Steer(core.SteerItem{ID: "steer-1", Text: "text-only steer"})
 	close(release)
 
 	select {
@@ -354,7 +354,7 @@ func TestExecuteDrainsBothFollowUpsAndSteer(t *testing.T) {
 
 	<-streaming
 	ag.Enqueue("followup msg")
-	ag.Steer("steer msg")
+	ag.Steer(core.SteerItem{ID: "steer-1", Text: "steer msg"})
 	close(release)
 	<-done
 

@@ -211,7 +211,9 @@ func wsEventFromBus(event any) (Event, bool) {
 			Command: e.Command, Messages: messages, HistoryTruncated: truncated,
 		}}, true
 	case bus.Steered:
-		return Event{Type: "steer", Data: SteerData{Text: e.Text}}, true
+		return Event{Type: "steer", Data: SteerData{ID: e.ID, IDs: e.IDs, MsgID: e.MsgID, Text: e.Text}}, true
+	case bus.SteersCanceled:
+		return Event{Type: "steers_canceled"}, true
 	case bus.AutoVerifyStarted:
 		return Event{Type: "auto_verify_start"}, true
 	case bus.AutoVerifyEnded:
@@ -344,6 +346,7 @@ func buildInitData(sess *ManagedSession) InitData {
 	bashJobs, _ := bus.QueryTyped[bus.GetBashJobs, []bus.BashJobSnapshot](b, bus.GetBashJobs{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
+	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
 	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
@@ -356,6 +359,13 @@ func buildInitData(sess *ManagedSession) InitData {
 		PathScope:        pathInfo.Scope,
 		CostUSD:          cost,
 		Compacting:       compacting,
+	}
+
+	if len(pendingSteers) > 0 {
+		data.PendingSteers = make([]PendingSteerData, len(pendingSteers))
+		for i, s := range pendingSteers {
+			data.PendingSteers[i] = PendingSteerData{ID: s.ID, Text: s.Text}
+		}
 	}
 
 	if len(subagents) > 0 {

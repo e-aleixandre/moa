@@ -75,6 +75,11 @@ type GetCompactionEpoch struct{ SessionID string }
 // Handler returns: bool
 type GetCompacting struct{ SessionID string }
 
+// GetPendingSteers returns the authoritative queue of steer messages not yet
+// delivered, so a reconnect snapshot can restore the queued-message chips.
+// Handler returns: []core.SteerItem
+type GetPendingSteers struct{ SessionID string }
+
 // GetPermissionMode returns the current permission mode (yolo/ask/auto).
 // Handler returns: string
 type GetPermissionMode struct{ SessionID string }
