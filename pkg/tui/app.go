@@ -358,17 +358,16 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 
 // applyRateLimit refreshes the plan-quota segments instantly from a request's
 // rate-limit response headers and flags when the request was served from extra
-// usage. This is the fast, per-request path; the 60s poller (applyUsage) remains
-// the authoritative source for the extra-usage spend amount. Only Anthropic
-// requests carry these headers, but guard explicitly in case the model was
-// switched away from Anthropic mid-flight.
+// usage. This is the fast, per-request path; for Anthropic the 60s poller
+// (applyUsage) remains the authoritative source for the extra-usage spend
+// amount, while for OpenAI/Codex (which has no usage endpoint) this per-request
+// path is the ONLY source. The provider only emits this event on a subscription
+// OAuth backend, so no provider check is needed here — an API key never
+// produces it. Run-generation filtering upstream keeps stale runs from writing.
 func (m *appModel) applyRateLimit(rl core.RateLimit) {
-	if m.modelProvider != "anthropic" {
-		return
-	}
 	// Refresh the quota segment only when both window utilizations are known
-	// (>= 0); a -1 means the header was absent, and we must not clobber the
-	// poller's good value with a fake 0%.
+	// (>= 0); a -1 means the header was absent, and we must not clobber a known
+	// value (the poller's, for Anthropic) with a fake 0%.
 	if rl.FiveHourUtil >= 0 && rl.SevenDayUtil >= 0 {
 		pct := func(f float64) int { return int(f*100 + 0.5) }
 		m.statusBar.UpdateUsageSegment(pct(rl.FiveHourUtil), pct(rl.SevenDayUtil))

@@ -706,11 +706,26 @@ export function handleWsSessionCost(id, data) {
 }
 
 // handleWsRateLimit reflects a request's live rate-limit headers: a per-session
-// "on extra usage" flag, plus an instant refresh of the global plan-usage
-// utilizations (the 5h/weekly windows are account-wide) so the widget doesn't
-// lag the 60s poll. The extra-usage spend (€) stays sourced from the poller.
+// "on extra usage" flag, the per-session 5h/weekly utilizations (the only usage
+// source for OpenAI/Codex, which has no poller), plus — for Anthropic — an
+// instant refresh of the global plan-usage snapshot (account-wide windows) so
+// the widget doesn't lag the 60s poll. The extra-usage spend (€) stays sourced
+// from the poller.
 export function handleWsRateLimit(id, data) {
-  updateSession(id, { onOverage: !!data.on_overage });
+  // Per-session utilizations: always record when the header was present
+  // (pct >= 0). This is what the OpenAI widget reads (no global poller), and it
+  // keeps each session's meter independent in a mixed-provider layout.
+  const patch = { onOverage: !!data.on_overage };
+  if (data.five_hour_pct >= 0) patch.rlFiveHourPct = data.five_hour_pct;
+  if (data.seven_day_pct >= 0) patch.rlSevenDayPct = data.seven_day_pct;
+  updateSession(id, patch);
+
+  // Patch the global (poller-owned) snapshot only for Anthropic sessions: those
+  // windows are account-wide and share the /api/usage shape. An OpenAI session
+  // must NOT overwrite the Anthropic snapshot in a mixed layout.
+  const sess = store.get().sessions[id];
+  const isAnthropic = !sess?.provider || sess.provider === 'anthropic';
+  if (!isAnthropic) return;
 
   const u = store.get().usage;
   if (u && u.available) {

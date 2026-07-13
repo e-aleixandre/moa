@@ -143,6 +143,17 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
+		// ChatGPT/Codex returns plan rate-limit state in the response headers
+		// (x-codex-*), available now, before the SSE body. Emit it up front as
+		// its own event so callers get instant per-request quota awareness — the
+		// OpenAI counterpart to Anthropic's rate-limit headers. Only the OAuth
+		// (Codex) backend sends these; api.openai.com (API key) does not, and
+		// parseRateLimit returns nil there, so nothing is emitted.
+		if o.accountID != "" {
+			if rl := parseRateLimit(resp.Header); rl != nil {
+				ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl}
+			}
+		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
 		consumeStream(ctx, body, ch)
 	}()

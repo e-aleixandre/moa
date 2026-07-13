@@ -64,12 +64,18 @@ export function TaskBar({ session, usage }) {
 
   const u = usage && usage.available ? usage : null;
   const isAnthropic = !session.provider || session.provider === 'anthropic';
+  const isOpenAI = session.provider === 'openai';
+  // Anthropic: windows come from the global poller snapshot (with reset times +
+  // extra-usage spend). OpenAI/Codex has no usage endpoint, so its 5h/weekly
+  // meters come from the per-session rate-limit headers (percent only).
   const fiveH = isAnthropic && u && u.five_hour;
   const week = isAnthropic && u && u.seven_day;
   const extra = isAnthropic && u && u.extra_usage;
   const showExtra = extra && extra.is_enabled;
   const extraOn = showExtra && (extra.used_credits ?? 0) > 0;
-  const hasUsage = !!(fiveH || week || showExtra);
+  const oaFiveHPct = isOpenAI && session.rlFiveHourPct >= 0 ? session.rlFiveHourPct : null;
+  const oaWeekPct = isOpenAI && session.rlSevenDayPct >= 0 ? session.rlSevenDayPct : null;
+  const hasUsage = !!(fiveH || week || showExtra || oaFiveHPct != null || oaWeekPct != null);
   const onOverage = !!session.onOverage;
 
   if (!hasPlan && !goalActive && !hasTasks && !hasContext && !hasUsage && !onOverage && !hasCost) return null;
@@ -136,6 +142,24 @@ export function TaskBar({ session, usage }) {
           title={`Week: ${Math.round(week.utilization)}% · resets in ${fmtReset(week.resets_at)}`}
         >
           wk {Math.round(week.utilization)}%
+        </span>
+      )}
+
+      {oaFiveHPct != null && (
+        <span
+          class={`task-bar-pill ${usageLevel(oaFiveHPct)}`}
+          title={`Session (5h): ${Math.round(oaFiveHPct)}%`}
+        >
+          5h {Math.round(oaFiveHPct)}%
+        </span>
+      )}
+
+      {oaWeekPct != null && (
+        <span
+          class={`task-bar-pill ${usageLevel(oaWeekPct)}`}
+          title={`Week: ${Math.round(oaWeekPct)}%`}
+        >
+          wk {Math.round(oaWeekPct)}%
         </span>
       )}
 

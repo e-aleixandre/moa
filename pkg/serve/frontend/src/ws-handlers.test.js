@@ -180,3 +180,47 @@ test('normalizeHistory reloads a prefix-based bash notification (no custom)', ()
   expect(out[0].args.command).toBe('false');
   expect(out[0].status).toBe('error');
 });
+
+import { handleWsRateLimit } from './ws-handlers.js';
+
+test('handleWsRateLimit stores per-session pcts and does not touch the global snapshot for OpenAI', () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
+    usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
+  });
+
+  handleWsRateLimit('s1', { five_hour_pct: 40, seven_day_pct: 51, on_overage: false });
+
+  const sess = store.get().sessions.s1;
+  expect(sess.rlFiveHourPct).toBe(40);
+  expect(sess.rlSevenDayPct).toBe(51);
+  // Anthropic global snapshot must be untouched by an OpenAI session.
+  expect(store.get().usage.five_hour.utilization).toBe(10);
+  expect(store.get().usage.seven_day.utilization).toBe(20);
+});
+
+test('handleWsRateLimit patches the global snapshot for Anthropic sessions', () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'anthropic', subagents: {} } },
+    usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
+  });
+
+  handleWsRateLimit('s1', { five_hour_pct: 40, seven_day_pct: 51, on_overage: false });
+
+  expect(store.get().usage.five_hour.utilization).toBe(40);
+  expect(store.get().usage.seven_day.utilization).toBe(51);
+  expect(store.get().sessions.s1.rlFiveHourPct).toBe(40);
+});
+
+test('handleWsRateLimit ignores unknown windows (pct < 0)', () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
+    usage: null,
+  });
+
+  handleWsRateLimit('s1', { five_hour_pct: 40, seven_day_pct: -1, on_overage: false });
+
+  const sess = store.get().sessions.s1;
+  expect(sess.rlFiveHourPct).toBe(40);
+  expect(sess.rlSevenDayPct).toBeUndefined();
+});
