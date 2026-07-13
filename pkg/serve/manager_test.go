@@ -956,6 +956,9 @@ func TestResumeSession_KeepsSystemPrompt(t *testing.T) {
 		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
+	// The run reaching idle only schedules its persistence snapshot. Shut down
+	// before TempDir cleanup so the persistence reactor has drained its save.
+	t.Cleanup(mgr.Shutdown)
 
 	sess, err := mgr.ResumeSession(saved.ID)
 	if err != nil {
