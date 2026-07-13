@@ -87,6 +87,13 @@ if (typeof document !== 'undefined') {
   });
 }
 
+// parseMarkdown runs the configured marked pipeline (with our custom code/table
+// renderers) WITHOUT sanitization. Exposed so tests can exercise the real
+// renderer; production always goes through renderMarkdown, which sanitizes.
+export function parseMarkdown(text) {
+  return marked.parse(text);
+}
+
 export function renderMarkdown(text) {
   const raw = marked.parse(text);
   return DOMPurify.sanitize(raw, {

@@ -97,8 +97,7 @@
 }
 .settings-thinking-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.settings-model-list { max-height: 240px; overflow-y: auto; scrollbar-width: none; }
-.settings-model-list::-webkit-scrollbar { display: none; }
+.settings-model-list { display: flex; flex-direction: column; }
 
 .settings-loading { padding: 8px 14px; font-size: 12px; color: var(--overlay0); }
 

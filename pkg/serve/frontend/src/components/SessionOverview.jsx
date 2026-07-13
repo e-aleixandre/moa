@@ -28,9 +28,12 @@ export function SessionOverview({ state, onSelect, onNewSession }) {
 
   const activeSessions = useMemo(() =>
     Object.values(state.sessions)
-      .filter(s => s.state !== 'saved' && !s.archived)
+      // Hide stale (>7d) sessions to keep the grid scannable, but never hide the
+      // one currently open — it must stay visible in the dashboard.
+      .filter(s => s.state !== 'saved' && !s.archived &&
+        (isRecentSession(s) || s.id === state.activeSession))
       .sort((a, b) => (b.updated || 0) - (a.updated || 0)),
-    [state.sessions]
+    [state.sessions, state.activeSession]
   );
 
   const savedSessions = useMemo(() =>

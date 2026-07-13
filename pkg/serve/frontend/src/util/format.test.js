@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS } from './format.js';
 
 test('formatDiff numbers lines from startLine', () => {
   const out = formatDiff('old line\nsecond', 'new line\nsecond', 260);
@@ -70,4 +70,19 @@ test('sessionDotState: null-safe', () => {
 
 test('sessionDotState: saved with subagent data stays saved', () => {
   expect(sessionDotState({ state: 'saved', subagentCount: 1 })).toBe('saved');
+});
+
+test('isRecentSession: within the window is recent', () => {
+  const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  expect(isRecentSession({ updated: twoDaysAgo })).toBe(true);
+});
+
+test('isRecentSession: older than the window is not recent', () => {
+  const old = Date.now() - (RECENT_DAYS + 1) * 24 * 60 * 60 * 1000;
+  expect(isRecentSession({ updated: old })).toBe(false);
+});
+
+test('isRecentSession: no timestamp counts as recent (never silently hidden)', () => {
+  expect(isRecentSession({})).toBe(true);
+  expect(isRecentSession(null)).toBe(true);
 });
