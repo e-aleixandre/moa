@@ -150,6 +150,11 @@ func RegisterHandlers(sctx *SessionContext) {
 			}
 		}
 		// Emit CompactionStarted/Ended explicitly (agent.Compact doesn't emit lifecycle events).
+		// Set the authoritative flag BEFORE publishing so a concurrent reconnect
+		// snapshot cut observes compacting=true consistently with the streamed
+		// events; the defer is a safety net against a panic path.
+		sctx.setCompacting(true)
+		defer sctx.setCompacting(false)
 		sctx.Bus.Publish(CompactionStarted{SessionID: sctx.SessionID})
 		result, err := func() (p *core.CompactionPayload, e error) {
 			// Recover panics so the state machine can never be left stuck in
@@ -171,6 +176,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			}
 		}
 		if err != nil {
+			sctx.setCompacting(false)
 			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
 			// A message queued during the failed compact must still be
 			// delivered (Error→Running is a valid transition).
@@ -178,6 +184,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			return err
 		}
 		// Signal compaction ended (with or without payload).
+		sctx.setCompacting(false)
 		sctx.Bus.Publish(CompactionEnded{
 			SessionID: sctx.SessionID,
 			Payload:   result, // nil if nothing to compact
@@ -305,6 +312,10 @@ func RegisterHandlers(sctx *SessionContext) {
 
 	b.OnQuery(func(q GetCompactionEpoch) (int, error) {
 		return sctx.Agent.CompactionEpoch(), nil
+	})
+
+	b.OnQuery(func(q GetCompacting) (bool, error) {
+		return sctx.Compacting(), nil
 	})
 
 	b.OnQuery(func(q GetPermissionMode) (string, error) {

@@ -69,6 +69,27 @@ test('handleWsInit clears a steer consumed while the session was hidden', () => 
   expect(session.messages).toHaveLength(1);
 });
 
+// Regression for bug #2: a stale "compacting" spinner must be cleared by the
+// authoritative snapshot when the compaction finished while the pane had no WS.
+test('handleWsInit clears a stale compacting spinner from the snapshot', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, compacting: true } } });
+
+  // Reconnect: the server's snapshot says no compaction is in progress.
+  handleWsInit('s1', { messages: [] });
+
+  expect(store.get().sessions.s1.compacting).toBe(false);
+});
+
+// Regression for bug #2: a compaction still running at reconnect must restore
+// the spinner from the snapshot.
+test('handleWsInit restores an in-progress compacting spinner from the snapshot', () => {
+  seedSession('s1');
+  handleWsInit('s1', { messages: [], compacting: true });
+
+  expect(store.get().sessions.s1.compacting).toBe(true);
+});
+
 // Regression for bug #7: persisted goal-lifecycle markers (role "goal") must
 // rebuild as system lines so a reopened conversation shows the goal record.
 test('normalizeHistory renders role "goal" markers as system lines', () => {

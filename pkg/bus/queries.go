@@ -70,6 +70,11 @@ type GoalInfo struct {
 // Handler returns: int
 type GetCompactionEpoch struct{ SessionID string }
 
+// GetCompacting reports whether a compaction is currently in progress, so a
+// reconnect snapshot can restore (or clear) the compacting spinner.
+// Handler returns: bool
+type GetCompacting struct{ SessionID string }
+
 // GetPermissionMode returns the current permission mode (yolo/ask/auto).
 // Handler returns: string
 type GetPermissionMode struct{ SessionID string }

@@ -275,6 +275,10 @@ export function handleWsInit(id, data) {
     pendingSteers: null,
     streamingText: null,
     thinkingText: null,
+    // Authoritative compacting flag from the snapshot: if the compaction
+    // finished while this pane had no WS, the stale local spinner is cleared;
+    // if one is still running, it is restored.
+    compacting: !!data.compacting,
     tasks: data.tasks || [],
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,

@@ -743,6 +743,45 @@ func TestBridgeEvent_CompactionEnded(t *testing.T) {
 	}
 }
 
+// Regression for bug #2: the automatic (bridge-driven) compaction path must
+// toggle the authoritative compacting flag around the lifecycle events, and the
+// run-end/error safety net must clear it if a run dies without a CompactionEnd.
+func TestBridgeEvent_CompactingFlag(t *testing.T) {
+	compacting := func(sctx *SessionContext) bool { return sctx.Compacting() }
+
+	cases := []struct {
+		name string
+		end  string
+	}{
+		{"clean end via CompactionEnd", core.AgentEventCompactionEnd},
+		{"safety net via AgentEnd", core.AgentEventEnd},
+		{"safety net via AgentError", core.AgentEventError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := NewLocalBus()
+			defer b.Close()
+			sctx := newTestSessionContext(b, nil)
+
+			if compacting(sctx) {
+				t.Fatal("compacting flag set before start")
+			}
+			bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventCompactionStart})
+			if !compacting(sctx) {
+				t.Fatal("compacting flag not set after CompactionStart")
+			}
+			end := core.AgentEvent{Type: tc.end}
+			if tc.end == core.AgentEventError {
+				end.Error = errors.New("boom")
+			}
+			bridgeEvent(sctx, end)
+			if compacting(sctx) {
+				t.Fatalf("compacting flag still set after %v", tc.end)
+			}
+		})
+	}
+}
+
 func TestRunStats_UsesLifecycleEventsForCostAndFinalText(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -955,6 +994,69 @@ func TestHandler_CompactSession_ErrorSettlesState(t *testing.T) {
 	if got := sctx.State.Current(); got != StateError {
 		t.Fatalf("post-error state = %q, want error", got)
 	}
+}
+
+// Regression for bug #2 (ghost compacting spinner): the authoritative
+// compacting flag must be true while a compaction runs and cleared once it
+// finishes — on both the success and error paths — so a reconnect snapshot
+// (GetCompacting) never restores a stale spinner.
+func TestHandler_CompactSession_CompactingFlag(t *testing.T) {
+	compactingNow := func(b EventBus) bool {
+		v, _ := QueryTyped[GetCompacting, bool](b, GetCompacting{})
+		return v
+	}
+
+	t.Run("success", func(t *testing.T) {
+		b := NewLocalBus()
+		defer b.Close()
+		var during bool
+		fa := &fakeAgent{}
+		sctx := newTestSessionContextWithState(b, fa)
+		fa.compactHook = func() { during = compactingNow(b) }
+		RegisterHandlers(sctx)
+
+		if compactingNow(b) {
+			t.Fatal("compacting flag set before compaction")
+		}
+		if err := b.Execute(CompactSession{}); err != nil {
+			t.Fatal(err)
+		}
+		if !during {
+			t.Fatal("compacting flag not set during compaction")
+		}
+		if compactingNow(b) {
+			t.Fatal("compacting flag still set after successful compaction")
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		b := NewLocalBus()
+		defer b.Close()
+		fa := &fakeAgent{compactErr: errors.New("boom")}
+		sctx := newTestSessionContextWithState(b, fa)
+		RegisterHandlers(sctx)
+
+		_ = b.Execute(CompactSession{})
+		if compactingNow(b) {
+			t.Fatal("compacting flag still set after failed compaction")
+		}
+	})
+
+	t.Run("panic", func(t *testing.T) {
+		b := NewLocalBus()
+		defer b.Close()
+		fa := &fakeAgent{}
+		sctx := newTestSessionContextWithState(b, fa)
+		fa.compactHook = func() { panic("kaboom") }
+		RegisterHandlers(sctx)
+
+		// The handler recovers the panic into an error; the deferred
+		// setCompacting(false) must still clear the flag.
+		_ = b.Execute(CompactSession{})
+		if compactingNow(b) {
+			t.Fatal("compacting flag still set after panicking compaction")
+		}
+	})
 }
 
 // A message sent while a compact holds the session busy is queued as a steer;

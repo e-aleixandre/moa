@@ -343,6 +343,7 @@ func buildInitData(sess *ManagedSession) InitData {
 	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
 	bashJobs, _ := bus.QueryTyped[bus.GetBashJobs, []bus.BashJobSnapshot](b, bus.GetBashJobs{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
+	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
 
 	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
@@ -354,6 +355,7 @@ func buildInitData(sess *ManagedSession) InitData {
 		Tasks:            taskList,
 		PathScope:        pathInfo.Scope,
 		CostUSD:          cost,
+		Compacting:       compacting,
 	}
 
 	if len(subagents) > 0 {

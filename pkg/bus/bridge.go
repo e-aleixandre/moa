@@ -117,6 +117,14 @@ type SessionContext struct {
 	// The Gate object itself is immutable between swaps — only the pointer changes.
 	gate atomic.Pointer[permission.Gate]
 
+	// compacting is the authoritative "a compaction is in progress" flag, so a
+	// reconnect snapshot can restore (or clear) the compacting spinner. It is
+	// set true before publishing CompactionStarted and cleared before
+	// publishing CompactionEnded (and defensively on run end/error), so the
+	// snapshot boundary cut (subscribe → LastSeq → query) always observes a
+	// value consistent with the events streamed after the cut.
+	compacting atomic.Bool
+
 	// persistPaused suppresses persistence-reactor snapshots while a session is
 	// being restored in place. The final complete state is saved explicitly by
 	// SessionRuntime.SwitchSession.
@@ -226,6 +234,20 @@ func (sctx *SessionContext) GoalVerifying() bool {
 	sctx.quiescenceMu.Lock()
 	defer sctx.quiescenceMu.Unlock()
 	return sctx.goalVerifyRunning > 0
+}
+
+// Compacting reports whether a compaction is currently in progress, so a
+// reconnect snapshot can restore (or clear) the compacting spinner.
+func (sctx *SessionContext) Compacting() bool {
+	return sctx.compacting.Load()
+}
+
+// setCompacting sets the authoritative compacting flag. It must be called
+// BEFORE publishing the corresponding CompactionStarted/CompactionEnded event
+// so a concurrent snapshot cut observes a value consistent with the streamed
+// events.
+func (sctx *SessionContext) setCompacting(v bool) {
+	sctx.compacting.Store(v)
 }
 
 // GetGate returns the current permission gate (may be nil for yolo mode).
@@ -375,6 +397,18 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	sid := sctx.SessionID
 	gen := sctx.RunGenAtomic.Load()
 	sctx.addRunEvent(gen, e)
+	// Keep the authoritative compacting flag in lockstep with the events we are
+	// about to publish. This runs serially in the bridge subscriber goroutine,
+	// and the Store happens before Bus.Publish, so a concurrent snapshot cut
+	// sees a value consistent with the streamed events. The run-end/error cases
+	// are a safety net: a run that dies without a CompactionEnd must not leave
+	// the spinner stuck.
+	switch e.Type {
+	case core.AgentEventCompactionStart:
+		sctx.setCompacting(true)
+	case core.AgentEventCompactionEnd, core.AgentEventEnd, core.AgentEventError:
+		sctx.setCompacting(false)
+	}
 	for _, ev := range TranslateAgentEvent(sid, gen, e, sctx.TaskStore) {
 		sctx.Bus.Publish(ev)
 	}
