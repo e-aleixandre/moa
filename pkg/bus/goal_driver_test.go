@@ -179,7 +179,10 @@ func TestGoalDriver_PersistsMarkers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("EnterGoal: %v", err)
 	}
-	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "done"})
+	// EnterGoal's first kick starts a real run whose RunEnded{RunGen:1} drives
+	// the loop. Publishing a manual one here would duplicate it and spawn two
+	// concurrent verifications, racing a second "iteration" marker past the
+	// "end" marker (flaky "last marker phase = iteration, want end").
 
 	select {
 	case <-endMarker:
