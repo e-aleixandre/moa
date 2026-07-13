@@ -62,8 +62,19 @@ if (typeof document !== 'undefined') {
   });
 }
 
+// Wrap GFM tables in a horizontally-scrollable container so wide tables scroll
+// sideways on narrow screens (mobile) instead of squashing their columns into
+// tall, unreadable wrapped cells. marked emits well-formed, non-nested
+// <table>…</table>, so a plain string wrap is safe here (and the wrapper div +
+// class are already on the DOMPurify allow-list below).
+export function wrapTables(html) {
+  return html
+    .replace(/<table>/g, '<div class="md-table-wrap"><table>')
+    .replace(/<\/table>/g, '</table></div>');
+}
+
 export function renderMarkdown(text) {
-  const raw = marked.parse(text);
+  const raw = wrapTables(marked.parse(text));
   return DOMPurify.sanitize(raw, {
     ADD_TAGS: ['div', 'button', 'span'],
     ADD_ATTR: ['class', 'data-lang'],

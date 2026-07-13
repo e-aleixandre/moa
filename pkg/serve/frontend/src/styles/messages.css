@@ -225,6 +225,37 @@
   color: var(--subtext1);
 }
 
+/* GFM tables: the wrapper scrolls horizontally so wide tables don't squash
+   their columns into tall wrapped cells on narrow screens (mobile). */
+.md-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  margin: 10px 0;
+}
+.md-table-wrap table {
+  border-collapse: collapse;
+  /* Don't stretch to the container: let content set the width so the wrapper
+     can scroll when the table is wider than the viewport. */
+  width: auto;
+  font-size: 13px;
+}
+.md-table-wrap th,
+.md-table-wrap td {
+  border: 1px solid var(--surface1);
+  padding: 6px 10px;
+  text-align: left;
+  /* Keep cell content on one line so columns keep their natural width and the
+     table scrolls instead of growing tall. */
+  white-space: nowrap;
+}
+.md-table-wrap th {
+  background: var(--surface0);
+  color: var(--text);
+  font-weight: 600;
+}
+.md-table-wrap tr:nth-child(even) td { background: var(--mantle); }
+
 /* Streaming cursor */
 .streaming .msg-assistant::after {
   content: '▌';
