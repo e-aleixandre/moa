@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -143,7 +144,8 @@ func handleRealtimeClientSecret(store *deviceStore, keyFn RealtimeAPIKeyFunc, cl
 }
 
 func decodeRealtimeEmptyBody(w http.ResponseWriter, r *http.Request) bool {
-	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return false
 	}
