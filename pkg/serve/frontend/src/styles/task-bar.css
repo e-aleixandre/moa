@@ -1,4 +1,4 @@
-/* Task bar — single-line compact indicator above input */
+/* Task bar — single-line compact status strip at the bottom of the chat view */
 
 .task-bar {
   display: flex;

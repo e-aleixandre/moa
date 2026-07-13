@@ -1,10 +1,13 @@
 import { ClipboardList, Map, Shield, Gauge, Zap, Flame, Target, DollarSign } from 'lucide-preact';
 
 /**
- * TaskBar — single-line status bar above the input.
+ * TaskBar — single-line status strip at the very bottom of the chat view,
+ * mirroring the TUI statusline. Owns the mobile safe-area inset so the
+ * interactive input/pills above it stay clear of the iOS gesture zone.
  * Shows: permission mode, extra-usage alert, context usage, plan usage
  * (5h + weekly windows), plan mode, task progress.
- * Always visible when there's anything to show. Compact: never more than one line.
+ * Always rendered while a session is open (at minimum the permission pill).
+ * Compact: never more than one line.
  *
  * `usage` is the global plan usage snapshot from /api/usage (shared across
  * sessions), passed in by the parent.
