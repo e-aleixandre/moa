@@ -201,7 +201,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.GoalVerifyEnded:
 		return Event{Type: "goal_verify", Data: map[string]any{
-			"active": false, "iteration": e.Iteration,
+			"active": e.Verifying, "iteration": e.Iteration,
 		}}, true
 	case bus.GoalEnded:
 		return Event{Type: "goal_end", Data: GoalEndData{Reason: e.Reason}}, true

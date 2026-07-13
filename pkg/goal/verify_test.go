@@ -236,12 +236,13 @@ func TestVerify_MaxTurnsExhausted(t *testing.T) {
 	}
 }
 
-// TestVerify_RepromptForCleanJSON: first text isn't JSON, the reprompt yields it.
-func TestVerify_RepromptForCleanJSON(t *testing.T) {
+// TestVerify_ParsesJSONEmbeddedInProse: the verifier's final turn may wrap the
+// JSON verdict in prose or fences; extractJSONObject recovers it without a
+// dedicated reprompt (which we deliberately dropped to avoid re-granting caps).
+func TestVerify_ParsesJSONEmbeddedInProse(t *testing.T) {
 	dir := t.TempDir()
 	prov := &scriptedProvider{steps: []scriptStep{
-		{text: "I believe the objective is complete, everything looks good."},
-		{text: `{"satisfied": true, "feedback": "confirmed"}`},
+		{text: "After reviewing everything, here is my verdict:\n```json\n{\"satisfied\": true, \"feedback\": \"confirmed\"}\n```\nDone."},
 	}}
 	factory := func(core.Model) (core.Provider, error) { return prov, nil }
 	cfg := baseCfg(factory, "obj")
@@ -252,17 +253,20 @@ func TestVerify_RepromptForCleanJSON(t *testing.T) {
 		t.Fatalf("Verify failed: %v", err)
 	}
 	if !v.Satisfied || v.Feedback != "confirmed" {
-		t.Fatalf("expected reprompt to recover clean JSON, got %+v", v)
+		t.Fatalf("expected the embedded JSON to be parsed, got %+v", v)
+	}
+	// Exactly one provider call — no reprompt.
+	if prov.call != 1 {
+		t.Fatalf("expected a single provider call (no reprompt), got %d", prov.call)
 	}
 }
 
-// TestVerify_ConservativeFallback: no clean JSON even after reprompt → not
-// satisfied, raw text as feedback, no error.
+// TestVerify_ConservativeFallback: no clean JSON in the final turn → not
+// satisfied, raw text as feedback, no error (no reprompt is attempted).
 func TestVerify_ConservativeFallback(t *testing.T) {
 	dir := t.TempDir()
 	prov := &scriptedProvider{steps: []scriptStep{
 		{text: "looks fine to me"},
-		{text: "still no json here"},
 	}}
 	factory := func(core.Model) (core.Provider, error) { return prov, nil }
 	cfg := baseCfg(factory, "obj")
@@ -358,6 +362,114 @@ func TestVerify_StatsCost(t *testing.T) {
 	if stats.CostUSD <= 0 {
 		t.Fatalf("expected a positive cost, got %v", stats.CostUSD)
 	}
+}
+
+// TestVerifierRegistry_SandboxedToWorkDir asserts the verifier builds its OWN
+// restricted path policy: reads inside WorkDir succeed, reads outside it are
+// denied — even though the caller never passes a policy (P4: never reuse the
+// session's possibly-unrestricted policy).
+func TestVerifierRegistry_SandboxedToWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	inside := filepath.Join(workDir, "in.txt")
+	if err := os.WriteFile(inside, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(outside, []byte("top secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := newVerifierRegistry(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readTool, ok := reg.Get("read")
+	if !ok {
+		t.Fatal("read tool missing from verifier registry")
+	}
+
+	// Inside the sandbox: succeeds.
+	res, err := readTool.Execute(context.Background(), map[string]any{"path": inside}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("reading inside WorkDir should succeed, got err=%v isErr=%v", err, res.IsError)
+	}
+
+	// Outside the sandbox: denied (either an error return or IsError result).
+	res, err = readTool.Execute(context.Background(), map[string]any{"path": outside}, nil)
+	if err == nil && !res.IsError {
+		t.Fatalf("reading outside WorkDir must be denied, got %+v", res)
+	}
+
+	// Write/exec tools must not exist at all.
+	for _, banned := range []string{"edit", "write", "bash", "subagent"} {
+		if _, ok := reg.Get(banned); ok {
+			t.Fatalf("verifier registry must not expose %q", banned)
+		}
+	}
+}
+
+// TestVerify_OneShotStatsCost: the legacy one-shot path reports usage/cost so
+// the driver can charge it against the goal budget (P3).
+func TestVerify_OneShotStatsCost(t *testing.T) {
+	prov := &scriptedProvider{steps: []scriptStep{
+		{text: `{"satisfied": true, "feedback": "ok"}`},
+	}}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.OneShot = true
+
+	_, stats, err := Verify(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Usage == nil || stats.Usage.TotalTokens == 0 {
+		t.Fatalf("one-shot must report usage, got %+v", stats.Usage)
+	}
+	if stats.CostUSD <= 0 {
+		t.Fatalf("one-shot must report a positive cost, got %v", stats.CostUSD)
+	}
+}
+
+// TestVerify_TimeoutIsTotal: the wall-clock timeout bounds the WHOLE call. A
+// provider that always errors would otherwise retry; with a tiny timeout the
+// call returns promptly rather than running the full retry budget (P1).
+func TestVerify_TimeoutIsTotal(t *testing.T) {
+	dir := t.TempDir()
+	prov := &slowProvider{delay: 200 * time.Millisecond}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.WorkDir = dir
+	cfg.Timeout = 50 * time.Millisecond
+
+	start := time.Now()
+	_, _, _ = Verify(context.Background(), cfg)
+	elapsed := time.Since(start)
+	// A single shared 50ms deadline: even with retries, we must finish well
+	// before N×(provider delay). Generous bound to avoid CI flakiness.
+	if elapsed > 400*time.Millisecond {
+		t.Fatalf("total timeout not enforced across retries: took %v", elapsed)
+	}
+}
+
+// slowProvider blocks on ctx until its delay elapses, then returns ctx.Err().
+// It never yields a real turn, so it exercises the deadline path.
+type slowProvider struct {
+	delay time.Duration
+}
+
+func (p *slowProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 1)
+	go func() {
+		defer close(ch)
+		select {
+		case <-time.After(p.delay):
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("slow")}
+		case <-ctx.Done():
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: ctx.Err()}
+		}
+	}()
+	return ch, nil
 }
 
 // hasTool reports whether a request offered a tool by name.

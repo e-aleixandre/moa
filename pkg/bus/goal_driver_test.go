@@ -127,7 +127,12 @@ func TestGoalDriver_PublishesVerifyStartEnd(t *testing.T) {
 		t.Fatal("GoalVerifyStarted should carry the iteration number")
 	}
 	_ = drainChan(endedCh, b, t)
-	_ = drainChan(endCh, b, t)
+	end := drainChan(endCh, b, t)
+	// With a single verification (no overlap), the aggregate verifying state
+	// after it finishes is false — so the UI clears its indicator (P7).
+	if end.Verifying {
+		t.Fatal("GoalVerifyEnded.Verifying should be false when no other verification is running")
+	}
 }
 
 // TestGoalDriver_PersistsMarkers is the regression guard for bug #7: goal

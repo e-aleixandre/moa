@@ -1072,7 +1072,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		go func() {
 			defer func() {
 				sctx.endGoalVerify()
-				sctx.Bus.Publish(GoalVerifyEnded{SessionID: sctx.SessionID, Iteration: it})
+				sctx.Bus.Publish(GoalVerifyEnded{SessionID: sctx.SessionID, Iteration: it, Verifying: sctx.GoalVerifying()})
 				goalVerifyCancel.CompareAndSwap(&combined, nil)
 				evidenceCancel()
 				verifyCancel()
@@ -1108,7 +1108,6 @@ func RegisterHandlers(sctx *SessionContext) {
 				Evidence:     evidence,
 				StatePath:    info.StatePath,
 				WorkDir:      goalWorkDir(sctx, info),
-				PathPolicy:   sctx.PathPolicy,
 				Timeout:      info.VerifyTimeout,
 				MaxBudget:    verifyBudget,
 				OneShot:      info.VerifyOneShot,
@@ -1117,6 +1116,15 @@ func RegisterHandlers(sctx *SessionContext) {
 			// judging the verdict, so the ceiling holds even on the winning
 			// iteration.
 			spent := sctx.Goal.AddSpent(stats.CostUSD)
+
+			// The verifier's spend is real LLM cost — surface it in the session
+			// total too (TUI statusline + web usage widget), not only the goal
+			// budget. RunEnded/SubagentEnded don't cover it: this is a separate
+			// agentic call outside the maker run.
+			if stats.CostUSD > 0 {
+				total := sctx.addSessionCost(stats.CostUSD)
+				sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: stats.CostUSD})
+			}
 
 			// If our verify context was cancelled, a user prompt or /goal stop
 			// aborted us (cancelGoalVerify cancels both phases via `combined`).

@@ -378,6 +378,9 @@ func TestLoop_MaxTurnsExceeded(t *testing.T) {
 	if err.Error() != "max turns exceeded (3)" {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !errors.Is(err, ErrMaxTurnsExceeded) {
+		t.Fatalf("error should match ErrMaxTurnsExceeded sentinel: %v", err)
+	}
 
 	// Even on error, we should get complete lifecycle events
 	if !waitForEvent(events, core.AgentEventEnd, 500*time.Millisecond) {
@@ -431,6 +434,9 @@ func TestLoop_DoomLoopDetection(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "doom loop") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !errors.Is(err, ErrDoomLoop) {
+		t.Fatalf("error should match ErrDoomLoop sentinel: %v", err)
 	}
 }
 

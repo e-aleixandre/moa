@@ -111,7 +111,13 @@ func (m *appModel) handleGoalVerifyStarted(e bus.GoalVerifyStarted) []tea.Cmd {
 }
 
 func (m *appModel) handleGoalVerifyEnded(e bus.GoalVerifyEnded) []tea.Cmd {
-	m.s.goalVerifying = false
+	// e.Verifying is the aggregate state after this verify finished: if another
+	// verification is still running (overlap), keep the indicator on.
+	m.s.goalVerifying = e.Verifying
+	if m.s.goalActive && e.Verifying {
+		m.statusBar.UpdateGoalSegment("verifying…")
+		return []tea.Cmd{renderTick()}
+	}
 	// Restore the iteration label; GoalIterationEnded (which lands right after)
 	// will set the final label, but restore here too in case the verifier was
 	// cancelled without an iteration verdict.

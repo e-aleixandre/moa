@@ -278,7 +278,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Guardrail: max turns
 		turnCount++
 		if cfg.maxTurns > 0 && turnCount > cfg.maxTurns {
-			loopErr = fmt.Errorf("max turns exceeded (%d)", cfg.maxTurns)
+			loopErr = fmt.Errorf("%w (%d)", ErrMaxTurnsExceeded, cfg.maxTurns)
 			return loopErr
 		}
 
@@ -490,7 +490,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				for _, tc := range nonExempt {
 					callNames = append(callNames, fmt.Sprintf("%s(%v)", tc.ToolName, tc.Arguments))
 				}
-				loopErr = fmt.Errorf("doom loop detected: identical tool calls repeated %d times in a row: %v", repeatCount, callNames)
+				loopErr = fmt.Errorf("%w: identical tool calls repeated %d times in a row: %v", ErrDoomLoop, repeatCount, callNames)
 
 				// Inject tool_result messages for every pending tool_call so
 				// the conversation stays valid (Anthropic requires a tool_result

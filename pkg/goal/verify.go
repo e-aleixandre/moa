@@ -61,16 +61,15 @@ type ProviderFactory func(core.Model) (core.Provider, error)
 // VerifyConfig configures a verifier run.
 type VerifyConfig struct {
 	Factory      ProviderFactory
-	VerifierSpec string           // model spec; "" = DefaultVerifierSpec
-	Objective    string           // the goal objective (verbatim /goal text)
-	Evidence     string           // initial hint (diff + checks); NOT authoritative
-	StatePath    string           // path to the goal's STATE.md (shown to the verifier)
-	WorkDir      string           // read-only sandbox root for the verifier's tools
-	PathPolicy   *tool.PathPolicy // shared path policy (nil = sandbox to WorkDir)
-	Timeout      time.Duration    // wall-clock TOTAL per run; 0 = DefaultVerifyTimeout
-	MaxTurns     int              // 0 = defaultVerifierMaxTurns
-	MaxBudget    float64          // 0 = DefaultVerifierMaxBudget
-	OneShot      bool             // legacy tool-less one-shot mode
+	VerifierSpec string        // model spec; "" = DefaultVerifierSpec
+	Objective    string        // the goal objective (verbatim /goal text)
+	Evidence     string        // initial hint (diff + checks); NOT authoritative
+	StatePath    string        // path to the goal's STATE.md (shown to the verifier)
+	WorkDir      string        // read-only sandbox root for the verifier's tools
+	Timeout      time.Duration // wall-clock TOTAL per run; 0 = DefaultVerifyTimeout
+	MaxTurns     int           // 0 = defaultVerifierMaxTurns
+	MaxBudget    float64       // 0 = DefaultVerifierMaxBudget
+	OneShot      bool          // legacy tool-less one-shot mode
 }
 
 const verifierSystemPrompt = `You are a strict completion auditor in an autonomous coding loop. You did NOT write the work — your only job is to judge whether the stated OBJECTIVE has actually been met, and to report precisely what is missing if it has not.
@@ -122,15 +121,15 @@ func Verify(ctx context.Context, cfg VerifyConfig) (Verdict, VerifyStats, error)
 	}
 
 	if cfg.OneShot {
-		verdict, err := verifyOneShot(ctx, prov, model, cfg.Objective, cfg.Evidence, timeout)
-		return verdict, VerifyStats{}, err
+		verdict, stats, err := verifyOneShot(ctx, prov, model, cfg.Objective, cfg.Evidence, timeout)
+		return verdict, stats, err
 	}
 	return verifyAgentic(ctx, prov, model, cfg, timeout)
 }
 
 // verifyAgentic runs the verifier as a read-only mini-agent.
 func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cfg VerifyConfig, timeout time.Duration) (Verdict, VerifyStats, error) {
-	reg, err := newVerifierRegistry(cfg.WorkDir, cfg.PathPolicy)
+	reg, err := newVerifierRegistry(cfg.WorkDir)
 	if err != nil {
 		return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: registry: %w", err)
 	}
@@ -149,7 +148,18 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 		maxBudget = 0
 	}
 
+	// A single wall-clock deadline bounds the WHOLE verifier call — every retry
+	// shares it, so the total never exceeds the configured timeout regardless of
+	// how many attempts run. The per-agent MaxRunDuration is left at 0 (unlimited)
+	// because this ctx is the authoritative bound.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	user := buildVerifierPrompt(cfg.Objective, cfg.StatePath, cfg.Evidence)
+
+	// The budget pool is shared across retries: each attempt is capped at what's
+	// left, so recreating the agent can't re-grant the full budget.
+	remainingBudget := maxBudget
 
 	var lastErr error
 	for attempt := 0; attempt < verifyMaxAttempts; attempt++ {
@@ -166,9 +176,13 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 			WorkspaceRoot:       cfg.WorkDir,
 			MaxTurns:            maxTurns,
 			MaxToolCallsPerTurn: 10,
-			MaxRunDuration:      timeout,
-			MaxBudget:           maxBudget,
-			Compaction:          &core.DefaultCompactionSettings,
+			MaxBudget:           remainingBudget,
+			// Compaction disabled: a 10-turn read-only verifier won't exhaust the
+			// context window, and a compaction call bills a summarization request
+			// that wouldn't be reflected in the returned assistant messages —
+			// i.e. cost the goal budget can't see. Keeping it off makes the
+			// returned stats the true, complete cost of the run.
+			Compaction: &core.CompactionSettings{Enabled: false},
 		})
 		if err != nil {
 			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: agent: %w", err)
@@ -179,37 +193,30 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 
 		// The parent context was cancelled (goal stopped / new run took over):
 		// surface it so the driver bails instead of treating it as a verdict.
-		if ctx.Err() != nil {
+		// (context.Canceled only — a deadline is our own total-timeout cap, which
+		// is handled as a capped verdict below.)
+		if errors.Is(ctx.Err(), context.Canceled) {
 			return Verdict{}, stats, fmt.Errorf("goal verify: %w", ctx.Err())
 		}
 
-		// "Output" means the verifier actually got a real assistant turn out of
-		// the provider — one with recorded token usage. The agent appends a
-		// synthetic "(stopped: …)" assistant marker when a run fails, but that
-		// carries no Usage, so requiring Usage distinguishes a real (capped) run
-		// from an infrastructure failure that produced nothing.
-		hadOutput := false
-		for _, m := range msgs {
-			if m.Role == "assistant" && m.Usage != nil {
-				hadOutput = true
-				break
-			}
-		}
+		hadOutput := hadRealAssistantTurn(msgs)
 
 		if runErr != nil {
-			// Running out of turns/budget/time is not infrastructure failure: a
-			// capped verifier returns a not-satisfied verdict with feedback so the
-			// healthy goal keeps going, rather than pausing. But a cap only counts
-			// if the verifier actually produced output — a Stream that failed
-			// immediately with no assistant message at all is an infrastructure
-			// failure (e.g. provider error), even if it surfaces as a deadline.
+			// Running out of turns/budget/time (or a doom loop) is not an
+			// infrastructure failure: a capped verifier returns a not-satisfied
+			// verdict with feedback so the healthy goal keeps going, rather than
+			// pausing. A cap only counts if the verifier actually produced a real
+			// turn — a Stream that failed before any assistant output is an
+			// infrastructure failure (retried), even if it surfaces as a deadline.
 			if hadOutput {
 				if capped, feedback := cappedRunFeedback(runErr); capped {
 					return Verdict{Satisfied: false, Feedback: feedback}, stats, nil
 				}
 			} else {
-				// No output at all: transient/infrastructure failure — retry.
+				// No real turn: transient/infrastructure failure — retry (within
+				// the shared deadline).
 				lastErr = fmt.Errorf("goal verify: run: %w", runErr)
+				remainingBudget = subtractBudget(remainingBudget, stats.CostUSD)
 				continue
 			}
 			// Output was produced despite the error — fall through and try to
@@ -217,23 +224,42 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 		}
 
 		out := core.ExtractFinalAssistantText(msgs)
-		if verdict, ok := tryParseVerdict(out); ok {
-			return verdict, stats, nil
-		}
-
-		// The run finished but didn't emit clean JSON. Ask once, explicitly, for
-		// just the verdict object before falling back conservatively.
-		if reMsgs, reErr := child.Send(ctx, "Reply now with ONLY the JSON verdict object, nothing else."); reErr == nil {
-			stats = statsFrom(model, append(msgs, reMsgs...))
-			if verdict, ok := tryParseVerdict(core.ExtractFinalAssistantText(reMsgs)); ok {
-				return verdict, stats, nil
-			}
-		}
-		// Conservative fallback: not-satisfied, keep whatever text we got as a
-		// signal. This is a verdict, not an error — don't pause the goal.
+		// Conservative fallback when the model didn't emit clean JSON:
+		// not-satisfied, keeping whatever text it produced as a signal.
+		// extractJSONObject already tolerates prose/fences around the object, so
+		// a well-behaved verifier parses even without a dedicated reprompt (which
+		// we avoid — a second Send would re-grant fresh turn/budget caps).
 		return parseVerdict(out), stats, nil
 	}
 	return Verdict{}, VerifyStats{}, lastErr
+}
+
+// hadRealAssistantTurn reports whether a run produced a genuine assistant turn
+// (one with recorded token usage). The agent appends a synthetic "(stopped: …)"
+// assistant marker when a run fails before any tokens; that marker carries no
+// Usage, so requiring Usage distinguishes a real (capped) run from an
+// infrastructure failure that produced nothing.
+func hadRealAssistantTurn(msgs []core.AgentMessage) bool {
+	for _, m := range msgs {
+		if m.Role == "assistant" && m.Usage != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// subtractBudget lowers a remaining budget by spent, never below a tiny floor
+// (a 0 or negative MaxBudget would mean "unlimited" to the agent, so we keep a
+// positive sliver to preserve the cap semantics across retries).
+func subtractBudget(remaining, spent float64) float64 {
+	if remaining <= 0 {
+		return remaining // 0 = unlimited (no pricing); leave as-is
+	}
+	r := remaining - spent
+	if r < 0.0001 {
+		return 0.0001
+	}
+	return r
 }
 
 // buildVerifierPrompt assembles the user message with the objective, the goal
@@ -261,10 +287,10 @@ func cappedRunFeedback(err error) (bool, string) {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true, "The verifier ran out of time before reaching a verdict. Treating the objective as NOT yet satisfied. Continue the work."
 	}
-	if strings.Contains(err.Error(), "max turns exceeded") {
+	if errors.Is(err, agent.ErrMaxTurnsExceeded) {
 		return true, "The verifier ran out of inspection turns before reaching a verdict. Treating the objective as NOT yet satisfied. Continue the work."
 	}
-	if strings.Contains(err.Error(), "doom loop detected") {
+	if errors.Is(err, agent.ErrDoomLoop) {
 		return true, "The verifier got stuck repeating the same inspection without reaching a verdict. Treating the objective as NOT yet satisfied. Continue the work."
 	}
 	return false, ""
@@ -301,7 +327,14 @@ func statsFrom(model core.Model, msgs []core.AgentMessage) VerifyStats {
 // sandboxed to workDir. It's a whitelist built from scratch — not a filtered
 // copy of the session registry — so a newly-added tool can never leak in, and
 // the tools resolve paths against the goal's own working directory.
-func newVerifierRegistry(workDir string, pp *tool.PathPolicy) (*core.Registry, error) {
+//
+// It builds its OWN restricted PathPolicy rooted at workDir rather than reusing
+// the session policy: the session may be unrestricted (yolo) or carry extra
+// allowed paths the maker was granted, and the verifier — which streams whatever
+// it reads to a remote provider — must stay confined to the goal's worktree.
+func newVerifierRegistry(workDir string) (*core.Registry, error) {
+	// unrestricted=false, no extra allowed paths → containment to workDir only.
+	pp := tool.NewPathPolicy(workDir, nil, false)
 	cfg := tool.ToolConfig{WorkspaceRoot: workDir, PathPolicy: pp}
 	reg := core.NewRegistry()
 	if err := tool.RegisterRead(reg, cfg); err != nil {
@@ -320,8 +353,10 @@ func newVerifierRegistry(workDir string, pp *tool.PathPolicy) (*core.Registry, e
 }
 
 // verifyOneShot is the legacy tool-less verifier: a single call with objective +
-// evidence, no history and no tools. Kept for --verify-oneshot.
-func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, objective, evidence string, timeout time.Duration) (Verdict, error) {
+// evidence, no history and no tools. Kept for --verify-oneshot. It reports the
+// usage/cost of the attempt that produced the verdict so the driver charges it
+// against the goal budget, and shares one wall-clock deadline across retries.
+func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, objective, evidence string, timeout time.Duration) (Verdict, VerifyStats, error) {
 	user := fmt.Sprintf("OBJECTIVE:\n%s\n\nEVIDENCE:\n%s", strings.TrimSpace(objective), strings.TrimSpace(evidence))
 	req := core.Request{
 		Model:    model,
@@ -330,28 +365,30 @@ func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, ob
 		Options:  core.StreamOptions{ThinkingLevel: "off"},
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < oneShotMaxAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return Verdict{}, fmt.Errorf("goal verify: %w", err)
-		}
-		verdict, err := oneShotAttempt(ctx, prov, req, timeout)
-		if err == nil {
-			return verdict, nil
-		}
-		lastErr = err
-	}
-	return Verdict{}, lastErr
-}
-
-// oneShotAttempt runs a single tool-less verifier attempt under its own timeout.
-func oneShotAttempt(ctx context.Context, prov core.Provider, req core.Request, timeout time.Duration) (Verdict, error) {
+	// One deadline for the whole call, shared by every retry.
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	var lastErr error
+	for attempt := 0; attempt < oneShotMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", err)
+		}
+		verdict, stats, err := oneShotAttempt(ctx, prov, model, req)
+		if err == nil {
+			return verdict, stats, nil
+		}
+		lastErr = err
+	}
+	return Verdict{}, VerifyStats{}, lastErr
+}
+
+// oneShotAttempt runs a single tool-less verifier attempt and reports its
+// usage/cost.
+func oneShotAttempt(ctx context.Context, prov core.Provider, model core.Model, req core.Request) (Verdict, VerifyStats, error) {
 	ch, err := prov.Stream(ctx, req)
 	if err != nil {
-		return Verdict{}, fmt.Errorf("goal verify: stream: %w", err)
+		return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: stream: %w", err)
 	}
 
 	var text strings.Builder
@@ -363,7 +400,7 @@ func oneShotAttempt(ctx context.Context, prov core.Provider, req core.Request, t
 		case core.ProviderEventDone:
 			finalMsg = event.Message
 		case core.ProviderEventError:
-			return Verdict{}, fmt.Errorf("goal verify: %w", event.Error)
+			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", event.Error)
 		}
 	}
 
@@ -375,7 +412,16 @@ func oneShotAttempt(ctx context.Context, prov core.Provider, req core.Request, t
 			}
 		}
 	}
-	return parseVerdict(out), nil
+
+	var stats VerifyStats
+	if finalMsg != nil && finalMsg.Usage != nil {
+		stats.Turns = 1
+		stats.Usage = finalMsg.Usage
+		if model.Pricing != nil {
+			stats.CostUSD = model.Pricing.Cost(*finalMsg.Usage)
+		}
+	}
+	return parseVerdict(out), stats, nil
 }
 
 // tryParseVerdict parses a strict verdict, reporting whether a JSON object was

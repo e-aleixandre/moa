@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -32,6 +33,14 @@ func (e *BudgetExceededError) Is(target error) bool {
 
 // ErrBudgetExceeded is a sentinel for errors.Is checks.
 var ErrBudgetExceeded = &BudgetExceededError{}
+
+// ErrMaxTurnsExceeded is a sentinel for a run that hit its MaxTurns cap.
+// The concrete error wraps it (with the turn count) via fmt.Errorf("%w").
+var ErrMaxTurnsExceeded = errors.New("max turns exceeded")
+
+// ErrDoomLoop is a sentinel for a run stopped because it repeated identical
+// tool calls (a doom loop). The concrete error wraps it via fmt.Errorf("%w").
+var ErrDoomLoop = errors.New("doom loop detected")
 
 const steerBufferSize = 32 // capacity of the inter-step steering channel
 

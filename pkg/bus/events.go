@@ -304,10 +304,14 @@ type GoalVerifyStarted struct {
 }
 
 // GoalVerifyEnded is published when the verifier finishes an iteration (with a
-// verdict, an error, or because it was cancelled).
+// verdict, an error, or because it was cancelled). Verifying carries the
+// aggregate state AFTER this verify finished: if another verification is still
+// running (verifications overlapped), it stays true so the UI keeps its
+// indicator on instead of clearing it prematurely.
 type GoalVerifyEnded struct {
 	SessionID string
 	Iteration int
+	Verifying bool
 }
 
 // GoalEnded is published when the loop stops (objective met or a backstop hit).
