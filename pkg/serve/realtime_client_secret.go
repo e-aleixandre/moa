@@ -20,7 +20,7 @@ import (
 const (
 	realtimeClientSecretBodyLimit = 128
 	realtimeModel                 = "gpt-realtime-mini"
-	realtimeEndpoint              = "wss://api.openai.com/v1/realtime"
+	realtimeEndpoint              = "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini"
 	realtimeSecretLimit           = 4096
 	realtimeResponseLimit         = 16 << 10
 	// OpenAI creates the credential at its clock. This permits only the small

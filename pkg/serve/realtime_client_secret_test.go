@@ -20,6 +20,21 @@ type realtimeRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f realtimeRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+const realtimeBrokerCredentialContractFixture = `{"client_secret":"ek_test-secret","expires_at":1900000000,"transport":"websocket","endpoint":"wss://api.openai.com/v1/realtime?model=gpt-realtime-mini","model":"gpt-realtime-mini"}`
+
+func TestRealtimeBrokerCredentialContractFixture(t *testing.T) {
+	var fixture struct {
+		Endpoint string `json:"endpoint"`
+		Model    string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(realtimeBrokerCredentialContractFixture), &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.Endpoint != realtimeEndpoint || fixture.Model != realtimeModel {
+		t.Fatalf("fixture does not match broker policy: %#v", fixture)
+	}
+}
+
 func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")
@@ -73,8 +88,11 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.ClientSecret != "ephemeral-secret" || response.Transport != "websocket" || response.Endpoint != realtimeEndpoint || response.Model != realtimeModel {
+	if response.ClientSecret != "ephemeral-secret" || response.Transport != "websocket" || response.Endpoint != "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini" || response.Model != "gpt-realtime-mini" {
 		t.Fatalf("unexpected response: %#v", response)
+	}
+	if response.Endpoint != realtimeEndpoint || response.Model != realtimeModel {
+		t.Fatalf("broker DTO drifted from realtime policy: %#v", response)
 	}
 }
 
