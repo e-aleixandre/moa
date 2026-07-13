@@ -443,12 +443,23 @@ func TestVerify_TimeoutIsTotal(t *testing.T) {
 	cfg.Timeout = 50 * time.Millisecond
 
 	start := time.Now()
-	_, _, _ = Verify(context.Background(), cfg)
+	v, _, err := Verify(context.Background(), cfg)
 	elapsed := time.Since(start)
 	// A single shared 50ms deadline: even with retries, we must finish well
 	// before N×(provider delay). Generous bound to avoid CI flakiness.
 	if elapsed > 400*time.Millisecond {
 		t.Fatalf("total timeout not enforced across retries: took %v", elapsed)
+	}
+	// Running out of the total budget is a cap, not an infrastructure failure:
+	// a conservative not-satisfied verdict with no error, so the goal keeps going.
+	if err != nil {
+		t.Fatalf("a total-timeout cap must not error, got %v", err)
+	}
+	if v.Satisfied {
+		t.Fatal("a timed-out verifier must return not-satisfied")
+	}
+	if !strings.Contains(strings.ToLower(v.Feedback), "time") {
+		t.Fatalf("feedback should mention running out of time, got %q", v.Feedback)
 	}
 }
 
@@ -470,6 +481,27 @@ func (p *slowProvider) Stream(ctx context.Context, req core.Request) (<-chan cor
 		}
 	}()
 	return ch, nil
+}
+
+// TestVerify_EmptyWorkDirRejected: the agentic verifier refuses an empty
+// WorkDir, since tool.safePath would treat "" as no sandbox (YOLO) and expose
+// the filesystem to the read-only verifier (P4).
+func TestVerify_EmptyWorkDirRejected(t *testing.T) {
+	prov := &scriptedProvider{steps: []scriptStep{
+		{text: `{"satisfied": true, "feedback": "ok"}`},
+	}}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.WorkDir = "" // no sandbox root
+
+	if _, _, err := Verify(context.Background(), cfg); err == nil {
+		t.Fatal("agentic Verify must reject an empty WorkDir")
+	}
+	// One-shot has no tools, so it's exempt from the WorkDir requirement.
+	cfg.OneShot = true
+	if _, _, err := Verify(context.Background(), cfg); err != nil {
+		t.Fatalf("one-shot Verify should not require a WorkDir, got %v", err)
+	}
 }
 
 // hasTool reports whether a request offered a tool by name.

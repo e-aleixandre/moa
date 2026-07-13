@@ -42,12 +42,15 @@ func (errProvider) Stream(ctx context.Context, req core.Request) (<-chan core.As
 
 func newGoalDriverContext(b EventBus, agent AgentController, verdictJSON string) *SessionContext {
 	sctx := &SessionContext{
-		SessionID:       "test-session",
-		SessionCtx:      context.Background(),
-		Bus:             b,
-		Agent:           agent,
-		State:           NewStateMachine(b, "test-session"),
-		Goal:            goal.New(),
+		SessionID:  "test-session",
+		SessionCtx: context.Background(),
+		Bus:        b,
+		Agent:      agent,
+		State:      NewStateMachine(b, "test-session"),
+		Goal:       goal.New(),
+		// The sandboxed verifier requires a WorkDir; the driver falls back to the
+		// session CWD when the goal has none, so give the test one that exists.
+		CWD:             os.TempDir(),
 		ProviderFactory: func(core.Model) (core.Provider, error) { return verdictProvider{text: verdictJSON}, nil },
 	}
 	// The driver treats a RunEnded whose RunGen != the current generation as

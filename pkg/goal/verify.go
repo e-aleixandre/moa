@@ -124,6 +124,12 @@ func Verify(ctx context.Context, cfg VerifyConfig) (Verdict, VerifyStats, error)
 		verdict, stats, err := verifyOneShot(ctx, prov, model, cfg.Objective, cfg.Evidence, timeout)
 		return verdict, stats, err
 	}
+	// The agentic verifier's tools are confined to WorkDir. An empty root would
+	// make tool.safePath treat every path as allowed (YOLO), defeating the
+	// read-only sandbox — refuse rather than expose the filesystem.
+	if strings.TrimSpace(cfg.WorkDir) == "" {
+		return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: WorkDir is required for the sandboxed verifier")
+	}
 	return verifyAgentic(ctx, prov, model, cfg, timeout)
 }
 
@@ -160,11 +166,23 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 	// The budget pool is shared across retries: each attempt is capped at what's
 	// left, so recreating the agent can't re-grant the full budget.
 	remainingBudget := maxBudget
+	// spentSoFar accumulates the real cost billed across every attempt so the
+	// verdict we return charges the goal for all of it (including retried
+	// attempts that produced no assistant message but still billed usage).
+	var spentSoFar float64
 
 	var lastErr error
 	for attempt := 0; attempt < verifyMaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", err)
+			// The shared deadline expired between attempts. If we already produced
+			// real output on an earlier attempt this wouldn't be reached; here it
+			// means we ran out of time — a cap, not an infrastructure failure, so
+			// the healthy goal keeps going rather than pausing.
+			if errors.Is(err, context.DeadlineExceeded) {
+				_, feedback := cappedRunFeedback(context.DeadlineExceeded)
+				return Verdict{Satisfied: false, Feedback: feedback}, VerifyStats{CostUSD: spentSoFar}, nil
+			}
+			return Verdict{}, VerifyStats{CostUSD: spentSoFar}, fmt.Errorf("goal verify: %w", err)
 		}
 
 		child, err := agent.New(agent.AgentConfig{
@@ -185,18 +203,27 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 			Compaction: &core.CompactionSettings{Enabled: false},
 		})
 		if err != nil {
-			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: agent: %w", err)
+			return Verdict{}, VerifyStats{CostUSD: spentSoFar}, fmt.Errorf("goal verify: agent: %w", err)
 		}
 
 		msgs, runErr := child.Run(ctx, user)
-		stats := statsFrom(model, msgs)
+		// child.RunCost() is the authoritative spend for this attempt (it counts
+		// empty/failed-turn usage the loop billed but never surfaced as a
+		// message). Accumulate it so the returned cost covers every attempt.
+		spentSoFar += child.RunCost()
+		remainingBudget = subtractBudget(remainingBudget, child.RunCost())
+		stats := statsFrom(spentSoFar, msgs)
 
 		// The parent context was cancelled (goal stopped / new run took over):
 		// surface it so the driver bails instead of treating it as a verdict.
-		// (context.Canceled only — a deadline is our own total-timeout cap, which
-		// is handled as a capped verdict below.)
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return Verdict{}, stats, fmt.Errorf("goal verify: %w", ctx.Err())
+		}
+		// Our own total deadline expired mid-run: treat as a cap (not-satisfied),
+		// not an infrastructure failure, whether or not a turn completed.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			_, feedback := cappedRunFeedback(context.DeadlineExceeded)
+			return Verdict{Satisfied: false, Feedback: feedback}, stats, nil
 		}
 
 		hadOutput := hadRealAssistantTurn(msgs)
@@ -216,7 +243,6 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 				// No real turn: transient/infrastructure failure — retry (within
 				// the shared deadline).
 				lastErr = fmt.Errorf("goal verify: run: %w", runErr)
-				remainingBudget = subtractBudget(remainingBudget, stats.CostUSD)
 				continue
 			}
 			// Output was produced despite the error — fall through and try to
@@ -231,7 +257,7 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 		// we avoid — a second Send would re-grant fresh turn/budget caps).
 		return parseVerdict(out), stats, nil
 	}
-	return Verdict{}, VerifyStats{}, lastErr
+	return Verdict{}, VerifyStats{CostUSD: spentSoFar}, lastErr
 }
 
 // hadRealAssistantTurn reports whether a run produced a genuine assistant turn
@@ -296,10 +322,12 @@ func cappedRunFeedback(err error) (bool, string) {
 	return false, ""
 }
 
-// statsFrom sums usage and cost across a run's assistant messages.
-func statsFrom(model core.Model, msgs []core.AgentMessage) VerifyStats {
+// statsFrom sums usage across a run's assistant messages for reporting. The
+// authoritative cost is passed in (child.RunCost()): it includes usage the loop
+// billed for empty/failed turns that never surface as an assistant message, so
+// re-deriving cost from msgs alone would undercount.
+func statsFrom(runCost float64, msgs []core.AgentMessage) VerifyStats {
 	var usage core.Usage
-	var cost float64
 	var turns int
 	found := false
 	for _, m := range msgs {
@@ -311,12 +339,9 @@ func statsFrom(model core.Model, msgs []core.AgentMessage) VerifyStats {
 			usage.CacheRead += m.Usage.CacheRead
 			usage.CacheWrite += m.Usage.CacheWrite
 			usage.TotalTokens += m.Usage.TotalTokens
-			if model.Pricing != nil {
-				cost += model.Pricing.Cost(*m.Usage)
-			}
 		}
 	}
-	stats := VerifyStats{CostUSD: cost, Turns: turns}
+	stats := VerifyStats{CostUSD: runCost, Turns: turns}
 	if found {
 		stats.Usage = &usage
 	}
@@ -372,6 +397,13 @@ func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, ob
 	var lastErr error
 	for attempt := 0; attempt < oneShotMaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
+			// Ran out of the shared wall-clock budget: a cap, not an
+			// infrastructure failure — return a conservative not-satisfied verdict
+			// so the healthy goal keeps going.
+			if errors.Is(err, context.DeadlineExceeded) {
+				_, feedback := cappedRunFeedback(context.DeadlineExceeded)
+				return Verdict{Satisfied: false, Feedback: feedback}, VerifyStats{}, nil
+			}
 			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", err)
 		}
 		verdict, stats, err := oneShotAttempt(ctx, prov, model, req)
@@ -393,16 +425,27 @@ func oneShotAttempt(ctx context.Context, prov core.Provider, model core.Model, r
 
 	var text strings.Builder
 	var finalMsg *core.Message
-	for event := range ch {
-		switch event.Type {
-		case core.ProviderEventTextDelta:
-			text.WriteString(event.Delta)
-		case core.ProviderEventDone:
-			finalMsg = event.Message
-		case core.ProviderEventError:
-			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", event.Error)
+	// Select on ctx.Done() so a provider that fails to close its channel after
+	// cancellation can't outlive the shared deadline.
+	for {
+		select {
+		case <-ctx.Done():
+			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", ctx.Err())
+		case event, ok := <-ch:
+			if !ok {
+				goto done
+			}
+			switch event.Type {
+			case core.ProviderEventTextDelta:
+				text.WriteString(event.Delta)
+			case core.ProviderEventDone:
+				finalMsg = event.Message
+			case core.ProviderEventError:
+				return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", event.Error)
+			}
 		}
 	}
+done:
 
 	out := text.String()
 	if strings.TrimSpace(out) == "" && finalMsg != nil {

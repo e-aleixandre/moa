@@ -58,6 +58,8 @@ type Agent struct {
 	steerCh    chan string // buffered, drained by agentLoop between steps
 	followUpMu sync.Mutex
 	followUps  []string // consumed after agentLoop returns in execute()
+
+	lastRunCost float64 // USD cost of the most recent execute(), guarded by mu
 }
 
 // AgentConfig configures an Agent.
@@ -834,5 +836,22 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	// Without this, callers could mutate returned messages and corrupt state.
 	msgs := make([]core.AgentMessage, len(a.state.Messages))
 	copy(msgs, a.state.Messages)
+
+	// Record the run's true accumulated cost — including empty/failed-turn usage
+	// the loop billed internally that never surfaces as an assistant message —
+	// so callers can charge the real spend rather than re-deriving it from msgs.
+	a.mu.Lock()
+	a.lastRunCost = cfg.runCost
+	a.mu.Unlock()
+
 	return msgs, err
+}
+
+// RunCost returns the USD cost accumulated by the most recent Run/Send. It
+// reflects everything the loop billed against MaxBudget, including usage from
+// empty or failed turns that never became an assistant message.
+func (a *Agent) RunCost() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lastRunCost
 }
