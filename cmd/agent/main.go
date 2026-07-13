@@ -302,10 +302,12 @@ func main() {
 		OnBashJobEnd: func(job tool.BashJobInfo) {
 			preBus.Publish(bus.BashJobEnded{JobID: job.JobID, Status: job.Status, Output: job.Output})
 			if job.Awaited {
+				preBus.Publish(bus.BashJobSettled{JobID: job.JobID})
 				return
 			}
 			agentText := bootstrap.FormatBashNotification(job.JobID, job.Command, job.Status, job.Output)
 			if agentText == "" {
+				preBus.Publish(bus.BashJobSettled{JobID: job.JobID})
 				return
 			}
 			preBus.Publish(bus.BashCompleted{
@@ -522,6 +524,7 @@ func main() {
 
 	// Same delivery discipline for async background bash jobs.
 	rt.Bus.Subscribe(func(e bus.BashCompleted) {
+		defer rt.Bus.Publish(bus.BashJobSettled{JobID: e.JobID})
 		if rt.State.Current() == bus.StateRunning {
 			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text})
 			return

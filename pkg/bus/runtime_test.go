@@ -442,6 +442,41 @@ func TestWaitQuiescent_WaitsForAutonomousBackgroundWork(t *testing.T) {
 	}
 }
 
+func TestBashBackgroundWorkSettlesAfterReinjection(t *testing.T) {
+	fas := newFakeAgentSubscriber()
+	rt, err := NewSessionRuntime(RuntimeConfig{Agent: fas.fakeAgent, Subscriber: &fas.fakeSubscriber})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	rt.Bus.Publish(BashJobStarted{JobID: "bash-1"})
+	rt.Bus.Drain(time.Second)
+	if !rt.sctx.hasBackgroundWork() {
+		t.Fatal("background bash was not tracked")
+	}
+
+	// The tray is finalized first, but this must not let headless quiescence
+	// win before the completion notification has been scheduled.
+	rt.Bus.Publish(BashJobEnded{JobID: "bash-1", Status: "completed"})
+	rt.Bus.Drain(time.Second)
+	if !rt.sctx.hasBackgroundWork() {
+		t.Fatal("BashJobEnded cleared background work before reinjection")
+	}
+
+	rt.Bus.Publish(BashCompleted{JobID: "bash-1", Text: "done"})
+	rt.Bus.Drain(time.Second)
+	if !rt.sctx.hasBackgroundWork() {
+		t.Fatal("BashCompleted cleared background work before delivery settled")
+	}
+
+	rt.Bus.Publish(BashJobSettled{JobID: "bash-1"})
+	rt.Bus.Drain(time.Second)
+	if rt.sctx.hasBackgroundWork() {
+		t.Fatal("BashJobSettled did not clear background work")
+	}
+}
+
 // rebindablePersister is a fake SessionPersister that also implements
 // SessionRebinder, for testing LoadSession's rebind behavior.
 type rebindablePersister struct {

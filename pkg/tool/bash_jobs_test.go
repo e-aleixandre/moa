@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,7 +150,14 @@ func TestSecondsToDuration(t *testing.T) {
 
 func TestBashJobsWaitReturnsResult(t *testing.T) {
 	release := make(chan struct{})
-	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	ended := make(chan BashJobInfo, 1)
+	var notifications atomic.Int32
+	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) {
+		if !info.Awaited {
+			notifications.Add(1)
+		}
+		ended <- info
+	})
 	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		<-release
 		return core.TextResult("finished\n"), nil
@@ -179,6 +187,17 @@ func TestBashJobsWaitReturnsResult(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Wait did not return")
 	}
+	select {
+	case info := <-ended:
+		if !info.Awaited {
+			t.Fatal("completion notification was not suppressed for blocked waiter")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("completion callback did not run")
+	}
+	if got := notifications.Load(); got != 0 {
+		t.Fatalf("async notification count = %d, want 0 for blocked waiter", got)
+	}
 }
 
 func TestBashJobsWaitAlreadyFinished(t *testing.T) {
@@ -197,6 +216,48 @@ func TestBashJobsWaitAlreadyFinished(t *testing.T) {
 	}
 	if info.Status != "completed" || info.Awaited {
 		t.Fatalf("Wait on finished job = %+v (Awaited should be false)", info)
+	}
+}
+
+// TestBashJobsWaitFastPathKeepsCompletionClaim verifies the finish-before-wait
+// race: completion claims the async notification while holding the job mutex,
+// and a later Wait only reads the terminal snapshot rather than opening a
+// second completion-notification lane.
+func TestBashJobsWaitFastPathKeepsCompletionClaim(t *testing.T) {
+	ended := make(chan BashJobInfo, 1)
+	var notifications atomic.Int32
+	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) {
+		if !info.Awaited {
+			notifications.Add(1)
+		}
+		ended <- info
+	})
+	job, err := jobs.Start("echo", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		return core.TextResult("done\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := <-ended
+	if completed.Awaited {
+		t.Fatal("completion should own notification with no registered waiter")
+	}
+
+	info, err := jobs.Wait(context.Background(), job.JobID, time.Second)
+	if err != nil {
+		t.Fatalf("Wait err = %v", err)
+	}
+	if info.Output != "done\n" {
+		t.Fatalf("Wait output = %q", info.Output)
+	}
+	jobs.mu.Lock()
+	claimed := jobs.jobs[job.JobID].resultClaimed
+	jobs.mu.Unlock()
+	if !claimed {
+		t.Fatal("fast-path Wait left terminal result unclaimed")
+	}
+	if got := notifications.Load(); got != 1 {
+		t.Fatalf("async notification count = %d, want exactly 1", got)
 	}
 }
 

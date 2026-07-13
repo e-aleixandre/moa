@@ -34,27 +34,29 @@ const (
 var fallbackJobCounter atomic.Uint64
 
 type job struct {
-	mu         sync.Mutex
-	id         string
-	task       string
-	model      string
-	status     string
-	result     string
-	err        string
-	progress   [8]string
-	progIdx    int
-	progLen    int
-	cancel     context.CancelFunc
-	done       chan struct{}
-	promoted   chan struct{}
-	startedAt  time.Time
-	finishedAt time.Time
-	sync       bool // true when this job runs synchronously (blocking the parent tool call)
-	waiters    int  // number of subagent_wait calls currently blocked on this job
-	childAgent *agent.Agent
-	messages   []core.AgentMessage
-	usage      *core.Usage
-	costUSD    float64
+	mu                    sync.Mutex
+	id                    string
+	task                  string
+	model                 string
+	status                string
+	result                string
+	err                   string
+	progress              [8]string
+	progIdx               int
+	progLen               int
+	cancel                context.CancelFunc
+	done                  chan struct{}
+	promoted              chan struct{}
+	startedAt             time.Time
+	finishedAt            time.Time
+	sync                  bool // true when this job runs synchronously (blocking the parent tool call)
+	waiters               int  // number of subagent_wait calls currently blocked on this job
+	resultClaimed         bool // completion result owner: a waiter or async notification
+	notifyAsyncCompletion bool // async notification owns the terminal result
+	childAgent            *agent.Agent
+	messages              []core.AgentMessage
+	usage                 *core.Usage
+	costUSD               float64
 }
 
 type jobSnapshot struct {
@@ -271,6 +273,7 @@ func (s *jobStore) setCompleted(id, result string) {
 	j.result = result
 	j.err = ""
 	j.finishedAt = time.Now()
+	claimTerminalResultLocked(j)
 }
 
 func (s *jobStore) setFailed(id, err string) {
@@ -286,6 +289,7 @@ func (s *jobStore) setFailed(id, err string) {
 	j.status = statusFailed
 	j.err = err
 	j.finishedAt = time.Now()
+	claimTerminalResultLocked(j)
 }
 
 func (s *jobStore) setCancelled(id string) {
@@ -301,6 +305,15 @@ func (s *jobStore) setCancelled(id string) {
 	j.status = statusCancelled
 	j.err = ""
 	j.finishedAt = time.Now()
+	claimTerminalResultLocked(j)
+}
+
+func claimTerminalResultLocked(j *job) {
+	// This is deliberately coupled to the terminal state transition. A waiter
+	// that registered before the transition owns the result; otherwise the
+	// async callback does. A fast-path wait after the transition only reads it.
+	j.resultClaimed = true
+	j.notifyAsyncCompletion = j.waiters == 0
 }
 
 func (s *jobStore) requestCancel(id string) (*job, jobSnapshot, bool) {
@@ -341,12 +354,17 @@ func (s *jobStore) promote(id string) error {
 	return nil
 }
 
-// hasWaiters reports whether any subagent_wait call is currently blocked on
-// this job. Read under j.mu.
-func (j *job) hasWaiters() bool {
+// claimAsyncCompletion consumes the async completion claim selected when the
+// terminal state was set. This runs before done is closed, so a fast-path wait
+// can only read an already-owned result, never cause a second notification.
+func (j *job) claimAsyncCompletion() bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return j.waiters > 0
+	if !j.notifyAsyncCompletion {
+		return false
+	}
+	j.notifyAsyncCompletion = false
+	return true
 }
 
 // wait blocks until the job finishes, the context is cancelled, or timeout
@@ -361,6 +379,9 @@ func (s *jobStore) wait(ctx context.Context, id string, timeout time.Duration) (
 	}
 	j.mu.Lock()
 	if j.status == statusCompleted || j.status == statusFailed || j.status == statusCancelled {
+		if !j.resultClaimed {
+			j.resultClaimed = true
+		}
 		snap := snapshotLocked(j)
 		j.mu.Unlock()
 		return snap, nil
@@ -391,6 +412,9 @@ func (s *jobStore) wait(ctx context.Context, id string, timeout time.Duration) (
 	}
 	snap := snapshotLocked(j)
 	if j.status == statusCompleted || j.status == statusFailed || j.status == statusCancelled {
+		if !j.resultClaimed {
+			j.resultClaimed = true
+		}
 		return snap, nil
 	}
 	if ctx.Err() != nil {

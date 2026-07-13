@@ -26,16 +26,17 @@ type BashJobInfo struct {
 	StartedAt  time.Time
 	FinishedAt time.Time
 	// Awaited is set on the snapshot delivered to onEnd when a bash_wait call
-	// was blocked on this job at completion time. It signals the completion
-	// handler to suppress result reinjection (the waiter already consumed it).
+	// owns the completion result. It signals the completion handler to suppress
+	// result reinjection (the waiter already consumed it).
 	Awaited bool
 }
 
 type bashJob struct {
 	BashJobInfo
-	cancel  context.CancelFunc
-	done    chan struct{}
-	waiters int
+	cancel        context.CancelFunc
+	done          chan struct{}
+	waiters       int
+	resultClaimed bool
 }
 
 // BashJobs owns session-scoped background bash processes. Jobs deliberately do
@@ -107,7 +108,12 @@ func (j *BashJobs) Start(command, cwd string, run func(context.Context, func(cor
 		}
 		live.Output = bashResultText(result)
 		live.FinishedAt = time.Now()
-		live.Awaited = live.waiters > 0
+		// Completion and Wait share this mutex, so exactly one lane claims the
+		// completion result before done is closed: a blocked waiter, or onEnd's
+		// async notification. A later fast-path Wait only reads that result.
+		notify := live.waiters == 0 && !live.resultClaimed
+		live.resultClaimed = true
+		live.Awaited = !notify
 		info := live.BashJobInfo
 		done := live.done
 		j.mu.Unlock()
@@ -184,6 +190,11 @@ func (j *BashJobs) Wait(ctx context.Context, jobID string, timeout time.Duration
 		return BashJobInfo{}, ErrUnknownBashJob
 	}
 	if !job.FinishedAt.IsZero() {
+		// Completion normally claims first, before closing done. Retain the
+		// claim here for terminal jobs constructed by future callers as well.
+		if !job.resultClaimed {
+			job.resultClaimed = true
+		}
 		info := job.BashJobInfo
 		j.mu.Unlock()
 		return info, nil
@@ -216,6 +227,9 @@ func (j *BashJobs) Wait(ctx context.Context, jobID string, timeout time.Duration
 	// Re-check under the same mutex that sets FinishedAt: if the job finished
 	// (even if ctx/timeout also fired), deliver the final snapshot as success.
 	if !job.FinishedAt.IsZero() {
+		if !job.resultClaimed {
+			job.resultClaimed = true
+		}
 		return job.BashJobInfo, nil
 	}
 	if ctx.Err() != nil {

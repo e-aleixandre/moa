@@ -61,7 +61,7 @@ func RegisterHandlers(sctx *SessionContext) {
 	b.Subscribe(func(e SubagentStarted) { sctx.trackBackgroundEvent(e) })
 	b.Subscribe(func(e SubagentEnded) { sctx.trackBackgroundEvent(e) })
 	b.Subscribe(func(e BashJobStarted) { sctx.trackBackgroundEvent(e) })
-	b.Subscribe(func(e BashJobEnded) { sctx.trackBackgroundEvent(e) })
+	b.Subscribe(func(e BashJobSettled) { sctx.trackBackgroundEvent(e) })
 
 	// -------------------------------------------------------------------
 	// Commands

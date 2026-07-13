@@ -237,9 +237,11 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				return
 			}
 			b := s.runtime.Bus
-			// Always publish BashJobEnded first (tray/quiescence), before any
-			// reinjection prompt.
+			// The tray must see completion before its follow-up. Keep this bash
+			// active for quiescence until the deferred settled event, after the
+			// reinjection has been scheduled.
 			b.Publish(bus.BashJobEnded{SessionID: s.ID, JobID: job.JobID, Status: job.Status, Output: job.Output})
+			defer b.Publish(bus.BashJobSettled{SessionID: s.ID, JobID: job.JobID})
 			// A bash_wait already consumed this job's result — don't deliver
 			// it twice (single delivery lane).
 			if job.Awaited {

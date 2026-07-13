@@ -1698,6 +1698,16 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 	if completeN != 0 {
 		t.Fatalf("OnAsyncComplete fired %d times while a waiter was blocked, want 0", completeN)
 	}
+	j, ok := jobs.get(jobID)
+	if !ok {
+		t.Fatal("job disappeared")
+	}
+	j.mu.Lock()
+	claimed := j.resultClaimed
+	j.mu.Unlock()
+	if !claimed {
+		t.Fatal("blocked waiter did not claim terminal result")
+	}
 }
 
 // TestSubagentWaitNoWaiterStillNotifies verifies OnAsyncComplete DOES fire
@@ -1728,7 +1738,7 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = jobIDFromResult(t, res)
+	jobID := jobIDFromResult(t, res)
 	<-started
 	close(release)
 
@@ -1737,6 +1747,33 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 		defer mu.Unlock()
 		return completeN == 1
 	})
+
+	// Completion won the mutex before this fast-path wait. The wait can still
+	// inspect its explicitly requested status, but cannot create another async
+	// completion notification for the same terminal transition.
+	result, err := jobs.wait(context.Background(), jobID, time.Second)
+	if err != nil {
+		t.Fatalf("wait result = %v", err)
+	}
+	if result.Status != statusCompleted || result.Result != "child result" {
+		t.Fatalf("fast-path wait = %+v", result)
+	}
+	mu.Lock()
+	gotCompleteN := completeN
+	mu.Unlock()
+	if gotCompleteN != 1 {
+		t.Fatalf("OnAsyncComplete called %d times after fast-path wait, want 1", gotCompleteN)
+	}
+	j, ok := jobs.get(jobID)
+	if !ok {
+		t.Fatal("job disappeared")
+	}
+	j.mu.Lock()
+	claimed := j.resultClaimed
+	j.mu.Unlock()
+	if !claimed {
+		t.Fatal("completion notification did not claim terminal result")
+	}
 }
 
 func TestSubagentWaitUnknownJob(t *testing.T) {

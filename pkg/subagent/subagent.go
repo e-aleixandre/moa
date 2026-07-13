@@ -503,12 +503,10 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		// parent's return value in awaitSyncResult instead, and must not
 		// also fire these callbacks (single delivery lane).
 		if !j.isSync() {
-			// If a subagent_wait is blocked on this job, that call consumes
-			// the result instead — suppress the async reinjection so it isn't
-			// delivered twice. hasWaiters() is stable here because this defer
-			// runs before close(j.done) (registered later), so no waiter has
-			// woken yet. UI/count callbacks still fire below.
-			if cfg.OnAsyncComplete != nil && !j.hasWaiters() {
+			// The terminal transition selected the waiter-vs-completion owner
+			// under j.mu; consume that async claim before close(j.done).
+			// UI/count callbacks still fire below when a waiter owns the result.
+			if j.claimAsyncCompletion() && cfg.OnAsyncComplete != nil {
 				snap, ok := jobs.snapshot(j.id)
 				if ok {
 					tail, wasTruncated := tailLinesWithFlag(snap.Result, asyncResultTailLines)

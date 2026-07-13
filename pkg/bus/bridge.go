@@ -209,7 +209,7 @@ func (sctx *SessionContext) trackBackgroundEvent(event any) {
 		delete(sctx.activeSubagents, e.JobID)
 	case BashJobStarted:
 		sctx.activeBashJobs[e.JobID] = struct{}{}
-	case BashJobEnded:
+	case BashJobSettled:
 		delete(sctx.activeBashJobs, e.JobID)
 	}
 }
