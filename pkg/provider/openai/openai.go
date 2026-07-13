@@ -75,6 +75,12 @@ func NewWithBaseURL(apiKey, baseURL string) *OpenAI {
 // the codex OAuth path (/codex/responses) is unverified for input_file.
 func (o *OpenAI) SupportsDocuments() bool { return o.endpoint == apiEndpoint }
 
+// supportsMaxOutputTokens reports whether the active endpoint accepts the
+// max_output_tokens parameter. The public Responses API (/v1/responses) does;
+// the ChatGPT OAuth backend (/codex/responses) rejects it with HTTP 400
+// ("Unsupported parameter: max_output_tokens").
+func (o *OpenAI) supportsMaxOutputTokens() bool { return o.endpoint == apiEndpoint }
+
 // Stream sends a request and returns a channel of normalized AssistantEvents.
 func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	apiKey := o.apiKey
@@ -82,7 +88,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		apiKey = req.Options.APIKey
 	}
 
-	body, err := buildRequestBody(req, o.SupportsDocuments())
+	body, err := buildRequestBody(req, o.SupportsDocuments(), o.supportsMaxOutputTokens())
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}

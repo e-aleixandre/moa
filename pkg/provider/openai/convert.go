@@ -28,7 +28,7 @@ type reasoning struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-func buildRequestBody(req core.Request, supportsDocuments bool) ([]byte, error) {
+func buildRequestBody(req core.Request, supportsDocuments, supportsMaxOutputTokens bool) ([]byte, error) {
 	r := responsesRequest{
 		Model:        req.Model.ID,
 		Stream:       true,
@@ -44,8 +44,14 @@ func buildRequestBody(req core.Request, supportsDocuments bool) ([]byte, error) 
 		r.Tools = convertToolSpecs(req.Tools)
 	}
 
-	maxTokens := core.ResolveMaxOutputTokens(req.Model, req.Options.MaxTokens)
-	r.MaxTokens = &maxTokens
+	// The public Responses API (/v1/responses) accepts max_output_tokens; the
+	// ChatGPT OAuth backend (/codex/responses) rejects it with HTTP 400
+	// ("Unsupported parameter: max_output_tokens"). Only send the cap where it's
+	// supported.
+	if supportsMaxOutputTokens {
+		maxTokens := core.ResolveMaxOutputTokens(req.Model, req.Options.MaxTokens)
+		r.MaxTokens = &maxTokens
+	}
 	if req.Options.Temperature != nil {
 		r.Temperature = req.Options.Temperature
 	}

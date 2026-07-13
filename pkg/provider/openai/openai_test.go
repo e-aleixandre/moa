@@ -1,9 +1,11 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -362,6 +364,12 @@ func TestNewOAuth_UsesCodexEndpoint(t *testing.T) {
 		}
 		if r.Header.Get("chatgpt-account-id") != "acct_123" {
 			t.Errorf("missing chatgpt-account-id header")
+		}
+		// The codex OAuth backend rejects max_output_tokens with HTTP 400, so
+		// the request must never carry it on this endpoint.
+		reqBody, _ := io.ReadAll(r.Body)
+		if bytes.Contains(reqBody, []byte("max_output_tokens")) {
+			t.Errorf("codex request must not include max_output_tokens, got body: %s", reqBody)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)

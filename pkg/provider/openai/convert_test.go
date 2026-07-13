@@ -17,7 +17,7 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 		},
 	}
 
-	body, err := buildRequestBody(req, true)
+	body, err := buildRequestBody(req, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestBuildRequestBody_ClampsOutputTokensToModel(t *testing.T) {
 		},
 	}
 
-	body, err := buildRequestBody(req, true)
+	body, err := buildRequestBody(req, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +69,29 @@ func TestBuildRequestBody_ClampsOutputTokensToModel(t *testing.T) {
 	}
 	if got := int(parsed["max_output_tokens"].(float64)); got != 16_384 {
 		t.Fatalf("max_output_tokens: got %d, want 16384", got)
+	}
+}
+
+func TestBuildRequestBody_OmitsMaxOutputTokensOnOAuth(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "gpt-5.6-terra", MaxOutput: 128_000},
+		Messages: []core.Message{
+			core.NewUserMessage("Hello"),
+		},
+	}
+
+	// supportsMaxOutputTokens=false mirrors the ChatGPT OAuth backend
+	// (/codex/responses), which rejects max_output_tokens with HTTP 400.
+	body, err := buildRequestBody(req, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := parsed["max_output_tokens"]; present {
+		t.Fatalf("max_output_tokens must be omitted on the OAuth path, got %v", parsed["max_output_tokens"])
 	}
 }
 
@@ -87,7 +110,7 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 		},
 	}
 
-	body, err := buildRequestBody(req, true)
+	body, err := buildRequestBody(req, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +140,7 @@ func TestBuildRequestBody_ReasoningEffort(t *testing.T) {
 		Options:  core.StreamOptions{ThinkingLevel: "high"},
 	}
 
-	body, err := buildRequestBody(req, true)
+	body, err := buildRequestBody(req, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
