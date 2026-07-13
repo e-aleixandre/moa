@@ -483,6 +483,104 @@ func (p *slowProvider) Stream(ctx context.Context, req core.Request) (<-chan cor
 	return ch, nil
 }
 
+// TestVerify_OneShotTimeoutIsCap: two fast one-shot failures then a slow one
+// that hits the shared deadline must yield a capped not-satisfied verdict, NOT
+// an infrastructure error that pauses the goal (P1, one-shot path).
+func TestVerify_OneShotTimeoutIsCap(t *testing.T) {
+	prov := &oneShotSeqProvider{fastFails: 2, slowDelay: 500 * time.Millisecond}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.OneShot = true
+	cfg.Timeout = 60 * time.Millisecond
+
+	v, _, err := Verify(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("a one-shot total-timeout cap must not error, got %v", err)
+	}
+	if v.Satisfied {
+		t.Fatal("a timed-out one-shot verifier must return not-satisfied")
+	}
+	if !strings.Contains(strings.ToLower(v.Feedback), "time") {
+		t.Fatalf("feedback should mention running out of time, got %q", v.Feedback)
+	}
+}
+
+// TestVerify_OneShotChargesFailedAttempts: an attempt that fails with a billed
+// empty-response error still contributes its cost to the returned stats, so the
+// goal is charged for retries (P3, one-shot path).
+func TestVerify_OneShotChargesFailedAttempts(t *testing.T) {
+	prov := &oneShotSeqProvider{
+		emptyErrUsage: &core.Usage{Input: 100, Output: 0, TotalTokens: 100},
+		successAfter:  1, // first attempt fails (billed), second succeeds
+		successText:   `{"satisfied": true, "feedback": "ok"}`,
+	}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.OneShot = true
+
+	v, stats, err := Verify(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.Satisfied {
+		t.Fatalf("expected satisfied verdict from the succeeding attempt, got %+v", v)
+	}
+	// Cost must cover BOTH the billed failed attempt and the successful one.
+	if stats.CostUSD <= 0 {
+		t.Fatalf("expected the failed billed attempt to be charged, got cost %v", stats.CostUSD)
+	}
+}
+
+// oneShotSeqProvider scripts a sequence of one-shot (tool-less) attempts:
+//   - the first `fastFails` calls fail immediately;
+//   - if slowDelay > 0, the next call blocks until ctx is done (deadline);
+//   - if emptyErrUsage is set, calls before successAfter fail with a billed
+//     EmptyResponseError; the call at index successAfter streams successText.
+type oneShotSeqProvider struct {
+	mu            sync.Mutex
+	call          int
+	fastFails     int
+	slowDelay     time.Duration
+	emptyErrUsage *core.Usage
+	successAfter  int
+	successText   string
+}
+
+func (p *oneShotSeqProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	p.mu.Lock()
+	idx := p.call
+	p.call++
+	p.mu.Unlock()
+
+	ch := make(chan core.AssistantEvent, 2)
+	go func() {
+		defer close(ch)
+		// Billed-failure-then-success mode.
+		if p.emptyErrUsage != nil {
+			if idx < p.successAfter {
+				ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: &core.EmptyResponseError{Usage: p.emptyErrUsage}}
+				return
+			}
+			msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent(p.successText)}, StopReason: "end_turn", Usage: &core.Usage{Input: 10, Output: 5, TotalTokens: 15}}
+			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: p.successText}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+			return
+		}
+		// Fast-fails-then-slow mode.
+		if idx < p.fastFails {
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("fast fail %d", idx)}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: ctx.Err()}
+		case <-time.After(p.slowDelay):
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("slow fail")}
+		}
+	}()
+	return ch, nil
+}
+
 // TestVerify_EmptyWorkDirRejected: the agentic verifier refuses an empty
 // WorkDir, since tool.safePath would treat "" as no sandbox (YOLO) and expose
 // the filesystem to the read-only verifier (P4).

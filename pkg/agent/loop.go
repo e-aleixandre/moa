@@ -241,9 +241,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.state.CompactionEpoch++
 					cfg.stateMu.Unlock()
 					// Account for compaction LLM call cost.
-					if result.Usage != nil && cfg.maxBudget > 0 {
-						cfg.runCost += cfg.model.Pricing.Cost(*result.Usage)
-					}
+					addRunCost(cfg, result.Usage)
 					emitLifecycle(cfg, core.AgentEvent{
 						Type: core.AgentEventCompactionEnd,
 						Compaction: &core.CompactionPayload{
@@ -324,9 +322,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			if errors.As(err, &emptyErr) {
 				// An empty response can still bill input tokens; account for it
 				// so retries (and the eventual error) can't slip past the budget.
-				if cfg.maxBudget > 0 && emptyErr.Usage != nil {
-					cfg.runCost += cfg.model.Pricing.Cost(*emptyErr.Usage)
-				}
+				addRunCost(cfg, emptyErr.Usage)
 				if ctx.Err() == nil && emptyRetries < maxEmptyRetries {
 					emptyRetries++
 					inTurn = false
@@ -370,8 +366,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// resubmit the persisted response once; this lets providers continue
 			// from their signed reasoning state without injecting fake user text.
 			toolCalls := extractToolCalls(assistantMsg)
+			addRunCost(cfg, assistantMsg.Usage)
 			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
 				if cfg.runCost > cfg.maxBudget {
 					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
 					inTurn = false
@@ -410,9 +406,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 			// Account for the paused response's cost; the pre-check at the top
 			// of the next iteration enforces the budget before resubmitting.
-			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
-			}
+			addRunCost(cfg, assistantMsg.Usage)
 			justPaused = true
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
@@ -439,9 +433,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 				return loopErr
 			}
-			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
-			}
+			addRunCost(cfg, assistantMsg.Usage)
 			justPaused = true
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
@@ -503,8 +495,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		if len(toolCalls) == 0 {
 			// Accumulate cost and check budget even on the final message so
 			// callers know when a run blew through the limit.
+			addRunCost(cfg, assistantMsg.Usage)
 			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-				cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
 				if cfg.runCost > cfg.maxBudget {
 					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
 					inTurn = false
@@ -530,8 +522,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		// Budget check — after tool execution so conversation state has matching
 		// tool_result messages for every tool_call (no dangling calls).
+		addRunCost(cfg, assistantMsg.Usage)
 		if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-			cfg.runCost += cfg.model.Pricing.Cost(*assistantMsg.Usage)
 			if cfg.runCost > cfg.maxBudget {
 				loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
 				return loopErr
@@ -1021,6 +1013,17 @@ func injectErrorToolResults(cfg *loopConfig, toolCalls []core.Content, errMsg st
 			tc.ToolCallID, tc.ToolName, content, true,
 		))
 		cfg.appendState(msg)
+	}
+}
+
+// addRunCost accumulates the USD cost of a usage record into the run total
+// whenever the model has pricing, independent of whether a budget cap is
+// active. This keeps Agent.RunCost() a faithful measure of real spend even for
+// unlimited-budget runs; budget *enforcement* stays gated on maxBudget > 0 at
+// each call site.
+func addRunCost(cfg *loopConfig, usage *core.Usage) {
+	if usage != nil && cfg.model.Pricing != nil {
+		cfg.runCost += cfg.model.Pricing.Cost(*usage)
 	}
 }
 

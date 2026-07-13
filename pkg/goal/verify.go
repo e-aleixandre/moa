@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -126,9 +127,14 @@ func Verify(ctx context.Context, cfg VerifyConfig) (Verdict, VerifyStats, error)
 	}
 	// The agentic verifier's tools are confined to WorkDir. An empty root would
 	// make tool.safePath treat every path as allowed (YOLO), defeating the
-	// read-only sandbox — refuse rather than expose the filesystem.
+	// read-only sandbox — refuse rather than expose the filesystem. Require an
+	// existing directory too, so the verifier can't emit a verdict without ever
+	// being able to inspect the workspace.
 	if strings.TrimSpace(cfg.WorkDir) == "" {
 		return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: WorkDir is required for the sandboxed verifier")
+	}
+	if info, err := os.Stat(cfg.WorkDir); err != nil || !info.IsDir() {
+		return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: WorkDir %q is not an existing directory", cfg.WorkDir)
 	}
 	return verifyAgentic(ctx, prov, model, cfg, timeout)
 }
@@ -394,29 +400,44 @@ func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, ob
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Accumulate real spend across attempts (a failed attempt can still bill
+	// usage), so the returned cost covers every one — mirroring the agentic path.
+	var spentSoFar float64
+	// deadlineCap builds the conservative not-satisfied verdict for a total
+	// timeout, carrying whatever we've spent so far.
+	deadlineCap := func() (Verdict, VerifyStats, error) {
+		_, feedback := cappedRunFeedback(context.DeadlineExceeded)
+		return Verdict{Satisfied: false, Feedback: feedback}, VerifyStats{CostUSD: spentSoFar}, nil
+	}
+
 	var lastErr error
 	for attempt := 0; attempt < oneShotMaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			// Ran out of the shared wall-clock budget: a cap, not an
 			// infrastructure failure — return a conservative not-satisfied verdict
-			// so the healthy goal keeps going.
+			// so the healthy goal keeps going. A real cancellation stays an error.
 			if errors.Is(err, context.DeadlineExceeded) {
-				_, feedback := cappedRunFeedback(context.DeadlineExceeded)
-				return Verdict{Satisfied: false, Feedback: feedback}, VerifyStats{}, nil
+				return deadlineCap()
 			}
-			return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", err)
+			return Verdict{}, VerifyStats{CostUSD: spentSoFar}, fmt.Errorf("goal verify: %w", err)
 		}
 		verdict, stats, err := oneShotAttempt(ctx, prov, model, req)
+		spentSoFar += stats.CostUSD
 		if err == nil {
-			return verdict, stats, nil
+			return verdict, VerifyStats{CostUSD: spentSoFar, Turns: stats.Turns, Usage: stats.Usage}, nil
 		}
 		lastErr = err
+		// The attempt failed because the shared deadline expired: treat as a cap.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return deadlineCap()
+		}
 	}
-	return Verdict{}, VerifyStats{}, lastErr
+	return Verdict{}, VerifyStats{CostUSD: spentSoFar}, lastErr
 }
 
 // oneShotAttempt runs a single tool-less verifier attempt and reports its
-// usage/cost.
+// usage/cost — including for an error path when the failing event still carries
+// billable usage (e.g. an empty-response error), so callers can charge it.
 func oneShotAttempt(ctx context.Context, prov core.Provider, model core.Model, req core.Request) (Verdict, VerifyStats, error) {
 	ch, err := prov.Stream(ctx, req)
 	if err != nil {
@@ -441,7 +462,9 @@ func oneShotAttempt(ctx context.Context, prov core.Provider, model core.Model, r
 			case core.ProviderEventDone:
 				finalMsg = event.Message
 			case core.ProviderEventError:
-				return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: %w", event.Error)
+				// A failed turn can still have billed usage (empty-response
+				// error): surface its cost so the caller charges it.
+				return Verdict{}, oneShotErrorStats(model, event.Error), fmt.Errorf("goal verify: %w", event.Error)
 			}
 		}
 	}
@@ -465,6 +488,21 @@ done:
 		}
 	}
 	return parseVerdict(out), stats, nil
+}
+
+// oneShotErrorStats extracts billable usage from a failed-turn error (e.g. an
+// empty-response error that still consumed input tokens) so the caller can
+// charge it. Returns a zero VerifyStats when the error carries no usage.
+func oneShotErrorStats(model core.Model, err error) VerifyStats {
+	var emptyErr *core.EmptyResponseError
+	if !errors.As(err, &emptyErr) || emptyErr.Usage == nil {
+		return VerifyStats{}
+	}
+	stats := VerifyStats{Turns: 1, Usage: emptyErr.Usage}
+	if model.Pricing != nil {
+		stats.CostUSD = model.Pricing.Cost(*emptyErr.Usage)
+	}
+	return stats
 }
 
 // tryParseVerdict parses a strict verdict, reporting whether a JSON object was
