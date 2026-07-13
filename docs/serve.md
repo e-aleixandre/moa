@@ -94,8 +94,8 @@ When a normal OpenAI API key (not OpenAI OAuth) is configured, a paired device
 may call `POST /api/pulse/realtime/client-secret` with exactly `{}` to receive a
 Realtime client secret requested for 60 seconds (Moa accepts at most an additional
 5 seconds for OpenAI clock/transport skew). This is a device-only route: owner cookies and
-tokens cannot mint it. Moa sends only server-controlled Realtime configuration
-to OpenAI and returns a minimal credential DTO; Pulse then talks directly to
+tokens cannot mint it. Moa sends only the server-controlled `gpt-realtime-2.1-mini`
+Realtime configuration to OpenAI and returns a minimal credential DTO; Pulse then talks directly to
 OpenAI. Moa does not proxy, store, or log audio, SDP, conversation data, the
 client secret, or the permanent API key. Revocation prevents a subsequent mint
 from being delivered once it wins the device lifecycle boundary; it cannot recall
