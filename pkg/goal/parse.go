@@ -16,7 +16,8 @@ type Command struct {
 	MaxIterations int           // --max N
 	MaxStalled    int           // --stalled N
 	Timeout       time.Duration // --timeout DUR (e.g. 2h, 90m)
-	VerifyTimeout time.Duration // --verify-timeout DUR (per-attempt verifier timeout)
+	VerifyTimeout time.Duration // --verify-timeout DUR (total wall-clock per verifier run)
+	VerifyOneShot bool          // --verify-oneshot (use the legacy tool-less verifier)
 	TotalBudget   float64       // --budget USD (cumulative ceiling across iterations)
 	WorkDir       string        // --cwd DIR (execution/evaluation directory; "" = session CWD)
 }
@@ -26,6 +27,7 @@ type FlagSpec struct {
 	Name        string // e.g. "--max"
 	Placeholder string // e.g. "N", "2h", "USD", "SPEC"
 	Desc        string // short human description
+	Bool        bool   // true = valueless boolean flag (e.g. "--verify-oneshot")
 }
 
 // Flags returns the declarative list of accepted /goal flags. It is the single
@@ -38,7 +40,8 @@ func Flags() []FlagSpec {
 		{Name: "--timeout", Placeholder: "2h", Desc: "wall-clock deadline (Go duration)"},
 		{Name: "--budget", Placeholder: "USD", Desc: "cumulative USD ceiling across iterations"},
 		{Name: "--verifier", Placeholder: "SPEC", Desc: "model spec for the verifier"},
-		{Name: "--verify-timeout", Placeholder: "90s", Desc: "per-attempt verifier timeout (Go duration)"},
+		{Name: "--verify-timeout", Placeholder: "5m", Desc: "total verifier run timeout (Go duration)"},
+		{Name: "--verify-oneshot", Desc: "use the legacy tool-less one-shot verifier", Bool: true},
 		{Name: "--compact", Placeholder: "N", Desc: "soft compaction threshold in tokens"},
 		{Name: "--cwd", Placeholder: "DIR", Desc: "execution/evaluation directory (default: session CWD)"},
 	}
@@ -50,6 +53,10 @@ var FlagsUsage = buildFlagsUsage()
 func buildFlagsUsage() string {
 	parts := make([]string, 0, len(Flags()))
 	for _, f := range Flags() {
+		if f.Bool {
+			parts = append(parts, fmt.Sprintf("[%s]", f.Name))
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("[%s %s]", f.Name, f.Placeholder))
 	}
 	return strings.Join(parts, " ")
@@ -71,8 +78,12 @@ func ParseCommand(args string) (Command, error) {
 	fields := strings.Fields(args)
 
 	known := make(map[string]bool, len(Flags()))
+	boolFlag := make(map[string]bool, len(Flags()))
 	for _, f := range Flags() {
 		known[f.Name] = true
+		if f.Bool {
+			boolFlag[f.Name] = true
+		}
 	}
 
 	// flagOf splits a "--flag=value" token into its flag and value if the flag
@@ -94,23 +105,27 @@ func ParseCommand(args string) (Command, error) {
 	}
 	var pairs []pair
 
-	if n >= 1 && known[fields[n-1]] {
-		// Last remaining token is itself a bare known flag: it has no value.
+	if n >= 1 && known[fields[n-1]] && !boolFlag[fields[n-1]] {
+		// Last remaining token is itself a bare known flag that needs a value.
 		return Command{}, fmt.Errorf("%s needs a value", fields[n-1])
 	}
 
 	for n >= 1 {
-		// Prefer the single-token "--flag=value" form.
-		if flag, val, ok := flagOf(fields[n-1]); ok {
+		// A valueless boolean flag as the tail token.
+		if boolFlag[fields[n-1]] {
+			pairs = append(pairs, pair{fields[n-1], ""})
+			n--
+		} else if flag, val, ok := flagOf(fields[n-1]); ok {
+			// Single-token "--flag=value" form.
 			pairs = append(pairs, pair{flag, val})
 			n--
-		} else if n >= 2 && known[fields[n-2]] && !strings.HasPrefix(fields[n-1], "--") {
+		} else if n >= 2 && known[fields[n-2]] && !boolFlag[fields[n-2]] && !strings.HasPrefix(fields[n-1], "--") {
 			pairs = append(pairs, pair{fields[n-2], fields[n-1]})
 			n -= 2
 		} else {
 			break
 		}
-		if n >= 1 && known[fields[n-1]] {
+		if n >= 1 && known[fields[n-1]] && !boolFlag[fields[n-1]] {
 			return Command{}, fmt.Errorf("%s needs a value", fields[n-1])
 		}
 	}
@@ -169,6 +184,8 @@ func applyFlag(cmd *Command, flag, val string) error {
 			return fmt.Errorf("invalid --verify-timeout: %s", val)
 		}
 		cmd.VerifyTimeout = d
+	case "--verify-oneshot":
+		cmd.VerifyOneShot = true
 	case "--budget":
 		f, err := strconv.ParseFloat(val, 64)
 		if err != nil || f < 0 {

@@ -33,7 +33,8 @@ type Options struct {
 	MaxStalled    int           // 0 = DefaultMaxStalled
 	Timeout       time.Duration // 0 = no wall-clock deadline
 	TotalBudget   float64       // cumulative USD ceiling across all iterations; 0 = unlimited
-	VerifyTimeout time.Duration // per-attempt verifier timeout; 0 = DefaultVerifyTimeout
+	VerifyTimeout time.Duration // total wall-clock per verifier run; 0 = DefaultVerifyTimeout
+	VerifyOneShot bool          // use the legacy tool-less one-shot verifier
 }
 
 // Info is an immutable snapshot for readers (UI, prompt builder, driver checks).
@@ -50,7 +51,8 @@ type Info struct {
 	Deadline      time.Time
 	TotalBudget   float64       // cumulative USD ceiling (0 = unlimited)
 	Spent         float64       // cumulative USD spent so far
-	VerifyTimeout time.Duration // per-attempt verifier timeout (0 = default)
+	VerifyTimeout time.Duration // total wall-clock per verifier run (0 = default)
+	VerifyOneShot bool          // use the legacy tool-less one-shot verifier
 }
 
 // Goal holds goal-mode runtime state. All exported methods are safe for
@@ -114,6 +116,7 @@ func (g *Goal) snapshot() Info {
 		TotalBudget:   g.opts.TotalBudget,
 		Spent:         g.spent,
 		VerifyTimeout: g.opts.VerifyTimeout,
+		VerifyOneShot: g.opts.VerifyOneShot,
 	}
 }
 

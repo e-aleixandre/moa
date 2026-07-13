@@ -12,7 +12,7 @@ import {
   handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd,
   handleWsBashJobStart, handleWsBashJobOutput, handleWsBashJobEnd, handleWsBashComplete,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
-  handleWsGoalChange, handleWsGoalIteration, handleWsGoalEnd,
+  handleWsGoalChange, handleWsGoalIteration, handleWsGoalVerify, handleWsGoalEnd,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer,
   handleWsSessionCost,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
@@ -215,6 +215,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'goal_iteration':
       handleWsGoalIteration(sessionId, evt.data);
+      break;
+    case 'goal_verify':
+      handleWsGoalVerify(sessionId, evt.data);
       break;
     case 'goal_end':
       handleWsGoalEnd(sessionId, evt.data);

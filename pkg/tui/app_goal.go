@@ -53,6 +53,7 @@ func (m appModel) handleGoalCommand(args string) (tea.Model, tea.Cmd) {
 			MaxStalled:    gc.MaxStalled,
 			Timeout:       gc.Timeout,
 			VerifyTimeout: gc.VerifyTimeout,
+			VerifyOneShot: gc.VerifyOneShot,
 			TotalBudget:   gc.TotalBudget,
 			WorkDir:       gc.WorkDir,
 		}); err != nil {
@@ -99,6 +100,25 @@ func (m *appModel) handleGoalChanged(e bus.GoalChanged) []tea.Cmd {
 		m.statusBar.UpdateGoalSegment("")
 	}
 	return nil
+}
+
+func (m *appModel) handleGoalVerifyStarted(e bus.GoalVerifyStarted) []tea.Cmd {
+	m.s.goalVerifying = true
+	if m.s.goalActive {
+		m.statusBar.UpdateGoalSegment("verifying…")
+	}
+	return []tea.Cmd{renderTick()}
+}
+
+func (m *appModel) handleGoalVerifyEnded(e bus.GoalVerifyEnded) []tea.Cmd {
+	m.s.goalVerifying = false
+	// Restore the iteration label; GoalIterationEnded (which lands right after)
+	// will set the final label, but restore here too in case the verifier was
+	// cancelled without an iteration verdict.
+	if m.s.goalActive {
+		m.statusBar.UpdateGoalSegment(fmt.Sprintf("iter %d", e.Iteration))
+	}
+	return []tea.Cmd{renderTick()}
 }
 
 func (m *appModel) handleGoalIterationEnded(e bus.GoalIterationEnded) []tea.Cmd {

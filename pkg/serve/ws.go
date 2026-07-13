@@ -195,6 +195,14 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "goal_iteration", Data: GoalIterationData{
 			Iteration: e.Iteration, Satisfied: e.Satisfied, Feedback: e.Feedback,
 		}}, true
+	case bus.GoalVerifyStarted:
+		return Event{Type: "goal_verify", Data: map[string]any{
+			"active": true, "iteration": e.Iteration,
+		}}, true
+	case bus.GoalVerifyEnded:
+		return Event{Type: "goal_verify", Data: map[string]any{
+			"active": false, "iteration": e.Iteration,
+		}}, true
 	case bus.GoalEnded:
 		return Event{Type: "goal_end", Data: GoalEndData{Reason: e.Reason}}, true
 	case bus.CommandExecuted:
@@ -393,6 +401,7 @@ func buildInitData(sess *ManagedSession) InitData {
 		data.GoalWorkDir = goalInfo.WorkDir
 		data.GoalIteration = goalInfo.Iteration
 		data.GoalStalled = goalInfo.Stalled
+		data.GoalVerifying = goalInfo.Verifying
 	}
 
 	return data

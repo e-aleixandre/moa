@@ -29,7 +29,7 @@
 | `pkg/skill/` | Skill file loading |
 | `pkg/prompt/` | Prompt template discovery and loading |
 | `pkg/askuser/` | `ask_user` tool bridge to UI |
-| `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`) |
+| `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`). The verifier is a read-only mini-agent (read/grep/find/ls) that inspects the repo to judge completion; `--verify-oneshot` falls back to the legacy tool-less check |
 | `pkg/autotitle/` | Generates short session titles from the conversation via a cheap LLM call |
 
 ### Providers

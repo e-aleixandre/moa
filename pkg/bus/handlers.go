@@ -299,6 +299,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			Stalled:       info.Stalled,
 			MaxIterations: info.MaxIterations,
 			MaxStalled:    info.MaxStalled,
+			Verifying:     sctx.GoalVerifying(),
 		}, nil
 	})
 
@@ -656,6 +657,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			Timeout:       cmd.Timeout,
 			TotalBudget:   totalBudget,
 			VerifyTimeout: cmd.VerifyTimeout,
+			VerifyOneShot: cmd.VerifyOneShot,
 		}); err != nil {
 			if cmd.CompactAt > 0 {
 				_ = sctx.Agent.SetCompactAt(sctx.goalPrevCompactAt) // roll back on failure
@@ -1065,10 +1067,12 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 		goalVerifyCancel.Store(&combined)
 		sctx.beginGoalVerify()
+		sctx.Bus.Publish(GoalVerifyStarted{SessionID: sctx.SessionID, Iteration: it})
 
 		go func() {
 			defer func() {
 				sctx.endGoalVerify()
+				sctx.Bus.Publish(GoalVerifyEnded{SessionID: sctx.SessionID, Iteration: it})
 				goalVerifyCancel.CompareAndSwap(&combined, nil)
 				evidenceCancel()
 				verifyCancel()
@@ -1082,7 +1086,37 @@ func RegisterHandlers(sctx *SessionContext) {
 
 			evidence := buildGoalEvidence(evidenceCtx, goalWorkDir(sctx, info), e.FinalText)
 			evidenceCancel() // done with the evidence phase; free it before verifying
-			verdict, err := goal.Verify(verifyCtx, sctx.ProviderFactory, info.VerifierSpec, info.Objective, evidence, info.VerifyTimeout)
+
+			// Clamp the verifier's own budget so the loop's cumulative spend can't
+			// blow the goal's total budget: cap it at whatever pool remains, up to
+			// the per-run default.
+			verifyBudget := goal.DefaultVerifierMaxBudget
+			if info.TotalBudget > 0 {
+				remaining := info.TotalBudget - sctx.Goal.Spent()
+				if remaining <= 0 {
+					stopGoal(sctx, "reached total budget")
+					return
+				}
+				if remaining < verifyBudget {
+					verifyBudget = remaining
+				}
+			}
+			verdict, stats, err := goal.Verify(verifyCtx, goal.VerifyConfig{
+				Factory:      sctx.ProviderFactory,
+				VerifierSpec: info.VerifierSpec,
+				Objective:    info.Objective,
+				Evidence:     evidence,
+				StatePath:    info.StatePath,
+				WorkDir:      goalWorkDir(sctx, info),
+				PathPolicy:   sctx.PathPolicy,
+				Timeout:      info.VerifyTimeout,
+				MaxBudget:    verifyBudget,
+				OneShot:      info.VerifyOneShot,
+			})
+			// Charge whatever the verifier spent against the goal budget, before
+			// judging the verdict, so the ceiling holds even on the winning
+			// iteration.
+			spent := sctx.Goal.AddSpent(stats.CostUSD)
 
 			// If our verify context was cancelled, a user prompt or /goal stop
 			// aborted us (cancelGoalVerify cancels both phases via `combined`).
@@ -1139,6 +1173,13 @@ func RegisterHandlers(sctx *SessionContext) {
 
 			if verdict.Satisfied {
 				stopGoal(sctx, "objective met")
+				return
+			}
+
+			// The verifier's spend may have exhausted the goal's total budget.
+			// Stop now rather than relaunch a maker iteration we can't pay for.
+			if info.TotalBudget > 0 && spent >= info.TotalBudget {
+				stopGoal(sctx, "reached total budget")
 				return
 			}
 

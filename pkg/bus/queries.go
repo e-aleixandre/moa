@@ -63,6 +63,7 @@ type GoalInfo struct {
 	Stalled       int
 	MaxIterations int
 	MaxStalled    int
+	Verifying     bool // a verifier run is currently in flight
 }
 
 // GetCompactionEpoch returns the current compaction epoch counter.

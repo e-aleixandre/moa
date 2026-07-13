@@ -256,6 +256,7 @@ func cmdGoal(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, e
 		MaxStalled:    gc.MaxStalled,
 		Timeout:       gc.Timeout,
 		VerifyTimeout: gc.VerifyTimeout,
+		VerifyOneShot: gc.VerifyOneShot,
 		TotalBudget:   gc.TotalBudget,
 		WorkDir:       gc.WorkDir,
 	}); err != nil {

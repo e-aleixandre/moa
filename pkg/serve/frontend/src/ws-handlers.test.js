@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsBashComplete } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -101,6 +101,19 @@ test('handleWsGoalChange adds a live start line once on fresh activation', () =>
   handleWsGoalChange('s1', { active: true, objective: 'ship it', iteration: 1 });
   msgs = store.get().sessions.s1.messages;
   expect(msgs).toHaveLength(1);
+});
+
+// Parity with the TUI "verifying…" status: goal_verify toggles a flag the
+// TaskBar pill reads, and it's cleared when the goal ends.
+test('handleWsGoalVerify toggles goalVerifying', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, goalActive: true } } });
+
+  handleWsGoalVerify('s1', { active: true, iteration: 2 });
+  expect(store.get().sessions.s1.goalVerifying).toBe(true);
+
+  handleWsGoalVerify('s1', { active: false, iteration: 2 });
+  expect(store.get().sessions.s1.goalVerifying).toBe(false);
 });
 
 import { handleWsStateChange } from './ws-handlers.js';

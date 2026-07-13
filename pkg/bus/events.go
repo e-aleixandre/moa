@@ -295,6 +295,21 @@ type GoalIterationEnded struct {
 	Err error
 }
 
+// GoalVerifyStarted is published when the verifier begins judging an iteration.
+// The verifier can take minutes (it reads the plan and inspects the repo), so
+// the UI shows a "verifying…" indicator instead of an apparent idle gap.
+type GoalVerifyStarted struct {
+	SessionID string
+	Iteration int
+}
+
+// GoalVerifyEnded is published when the verifier finishes an iteration (with a
+// verdict, an error, or because it was cancelled).
+type GoalVerifyEnded struct {
+	SessionID string
+	Iteration int
+}
+
 // GoalEnded is published when the loop stops (objective met or a backstop hit).
 type GoalEnded struct {
 	SessionID string

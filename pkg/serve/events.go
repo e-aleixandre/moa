@@ -33,6 +33,7 @@ type InitData struct {
 	GoalWorkDir       string              `json:"goal_work_dir,omitempty"`
 	GoalIteration     int                 `json:"goal_iteration,omitempty"`
 	GoalStalled       int                 `json:"goal_stalled,omitempty"`
+	GoalVerifying     bool                `json:"goal_verifying,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
 	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
 	BashJobs          []BashJobInitData   `json:"bash_jobs,omitempty"`

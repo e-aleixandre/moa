@@ -100,6 +100,36 @@ func TestGoalDriver_FiniteSatisfied_Stops(t *testing.T) {
 	}
 }
 
+// TestGoalDriver_PublishesVerifyStartEnd checks the verifying-phase signal is
+// emitted around the verifier so the UI can show a "verifying…" indicator.
+func TestGoalDriver_PublishesVerifyStartEnd(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newGoalDriverContext(b, fa, `{"satisfied":true,"feedback":"done"}`)
+	RegisterHandlers(sctx)
+
+	startCh := make(chan GoalVerifyStarted, 4)
+	b.Subscribe(func(e GoalVerifyStarted) { startCh <- e })
+	endCh := make(chan GoalVerifyEnded, 4)
+	b.Subscribe(func(e GoalVerifyEnded) { endCh <- e })
+	endedCh := make(chan GoalEnded, 4)
+	b.Subscribe(func(e GoalEnded) { endedCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{})
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "did work"})
+
+	// GoalVerifyStarted is published synchronously before the verify goroutine;
+	// GoalVerifyEnded fires from the goroutine's defer, after the terminal
+	// GoalEnded — so wait for it explicitly rather than assuming ordering.
+	start := drainChan(startCh, b, t)
+	if start.Iteration == 0 {
+		t.Fatal("GoalVerifyStarted should carry the iteration number")
+	}
+	_ = drainChan(endedCh, b, t)
+	_ = drainChan(endCh, b, t)
+}
+
 // TestGoalDriver_PersistsMarkers is the regression guard for bug #7: goal
 // lifecycle events must leave a persistent record in the conversation (role
 // "goal") so they survive a reload — not just ephemeral in-memory frontend

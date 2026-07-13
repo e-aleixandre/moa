@@ -182,6 +182,21 @@ func TestParseCommand(t *testing.T) {
 			args: "explain what --max=3 means",
 			want: Command{Objective: "explain what --max=3 means"},
 		},
+		{
+			name: "verify-oneshot boolean flag",
+			args: "ship it --verify-oneshot",
+			want: Command{Objective: "ship it", VerifyOneShot: true},
+		},
+		{
+			name: "verify-oneshot combined with valued flags",
+			args: "ship it --verifier haiku --verify-oneshot --max 5",
+			want: Command{Objective: "ship it", VerifierSpec: "haiku", VerifyOneShot: true, MaxIterations: 5},
+		},
+		{
+			name: "verify-oneshot mid-objective stays literal",
+			args: "explain the --verify-oneshot flag please",
+			want: Command{Objective: "explain the --verify-oneshot flag please"},
+		},
 	}
 
 	for _, tt := range tests {

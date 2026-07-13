@@ -46,6 +46,7 @@ type state struct {
 	viewportDirty      bool           // blocks changed, viewport needs refresh on next tick
 	running            bool           // agent is running (tick should continue)
 	goalActive         bool           // goal mode is on (autonomous relaunches count as running)
+	goalVerifying      bool           // the verifier is currently judging an iteration
 	streamState        streamState
 	activeTools        int                            // number of tool calls currently executing
 	showThinking       bool                           // toggle thinking visibility (Ctrl+T)
@@ -1526,6 +1527,12 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	// --- Goal mode ---
 	case bus.GoalChanged:
 		return m.handleGoalChanged(e)
+
+	case bus.GoalVerifyStarted:
+		return m.handleGoalVerifyStarted(e)
+
+	case bus.GoalVerifyEnded:
+		return m.handleGoalVerifyEnded(e)
 
 	case bus.GoalIterationEnded:
 		return m.handleGoalIterationEnded(e)

@@ -149,7 +149,9 @@ export function TaskBar({ session, usage }) {
       {goalActive && (
         <span class="task-bar-pill goal" title={session.goalObjective || 'Goal active'}>
           <Target />
-          goal{session.goalIteration ? ` ${session.goalIteration}` : ''}
+          {session.goalVerifying
+            ? 'goal · verifying…'
+            : `goal${session.goalIteration ? ` ${session.goalIteration}` : ''}`}
         </span>
       )}
 

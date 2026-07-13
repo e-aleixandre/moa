@@ -285,6 +285,7 @@ export function handleWsInit(id, data) {
     goalWorkDir: data.goal_active ? (data.goal_work_dir || '') : null,
     goalIteration: data.goal_iteration || 0,
     goalStalled: data.goal_stalled || 0,
+    goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
 }
@@ -1074,6 +1075,7 @@ export function handleWsGoalChange(id, data) {
     goalIteration: data.iteration || 0,
     goalStalled: data.stalled || 0,
   };
+  if (!data.active) patch.goalVerifying = false;
   // Live start line, matching the persisted "start" marker shown on reopen.
   // Only on a fresh activation (iteration 0) so a reconnect's goal_change echo
   // doesn't re-announce an already-running goal.
@@ -1095,6 +1097,12 @@ export function handleWsGoalIteration(id, data) {
   });
 }
 
+export function handleWsGoalVerify(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  updateSession(id, { goalVerifying: !!data.active });
+}
+
 export function handleWsGoalEnd(id, data) {
   const sess = store.get().sessions[id];
   if (!sess) return;
@@ -1102,6 +1110,7 @@ export function handleWsGoalEnd(id, data) {
     goalActive: false,
     goalObjective: null,
     goalWorkDir: null,
+    goalVerifying: false,
     messages: [...sess.messages, { _type: 'system', text: `🎯 Goal ended: ${data.reason || ''}` }],
   });
   markUnseen(id);

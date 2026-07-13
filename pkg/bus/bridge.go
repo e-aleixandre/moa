@@ -220,6 +220,14 @@ func (sctx *SessionContext) hasBackgroundWork() bool {
 	return sctx.autoVerifyRunning > 0 || sctx.goalVerifyRunning > 0 || len(sctx.activeSubagents) > 0 || len(sctx.activeBashJobs) > 0
 }
 
+// GoalVerifying reports whether a goal verifier is currently running, so a
+// reconnect snapshot can restore the "verifying…" indicator.
+func (sctx *SessionContext) GoalVerifying() bool {
+	sctx.quiescenceMu.Lock()
+	defer sctx.quiescenceMu.Unlock()
+	return sctx.goalVerifyRunning > 0
+}
+
 // GetGate returns the current permission gate (may be nil for yolo mode).
 func (sctx *SessionContext) GetGate() *permission.Gate {
 	return sctx.gate.Load()
