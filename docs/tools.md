@@ -6,10 +6,13 @@ Always registered:
 
 | Tool | Description |
 |------|-------------|
-| `bash` | Execute shell commands (streamed, timeout, truncation + spill file) |
+| `bash` | Execute shell commands (streamed, timeout, truncation + spill file). Persists `cwd` and exported env between calls in a session |
+| `bash_status` | Check a background bash job's status and output |
+| `bash_wait` | Block until a background bash job finishes and return its result |
+| `bash_cancel` | Cancel a running background bash job |
 | `read` | Read text/image files with offset/limit |
-| `write` | Create or overwrite files |
-| `edit` | Exact-text replacement (single match enforced) |
+| `write` | Create or overwrite files (atomic: temp file + rename) |
+| `edit` | Exact-text replacement (single match enforced, atomic write) |
 | `multiedit` | Atomic batch of edits to a single file |
 | `apply_patch` | Apply multi-file unified diffs |
 | `grep` | Search file content (prefers `rg` if installed) |
@@ -19,6 +22,7 @@ Always registered:
 | `memory` | Read/update persistent cross-session project notes |
 | `subagent` | Spawn a child agent (sync or async) |
 | `subagent_status` | Poll async subagent jobs |
+| `subagent_wait` | Block until an async subagent job finishes and return its result |
 | `subagent_cancel` | Cancel a running async subagent |
 | `tasks` | Track implementation tasks (used most heavily during plan mode, but always available) |
 
@@ -40,6 +44,22 @@ Conditionally registered:
 - Use `write` for new files or complete rewrites
 - Use `bash` when you need actual shell behavior
 
+## Bash: persistent state & background jobs
+
+`bash` persists working directory and exported environment between calls within
+a session: a `cd` or `export` in one call is visible in the next (an EXIT trap
+captures `pwd` and `env -0` after each command). A few variables are never
+persisted (`PWD`, `OLDPWD`, `SHLVL`, `_`, `BASH_ENV`, `ENV`, and exported bash
+functions) because a real interactive shell regenerates them. Subagents get an
+isolated copy seeded from their parent (subshell semantics: a child's `cd`/env
+changes never propagate back).
+
+Set `async: true` to launch long-running work in the background and get a job
+ID: block on `bash_wait` when you need the result, peek with `bash_status`, or
+stop it with `bash_cancel`. Background jobs do **not** persist `cwd`/env
+changes. A synchronous call can't be promoted after launch — cancel and
+relaunch with `async: true`.
+
 ## Sandbox
 
 Path-based tools are sandboxed to the workspace directory by default. Escape attempts via `..` or symlinks are blocked.
@@ -50,13 +70,21 @@ Override with:
 - `allowed_paths` for specific extra directories
 - `/path add <dir>` at runtime in the TUI
 
+### Dangerous-command confirmation
+
+As a heuristic mitigation against prompt injection, `bash` commands that
+download and immediately execute remote code (the `curl … | sh` shape, and its
+`bash <(curl …)` / `sh -c "$(curl …)"` variants) always require explicit user
+confirmation, even in permissive modes. This is not a sandbox — it only forces
+a prompt — but it stops smuggled remote code from running unattended.
+
 ## Subagents
 
 ```
 subagent(task: "...", model?: "...", thinking?: "...", tools?: [...], async?: bool)
 ```
 
-Async flow: call with `async: true` → get a job ID → poll with `subagent_status` → optionally `subagent_cancel`.
+Async flow: call with `async: true` → get a job ID → block on `subagent_wait` (preferred) or poll with `subagent_status` → optionally `subagent_cancel`.
 
 ### Live sub-conversations
 

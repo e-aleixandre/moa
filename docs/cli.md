@@ -24,8 +24,16 @@
 ## Serve subcommand
 
 ```bash
-moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet]
+moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet] [--token <secret>] [--allowed-hosts <names>]
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `127.0.0.1` | Bind address (use `0.0.0.0` for remote access) |
+| `--port` | `8080` | HTTP port |
+| `--model` | `sonnet` | Default model for new sessions |
+| `--token` | | Shared secret for opt-in auth (or `MOA_SERVE_TOKEN`). When set, requests need a valid session cookie or `?token=<secret>` |
+| `--allowed-hosts` | | Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost/IP literals always allowed; e.g. a Tailscale MagicDNS name) |
 
 See [Web UI](./serve.md) for details.
 
@@ -40,7 +48,12 @@ See [Web UI](./serve.md) for details.
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
+| `sol` | `gpt-5.6-sol` |
+| `terra` | `gpt-5.6-terra` |
+| `luna` | `gpt-5.6-luna` |
+| `gpt-5.6` | `gpt-5.6-sol` |
 | `gpt5` | `gpt-5.5` |
+| `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
 You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Unknown IDs are accepted but context-window management is disabled for them.

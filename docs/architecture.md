@@ -63,6 +63,9 @@
 | `pkg/jsonutil/` | JSON parsing utilities |
 | `pkg/push/` | Web Push notifications (VAPID keys, subscription store, dispatch) |
 | `pkg/usage/` | Polls Anthropic's undocumented endpoint for Claude subscription plan usage |
+| `pkg/attention/` | Attention Service: consumes every session's event bus and produces a priority-ordered attention queue (drives Ops/companion notifications) |
+| `pkg/ops/` | Bounded, safe operational projection consumed by an Ops client (no filesystem/bus wiring; callers provide canonical facts) |
+| `pkg/schedule/` | Durable one-shot schedule records (backs the web `/schedule` command) |
 
 ## Execution model
 
@@ -76,9 +79,9 @@ The same agent core is reused across all interfaces:
 
 `pkg/bus` is the central nervous system. Components communicate through typed messages:
 
-- **Events** — async, fan-out (e.g. `ToolStarted`, `PlanModeChanged`)
-- **Commands** — sync, one handler (e.g. `EnterPlanMode`, `CancelRun`)
-- **Queries** — sync, request-response (e.g. `GetPlanMode`, `GetSessionInfo`)
+- **Events** — async, fan-out (e.g. `ToolExecStarted`, `PlanModeChanged`)
+- **Commands** — sync, one handler (e.g. `EnterPlanMode`, `AbortRun`)
+- **Queries** — sync, request-response (e.g. `GetPlanMode`, `GetSessionState`)
 
 The TUI and serve layer subscribe to events for rendering. The agent loop publishes events and handles commands.
 

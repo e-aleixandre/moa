@@ -74,6 +74,15 @@ CLI flags override both at runtime. Project config extends global config; some f
 | `brave_api_key` | string | | Enables the `web_search` tool |
 | `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
 | `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids Whisper mis-detecting short clips. Use `"auto"` to let the model detect |
+| `persistent_shell` | bool | `true` | Whether `bash` persists working directory and exported env between calls in a session |
+
+### Subagents
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `subagent_max_turns` | int | `100` | Max agent turns per subagent run (0 = package default) |
+| `subagent_max_run_duration` | string | `"10m"` | Max subagent wall-clock duration, Go duration (empty = package default) |
+| `subagent_max_concurrent_async` | int | `5` | Max concurrent async subagents (0 = package default) |
 
 ### Models
 
@@ -91,6 +100,7 @@ CLI flags override both at runtime. Project config extends global config; some f
 |-------|------|-------------|
 | `mcp_servers` | map | MCP server definitions (see example above) |
 | `trusted_mcp_paths` | []string | Project dirs whose `.mcp.json` is trusted. **Global-only.** |
+| `trusted_project_paths` | []string | Project dirs whose `.moa/config.json` and `.moa/tools/*` are auto-loaded without a trust prompt. **Global-only.** |
 
 Moa also loads `.mcp.json` files (Claude Code-compatible format):
 

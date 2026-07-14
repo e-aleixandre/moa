@@ -7,6 +7,7 @@ Moa is a coding agent runtime in Go. One core, three interfaces: TUI, web UI, an
 - **Tool calling** with filesystem sandboxing and path policies
 - **Permissions**: `yolo`, `ask`, or `auto` (AI-evaluated) modes
 - **Plan mode**: plan-then-execute workflow with task tracking
+- **Goal mode**: autonomous maker→verifier loop that works toward an objective until a read-only verifier judges it done
 - **Sessions**: persist, resume, browse previous conversations
 - **Subagents**: spawn child agents, sync or async
 - **Memory**: cross-session persistent project notes

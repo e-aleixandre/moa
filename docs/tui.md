@@ -12,11 +12,12 @@ Type `/` to open the command palette, or type a command directly:
 | `/models` | Open model picker and manage pinned models |
 | `/thinking <level>` | Set thinking level (`off`/`low`/`medium`/`high`/`xhigh`) |
 | `/permissions <mode>` | Set permission mode (`yolo`/`ask`/`auto`) |
-| `/path [list\|add\|rm\|scope]` | View or manage path access scope |
+| `/path [list\|add\|rm\|scope]` | View or manage path access scope (`remove` aliases `rm`) |
 | `/plan` | Toggle plan mode |
 | `/goal <objective> [flags]\|stop\|status` | Autonomous maker→verifier loop toward an objective |
 | `/tasks [done\|reset\|show]` | View or manage implementation tasks |
 | `/undo` | Revert files written/edited by the last agent turn (not bash, MCP, or subagent changes); skips any file changed since then to avoid clobbering it |
+| `/branch` | Rewind to an earlier point and start a new conversation branch (alias `/back`) |
 | `/verify` | Run project verification checks |
 | `/prompt <name>` | Insert a prompt template |
 | `/rename <title>` | Rename the current session (marks the title manual so auto-titling won't overwrite it) |
@@ -24,7 +25,7 @@ Type `/` to open the command palette, or type a command directly:
 | `/voice` | Toggle voice recording |
 | `/settings` | Open settings menu |
 | `/clear` | Clear conversation, start fresh session |
-| `/exit` | Quit |
+| `/exit` | Quit (alias `/quit`) |
 
 ## Keybindings
 
@@ -40,6 +41,10 @@ Type `/` to open the command palette, or type a command directly:
 | `Ctrl+O` | Toggle transcript mode |
 | `Ctrl+R` | Toggle voice recording |
 | `Ctrl+V` | Paste image from clipboard |
+| `Ctrl+G` | Open the live-subagent picker / return from a subagent view |
+| `Ctrl+B` | Promote a running synchronous subagent to the background |
+| `↑` / `↓` | Recall input history (when idle, empty input) |
+| `Tab` | Path completion (when no picker is active) |
 | `Alt+Up` | Recall queued steer messages back into the input |
 | `PgUp` / `PgDn` | Scroll |
 | `Ctrl+C` | Clear input / abort run / quit |
@@ -63,6 +68,9 @@ Open with `moa --resume`:
 - `Enter` — open selected
 - `Ctrl+N` — new session
 - `Ctrl+D` — delete selected session (press twice to confirm)
+- `Ctrl+A` — archive/unarchive selected session
+- `Ctrl+V` — toggle visibility of archived sessions
+- `Esc` — exit the browser
 - Type to filter by title/id
 
 ## Permission prompts

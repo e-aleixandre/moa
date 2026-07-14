@@ -4,11 +4,12 @@
 
 - Go 1.25+
 - Node.js/npm (only to build the embedded web UI frontend via `make build`)
-- At least one provider key: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+- A provider login: either an API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) or an interactive OAuth login (see [Authenticate](#authenticate)) — at least one of Anthropic or OpenAI
 
 ## Build
 
 ```bash
+make fe-install   # first time only: install frontend deps
 make build
 # → ./bin/moa
 ```
