@@ -316,14 +316,38 @@ func (m appModel) renderQueuedSteers() string {
 	badge := steerBadgeStyle
 
 	n := len(m.s.queuedSteers)
-	last := m.s.queuedSteers[n-1].Text
+	item := m.s.queuedSteers[n-1]
+
+	// A command barrier is shown with its "/command" text and a "command" tag;
+	// a message with image content gets a 🖼 marker (parity with the web chips).
+	label := item.Text
+	prefix := ""
+	tagText := "queued"
+	if item.IsBarrier() {
+		if !strings.HasPrefix(label, "/") {
+			label = "/" + label
+		}
+		tagText = "command"
+	} else if hasImageContent(item.Content) {
+		prefix = "🖼 "
+	}
 
 	// Truncate long messages to one line.
-	last = truncateDisplay(last, 58)
+	label = truncateDisplay(label, 58)
 
-	tag := badge.Render("queued")
 	if n > 1 {
-		tag = badge.Render(fmt.Sprintf("queued ×%d", n))
+		tagText = fmt.Sprintf("%s ×%d", tagText, n)
 	}
-	return "  " + tag + " " + text.Render(last)
+	tag := badge.Render(tagText)
+	return "  " + tag + " " + text.Render(prefix+label)
+}
+
+// hasImageContent reports whether a steer's content carries any image block.
+func hasImageContent(content []core.Content) bool {
+	for _, c := range content {
+		if c.Type == "image" {
+			return true
+		}
+	}
+	return false
 }

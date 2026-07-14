@@ -2240,3 +2240,200 @@ func TestVerifyCommand_RejectsActiveGoalFromRuntime(t *testing.T) {
 		t.Fatalf("verify result = %+v, want goal-policy error", rm.s.blocks)
 	}
 }
+
+// TestCommandQueuedEvent adds a command-barrier chip once, reconciling by ID
+// (no duplication when the optimistic chip already exists).
+func TestCommandQueuedEvent(t *testing.T) {
+	m := newTestModel()
+
+	// From another client (no local chip yet): the chip is added.
+	m.handleBusEvent(bus.CommandQueued{ID: "c1", Raw: "/compact"})
+	if len(m.s.queuedSteers) != 1 {
+		t.Fatalf("after CommandQueued: queuedSteers = %d, want 1", len(m.s.queuedSteers))
+	}
+	if got := m.s.queuedSteers[0]; got.ID != "c1" || !got.IsBarrier() {
+		t.Fatalf("chip = %+v, want a barrier with ID c1", got)
+	}
+
+	// The same ID again (echo of our own optimistic chip): no duplicate.
+	m.handleBusEvent(bus.CommandQueued{ID: "c1", Raw: "/compact"})
+	if len(m.s.queuedSteers) != 1 {
+		t.Fatalf("after duplicate CommandQueued: queuedSteers = %d, want 1", len(m.s.queuedSteers))
+	}
+}
+
+// TestCommandDequeuedEvent removes the barrier chip; a permanent failure also
+// appends an error block, an idle execution does not.
+func TestCommandDequeuedEvent(t *testing.T) {
+	m := newTestModel()
+	m.s.queuedSteers = []core.SteerItem{
+		{ID: "c1", Text: "/compact", Command: "/compact"},
+		{ID: "c2", Text: "/goal bad", Command: "/goal bad"},
+	}
+
+	// Executed at idle: chip gone, no error block.
+	m.handleBusEvent(bus.CommandDequeued{ID: "c1", Raw: "/compact", Executed: true})
+	if len(m.s.queuedSteers) != 1 || m.s.queuedSteers[0].ID != "c2" {
+		t.Fatalf("after executed dequeue: queuedSteers = %+v, want only c2", m.s.queuedSteers)
+	}
+	for _, b := range m.s.blocks {
+		if b.Type == "error" {
+			t.Fatal("executed dequeue must not append an error block")
+		}
+	}
+
+	// Permanent failure: chip gone AND an error block appears.
+	m.handleBusEvent(bus.CommandDequeued{ID: "c2", Raw: "/goal bad", Executed: false, Err: "bad objective"})
+	if len(m.s.queuedSteers) != 0 {
+		t.Fatalf("after failed dequeue: queuedSteers = %d, want 0", len(m.s.queuedSteers))
+	}
+	last := m.s.blocks[len(m.s.blocks)-1]
+	if last.Type != "error" || !strings.Contains(last.Raw, "bad objective") {
+		t.Fatalf("failed dequeue block = %+v, want an error mentioning the failure", last)
+	}
+}
+
+// TestRenderQueuedSteers_CommandAndImage renders a command chip with a "command"
+// tag and its slash text, and an image steer with a 🖼 marker.
+func TestRenderQueuedSteers_CommandAndImage(t *testing.T) {
+	m := newTestModel()
+
+	m.s.queuedSteers = []core.SteerItem{{ID: "c1", Text: "compact", Command: "compact"}}
+	out := m.renderQueuedSteers()
+	if !strings.Contains(out, "command") || !strings.Contains(out, "/compact") {
+		t.Fatalf("command chip render = %q, want a 'command' tag and '/compact'", out)
+	}
+
+	m.s.queuedSteers = []core.SteerItem{{
+		ID: "i1", Text: "see this",
+		Content: []core.Content{core.TextContent("see this"), core.ImageContent("AAAA", "image/png")},
+	}}
+	out = m.renderQueuedSteers()
+	if !strings.Contains(out, "🖼") || !strings.Contains(out, "see this") {
+		t.Fatalf("image chip render = %q, want a 🖼 marker and the text", out)
+	}
+}
+
+// TestSubmitBusy_QueuesCommandBarrier: a PolicyQueue command typed mid-run is
+// enqueued via bus.QueueCommand and shown as a command chip.
+func TestSubmitBusy_QueuesCommandBarrier(t *testing.T) {
+	m := newSwitchTestApp(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	var queued bus.QueueCommand
+	b.OnCommand(func(cmd bus.QueueCommand) error { queued = cmd; return nil })
+	m.runtime.Bus = b
+	m.s.running = true
+
+	updated, _ := m.submitBusy("/compact")
+	rm := updated.(appModel)
+
+	if queued.Raw != "compact" {
+		t.Fatalf("QueueCommand.Raw = %q, want compact", queued.Raw)
+	}
+	if len(rm.s.queuedSteers) != 1 || !rm.s.queuedSteers[0].IsBarrier() {
+		t.Fatalf("queuedSteers = %+v, want one command chip", rm.s.queuedSteers)
+	}
+	if rm.s.queuedSteers[0].ID != queued.ID {
+		t.Fatalf("chip ID %q != QueueCommand.ID %q", rm.s.queuedSteers[0].ID, queued.ID)
+	}
+}
+
+// TestSubmitBusy_RejectsRefusedCommand: a PolicyReject command mid-run is
+// refused (no queue, no bus command) with a status message.
+func TestSubmitBusy_RejectsRefusedCommand(t *testing.T) {
+	m := newSwitchTestApp(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	queueCalled := false
+	b.OnCommand(func(cmd bus.QueueCommand) error { queueCalled = true; return nil })
+	m.runtime.Bus = b
+	m.s.running = true
+
+	updated, _ := m.submitBusy("/undo")
+	rm := updated.(appModel)
+
+	if queueCalled {
+		t.Fatal("a rejected command must not be queued")
+	}
+	if len(rm.s.queuedSteers) != 0 {
+		t.Fatalf("queuedSteers = %d, want 0 for a rejected command", len(rm.s.queuedSteers))
+	}
+}
+
+// TestSubmitBusy_SteersPlainMessage: a plain message mid-run is steered onto the
+// rail and shown as a message chip (not a barrier).
+func TestSubmitBusy_SteersPlainMessage(t *testing.T) {
+	m := newSwitchTestApp(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	var steer bus.SteerAgent
+	b.OnCommand(func(cmd bus.SteerAgent) error { steer = cmd; return nil })
+	m.runtime.Bus = b
+	m.s.running = true
+
+	updated, _ := m.submitBusy("do this next")
+	rm := updated.(appModel)
+
+	if steer.Text != "do this next" {
+		t.Fatalf("SteerAgent.Text = %q, want 'do this next'", steer.Text)
+	}
+	if len(rm.s.queuedSteers) != 1 || rm.s.queuedSteers[0].IsBarrier() {
+		t.Fatalf("queuedSteers = %+v, want one non-command chip", rm.s.queuedSteers)
+	}
+}
+
+// TestAbortDumpsQueueToInput_RestoresSlash: aborting with a queued command
+// barrier restores its leading "/" so the dumped text re-parses as a command,
+// not a plain prompt. Regression for the abort-dump parity fix.
+func TestAbortDumpsQueueToInput_RestoresSlash(t *testing.T) {
+	m := newTestModel()
+	m.s.queuedSteers = []core.SteerItem{
+		{ID: "c1", Text: "compact", Command: "compact"},
+		{ID: "s1", Text: "and then this"},
+	}
+
+	m.dumpQueueToInput()
+
+	if len(m.s.queuedSteers) != 0 {
+		t.Fatalf("queuedSteers after dump = %d, want 0", len(m.s.queuedSteers))
+	}
+	got := m.input.textarea.Value()
+	want := "/compact\nand then this"
+	if got != want {
+		t.Fatalf("input after dump = %q, want %q", got, want)
+	}
+	// The restored command must parse back as a command.
+	if cmd, ok := ParseCommand("/compact"); !ok || cmd != "compact" {
+		t.Fatalf("restored command did not re-parse: cmd=%q ok=%v", cmd, ok)
+	}
+}
+
+// TestPermissionDenyDumpsQueueToInput: denying a permission aborts the run, so
+// the queued rail must be dumped back into the input (parity with the other
+// abort paths). Regression for the third abort path.
+func TestPermissionDenyDumpsQueueToInput(t *testing.T) {
+	m := newTestModel()
+	b := bus.NewLocalBus()
+	defer b.Close()
+	b.OnCommand(func(bus.ResolvePermission) error { return nil })
+	b.OnCommand(func(bus.AbortRun) error { return nil })
+	m.runtime = &bus.SessionRuntime{Bus: b}
+	m.s.running = true
+	m.permPrompt.ShowFromBus("perm-1", "bash", map[string]any{"command": "rm"}, "", "ask")
+	m.s.queuedSteers = []core.SteerItem{
+		{ID: "c1", Text: "compact", Command: "compact"},
+		{ID: "s1", Text: "then this"},
+	}
+
+	updated, _ := m.handlePermissionKey(tea.KeyMsg{Type: tea.KeyEsc})
+	rm := updated.(appModel)
+
+	if len(rm.s.queuedSteers) != 0 {
+		t.Fatalf("queuedSteers after permission deny = %d, want 0 (dumped)", len(rm.s.queuedSteers))
+	}
+	got := rm.input.textarea.Value()
+	if got != "/compact\nthen this" {
+		t.Fatalf("input after permission-deny dump = %q, want %q", got, "/compact\nthen this")
+	}
+}

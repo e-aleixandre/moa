@@ -384,6 +384,10 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.permPrompt.active = false
+		// Denying the permission aborts the run; the agent discards its queue
+		// without an event, so dump the queued chips back into the input first
+		// (parity with the other abort paths and the web client).
+		m.dumpQueueToInput()
 		_ = m.runtime.Bus.Execute(bus.AbortRun{})
 		return m, nil
 	case tea.KeyRunes:

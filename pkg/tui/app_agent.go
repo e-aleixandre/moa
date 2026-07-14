@@ -96,6 +96,108 @@ func (m appModel) launchAgentSendWithContent(content []core.Content) tea.Cmd {
 	)
 }
 
+// submitBusy routes an Enter pressed while the session is busy (running or
+// permission) OR while the queue rail is non-empty. It mirrors the web client's
+// handleSendInner busy branch and the server's ExecCommand/Manager.Send gate:
+//
+//   - a slash command is classified by policy: PolicyReject is refused with a
+//     status message; PolicyQueue is enqueued as a barrier (bus.QueueCommand)
+//     and shown as a command chip; PolicyInstant runs immediately (it doesn't
+//     touch the live run);
+//   - anything else is steered onto the rail, carrying a pending clipboard image
+//     when present (attachments mid-run, #18).
+//
+// Every accepted item is reflected as a local chip only if the agent accepted it
+// (a full queue returns an error), so a chip never lies about delivery.
+func (m appModel) submitBusy(text string) (tea.Model, tea.Cmd) {
+	if cmd, ok := ParseCommand(text); ok {
+		switch bus.ClassifyCommand(cmd) {
+		case bus.PolicyReject:
+			name, _, _ := strings.Cut(cmd, " ")
+			m.status.SetText("/" + name + " can't run while the agent is working — stop it first")
+			return m, nil
+		case bus.PolicyQueue:
+			id := core.NewSteerID()
+			if err := m.runtime.Bus.Execute(bus.QueueCommand{ID: id, Raw: cmd}); err != nil {
+				m.status.SetText("Queue full — command not queued")
+				return m, nil
+			}
+			m.s.queuedSteers = append(m.s.queuedSteers, core.SteerItem{ID: id, Text: cmd, Command: cmd})
+			m.s.viewportDirty = true
+			return m, m.forceRepaint()
+		default:
+			// PolicyInstant: safe to run now even mid-run.
+			return m.handleCommand(cmd)
+		}
+	}
+
+	if strings.HasPrefix(text, "!") {
+		return m.handleShellEscape(text)
+	}
+
+	// Plain message → steer. Carry a pending clipboard image as content (#18).
+	id := core.NewSteerID()
+	var steer bus.SteerAgent
+	var chip core.SteerItem
+	if m.s.pendingImage != nil {
+		encoded := base64.StdEncoding.EncodeToString(m.s.pendingImage)
+		content := []core.Content{core.TextContent(text), core.ImageContent(encoded, m.s.pendingImageMime)}
+		steer = bus.SteerAgent{ID: id, Text: text, Content: content}
+		chip = core.SteerItem{ID: id, Text: text, Content: content}
+	} else {
+		steer = bus.SteerAgent{ID: id, Text: text}
+		chip = core.SteerItem{ID: id, Text: text}
+	}
+	// Only reflect the chip if the agent actually accepted it: a full steer
+	// queue returns ErrSteerQueueFull, and showing an accepted chip that will
+	// never be delivered would be a lie (parity with the web 503 path).
+	if err := m.runtime.Bus.Execute(steer); err != nil {
+		m.status.SetText("Queue full — message not sent")
+		return m, nil
+	}
+	if m.s.pendingImage != nil {
+		m.s.pendingImage = nil
+		m.s.pendingImageMime = ""
+	}
+	m.s.queuedSteers = append(m.s.queuedSteers, chip)
+	return m, nil
+}
+
+// dumpQueueToInput moves any queued steer/command chips back into the input
+// before an abort. The agent discards its queue on abort without an event, so
+// this preserves the user's intent (parity with the web client's handleStop).
+// Command barriers are restored with their leading "/" so re-submitting parses
+// them as commands again; image steers can't be restored (raw bytes not
+// retained) and set a status note. A no-op when the queue is empty.
+func (m *appModel) dumpQueueToInput() {
+	if len(m.s.queuedSteers) == 0 {
+		return
+	}
+	texts := make([]string, len(m.s.queuedSteers))
+	imageDropped := false
+	for i, s := range m.s.queuedSteers {
+		t := s.Text
+		if s.IsBarrier() && !strings.HasPrefix(t, "/") {
+			t = "/" + t
+		}
+		texts[i] = t
+		if hasImageContent(s.Content) {
+			imageDropped = true
+		}
+	}
+	combined := strings.Join(texts, "\n")
+	if current := m.input.textarea.Value(); current != "" {
+		combined = current + "\n" + combined
+	}
+	m.s.queuedSteers = nil
+	m.input.textarea.SetValue(combined)
+	m.input.textarea.CursorEnd()
+	if imageDropped {
+		m.status.SetText("queued image(s) not restored — re-attach if still needed")
+	}
+	m.updateViewport()
+}
+
 // checkClipboardImage reads image data from the system clipboard.
 func (m appModel) checkClipboardImage() tea.Cmd {
 	return func() tea.Msg {

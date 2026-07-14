@@ -817,6 +817,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.s.running {
+				m.dumpQueueToInput()
 				_ = m.runtime.Bus.Execute(bus.AbortRun{})
 				return m, nil
 			}
@@ -865,6 +866,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.s.running {
+			// Preserve the user's intent before aborting: the agent discards its
+			// queue on abort without an event, so dump the queued chips back into
+			// the input (parity with the web client's handleStop).
+			m.dumpQueueToInput()
 			_ = m.runtime.Bus.Execute(bus.AbortRun{})
 			return m, nil
 		}
@@ -1002,17 +1007,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
-			id := core.NewSteerID()
-			// Only reflect the chip if the agent actually accepted it: a full
-			// steer queue returns ErrSteerQueueFull, and showing an accepted
-			// chip that will never be delivered would be a lie (parity with the
-			// web 503 path).
-			if err := m.runtime.Bus.Execute(bus.SteerAgent{ID: id, Text: text}); err != nil {
-				m.status.SetText("Queue full — message not sent")
-				return m, nil
-			}
-			m.s.queuedSteers = append(m.s.queuedSteers, core.SteerItem{ID: id, Text: text})
-			return m, nil
+			return m.submitBusy(text)
 		}
 
 		if m.cmdPalette.active {
@@ -1050,10 +1045,22 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if cmd, ok := ParseCommand(text); ok {
+			// A command typed while the queue rail is non-empty (a barrier/steer
+			// is waiting) must not run ahead of it — route it through the same
+			// busy policy so it queues in strict send order (parity with the web
+			// client and Manager.Send). An empty queue runs it immediately.
+			if len(m.s.queuedSteers) > 0 {
+				return m.submitBusy(text)
+			}
 			return m.handleCommand(cmd)
 		}
 		if strings.HasPrefix(text, "!") {
 			return m.handleShellEscape(text)
+		}
+		// A plain message with a non-empty queue must steer (append to the rail),
+		// not start a new run that would jump ahead of the queued items.
+		if len(m.s.queuedSteers) > 0 {
+			return m.submitBusy(text)
 		}
 		return m.startAgentRun(text)
 
@@ -1119,15 +1126,27 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Alt && len(m.s.queuedSteers) > 0 {
 			// Alt+Up: pull queued steers back into the input for editing/cancelling.
+			// Command barriers keep their "/command" text; image steers can't be
+			// restored (raw bytes not retained) — note it. Parity with the web
+			// pull-back.
 			texts := make([]string, len(m.s.queuedSteers))
+			imageDropped := false
 			for i, s := range m.s.queuedSteers {
-				texts[i] = s.Text
+				t := s.Text
+				if s.IsBarrier() && !strings.HasPrefix(t, "/") {
+					t = "/" + t
+				}
+				texts[i] = t
+				if hasImageContent(s.Content) {
+					imageDropped = true
+				}
 			}
 			combined := strings.Join(texts, "\n")
 			m.s.queuedSteers = nil
 			// The steers were already sent to the agent's channel; cancel the
-			// not-yet-delivered ones so re-submitting the edited text doesn't
-			// deliver both the originals and the edit.
+			// not-yet-delivered ones (including command barriers — the queue is
+			// unified) so re-submitting the edited text doesn't deliver both the
+			// originals and the edit.
 			_ = m.runtime.Bus.Execute(bus.CancelSteer{})
 			current := m.input.textarea.Value()
 			if current != "" {
@@ -1135,6 +1154,9 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.input.textarea.SetValue(combined)
 			m.input.textarea.CursorEnd()
+			if imageDropped {
+				m.status.SetText("queued image(s) not restored — re-attach if still needed")
+			}
 			m.updateViewport()
 			return m, nil
 		}
@@ -1481,6 +1503,38 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		// editing). Clear our chips too — parity with the web client.
 		if len(m.s.queuedSteers) > 0 {
 			m.s.queuedSteers = nil
+			m.s.viewportDirty = true
+		}
+
+	case bus.CommandQueued:
+		// A slash command was enqueued as a barrier (this client, or another
+		// one sharing the session). Reconcile by ID: confirm/keep an existing
+		// optimistic chip, or add it if it came from elsewhere. No duplication.
+		found := false
+		for _, s := range m.s.queuedSteers {
+			if s.ID == e.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.s.queuedSteers = append(m.s.queuedSteers, core.SteerItem{ID: e.ID, Text: e.Raw, Command: e.Raw})
+			m.s.viewportDirty = true
+		}
+
+	case bus.CommandDequeued:
+		// The barrier left the queue — executed at idle, or dropped for a
+		// permanent failure (Executed=false, Err set). Remove its chip; surface
+		// a failure so a queued command that never ran isn't lost silently.
+		for i, s := range m.s.queuedSteers {
+			if s.ID == e.ID {
+				m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
+				m.s.viewportDirty = true
+				break
+			}
+		}
+		if !e.Executed && e.Err != "" {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Queued command failed: " + e.Raw + ": " + e.Err})
 			m.s.viewportDirty = true
 		}
 
