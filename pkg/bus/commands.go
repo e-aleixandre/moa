@@ -40,10 +40,26 @@ type SteerAgent struct {
 	SessionID string
 	ID        string
 	Text      string
+	// Content, when non-nil, carries the full payload of the steer (text plus
+	// image/content blocks) so a mid-run message can include attachments. When
+	// nil the steer is plain text carried in Text.
+	Content []core.Content
 	// Internal marks a system-generated steer (subagent/bash completion) so it
 	// is delivered to the agent but excluded from the user-visible queue
 	// snapshot. Its delivery event is separately suppressed via SteerFilter.
 	Internal bool
+}
+
+// QueueCommand enqueues a slash command as a BARRIER in the agent's unified
+// queue rail. The command is not executed now: it stops the queue drain and is
+// run at the next idle point (RunEnded) by the queue pump, in strict send order
+// relative to surrounding steer messages. Raw is the normalized command line
+// (leading slash optional, e.g. "/compact", "model sonnet"). Only commands with
+// PolicyQueue should be enqueued this way; the caller classifies first.
+type QueueCommand struct {
+	SessionID string
+	ID        string
+	Raw       string
 }
 
 // CancelSteer drops steer messages still queued (not yet delivered) for the

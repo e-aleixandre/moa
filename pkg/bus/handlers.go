@@ -81,9 +81,22 @@ func RegisterHandlers(sctx *SessionContext) {
 		if cmd.ID == "" {
 			cmd.ID = core.NewSteerID()
 		}
-		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Internal: cmd.Internal}) {
+		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Content: cmd.Content, Internal: cmd.Internal}) {
 			return ErrSteerQueueFull
 		}
+		return nil
+	})
+
+	b.OnCommand(func(cmd QueueCommand) error {
+		if cmd.ID == "" {
+			cmd.ID = core.NewSteerID()
+		}
+		// A barrier carries the raw command line in both Command (the executable
+		// form) and Text (display). It is never injected as a message.
+		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Raw, Command: cmd.Raw}) {
+			return ErrSteerQueueFull
+		}
+		sctx.Bus.Publish(CommandQueued{SessionID: sctx.SessionID, ID: cmd.ID, Raw: cmd.Raw})
 		return nil
 	})
 

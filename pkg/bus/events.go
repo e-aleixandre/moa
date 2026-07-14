@@ -183,6 +183,28 @@ type SteersCanceled struct {
 	SessionID string
 }
 
+// CommandQueued is published when a slash command is enqueued as a barrier in
+// the unified queue rail (issued while the session was busy). Frontends render
+// an optimistic queued chip for it, distinct from a queued message chip, keyed
+// by ID. Raw is the normalized command line for display (e.g. "/compact").
+type CommandQueued struct {
+	SessionID string
+	ID        string
+	Raw       string
+}
+
+// CommandDequeued is published when a queued command barrier leaves the queue:
+// either because the pump is about to execute it (Executed=true) or because it
+// was pulled back / canceled (Executed=false). Frontends clear the matching
+// queued chip by ID. The command's own execution still emits its usual events
+// (CommandExecuted, CompactionStarted/Ended, ConfigChanged, …).
+type CommandDequeued struct {
+	SessionID string
+	ID        string
+	Raw       string
+	Executed  bool
+}
+
 // ---------------------------------------------------------------------------
 // Session state
 // ---------------------------------------------------------------------------
