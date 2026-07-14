@@ -1132,7 +1132,7 @@ func TestExecCommand_Clear(t *testing.T) {
 		t.Fatal("expected messages after send")
 	}
 
-	result, err := mgr.ExecCommand(sess.ID, "/clear")
+	result, err := mgr.ExecCommand(sess.ID, "/clear", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1163,7 +1163,7 @@ func TestExecCommand_UnknownCommand(t *testing.T) {
 	mgr := newTestManager(t, ctx, newMockProvider())
 	sess, _ := mgr.CreateSession(CreateOpts{})
 
-	result, err := mgr.ExecCommand(sess.ID, "/nope")
+	result, err := mgr.ExecCommand(sess.ID, "/nope", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1177,7 @@ func TestExecCommand_NotFound(t *testing.T) {
 	defer cancel()
 	mgr := newTestManager(t, ctx, newMockProvider())
 
-	_, err := mgr.ExecCommand("nonexistent", "/clear")
+	_, err := mgr.ExecCommand("nonexistent", "/clear", "")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}

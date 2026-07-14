@@ -14,6 +14,12 @@ func TestHandler_QueueCommand_EnqueuesBarrierAndAnnounces(t *testing.T) {
 	fa := &fakeAgent{}
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	// A barrier is queued while a run is in flight; occupy the state so the
+	// pump (kicked after enqueue to close the idle orphan race) abstains and
+	// leaves the barrier pending for the running agent's next idle point.
+	if err := sctx.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
 
 	var (
 		mu     sync.Mutex
@@ -61,6 +67,9 @@ func TestHandler_QueueCommand_PreservesCallerID(t *testing.T) {
 	fa := &fakeAgent{}
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	if err := sctx.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := b.Execute(QueueCommand{ID: "cmd-1", Raw: "/model sonnet"}); err != nil {
 		t.Fatalf("QueueCommand: %v", err)

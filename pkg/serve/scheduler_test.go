@@ -50,7 +50,7 @@ func TestScheduleCommandCreateListAndCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := mgr.ExecCommand(sess.ID, "/schedule in 1h -- review report")
+	created, err := mgr.ExecCommand(sess.ID, "/schedule in 1h -- review report", "")
 	if err != nil || !created.OK {
 		t.Fatalf("create = %#v, %v", created, err)
 	}
@@ -58,11 +58,11 @@ func TestScheduleCommandCreateListAndCancel(t *testing.T) {
 	if len(records) != 1 || records[0].SessionID != sess.ID || records[0].Text != "review report" {
 		t.Fatalf("records = %#v", records)
 	}
-	listed, err := mgr.ExecCommand(sess.ID, "/schedule list")
+	listed, err := mgr.ExecCommand(sess.ID, "/schedule list", "")
 	if err != nil || !listed.OK || !strings.Contains(listed.Message, records[0].ID) {
 		t.Fatalf("list = %#v, %v", listed, err)
 	}
-	canceled, err := mgr.ExecCommand(sess.ID, "/schedule cancel "+records[0].ID)
+	canceled, err := mgr.ExecCommand(sess.ID, "/schedule cancel "+records[0].ID, "")
 	if err != nil || !canceled.OK {
 		t.Fatalf("cancel = %#v, %v", canceled, err)
 	}

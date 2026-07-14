@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ func TestCmdClear_StartsNewSessionKeepsOld(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := mgr.ExecCommand(sess.ID, "/clear")
+	res, err := mgr.ExecCommand(sess.ID, "/clear", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +74,7 @@ func TestCmdVerify_AllPass(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := mgr.ExecCommand(sess.ID, "/verify")
+	res, err := mgr.ExecCommand(sess.ID, "/verify", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestCmdVerify_Failure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := mgr.ExecCommand(sess.ID, "/verify")
+	res, err := mgr.ExecCommand(sess.ID, "/verify", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestCmdVerify_NoConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := mgr.ExecCommand(sess.ID, "/verify")
+	res, err := mgr.ExecCommand(sess.ID, "/verify", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestCmdVerify_RejectsWhileGoalActive(t *testing.T) {
 	})
 	sess.runtime.Bus = b
 
-	res, err := mgr.ExecCommand(sess.ID, "/verify")
+	res, err := mgr.ExecCommand(sess.ID, "/verify", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,12 +182,12 @@ func TestCmdVerify_RejectsConcurrent(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		first, firstErr = mgr.ExecCommand(sess.ID, "/verify")
+		first, firstErr = mgr.ExecCommand(sess.ID, "/verify", "")
 	}()
 
 	// Let the first verify acquire the serialization flag before the second.
 	time.Sleep(50 * time.Millisecond)
-	second, secondErr := mgr.ExecCommand(sess.ID, "/verify")
+	second, secondErr := mgr.ExecCommand(sess.ID, "/verify", "")
 	wg.Wait()
 
 	if firstErr != nil {
@@ -214,7 +215,7 @@ func TestCmdRename_SetsManualTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := mgr.ExecCommand(sess.ID, "/rename My New Title")
+	res, err := mgr.ExecCommand(sess.ID, "/rename My New Title", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,11 +244,60 @@ func TestCmdRename_EmptyRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := mgr.ExecCommand(sess.ID, "/rename")
+	res, err := mgr.ExecCommand(sess.ID, "/rename", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.OK {
 		t.Fatalf("expected failure for empty rename, got OK: %s", res.Message)
 	}
+}
+
+// While a run is in flight, ExecCommand classifies commands by policy: a queued
+// command becomes a barrier (OK+Queued), a rejected one returns ErrBusy, and an
+// instant one runs immediately.
+func TestExecCommand_PolicyGateWhileRunning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(delayedResponseHandler(500*time.Millisecond, "slow"))
+	mgr := newTestManager(t, ctx, prov)
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := mgr.Send(sess.ID, "go", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 2*time.Second, "running", func() bool {
+		return sessState(sess) == StateRunning
+	})
+
+	// PolicyQueue: enqueued as a barrier under the client-minted ID.
+	res, err := mgr.ExecCommand(sess.ID, "/compact", "cmd-1")
+	if err != nil {
+		t.Fatalf("queue command: %v", err)
+	}
+	if !res.OK || !res.Queued || res.ID != "cmd-1" {
+		t.Fatalf("expected queued barrier under cmd-1, got %+v", res)
+	}
+
+	// PolicyReject: refused while busy.
+	if _, err := mgr.ExecCommand(sess.ID, "/undo", ""); !errors.Is(err, ErrBusy) {
+		t.Fatalf("expected ErrBusy for /undo while running, got %v", err)
+	}
+
+	// PolicyInstant: runs immediately (reads side state).
+	res, err = mgr.ExecCommand(sess.ID, "/permissions", "")
+	if err != nil {
+		t.Fatalf("instant command: %v", err)
+	}
+	if !res.OK || res.Queued {
+		t.Fatalf("expected instant execution for /permissions, got %+v", res)
+	}
+
+	pollUntil(t, 2*time.Second, "idle", func() bool {
+		return sessState(sess) == StateIdle || sessState(sess) == StateError
+	})
 }

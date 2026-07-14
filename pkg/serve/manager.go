@@ -382,19 +382,51 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	}
 
 	state := sess.runtime.State.Current()
-	if state == bus.StateRunning || state == bus.StatePermission {
-		if len(atts) > 0 {
-			return "", "", ErrAttachmentsWhileRunning
-		}
-		// Steer the running agent under the client-minted ID (the handler mints
-		// one if the client didn't). Every client reconciles the queued chip by
-		// ID, and the reconnect snapshot lists it under the same ID. A full queue
-		// is surfaced as an error so the client doesn't confirm a message that
-		// would never be delivered.
+	busy := state == bus.StateRunning || state == bus.StatePermission
+	// Direct send requires BOTH an idle session AND an empty queue rail: a queued
+	// barrier/steer ahead of us means a new run would jump the queue and break
+	// strict send order. When either holds, enqueue as a steer instead (the pump
+	// delivers it in turn). Query the queue only when idle — while busy we steer
+	// regardless.
+	queued := false
+	if !busy {
+		ql, _ := bus.QueryTyped[bus.GetQueueLen, int](sess.runtime.Bus, bus.GetQueueLen{})
+		queued = ql > 0
+	}
+	if busy || queued {
+		// Steer under the client-minted ID (the handler mints one if the client
+		// didn't). Every client reconciles the queued chip by ID, and the
+		// reconnect snapshot lists it under the same ID. A full queue is surfaced
+		// as an error so the client doesn't confirm a message that would never be
+		// delivered. Attachments are allowed here now: they are built into the
+		// steer's content just like an idle send.
 		if steerID == "" {
 			steerID = core.NewSteerID()
 		}
-		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text}); err != nil {
+		if len(atts) == 0 {
+			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text}); err != nil {
+				return "", "", err
+			}
+			return "steer", steerID, nil
+		}
+		// Serialize attachment processing per session so the on-disk quota check
+		// is atomic against concurrent /send requests (see the idle path below).
+		sess.attachMu.Lock()
+		defer sess.attachMu.Unlock()
+		priorNativeDoc := priorNativeDocBytes(sess)
+		content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc)
+		if err != nil {
+			return "", "", err
+		}
+		if text != "" {
+			content = append(content, core.TextContent(text))
+		}
+		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Content: content}); err != nil {
+			// The steer was rejected (e.g. full queue) — roll back any files
+			// written for it so they don't orphan and count against the quota.
+			for _, p := range writtenFiles {
+				_ = os.Remove(p)
+			}
 			return "", "", err
 		}
 		return "steer", steerID, nil
@@ -430,7 +462,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	// requests each observe the same previous total.
 	sess.attachMu.Lock()
 	defer sess.attachMu.Unlock()
-	priorNativeDoc := countNativeDocBytes(sess.History())
+	priorNativeDoc := priorNativeDocBytes(sess)
 	content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc)
 	if err != nil {
 		return "", "", err
@@ -569,4 +601,10 @@ type CommandResult struct {
 	OK           bool   `json:"ok"`
 	Message      string `json:"message"`
 	NewSessionID string `json:"newSessionId,omitempty"`
+	// Queued is true when the command was not executed now but enqueued as a
+	// barrier in the unified queue rail (issued while the session was busy). ID
+	// is then the queued chip's authoritative ID, so the client reconciles its
+	// optimistic command chip by ID.
+	Queued bool   `json:"queued,omitempty"`
+	ID     string `json:"id,omitempty"`
 }

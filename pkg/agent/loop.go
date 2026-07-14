@@ -111,6 +111,9 @@ type loopConfig struct {
 
 	// Steering messages injected between steps
 	drainSteers func() []core.SteerItem
+	// settleSteers settles a drained batch's inflight native-content bytes once
+	// the batch's messages are appended to history (paired with drainSteers).
+	settleSteers func([]core.SteerItem)
 }
 
 // emitLifecycle emits a lifecycle event to both the emitter (subscribers)
@@ -507,6 +510,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					// Steered event; clients dedup the user message by MsgID
 					// (the reconnect snapshot may already contain it).
 					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: um.MsgID, Text: item.Text})
+				}
+				// The drained steers are now in history; settle their inflight
+				// native-content bytes (paired with drainSteers).
+				if cfg.settleSteers != nil {
+					cfg.settleSteers(steered)
 				}
 			}
 		}

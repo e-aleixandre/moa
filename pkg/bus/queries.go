@@ -92,6 +92,21 @@ type StreamingAggregate struct {
 // Handler returns: []core.SteerItem
 type GetPendingSteers struct{ SessionID string }
 
+// GetQueueLen returns the number of items in the unified queue rail (steers and
+// command barriers not yet delivered/executed). The serve layer uses it to
+// decide whether a /send starts a run directly (idle and empty queue) or must
+// be enqueued as a steer to preserve strict send order.
+// Handler returns: int
+type GetQueueLen struct{ SessionID string }
+
+// GetUndeliveredNativeBytes returns the decoded native document/image bytes that
+// are accepted into the session (queued steers plus any drained batch in flight
+// to history) but not yet visible in history. The serve quota check adds it to
+// the history total so concurrent sends can't collectively exceed the
+// per-session native-content budget through the async delivery window.
+// Handler returns: int64
+type GetUndeliveredNativeBytes struct{ SessionID string }
+
 // GetPermissionMode returns the current permission mode (yolo/ask/auto).
 // Handler returns: string
 type GetPermissionMode struct{ SessionID string }

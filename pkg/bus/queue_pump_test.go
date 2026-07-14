@@ -77,6 +77,37 @@ func TestPump_QueuedBarrierExecutesAtIdle(t *testing.T) {
 	}
 }
 
+// A QueueCommand that lands on an already-idle session (the classifier saw the
+// session busy, but the run finished and drained an empty queue before the
+// barrier arrived) must still be executed: the handler kicks the pump after
+// enqueuing, so the barrier is not stranded. Regression for the orphan-barrier
+// race.
+func TestHandler_QueueCommand_IdleSelfDrains(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+	// State is idle: no external requestPump is issued; only the handler's own
+	// post-enqueue kick can drain the barrier.
+
+	deq, dmu := collect[CommandDequeued](b)
+	if err := b.Execute(QueueCommand{ID: "c1", Raw: "/compact"}); err != nil {
+		t.Fatalf("QueueCommand: %v", err)
+	}
+	if !waitForLen(b, deq, dmu, 1, 2*time.Second) {
+		t.Fatal("idle barrier never executed — orphaned")
+	}
+	dmu.Lock()
+	defer dmu.Unlock()
+	if (*deq)[0].ID != "c1" || !(*deq)[0].Executed {
+		t.Fatalf("expected executed barrier c1, got %+v", *deq)
+	}
+	if len(fa.PendingSteers()) != 0 {
+		t.Fatalf("barrier still queued: %+v", fa.PendingSteers())
+	}
+}
+
 // Strict send order: message → /compact → message. The steer before the barrier
 // stays queued for the current run (not tested here), the barrier runs at idle,
 // and the trailing steer starts a fresh run via SendItems.

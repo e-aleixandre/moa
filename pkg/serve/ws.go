@@ -212,6 +212,10 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.Steered:
 		return Event{Type: "steer", Data: SteerData{ID: e.ID, IDs: e.IDs, MsgID: e.MsgID, Text: e.Text}}, true
+	case bus.CommandQueued:
+		return Event{Type: "command_queued", Data: CommandQueuedData{ID: e.ID, Raw: e.Raw}}, true
+	case bus.CommandDequeued:
+		return Event{Type: "command_dequeued", Data: CommandDequeuedData{ID: e.ID, Raw: e.Raw, Executed: e.Executed, Err: e.Err}}, true
 	case bus.SteersCanceled:
 		return Event{Type: "steers_canceled"}, true
 	case bus.AutoVerifyStarted:
@@ -290,6 +294,19 @@ var wsLossyEventTypes = map[string]bool{
 	"tool_update":     true,
 	"tool_call_delta": true,
 	"bash_job_output": true,
+}
+
+// countImageContent returns how many image blocks a steer's content carries, so
+// a reconnecting client can badge the chip (the base64 payload itself is not
+// re-transported in the snapshot).
+func countImageContent(content []core.Content) int {
+	n := 0
+	for _, c := range content {
+		if c.Type == "image" {
+			n++
+		}
+	}
+	return n
 }
 
 // isLossyWsEvent reports whether e can be safely dropped on channel overflow.
@@ -380,7 +397,12 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 	if len(pendingSteers) > 0 {
 		data.PendingSteers = make([]PendingSteerData, len(pendingSteers))
 		for i, s := range pendingSteers {
-			data.PendingSteers[i] = PendingSteerData{ID: s.ID, Text: s.Text}
+			data.PendingSteers[i] = PendingSteerData{
+				ID:      s.ID,
+				Text:    s.Text,
+				Command: s.IsBarrier(),
+				Images:  countImageContent(s.Content),
+			}
 		}
 	}
 

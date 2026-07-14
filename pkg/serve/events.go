@@ -46,12 +46,18 @@ type InitData struct {
 	HistoryTruncated  bool                `json:"history_truncated,omitempty"`
 }
 
-// PendingSteerData is one queued (not yet delivered) steer message, with its
-// authoritative ID so a reconnecting client reconciles its optimistic chip by
-// ID instead of by text.
+// PendingSteerData is one queued (not yet delivered) item in the unified queue
+// rail, with its authoritative ID so a reconnecting client reconciles its
+// optimistic chip by ID instead of by text. Command marks a queued slash-command
+// barrier (Text holds its raw command line, e.g. "/compact") so the client
+// renders a command chip; Images is the number of image blocks a queued message
+// carries (0 for a plain-text steer or a command) so the chip can show an
+// attachment badge.
 type PendingSteerData struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID      string `json:"id"`
+	Text    string `json:"text"`
+	Command bool   `json:"command,omitempty"`
+	Images  int    `json:"images,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients
@@ -191,6 +197,24 @@ type SteerData struct {
 	IDs   []string `json:"ids,omitempty"`
 	MsgID string   `json:"msg_id,omitempty"`
 	Text  string   `json:"text"`
+}
+
+// CommandQueuedData is sent when a slash command is enqueued as a barrier in the
+// unified queue rail (issued while the session was busy). The client renders a
+// queued command chip keyed by ID, distinct from a queued message chip.
+type CommandQueuedData struct {
+	ID  string `json:"id"`
+	Raw string `json:"raw"`
+}
+
+// CommandDequeuedData is sent when a queued command barrier leaves the queue
+// (after execution, cancellation, or a permanent failure). The client removes
+// the matching chip by ID. Err is set when it left because execution failed.
+type CommandDequeuedData struct {
+	ID       string `json:"id"`
+	Raw      string `json:"raw"`
+	Executed bool   `json:"executed"`
+	Err      string `json:"err,omitempty"`
 }
 
 // PlanModeData is sent on plan mode state changes.

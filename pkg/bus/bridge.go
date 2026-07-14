@@ -64,6 +64,9 @@ type AgentController interface {
 	IsRunning() bool
 	PendingSteers() []core.SteerItem
 	QueueLen() int
+	NativeDocBytesUndelivered() int64
+	ReserveNativeDocBytes(n int64)
+	ReleaseNativeDocBytes(n int64)
 }
 
 // ---------------------------------------------------------------------------

@@ -271,7 +271,11 @@ func TestSend_TooManyAttachments(t *testing.T) {
 	}
 }
 
-func TestSend_AttachmentsWhileRunning(t *testing.T) {
+// TestSend_AttachmentsSteerWhileRunning verifies attachments sent mid-run are
+// now accepted as a steer (with content) instead of being rejected: the unified
+// queue rail carries image/content steers so a user can attach a file mid-run.
+func TestSend_AttachmentsSteerWhileRunning(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -300,8 +304,16 @@ func TestSend_AttachmentsWhileRunning(t *testing.T) {
 	atts := []Attachment{{Name: "x.png", Mime: "image/png", Data: b64([]byte("x"))}}
 	resp2 := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", sendBody(t, "second", atts))
 	defer resp2.Body.Close() //nolint:errcheck
-	if resp2.StatusCode != 409 {
-		t.Fatalf("expected 409 for attachments while running, got %d", resp2.StatusCode)
+	if resp2.StatusCode != 202 {
+		t.Fatalf("expected 202 for attachments while running, got %d", resp2.StatusCode)
+	}
+	var out2 map[string]string
+	_ = json.NewDecoder(resp2.Body).Decode(&out2)
+	if out2["action"] != "steer" {
+		t.Fatalf("expected action=steer for attachment mid-run, got %q", out2["action"])
+	}
+	if out2["steer_id"] == "" {
+		t.Fatalf("expected a steer_id for the queued attachment chip")
 	}
 
 	// Text-only steer still works while running.

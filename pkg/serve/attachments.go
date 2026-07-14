@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -26,10 +27,6 @@ type Attachment struct {
 // ErrBadAttachment wraps any attachment validation failure; the wrapping error
 // message names the offending attachment and is safe to surface as a 400.
 var ErrBadAttachment = errors.New("bad attachment")
-
-// ErrAttachmentsWhileRunning is returned when attachments are sent while the
-// agent is running or awaiting a permission decision — steering is text-only.
-var ErrAttachmentsWhileRunning = errors.New("attachments cannot be sent while the agent is running")
 
 const (
 	maxAttachments        = 8
@@ -264,6 +261,20 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		content = append(content, block)
 	}
 	return content, writtenPaths, nil
+}
+
+// priorNativeDocBytes returns the native document/image bytes already
+// committed to (or in flight to) the session, for the per-session budget check.
+// It reads the undelivered total (queued + inflight steers) BEFORE history: a
+// steer only leaves the undelivered count once it is visible in history, so
+// reading queue-side first then history can never miss bytes in the delivery
+// window (at worst it double-counts an item transiting between the two reads,
+// which fails closed — a spurious rejection the caller can retry — rather than
+// underestimating and admitting content past the cap). History is recomputed
+// live so compaction/clear naturally shrink the total.
+func priorNativeDocBytes(sess *ManagedSession) int64 {
+	undelivered, _ := bus.QueryTyped[bus.GetUndeliveredNativeBytes, int64](sess.runtime.Bus, bus.GetUndeliveredNativeBytes{})
+	return undelivered + countNativeDocBytes(sess.History())
 }
 
 // countNativeDocBytes returns the total decoded byte size of native binary

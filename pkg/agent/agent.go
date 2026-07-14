@@ -50,6 +50,16 @@ const steerBufferSize = 32 // capacity of the steer queue
 type steerQueue struct {
 	mu    sync.Mutex
 	items []core.SteerItem
+	// inflightNativeDocBytes tracks native document/image bytes that have been
+	// DRAINED from items (so they no longer appear in a queue snapshot) but are
+	// not yet visible in the conversation history — the async delivery window
+	// between drainUntilBarrier and the run goroutine's append. It is a transit
+	// ledger, not a monotonic counter: every drained batch is settled (−) once
+	// its destination materializes (appended to history, or re-queued via
+	// pushFront), so it returns to 0 when nothing is in flight. This is what
+	// lets the serve quota check see drained-but-uncommitted native content and
+	// not underestimate the per-session budget under concurrency. Guarded by mu.
+	inflightNativeDocBytes int64
 }
 
 // push appends an item, returning false (dropping it) if the queue is already
@@ -80,6 +90,13 @@ func (q *steerQueue) pushFront(items []core.SteerItem) {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	// These items were drained (counted as inflight); they are back in the queue
+	// now, so settle their transit bytes here — atomically with the reinsertion,
+	// or a reader could see them in neither the queue nor the ledger.
+	q.inflightNativeDocBytes -= batchNativeDocBytes(items)
+	if q.inflightNativeDocBytes < 0 {
+		q.inflightNativeDocBytes = 0
+	}
 	q.items = append(append([]core.SteerItem{}, items...), q.items...)
 }
 
@@ -92,6 +109,9 @@ func (q *steerQueue) drain() []core.SteerItem {
 	}
 	items := q.items
 	q.items = nil
+	// Items left the queue but their delivery to history is async; account for
+	// their native bytes as inflight until the caller settles the batch.
+	q.inflightNativeDocBytes += batchNativeDocBytes(items)
 	return items
 }
 
@@ -113,6 +133,9 @@ func (q *steerQueue) drainUntilBarrier() []core.SteerItem {
 	}
 	items := q.items[:cut]
 	q.items = append([]core.SteerItem{}, q.items[cut:]...)
+	// Drained items are en route to history asynchronously; count their native
+	// bytes as inflight until the caller settles the batch (see settle).
+	q.inflightNativeDocBytes += batchNativeDocBytes(items)
 	return items
 }
 
@@ -165,6 +188,62 @@ func (q *steerQueue) len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.items)
+}
+
+// addInflight / subInflight adjust the inflight native-byte ledger under q.mu.
+// subInflight floors at 0 so a benign over-settle can't drive the ledger
+// negative and corrupt a concurrent reservation.
+func (q *steerQueue) addInflight(n int64) {
+	if n == 0 {
+		return
+	}
+	q.mu.Lock()
+	q.inflightNativeDocBytes += n
+	q.mu.Unlock()
+}
+
+func (q *steerQueue) subInflight(n int64) {
+	if n == 0 {
+		return
+	}
+	q.mu.Lock()
+	q.inflightNativeDocBytes -= n
+	if q.inflightNativeDocBytes < 0 {
+		q.inflightNativeDocBytes = 0
+	}
+	q.mu.Unlock()
+}
+
+// settle removes a drained batch's native bytes from the inflight ledger, once
+// the batch's destination has materialized (its messages appended to history).
+// Called exactly once per drained batch by each delivery site. Recounting the
+// batch is safe: item Content is cloned on entry (ownItem) and never mutated.
+func (q *steerQueue) settle(items []core.SteerItem) {
+	q.subInflight(batchNativeDocBytes(items))
+}
+
+// undeliveredNativeDocBytes returns the native document/image bytes that are
+// accepted into the session but not yet visible in history: the still-queued
+// items plus the inflight (drained-but-not-committed) ledger. The serve quota
+// check adds this to the history total so concurrent sends can't collectively
+// exceed the per-session native-content budget through the delivery window.
+func (q *steerQueue) undeliveredNativeDocBytes() int64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	total := q.inflightNativeDocBytes
+	for _, it := range q.items {
+		total += core.NativeDocBytes(it.Content)
+	}
+	return total
+}
+
+// batchNativeDocBytes sums the native document/image bytes of a batch of items.
+func batchNativeDocBytes(items []core.SteerItem) int64 {
+	var total int64
+	for _, it := range items {
+		total += core.NativeDocBytes(it.Content)
+	}
+	return total
 }
 
 // steerMessage builds the conversation message for a queued steer, using its
@@ -379,13 +458,26 @@ func (a *Agent) SendWithCustom(ctx context.Context, prompt string, custom map[st
 // processed by subscribers (up to DrainTimeout). Dropped events are not waited on.
 func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error) {
 	cc := core.CloneContent(content)
-	return a.execute(ctx, func() {
+	// The SendPromptWithContent handler reserved these native bytes in the
+	// inflight ledger before this run's goroutine started (see
+	// ReserveNativeDocBytes). Resolve that reservation exactly once: settle it
+	// the instant the message is appended to history (freeing the quota while
+	// the run proceeds), or release it if the send never happened.
+	n := core.NativeDocBytes(cc)
+	appended := false
+	msgs, err := a.execute(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
 		a.state.Messages = append(a.state.Messages,
 			core.WrapMessage(core.NewUserMessageWithContent(cc)))
+		a.steers.subInflight(n) // under a.mu, atomic with the append
+		appended = true
 	})
+	if !appended {
+		a.steers.subInflight(n) // send never started; release the reservation
+	}
+	return msgs, err
 }
 
 // SendItems appends one user message per queued item (each with its own MsgID,
@@ -418,6 +510,7 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 		list = append(list, owned{item: ownItem(it), msgID: mid})
 	}
 	outIDs := make([]string, len(list))
+	appended := false
 	msgs, err := a.execute(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
@@ -432,7 +525,18 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 			outIDs[i] = um.MsgID
 			a.state.Messages = append(a.state.Messages, um)
 		}
+		// Settle the inflight ledger AFTER the append (never before: the bytes
+		// must stay counted until they are visible in history). Under a.mu here,
+		// atomic with the appends that made them visible.
+		a.steers.settle(items)
+		appended = true
 	})
+	// If execute() bailed before prepare ran (e.g. a run was already in flight),
+	// the items were drained (inflight-counted) but never appended; settle them
+	// so the ledger doesn't leak the batch forever.
+	if !appended {
+		a.steers.settle(items)
+	}
 	return msgs, outIDs, err
 }
 
@@ -478,6 +582,35 @@ func (a *Agent) Reset() error {
 // strict-order gate: a user run must not start while the queue is non-empty.
 func (a *Agent) QueueLen() int {
 	return a.steers.len()
+}
+
+// NativeDocBytesUndelivered returns the decoded native document/image bytes that
+// have been accepted into the session (queued steers, plus any drained batch
+// still in flight to history) but are not yet visible in the conversation
+// history. The serve layer adds this to the history total when enforcing the
+// per-session native-content budget, so concurrent sends can't collectively
+// exceed it through the async steer-delivery window.
+func (a *Agent) NativeDocBytesUndelivered() int64 {
+	return a.steers.undeliveredNativeDocBytes()
+}
+
+// ReserveNativeDocBytes adds n decoded native-content bytes to the inflight
+// ledger BEFORE a direct content send's message reaches history. A direct
+// SendWithContent appends to history asynchronously (in the run goroutine), so
+// without this reservation a concurrent send could read the quota after the
+// caller released its serialization lock but before the message is countable in
+// history, and admit content past the per-session cap. The paired settle happens
+// inside SendWithContent right after the append; if the send is never started
+// (e.g. the run slot was lost), the caller must release the reservation with
+// ReleaseNativeDocBytes.
+func (a *Agent) ReserveNativeDocBytes(n int64) {
+	a.steers.addInflight(n)
+}
+
+// ReleaseNativeDocBytes undoes a ReserveNativeDocBytes when the reserved send
+// never started (so SendWithContent's settle won't run).
+func (a *Agent) ReleaseNativeDocBytes(n int64) {
+	a.steers.subInflight(n)
 }
 
 // LoadMessages replaces the conversation history with the given messages.
@@ -1053,6 +1186,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		permissionCheck:     a.config.PermissionCheck,
 		compaction:          a.config.Compaction,
 		drainSteers:         a.steers.drainUntilBarrier,
+		settleSteers:        a.steers.settle,
 	}
 
 	var err error
@@ -1087,6 +1221,8 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 			a.mu.Unlock()
 			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: mid, Text: item.Text})
 		}
+		// Settle the drained steers' inflight bytes now that they are in history.
+		a.steers.settle(steered)
 	}
 
 	// Classify the termination cause NOW, the instant the loop returned — before

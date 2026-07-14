@@ -58,6 +58,7 @@ type fakeAgent struct {
 	steerQueue  []core.SteerItem
 	steerFull   bool             // when true, Steer rejects (queue full)
 	sentItems   []core.SteerItem // items delivered via SendItems (pump tests)
+	inflight    int64            // reserved native bytes (Reserve/Release)
 
 	// appendBusy > 0 makes AppendMessage fail (simulating a live run) and
 	// decrements once per call, so a deferred append can succeed on retry.
@@ -168,6 +169,31 @@ func (f *fakeAgent) QueueLen() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.steerQueue)
+}
+
+func (f *fakeAgent) NativeDocBytesUndelivered() int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	total := f.inflight
+	for _, it := range f.steerQueue {
+		total += core.NativeDocBytes(it.Content)
+	}
+	return total
+}
+
+func (f *fakeAgent) ReserveNativeDocBytes(n int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inflight += n
+}
+
+func (f *fakeAgent) ReleaseNativeDocBytes(n int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inflight -= n
+	if f.inflight < 0 {
+		f.inflight = 0
+	}
 }
 
 func (f *fakeAgent) Model() core.Model {
@@ -1091,8 +1117,14 @@ func TestHandler_SteerAgent(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
-	sctx := newTestSessionContext(b, fa)
+	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	// Steering targets an in-flight run; occupy the state so the queue pump
+	// (kicked after enqueue to close the idle orphan-steer race) abstains and
+	// leaves the steer queued for the running agent to drain.
+	if err := sctx.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := b.Execute(SteerAgent{ID: "st1", Text: "focus here"}); err != nil {
 		t.Fatal(err)
@@ -1117,8 +1149,11 @@ func TestHandler_SteerAgent_MintsMissingID(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
-	sctx := newTestSessionContext(b, fa)
+	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	if err := sctx.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := b.Execute(SteerAgent{Text: "no id"}); err != nil {
 		t.Fatal(err)
@@ -1150,8 +1185,11 @@ func TestHandler_SteerAgent_InternalExcludedFromSnapshot(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
-	sctx := newTestSessionContext(b, fa)
+	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	if err := sctx.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := b.Execute(SteerAgent{ID: "u1", Text: "user msg"}); err != nil {
 		t.Fatal(err)

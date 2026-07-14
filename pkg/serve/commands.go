@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/goal"
 	"github.com/ealeixandre/moa/pkg/schedule"
 	"github.com/ealeixandre/moa/pkg/tasks"
@@ -88,8 +89,10 @@ func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 	return &CommandResult{OK: true, Message: fmt.Sprintf("scheduled %s at %s", record.ID, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"))}, nil
 }
 
-// ExecCommand executes a slash command in a session.
-func (m *Manager) ExecCommand(sessionID, rawCommand string) (*CommandResult, error) {
+// ExecCommand executes a slash command in a session. id is the client-minted
+// stable ID for the optimistic chip when the command is enqueued as a barrier
+// (busy session, PolicyQueue); it is ignored when the command runs immediately.
+func (m *Manager) ExecCommand(sessionID, rawCommand, id string) (*CommandResult, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return nil, ErrNotFound
@@ -107,6 +110,31 @@ func (m *Manager) ExecCommand(sessionID, rawCommand string) (*CommandResult, err
 	if !ok {
 		return &CommandResult{OK: false, Message: "unknown command: /" + cmd}, nil
 	}
+
+	// While the session is busy, a command typed mid-run is classified by
+	// policy: instant commands run now (they don't touch the live run), queued
+	// commands become a barrier in the unified queue rail (executed in strict
+	// send order at the next idle point), and the rest are refused. An idle
+	// session runs every command immediately.
+	if requireIdle(sess) != nil {
+		switch bus.ClassifyCommand(rawCommand) {
+		case bus.PolicyQueue:
+			if id == "" {
+				id = core.NewSteerID()
+			}
+			if err := sess.runtime.Bus.Execute(bus.QueueCommand{ID: id, Raw: rawCommand}); err != nil {
+				if errors.Is(err, bus.ErrSteerQueueFull) {
+					return nil, err
+				}
+				return &CommandResult{OK: false, Message: err.Error()}, nil
+			}
+			return &CommandResult{OK: true, Queued: true, ID: id, Message: "queued " + rawCommand}, nil
+		case bus.PolicyReject:
+			return nil, ErrBusy
+		}
+		// PolicyInstant falls through to run now.
+	}
+
 	return handler(m, sess, args)
 }
 

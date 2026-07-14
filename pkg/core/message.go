@@ -2,6 +2,7 @@ package core
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"strings"
@@ -63,6 +64,19 @@ func DocumentContent(data, mime, filename string) Content {
 func ThinkingContent(text string) Content { return Content{Type: "thinking", Thinking: text} }
 func ToolCallContent(id, name string, args map[string]any) Content {
 	return Content{Type: "tool_call", ToolCallID: id, ToolName: name, Arguments: args}
+}
+
+// NativeDocBytes sums the decoded size of the native document/image blocks in
+// content — the base64 payloads that count against a session's native-content
+// budget. Text/thinking/tool blocks contribute nothing.
+func NativeDocBytes(content []Content) int64 {
+	var total int64
+	for _, c := range content {
+		if c.Type == "image" || c.Type == "document" {
+			total += int64(base64.StdEncoding.DecodedLen(len(c.Data)))
+		}
+	}
+	return total
 }
 
 // Clone returns a deep copy of the content: every field is copied by value

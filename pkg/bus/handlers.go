@@ -87,6 +87,12 @@ func RegisterHandlers(sctx *SessionContext) {
 		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Content: cmd.Content, Internal: cmd.Internal}) {
 			return ErrSteerQueueFull
 		}
+		// Kick the pump after enqueuing. While a run is in flight this is a
+		// no-op (the running agent drains the steer at its next turn boundary);
+		// but if the session is idle — e.g. the serve layer observed a
+		// non-empty queue and steered, then the pump drained it to idle in
+		// between — this delivers the otherwise-orphaned steer as a new run.
+		requestPump(sctx)
 		return nil
 	})
 
@@ -100,6 +106,12 @@ func RegisterHandlers(sctx *SessionContext) {
 			return ErrSteerQueueFull
 		}
 		sctx.Bus.Publish(CommandQueued{SessionID: sctx.SessionID, ID: cmd.ID, Raw: cmd.Raw})
+		// Kick the pump after enqueuing (same orphan-race close as SteerAgent):
+		// if the session was busy when the caller classified it but the run's
+		// RunEnded drained an empty queue before this barrier landed, the pump
+		// would never revisit it. A no-op while a run is in flight; at idle it
+		// executes the barrier at once.
+		requestPump(sctx)
 		return nil
 	})
 
@@ -399,6 +411,14 @@ func RegisterHandlers(sctx *SessionContext) {
 		return sctx.Agent.PendingSteers(), nil
 	})
 
+	b.OnQuery(func(q GetQueueLen) (int, error) {
+		return sctx.Agent.QueueLen(), nil
+	})
+
+	b.OnQuery(func(q GetUndeliveredNativeBytes) (int64, error) {
+		return sctx.Agent.NativeDocBytesUndelivered(), nil
+	})
+
 	b.OnQuery(func(q GetPermissionMode) (string, error) {
 		if g := sctx.GetGate(); g != nil {
 			return string(g.Mode()), nil
@@ -524,9 +544,22 @@ func RegisterHandlers(sctx *SessionContext) {
 		if len(cmd.Content) > 0 && cmd.Content[0].Text != "" {
 			label = cmd.Content[0].Text
 		}
-		return startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
+		// Reserve this send's native bytes in the inflight ledger BEFORE the run
+		// goroutine starts: SendWithContent appends to history asynchronously, so
+		// without the reservation a concurrent send (steering, since we just
+		// reserved the run slot) could read the quota before these bytes are
+		// countable in history and admit content past the per-session cap.
+		// SendWithContent settles it once the message lands (or releases it if
+		// the send never runs); if startRun itself fails, release it here.
+		nativeBytes := core.NativeDocBytes(cmd.Content)
+		sctx.Agent.ReserveNativeDocBytes(nativeBytes)
+		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
 			return sctx.Agent.SendWithContent(ctx, cmd.Content)
-		})
+		}); err != nil {
+			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)
+			return err
+		}
+		return nil
 	})
 
 	// -------------------------------------------------------------------

@@ -34,6 +34,45 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	}
 }
 
+func TestWsEventFromBus_CommandQueued(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.CommandQueued{SessionID: "s1", ID: "c1", Raw: "/compact"})
+	if !ok || ev.Type != "command_queued" {
+		t.Fatalf("Type = %q ok=%v, want command_queued", ev.Type, ok)
+	}
+	data, ok := ev.Data.(CommandQueuedData)
+	if !ok {
+		t.Fatalf("Data type = %T, want CommandQueuedData", ev.Data)
+	}
+	if data != (CommandQueuedData{ID: "c1", Raw: "/compact"}) {
+		t.Fatalf("Data = %+v", data)
+	}
+}
+
+func TestWsEventFromBus_CommandDequeued(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.CommandDequeued{SessionID: "s1", ID: "c1", Raw: "/compact", Executed: true})
+	if !ok || ev.Type != "command_dequeued" {
+		t.Fatalf("Type = %q ok=%v, want command_dequeued", ev.Type, ok)
+	}
+	data, ok := ev.Data.(CommandDequeuedData)
+	if !ok {
+		t.Fatalf("Data type = %T, want CommandDequeuedData", ev.Data)
+	}
+	if data != (CommandDequeuedData{ID: "c1", Raw: "/compact", Executed: true}) {
+		t.Fatalf("Data = %+v", data)
+	}
+}
+
+func TestCountImageContent(t *testing.T) {
+	got := countImageContent([]core.Content{
+		core.TextContent("hi"),
+		core.ImageContent("data", "image/png"),
+		core.ImageContent("data2", "image/png"),
+	})
+	if got != 2 {
+		t.Fatalf("countImageContent = %d, want 2", got)
+	}
+}
+
 func TestLimitInitHistoryBoundsPayloadAndInlineAttachments(t *testing.T) {
 	largeImage := strings.Repeat("a", historyContentMaxBytes+1)
 	messages := make([]core.AgentMessage, initHistoryMaxMessages+10)

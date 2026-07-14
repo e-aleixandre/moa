@@ -366,8 +366,6 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
-		case errors.Is(err, ErrAttachmentsWhileRunning):
-			http.Error(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, ErrBadAttachment):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		case errors.Is(err, bus.ErrSteerQueueFull):
@@ -954,6 +952,7 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 		limitBody(w, r, maxJSONBodySize)
 		var body struct {
 			Command string `json:"command"`
+			ID      string `json:"id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -963,7 +962,7 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "command required", http.StatusBadRequest)
 			return
 		}
-		result, err := mgr.ExecCommand(sess.ID, body.Command)
+		result, err := mgr.ExecCommand(sess.ID, body.Command, body.ID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				http.Error(w, "not found", http.StatusNotFound)
@@ -971,6 +970,10 @@ func handleCommand(mgr *Manager) http.HandlerFunc {
 			}
 			if errors.Is(err, ErrBusy) {
 				http.Error(w, "session is busy", http.StatusConflict)
+				return
+			}
+			if errors.Is(err, bus.ErrSteerQueueFull) {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)

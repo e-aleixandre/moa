@@ -381,3 +381,111 @@ func TestAbortClearsQueue(t *testing.T) {
 		t.Fatalf("expected agent queue cleared after abort, got %v", ids(pending))
 	}
 }
+
+// The steerQueue inflight ledger keeps native-content bytes counted through the
+// drain→settle window: undelivered = queued items + drained-but-unsettled.
+func TestSteerQueue_InflightLedger(t *testing.T) {
+	img := core.ImageContent("0123456789ABCDEF", "image/png") // DecodedLen 12
+	imgSteer := func(id string) core.SteerItem {
+		return core.SteerItem{ID: id, Content: []core.Content{img}}
+	}
+	var q steerQueue
+
+	q.push(imgSteer("s1"))
+	q.push(imgSteer("s2"))
+	if got := q.undeliveredNativeDocBytes(); got != 24 {
+		t.Fatalf("queued: undelivered = %d, want 24", got)
+	}
+
+	// Drain removes them from the queue but they are still undelivered (in
+	// flight to history) until settled.
+	drained := q.drainUntilBarrier()
+	if len(drained) != 2 {
+		t.Fatalf("drained %d items, want 2", len(drained))
+	}
+	if got := q.undeliveredNativeDocBytes(); got != 24 {
+		t.Fatalf("in flight: undelivered = %d, want 24 (queue empty but inflight)", got)
+	}
+
+	// Settling the batch (as delivery to history does) clears the ledger.
+	q.settle(drained)
+	if got := q.undeliveredNativeDocBytes(); got != 0 {
+		t.Fatalf("after settle: undelivered = %d, want 0", got)
+	}
+}
+
+// pushFront (a drained batch that lost the run slot) settles the inflight bytes
+// as it returns the items to the queue, so they are counted once, not twice.
+func TestSteerQueue_InflightLedger_PushFrontSettles(t *testing.T) {
+	img := core.ImageContent("0123456789ABCDEF", "image/png") // DecodedLen 12
+	var q steerQueue
+	q.push(core.SteerItem{ID: "s1", Content: []core.Content{img}})
+
+	drained := q.drainUntilBarrier() // inflight += 12
+	q.pushFront(drained)             // back in queue, inflight -= 12
+	if got := q.undeliveredNativeDocBytes(); got != 12 {
+		t.Fatalf("after pushFront: undelivered = %d, want 12 (counted once, in queue)", got)
+	}
+}
+
+// A direct SendWithContent keeps its native bytes counted from the handler's
+// reservation until the message is appended to history, so a concurrent quota
+// read never undercounts an accepted-but-not-yet-delivered content send.
+func TestSendWithContent_ReservationCountedUntilAppended(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	blockTool := core.Tool{
+		Name:       "block",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			close(started)
+			<-release
+			return core.TextResult("done"), nil
+		},
+	}
+	provider := NewMockProvider(toolCallResponse("tc-1", "block", nil), simpleTextResponse("ok"))
+	ag := newTestAgent(provider, blockTool)
+
+	content := []core.Content{core.ImageContent("0123456789ABCDEF", "image/png")} // DecodedLen 12
+	want := core.NativeDocBytes(content)
+
+	// The bus handler reserves before starting the run; emulate that here.
+	ag.ReserveNativeDocBytes(want)
+	if got := ag.NativeDocBytesUndelivered(); got != want {
+		t.Fatalf("after reserve: undelivered = %d, want %d", got, want)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ag.SendWithContent(context.Background(), content) //nolint:errcheck
+	}()
+
+	<-started
+	// The message has been appended to history (append happens before the tool
+	// runs), so SendWithContent's settle has fired: undelivered is back to 0
+	// while the bytes now live in history.
+	if got := ag.NativeDocBytesUndelivered(); got != 0 {
+		t.Fatalf("while running: undelivered = %d, want 0 (settled into history)", got)
+	}
+	close(release)
+	<-done
+	if got := ag.NativeDocBytesUndelivered(); got != 0 {
+		t.Fatalf("after run: undelivered = %d, want 0", got)
+	}
+}
+
+// A reservation for a send that never runs is released (no permanent ledger
+// leak): ReleaseNativeDocBytes undoes it.
+func TestReserveNativeDocBytes_ReleaseNoLeak(t *testing.T) {
+	provider := NewMockProvider(simpleTextResponse("ok"))
+	ag := newTestAgent(provider)
+	ag.ReserveNativeDocBytes(100)
+	if got := ag.NativeDocBytesUndelivered(); got != 100 {
+		t.Fatalf("after reserve: undelivered = %d, want 100", got)
+	}
+	ag.ReleaseNativeDocBytes(100)
+	if got := ag.NativeDocBytesUndelivered(); got != 0 {
+		t.Fatalf("after release: undelivered = %d, want 0", got)
+	}
+}
