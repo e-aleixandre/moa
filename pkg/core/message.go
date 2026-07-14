@@ -65,6 +65,59 @@ func ToolCallContent(id, name string, args map[string]any) Content {
 	return Content{Type: "tool_call", ToolCallID: id, ToolName: name, Arguments: args}
 }
 
+// Clone returns a deep copy of the content: every field is copied by value
+// except Arguments (a map[string]any), which is cloned so the copy shares no
+// mutable backing state with the original. Nested values inside Arguments are
+// copied via cloneAny (maps and slices are rebuilt recursively). Used at
+// ownership boundaries (e.g. when the agent takes a caller-supplied content
+// block into its own state) so a later mutation by the caller can't change the
+// stored message or race a concurrent reader.
+func (c Content) Clone() Content {
+	c.Arguments = cloneArgs(c.Arguments)
+	return c
+}
+
+// CloneContent returns a deep copy of a content slice (see Content.Clone). A nil
+// input yields a nil output.
+func CloneContent(in []Content) []Content {
+	if in == nil {
+		return nil
+	}
+	out := make([]Content, len(in))
+	for i, c := range in {
+		out[i] = c.Clone()
+	}
+	return out
+}
+
+func cloneArgs(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = cloneAny(v)
+	}
+	return out
+}
+
+// cloneAny deep-copies the JSON-shaped values that can appear in a tool_call's
+// Arguments (maps, slices, scalars). Scalars are returned as-is.
+func cloneAny(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return cloneArgs(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = cloneAny(e)
+		}
+		return out
+	default:
+		return t
+	}
+}
+
 // Message is a tagged union. Role determines which fields are relevant.
 //
 //	"user"        → Content
@@ -102,10 +155,25 @@ func (m *Message) EnsureMsgID() {
 	m.MsgID = time.Now().UTC().Format("20060102150405.000000000")
 }
 
-// SteerItem is a queued steering message with a stable, authoritative ID.
+// SteerItem is a queued item in the agent's unified queue rail. It is either a
+// steering message (text, optionally with image/content blocks) injected into a
+// run, or a queued command that acts as a turn barrier (see Command). Items are
+// consumed in strict FIFO order, so a command queued between two messages runs
+// exactly in that position.
 type SteerItem struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	// Content, when non-nil, is the full payload of a steer (text plus image or
+	// other content blocks). It is injected with NewUserMessageWithContent. A
+	// nil Content means a plain-text steer carried in Text.
+	Content []Content `json:"content,omitempty"`
+	// Command, when non-empty, marks this item as a queued command (a BARRIER):
+	// it holds the raw normalized command line (e.g. "/compact", "/model sonnet").
+	// A barrier item is never injected as a conversation message — it stops the
+	// queue drain, and is executed at the next idle point (RunEnded) by the bus.
+	// Invariant: a barrier carries no Content, and an Internal item is never a
+	// barrier.
+	Command string `json:"command,omitempty"`
 	// Internal marks a system-generated steer (e.g. a subagent/bash completion
 	// injected into the parent run) as opposed to a user-typed message. Internal
 	// steers are delivered to the agent but excluded from the authoritative
@@ -113,6 +181,10 @@ type SteerItem struct {
 	// surface as user-visible "queued" chips.
 	Internal bool `json:"-"`
 }
+
+// IsBarrier reports whether this item is a queued command that stops the run
+// (a turn barrier) rather than a steer injected into the current run.
+func (it SteerItem) IsBarrier() bool { return it.Command != "" }
 
 // NewSteerID mints a random identifier for a steer item, using the same
 // crypto/rand mechanism as Message.EnsureMsgID.

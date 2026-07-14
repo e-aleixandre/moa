@@ -500,7 +500,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		if cfg.drainSteers != nil {
 			if steered := cfg.drainSteers(); len(steered) > 0 {
 				for _, item := range steered {
-					um := core.WrapMessage(core.NewUserMessage(item.Text))
+					um := core.WrapMessage(steerMessage(item))
 					um.EnsureMsgID()
 					cfg.appendState(um)
 					// Carry the message's MsgID so serve can publish it on the

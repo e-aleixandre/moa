@@ -95,6 +95,52 @@ func (q *steerQueue) drain() []core.SteerItem {
 	return items
 }
 
+// drainUntilBarrier removes and returns the queued items up to (but NOT
+// including) the first barrier (a queued command). If the head is a barrier it
+// returns nil and leaves the queue untouched, so the run ends naturally and the
+// bus can execute the command at the idle point. This is what preserves strict
+// send order: steers queued before a command are injected into the current run;
+// the command and anything after it wait for the run to finish.
+func (q *steerQueue) drainUntilBarrier() []core.SteerItem {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	cut := 0
+	for cut < len(q.items) && !q.items[cut].IsBarrier() {
+		cut++
+	}
+	if cut == 0 {
+		return nil
+	}
+	items := q.items[:cut]
+	q.items = append([]core.SteerItem{}, q.items[cut:]...)
+	return items
+}
+
+// peekHead returns a copy of the item at the head of the queue without removing
+// it. The bool is false when the queue is empty.
+func (q *steerQueue) peekHead() (core.SteerItem, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) == 0 {
+		return core.SteerItem{}, false
+	}
+	return q.items[0], true
+}
+
+// popBarrier removes the head item only if it is still the barrier with the
+// given ID. It returns false when the head changed (a race with a concurrent
+// drain or a fresh enqueue), so the caller re-checks instead of executing a
+// command that is no longer at the front.
+func (q *steerQueue) popBarrier(id string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) == 0 || !q.items[0].IsBarrier() || q.items[0].ID != id {
+		return false
+	}
+	q.items = append([]core.SteerItem{}, q.items[1:]...)
+	return true
+}
+
 // snapshot returns a copy of the queued items without removing them.
 func (q *steerQueue) snapshot() []core.SteerItem {
 	q.mu.Lock()
@@ -112,6 +158,30 @@ func (q *steerQueue) clear() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.items = nil
+}
+
+// steerMessage builds the conversation message for a queued steer, using its
+// full content blocks (text + images) when present and falling back to plain
+// text otherwise. Callers wrap and assign a MsgID. The item's Content is
+// expected to already be owned by the agent (copied at the enqueue/Send
+// boundary), so this does not copy again.
+func steerMessage(item core.SteerItem) core.Message {
+	if len(item.Content) > 0 {
+		return core.NewUserMessageWithContent(item.Content)
+	}
+	return core.NewUserMessage(item.Text)
+}
+
+// ownItem returns a copy of the item that shares no mutable backing state with
+// the caller: its Content slice is deep-cloned (see core.CloneContent, which
+// also clones each block's mutable Arguments map). Used at every boundary where
+// an item enters the agent (Steer/SendItems), so a caller mutating its content
+// after handing it over can't race the provider reading a.state.Messages.
+func ownItem(it core.SteerItem) core.SteerItem {
+	if len(it.Content) > 0 {
+		it.Content = core.CloneContent(it.Content)
+	}
+	return it
 }
 
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
@@ -295,13 +365,13 @@ func (a *Agent) SendWithCustom(ctx context.Context, prompt string, custom map[st
 
 // SendWithContent appends a user message with mixed content blocks (text + images)
 // and runs the agent loop, continuing the conversation.
-// The content slice is shallow-copied to prevent caller aliasing. This is sufficient
-// for text and image content blocks which only contain immutable string fields.
+// The content is deep-cloned (core.CloneContent) to take ownership from the caller,
+// so a later mutation of the caller's slice or of a block's Arguments map can't
+// change the stored message or race a concurrent reader.
 // Before returning, SendWithContent waits for all accepted in-flight events to be
 // processed by subscribers (up to DrainTimeout). Dropped events are not waited on.
 func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error) {
-	cc := make([]core.Content, len(content))
-	copy(cc, content)
+	cc := core.CloneContent(content)
 	return a.execute(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
@@ -309,6 +379,60 @@ func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]
 		a.state.Messages = append(a.state.Messages,
 			core.WrapMessage(core.NewUserMessageWithContent(cc)))
 	})
+}
+
+// SendItems appends one user message per queued item (each with its own MsgID,
+// carrying image/content blocks when present) and runs the agent loop. It is
+// used to start a fresh run for the steers that were queued after a barrier
+// command, preserving per-item granularity (no folding into one message). The
+// returned MsgIDs are in item order so the caller can publish a delivery event
+// per item; clients dedup the user messages by MsgID on reconnect.
+func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem) ([]core.AgentMessage, []string, error) {
+	// Take ownership of each item's Content so a caller mutating its slices
+	// after the call can't race the provider reading a.state.Messages. Barrier
+	// items are commands, not messages, and must never be injected — skip them
+	// defensively (the bus pump only ever passes non-barrier steers here).
+	owned := make([]core.SteerItem, 0, len(items))
+	for _, it := range items {
+		if it.IsBarrier() {
+			continue
+		}
+		owned = append(owned, ownItem(it))
+	}
+	msgIDs := make([]string, len(owned))
+	msgs, err := a.execute(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+		for i, item := range owned {
+			um := core.WrapMessage(steerMessage(item))
+			um.EnsureMsgID()
+			msgIDs[i] = um.MsgID
+			a.state.Messages = append(a.state.Messages, um)
+		}
+	})
+	return msgs, msgIDs, err
+}
+
+// PeekQueueHead returns a copy of the item at the head of the unified queue
+// without removing it, and false when the queue is empty. Used by the bus queue
+// pump to decide whether the next item is a barrier command or a steer.
+func (a *Agent) PeekQueueHead() (core.SteerItem, bool) {
+	return a.steers.peekHead()
+}
+
+// PopQueueBarrier removes the head item only if it is still the barrier command
+// with the given ID, returning false when the head changed. Lets the pump
+// execute a queued command exactly once, safely against concurrent enqueues.
+func (a *Agent) PopQueueBarrier(id string) bool {
+	return a.steers.popBarrier(id)
+}
+
+// DrainUntilBarrier removes and returns the queued steers up to (but not
+// including) the first barrier command. Used by the pump to start a new run
+// with the steers that follow an executed command.
+func (a *Agent) DrainUntilBarrier() []core.SteerItem {
+	return a.steers.drainUntilBarrier()
 }
 
 // Reset clears conversation state. Returns error if the agent is currently running.
@@ -707,7 +831,7 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 // Returns false if the queue is full (the message was dropped), so callers can
 // surface a rejection instead of confirming a message that will never arrive.
 func (a *Agent) Steer(it core.SteerItem) bool {
-	return a.steers.push(it)
+	return a.steers.push(ownItem(it))
 }
 
 // CancelSteer drops all steer messages still queued for inter-step delivery.
@@ -895,7 +1019,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		convertToLLM:        a.config.ConvertToLLM,
 		permissionCheck:     a.config.PermissionCheck,
 		compaction:          a.config.Compaction,
-		drainSteers:         a.steers.drain,
+		drainSteers:         a.steers.drainUntilBarrier,
 	}
 
 	var err error
@@ -905,7 +1029,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 			break
 		}
 		followUps := a.drainFollowUps()
-		steered := a.steers.drain()
+		steered := a.steers.drainUntilBarrier()
 		if len(followUps) == 0 && len(steered) == 0 {
 			break
 		}
@@ -923,7 +1047,7 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		}
 		for _, item := range steered {
 			a.mu.Lock()
-			um := core.WrapMessage(core.NewUserMessage(item.Text))
+			um := core.WrapMessage(steerMessage(item))
 			um.EnsureMsgID()
 			mid := um.MsgID
 			a.state.Messages = append(a.state.Messages, um)
