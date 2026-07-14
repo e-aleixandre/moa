@@ -61,6 +61,17 @@ type ManagedSession struct {
 	// lastRunAt + cacheTTL; the UI uses this to warn when writing would incur a
 	// fresh cache-write cost. Zero means "no run yet".
 	lastRunAt time.Time
+	// runStartedAt is when the current run began (set on RunStarted, cleared on
+	// RunEnded). The UI turns this into the elapsed-time counter on the activity
+	// indicator; surfacing it from the server keeps the counter correct across
+	// WebSocket reconnects instead of restarting from zero. Zero means idle.
+	runStartedAt time.Time
+	// runStartedGen is the RunGen that anchored runStartedAt. RunStarted and
+	// RunEnded are delivered on independent bus subscriptions, so a late
+	// RunEnded from a finished run can race the RunStarted of the next one; we
+	// only clear the anchor when the ending run matches the one we recorded, so
+	// a stale RunEnded can't wipe an already-started newer run's timer.
+	runStartedGen uint64
 	// cacheTTL is the prompt-cache retention window (5m default, or 1h when
 	// configured). Immutable after creation; read alongside lastRunAt.
 	cacheTTL time.Duration
@@ -136,6 +147,11 @@ type SessionInfo struct {
 	// or a non-Anthropic model that doesn't use TTL-based prompt caching). The
 	// UI warns once this time has passed that a new message pays a cache write.
 	CacheExpiresAt time.Time `json:"cache_expires_at,omitzero"`
+	// RunStartedAt is when the in-progress run began; zero/omitted when idle.
+	// The UI anchors the activity-indicator elapsed counter to it so the counter
+	// stays correct across reconnects. Only meaningful while State is running or
+	// permission.
+	RunStartedAt time.Time `json:"run_started_at,omitzero"`
 }
 
 const (
@@ -197,6 +213,7 @@ func (s *ManagedSession) info() SessionInfo {
 	s.mu.Lock()
 	lastRun := s.lastRunAt
 	cacheTTL := s.cacheTTL
+	runStartedAt := s.runStartedAt
 	info := SessionInfo{
 		ID:             s.ID,
 		Title:          s.Title,
@@ -223,6 +240,11 @@ func (s *ManagedSession) info() SessionInfo {
 	if planInfo.Mode != "off" {
 		info.PlanMode = planInfo.Mode
 		info.PlanFile = planInfo.PlanFile
+	}
+	// Surface the run-start time only while a run is in flight so the client can
+	// show (and keep) an accurate elapsed counter across reconnects.
+	if !runStartedAt.IsZero() && (info.State == StateRunning || info.State == StatePermission) {
+		info.RunStartedAt = runStartedAt
 	}
 	return info
 }

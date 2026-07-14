@@ -298,6 +298,10 @@ export function handleWsInit(id, data) {
     // that land after the cut. Empty when nothing is streaming.
     streamingText: data.streaming_text || null,
     thinkingText: data.streaming_thinking || null,
+    // Reconnect-safe elapsed counter: the server anchors the run-start time so
+    // the activity indicator keeps counting from the real start, not from the
+    // moment this pane reconnected. Null when idle.
+    runStartedAtMs: data.run_started_at_ms || null,
     // Authoritative compacting flag from the snapshot: if the compaction
     // finished while this pane had no WS, the stale local spinner is cleared;
     // if one is still running, it is restored.
@@ -609,12 +613,20 @@ export function handleWsStateChange(id, data) {
   const state = store.get();
   const prev = state.sessions[id];
   const wasRunning = prev && (prev.state === 'running' || prev.state === 'permission');
-  updateSession(id, { state: data.state, error: data.error || null });
+  const patch = { state: data.state, error: data.error || null };
+  // Anchor the activity-indicator elapsed counter when a run begins. Only on
+  // the transition into a running state, and only if not already set (a reconnect
+  // snapshot may have seeded the authoritative server timestamp).
+  const nowRunning = data.state === 'running' || data.state === 'permission';
+  if (nowRunning && !wasRunning && !prev?.runStartedAtMs) {
+    patch.runStartedAtMs = Date.now();
+  }
+  updateSession(id, patch);
   if (data.state === 'idle' || data.state === 'error') {
     const sess = store.get().sessions[id];
     // Keep pendingSteers: a steer queued during the last turn stays genuinely
     // queued (mostrar la verdad). It's cleared only by Steered or a snapshot.
-    if (sess) updateSession(id, { streamingText: null, thinkingText: null, compacting: false });
+    if (sess) updateSession(id, { streamingText: null, thinkingText: null, compacting: false, runStartedAtMs: null });
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
       markUnseen(id);

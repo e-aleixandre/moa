@@ -37,6 +37,7 @@ type InitData struct {
 	Compacting        bool                `json:"compacting,omitempty"`
 	StreamingText     string              `json:"streaming_text,omitempty"`
 	StreamingThinking string              `json:"streaming_thinking,omitempty"`
+	RunStartedAtMs    int64               `json:"run_started_at_ms,omitempty"`
 	PendingSteers     []PendingSteerData  `json:"pending_steers,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
 	Subagents         []SubagentInitData  `json:"subagents,omitempty"`

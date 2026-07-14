@@ -7,6 +7,7 @@ import { addToast } from '../notifications.js';
 import { store, updateSession } from '../store.js';
 import { FileSuggestions } from './FileSuggestions.jsx';
 import { processFile } from '../util/attachments.js';
+import { activityPhase, activityLabel as buildActivityLabel, formatElapsed } from '../util/activity.js';
 
 const MAX_ATTACHMENTS = 8;
 
@@ -907,18 +908,30 @@ export function InputBar({ sessionId, session, tileId }) {
     }
   };
 
-  // Derive activity label from session state.
-  let activityLabel = null;
-  if (session?.compacting) {
-    activityLabel = 'Compacting context…';
-  } else if (session?.autoVerifying) {
-    activityLabel = 'Running auto-verify…';
-  } else if (busy) {
-    if (session?.thinkingText) activityLabel = 'Thinking…';
-    else if (session?.streamingText) activityLabel = 'Generating…';
-    else if (session?.runningTool) activityLabel = `Running ${session.runningTool}…`;
-    else activityLabel = 'Working…';
-  }
+  // Derive activity phase + label from session state. Three coarse phases
+  // (thinking / working / waiting) plus compacting/auto-verify specials — never
+  // the specific tool, which is already visible in the chat. The "working"
+  // phase rotates playful gerunds by elapsed time.
+  const phase = activityPhase(session);
+  const activityActive = phase !== null;
+  const runStartedAtMs = session?.runStartedAtMs || 0;
+
+  // Tick once a second while a run is in flight so both the elapsed counter and
+  // the rotating gerund advance on their own.
+  const [activityTick, setActivityTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!activityActive) return;
+    setActivityTick(Date.now());
+    const t = setInterval(() => setActivityTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [activityActive]);
+
+  const elapsedMs = runStartedAtMs ? Math.max(0, activityTick - runStartedAtMs) : 0;
+  const activityLabel = buildActivityLabel(phase, elapsedMs);
+  // Show the timer only for the running phases, not for the momentary
+  // compacting/verifying/waiting states where an age counter reads oddly.
+  const showTimer = runStartedAtMs > 0 && (phase === 'thinking' || phase === 'working');
+  const elapsedText = showTimer ? formatElapsed(elapsedMs) : '';
 
   const permissionMode = session?.permissionMode || 'yolo';
 
@@ -1015,10 +1028,11 @@ export function InputBar({ sessionId, session, tileId }) {
               Caché caducada · el próximo mensaje paga escritura
             </div>
           )}
-          {(busy || session?.autoVerifying || session?.compacting) && activityLabel && (
-            <div class="input-activity">
-              <Loader2 class="input-activity-spinner" />
+          {activityActive && activityLabel && (
+            <div class={`input-activity phase-${phase}`}>
+              <span class="input-activity-dots" aria-hidden="true"><i></i><i></i><i></i></span>
               <span class="input-activity-label">{activityLabel}</span>
+              {elapsedText && <span class="input-activity-timer">· {elapsedText}</span>}
               {busy && (
                 <button class="input-activity-abort" onClick={handleStop} title="Stop (Esc)">
                   Esc to abort

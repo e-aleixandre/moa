@@ -367,6 +367,16 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 		StreamingThinking: truncateHistoryString(streaming.Thinking),
 	}
 
+	// Anchor the client's elapsed counter to the server-side run-start time so
+	// it stays correct across reconnects instead of restarting at zero. Only
+	// while a run is in flight.
+	sess.mu.Lock()
+	runStartedAt := sess.runStartedAt
+	sess.mu.Unlock()
+	if !runStartedAt.IsZero() && (state == string(StateRunning) || state == string(StatePermission)) {
+		data.RunStartedAtMs = runStartedAt.UnixMilli()
+	}
+
 	if len(pendingSteers) > 0 {
 		data.PendingSteers = make([]PendingSteerData, len(pendingSteers))
 		for i, s := range pendingSteers {

@@ -280,6 +280,7 @@ export async function sendMessage(id, text, attachments = []) {
       state: 'running',
       streamingText: null,
       thinkingText: null,
+      runStartedAtMs: Date.now(),
     });
   } else {
     const current = store.get().sessions[id];

@@ -15,7 +15,27 @@ import (
 func (m *Manager) subscribeCacheClock(sess *ManagedSession) {
 	b := sess.runtime.Bus
 	sess.pushUnsubs = append(sess.pushUnsubs,
+		b.Subscribe(func(e bus.RunStarted) {
+			// Anchor the activity-indicator elapsed counter. Recorded server-side
+			// so it survives WebSocket reconnects instead of restarting at zero.
+			// Track the generation so a late RunEnded from a prior run can't clear
+			// a newer run's anchor (the two events race on separate subscriptions).
+			sess.mu.Lock()
+			sess.runStartedAt = time.Now()
+			sess.runStartedGen = e.RunGen
+			sess.mu.Unlock()
+		}),
 		b.Subscribe(func(e bus.RunEnded) {
+			sess.mu.Lock()
+			// Only clear if this end belongs to the run we anchored. A stale
+			// RunEnded from generation N must not wipe the timer of an already
+			// started generation N+1.
+			if e.RunGen >= sess.runStartedGen {
+				sess.runStartedAt = time.Time{}
+				sess.runStartedGen = e.RunGen
+			}
+			sess.mu.Unlock()
+
 			// Only successful runs are guaranteed to have reached the API and
 			// (re)written the cache. Refreshing on a failed run could falsely
 			// report the cache as warm; skipping errors errs toward an early

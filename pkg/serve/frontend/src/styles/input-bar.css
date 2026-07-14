@@ -376,15 +376,39 @@
   background: var(--peach);
   flex-shrink: 0;
 }
-.input-activity-spinner {
-  width: 14px;
-  height: 14px;
-  color: var(--blue);
-  animation: spin 1.2s linear infinite;
+.input-activity-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
   flex-shrink: 0;
 }
+.input-activity-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  animation: activity-breathe 1.3s ease-in-out infinite;
+}
+.input-activity-dots i:nth-child(2) { animation-delay: 0.18s; }
+.input-activity-dots i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes activity-breathe {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40% { opacity: 1; transform: scale(1); }
+}
+.input-activity-timer {
+  color: var(--overlay1);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+/* Waiting-for-you: reclaims attention with the peach accent (nothing is
+   running; you are the blocker). */
+.input-activity.phase-waiting .input-activity-dots i {
+  background: var(--peach);
+}
+.input-activity.phase-waiting .input-activity-label {
+  color: var(--peach);
+}
 .input-activity-label {
-  flex: 1;
   font-weight: 500;
   color: var(--subtext1);
 }
@@ -395,6 +419,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface0);
   transition: all 0.15s;
+  margin-left: auto;
 }
 .input-activity-abort:hover {
   background: var(--surface1);

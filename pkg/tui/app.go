@@ -53,6 +53,7 @@ type state struct {
 	expanded           bool                           // toggle expanded tool results (Ctrl+E)
 	initialized        bool                           // first WindowSizeMsg processed
 	runGen             uint64                         // set from bus.RunStarted; single source of truth is the bus
+	runStart           time.Time                      // wall-clock start of the current run (activity-indicator timer)
 	cleanupOnce        sync.Once                      // idempotent cleanup
 	pendingStatus      string                         // transient generic status shown in View(), never persisted
 	pendingTimeline    *pendingTimelineEvent          // live timeline event shown in View() until next send
@@ -1257,6 +1258,9 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 		m.s.streamText += e.Delta
 		m.s.dirty = true
+		if m.s.streamState == stateStreaming {
+			m.status.SetPhase(phaseWorking, m.s.runStart)
+		}
 
 	case bus.ThinkingDelta:
 		if e.RunGen != m.s.runGen {
@@ -1264,6 +1268,9 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 		m.s.thinkingText += e.Delta
 		m.s.dirty = true
+		if m.s.streamState == stateStreaming && m.s.streamText == "" {
+			m.status.SetPhase(phaseThinking, m.s.runStart)
+		}
 
 	case bus.MessageStarted:
 		if e.RunGen != m.s.runGen {
@@ -1274,7 +1281,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		m.s.streamCache = ""
 		m.s.textMaterialized = false
 		m.s.streamState = stateStreaming
-		m.status.SetText("generating...")
+		m.status.SetPhase(phaseWorking, m.s.runStart)
 
 	case bus.MessageEnded:
 		if e.RunGen != m.s.runGen {
@@ -1324,7 +1331,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 		m.s.streamCache = ""
 		m.s.streamState = stateToolRunning
-		m.status.SetText("generating " + e.ToolName + "...")
+		m.status.SetPhase(phaseWorking, m.s.runStart)
 		m.s.blocks = append(m.s.blocks, messageBlock{
 			Type:       "tool",
 			ToolCallID: e.ToolCallID,
@@ -1353,11 +1360,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 		m.s.activeTools++
 		m.s.streamState = stateToolRunning
-		if m.s.activeTools == 1 {
-			m.status.SetText("running " + e.ToolName + "...")
-		} else {
-			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
-		}
+		m.status.SetPhase(phaseWorking, m.s.runStart)
 		// Check if block was already created by ToolCallStreaming
 		found := false
 		for i := len(m.s.blocks) - 1; i >= 0; i-- {
@@ -1424,12 +1427,8 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		if m.s.activeTools <= 0 {
 			m.s.activeTools = 0
 			m.s.streamState = stateStreaming
-			m.status.SetText("generating...")
-		} else if m.s.activeTools == 1 {
-			m.status.SetText("running tool...")
-		} else {
-			m.status.SetText(fmt.Sprintf("running %d tools...", m.s.activeTools))
 		}
+		m.status.SetPhase(phaseWorking, m.s.runStart)
 		if e.ToolName == "tasks" {
 			m.refreshTaskDisplay()
 		}
@@ -1486,7 +1485,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 
 	case bus.CompactionStarted:
-		m.status.SetText("compacting context...")
+		m.status.SetPhase(phaseCompacting, time.Time{})
 
 	case bus.CompactionEnded:
 		if e.Err != nil {
@@ -1500,7 +1499,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", e.Payload.TokensBefore/1000, e.Payload.TokensAfter/1000),
 			})
 		}
-		m.status.SetText("generating...")
+		m.status.SetPhase(phaseWorking, m.s.runStart)
 		m.refreshContextSegment()
 		m.s.viewportDirty = true
 
@@ -1525,7 +1524,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 
 	// --- Auto-verify ---
 	case bus.AutoVerifyStarted:
-		m.status.SetText("running auto-verify...")
+		m.status.SetPhase(phaseVerifying, time.Time{})
 		return nil
 
 	case bus.AutoVerifyEnded:
@@ -1657,6 +1656,7 @@ func (m *appModel) handlePermissionRequested(e bus.PermissionRequested) []tea.Cm
 	}
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](m.runtime.Bus, bus.GetPermissionMode{})
 	m.permPrompt.ShowFromBus(e.ID, e.ToolName, e.Args, e.AllowPattern, permMode)
+	m.status.SetPhase(phaseWaiting, time.Time{})
 	return cmds
 }
 
@@ -1669,6 +1669,7 @@ func (m *appModel) handleAskUserRequested(e bus.AskUserRequested) []tea.Cmd {
 		cmds = append(cmds, tea.EnterAltScreen, tea.EnableMouseCellMotion)
 	}
 	m.askPrompt.ShowFromBus(e.ID, e.Questions)
+	m.status.SetPhase(phaseWaiting, time.Time{})
 	return cmds
 }
 
@@ -1839,6 +1840,7 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
+	m.s.runStart = time.Time{}
 	// Keep queuedSteers: a steer that arrived during the run's last turn is
 	// still genuinely queued on the agent (it will be delivered on the next run
 	// and reconciled by its Steered event). Dumping it into the transcript here

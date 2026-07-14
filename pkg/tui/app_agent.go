@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ealeixandre/moa/pkg/bus"
@@ -58,8 +59,9 @@ func (m *appModel) prepareRun(label string) {
 	m.s.streamText = ""
 	m.s.thinkingText = ""
 	m.s.streamCache = ""
+	m.s.runStart = time.Now()
 	m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
-	m.status.SetText("working...")
+	m.status.SetPhase(phaseWorking, m.s.runStart)
 }
 
 // launchAgentSend returns a tea.Batch that executes SendPrompt via bus.
