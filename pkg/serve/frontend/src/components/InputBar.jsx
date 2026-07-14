@@ -1,12 +1,13 @@
 import { useRef, useCallback, useEffect, useState } from 'preact/hooks';
 import { SendHorizonal, Mic, MicOff, Square, Loader2, Paperclip, X, ChevronUp } from 'lucide-preact';
-import { sendMessage, cancelRun, cancelSteers, execCommand, execShell, resolvePermission, addPermissionRule, steerSubagent } from '../session-actions.js';
+import { sendMessage, cancelRun, cancelSteers, execCommand, execShell, resolvePermission, addPermissionRule, steerSubagent, newSteerId } from '../session-actions.js';
 import { useVoice } from '../hooks/useVoice.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { addToast } from '../notifications.js';
 import { store, updateSession } from '../store.js';
 import { FileSuggestions } from './FileSuggestions.jsx';
 import { processFile } from '../util/attachments.js';
+import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from '../util/command-policy.js';
 import { activityPhase, activityLabel as buildActivityLabel, formatElapsed } from '../util/activity.js';
 
 const MAX_ATTACHMENTS = 8;
@@ -522,10 +523,18 @@ export function InputBar({ sessionId, session, tileId }) {
     if (!el) return;
 
     // Every chip has a client-minted ID and is queued (or in flight) on the
-    // agent, so pull them all into the textarea for editing.
+    // agent, so pull them all into the textarea for editing. Command chips carry
+    // their full "/command" text; message chips carry their text. Queued images
+    // can't be pulled back — their base64 payload was never tracked client-side
+    // (only the count), so warn that they're dropped and must be re-attached.
     const combined = sess.pendingSteers.map((s) => s.text).join('\n');
+    const droppedImages = sess.pendingSteers.reduce((n, s) => n + (s.images || 0), 0);
     const current = el.value;
     el.value = current ? current + '\n' + combined : combined;
+
+    if (droppedImages > 0) {
+      addToast({ sessionId, title: 'Queued images dropped', detail: `${droppedImages} attached image${droppedImages > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+    }
 
     // Cancel the not-yet-delivered steers on the server so re-submitting the
     // edited text doesn't deliver both the originals and the edit. The server
@@ -573,7 +582,6 @@ export function InputBar({ sessionId, session, tileId }) {
   }, []);
 
   const handleAttachClick = () => {
-    if (busy) return;
     attachInputRef.current?.click();
   };
 
@@ -667,8 +675,62 @@ export function InputBar({ sessionId, session, tileId }) {
       // starts a token (preceded by whitespace, followed by a letter) back into
       // "--". A real em-dash inside prose (word—word) is left untouched.
       const normalized = text.replace(/(^|\s)[\u2013\u2014](?=[A-Za-z])/g, '$1--');
+
+      // While the session is occupied (running / permission) OR the queue rail
+      // is non-empty, a command is classified by policy (mirrors the server's
+      // requireIdle + ClassifyCommand gate): reject commands that can't run
+      // mid-run, and enqueue "queue" commands as a barrier with an optimistic
+      // command chip so they run in strict send order at the next idle point.
+      // An idle session with an empty queue runs everything immediately.
+      const sessNow = store.get().sessions[sessionId];
+      const queueNonEmpty = !!sessNow?.pendingSteers?.length;
+      const occupied = sessionState === 'running' || sessionState === 'permission';
+      let optimisticCmd = null;
+      let cmdId = '';
+      if (occupied || queueNonEmpty) {
+        const policy = classifyCommand(normalized);
+        if (policy === POLICY_REJECT) {
+          addToast({ title: 'Cannot run this now', detail: `${normalized.split(/\s+/)[0]} can't run while the agent is working — stop it first.`, type: 'attention' });
+          return;
+        }
+        if (policy === POLICY_QUEUE) {
+          // Optimistic command chip: minted client-side so it has an
+          // authoritative identity before the POST returns (the server echoes
+          // the same ID on command_queued). Reconciled by ID like a steer chip.
+          cmdId = newSteerId();
+          optimisticCmd = { id: cmdId, text: normalized, command: true };
+          const steers = sessNow?.pendingSteers || [];
+          updateSession(sessionId, { pendingSteers: [...steers, optimisticCmd] });
+        }
+      }
+
       try {
-        const result = await execCommand(sessionId, normalized);
+        const result = await execCommand(sessionId, normalized, cmdId);
+        if (optimisticCmd) {
+          if (result && result.queued) {
+            // Confirm the chip if it's still there (a concurrent
+            // command_dequeued may already have removed it); never resurrect.
+            const cur = store.get().sessions[sessionId];
+            const list = cur?.pendingSteers;
+            if (list && list.some((s) => s.id === cmdId)) {
+              updateSession(sessionId, {
+                pendingSteers: list.map((s) => (s.id === cmdId ? { ...s, confirmed: true } : s)),
+              });
+            }
+            return; // queued — no immediate outcome to surface
+          }
+          // The run ended before the POST landed: the server found the session
+          // idle and ran the command immediately (queued:false), so no
+          // command_dequeued will retire the optimistic chip. Remove it now and
+          // fall through to surface the immediate outcome (verify/rename/error).
+          const cur = store.get().sessions[sessionId];
+          if (cur?.pendingSteers) {
+            const kept = cur.pendingSteers.filter((s) => s !== optimisticCmd);
+            updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
+          }
+        } else if (result && result.queued) {
+          return; // enqueued server-side without an optimistic chip (e.g. idle→queue race)
+        }
         if (text.startsWith('/verify') && result) {
           // Verify ran — surface the pass/fail outcome (the spinner is driven
           // by the AutoVerify WS events).
@@ -686,6 +748,15 @@ export function InputBar({ sessionId, session, tileId }) {
           addToast({ title: 'Command failed', detail: result.message, type: 'error' });
         }
       } catch (e) {
+        // Roll back the optimistic command chip: a rejected enqueue (e.g. 503
+        // queue full, or a network error) must not leave a phantom chip.
+        if (optimisticCmd) {
+          const cur = store.get().sessions[sessionId];
+          if (cur?.pendingSteers) {
+            const kept = cur.pendingSteers.filter((s) => s !== optimisticCmd);
+            updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
+          }
+        }
         addToast({ title: 'Command error', detail: e.message, type: 'error' });
       }
       return;
@@ -862,6 +933,29 @@ export function InputBar({ sessionId, session, tileId }) {
 
   const handleStop = async () => {
     if (!sessionId) return;
+    // On abort the agent discards its queued steers/commands (they belonged to
+    // the now-dead run) without emitting an event, so the user's intent would be
+    // lost. Preserve it: move the locally-tracked queued chips back into the
+    // input before cancelling, and clear them (mirrors the TUI's abort-dumps-
+    // queue-to-input). Images can't be restored (base64 not tracked) — warn.
+    const sess = store.get().sessions[sessionId];
+    const steers = sess?.pendingSteers;
+    if (steers && steers.length > 0) {
+      const el = textareaRef.current;
+      if (el) {
+        const combined = steers.map((s) => s.text).join('\n');
+        el.value = el.value ? el.value + '\n' + combined : combined;
+        setHasText(!!el.value.trim());
+        autoResize();
+        el.focus();
+        el.selectionStart = el.selectionEnd = el.value.length;
+      }
+      const droppedImages = steers.reduce((n, s) => n + (s.images || 0), 0);
+      if (droppedImages > 0) {
+        addToast({ sessionId, title: 'Queued images dropped', detail: `${droppedImages} attached image${droppedImages > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+      }
+      updateSession(sessionId, { pendingSteers: null });
+    }
     try {
       await cancelRun(sessionId);
     } catch (e) {
@@ -1040,15 +1134,22 @@ export function InputBar({ sessionId, session, tileId }) {
               )}
             </div>
           )}
-          {!subagentMode && pendingSteers && pendingSteers.length > 0 && (
-            <button class="input-steers" onClick={handleDequeueSteers} title="Click or Alt+↑ to edit queued messages">
-              {pendingSteers.length === 1
-                ? <span class="input-steer-text">{pendingSteers[0].text}</span>
-                : <span class="input-steer-text">{pendingSteers[pendingSteers.length - 1].text} <span class="input-steer-count">+{pendingSteers.length - 1}</span></span>
-              }
-              <span class="input-steer-badge">queued · click to edit</span>
-            </button>
-          )}
+          {!subagentMode && pendingSteers && pendingSteers.length > 0 && (() => {
+            const last = pendingSteers[pendingSteers.length - 1];
+            const extra = pendingSteers.length - 1;
+            const badge = last.command ? 'command · queued' : 'queued · click to edit';
+            return (
+              <button class="input-steers" onClick={handleDequeueSteers} title="Click or Alt+↑ to edit queued messages">
+                {last.command && <span class="input-steer-cmd" aria-hidden="true">/</span>}
+                {!last.command && last.images > 0 && <span class="input-steer-img" aria-hidden="true">🖼</span>}
+                <span class="input-steer-text">
+                  {last.command ? last.text.replace(/^\//, '') : last.text}
+                  {extra > 0 && <span class="input-steer-count"> +{extra}</span>}
+                </span>
+                <span class="input-steer-badge">{badge}</span>
+              </button>
+            );
+          })()}
           {subagentMode && subagentPending.length > 0 && (
             <div class="input-steers-list">
               {subagentPending.map((msg, i) => (
@@ -1090,7 +1191,6 @@ export function InputBar({ sessionId, session, tileId }) {
           <button
             class="input-attach"
             onClick={handleAttachClick}
-            disabled={busy}
             title="Attach files"
           >
             <Paperclip />

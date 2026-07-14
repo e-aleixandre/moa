@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -82,7 +82,7 @@ test('handleWsInit keeps an in-flight local chip (ID not yet in snapshot) but ad
 
   const steers = store.get().sessions.s1.pendingSteers;
   expect(steers).toHaveLength(2);
-  expect(steers[0]).toEqual({ id: 'srv9', text: 'queued elsewhere', confirmed: true });
+  expect(steers[0]).toMatchObject({ id: 'srv9', text: 'queued elsewhere', confirmed: true });
   expect(steers[1]).toEqual({ id: 'c-local1', text: 'just typed' });
 });
 
@@ -172,6 +172,61 @@ test('handleWsSteersCanceled clears the shared queue on every client', () => {
   handleWsSteersCanceled('s1');
 
   expect(store.get().sessions.s1.pendingSteers).toBeNull();
+});
+
+test('handleWsCommandQueued appends a command chip and confirms an optimistic one by ID', () => {
+  seedSession('s1');
+  // From another device: no local chip yet — append it.
+  handleWsCommandQueued('s1', { id: 'cmd-1', raw: '/compact' });
+  let steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0]).toMatchObject({ id: 'cmd-1', text: '/compact', command: true, confirmed: true });
+
+  // Same device that already showed an optimistic (unconfirmed) chip: confirm,
+  // don't duplicate.
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [
+    { id: 'cmd-2', text: '/model sonnet', command: true },
+  ] } } });
+  handleWsCommandQueued('s1', { id: 'cmd-2', raw: '/model sonnet' });
+  steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0].confirmed).toBe(true);
+});
+
+test('handleWsCommandDequeued removes the command chip; a failure surfaces a toast', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [
+    { id: 'cmd-1', text: '/compact', command: true, confirmed: true },
+    { id: 'q2', text: 'keep me' },
+  ] } } });
+
+  // Executed at idle: chip gone, others kept, no toast.
+  const before = getToasts().length;
+  handleWsCommandDequeued('s1', { id: 'cmd-1', raw: '/compact', executed: true });
+  let steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0].id).toBe('q2');
+  expect(getToasts().length).toBe(before);
+
+  // Failed permanently: chip gone AND an error toast is raised.
+  handleWsCommandDequeued('s1', { id: 'q2', raw: '/bogus', executed: false, err: 'boom' });
+  expect(store.get().sessions.s1.pendingSteers).toBeNull();
+  expect(getToasts().length).toBe(before + 1);
+});
+
+test('mergeSteers carries command/images through a reconnect snapshot', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    state: 'running',
+    pending_steers: [
+      { id: 'cmd-1', text: '/compact', command: true },
+      { id: 'm1', text: 'look at this', images: 2 },
+    ],
+  });
+  const steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(2);
+  expect(steers[0]).toMatchObject({ id: 'cmd-1', command: true, confirmed: true });
+  expect(steers[1]).toMatchObject({ id: 'm1', images: 2, command: false, confirmed: true });
 });
 
 test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', () => {

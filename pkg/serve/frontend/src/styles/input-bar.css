@@ -62,6 +62,18 @@
   padding: 1px 6px;
   border-radius: 3px;
 }
+/* Command barrier chip: a queued slash command runs at the next idle point. */
+.input-steer-cmd {
+  flex: none;
+  font-weight: 700;
+  color: var(--mauve);
+  font-family: var(--font-mono, monospace);
+}
+/* Image marker: a queued message carries attached image(s). */
+.input-steer-img {
+  flex: none;
+  font-size: 12px;
+}
 
 /* Wrapper: positions mic inside the textarea area */
 .input-wrap {

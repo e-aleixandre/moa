@@ -16,7 +16,7 @@ mock.module('./api.js', () => ({
 }));
 
 const { store, setState } = await import('./store.js');
-const { loadSessions } = await import('./session-actions.js');
+const { loadSessions, sendMessage } = await import('./session-actions.js');
 
 beforeEach(() => {
   setState({ sessions: {}, tileTree: null, activeSession: null });
@@ -50,4 +50,35 @@ test('loadSessions leaves rate-limit percents undefined for a fresh session', as
   const s2 = store.get().sessions.s2;
   expect(s2.rlFiveHourPct).toBeUndefined();
   expect(s2.rlSevenDayPct).toBeUndefined();
+});
+
+test('sendMessage mid-run records the image count on the optimistic steer chip', async () => {
+  // A running session: the send becomes a steer, and the optimistic chip must
+  // carry the number of attached images so the UI can badge it and warn on
+  // pull-back/abort (base64 is not tracked locally, only the count).
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] } } });
+  apiResponse = { action: 'steer' };
+
+  await sendMessage('s1', 'look at these', [
+    { name: 'a.png', mime: 'image/png', data: 'AAAA', isImage: true },
+    { name: 'b.png', mime: 'image/png', data: 'BBBB', isImage: true },
+    { name: 'notes.txt', mime: 'text/plain', data: 'Q0M=', isImage: false },
+  ]);
+
+  const steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0].text).toBe('look at these');
+  expect(steers[0].images).toBe(2);
+  expect(steers[0].confirmed).toBe(true);
+});
+
+test('sendMessage mid-run without images omits the images field', async () => {
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] } } });
+  apiResponse = { action: 'steer' };
+
+  await sendMessage('s1', 'just text', []);
+
+  const steers = store.get().sessions.s1.pendingSteers;
+  expect(steers).toHaveLength(1);
+  expect(steers[0].images).toBeUndefined();
 });

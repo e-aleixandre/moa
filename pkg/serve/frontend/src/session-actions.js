@@ -17,7 +17,7 @@ let pollTimer = null;
 // where it must be reconciled by text. crypto.randomUUID is available in the
 // secure contexts this app runs in (localhost / Tailscale HTTPS); the fallback
 // keeps it working if that ever changes.
-function newSteerId() {
+export function newSteerId() {
   try {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return 'c-' + crypto.randomUUID();
   } catch { /* fall through */ }
@@ -292,6 +292,8 @@ export async function sendMessage(id, text, attachments = []) {
     // by text (closes the double-send and cancel-vs-in-flight races).
     steerId = newSteerId();
     optimisticSteer = { id: steerId, text };
+    const imageCount = attachments.filter((a) => a.isImage).length;
+    if (imageCount > 0) optimisticSteer.images = imageCount;
     updateSession(id, { pendingSteers: [...steers, optimisticSteer] });
   }
 
@@ -473,8 +475,8 @@ export async function trustMcp(id) {
   updateSession(id, { untrustedMcp: false });
 }
 
-export async function execCommand(id, command) {
-  const res = await api('POST', `/api/sessions/${id}/command`, { command });
+export async function execCommand(id, command, steerId = '') {
+  const res = await api('POST', `/api/sessions/${id}/command`, { command, id: steerId || undefined });
   if (res && res.newSessionId) {
     await loadSessions();
     const state = store.get();

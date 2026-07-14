@@ -265,8 +265,15 @@ function flushDeltas() {
 function mergeSteers(snapshot, local) {
   // Snapshot steers are authoritative and already accepted by the server, so
   // they are confirmed: a later snapshot that omits them means delivered/
-  // cancelled, not in-flight.
-  const server = (snapshot || []).map(s => ({ id: s.id, text: s.text, confirmed: true }));
+  // cancelled, not in-flight. command/images ride along so a reconnect restores
+  // a queued command barrier as a command chip and badges an image message.
+  const server = (snapshot || []).map(s => ({
+    id: s.id,
+    text: s.text,
+    command: !!s.command,
+    images: s.images || 0,
+    confirmed: true,
+  }));
   const serverIds = new Set(server.map(s => s.id));
   const inFlightLocal = (local || []).filter(s => s && s.id && s.confirmed !== true && !serverIds.has(s.id));
   const merged = [...server, ...inFlightLocal];
@@ -1065,6 +1072,40 @@ export function handleWsSteersCanceled(id) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.pendingSteers) return;
   updateSession(id, { pendingSteers: null });
+}
+
+// handleWsCommandQueued adds a queued slash-command barrier to the shared queue
+// on every client. The command was enqueued mid-run (policy = queue) and will
+// run at the next idle point, preserving strict send order. Reconciled by ID:
+// the client that issued it minted the ID for its optimistic chip, so this
+// authoritative event just confirms it (or, for another device, appends it).
+export function handleWsCommandQueued(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data || !data.id) return;
+  const steers = [...(sess.pendingSteers || [])];
+  if (steers.some(s => s.id === data.id)) {
+    // Already present as an optimistic chip — confirm it (see mergeSteers).
+    updateSession(id, {
+      pendingSteers: steers.map(s => (s.id === data.id ? { ...s, confirmed: true } : s)),
+    });
+    return;
+  }
+  steers.push({ id: data.id, text: data.raw, command: true, confirmed: true });
+  updateSession(id, { pendingSteers: steers });
+}
+
+// handleWsCommandDequeued removes a queued command barrier when it leaves the
+// queue — either executed at idle (executed=true) or dropped because it failed
+// permanently (executed=false, err set). The command chip disappears; a failure
+// surfaces as a toast so a queued command that never ran isn't lost silently.
+export function handleWsCommandDequeued(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data || !data.id) return;
+  const steers = (sess.pendingSteers || []).filter(s => s.id !== data.id);
+  updateSession(id, { pendingSteers: steers.length > 0 ? steers : null });
+  if (!data.executed && data.err) {
+    addToast({ sessionId: id, title: 'Queued command failed', detail: `${data.raw}: ${data.err}`, type: 'error' });
+  }
 }
 
 export function handleWsTasksUpdate(id, data) {
