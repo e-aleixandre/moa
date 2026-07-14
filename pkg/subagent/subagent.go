@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -514,7 +515,15 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			if j.claimAsyncCompletion() && cfg.OnAsyncComplete != nil {
 				snap, ok := jobs.snapshot(j.id)
 				if ok {
-					tail, wasTruncated := tailLinesWithFlag(snap.Result, asyncResultTailLines)
+					// A failed job carries its message in Error, not Result, so
+					// deliver whichever is populated — otherwise a failure
+					// (e.g. a timeout, with its actionable text + partial) would
+					// surface as an empty notification.
+					payload := snap.Result
+					if snap.Status == statusFailed {
+						payload = snap.Error
+					}
+					tail, wasTruncated := tailLinesWithFlag(payload, asyncResultTailLines)
 					cfg.OnAsyncComplete(snap.ID, snap.Task, snap.Status, tail, wasTruncated)
 				}
 			}
@@ -560,14 +569,104 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	jobs.setMessages(j.id, msgs)
 	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs))
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		// Classify from authoritative signals, not the returned error's chain
+		// (a provider may wrap a context error while the context is still live).
+		// jobCtx.Err() is the authoritative "was THIS job cancelled" signal —
+		// subagent_cancel and an AppCtx shutdown both cancel jobCtx. Check it
+		// first so a genuine cancel wins even if a deadline also tripped in the
+		// same unwind.
+		if jobCtx.Err() == context.Canceled {
 			jobs.setCancelled(j.id)
+			return
+		}
+		if child.TimedOut() {
+			// The child exhausted its own MaxRunDuration budget (not an
+			// inherited parent deadline — child.TimedOut() already excludes
+			// that). Surface an actionable message instead of the cryptic
+			// "stream: context deadline exceeded", and keep whatever it produced
+			// before the deadline so the work isn't lost.
+			_, effective := resolveChildGuardrails(cfg, maxRunDuration)
+			jobs.setFailed(j.id, timeoutMessage(effective, timeoutPartial(msgs)))
 			return
 		}
 		jobs.setFailed(j.id, err.Error())
 		return
 	}
 	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
+}
+
+// timeoutMessage builds the actionable text shown when a subagent exhausts its
+// wall-clock budget: any real partial output the child produced, followed by the
+// effective duration that tripped and a suggested larger max_duration. The
+// actionable guidance goes LAST so it survives tail-truncation on the async
+// notification path (which keeps the final lines).
+func timeoutMessage(effective time.Duration, partial string) string {
+	guidance := fmt.Sprintf("subagent timed out after %s (its max run duration). Re-run with a larger max_duration (e.g. %q) for long tasks, or split the task into smaller steps.", effective, formatDurationArg(suggestLongerDuration(effective)))
+	if partial != "" {
+		return "Partial output before the timeout:\n" + partial + "\n\n" + guidance
+	}
+	return guidance
+}
+
+// timeoutPartial returns the child's real partial assistant text, excluding the
+// synthetic "(run timed out)" marker the agent inserts when the deadline trips
+// before any reply — that marker is a status note, not model output.
+func timeoutPartial(msgs []core.AgentMessage) string {
+	partial := core.ExtractFinalAssistantText(msgs)
+	if partial == agent.MarkerRunTimedOut {
+		return ""
+	}
+	return partial
+}
+
+// formatDurationArg renders a whole-minute duration the way the max_duration
+// arg expects (a Go duration string): "20m", "1h", "1h30m" rather than Go's
+// default "20m0s" / "1h0m0s". Assumes d is a whole number of minutes (what
+// suggestLongerDuration produces).
+func formatDurationArg(d time.Duration) string {
+	mins := int(d / time.Minute)
+	h, m := mins/60, mins%60
+	switch {
+	case h > 0 && m > 0:
+		return fmt.Sprintf("%dh%dm", h, m)
+	case h > 0:
+		return fmt.Sprintf("%dh", h)
+	default:
+		return fmt.Sprintf("%dm", m)
+	}
+}
+
+// suggestLongerDuration proposes a bigger max_duration to retry a timed-out
+// subagent with: double the exhausted budget, rounded UP to a whole minute so
+// the suggestion is never smaller than the real double, with a 1m floor. Guards
+// against overflow for absurdly large budgets by capping instead of wrapping.
+func suggestLongerDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return time.Minute
+	}
+	// Double the budget, but never wrap: cap at MaxInt64 for astronomical inputs.
+	doubled := time.Duration(math.MaxInt64)
+	if d <= math.MaxInt64/2 {
+		doubled = d * 2
+	}
+	return roundUpToMinute(doubled)
+}
+
+// roundUpToMinute rounds d up to the next whole minute, with a 1m floor, without
+// overflowing: if rounding up would wrap past MaxInt64, it rounds DOWN to the
+// current whole minute instead (still positive and a valid Go duration).
+func roundUpToMinute(d time.Duration) time.Duration {
+	if d < time.Minute {
+		return time.Minute
+	}
+	r := d % time.Minute
+	if r == 0 {
+		return d
+	}
+	if d > math.MaxInt64-(time.Minute-r) {
+		return d - r // rounding up would overflow; round down to a whole minute
+	}
+	return d + (time.Minute - r)
 }
 
 // forwardChildEvent translates a child's core.AgentEvent into typed bus

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
@@ -675,6 +677,135 @@ func TestAsyncSubagentStatusAndCompletion(t *testing.T) {
 	})
 }
 
+func TestSubagentTimeoutSurfacesActionableMessage(t *testing.T) {
+	// A provider that blocks until the context is cancelled, then reports the
+	// context error — mimicking a real stream that outlives the child's own
+	// MaxRunDuration budget.
+	provider := newMockProvider(cancellableResponse(nil))
+	var (
+		mu             sync.Mutex
+		notifiedStatus string
+		notifiedTail   string
+	)
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:        core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory:     func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:              context.Background(),
+		ChildMaxRunDuration: 50 * time.Millisecond,
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			mu.Lock()
+			notifiedStatus = status
+			notifiedTail = resultTail
+			mu.Unlock()
+		},
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+
+	waitFor(t, 2*time.Second, func() bool {
+		r, _ := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+		return strings.Contains(textOf(r), "Status: failed")
+	})
+	r, _ := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+	got := textOf(r)
+	// Actionable message, not the cryptic raw error.
+	if !strings.Contains(got, "timed out after 50ms") {
+		t.Errorf("expected effective-duration timeout message, got %q", got)
+	}
+	if !strings.Contains(got, "max_duration") {
+		t.Errorf("expected max_duration guidance, got %q", got)
+	}
+	if strings.Contains(got, "context deadline exceeded") {
+		t.Errorf("should not leak the raw context error: %q", got)
+	}
+
+	// Blocker #2: the async notification path must deliver the failure message,
+	// not an empty string (a failed job carries its text in Error, not Result).
+	waitFor(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return notifiedStatus == statusFailed
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(notifiedTail, "timed out after 50ms") {
+		t.Errorf("OnAsyncComplete tail should carry the timeout message, got %q", notifiedTail)
+	}
+}
+
+// An inherited parent deadline (AppCtx) that fires must NOT be misreported as
+// the child exhausting its own much-larger MaxRunDuration budget.
+func TestSubagentInheritedDeadlineNotReportedAsChildTimeout(t *testing.T) {
+	provider := newMockProvider(cancellableResponse(nil))
+	appCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:        core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory:     func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:              appCtx,
+		ChildMaxRunDuration: 10 * time.Minute, // far larger than the AppCtx deadline
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+
+	waitFor(t, 2*time.Second, func() bool {
+		r, _ := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+		s := textOf(r)
+		return strings.Contains(s, "Status: failed") || strings.Contains(s, "Status: cancelled")
+	})
+	got := textOf(mustStatus(t, statusTool, jobID))
+	// The child's 10m budget did NOT trip; must not claim it did.
+	if strings.Contains(got, "timed out after 10m") {
+		t.Errorf("inherited deadline misreported as child timeout: %q", got)
+	}
+}
+
+// A genuine subagent_cancel racing the child's own deadline must be classified
+// as cancelled, never as a timeout.
+func TestSubagentCancelWinsOverTimeout(t *testing.T) {
+	provider := newMockProvider(cancellableResponse(nil))
+	sub, statusTool, cancelTool := newSubagentTools(t, Config{
+		DefaultModel:        core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory:     func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:              context.Background(),
+		ChildMaxRunDuration: 10 * time.Minute,
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+
+	if _, err := cancelTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, statusTool, jobID)), "Status: cancelled")
+	})
+	got := textOf(mustStatus(t, statusTool, jobID))
+	if strings.Contains(got, "timed out") {
+		t.Errorf("cancel must not be reported as timeout: %q", got)
+	}
+}
+
+func mustStatus(t *testing.T, statusTool core.Tool, jobID string) core.Result {
+	t.Helper()
+	r, err := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
 func TestAsyncSubagentSurvivesParentContextCancellation(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -1130,6 +1261,110 @@ func TestResolveMaxDuration(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSuggestLongerDuration(t *testing.T) {
+	tests := []struct {
+		in   time.Duration
+		want time.Duration
+	}{
+		{10 * time.Minute, 20 * time.Minute},
+		{30 * time.Minute, time.Hour},
+		{time.Hour, 2 * time.Hour},
+		{20 * time.Second, time.Minute},      // 40s → round UP to 1m
+		{90 * time.Second, 3 * time.Minute},  // 180s exact
+		{40 * time.Second, 2 * time.Minute},  // 80s → round UP to 2m (never below the double)
+		{100 * time.Second, 4 * time.Minute}, // 200s → round UP to 4m
+		{math.MaxInt64 - 100, 0},             // overflow guard: no fixed want, invariants checked below
+	}
+	overflowIdx := len(tests) - 1
+	for i, tc := range tests {
+		got := suggestLongerDuration(tc.in)
+		// The overflow case has no fixed expected value; assert only invariants.
+		if i != overflowIdx && got != tc.want {
+			t.Errorf("suggestLongerDuration(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+		// Invariant: the suggestion is always a positive, whole-minute duration.
+		if got <= 0 {
+			t.Errorf("suggestLongerDuration(%v) = %v is not positive", tc.in, got)
+		}
+		if got%time.Minute != 0 {
+			t.Errorf("suggestLongerDuration(%v) = %v is not a whole minute", tc.in, got)
+		}
+		if i == overflowIdx {
+			// At the very ceiling of time.Duration we cannot round up without
+			// wrapping, so we round down to the current whole minute — still
+			// within a minute of the (astronomical) input, never the old
+			// catastrophic wrap to a tiny/negative value.
+			if tc.in-got >= time.Minute {
+				t.Errorf("overflow: suggestLongerDuration(%v) = %v drifted too far below input", tc.in, got)
+			}
+			continue
+		}
+		// For all realistic inputs the suggestion never shrinks the budget...
+		if got < tc.in {
+			t.Errorf("suggestLongerDuration(%v) = %v is below the original budget", tc.in, got)
+		}
+		// ...and, when doubling doesn't overflow, is never below the real double.
+		if tc.in >= time.Minute/2 && tc.in <= math.MaxInt64/2 && got < tc.in*2 {
+			t.Errorf("suggestLongerDuration(%v) = %v is below the double %v", tc.in, got, tc.in*2)
+		}
+	}
+}
+func TestFormatDurationArg(t *testing.T) {
+	tests := []struct {
+		in   time.Duration
+		want string
+	}{
+		{20 * time.Minute, "20m"},
+		{time.Hour, "1h"},
+		{90 * time.Minute, "1h30m"},
+		{2 * time.Hour, "2h"},
+		{time.Minute, "1m"},
+	}
+	for _, tc := range tests {
+		if got := formatDurationArg(tc.in); got != tc.want {
+			t.Errorf("formatDurationArg(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestTimeoutMessage(t *testing.T) {
+	msg := timeoutMessage(10*time.Minute, "")
+	if !strings.Contains(msg, "timed out after 10m0s") {
+		t.Errorf("message should state the effective duration: %q", msg)
+	}
+	if !strings.Contains(msg, `"20m"`) {
+		t.Errorf("message should suggest a larger max_duration: %q", msg)
+	}
+	if strings.Contains(msg, "Partial output") {
+		t.Errorf("no partial should not mention partial output: %q", msg)
+	}
+	withPartial := timeoutMessage(10*time.Minute, "did half the work")
+	if !strings.Contains(withPartial, "Partial output before the timeout:\ndid half the work") {
+		t.Errorf("partial should be included: %q", withPartial)
+	}
+	// The actionable guidance must come AFTER the partial so it survives
+	// tail-truncation on the async notification path.
+	if strings.Index(withPartial, "did half the work") > strings.Index(withPartial, "timed out after") {
+		t.Errorf("guidance should come after the partial, got %q", withPartial)
+	}
+}
+
+func TestTimeoutPartialExcludesMarker(t *testing.T) {
+	// The synthetic "(run timed out)" marker must not be surfaced as real output.
+	marker := []core.AgentMessage{
+		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent(agent.MarkerRunTimedOut)}}),
+	}
+	if got := timeoutPartial(marker); got != "" {
+		t.Errorf("marker-only should yield empty partial, got %q", got)
+	}
+	real := []core.AgentMessage{
+		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("real work")}}),
+	}
+	if got := timeoutPartial(real); got != "real work" {
+		t.Errorf("real text should pass through, got %q", got)
 	}
 }
 

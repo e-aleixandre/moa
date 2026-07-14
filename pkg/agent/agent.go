@@ -130,6 +130,13 @@ type Agent struct {
 	followUps  []string // consumed after agentLoop returns in execute()
 
 	lastRunCost float64 // USD cost of the most recent execute(), guarded by mu
+	// lastRunTimedOut records whether the most recent execute() ended because
+	// this run's own MaxRunDuration deadline tripped (ctx.Err() ==
+	// context.DeadlineExceeded), as opposed to a user abort or a provider error
+	// that merely wrapped a context error. Derived from the run context — the
+	// authoritative intent signal, same as interruptedMarkerText — so callers
+	// need not (unreliably) inspect the returned error's chain. Guarded by mu.
+	lastRunTimedOut bool
 }
 
 // AgentConfig configures an Agent.
@@ -771,6 +778,12 @@ func (a *Agent) Abort() {
 	}
 }
 
+// MarkerRunTimedOut is the synthetic assistant-message text inserted when a run
+// ends on its MaxRunDuration deadline before the model replied. Exported so
+// callers that surface partial output can recognise and exclude it (it is a
+// status marker, not real assistant text).
+const MarkerRunTimedOut = "(run timed out)"
+
 // interruptedMarkerText returns the text for the synthetic assistant message
 // inserted when a run ends before the model replied. It reflects the actual
 // cause so a provider failure is never mislabeled as a user interruption.
@@ -789,7 +802,7 @@ func (a *Agent) Abort() {
 func interruptedMarkerText(ctx context.Context, err error) string {
 	switch ctx.Err() {
 	case context.DeadlineExceeded:
-		return "(run timed out)"
+		return MarkerRunTimedOut
 	case context.Canceled:
 		return "(interrupted by user)"
 	}
@@ -835,7 +848,12 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	// marker. Normalizing here, under a.mu, closes that gap for every ingress path.
 	ensureMsgIDs(a.state.Messages)
 
-	// Apply run duration limit
+	// Apply run duration limit. Keep the parent context to distinguish OUR own
+	// deadline from an inherited one: with context.WithTimeout the effective
+	// deadline is the earlier of parent and child, so ctx.Err() alone can't tell
+	// whether it was this run's MaxRunDuration or a caller-imposed deadline that
+	// fired. parentCtx lets TimedOut() attribute the timeout correctly.
+	parentCtx := ctx
 	if a.config.MaxRunDuration > 0 {
 		ctx, a.cancel = context.WithTimeout(ctx, a.config.MaxRunDuration)
 	} else {
@@ -914,6 +932,18 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		}
 	}
 
+	// Classify the termination cause NOW, the instant the loop returned — before
+	// any cleanup (marker insertion, Emitter.Drain) that could itself outlast our
+	// deadline and taint ctx.Err(). Our own MaxRunDuration budget was exhausted
+	// only if: the run ended with an error, we set a duration, our context tripped
+	// its deadline, and the parent context did NOT itself end (a parent
+	// deadline/cancel propagates into ctx too, but that's the caller's limit, not
+	// ours). Same ctx.Err() signal interruptedMarkerText uses just below.
+	timedOut := err != nil &&
+		a.config.MaxRunDuration > 0 &&
+		ctx.Err() == context.DeadlineExceeded &&
+		parentCtx.Err() == nil
+
 	// On abort, discard any steer messages still queued for the now-cancelled
 	// run. Left in the queue they would be drained by the next Send/Run and
 	// injected as a stale user turn — possibly into a different conversation
@@ -959,9 +989,21 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 	// so callers can charge the real spend rather than re-deriving it from msgs.
 	a.mu.Lock()
 	a.lastRunCost = cfg.runCost
+	// Record the cause captured right after the loop (see `timedOut` above),
+	// not ctx.Err() here — by now cleanup/drain may have crossed our deadline.
+	a.lastRunTimedOut = timedOut
 	a.mu.Unlock()
 
 	return msgs, err
+}
+
+// TimedOut reports whether the most recent Run/Send ended because the run's own
+// MaxRunDuration deadline tripped. False for a user abort, a provider error, or
+// a normal completion. Derived from the run context, not the returned error.
+func (a *Agent) TimedOut() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lastRunTimedOut
 }
 
 // RunCost returns the USD cost accumulated by the most recent Run/Send. It is a

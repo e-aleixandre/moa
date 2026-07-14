@@ -60,6 +60,21 @@ func (p *alwaysProvider) Stream(_ context.Context, _ core.Request) (<-chan core.
 	return ch, nil
 }
 
+// ctxBlockingProvider blocks each Stream call until the run context is
+// cancelled, then reports the context error — mimicking a stream that outlives
+// the run's MaxRunDuration deadline. Used to exercise TimedOut().
+type ctxBlockingProvider struct{}
+
+func (p *ctxBlockingProvider) Stream(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 1)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: ctx.Err()}
+	}()
+	return ch, nil
+}
+
 // simpleTextResponse returns a handler that streams a text response.
 func simpleTextResponse(text string) func(req core.Request) (<-chan core.AssistantEvent, error) {
 	return func(req core.Request) (<-chan core.AssistantEvent, error) {
@@ -1277,6 +1292,53 @@ func TestParallelToolCalls_ContextCancellation(t *testing.T) {
 	_, err = ag.Run(context.Background(), "Block forever")
 	if err == nil {
 		t.Fatal("expected error from context cancellation")
+	}
+}
+
+func TestTimedOut_TrueOnRunDurationDeadline(t *testing.T) {
+	// A provider that blocks until the Stream context is cancelled — the run's
+	// own MaxRunDuration budget is what trips it.
+	provider := &ctxBlockingProvider{}
+	ag, err := New(AgentConfig{
+		Provider:       provider,
+		Model:          core.Model{ID: "test"},
+		Tools:          core.NewRegistry(),
+		MaxTurns:       10,
+		MaxRunDuration: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ag.Run(context.Background(), "block"); err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !ag.TimedOut() {
+		t.Error("TimedOut() should be true after a MaxRunDuration timeout")
+	}
+}
+
+func TestTimedOut_FalseOnProviderError(t *testing.T) {
+	// The provider fails immediately with the run context still alive: this is
+	// NOT a duration timeout and must not be misclassified as one, even though
+	// a MaxRunDuration is configured.
+	provider := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
+		return nil, fmt.Errorf("boom: provider unavailable")
+	})
+	ag, err := New(AgentConfig{
+		Provider:       provider,
+		Model:          core.Model{ID: "test"},
+		Tools:          core.NewRegistry(),
+		MaxTurns:       10,
+		MaxRunDuration: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ag.Run(context.Background(), "go"); err == nil {
+		t.Fatal("expected provider error")
+	}
+	if ag.TimedOut() {
+		t.Error("TimedOut() must be false for a provider error (context still alive)")
 	}
 }
 
