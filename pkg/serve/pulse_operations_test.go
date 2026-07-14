@@ -88,7 +88,7 @@ func pendingPulsePermissionOperation(t *testing.T, command string) (*Manager, *M
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.Send(sess.ID, "request permission", nil); err != nil {
+	if _, _, err := mgr.Send(sess.ID, "request permission", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 3*time.Second, "pending permission", func() bool {
