@@ -168,13 +168,8 @@ type Steered struct {
 	SessionID string
 	RunGen    uint64
 	ID        string
-	// IDs, when non-empty, lists every queued-steer chip ID this single event
-	// consumes at once — used when several queued steers are folded into one
-	// delivered message (deliverQueuedSteers). Clients clear all of them; ID is
-	// left empty in that case.
-	IDs   []string
-	MsgID string
-	Text  string
+	MsgID     string
+	Text      string
 }
 
 // SteersCanceled is published when all queued (not yet delivered) steers are

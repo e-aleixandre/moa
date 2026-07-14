@@ -1046,13 +1046,9 @@ export function handleWsSteer(id, data) {
   // before the chip appears, so every chip already has its final identity and
   // two queued messages with identical text never collapse into one chip. A
   // steer from another device carries an ID this client never had, so it just
-  // appends the message without touching local chips. data.ids (a batch) is
-  // used when several queued steers were folded into one delivered message
-  // (deliverQueuedSteers): clear every chip in the batch at once.
-  const consumed = data.ids && data.ids.length ? data.ids : (data.id ? [data.id] : []);
-  if (consumed.length) {
-    const drop = new Set(consumed);
-    steers = steers.filter(s => !drop.has(s.id));
+  // appends the message without touching local chips.
+  if (data.id) {
+    steers = steers.filter(s => s.id !== data.id);
   }
   // Dedup the injected user message by MsgID: a non-atomic reconnect snapshot
   // may already contain it (the agent appended it to state before the cut),

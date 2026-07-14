@@ -124,29 +124,6 @@ test('handleWsSteer removes the queued chip by ID, not by text', () => {
   expect(steers[0].id).toBe('a');
 });
 
-test('handleWsSteer clears a whole batch of chips via data.ids and dedups by MsgID', () => {
-  seedSession('s1');
-  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], pendingSteers: [
-    { id: 'q1', text: 'a', confirmed: true },
-    { id: 'q2', text: 'b', confirmed: true },
-    { id: 'q3', text: 'unrelated' },
-  ] } } });
-
-  // deliverQueuedSteers folds q1+q2 into one joined message and announces both
-  // IDs at once with a shared MsgID.
-  handleWsSteer('s1', { ids: ['q1', 'q2'], msg_id: 'joined1', text: 'a\nb' });
-
-  const sess = store.get().sessions.s1;
-  expect(sess.pendingSteers).toHaveLength(1);
-  expect(sess.pendingSteers[0].id).toBe('q3');
-  expect(sess.messages).toHaveLength(1);
-  expect(sess.messages[0]._msg_id).toBe('joined1');
-
-  // A reconnect that replays the same event must not duplicate the message.
-  handleWsSteer('s1', { ids: ['q1', 'q2'], msg_id: 'joined1', text: 'a\nb' });
-  expect(store.get().sessions.s1.messages).toHaveLength(1);
-});
-
 test('handleWsSteer dedups the injected user message by MsgID', () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [

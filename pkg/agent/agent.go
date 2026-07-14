@@ -77,7 +77,7 @@ func (q *steerQueue) push(it core.SteerItem) bool {
 
 // pushFront re-inserts items at the head of the queue, preserving their order.
 // Used to hand back items that were drained but then lost the race to start a
-// run (deliverQueuedSteers): the concurrent run that won the slot drains them on
+// run (the pump's reserve-then-drain): the concurrent run that won the slot drains them on
 // its next step, so this is a transient, self-healing state. It does NOT drop to
 // steerBufferSize: these items were already accepted (a caller was told the
 // steer is queued), so truncating would silently lose an accepted user message.

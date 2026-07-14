@@ -591,9 +591,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactResultMsg:
 		// A message queued during the compact may have started a follow-up run
-		// (deliverQueuedSteers). If the session is actually running now, switch
-		// into run mode and seed the render loop — resetting to idle would
-		// freeze the UI for a live run. The run's own RunEnded restores idle.
+		// (the pump drains the queue at the idle point). If the session is
+		// actually running now, switch into run mode and seed the render loop —
+		// resetting to idle would freeze the UI for a live run. The run's own
+		// RunEnded restores idle.
 		if m.runtime.State != nil && m.runtime.State.Current() == bus.StateRunning {
 			m.prepareRun("working")
 			if msg.Err != nil {
@@ -1460,28 +1461,12 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 			return nil
 		}
 		// Reconcile by authoritative ID, not text: two queued messages with
-		// identical text must not collapse into one chip. e.IDs (a batch) is set
-		// when several queued steers were folded into one delivered message
-		// (deliverQueuedSteers); clear every chip in the batch. Fall back to a
-		// single e.ID, then to text for steers that predate IDs (empty ID).
-		if len(e.IDs) > 0 {
-			drop := make(map[string]bool, len(e.IDs))
-			for _, id := range e.IDs {
-				drop[id] = true
-			}
-			kept := m.s.queuedSteers[:0]
-			for _, s := range m.s.queuedSteers {
-				if !drop[s.ID] {
-					kept = append(kept, s)
-				}
-			}
-			m.s.queuedSteers = kept
-		} else {
-			for i, s := range m.s.queuedSteers {
-				if (e.ID != "" && s.ID == e.ID) || (e.ID == "" && s.Text == e.Text) {
-					m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
-					break
-				}
+		// identical text must not collapse into one chip. Fall back to text only
+		// for steers that predate IDs (empty ID).
+		for i, s := range m.s.queuedSteers {
+			if (e.ID != "" && s.ID == e.ID) || (e.ID == "" && s.Text == e.Text) {
+				m.s.queuedSteers = append(m.s.queuedSteers[:i], m.s.queuedSteers[i+1:]...)
+				break
 			}
 		}
 		if task, status, result, ok := parseSubagentNotification(e.Text); ok {

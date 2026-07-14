@@ -15,6 +15,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Permission prompts and cancel
 - Plan mode, subagents, MCP
 - Model and thinking reconfiguration per session
+- Queue commands and messages while the agent is working (strict send order)
 - Per-session cost readout (main run + subagents), matching the TUI
 - Rename (`/rename <title>`) and delete sessions from the overview
 - Unread badges on sessions with activity you haven't seen yet
@@ -69,6 +70,21 @@ In the conversation history, each attachment is tagged so you can tell which pat
 - Native PDFs are additionally capped at **24 MB per message** and **48 MB cumulative across the session's history** (because a native PDF is re-sent to the model every turn); PDFs beyond those caps fall back to disk instead.
 - Files that exceed the client-side cap are rejected before upload. Raising these limits would require changing the transport (currently base64-in-JSON), which is out of scope.
 - The base directory can be overridden with the `MOA_ATTACHMENTS_DIR` environment variable (default `/tmp/moa`).
+
+## Queued commands and mid-run messages
+
+You don't have to wait for a run to finish before lining up your next move. What you type while the agent is working is handled in **strict send order** — the order you sent things is the order the agent sees them.
+
+- **Messages** typed mid-run are *steered* onto a queue and delivered to the agent between steps of the current run (or, if they arrive after the run ends, they start the next one). They show up as a **queued** chip above the composer.
+- **Slash commands** typed mid-run are classified by what they do:
+  - **Queued** (`/compact`, `/clear`, `/model`, `/thinking`, `/verify`, `/goal <objective>`) — these rewrite or reconfigure the conversation, so they can't run in the middle of a live turn. They wait in the queue as a **command** chip and run at the next idle point, in order relative to your messages. So `message → /compact → message` compacts *after* the first message lands and *before* the second.
+  - **Instant** (`/rename`, `/permissions`, `/path`, `/tasks`, `/schedule`, `/goal status`, `/goal stop`) — these only touch side state, so they run immediately without waiting.
+  - **Refused** (`/undo`, `/branch`, `/back`, `/plan`) — these only make sense against a settled conversation and are rejected while the agent is working; stop the run first.
+- **Attachments** can be added to a mid-run message too (the paperclip is no longer disabled while a run is in flight); the image/file rides along with the steered message.
+- **Editing the queue**: click the queued chip (or `Alt+↑`) to pull everything back into the composer for editing — this cancels the not-yet-delivered items so you don't get both the originals and your edit. Queued images can't be pulled back (only their count is tracked client-side), so re-attach them if needed.
+- **Stopping**: pressing Stop/`Esc` while a run is in flight dumps whatever was queued back into the composer, so nothing you lined up is silently lost.
+
+`/clear` while a run is queued behind it starts a fresh conversation but keeps the items queued after it — they belong to the new conversation.
 
 ## Security
 

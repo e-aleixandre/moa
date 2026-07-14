@@ -211,7 +211,7 @@ func wsEventFromBus(event any) (Event, bool) {
 			Command: e.Command, Messages: messages, HistoryTruncated: truncated,
 		}}, true
 	case bus.Steered:
-		return Event{Type: "steer", Data: SteerData{ID: e.ID, IDs: e.IDs, MsgID: e.MsgID, Text: e.Text}}, true
+		return Event{Type: "steer", Data: SteerData{ID: e.ID, MsgID: e.MsgID, Text: e.Text}}, true
 	case bus.CommandQueued:
 		return Event{Type: "command_queued", Data: CommandQueuedData{ID: e.ID, Raw: e.Raw}}, true
 	case bus.CommandDequeued:

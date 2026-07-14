@@ -193,10 +193,9 @@ func pctOf(frac float64) int {
 
 // SteerData is sent when the user steers a running agent.
 type SteerData struct {
-	ID    string   `json:"id,omitempty"`
-	IDs   []string `json:"ids,omitempty"`
-	MsgID string   `json:"msg_id,omitempty"`
-	Text  string   `json:"text"`
+	ID    string `json:"id,omitempty"`
+	MsgID string `json:"msg_id,omitempty"`
+	Text  string `json:"text"`
 }
 
 // CommandQueuedData is sent when a slash command is enqueued as a barrier in the

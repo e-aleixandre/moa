@@ -32,9 +32,9 @@ type SendPrompt struct {
 	Text      string
 	Custom    map[string]any
 	// MsgID, when set, is used as the user message's stable identifier instead
-	// of an auto-minted one, so a caller that later announces this prompt (e.g.
-	// deliverQueuedSteers folding queued steers into one message) can reference
-	// it by a shared MsgID for reconnect dedup. Ignored when Custom is set.
+	// of an auto-minted one, so a caller that later announces this prompt can
+	// reference it by a shared MsgID for reconnect dedup. Ignored when Custom is
+	// set.
 	MsgID string
 }
 
