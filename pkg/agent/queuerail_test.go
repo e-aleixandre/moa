@@ -188,7 +188,7 @@ func TestSendItems_PerItemMessagesWithContent(t *testing.T) {
 		{ID: "s1", Text: "plain"},
 		{ID: "s2", Content: []core.Content{core.TextContent("with"), core.ImageContent("AAAA", "image/png")}},
 	}
-	msgs, msgIDs, err := ag.SendItems(context.Background(), items)
+	msgs, msgIDs, err := ag.SendItems(context.Background(), items, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestQueueOwnsContent_NoAliasing(t *testing.T) {
 			core.ToolCallContent("tc", "edit", args),
 		}
 		item := core.SteerItem{ID: "s1", Content: content}
-		msgs, _, err := ag.SendItems(context.Background(), []core.SteerItem{item})
+		msgs, _, err := ag.SendItems(context.Background(), []core.SteerItem{item}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,7 +301,7 @@ func TestSendItems_SkipsBarriers(t *testing.T) {
 		{ID: "s1", Text: "real"},
 		barrier("c1", "/compact"),
 	}
-	msgs, msgIDs, err := ag.SendItems(context.Background(), items)
+	msgs, msgIDs, err := ag.SendItems(context.Background(), items, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,8 +314,42 @@ func TestSendItems_SkipsBarriers(t *testing.T) {
 	}
 }
 
-// Abort discards the whole queue, barriers included.
-func TestAbortDiscardsBarriers(t *testing.T) {
+// Reset (the mechanism behind a queued /clear) must NOT drop the queue: items
+// still queued belong, by FIFO, to the fresh conversation after the /clear.
+func TestReset_PreservesQueue(t *testing.T) {
+	provider := NewMockProvider(simpleTextResponse("ok"))
+	ag := newTestAgent(provider)
+
+	ag.Steer(steer("s1", "after clear"))
+	ag.Steer(barrier("c1", "/model sonnet"))
+	if err := ag.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	pending := ag.PendingSteers()
+	if !eq(ids(pending), []string{"s1", "c1"}) {
+		t.Fatalf("Reset dropped queued items: got %v, want [s1 c1]", ids(pending))
+	}
+	if ag.QueueLen() != 2 {
+		t.Fatalf("QueueLen = %d, want 2", ag.QueueLen())
+	}
+}
+
+// CancelSteer still drops the queue (explicit discard path).
+func TestCancelSteer_DropsQueue(t *testing.T) {
+	provider := NewMockProvider(simpleTextResponse("ok"))
+	ag := newTestAgent(provider)
+	ag.Steer(steer("s1", "x"))
+	ag.CancelSteer()
+	if ag.QueueLen() != 0 {
+		t.Fatalf("CancelSteer left %d items", ag.QueueLen())
+	}
+}
+
+// Abort clears the agent's own steer buffer (its low-level anti-stale-leak
+// guarantee). The user-facing "keep my queued items" behavior is a frontend
+// concern: on stop the client moves its own locally-tracked chips into the
+// input. This asserts only the agent contract.
+func TestAbortClearsQueue(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	blockTool := core.Tool{
@@ -337,13 +371,13 @@ func TestAbortDiscardsBarriers(t *testing.T) {
 	}()
 
 	<-started
-	ag.Steer(steer("s1", "a"))
 	ag.Steer(barrier("c1", "/compact"))
+	ag.Steer(steer("s2", "after barrier"))
 	ag.Abort()
 	close(release)
 	<-done
 
 	if pending := ag.PendingSteers(); len(pending) != 0 {
-		t.Fatalf("expected empty queue after abort, got %v", ids(pending))
+		t.Fatalf("expected agent queue cleared after abort, got %v", ids(pending))
 	}
 }

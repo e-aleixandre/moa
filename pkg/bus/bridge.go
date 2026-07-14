@@ -33,7 +33,11 @@ type AgentController interface {
 	Steer(it core.SteerItem) bool
 	CancelSteer()
 	DrainSteers() []core.SteerItem
+	DrainUntilBarrier() []core.SteerItem
 	PushSteersFront(items []core.SteerItem)
+	PeekQueueHead() (core.SteerItem, bool)
+	PopQueueBarrier(id string) bool
+	SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string) ([]core.AgentMessage, []string, error)
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
@@ -59,6 +63,7 @@ type AgentController interface {
 	CompactionEpoch() int
 	IsRunning() bool
 	PendingSteers() []core.SteerItem
+	QueueLen() int
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +188,17 @@ type SessionContext struct {
 	goalVerifyRunning int
 	activeSubagents   map[string]struct{}
 	activeBashJobs    map[string]struct{}
+
+	// Queue pump coalescing. The pump drains the agent's unified queue rail at
+	// each idle point (RunEnded / CompactionEnded), executing barrier commands
+	// and starting runs for trailing steers. Two idle signals arrive on two
+	// subscriber goroutines, and a barrier the pump executes can itself emit an
+	// idle signal, so pumps must never overlap: pumpActive serializes them and
+	// pumpRerun coalesces a request that arrives while a pump is running into
+	// one more loop, instead of spawning a concurrent pump.
+	pumpMu     sync.Mutex
+	pumpActive bool
+	pumpRerun  bool
 }
 
 type runStats struct {

@@ -1,9 +1,16 @@
 package bus
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
+
+// ErrInvalidTransition is returned (wrapped) by StateMachine.Transition when the
+// requested transition is not allowed from the current state. Callers use
+// errors.Is to detect "the session was busy" precisely, instead of matching the
+// error text.
+var ErrInvalidTransition = errors.New("invalid state transition")
 
 // SessionState represents the state of a session.
 type SessionState string
@@ -51,14 +58,13 @@ func (sm *StateMachine) Transition(to SessionState) error {
 	return sm.TransitionWithError(to, "")
 }
 
-
 // TransitionWithError moves to a new state with an optional error message.
 // Returns error if the transition is invalid. Publishes StateChanged on success.
 func (sm *StateMachine) TransitionWithError(to SessionState, errMsg string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if allowed := validTransitions[sm.current]; !allowed[to] {
-		return fmt.Errorf("invalid state transition: %s → %s", sm.current, to)
+		return fmt.Errorf("%w: %s → %s", ErrInvalidTransition, sm.current, to)
 	}
 	sm.current = to
 	sm.lastError = errMsg

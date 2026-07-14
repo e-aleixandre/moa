@@ -193,16 +193,23 @@ type CommandQueued struct {
 	Raw       string
 }
 
-// CommandDequeued is published when a queued command barrier leaves the queue:
-// either because the pump is about to execute it (Executed=true) or because it
-// was pulled back / canceled (Executed=false). Frontends clear the matching
-// queued chip by ID. The command's own execution still emits its usual events
-// (CommandExecuted, CompactionStarted/Ended, ConfigChanged, …).
+// CommandDequeued is published when a queued command barrier leaves the queue,
+// AFTER its execution: either because it was executed (Executed=true) or because
+// its execution failed permanently (Executed=false, Err set) — a transient
+// failure (lost run slot) neither dequeues nor emits an event, it is retried.
+// It can also be published when the barrier was pulled back / canceled. Frontends
+// clear the matching queued chip by ID. The command's own execution still emits
+// its usual events (CommandExecuted, CompactionStarted/Ended, ConfigChanged, …).
 type CommandDequeued struct {
 	SessionID string
 	ID        string
 	Raw       string
 	Executed  bool
+	// Err is non-empty when the barrier left the queue because its execution
+	// failed permanently (e.g. a bad queued /goal objective); Executed is then
+	// false. Frontends can surface it. A transient failure (lost run slot) does
+	// NOT dequeue and emits no event — the pump retries at the next idle point.
+	Err string
 }
 
 // ---------------------------------------------------------------------------

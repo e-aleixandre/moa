@@ -55,6 +55,9 @@ func rebuildSystemPrompt(sctx *SessionContext) {
 func RegisterHandlers(sctx *SessionContext) {
 	b := sctx.Bus
 
+	// Serializes manual /verify runs (bus command and queued barrier share it).
+	var manualVerifyRunning atomic.Bool
+
 	// Background jobs can continue after the foreground agent reaches idle.
 	// Keep their lifecycle in the runtime so headless callers can wait for the
 	// same complete result chain that interactive frontends observe.
@@ -98,6 +101,57 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 		sctx.Bus.Publish(CommandQueued{SessionID: sctx.SessionID, ID: cmd.ID, Raw: cmd.Raw})
 		return nil
+	})
+
+	b.OnCommand(func(cmd RunManualVerify) error {
+		if err := RequireManualVerifyAllowed(sctx.Bus); err != nil {
+			return err
+		}
+		// Occupy the session state for the whole verify (idle → running → idle),
+		// like a run: this is what keeps a queued /verify barrier in its position
+		// (a concurrent SendPrompt can't slip in while it runs). A second caller
+		// fails the transition and gets ErrSessionBusy. The atomic below is a
+		// belt against two verifies that both somehow saw idle. (The serve/TUI
+		// direct /verify commands are routed through here in a later commit; for
+		// now only the queued barrier uses this state-occupying path.)
+		if sctx.State != nil {
+			if err := sctx.State.Transition(StateRunning); err != nil {
+				return ErrSessionBusy
+			}
+		}
+		settle := func() {
+			if sctx.State != nil {
+				_ = sctx.State.Transition(StateIdle)
+			}
+			// No RunEnded fires for a verify (it isn't a run), so kick the pump
+			// ourselves so a following queued item drains.
+			requestPump(sctx)
+		}
+		if !manualVerifyRunning.CompareAndSwap(false, true) {
+			settle()
+			return ErrVerifyRunning
+		}
+		defer func() {
+			manualVerifyRunning.Store(false)
+			settle()
+		}()
+
+		sctx.Bus.Publish(AutoVerifyStarted{SessionID: sctx.SessionID})
+		ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
+		defer cancel()
+
+		result, err := verify.Execute(ctx, sctx.CWD)
+		if err != nil {
+			sctx.Bus.Publish(AutoVerifyEnded{SessionID: sctx.SessionID, Err: err})
+			return err
+		}
+		if result.AllPass {
+			sctx.Bus.Publish(AutoVerifyEnded{SessionID: sctx.SessionID, AllPass: true})
+			return nil
+		}
+		summary := formatVerifyFailure(result)
+		sctx.Bus.Publish(AutoVerifyEnded{SessionID: sctx.SessionID, Summary: summary})
+		return fmt.Errorf("%s", summary)
 	})
 
 	b.OnCommand(func(cmd CancelSteer) error {
@@ -203,7 +257,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
 			// A message queued during the failed compact must still be
 			// delivered (Error→Running is a valid transition).
-			deliverQueuedSteers(sctx)
+			requestPump(sctx)
 			return err
 		}
 		// Signal compaction ended (with or without payload).
@@ -219,8 +273,8 @@ func RegisterHandlers(sctx *SessionContext) {
 			Messages:  sctx.Agent.Messages(),
 		})
 		// Messages sent while the compact held the session busy were queued as
-		// steers, but no run is coming to drain them — start one now.
-		deliverQueuedSteers(sctx)
+		// steers, but no run is coming to drain them — pump the queue now.
+		requestPump(sctx)
 		return nil
 	})
 
@@ -402,6 +456,28 @@ func RegisterHandlers(sctx *SessionContext) {
 	}
 
 	b.OnCommand(func(cmd SendPrompt) error {
+		// Strict-order gate (INV-2): a genuine user prompt must not start a run
+		// while the queue rail holds pending items — it would jump ahead of a
+		// queued barrier/steer. Convert it into a steer at the tail of the queue
+		// instead, preserving send order; the pump delivers it in turn. Internal
+		// producers (the goal loop, auto-verify) are exempt: they are the
+		// machinery the queue is waiting on, not new user turns, and steering
+		// them would strip their Custom source.
+		if !isInternalPromptSource(cmd.Custom) && sctx.Agent.QueueLen() > 0 {
+			id := cmd.MsgID
+			if id == "" {
+				id = core.NewSteerID()
+			}
+			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text}) {
+				return ErrSteerQueueFull
+			}
+			// Always kick the pump after enqueuing: this closes the orphan-steer
+			// race where the pump drained the queue empty between our QueueLen
+			// read and this Steer. A coalesced pump pass guarantees our steer is
+			// delivered (immediately if idle, or on the current run's RunEnded).
+			requestPump(sctx)
+			return nil
+		}
 		// Reset auto-verify counter on user-initiated prompts.
 		if cmd.Custom == nil || cmd.Custom["source"] != "auto_verify" {
 			autoVerifyCount.Store(0)
@@ -427,6 +503,16 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SendPromptWithContent) error {
+		// Strict-order gate (INV-2): queue behind pending items instead of
+		// jumping ahead. Content sends are always user-initiated, so no source
+		// exemption applies.
+		if sctx.Agent.QueueLen() > 0 {
+			if !sctx.Agent.Steer(core.SteerItem{ID: core.NewSteerID(), Content: cmd.Content}) {
+				return ErrSteerQueueFull
+			}
+			requestPump(sctx) // close the orphan-steer race (see SendPrompt)
+			return nil
+		}
 		// User-initiated content send resets auto-verify counter.
 		autoVerifyCount.Store(0)
 		cancelAutoVerify()
@@ -587,6 +673,10 @@ func RegisterHandlers(sctx *SessionContext) {
 			if err := sctx.Agent.Reset(); err != nil {
 				return fmt.Errorf("reset before execution: %w", err)
 			}
+			// Reset no longer drops the queue (it preserves it for the queued
+			// /clear reset-in-place case); a clean-context plan execution is a
+			// genuine clean slate, so drop any queued steers explicitly.
+			sctx.Agent.CancelSteer()
 			// Agent.Reset alone leaves the persisted tree and the syncer's old
 			// baseline behind. Replace both in the same transition so the next
 			// execution turn cannot revive or splice into the planning history.
@@ -938,6 +1028,24 @@ func RegisterHandlers(sctx *SessionContext) {
 	b.Subscribe(func(e RunEnded) { publishContextUpdate() })
 	b.Subscribe(func(e CommandExecuted) { publishContextUpdate() })
 	b.Subscribe(func(e ConfigChanged) { publishContextUpdate() })
+
+	// Queue pump: at every idle point, drain the unified queue rail — execute
+	// queued barrier commands and start runs for trailing steers. RunEnded is
+	// the normal idle signal; the manual compact/verify paths call requestPump
+	// directly (they hold the session busy without a run). requestPump coalesces
+	// the signals (and a barrier that itself ends a run) into one non-overlapping
+	// pass. On a user abort the agent clears its own steer buffer as the
+	// cancelled run ends, so an aborted run's RunEnded simply finds an empty
+	// queue here — nothing to guard against.
+	b.Subscribe(func(e RunEnded) { requestPump(sctx) })
+
+	// When goal mode ends, drain any barriers/steers that were enqueued while
+	// the pump was abstaining (it yields the idle slot to the goal driver). The
+	// goal's final RunEnded is not a reliable trigger: its async subscribers may
+	// see Goal.Active()==true when the pump reactor runs, so it could abstain
+	// and then no further idle signal would arrive. GoalEnded fires after the
+	// driver clears goal state, closing that gap.
+	b.Subscribe(func(e GoalEnded) { requestPump(sctx) })
 
 	// -------------------------------------------------------------------
 	// SessionCostUpdated reactor — accumulates the session's USD spend from
@@ -1422,64 +1530,6 @@ func stopGoal(sctx *SessionContext, reason string) {
 	})
 }
 
-// deliverQueuedSteers drains steer messages that were queued while a non-run
-// operation (manual compaction) held the session busy, and starts a run to
-// process them. A normal run drains its steers between steps, but a compact
-// never runs the agent loop — without this, queued messages would sit in the
-// agent's steer buffer until some unrelated future run picked them up.
-func deliverQueuedSteers(sctx *SessionContext) {
-	queued := sctx.Agent.DrainSteers()
-	if len(queued) == 0 {
-		return
-	}
-	// Start a run that consumes the queued messages as its prompt. Go through
-	// the SendPrompt command (not startRun directly) so it keeps the same
-	// semantics as any user prompt: auto-verify reset, goal-verify cancel, etc.
-	// The N queued steers are folded into ONE joined message, so we mint one
-	// MsgID up front: the message lands in state under it, and the single
-	// announcement below carries the same MsgID so a reconnect snapshot dedups
-	// the joined message by identity (live and reload both show one message).
-	texts := make([]string, len(queued))
-	ids := make([]string, len(queued))
-	for i, q := range queued {
-		texts[i] = q.Text
-		ids[i] = q.ID
-	}
-	joinedText := strings.Join(texts, "\n")
-	msgID := core.NewMsgID()
-	if err := sctx.Bus.Execute(SendPrompt{
-		SessionID: sctx.SessionID,
-		Text:      joinedText,
-		MsgID:     msgID,
-	}); err != nil {
-		// A concurrent run won the race for the run slot — hand the messages
-		// back to the front of the steer buffer so that run delivers them
-		// between steps, preserving FIFO order. That run's loop emits its own
-		// Steered as it drains them, so we must publish nothing here or the text
-		// would appear twice in the transcript.
-		sctx.Agent.PushSteersFront(queued)
-		return
-	}
-	// The run started. Its loop won't emit Steered for a prompt (these were
-	// delivered as the prompt, not as mid-run steers), so announce the dequeue
-	// ourselves — that moves the text from the frontend's "queued" strip into
-	// the transcript. A SINGLE event carries the joined text, the shared MsgID
-	// (so a reconnect snapshot that already contains the joined message dedups
-	// it instead of appending a duplicate), and every consumed chip ID so all
-	// queued chips clear at once. Reading the atomic here is safe: SendPrompt
-	// synchronously, and the transition table forbids any other run from
-	// starting (and ours can't finish synchronously — it runs in a goroutine),
-	// so the gen can't change under us on this goroutine.
-	gen := sctx.RunGenAtomic.Load()
-	sctx.Bus.Publish(Steered{
-		SessionID: sctx.SessionID,
-		RunGen:    gen,
-		IDs:       ids,
-		MsgID:     msgID,
-		Text:      joinedText,
-	})
-}
-
 // resolveGoalWorkDir validates and resolves EnterGoal's --cwd override. An
 // empty cmdWorkDir keeps the existing behavior (evaluate in the session's
 // CWD). A relative override resolves against the session CWD; the result must
@@ -1635,13 +1685,32 @@ func runGit(ctx context.Context, dir string, args ...string) string {
 // startRun is the shared implementation for SendPrompt and SendPromptWithContent.
 // It validates state, creates a per-run context, and spawns the agent run goroutine.
 func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
-	// State transition: idle/error → running.
+	if err := reserveRunSlot(sctx); err != nil {
+		return err
+	}
+	launchRun(sctx, label, runFn)
+	return nil
+}
+
+// reserveRunSlot transitions the session idle/error → running, claiming the run
+// slot without launching anything. Split out of startRun so the queue pump can
+// reserve the slot BEFORE it drains steers from the queue (reserve-then-drain):
+// that closes the window where a concurrent SendPrompt could see an empty queue
+// plus idle state and start a run that jumps ahead of the queued steers.
+// Returns an error if the session is not in a startable state.
+func reserveRunSlot(sctx *SessionContext) error {
 	if sctx.State != nil {
 		if err := sctx.State.Transition(StateRunning); err != nil {
 			return fmt.Errorf("cannot send: %w", err)
 		}
 	}
+	return nil
+}
 
+// launchRun starts the agent goroutine for a slot already reserved by
+// reserveRunSlot. It creates the per-run context, publishes RunStarted, and runs
+// runFn in a goroutine, settling the state and publishing RunEnded when it ends.
+func launchRun(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error)) {
 	// Create per-run context with generation token.
 	sctx.runMu.Lock()
 	runCtx, gen := sctx.newRunContext()
@@ -1714,7 +1783,6 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 			Cost:      stats.costUSD,
 		})
 	}()
-	return nil
 }
 
 // cleanRunError renders a run error for user-facing display. It unwraps the

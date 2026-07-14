@@ -160,6 +160,13 @@ func (q *steerQueue) clear() {
 	q.items = nil
 }
 
+// len returns the number of queued items (steers and barriers).
+func (q *steerQueue) len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.items)
+}
+
 // steerMessage builds the conversation message for a queued steer, using its
 // full content blocks (text + images) when present and falling back to plain
 // text otherwise. Callers wrap and assign a MsgID. The item's Content is
@@ -384,34 +391,49 @@ func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]
 // SendItems appends one user message per queued item (each with its own MsgID,
 // carrying image/content blocks when present) and runs the agent loop. It is
 // used to start a fresh run for the steers that were queued after a barrier
-// command, preserving per-item granularity (no folding into one message). The
-// returned MsgIDs are in item order so the caller can publish a delivery event
-// per item; clients dedup the user messages by MsgID on reconnect.
-func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem) ([]core.AgentMessage, []string, error) {
+// command, preserving per-item granularity (no folding into one message).
+//
+// msgIDs, when non-empty, supplies the stable MsgID for each item in order
+// (len(msgIDs) must equal len(items)); an empty entry (or a nil/short slice) is
+// auto-minted. Callers pre-mint so they can announce each delivered chip with a
+// known MsgID without waiting for the run — clients dedup by MsgID on reconnect.
+// The returned MsgIDs are the effective ones in item order. Barrier items are
+// commands, never messages, and are skipped defensively.
+func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string) ([]core.AgentMessage, []string, error) {
 	// Take ownership of each item's Content so a caller mutating its slices
-	// after the call can't race the provider reading a.state.Messages. Barrier
-	// items are commands, not messages, and must never be injected — skip them
-	// defensively (the bus pump only ever passes non-barrier steers here).
-	owned := make([]core.SteerItem, 0, len(items))
-	for _, it := range items {
+	// after the call can't race the provider reading a.state.Messages.
+	type owned struct {
+		item  core.SteerItem
+		msgID string
+	}
+	list := make([]owned, 0, len(items))
+	for i, it := range items {
 		if it.IsBarrier() {
 			continue
 		}
-		owned = append(owned, ownItem(it))
+		mid := ""
+		if i < len(msgIDs) {
+			mid = msgIDs[i]
+		}
+		list = append(list, owned{item: ownItem(it), msgID: mid})
 	}
-	msgIDs := make([]string, len(owned))
+	outIDs := make([]string, len(list))
 	msgs, err := a.execute(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
-		for i, item := range owned {
-			um := core.WrapMessage(steerMessage(item))
-			um.EnsureMsgID()
-			msgIDs[i] = um.MsgID
+		for i, o := range list {
+			um := core.WrapMessage(steerMessage(o.item))
+			if o.msgID != "" {
+				um.MsgID = o.msgID
+			} else {
+				um.EnsureMsgID()
+			}
+			outIDs[i] = um.MsgID
 			a.state.Messages = append(a.state.Messages, um)
 		}
 	})
-	return msgs, msgIDs, err
+	return msgs, outIDs, err
 }
 
 // PeekQueueHead returns a copy of the item at the head of the unified queue
@@ -436,15 +458,26 @@ func (a *Agent) DrainUntilBarrier() []core.SteerItem {
 }
 
 // Reset clears conversation state. Returns error if the agent is currently running.
+//
+// Reset deliberately does NOT drop the queued steers/barriers: when a queued
+// /clear barrier is executed at idle, everything still in the queue is, by FIFO,
+// behind the /clear and therefore belongs to the fresh conversation (reset
+// in-place). Callers that want to discard the queue call CancelSteer explicitly.
 func (a *Agent) Reset() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.cancel != nil {
 		return fmt.Errorf("cannot reset while agent is running")
 	}
-	a.steers.clear() // drop steers queued for the old conversation
 	a.state = AgentState{}
 	return nil
+}
+
+// QueueLen returns the number of items currently in the unified queue rail
+// (steers and barriers, including internal steers). Used by the producer-side
+// strict-order gate: a user run must not start while the queue is non-empty.
+func (a *Agent) QueueLen() int {
+	return a.steers.len()
 }
 
 // LoadMessages replaces the conversation history with the given messages.
@@ -1068,10 +1101,13 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		ctx.Err() == context.DeadlineExceeded &&
 		parentCtx.Err() == nil
 
-	// On abort, discard any steer messages still queued for the now-cancelled
-	// run. Left in the queue they would be drained by the next Send/Run and
-	// injected as a stale user turn — possibly into a different conversation
-	// after Reset.
+	// On a run error (including a user abort, which cancels the context),
+	// discard any steers still queued for this now-dead run. Left in the queue
+	// they would be injected as a stale user turn on the next Send — possibly
+	// into a different conversation after Reset. On a user abort the frontend
+	// preserves the user's intent separately, by moving its own locally-tracked
+	// queued chips back into the input; the agent's buffer is cleared here
+	// regardless.
 	if err != nil {
 		a.steers.clear()
 	}

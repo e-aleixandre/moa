@@ -56,7 +56,8 @@ type fakeAgent struct {
 	sendContent []core.Content
 	sendMsgID   string
 	steerQueue  []core.SteerItem
-	steerFull   bool // when true, Steer rejects (queue full)
+	steerFull   bool             // when true, Steer rejects (queue full)
+	sentItems   []core.SteerItem // items delivered via SendItems (pump tests)
 
 	// appendBusy > 0 makes AppendMessage fail (simulating a live run) and
 	// decrements once per call, so a deferred append can succeed on retry.
@@ -96,6 +97,61 @@ func (f *fakeAgent) PushSteersFront(items []core.SteerItem) {
 	f.steerQueue = append(append([]core.SteerItem{}, items...), f.steerQueue...)
 }
 
+// DrainUntilBarrier removes and returns the queued items up to (but not
+// including) the first barrier, mirroring the real queue semantics so pump
+// tests exercise the same control flow.
+func (f *fakeAgent) DrainUntilBarrier() []core.SteerItem {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cut := 0
+	for cut < len(f.steerQueue) && !f.steerQueue[cut].IsBarrier() {
+		cut++
+	}
+	if cut == 0 {
+		return nil
+	}
+	items := f.steerQueue[:cut]
+	f.steerQueue = append([]core.SteerItem{}, f.steerQueue[cut:]...)
+	return items
+}
+
+func (f *fakeAgent) PeekQueueHead() (core.SteerItem, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.steerQueue) == 0 {
+		return core.SteerItem{}, false
+	}
+	return f.steerQueue[0], true
+}
+
+func (f *fakeAgent) PopQueueBarrier(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.steerQueue) == 0 || !f.steerQueue[0].IsBarrier() || f.steerQueue[0].ID != id {
+		return false
+	}
+	f.steerQueue = append([]core.SteerItem{}, f.steerQueue[1:]...)
+	return true
+}
+
+// SendItems records the delivered items and returns synthetic MsgIDs, letting
+// pump tests assert which steers started a fresh run without exercising a real
+// agent loop.
+func (f *fakeAgent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string) ([]core.AgentMessage, []string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := make([]string, len(items))
+	for i, it := range items {
+		if i < len(msgIDs) && msgIDs[i] != "" {
+			ids[i] = msgIDs[i]
+		} else {
+			ids[i] = "msg-" + it.ID
+		}
+		f.sentItems = append(f.sentItems, it)
+	}
+	return nil, ids, nil
+}
+
 func (f *fakeAgent) PendingSteers() []core.SteerItem {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -106,6 +162,12 @@ func (f *fakeAgent) PendingSteers() []core.SteerItem {
 		}
 	}
 	return out
+}
+
+func (f *fakeAgent) QueueLen() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.steerQueue)
 }
 
 func (f *fakeAgent) Model() core.Model {
@@ -1311,8 +1373,10 @@ func TestHandler_CompactSession_CompactingFlag(t *testing.T) {
 }
 
 // A message sent while a compact holds the session busy is queued as a steer;
-// since the compact never runs the agent loop, the handler must drain the
-// queued steers and start a run to deliver them when compaction finishes.
+// since the compact never runs the agent loop, the queue pump must drain the
+// queued steers and start a run to deliver them when compaction finishes. With
+// the unified queue rail each steer becomes its own message (SendItems) and its
+// own Steered announcement.
 func TestHandler_CompactSession_DeliversQueuedSteers(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -1323,54 +1387,56 @@ func TestHandler_CompactSession_DeliversQueuedSteers(t *testing.T) {
 		fa.Steer(core.SteerItem{ID: "s1", Text: "first while compacting"})
 		fa.Steer(core.SteerItem{ID: "s2", Text: "second while compacting"})
 	}
-	// Capture the single announcement the handler publishes for the batch.
-	got := make(chan Steered, 4)
+	// Capture the per-item announcements the pump publishes.
+	got := make(chan Steered, 8)
 	b.Subscribe(func(e Steered) { got <- e })
 	RegisterHandlers(sctx)
 
 	if err := b.Execute(CompactSession{}); err != nil {
 		t.Fatal(err)
 	}
-	// deliverQueuedSteers issues a SendPrompt, which startRun runs the agent
-	// asynchronously — poll until Send receives the joined queued text.
+	// The pump starts a run via SendItems, which startRun runs asynchronously —
+	// poll until both queued items were delivered as messages.
 	deadline := time.After(2 * time.Second)
 	for {
-		if fa.wasSendCalled() {
-			if got := fa.getSendPrompt(); got != "first while compacting\nsecond while compacting" {
-				t.Fatalf("delivered prompt = %q", got)
-			}
+		fa.mu.Lock()
+		n := len(fa.sentItems)
+		fa.mu.Unlock()
+		if n >= 2 {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatal("queued steer was never delivered as a run after compaction")
+			t.Fatal("queued steers were never delivered as a run after compaction")
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
-	// Exactly one Steered announcement, carrying both chip IDs and the same
-	// MsgID the joined message was sent under (so reconnect dedups by identity).
-	select {
-	case e := <-got:
-		if len(e.IDs) != 2 || e.IDs[0] != "s1" || e.IDs[1] != "s2" {
-			t.Fatalf("Steered.IDs = %v, want [s1 s2]", e.IDs)
-		}
-		if e.MsgID == "" {
-			t.Fatal("Steered.MsgID is empty; batch announcement needs a shared MsgID")
-		}
-		fa.mu.Lock()
-		sentMsgID := fa.sendMsgID
+	fa.mu.Lock()
+	if fa.sentItems[0].Text != "first while compacting" || fa.sentItems[1].Text != "second while compacting" {
 		fa.mu.Unlock()
-		if e.MsgID != sentMsgID {
-			t.Fatalf("Steered.MsgID = %q but message was sent under %q", e.MsgID, sentMsgID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no Steered announcement for the delivered batch")
+		t.Fatalf("delivered items = %+v", fa.sentItems)
 	}
-	// And only that one — no extra per-item events.
-	select {
-	case e := <-got:
-		t.Fatalf("unexpected second Steered event: %+v", e)
-	case <-time.After(100 * time.Millisecond):
+	fa.mu.Unlock()
+
+	// One Steered per item, each carrying its own chip ID and a non-empty MsgID.
+	seen := map[string]string{}
+	deadline = time.After(2 * time.Second)
+	for len(seen) < 2 {
+		select {
+		case e := <-got:
+			if e.MsgID == "" {
+				t.Fatalf("Steered for %q has empty MsgID", e.ID)
+			}
+			seen[e.ID] = e.MsgID
+		case <-deadline:
+			t.Fatalf("expected 2 Steered events, got %d: %v", len(seen), seen)
+		}
+	}
+	if _, ok := seen["s1"]; !ok {
+		t.Fatalf("missing Steered for s1: %v", seen)
+	}
+	if _, ok := seen["s2"]; !ok {
+		t.Fatalf("missing Steered for s2: %v", seen)
 	}
 }
 

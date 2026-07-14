@@ -12,6 +12,15 @@ import (
 // confirming a message that would never be delivered.
 var ErrSteerQueueFull = errors.New("steer queue full")
 
+// ErrSessionBusy is returned by a bus command that requires the session to be
+// idle (e.g. RunManualVerify) when a run is in flight or a permission is
+// pending.
+var ErrSessionBusy = errors.New("session is busy")
+
+// ErrVerifyRunning is returned by RunManualVerify when a manual verify is
+// already in progress for the session.
+var ErrVerifyRunning = errors.New("verify already running")
+
 // ---------------------------------------------------------------------------
 // Agent interaction
 // ---------------------------------------------------------------------------
@@ -147,6 +156,16 @@ type ClearSession struct{ SessionID string }
 
 // CompactSession triggers manual compaction.
 type CompactSession struct{ SessionID string }
+
+// RunManualVerify runs the project's verification checks (the /verify command)
+// as a bus command that occupies the session state (idle→running→idle), so a
+// queued /verify barrier keeps its position and can't race a concurrent run. It
+// emits AutoVerifyStarted/Ended and returns an error describing a failure
+// (ErrManualVerifyGoalActive when goal mode is active, ErrSessionBusy when a run
+// is in flight, ErrVerifyRunning when one is already running, or a check
+// failure). The serve/TUI /verify commands are routed through it in a later
+// commit so both frontends share this state-occupying implementation.
+type RunManualVerify struct{ SessionID string }
 
 // UndoLastChange pops the last checkpoint and restores files.
 type UndoLastChange struct{ SessionID string }
