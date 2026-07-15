@@ -69,6 +69,9 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	if noCSRFRec.Code != http.StatusForbidden {
 		t.Fatalf("pairing without CSRF = %d", noCSRFRec.Code)
 	}
+	if got := noCSRFRec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("pairing Cache-Control = %q, want no-store", got)
+	}
 	if malformed := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{"unexpected":true}`, owner, ""); malformed.Code != http.StatusBadRequest {
 		t.Fatalf("pairing unknown JSON field = %d: %s", malformed.Code, malformed.Body.String())
 	}
@@ -76,6 +79,9 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	pairRec := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, owner, "")
 	if pairRec.Code != http.StatusCreated {
 		t.Fatalf("pairing = %d: %s", pairRec.Code, pairRec.Body.String())
+	}
+	if got := pairRec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("pairing Cache-Control = %q, want no-store", got)
 	}
 	var pairing pairingResult
 	if err := json.NewDecoder(pairRec.Body).Decode(&pairing); err != nil {
@@ -106,9 +112,15 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	if claimWithoutCSRFRec.Code != http.StatusForbidden {
 		t.Fatalf("claim without CSRF = %d", claimWithoutCSRFRec.Code)
 	}
+	if got := claimWithoutCSRFRec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("pairing claim Cache-Control = %q, want no-store", got)
+	}
 	claimRec := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings/claim", claimBody, nil, "")
 	if claimRec.Code != http.StatusCreated {
 		t.Fatalf("claim = %d: %s", claimRec.Code, claimRec.Body.String())
+	}
+	if got := claimRec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("pairing claim Cache-Control = %q, want no-store", got)
 	}
 	var credential deviceCredentialResult
 	if err := json.NewDecoder(claimRec.Body).Decode(&credential); err != nil {

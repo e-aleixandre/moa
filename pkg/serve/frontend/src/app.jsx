@@ -17,6 +17,7 @@ import { ToastContainer } from './components/Toast.jsx';
 import { CommandPalette } from './components/CommandPalette.jsx';
 import { LayoutBar } from './components/LayoutBar.jsx';
 import { OpsPanel } from './components/OpsPanel.jsx';
+import { PulsePairingPanel } from './components/PulsePairingPanel.jsx';
 import './styles/index.css';
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteMode, setPaletteMode] = useState('search');
   const [opsOpen, setOpsOpen] = useState(false);
+  const [pairingOpen, setPairingOpen] = useState(false);
 
   useEffect(() => store.subscribe(setState), []);
 
@@ -110,11 +112,13 @@ function App() {
   }, []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
   const openOps = useCallback(() => setOpsOpen(true), []);
+  const openPairing = useCallback(() => setPairingOpen(true), []);
 
   const hotkeys = useMemo(() => [
     { key: 'k', mod: true, handler: () => setPaletteOpen(v => !v) },
     { key: 'Escape', handler: () => {
       if (paletteOpen) setPaletteOpen(false);
+      else if (pairingOpen) setPairingOpen(false);
       else if (overview) setOverview(false);
     }},
     ...Array.from({ length: 9 }, (_, i) => ({
@@ -128,7 +132,7 @@ function App() {
       const entry = inputBarRegistry.get(state.focusedTile);
       if (entry) entry.toggleVoice();
     }},
-  ], [state.isMobile, state.focusedTile, overview, paletteOpen]);
+  ], [state.isMobile, state.focusedTile, overview, paletteOpen, pairingOpen]);
 
   useHotkeys(hotkeys);
 
@@ -141,13 +145,15 @@ function App() {
             onSelect={() => setOverview(false)}
             onNewSession={() => { setOverview(false); openPalette('create'); }}
             onOpenOps={openOps}
+            onOpenPairing={openPairing}
           />
         ) : (
           <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} />
         )}
         <ToastContainer />
-        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} />
+        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} onOpenPairing={openPairing} />
         <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} onNavigate={(id) => { if (openSession(id)) setOpsOpen(false); }} />
+        <PulsePairingPanel open={pairingOpen} onClose={() => setPairingOpen(false)} />
       </div>
     );
   }
@@ -155,12 +161,13 @@ function App() {
   return (
     <div class="app desktop">
       <div class="main">
-        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} onOpenOps={openOps} />
+        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} onOpenOps={openOps} onOpenPairing={openPairing} />
         <TileTree state={state} />
       </div>
       <ToastContainer />
-      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} />
+      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenOps={openOps} onOpenPairing={openPairing} />
       <OpsPanel open={opsOpen} onClose={() => setOpsOpen(false)} onNavigate={(id) => { if (openSession(id)) setOpsOpen(false); }} />
+      <PulsePairingPanel open={pairingOpen} onClose={() => setPairingOpen(false)} />
     </div>
   );
 }

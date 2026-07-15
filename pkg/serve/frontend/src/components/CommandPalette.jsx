@@ -16,7 +16,7 @@ function getCaps() {
     .catch(() => ({}));
 }
 
-export function CommandPalette({ open, onClose, state, initialMode = 'search', onOpenOps }) {
+export function CommandPalette({ open, onClose, state, initialMode = 'search', onOpenOps, onOpenPairing }) {
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mode, setMode] = useState(initialMode);
@@ -97,6 +97,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
 
     result.push({ type: 'action', id: '__new', label: 'New session…' });
     result.push({ type: 'action', id: '__ops', label: 'View Ops status' });
+    result.push({ type: 'action', id: '__pair-pulse', label: 'Pair Pulse…' });
 
     const q = query.toLowerCase().trim();
     // Order by most-recently-used first (consistent with the mobile dashboard),
@@ -205,6 +206,11 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
       onOpenOps();
       return;
     }
+    if (item.type === 'action' && item.id === '__pair-pulse') {
+      onClose();
+      onOpenPairing();
+      return;
+    }
     if (item.type === 'session') {
       if (item.archived) {
         // Reopen: the server also auto-unarchives on resume/send, but for
@@ -227,7 +233,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
       }
       onClose();
     }
-  }, [state.focusedTile, onClose, onOpenOps]);
+  }, [state.focusedTile, onClose, onOpenOps, onOpenPairing]);
 
   const handleSelectCreate = useCallback(async (item) => {
     if (creating) return;
