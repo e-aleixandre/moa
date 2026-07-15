@@ -3,9 +3,6 @@ package serve
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"mime"
@@ -126,12 +123,7 @@ func handleRealtimeClientSecret(store *deviceStore, keyFn RealtimeAPIKeyFunc, cl
 			realtimeUnavailable(w)
 			return
 		}
-		safetyID, ok := realtimeSafetyIdentifier(store, identity.DeviceID)
-		if !ok {
-			realtimeUnavailable(w)
-			return
-		}
-		secret, expires, status, retry := mintRealtimeClientSecret(r.Context(), client, key, safetyID, now)
+		secret, expires, status, retry := mintRealtimeClientSecret(r.Context(), client, key, now)
 		if status == http.StatusTooManyRequests {
 			w.Header().Set("Retry-After", strconv.Itoa(retry))
 			writeJSON(w, status, map[string]string{"error": "realtime provider rate limit exceeded"})
@@ -189,28 +181,15 @@ func decodeRealtimeEmptyBody(w http.ResponseWriter, r *http.Request) bool {
 func activeRealtimeDevice(store *deviceStore, id string) bool {
 	return store != nil && store.withActiveDevice(id, func() error { return nil }) == nil
 }
-func realtimeSafetyIdentifier(store *deviceStore, id string) (string, bool) {
-	if store == nil {
-		return "", false
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if store.closed || store.unavailable || store.state.Key == "" {
-		return "", false
-	}
-	h := hmac.New(sha256.New, []byte(store.state.Key))
-	_, _ = h.Write([]byte("realtime-safety-id:\x00" + id))
-	return hex.EncodeToString(h.Sum(nil)), true
-}
 
 func realtimeUnavailable(w http.ResponseWriter) {
 	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "realtime credentials unavailable"})
 }
 
-func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key, safetyID string, now func() time.Time) (string, int64, int, int) {
+func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key string, now func() time.Time) (string, int64, int, int) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	body, _ := json.Marshal(map[string]any{"expires_after": map[string]any{"anchor": "created_at", "seconds": 60}, "session": map[string]any{"type": "realtime", "model": realtimeModel, "output_modalities": []string{"audio"}, "audio": map[string]any{"output": map[string]any{"voice": "marin"}}, "max_output_tokens": 1024, "safety_identifier": safetyID}})
+	body, _ := json.Marshal(map[string]any{"expires_after": map[string]any{"anchor": "created_at", "seconds": 60}, "session": map[string]any{"type": "realtime", "model": realtimeModel, "output_modalities": []string{"audio"}, "audio": map[string]any{"output": map[string]any{"voice": "marin"}}, "max_output_tokens": 1024}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/realtime/client_secrets", bytes.NewReader(body))
 	if err != nil {
 		return "", 0, 1, 0
@@ -232,7 +211,7 @@ func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key, saf
 		}
 		return "", 0, resp.StatusCode, n
 	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+	if resp.StatusCode != http.StatusOK {
 		return "", 0, 1, 0
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, realtimeResponseLimit+1))
@@ -247,11 +226,11 @@ func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key, saf
 	var value string
 	var expiresAt int64
 	if json.Unmarshal(result["value"], &value) != nil || json.Unmarshal(result["expires_at"], &expiresAt) != nil ||
-		strings.TrimSpace(value) == "" || !utf8.ValidString(value) || len(value) > realtimeSecretLimit {
+		strings.TrimSpace(value) == "" || !strings.HasPrefix(value, "ek_") || !utf8.ValidString(value) || len(value) > realtimeSecretLimit {
 		return "", 0, 1, 0
 	}
 	issued := now().UTC()
-	if expiresAt <= issued.Unix() || expiresAt > issued.Add(time.Minute+realtimeExpirySkew).Unix() {
+	if expiresAt <= issued.Add(30*time.Second).Unix() || expiresAt > issued.Add(time.Minute+realtimeExpirySkew).Unix() {
 		return "", 0, 1, 0
 	}
 	return value, expiresAt, 0, 0

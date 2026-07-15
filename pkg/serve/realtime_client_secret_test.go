@@ -39,7 +39,6 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")
 	}
-	var gotSafety string
 	client := &http.Client{Transport: realtimeRoundTripper(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.openai.com/v1/realtime/client_secrets" || r.Header.Get("Authorization") != "Bearer permanent-key" {
 			t.Fatalf("unexpected upstream request: %s authorization=%q", r.URL, r.Header.Get("Authorization"))
@@ -51,9 +50,14 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 		if body["expires_after"].(map[string]any)["seconds"] != float64(60) || body["session"].(map[string]any)["model"] != realtimeModel {
 			t.Fatalf("unexpected upstream schema: %#v", body)
 		}
-		gotSafety, _ = body["session"].(map[string]any)["safety_identifier"].(string)
+		if _, present := body["safety_identifier"]; present {
+			t.Fatalf("unsupported top-level safety identifier: %#v", body)
+		}
+		if _, present := body["session"].(map[string]any)["safety_identifier"]; present {
+			t.Fatalf("unsupported session safety identifier: %#v", body)
+		}
 		expires := time.Now().Add(time.Minute).Unix()
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"value":"ephemeral-secret","expires_at":%d}`, expires)))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"value":"ek_ephemeral-secret","expires_at":%d}`, expires)))}, nil
 	})}
 	mgr := newTestManagerWithConfig(t, context.Background(), newMockProvider(simpleResponseHandler("ok")), t.TempDir(), core.MoaConfig{DisableSandbox: true})
 	h := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")), WithRealtimeClientSecretBroker(func() (string, bool) { return "permanent-key", true }, client))
@@ -73,8 +77,8 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("mint = %d: %s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Cache-Control") != "no-store" || gotSafety == "" || strings.Contains(gotSafety, device.DeviceID) {
-		t.Fatalf("unsafe response/safety id: cache=%q safety=%q", rec.Header().Get("Cache-Control"), gotSafety)
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unsafe response cache header: %q", rec.Header().Get("Cache-Control"))
 	}
 	if strings.Contains(rec.Body.String(), "permanent-key") {
 		t.Fatalf("permanent key leaked")
@@ -88,7 +92,7 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.ClientSecret != "ephemeral-secret" || response.Transport != "websocket" || response.Endpoint != "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini" || response.Model != "gpt-realtime-2.1-mini" {
+	if response.ClientSecret != "ek_ephemeral-secret" || response.Transport != "websocket" || response.Endpoint != "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini" || response.Model != "gpt-realtime-2.1-mini" {
 		t.Fatalf("unexpected response: %#v", response)
 	}
 	if response.Endpoint != realtimeEndpoint || response.Model != realtimeModel {
@@ -99,21 +103,45 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 func TestMintRealtimeClientSecretRejectsUnsafeUpstreamResponses(t *testing.T) {
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	for name, body := range map[string]string{
-		"malformed":     `{`,
-		"trailing JSON": `{"value":"secret","expires_at":1783944060} {}`,
-		"missing value": `{"expires_at":1783944060}`,
-		"expired":       `{"value":"secret","expires_at":1783943999}`,
-		"too far":       `{"value":"secret","expires_at":1783944066}`,
-		"oversize":      strings.Repeat("x", realtimeResponseLimit+1),
+		"malformed":      `{`,
+		"trailing JSON":  `{"value":"ek_secret","expires_at":1783944060} {}`,
+		"missing value":  `{"expires_at":1783944060}`,
+		"invalid prefix": `{"value":"secret","expires_at":1783944060}`,
+		"expired":        `{"value":"ek_secret","expires_at":1783943999}`,
+		"too soon":       `{"value":"ek_secret","expires_at":1783944030}`,
+		"too far":        `{"value":"ek_secret","expires_at":1783944066}`,
+		"oversize":       strings.Repeat("x", realtimeResponseLimit+1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			client := &http.Client{Transport: realtimeRoundTripper(func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 			})}
-			if _, _, status, _ := mintRealtimeClientSecret(context.Background(), client, "key", "safety", func() time.Time { return now }); status == 0 {
+			if _, _, status, _ := mintRealtimeClientSecret(context.Background(), client, "key", func() time.Time { return now }); status == 0 {
 				t.Fatal("unsafe response was accepted")
 			}
 		})
+	}
+}
+
+func TestMintRealtimeClientSecretAcceptsOnlyUsableOKResponse(t *testing.T) {
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	response := `{"value":"ek_secret","expires_at":1783944031}`
+	for _, statusCode := range []int{http.StatusCreated, http.StatusAccepted, http.StatusNoContent} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			client := &http.Client{Transport: realtimeRoundTripper(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: statusCode, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}, nil
+			})}
+			if _, _, status, _ := mintRealtimeClientSecret(context.Background(), client, "key", func() time.Time { return now }); status == 0 {
+				t.Fatalf("upstream status %d was accepted", statusCode)
+			}
+		})
+	}
+	client := &http.Client{Transport: realtimeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}, nil
+	})}
+	secret, expires, status, _ := mintRealtimeClientSecret(context.Background(), client, "key", func() time.Time { return now })
+	if status != 0 || secret != "ek_secret" || expires != 1783944031 {
+		t.Fatalf("usable OK response = secret=%q expires=%d status=%d", secret, expires, status)
 	}
 }
 
