@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +40,8 @@ type ConversationMessage struct {
 	Omitted       bool      `json:"omitted,omitempty"`
 	OmittedBlocks int       `json:"omitted_blocks,omitempty"`
 	Tool          string    `json:"tool,omitempty"`
+	Action        string    `json:"action,omitempty"`
+	Target        string    `json:"target,omitempty"`
 	Summary       string    `json:"summary,omitempty"`
 	Status        string    `json:"status,omitempty"`
 }
@@ -286,11 +290,14 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 				continue
 			}
 			toolID := fmt.Sprintf("tool:%s:%d", id, blockIndex)
+			action, target := conversationToolActivity(block.ToolName, block.Arguments)
 			toolItem := ConversationMessage{
 				ID:        toolID,
 				Role:      "tool",
 				Tool:      block.ToolName,
-				Summary:   conversationToolSummary(block.ToolName, block.Arguments),
+				Action:    action,
+				Target:    target,
+				Summary:   "Tool activity",
 				Status:    "pending",
 				Timestamp: conversationTimestamp(msg.Timestamp),
 			}
@@ -388,65 +395,75 @@ func conversationTail(value string, maxBytes int) string {
 	return value[start:]
 }
 
-func conversationToolSummary(name string, args map[string]any) string {
-	path := conversationToolArg(args, "path", "file", "filename")
-	command := conversationToolArg(args, "command", "cmd")
-	task := conversationToolArg(args, "task", "prompt", "message")
-	var summary string
+// conversationToolActivity exposes only the reviewed, non-sensitive parts of
+// arguments for known tools. Unknown tools deliberately have no action or
+// target: the tool name remains available for display without projecting
+// arbitrary args.
+func conversationToolActivity(name string, args map[string]any) (action, target string) {
 	switch name {
-	case "read":
-		summary = "leyó " + conversationToolTarget(path, "un archivo")
-	case "edit":
-		summary = "editó " + conversationToolTarget(path, "un archivo")
-	case "write":
-		summary = "escribió " + conversationToolTarget(path, "un archivo")
-	case "apply_patch", "multiedit":
-		summary = "aplicó cambios"
+	case "read", "edit", "write", "ls", "send_file":
+		return name, conversationToolValue(args, "path")
 	case "bash":
-		if command != "" {
-			summary = "ejecutó `" + command + "`"
-		} else {
-			summary = "ejecutó un comando"
-		}
-	case "find":
-		summary = "buscó archivos"
-		if path != "" {
-			summary += " en " + path
-		}
-	case "grep":
-		summary = "buscó texto"
-		if path != "" {
-			summary += " en " + path
-		}
+		return name, conversationBashExecutable(conversationToolString(args, "command"))
+	case "find", "grep":
+		return name, conversationToolValue(args, "path")
+	case "fetch_content":
+		return "fetch", conversationFetchHostname(conversationToolString(args, "url"))
+	case "web_search":
+		return name, ""
 	case "subagent":
-		if task != "" {
-			summary = "lanzó subagente: " + task
-		} else {
-			summary = "lanzó un subagente"
-		}
+		return name, ""
 	default:
-		summary = "ejecutó " + name
+		return "", ""
 	}
-	return conversationSummaryLine(summary)
 }
 
-func conversationToolArg(args map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := args[key].(string); ok && value != "" {
-			return value
-		}
-	}
-	return ""
+func conversationToolValue(args map[string]any, key string) string {
+	return conversationToolText(conversationToolString(args, key))
 }
 
-func conversationToolTarget(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
+func conversationToolString(args map[string]any, key string) string {
+	value, _ := args[key].(string)
 	return value
 }
 
-func conversationSummaryLine(value string) string {
+// conversationBashExecutable returns only a simple command's basename. It is
+// deliberately conservative: shell syntax, quoting, assignments, and unusual
+// executable names produce no target rather than risking an argument leak.
+func conversationBashExecutable(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" || !utf8.ValidString(command) || strings.ContainsAny(command, "\r\n'\"`\\$&|;<>") || strings.ContainsAny(command, "()[]{}*?!~") {
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	executable := fields[0]
+	if strings.Contains(executable, "=") || strings.HasPrefix(executable, "-") {
+		return ""
+	}
+	for _, char := range executable {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || strings.ContainsRune("._/-", char)) {
+			return ""
+		}
+	}
+	executable = path.Base(executable)
+	if executable == "." || executable == "" {
+		return ""
+	}
+	return conversationToolText(executable)
+}
+
+func conversationFetchHostname(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return ""
+	}
+	return conversationToolText(strings.TrimSuffix(strings.ToLower(parsed.Hostname()), "."))
+}
+
+func conversationToolText(value string) string {
 	value = strings.Join(strings.Fields(value), " ")
 	value = strings.ToValidUTF8(value, "�")
 	if len(value) <= maxConversationToolSummaryBytes {

@@ -37,8 +37,14 @@ sesión; el propietario acepta que ese contexto llegue a OpenAI.
 El contrato de lectura prioriza presupuesto, no censura:
 
 - los mensajes visibles se entregan completos, con límites defensivos;
-- la actividad de tools entrega de inicio nombre, argumentos condensados,
-  estado y tiempo, sin la salida completa;
+- la actividad de tools entrega de inicio `tool`, `action`, `target`, estado y
+  tiempo, sin argumentos crudos ni salida completa. `target` solo conserva el
+  `path` de `read`, `edit`, `write`, `ls` y `send_file`; para `find` y `grep`,
+  solo su `path`; para `bash`, únicamente el ejecutable base cuando se puede
+  determinar conservadoramente; y para `fetch_content`, solo el hostname
+  normalizado. Las búsquedas web y los subagentes no exponen target. Tools
+  desconocidas no exponen `action` ni `target`; `summary` es el fallback neutro
+  inglés `Tool activity`;
 - la salida de una tool se consulta explícitamente con
   `GET /api/sessions/{id}/messages?detail=full&item_id={tool-item-id}` y se
   devuelve como un tail acotado, nunca ilimitado;

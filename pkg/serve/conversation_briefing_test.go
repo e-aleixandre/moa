@@ -67,7 +67,7 @@ func TestConversationMessagesActiveFilteringPaginationAndAccess(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
 		t.Fatal(err)
 	}
-	if page.Order != "newest_first" || page.Branch.Source != "active" || len(page.Messages) != 2 || page.Messages[0].ID != "u2" || page.Messages[1].Role != "tool" || page.Messages[1].Tool != "bash" || page.Messages[1].Status != "pending" || page.Messages[1].Summary != "ejecutó un comando" || page.Messages[1].Text != "" || page.NextCursor == "" || !page.HasMore {
+	if page.Order != "newest_first" || page.Branch.Source != "active" || len(page.Messages) != 2 || page.Messages[0].ID != "u2" || page.Messages[1].Role != "tool" || page.Messages[1].Tool != "bash" || page.Messages[1].Action != "bash" || page.Messages[1].Status != "pending" || page.Messages[1].Summary != "Tool activity" || page.Messages[1].Text != "" || page.NextCursor == "" || !page.HasMore {
 		t.Fatalf("unsafe or unexpected first page: %#v", page)
 	}
 	if strings.Contains(rec.Body.String(), "private thought") || strings.Contains(rec.Body.String(), "secret shell") || strings.Contains(rec.Body.String(), "\"arguments\"") {
@@ -126,7 +126,7 @@ func TestConversationMessagesToolMetadataCorrelatesResultsWithoutOutput(t *testi
 		}
 		byTool[item.Tool] = item
 	}
-	if byTool["read"].Status != "ok" || byTool["read"].Summary != "leyó pkg/serve/handlers.go" || byTool["bash"].Status != "error" || byTool["bash"].Summary != "ejecutó `go test ./pkg/serve`" || byTool["edit"].Status != "rejected" || byTool["write"].Status != "pending" {
+	if byTool["read"].Status != "ok" || byTool["read"].Action != "read" || byTool["read"].Target != "pkg/serve/handlers.go" || byTool["bash"].Status != "error" || byTool["bash"].Action != "bash" || byTool["bash"].Target != "go" || byTool["edit"].Status != "rejected" || byTool["edit"].Action != "edit" || byTool["edit"].Target != "secret.go" || byTool["write"].Status != "pending" || byTool["write"].Action != "write" || byTool["write"].Target != "later.go" {
 		t.Fatalf("tool correlation = %#v", byTool)
 	}
 	rec = httptest.NewRecorder()
@@ -139,6 +139,106 @@ func TestConversationMessagesToolMetadataCorrelatesResultsWithoutOutput(t *testi
 		if item.Tool == "read" && item.ID != byTool["read"].ID {
 			t.Fatalf("tool item ID changed: first=%q second=%q", byTool["read"].ID, item.ID)
 		}
+	}
+}
+
+func TestConversationMessagesToolActivityUsesWhitelistedArguments(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "tool activity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendConversationTestMessage(sess, "assistant-tools", "assistant", "", nil,
+		core.ToolCallContent("read", "read", map[string]any{"path": "  src/\xffmain.go  ", "content": "private read content"}),
+		core.ToolCallContent("edit", "edit", map[string]any{"path": "edit.go", "old_string": "private old string", "new_string": "private new string"}),
+		core.ToolCallContent("write", "write", map[string]any{"path": "write.go", "content": "private write content"}),
+		core.ToolCallContent("ls", "ls", map[string]any{"path": "dir"}),
+		core.ToolCallContent("send", "send_file", map[string]any{"path": "report.pdf", "name": "private-name.pdf"}),
+		core.ToolCallContent("bash", "bash", map[string]any{"command": " go test ./pkg/serve --token private-bash-token ", "cmd": "private alternate command"}),
+		core.ToolCallContent("find", "find", map[string]any{"pattern": " private-find-pattern ", "path": " pkg/serve ", "content": "private find content"}),
+		core.ToolCallContent("grep", "grep", map[string]any{"pattern": " private-grep-pattern ", "path": " internal ", "new_string": "private grep replacement"}),
+		core.ToolCallContent("fetch", "fetch_content", map[string]any{"url": "https://user:private-url-token@EXAMPLE.test:8443/docs?token=private-query-token#private-fragment", "headers": map[string]any{"Authorization": "Bearer private-auth-header"}, "content": "private fetched content"}),
+		core.ToolCallContent("search", "web_search", map[string]any{"query": "private search query", "content": "private search content"}),
+		core.ToolCallContent("subagent", "subagent", map[string]any{"task": "private subagent task", "prompt": "private prompt"}),
+		core.ToolCallContent("unregistered-fetch", "fetch", map[string]any{"url": "https://private-fetch-alias.test/token"}),
+		core.ToolCallContent("unknown", "custom_tool", map[string]any{"path": "private path", "content": "private custom content", "new_string": "private custom replacement", "api_key": "private secret"}),
+	)
+
+	handler := NewServer(mgr)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages = %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, forbidden := range []string{
+		"private read content", "private old string", "private new string", "private write content",
+		"private alternate command", "private-bash-token", "private-find-pattern", "private-grep-pattern", "private find content", "private grep replacement",
+		"private-url-token", "private-query-token", "private-fragment", "private-auth-header", "private fetched content",
+		"private search query", "private search content", "private subagent task", "private prompt", "private path", "private custom content", "private custom replacement", "private secret", "private-name.pdf", "private-fetch-alias.test",
+		`"content"`, `"old_string"`, `"new_string"`, `"arguments"`, `"headers"`, `"Authorization"`,
+	} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatalf("non-whitelisted tool data leaked (%q): %s", forbidden, rec.Body.String())
+		}
+	}
+
+	var page conversationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct{ action, target string }{
+		"read":          {"read", "src/�main.go"},
+		"edit":          {"edit", "edit.go"},
+		"write":         {"write", "write.go"},
+		"ls":            {"ls", "dir"},
+		"send_file":     {"send_file", "report.pdf"},
+		"bash":          {"bash", "go"},
+		"find":          {"find", "pkg/serve"},
+		"grep":          {"grep", "internal"},
+		"fetch_content": {"fetch", "example.test"},
+		"web_search":    {"web_search", ""},
+		"subagent":      {"subagent", ""},
+		"fetch":         {"", ""},
+		"custom_tool":   {"", ""},
+	}
+	for _, item := range page.Messages {
+		expected, ok := want[item.Tool]
+		if !ok {
+			t.Fatalf("unexpected tool item: %#v", item)
+		}
+		if item.Action != expected.action || item.Target != expected.target || item.Summary != "Tool activity" {
+			t.Fatalf("tool %q = %#v, want action=%q target=%q", item.Tool, item, expected.action, expected.target)
+		}
+		if len(item.Target) > maxConversationToolSummaryBytes || !utf8.ValidString(item.Target) {
+			t.Fatalf("tool target is not normalized and bounded: %#v", item)
+		}
+	}
+}
+
+func TestConversationBashExecutableRedactsComplexCommands(t *testing.T) {
+	for _, test := range []struct {
+		command string
+		want    string
+	}{
+		{"go test ./pkg/serve --token private", "go"},
+		{"/usr/local/bin/git status", "git"},
+		{"curl -H Authorization:private https://example.test", "curl"},
+		{`curl -H "Authorization: Bearer private" https://example.test`, ""},
+		{"TOKEN=private go test", ""},
+		{"go test; curl private", ""},
+		{"$(private) go test", ""},
+	} {
+		if got := conversationBashExecutable(test.command); got != test.want {
+			t.Errorf("conversationBashExecutable(%q) = %q, want %q", test.command, got, test.want)
+		}
+	}
+	if got := conversationBashExecutable(strings.Repeat("a", maxConversationToolSummaryBytes+10) + " --token private"); len(got) > maxConversationToolSummaryBytes || !utf8.ValidString(got) {
+		t.Fatalf("unbounded bash executable target: %q", got)
+	}
+	if got := conversationFetchHostname("https://" + strings.Repeat("a", maxConversationToolSummaryBytes+10) + ".test/private"); len(got) > maxConversationToolSummaryBytes || !utf8.ValidString(got) {
+		t.Fatalf("unbounded fetch hostname target: %q", got)
 	}
 }
 
