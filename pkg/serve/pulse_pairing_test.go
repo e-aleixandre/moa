@@ -168,6 +168,34 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	}
 }
 
+func TestPulsePairingUsesServeNetworkBoundaryWhenTokenIsDisabled(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+	handler := NewServer(mgr, WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
+
+	pairRec := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, nil, "")
+	if pairRec.Code != http.StatusCreated {
+		t.Fatalf("tokenless network pairing = %d: %s", pairRec.Code, pairRec.Body.String())
+	}
+	var pairing pairingResult
+	if err := json.NewDecoder(pairRec.Body).Decode(&pairing); err != nil {
+		t.Fatal(err)
+	}
+	claimRec := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings/claim", `{"pairing_id":"`+pairing.PairingID+`","pairing_secret":"`+pairingPayloadSecret(t, pairing)+`","device_label":"network phone"}`, nil, "")
+	if claimRec.Code != http.StatusCreated {
+		t.Fatalf("tokenless network claim = %d: %s", claimRec.Code, claimRec.Body.String())
+	}
+	var device deviceCredentialResult
+	if err := json.NewDecoder(claimRec.Body).Decode(&device); err != nil {
+		t.Fatal(err)
+	}
+	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, device.Credential); got.Code != http.StatusForbidden {
+		t.Fatalf("tokenless device raw sessions auth = %d, want 403: %s", got.Code, got.Body.String())
+	}
+}
+
 func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")

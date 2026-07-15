@@ -64,6 +64,9 @@ func (i authIdentity) auditID() string {
 	if i.Kind == "device" {
 		return "device:" + i.DeviceID
 	}
+	if i.Kind == "network" {
+		return "network"
+	}
 	return "token"
 }
 
@@ -939,5 +942,32 @@ func authMiddleware(token string, secureCookie bool, devices *deviceStore, next 
 			return
 		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+}
+
+// networkOwnerMiddleware preserves Serve's opt-in token policy. When no token
+// is configured, the operator-selected network boundary is the owner boundary;
+// a paired device still has only its explicitly allowlisted surface.
+func networkOwnerMiddleware(devices *deviceStore, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = withDeviceStore(r, devices)
+		if credential, ok := parseDeviceAuthorization(r.Header.Get("Authorization")); ok {
+			if devices == nil {
+				http.Error(w, "device authentication unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if !deviceTransportAllowed(r) {
+				rejectInsecureDeviceTransport(w)
+				return
+			}
+			identity, err := devices.authenticate(credential)
+			if err != nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, withAuthIdentity(r, identity))
+			return
+		}
+		next.ServeHTTP(w, withAuthIdentity(r, authIdentity{Kind: "network"}))
 	})
 }

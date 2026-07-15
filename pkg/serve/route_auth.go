@@ -35,7 +35,7 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 				return
 			}
 		case routeOwnerAdmin:
-			if !authenticated || identity.Kind != "token" {
+			if !authenticated || (identity.Kind != "token" && identity.Kind != "network") {
 				http.Error(w, "paired devices cannot administer pairing", http.StatusForbidden)
 				return
 			}

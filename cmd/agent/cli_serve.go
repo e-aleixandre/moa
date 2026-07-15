@@ -100,6 +100,7 @@ func runServe(args []string) {
 	srv := serve.NewServer(mgr,
 		serve.WithAllowedHosts(splitCSV(*allowedHosts)),
 		serve.WithAuthToken(token, false),
+		serve.WithDeviceAuthentication(),
 		serve.WithRealtimeClientSecretBroker(func() (string, bool) {
 			if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 				return key, !auth.IsOAuthToken(key)

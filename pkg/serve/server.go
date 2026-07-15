@@ -37,6 +37,7 @@ type serverOptions struct {
 	token        string
 	secureCookie bool
 	devicePath   string
+	deviceAuth   bool
 	realtimeKey  RealtimeAPIKeyFunc
 	realtimeHTTP *http.Client
 }
@@ -78,7 +79,17 @@ func WithAuthToken(token string, secureCookie bool) ServerOption {
 // primarily useful for embedded deployments and tests; normal Serve uses
 // ~/.config/moa/devices.json (or MOA_CONFIG_DIR/devices.json).
 func WithDeviceStorePath(path string) ServerOption {
-	return func(o *serverOptions) { o.devicePath = path }
+	return func(o *serverOptions) {
+		o.devicePath = path
+		o.deviceAuth = true
+	}
+}
+
+// WithDeviceAuthentication enables Pulse device pairing and credentials when
+// Serve is embedded without a shared token. The CLI enables it by default;
+// tests and other embedders opt in explicitly.
+func WithDeviceAuthentication() ServerOption {
+	return func(o *serverOptions) { o.deviceAuth = true }
 }
 
 // NewServer returns an http.Handler wired to the given manager.
@@ -153,7 +164,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.Handle("GET /", staticHandler)
 
 	var devices *deviceStore
-	if o.token != "" {
+	if o.token != "" || o.deviceAuth {
 		path := o.devicePath
 		if path == "" {
 			path = defaultDeviceStorePath()
@@ -186,6 +197,11 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// routes via the cookie.
 	if o.token != "" {
 		handler = authMiddleware(o.token, o.secureCookie, devices, handler)
+	} else {
+		// Without a shared token, Serve's selected network boundary
+		// (localhost/Tailscale) is the owner boundary. Device credentials still
+		// remain narrow and revocable rather than inheriting that owner surface.
+		handler = networkOwnerMiddleware(devices, handler)
 	}
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
