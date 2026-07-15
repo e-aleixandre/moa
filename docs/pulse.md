@@ -49,8 +49,13 @@ Realtime, Moa puede intercambiar su API key normal de OpenAI por un client secre
 efímero y limitado para un dispositivo emparejado; Pulse guarda ese secreto solo
 el tiempo necesario y se conecta directamente a OpenAI. Moa no hace de proxy ni
 guarda o registra audio, SDP, conversación, el client secret o la clave
-permanente. OAuth de OpenAI no sirve para este broker. Las credenciales de Pulse
-nunca se incluyen en URLs, logs o preferencias ordinarias.
+permanente. OAuth de OpenAI no sirve para este broker: acuñar client secrets de
+Realtime exige una API key normal de OpenAI. Esa clave se guarda aparte de la
+credencial principal (slot `openai-transcribe`, compartido con la transcripción
+Whisper), de modo que el agente puede seguir usando su suscripción OAuth de
+OpenAI sin que sus llamadas se facturen por API. Configúrala con
+`moa --login openai-transcribe` y no pongas `OPENAI_API_KEY` en el entorno. Las
+credenciales de Pulse nunca se incluyen en URLs, logs o preferencias ordinarias.
 
 El modelo puede:
 

@@ -117,8 +117,9 @@ func handleOpenAILogin(authStore *auth.Store) {
 }
 
 func handleTranscribeKeySetup(authStore *auth.Store) {
-	fmt.Println("Store an OpenAI API key for Whisper speech-to-text.")
-	fmt.Println("This is separate from the main OpenAI credential (OAuth/API key).")
+	fmt.Println("Store an OpenAI API key for Whisper speech-to-text and Pulse Realtime voice.")
+	fmt.Println("This is separate from the main OpenAI credential (OAuth/API key),")
+	fmt.Println("so the agent can stay on an OpenAI OAuth subscription.")
 	key := readSecretInput("Enter your OpenAI API key: ")
 	if err := authStore.Set("openai-transcribe", auth.Credential{
 		Type: "api_key",
@@ -127,7 +128,7 @@ func handleTranscribeKeySetup(authStore *auth.Store) {
 		fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("✓ OpenAI transcription key saved. Voice input is now available in the web UI.")
+	fmt.Println("✓ OpenAI auxiliary key saved. Voice input and Pulse Realtime are now available.")
 }
 
 // readSecretInput reads a line from stdin, hiding input if terminal.
