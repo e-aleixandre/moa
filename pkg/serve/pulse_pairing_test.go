@@ -46,6 +46,28 @@ func pairingPayloadSecret(t *testing.T, pairing pairingResult) string {
 	return parts[2]
 }
 
+func pairedDevice(t *testing.T, handler http.Handler, owner *http.Cookie, label string) deviceCredentialResult {
+	t.Helper()
+	pair := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, owner, "")
+	if pair.Code != http.StatusCreated {
+		t.Fatalf("pair device = %d: %s", pair.Code, pair.Body.String())
+	}
+	var pairing pairingResult
+	if err := json.NewDecoder(pair.Body).Decode(&pairing); err != nil {
+		t.Fatal(err)
+	}
+	claimBody := `{"pairing_id":"` + pairing.PairingID + `","pairing_secret":"` + pairingPayloadSecret(t, pairing) + `","device_label":"` + label + `"}`
+	claim := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings/claim", claimBody, nil, "")
+	if claim.Code != http.StatusCreated {
+		t.Fatalf("claim device = %d: %s", claim.Code, claim.Body.String())
+	}
+	var device deviceCredentialResult
+	if err := json.NewDecoder(claim.Body).Decode(&device); err != nil {
+		t.Fatal(err)
+	}
+	return device
+}
+
 func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")
@@ -143,8 +165,23 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 		t.Fatalf("used pairing claim = %d", replayClaim.Code)
 	}
 
-	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, credential.Credential); got.Code != http.StatusForbidden {
-		t.Fatalf("device raw sessions auth = %d, want 403: %s", got.Code, got.Body.String())
+	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, credential.Credential); got.Code != http.StatusOK {
+		t.Fatalf("device sessions auth = %d, want 200: %s", got.Code, got.Body.String())
+	}
+	for _, path := range []string{
+		"/api/attention",
+		"/api/usage",
+		"/api/sessions/" + sess.ID + "/messages",
+	} {
+		if got := pairingRequest(handler, http.MethodGet, path, "", nil, credential.Credential); got.Code != http.StatusOK {
+			t.Fatalf("device generic read %s = %d, want 200: %s", path, got.Code, got.Body.String())
+		}
+	}
+	if got := pairingRequest(handler, http.MethodPost, "/api/sessions/"+sess.ID+"/archive", `{"archived":true}`, nil, credential.Credential); got.Code != http.StatusOK {
+		t.Fatalf("device generic archive = %d, want 200: %s", got.Code, got.Body.String())
+	}
+	if got := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, nil, credential.Credential); got.Code != http.StatusForbidden {
+		t.Fatalf("device pairing administration = %d, want 403: %s", got.Code, got.Body.String())
 	}
 	if got := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, credential.Credential); got.Code != http.StatusForbidden {
 		t.Fatalf("device list auth = %d, want 403: %s", got.Code, got.Body.String())
@@ -158,17 +195,17 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/companion-ws", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential.Credential}}}) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential.Credential}}}) //nolint:staticcheck
 	if err != nil {
-		t.Fatalf("device companion WS auth: %v", err)
+		t.Fatalf("device session WS auth: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
-	var event CompanionWireEvent
+	var event Event
 	if err := wsjson.Read(ctx, conn, &event); err != nil { //nolint:staticcheck
 		t.Fatal(err)
 	}
 	if event.Type != "init" {
-		t.Fatalf("device companion WS event = %q", event.Type)
+		t.Fatalf("device session WS event = %q", event.Type)
 	}
 
 	revokeRec := pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+credential.DeviceID+"/revoke", `{}`, owner, "")
@@ -203,8 +240,8 @@ func TestPulsePairingUsesServeNetworkBoundaryWhenTokenIsDisabled(t *testing.T) {
 	if err := json.NewDecoder(claimRec.Body).Decode(&device); err != nil {
 		t.Fatal(err)
 	}
-	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, device.Credential); got.Code != http.StatusForbidden {
-		t.Fatalf("tokenless device raw sessions auth = %d, want 403: %s", got.Code, got.Body.String())
+	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, device.Credential); got.Code != http.StatusOK {
+		t.Fatalf("tokenless device sessions auth = %d, want 200: %s", got.Code, got.Body.String())
 	}
 }
 

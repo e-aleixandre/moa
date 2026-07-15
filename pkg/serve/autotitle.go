@@ -64,8 +64,6 @@ func (m *Manager) generateAutoTitle(sess *ManagedSession) {
 	sess.TitleSource = session.TitleSourceAuto
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
-	m.updateOpsTitle(sess)
-
 	if sess.persister != nil {
 		sess.persister.saveTitle(title, session.TitleSourceAuto)
 	}

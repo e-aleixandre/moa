@@ -1,4 +1,4 @@
-import { Search, PanelRight, PanelBottom, Bell, QrCode, ShieldCheck } from 'lucide-preact';
+import { Search, PanelRight, PanelBottom, Bell, QrCode } from 'lucide-preact';
 import { applyPreset, addPane, assignToTile } from '../tile-actions.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { PRESETS } from '../layoutPresets.js';
@@ -14,7 +14,7 @@ function LayoutPreview({ preset }) {
   );
 }
 
-export function LayoutBar({ state, onOpenPalette, onOpenOps, onOpenPairing }) {
+export function LayoutBar({ state, onOpenPalette, onOpenPairing }) {
 	const attentionItems = state.attentionItems || [];
 	const openAttentionSession = (sessionId) => {
 		if (sessionId) assignToTile(state.focusedTile, sessionId);
@@ -30,9 +30,6 @@ export function LayoutBar({ state, onOpenPalette, onOpenOps, onOpenPairing }) {
         <Search />
         <span>Sessions</span>
         <kbd class="shortcut-hint">{formatShortcut('K', { mod: true })}</kbd>
-      </button>
-      <button class="layout-btn" onClick={onOpenOps} title="Ops status">
-        <ShieldCheck />
       </button>
       <button class="layout-btn" onClick={onOpenPairing} title="Pair Pulse">
         <QrCode />

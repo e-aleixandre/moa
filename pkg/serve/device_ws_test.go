@@ -52,8 +52,7 @@ func createStoredDeviceCredential(t *testing.T, path string, expiresAt time.Time
 }
 
 type deviceWSSet struct {
-	companion *websocket.Conn
-	ops       *websocket.Conn
+	session *websocket.Conn
 }
 
 func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, credential string) deviceWSSet {
@@ -67,30 +66,19 @@ func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, cred
 		}
 		return conn
 	}
-	set := deviceWSSet{
-		companion: dial("/api/sessions/" + sessionID + "/companion-ws"),
-		ops:       dial("/api/ops/ws"),
-	}
-	var companion CompanionWireEvent
-	if err := wsjson.Read(ctx, set.companion, &companion); err != nil { //nolint:staticcheck
+	set := deviceWSSet{session: dial("/api/sessions/" + sessionID + "/ws")}
+	var init Event
+	if err := wsjson.Read(ctx, set.session, &init); err != nil { //nolint:staticcheck
 		t.Fatal(err)
 	}
-	if companion.Type != "init" {
-		t.Fatalf("companion init = %q", companion.Type)
-	}
-	var opsEvent opsWireEvent
-	if err := wsjson.Read(ctx, set.ops, &opsEvent); err != nil { //nolint:staticcheck
-		t.Fatal(err)
-	}
-	if opsEvent.Type != "init" {
-		t.Fatalf("ops init = %q", opsEvent.Type)
+	if init.Type != "init" {
+		t.Fatalf("session init = %q", init.Type)
 	}
 	return set
 }
 
 func (set deviceWSSet) close() {
-	_ = set.companion.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
-	_ = set.ops.Close(websocket.StatusNormalClosure, "")       //nolint:errcheck,staticcheck
+	_ = set.session.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
 }
 
 func expectDeviceWSClose(t *testing.T, conn *websocket.Conn, name string) {
@@ -142,8 +130,7 @@ func TestDeviceRevokeClosesEveryWebSocketAndLeavesTokenSocketAlive(t *testing.T)
 	}
 	sess.runtime.Bus.Publish(bus.TextDelta{SessionID: sess.ID, RunGen: 1, Delta: "after revoke"})
 
-	expectDeviceWSClose(t, deviceSockets.companion, "companion")
-	expectDeviceWSClose(t, deviceSockets.ops, "ops")
+	expectDeviceWSClose(t, deviceSockets.session, "session")
 
 	tokenReadCtx, cancelTokenRead := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelTokenRead()
@@ -173,6 +160,5 @@ func TestDeviceCredentialExpiryClosesEveryWebSocketWhileIdle(t *testing.T) {
 	deviceSockets := dialDeviceWebSockets(t, server, sess.ID, credential.Credential)
 	defer deviceSockets.close()
 
-	expectDeviceWSClose(t, deviceSockets.companion, "companion expiry")
-	expectDeviceWSClose(t, deviceSockets.ops, "ops expiry")
+	expectDeviceWSClose(t, deviceSockets.session, "session expiry")
 }

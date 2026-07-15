@@ -61,7 +61,7 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	})}
 	mgr := newTestManagerWithConfig(t, context.Background(), newMockProvider(simpleResponseHandler("ok")), t.TempDir(), core.MoaConfig{DisableSandbox: true})
 	h := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")), WithRealtimeClientSecretBroker(func() (string, bool) { return "permanent-key", true }, client))
-	device := pulseOperationDevice(t, h, &http.Cookie{Name: authCookieName, Value: "owner"}, "phone")
+	device := pairedDevice(t, h, &http.Cookie{Name: authCookieName, Value: "owner"}, "phone")
 
 	ownerReq := httptest.NewRequest(http.MethodPost, "/api/pulse/realtime/client-secret", strings.NewReader(`{}`))
 	ownerReq.Host, ownerReq.RemoteAddr = "localhost", "127.0.0.1:12345"
@@ -73,7 +73,7 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	if owner.Code != http.StatusForbidden {
 		t.Fatalf("owner mint = %d", owner.Code)
 	}
-	rec := pulseOperationRequest(h, http.MethodPost, "/api/pulse/realtime/client-secret", `{}`, device.Credential)
+	rec := pairingRequest(h, http.MethodPost, "/api/pulse/realtime/client-secret", `{}`, nil, device.Credential)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("mint = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -151,11 +151,11 @@ func TestRealtimeClientSecretRejectsClientParametersAndUnavailableKey(t *testing
 	}
 	mgr := newTestManagerWithConfig(t, context.Background(), newMockProvider(simpleResponseHandler("ok")), t.TempDir(), core.MoaConfig{DisableSandbox: true})
 	h := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")), WithRealtimeClientSecretBroker(func() (string, bool) { return "", false }, nil))
-	device := pulseOperationDevice(t, h, &http.Cookie{Name: authCookieName, Value: "owner"}, "phone")
-	if rec := pulseOperationRequest(h, http.MethodPost, "/api/pulse/realtime/client-secret", `{"model":"attacker"}`, device.Credential); rec.Code != http.StatusBadRequest {
+	device := pairedDevice(t, h, &http.Cookie{Name: authCookieName, Value: "owner"}, "phone")
+	if rec := pairingRequest(h, http.MethodPost, "/api/pulse/realtime/client-secret", `{"model":"attacker"}`, nil, device.Credential); rec.Code != http.StatusBadRequest {
 		t.Fatalf("parameters = %d", rec.Code)
 	}
-	if rec := pulseOperationRequest(h, http.MethodPost, "/api/pulse/realtime/client-secret", `{}`, device.Credential); rec.Code != http.StatusServiceUnavailable {
+	if rec := pairingRequest(h, http.MethodPost, "/api/pulse/realtime/client-secret", `{}`, nil, device.Credential); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("missing key = %d", rec.Code)
 	}
 }
@@ -188,7 +188,7 @@ func TestRealtimeClientSecretDeviceTransportAndRequestShape(t *testing.T) {
 	}
 	mgr := newTestManagerWithConfig(t, context.Background(), newMockProvider(simpleResponseHandler("ok")), t.TempDir(), core.MoaConfig{DisableSandbox: true})
 	h := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
-	device := pulseOperationDevice(t, h, &http.Cookie{Name: authCookieName, Value: "owner"}, "phone")
+	device := pairedDevice(t, h, &http.Cookie{Name: authCookieName, Value: "owner"}, "phone")
 	request := func(body string) *http.Request {
 		r := httptest.NewRequest(http.MethodPost, "/api/pulse/realtime/client-secret", strings.NewReader(body))
 		r.Host, r.RemoteAddr = "localhost", "127.0.0.1:1"

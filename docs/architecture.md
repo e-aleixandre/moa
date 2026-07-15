@@ -63,8 +63,7 @@
 | `pkg/jsonutil/` | JSON parsing utilities |
 | `pkg/push/` | Web Push notifications (VAPID keys, subscription store, dispatch) |
 | `pkg/usage/` | Polls Anthropic's undocumented endpoint for Claude subscription plan usage |
-| `pkg/attention/` | Attention Service: consumes every session's event bus and produces a priority-ordered attention queue (drives Ops/companion notifications) |
-| `pkg/ops/` | Bounded, safe operational projection consumed by an Ops client (no filesystem/bus wiring; callers provide canonical facts) |
+| `pkg/attention/` | Attention Service: consumes every session's event bus and produces a priority-ordered attention queue |
 | `pkg/schedule/` | Durable one-shot schedule records (backs the web `/schedule` command) |
 
 ## Execution model

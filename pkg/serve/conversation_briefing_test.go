@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -20,6 +21,13 @@ func appendConversationTestMessage(sess *ManagedSession, id, role, text string, 
 	content := []core.Content{core.TextContent(text)}
 	content = append(content, extra...)
 	sess.runtime.Context().Tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{MsgID: id, Role: role, Content: content, Timestamp: time.Now().Unix()}, Custom: custom}})
+}
+
+func appendConversationToolResult(sess *ManagedSession, id, callID, name, output string, isError bool, custom map[string]any) {
+	msg := core.WrapMessage(core.NewToolResultMessage(callID, name, []core.Content{core.TextContent(output)}, isError))
+	msg.MsgID = id
+	msg.Custom = custom
+	sess.runtime.Context().Tree.Append(session.Entry{Type: session.EntryMessage, Message: msg})
 }
 
 func TestConversationMessagesActiveFilteringPaginationAndAccess(t *testing.T) {
@@ -59,7 +67,7 @@ func TestConversationMessagesActiveFilteringPaginationAndAccess(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
 		t.Fatal(err)
 	}
-	if page.Order != "newest_first" || page.Branch.Source != "active" || len(page.Messages) != 2 || page.Messages[0].ID != "u2" || page.Messages[1].ID != "a1" || !page.Messages[1].Omitted || page.Messages[1].OmittedBlocks != 2 || page.NextCursor == "" || !page.HasMore {
+	if page.Order != "newest_first" || page.Branch.Source != "active" || len(page.Messages) != 2 || page.Messages[0].ID != "u2" || page.Messages[1].Role != "tool" || page.Messages[1].Tool != "bash" || page.Messages[1].Status != "pending" || page.Messages[1].Summary != "ejecutó un comando" || page.Messages[1].Text != "" || page.NextCursor == "" || !page.HasMore {
 		t.Fatalf("unsafe or unexpected first page: %#v", page)
 	}
 	if strings.Contains(rec.Body.String(), "private thought") || strings.Contains(rec.Body.String(), "secret shell") || strings.Contains(rec.Body.String(), "\"arguments\"") {
@@ -69,11 +77,138 @@ func TestConversationMessagesActiveFilteringPaginationAndAccess(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("next page = %d: %s", rec.Code, rec.Body.String())
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil || len(page.Messages) != 1 || page.Messages[0].ID != "u1" || page.HasMore {
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil || len(page.Messages) != 2 || page.Messages[0].ID != "a1" || !page.Messages[0].Omitted || page.Messages[0].OmittedBlocks != 1 || page.Messages[1].ID != "u1" || page.HasMore {
 		t.Fatalf("next page = %#v, err=%v", page, err)
 	}
 	if got := request("/api/sessions/"+sess.ID+"/messages?cursor=tampered", "localhost", true); got.Code != http.StatusBadRequest {
 		t.Fatalf("invalid cursor = %d", got.Code)
+	}
+}
+
+func TestConversationMessagesToolMetadataCorrelatesResultsWithoutOutput(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "tools"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendConversationTestMessage(sess, "assistant-tools", "assistant", "", nil,
+		core.ToolCallContent("ok", "read", map[string]any{"path": "pkg/serve/handlers.go"}),
+		core.ToolCallContent("err", "bash", map[string]any{"command": "go test ./pkg/serve"}),
+		core.ToolCallContent("rejected", "edit", map[string]any{"path": "secret.go"}),
+		core.ToolCallContent("pending", "write", map[string]any{"path": "later.go"}),
+	)
+	appendConversationToolResult(sess, "result-ok", "ok", "read", "private file contents", false, nil)
+	appendConversationToolResult(sess, "result-error", "err", "bash", "private test failure", true, nil)
+	appendConversationToolResult(sess, "result-rejected", "rejected", "edit", "private permission reason", true, map[string]any{"rejected": true})
+
+	handler := NewServer(mgr)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages = %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "private file contents") || strings.Contains(rec.Body.String(), "private test failure") || strings.Contains(rec.Body.String(), "private permission reason") {
+		t.Fatalf("tool output leaked in metadata response: %s", rec.Body.String())
+	}
+	var page conversationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 4 {
+		t.Fatalf("tool items = %#v", page.Messages)
+	}
+	byTool := make(map[string]ConversationMessage, len(page.Messages))
+	for _, item := range page.Messages {
+		if item.Role != "tool" || item.ID == "" || item.Text != "" || item.Timestamp.IsZero() {
+			t.Fatalf("unexpected tool item: %#v", item)
+		}
+		byTool[item.Tool] = item
+	}
+	if byTool["read"].Status != "ok" || byTool["read"].Summary != "leyó pkg/serve/handlers.go" || byTool["bash"].Status != "error" || byTool["bash"].Summary != "ejecutó `go test ./pkg/serve`" || byTool["edit"].Status != "rejected" || byTool["write"].Status != "pending" {
+		t.Fatalf("tool correlation = %#v", byTool)
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	var repeated conversationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&repeated); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range repeated.Messages {
+		if item.Tool == "read" && item.ID != byTool["read"].ID {
+			t.Fatalf("tool item ID changed: first=%q second=%q", byTool["read"].ID, item.ID)
+		}
+	}
+}
+
+func TestConversationMessagesToolDetailRequiresItemAndReturnsUTF8Tail(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "tool detail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendConversationTestMessage(sess, "assistant-tool", "assistant", "", nil, core.ToolCallContent("read-call", "read", map[string]any{"path": "large.txt"}))
+	output := "begin\n" + strings.Repeat("é", maxConversationToolDetailBytes) + "\nEND"
+	appendConversationToolResult(sess, "result-tool", "read-call", "read", output, false, nil)
+	handler := NewServer(mgr)
+	request := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := request("/api/sessions/" + sess.ID + "/messages?detail=full"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing item_id = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec := request("/api/sessions/" + sess.ID + "/messages")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages = %d: %s", rec.Code, rec.Body.String())
+	}
+	var page conversationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil || len(page.Messages) != 1 || page.Messages[0].Role != "tool" {
+		t.Fatalf("metadata = %#v, err=%v", page, err)
+	}
+	rec = request("/api/sessions/" + sess.ID + "/messages?detail=full&item_id=" + page.Messages[0].ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail = %d: %s", rec.Code, rec.Body.String())
+	}
+	var detail conversationToolDetailResponse
+	if err := json.NewDecoder(rec.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if !detail.Truncated || len(detail.Output) > maxConversationToolDetailBytes || !utf8.ValidString(detail.Output) || !strings.HasSuffix(detail.Output, "\nEND") || strings.Contains(detail.Output, "begin\n") {
+		t.Fatalf("bounded detail = %#v", detail)
+	}
+}
+
+func TestConversationMessagesExcludeThinkingAndCustomByDefault(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "filtering"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendConversationTestMessage(sess, "visible", "assistant", "visible answer", nil, core.ThinkingContent("private reasoning"))
+	appendConversationTestMessage(sess, "thinking-only", "assistant", "", nil, core.ThinkingContent("only private reasoning"))
+	appendConversationTestMessage(sess, "custom", "assistant", "private custom message", map[string]any{"internal": true})
+	handler := NewServer(mgr)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages = %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "private reasoning") || strings.Contains(rec.Body.String(), "private custom message") {
+		t.Fatalf("thinking or custom content leaked: %s", rec.Body.String())
+	}
+	var page conversationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].ID != "visible" || page.Messages[0].Text != "visible answer" {
+		t.Fatalf("filtered messages = %#v", page.Messages)
 	}
 }
 

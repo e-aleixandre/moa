@@ -413,7 +413,6 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribeAutoTitle(sess)
 	m.subscribeCacheClock(sess)
 	m.subscribeAttention(sess)
-	m.subscribeOps(sess)
 
 	return sess, nil
 }
@@ -435,9 +434,6 @@ func (m *Manager) Delete(id string) error {
 	sess, ok := m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		if m.ops != nil {
-			m.ops.RemoveSession(id)
-		}
 		// Not active — try disk.
 		if err := session.DeleteByID(m.sessionBaseDir, id); err != nil {
 			if errors.Is(err, session.ErrNotFound) {
@@ -451,10 +447,6 @@ func (m *Manager) Delete(id string) error {
 	}
 	delete(m.sessions, id)
 	m.mu.Unlock()
-	if m.ops != nil {
-		m.ops.RemoveSession(id)
-	}
-
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {
 		sess.persister.markDeleted()
@@ -684,16 +676,6 @@ func (m *Manager) Shutdown() {
 	}
 	if m.attention != nil {
 		m.attention.Close()
-	}
-	if m.pulseOperations != nil {
-		if err := m.pulseOperations.Close(); err != nil {
-			slog.Warn("Pulse operation storage close failed", "error", err)
-		}
-	}
-	if m.instructionStore != nil {
-		if err := m.instructionStore.Close(); err != nil {
-			slog.Warn("canonical instruction ledger close failed", "error", err)
-		}
 	}
 }
 

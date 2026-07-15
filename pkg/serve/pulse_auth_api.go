@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -33,7 +35,7 @@ func handlePulsePairing(store *deviceStore) http.HandlerFunc {
 		var body struct {
 			DeviceExpiresDays int `json:"device_expires_days"`
 		}
-		if !decodeInstructionBody(w, r, &body) {
+		if !decodePulseJSONBody(w, r, &body) {
 			return
 		}
 		days := body.DeviceExpiresDays
@@ -77,7 +79,7 @@ func handlePulsePairingClaim(store *deviceStore) http.HandlerFunc {
 			PairingSecret string `json:"pairing_secret"`
 			DeviceLabel   string `json:"device_label"`
 		}
-		if !decodeInstructionBody(w, r, &body) {
+		if !decodePulseJSONBody(w, r, &body) {
 			return
 		}
 		body.PairingID = strings.TrimSpace(body.PairingID)
@@ -127,7 +129,7 @@ func handlePulseDeviceRevoke(store *deviceStore) http.HandlerFunc {
 			return
 		}
 		var body struct{}
-		if !decodeInstructionBody(w, r, &body) {
+		if !decodePulseJSONBody(w, r, &body) {
 			return
 		}
 		id := r.PathValue("id")
@@ -145,4 +147,19 @@ func handlePulseDeviceRevoke(store *deviceStore) http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 		}
 	}
+}
+
+func decodePulseJSONBody(w http.ResponseWriter, r *http.Request, target any) bool {
+	limitBody(w, r, maxJSONBodySize)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return false
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return false
+	}
+	return true
 }

@@ -104,26 +104,14 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/models", handleListModels())
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
-	mux.HandleFunc("GET /api/ops", handleOpsQuery(manager))
-	mux.HandleFunc("GET /api/ops/overview", handleOpsOverview(manager))
-	mux.HandleFunc("GET /api/ops/pulse", handleOpsPulse(manager))
-	mux.HandleFunc("POST /api/ops/ask", handleOpsAsk(manager))
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", handleConversationMessages(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/companion-ws", handleCompanionWebSocket(manager))
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/archive", handleArchiveSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/steers/cancel", handleCancelSteers(manager))
-	// Voice/Ops inherits Serve's established access model: a configured token
-	// protects every route through the shared middleware; without one, the
-	// operator must restrict network reachability (for example with Tailscale).
-	// It must not have a surprising, stricter policy than the rest of Serve.
-	mux.HandleFunc("POST /api/sessions/{id}/instruction", handleInstruction(manager))
-	mux.HandleFunc("POST /api/ops/instruction", handleOpsInstruction(manager))
-	mux.HandleFunc("GET /api/ops/ws", handleOpsWebSocket(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
@@ -173,8 +161,6 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 		devices, err = openDeviceStore(path)
 		if err != nil {
 			slog.Warn("device authentication disabled", "error", err)
-		} else {
-			devices.setDeactivationHook(manager.invalidatePulseDeviceOperations)
 		}
 	}
 	// Device handlers receive the store selected above; the rest of Serve stays
@@ -183,12 +169,6 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/pulse/pairings/claim", handlePulsePairingClaim(devices))
 	mux.HandleFunc("GET /api/pulse/devices", handlePulseDevices(devices))
 	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))
-	// Pulse operation transactions are intentionally separate from legacy web
-	// and terminal writes: these are paired-device-only typed adapters, not a
-	// generic command surface.
-	mux.HandleFunc("POST /api/pulse/operations/prepare", handlePulseOperationPrepare(manager))
-	mux.HandleFunc("POST /api/pulse/operations/{id}/confirm", handlePulseOperationConfirm(manager))
-	mux.HandleFunc("GET /api/pulse/operations/{id}", handlePulseOperationGet(manager))
 	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))
 
 	handler := routeAuthorizationMiddleware(csrfMiddleware(bodyTimeoutMiddleware(mux)))
@@ -199,8 +179,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 		handler = authMiddleware(o.token, o.secureCookie, devices, handler)
 	} else {
 		// Without a shared token, Serve's selected network boundary
-		// (localhost/Tailscale) is the owner boundary. Device credentials still
-		// remain narrow and revocable rather than inheriting that owner surface.
+		// (localhost/Tailscale) is the owner boundary. Device credentials remain
+		// individually revocable while sharing the generic owner API.
 		handler = networkOwnerMiddleware(devices, handler)
 	}
 	// Host validation is the outermost middleware so it protects every route,

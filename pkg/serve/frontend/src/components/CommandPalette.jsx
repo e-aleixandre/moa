@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'preact/hooks';
-import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft, ChevronRight, ShieldCheck } from 'lucide-preact';
+import { Plus, Search, CornerDownLeft, FolderOpen, ArrowLeft, ChevronRight } from 'lucide-preact';
 import { assignToTile } from '../tile-actions.js';
 import { resumeSession, createSession, unarchiveSession } from '../session-actions.js';
 import { allTileIds, findTile } from '../tileTree.js';
@@ -16,7 +16,7 @@ function getCaps() {
     .catch(() => ({}));
 }
 
-export function CommandPalette({ open, onClose, state, initialMode = 'search', onOpenOps, onOpenPairing }) {
+export function CommandPalette({ open, onClose, state, initialMode = 'search', onOpenPairing }) {
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mode, setMode] = useState(initialMode);
@@ -96,7 +96,6 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
     const result = [];
 
     result.push({ type: 'action', id: '__new', label: 'New session…' });
-    result.push({ type: 'action', id: '__ops', label: 'View Ops status' });
     result.push({ type: 'action', id: '__pair-pulse', label: 'Pair Pulse…' });
 
     const q = query.toLowerCase().trim();
@@ -201,11 +200,6 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
       setMode('create');
       return;
     }
-    if (item.type === 'action' && item.id === '__ops') {
-      onClose();
-      onOpenOps();
-      return;
-    }
     if (item.type === 'action' && item.id === '__pair-pulse') {
       onClose();
       onOpenPairing();
@@ -233,7 +227,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
       }
       onClose();
     }
-  }, [state.focusedTile, onClose, onOpenOps, onOpenPairing]);
+  }, [state.focusedTile, onClose, onOpenPairing]);
 
   const handleSelectCreate = useCallback(async (item) => {
     if (creating) return;
@@ -327,7 +321,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
                 onClick={() => handleSelect(item)}
                 onMouseEnter={() => setSelectedIdx(i)}
               >
-                {item.id === '__ops' ? <ShieldCheck class="palette-item-icon" /> : <Plus class="palette-item-icon" />}
+                <Plus class="palette-item-icon" />
                 <span class="palette-item-label">{item.label}</span>
                 {i === selectedIdx && <CornerDownLeft class="palette-enter-hint" />}
               </div>

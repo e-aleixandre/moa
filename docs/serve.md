@@ -107,77 +107,14 @@ The route has the same Host, CSRF,
 TLS/loopback, revocation, concurrency, and rate-limit protections as other
 paired-device operations.
 
-The device credential is **not** a second owner token. Its legacy access is an
-explicit default-deny allowlist: the safe Ops projections (`GET /api/ops`,
-`/api/ops/overview`, and `/api/ops/pulse`), the read-only Ops WebSocket
-(`/api/ops/ws`), the display-only owner conversation endpoint
-(`/api/sessions/{id}/messages`), and the dedicated display-only companion
-WebSocket (`/api/sessions/{id}/companion-ws`). Every other legacy route is
-owner-only. In particular a device cannot read `/api/attention`, generic
-session lists/details, `/api/sessions/{id}/ws`, subagent transcripts, files,
-branches, filesystem completion, models, capabilities, usage, logs, tool or
-permission payloads; nor can it call `/send`, `/instruction`, permission,
-shell, command, config, branch, subagent, cancel, pairing, device list, or
-revoke endpoints. New owner capabilities must get a typed Pulse adapter rather
-than being added to this allowlist.
+An emparejado Pulse device represents the owner on Serve's **generic API**:
+it can read sessions, conversations and activity and use the same generic
+actions as the web client. This is deliberate: Pulse is a client of Moa, not a
+separate restricted product surface. The exceptions are pairing administration:
+only the network/token owner can create pairings, list paired devices or revoke
+a device. An already paired device cannot extend its own authority.
 
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
-
-### Pulse typed write transactions
-
-Paired Pulse devices can use a separate, device-only transaction surface:
-
-- `POST /api/pulse/operations/prepare`
-- `POST /api/pulse/operations/{id}/confirm` with an empty JSON object
-- `GET /api/pulse/operations/{id}`
-
-These routes require `Authorization: Moa-Device <device-id>.<secret>`; legacy
-`--token` cookie/query authentication is deliberately rejected for them. They
-also require normal Host validation, no query parameters, `X-Moa-Request` for
-POSTs, strict JSON, and TLS unless Serve sees a direct loopback peer. They do
-not alter the legacy web/TUI routes.
-
-The supported kinds are `directed_instruction` and `permission_decision`.
-`directed_instruction` accepts bounded `target` and `text`; prepare resolves an
-exact Ops destination or returns `409` candidates.
-
-`permission_decision` accepts only a bounded `target` and `decision`
-(`approve_once` or `deny`). `feedback` is rejected, including benign text, so
-Pulse cannot inject agent-visible text through a permission decision.
-The target must resolve to one session with exactly one current permission.
-Prepare binds the private review to that session, the runtime permission ID,
-run generation, tool, allow scope, and a canonical digest of raw arguments.
-Confirm atomically revalidates that exact snapshot before using the canonical
-one-off resolver. A changed/replaced request, new run, missing permission, or
-legacy resolution is rejected safely. Its review contains only a bounded,
-redacted target/tool and generic one-time scope; it never contains raw tool
-arguments, tool output, permission IDs, or internal errors. `allow`, permanent
-rules, `add_rule`, shell/command/config fields, and arbitrary decisions are
-strict-schema errors. Permission reviews expire after two minutes; instruction
-reviews expire after five.
-
-Confirm binds the same paired device and immutable review; it never accepts a
-client-supplied confirmation flag, endpoint/method, free-form command, new
-text, or changed decision. Receipts are immutable and idempotent, retained for
-one hour, and are never evicted early to make room for a newer operation:
-admission returns `429` when pending or receipt capacity is full. An
-instruction receipt says whether Moa accepted/rejected and delivered the
-instruction; it does not claim that agent work is complete unless that is
-separately observed. A permission receipt reports only `accepted`, `rejected`,
-or `indeterminate` and whether permission resolution was observed; it never
-claims completion of subsequent agent work. Raw permission args are never
-persisted in the operation store. `status: "indeterminate"` and
-`delivery: "indeterminate"` mean a crash or durable-storage window prevents
-Moa from truthfully determining the result; Pulse must present that uncertainty and may
-not treat it as rejection. Serve never retries such delivery in the background.
-Instruction recovery consults its canonical ledger. Permission resolution has
-no replay ledger: after its durable attempt marker, restart recovery is terminal
-`indeterminate`, never a blind retry or approval. Revoke/expiry synchronously
-invalidates pending operations. Prepare admission is also bound to the active
-device lifecycle boundary: a credential that expires or is revoked while its
-body/review is delayed cannot create a pending review; if creation wins the
-race, deactivation invalidates it before returning. Confirmation rechecks the
-same boundary at execution.
 
 ## Frontend development
 

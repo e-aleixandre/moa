@@ -4,6 +4,7 @@ package serve
 
 import (
 	"context"
+	"crypto/rand"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,7 +18,6 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/files"
 	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/ops"
 	"github.com/ealeixandre/moa/pkg/push"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
@@ -258,17 +258,7 @@ type Manager struct {
 	resuming map[string]struct{}
 	baseCtx  context.Context
 
-	// instructionMu serializes voice instruction idempotency, rate limiting, and
-	// state selection. This keeps a retried instruction from being applied twice.
-	instructionMu       sync.Mutex
-	instructionRequests map[string][]instructionRequest
-	instructionRates    map[string][]time.Time
-	instructionGlobal   []time.Time
-	instructionStore    *instructionStore
-	instructionKey      []byte
-	instructionNow      func() time.Time
-	pulseOperations     *operationStore
-	conversationKey     []byte // process-local HMAC key for read cursors
+	conversationKey []byte // process-local HMAC key for read cursors
 
 	providerFactory func(model core.Model) (core.Provider, error)
 	transcriber     core.Transcriber // nil when no speech-to-text is available
@@ -295,8 +285,6 @@ type Manager struct {
 	// attention normalizes cross-session blocking state for future voice and
 	// digest clients. It owns no session state and is stopped on Shutdown.
 	attention *attention.Service
-	// ops is the read-only, safe cross-session operational projection.
-	ops *ops.Service
 }
 
 // ManagerConfig configures a Manager.
@@ -316,15 +304,6 @@ type ManagerConfig struct {
 	// SchedulePath overrides the durable schedules file. Empty stores it beside
 	// the session base directory.
 	SchedulePath string
-	// OpsPath overrides the durable safe Ops journal. Empty stores it beside
-	// the session base directory.
-	OpsPath string
-	// InstructionPath overrides the private replay-idempotency store. Empty
-	// stores it beside the session base directory.
-	InstructionPath string
-	// PulseOperationPath overrides the private Pulse prepare/confirm store.
-	// Empty stores it beside the session base directory.
-	PulseOperationPath string
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -356,142 +335,44 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
 		}
 	}
-	opsPath := cfg.OpsPath
-	if opsPath == "" {
-		baseDir := cfg.SessionBaseDir
-		if baseDir == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				baseDir = filepath.Join(home, ".config", "moa", "sessions")
-			}
-		}
-		if baseDir != "" {
-			opsPath = filepath.Join(filepath.Dir(baseDir), "ops.json")
-		}
-	}
-	var opsStore *ops.Store
-	var opsState ops.DurableState
-	if opsPath != "" {
-		var err error
-		opsStore, opsState, err = ops.OpenStore(opsPath)
-		if err != nil {
-			slog.Warn("ops storage disabled", "path", opsPath, "error", err)
-		}
-	}
-	opsService := ops.New(ops.Config{Persist: func(state ops.DurableState) error {
-		if opsStore == nil {
-			return nil
-		}
-		return opsStore.Save(state)
-	}})
-	if opsStore != nil {
-		if err := opsService.Restore(opsState); err != nil {
-			slog.Warn("ops restore failed", "error", err)
-		}
-	}
-	instructionPath := cfg.InstructionPath
-	if instructionPath == "" {
-		baseDir := cfg.SessionBaseDir
-		if baseDir == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				baseDir = filepath.Join(home, ".config", "moa", "sessions")
-			}
-		}
-		if baseDir != "" {
-			instructionPath = filepath.Join(filepath.Dir(baseDir), "instruction-idempotency.json")
-		}
-	}
-	var instructionStore *instructionStore
-	var instructionState durableInstructionState
-	if instructionPath != "" {
-		var err error
-		instructionStore, instructionState, err = openInstructionStore(instructionPath)
-		if err != nil {
-			slog.Warn("canonical instruction ledger unavailable; instructions fail closed", "path", instructionPath, "error", err)
-		}
-	}
-	pulseOperationPath := cfg.PulseOperationPath
-	if pulseOperationPath == "" {
-		baseDir := cfg.SessionBaseDir
-		if baseDir == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				baseDir = filepath.Join(home, ".config", "moa", "sessions")
-			}
-		}
-		if baseDir != "" {
-			pulseOperationPath = filepath.Join(filepath.Dir(baseDir), "pulse-operations.json")
-		}
-	}
-	var pulseOperations *operationStore
-	if pulseOperationPath != "" {
-		var err error
-		pulseOperations, err = openOperationStore(pulseOperationPath)
-		if err != nil {
-			slog.Warn("Pulse operation storage disabled", "path", pulseOperationPath, "error", err)
-		}
-	}
-	instructionKey, validInstructionKey := decodeInstructionKey(instructionState.Key)
-	if !validInstructionKey {
-		var err error
-		instructionKey, err = newInstructionKey()
-		if err != nil {
-			slog.Warn("instruction idempotency key unavailable", "error", err)
-			if instructionStore != nil {
-				_ = instructionStore.Close()
-			}
-			instructionStore = nil
-		}
-	}
-	conversationKey, err := newInstructionKey()
+	conversationKey, err := newConversationKey()
 	if err != nil {
 		// A nil key only makes cursors unusable; reads without a cursor remain
 		// safe. Do not reuse a user-provided secret or persist transcript state.
 		slog.Warn("conversation cursor key unavailable", "error", err)
 	}
 	m := &Manager{
-		sessions:         make(map[string]*ManagedSession),
-		resuming:         make(map[string]struct{}),
-		baseCtx:          ctx,
-		providerFactory:  cfg.ProviderFactory,
-		transcriber:      cfg.Transcriber,
-		usagePoller:      cfg.UsagePoller,
-		pushStore:        cfg.PushStore,
-		pushDispatcher:   cfg.PushDispatcher,
-		defaultModel:     cfg.DefaultModel,
-		workspaceRoot:    cfg.WorkspaceRoot,
-		moaCfg:           cfg.MoaCfg,
-		configLoader:     configLoader,
-		sessionBaseDir:   cfg.SessionBaseDir,
-		savedCacheTTL:    30 * time.Second,
-		fileScanner:      files.NewScanner(),
-		scheduler:        scheduler,
-		attention:        attention.New(attention.Config{}),
-		ops:              opsService,
-		instructionStore: instructionStore,
-		pulseOperations:  pulseOperations,
-		instructionKey:   instructionKey,
-		instructionNow:   time.Now,
-		conversationKey:  conversationKey,
+		sessions:        make(map[string]*ManagedSession),
+		resuming:        make(map[string]struct{}),
+		baseCtx:         ctx,
+		providerFactory: cfg.ProviderFactory,
+		transcriber:     cfg.Transcriber,
+		usagePoller:     cfg.UsagePoller,
+		pushStore:       cfg.PushStore,
+		pushDispatcher:  cfg.PushDispatcher,
+		defaultModel:    cfg.DefaultModel,
+		workspaceRoot:   cfg.WorkspaceRoot,
+		moaCfg:          cfg.MoaCfg,
+		configLoader:    configLoader,
+		sessionBaseDir:  cfg.SessionBaseDir,
+		savedCacheTTL:   30 * time.Second,
+		fileScanner:     files.NewScanner(),
+		scheduler:       scheduler,
+		attention:       attention.New(attention.Config{}),
+		conversationKey: conversationKey,
 	}
-	m.instructionRequests = make(map[string][]instructionRequest)
-	m.instructionRates = make(map[string][]time.Time)
-	if m.instructionStore != nil {
-		for _, record := range normalizeDurableInstructionRecords(instructionState.Records, m.instructionNow()) {
-			m.instructionRequests[record.SessionID] = append(m.instructionRequests[record.SessionID], instructionRequest{
-				id: record.RequestID, fingerprint: record.Fingerprint, action: record.Action,
-				at: record.At, state: durableInstructionStateOf(record), pulse: record.Pulse,
-			})
-		}
-		if err := m.persistInstructionRequestsLocked(); err != nil {
-			slog.Warn("canonical instruction ledger initialization failed; instructions fail closed", "error", err)
-		}
-	}
-	m.recoverPulseConfirmations()
 	m.attention.Start()
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
 	}
 	reapStaleAttachments()
 	return m
+}
+
+func newConversationKey() ([]byte, error) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	return key, err
 }
 
 func (m *Manager) loadConfig(cwd string) core.MoaConfig {
@@ -588,8 +469,6 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	}
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
-	m.updateOpsTitle(sess)
-
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
 			return "", "", err
