@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Manager, context.CancelFunc
 	return newTestServerWithRoot(t, "/tmp")
 }
 
-func TestAttentionEndpointReturnsCrossSessionBlockingItems(t *testing.T) {
+func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testing.T) {
 	ts, mgr, cancel := newTestServer(t)
 	defer cancel()
 	defer ts.Close()
@@ -38,7 +38,7 @@ func TestAttentionEndpointReturnsCrossSessionBlockingItems(t *testing.T) {
 		SessionID: sess.ID,
 		ID:        "perm_attention_api",
 		ToolName:  "bash",
-		Args:      map[string]any{"command": "git status"},
+		Args:      map[string]any{"command": "rm -rf /tmp/build"},
 	})
 	pollUntil(t, time.Second, "attention API item", func() bool {
 		resp, err := http.Get(ts.URL + "/api/attention")
@@ -47,12 +47,30 @@ func TestAttentionEndpointReturnsCrossSessionBlockingItems(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		var body struct {
-			Items []struct {
-				RefID string `json:"ref_id"`
-			} `json:"items"`
+			Items []map[string]json.RawMessage `json:"items"`
 		}
-		return resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&body) == nil &&
-			len(body.Items) == 1 && body.Items[0].RefID == "perm_attention_api"
+		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&body) != nil || len(body.Items) != 1 {
+			return false
+		}
+		item := body.Items[0]
+		var refID, riskLevel, verbatim string
+		var riskFlags []string
+		if json.Unmarshal(item["ref_id"], &refID) != nil ||
+			json.Unmarshal(item["risk_level"], &riskLevel) != nil ||
+			json.Unmarshal(item["risk_flags"], &riskFlags) != nil ||
+			json.Unmarshal(item["verbatim"], &verbatim) != nil {
+			return false
+		}
+		hasDestructive := false
+		for _, flag := range riskFlags {
+			if flag == "destructive" {
+				hasDestructive = true
+				break
+			}
+		}
+		_, hasLegacyConfirm := item["requires_verbatim_confirm"]
+		return refID == "perm_attention_api" && riskLevel == "high" &&
+			hasDestructive && verbatim == "rm -rf /tmp/build" && !hasLegacyConfirm
 	})
 }
 

@@ -53,6 +53,10 @@ El contrato de lectura prioriza presupuesto, no censura:
 Los mensajes de agentes son contexto conversacional, no una afirmación
 verificada de estado por sí mismos.
 
+El frontend web actual no consume el endpoint genérico de transcript, por lo
+que este cambio de contrato no requiere un cambio de frontend. Pulse y futuros
+clientes deben usar los campos aditivos `action` y `target`.
+
 ## Acciones
 
 Pulse actúa directamente contra las rutas genéricas de Moa: enviar o dirigir un
@@ -60,6 +64,17 @@ mensaje, responder un `ask_user`, decidir un permiso, crear, retomar, cancelar
 o archivar sesiones. No existe `prepare → review → confirm`: la conversación de
 voz es el contexto de confianza. El modelo solo pregunta cuando el destino es
 realmente ambiguo.
+
+### Attention y permisos
+
+`GET /api/attention` es una vista informativa de los elementos sin resolver de
+todas las sesiones, no un protocolo de aprobación. Para un permiso, Pulse puede
+leer `risk_level`, `risk_flags` y `verbatim` para informar al propietario y usa
+el `session_id` y `ref_id` del elemento con la ruta genérica de decisión de
+permisos. No hay una eco-confirmación que el cliente deba completar antes de
+esa decisión. En particular, `requires_verbatim_confirm` ya no forma parte del
+contrato de attention; Moa no tiene versionado formal de API y los clientes no
+deben depender de ese campo.
 
 ## Fases
 

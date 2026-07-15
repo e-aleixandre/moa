@@ -114,6 +114,22 @@ separate restricted product surface. The exceptions are pairing administration:
 only the network/token owner can create pairings, list paired devices or revoke
 a device. An already paired device cannot extend its own authority.
 
+## Attention queue and permission decisions
+
+`GET /api/attention` returns an informational, cross-session snapshot of
+unresolved attention items. It describes what needs the owner's attention; it
+does not define an approval or echo-confirmation protocol. For a permission
+item, an owner-authorized client uses its `session_id` and `ref_id` with the
+existing generic `POST /api/sessions/{id}/permission` action to decide it.
+
+Permission items retain `risk_level`, `risk_flags`, and `verbatim` so a client
+can present or read the assessed risk and exact command before making that
+generic decision. They are information for the client and owner, not a
+server-enforced confirmation ceremony. The attention item intentionally no
+longer includes `requires_verbatim_confirm`; clients must not infer an
+echo-confirmation requirement from the queue. Serve has no formal API version;
+this is the current attention contract.
+
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
 
 ## Frontend development

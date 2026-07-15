@@ -153,10 +153,3 @@ func commandString(toolName string, args map[string]any) string {
 	}
 	return strings.Join(parts, " ")
 }
-
-// requiresVerbatimConfirm reports whether an item of this risk demands an
-// explicit spoken echo-confirmation before the client acts (design §4). High
-// risk always does.
-func requiresVerbatimConfirm(level RiskLevel) bool {
-	return level == RiskHigh
-}

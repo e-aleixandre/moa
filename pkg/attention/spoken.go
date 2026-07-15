@@ -37,8 +37,8 @@ func resolveLang(code string) lang {
 	}
 }
 
-// spokenAsk writes the briefing for a pending question. The question text is
-// relayed verbatim (joined if multiple) — never paraphrased.
+// spokenAsk writes the briefing for a pending question, including the question
+// text joined when multiple questions are pending.
 func (l lang) spokenAsk(alias string, questions []bus.AskQuestion) string {
 	var qs []string
 	for _, q := range questions {
@@ -58,7 +58,7 @@ func (l lang) spokenAsk(alias string, questions []bus.AskQuestion) string {
 // spokenPermission writes the briefing for a permission request. It always
 // states the tool and, when risk flags are present, names the danger in strong
 // words. It does NOT read the full command by default (the client can offer
-// that via Verbatim), but high-risk items are flagged for verbatim confirm.
+// that via Verbatim).
 func (l lang) spokenPermission(alias, toolName string, level RiskLevel, flags []string) string {
 	danger := dangerPhrase(l, flags)
 	switch l {

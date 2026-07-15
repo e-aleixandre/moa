@@ -109,7 +109,7 @@ func TestPermissionRequestBecomesP0AndResolves(t *testing.T) {
 	}
 }
 
-func TestAskRequestVerbatimAndResolve(t *testing.T) {
+func TestAskRequestAndResolve(t *testing.T) {
 	s := newTestService(t)
 	b := bus.NewLocalBus()
 	defer b.Close()
@@ -123,7 +123,7 @@ func TestAskRequestVerbatimAndResolve(t *testing.T) {
 		Questions: []bus.AskQuestion{{Text: "Deploy to prod now?"}},
 	})
 
-	eventually(t, "ask delivered verbatim", func() bool {
+	eventually(t, "ask delivered", func() bool {
 		m, ok := client.lastOfType("attention")
 		return ok && m.Item != nil && m.Item.Kind == KindAsk &&
 			contains(m.Item.Spoken, "Deploy to prod now?")

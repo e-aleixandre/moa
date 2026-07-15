@@ -84,17 +84,16 @@ const (
 )
 
 // AttentionItem is one thing worth telling the user about. The Spoken field is
-// already written for the ear; the client reads it verbatim and never
-// paraphrases. RefID carries moa's real pending ID (perm_%d / ask_%d) so the
-// client can resolve it through the EXISTING HTTP endpoints — the Attention
-// Service itself resolves nothing.
+// already written for the ear. RefID carries moa's real pending ID (perm_%d /
+// ask_%d) so the client can resolve it through the EXISTING HTTP endpoints —
+// the Attention Service itself resolves nothing.
 type AttentionItem struct {
 	ID        string    `json:"id"`         // stable attention-item id (att_%d)
 	Priority  Priority  `json:"priority"`   // P0..P3
 	Kind      Kind      `json:"kind"`       // ask | permission | error | ...
 	SessionID string    `json:"session_id"` // origin session
 	Alias     string    `json:"alias"`      // pronounceable session name for speech
-	Spoken    string    `json:"spoken"`     // text written for the ear (read verbatim)
+	Spoken    string    `json:"spoken"`     // text written for the ear
 	State     ItemState `json:"state"`
 	CreatedAt time.Time `json:"created_at"`
 
@@ -105,9 +104,8 @@ type AttentionItem struct {
 
 	// Risk metadata — only meaningful for KindPermission. Populated by the
 	// deterministic risk parser (assessRisk). Never softened by any model.
-	RiskLevel               RiskLevel `json:"risk_level,omitempty"`
-	RiskFlags               []string  `json:"risk_flags,omitempty"`
-	RequiresVerbatimConfirm bool      `json:"requires_verbatim_confirm,omitempty"`
+	RiskLevel RiskLevel `json:"risk_level,omitempty"`
+	RiskFlags []string  `json:"risk_flags,omitempty"`
 	// Verbatim is the exact command/args, ALWAYS captured even when not read
 	// aloud, so a client can offer "read it to me literally".
 	Verbatim string `json:"verbatim,omitempty"`

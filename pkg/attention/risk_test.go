@@ -112,9 +112,6 @@ func TestSpokenPermission_NeverSoftensDanger(t *testing.T) {
 	if !contains(spoken, "deletes or overwrites") {
 		t.Fatalf("destructive permission spoken text lost its warning: %q", spoken)
 	}
-	if !requiresVerbatimConfirm(level) {
-		t.Fatalf("high-risk command must require verbatim confirm")
-	}
 }
 
 func TestSpokenPermission_Spanish(t *testing.T) {

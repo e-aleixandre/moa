@@ -29,8 +29,8 @@ func attentionAlias(title string) string {
 }
 
 // handleAttention exposes the current unresolved, cross-session attention
-// items. It is deliberately read-only: voice actions and approvals need a
-// server-bound operation/confirmation protocol and are not part of M0.
+// items as read-only state. It never resolves an item: owner-authorized clients
+// use the existing generic per-session actions for answers and permissions.
 func handleAttention(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		if m.attention == nil {

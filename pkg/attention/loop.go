@@ -291,13 +291,12 @@ func (s *Service) ensurePermItem(st *loopState, snap *sessionSnapshot, refID, to
 	it := &AttentionItem{
 		ID: s.nextItemID(), Priority: P0Blocking, Kind: KindPermission,
 		SessionID: snap.id, Alias: snap.alias, RefID: refID,
-		Spoken:                  s.lang.spokenPermission(snap.alias, toolName, level, flags),
-		State:                   StatePending,
-		CreatedAt:               time.Now(),
-		RiskLevel:               level,
-		RiskFlags:               flags,
-		RequiresVerbatimConfirm: requiresVerbatimConfirm(level),
-		Verbatim:                commandString(toolName, args),
+		Spoken:    s.lang.spokenPermission(snap.alias, toolName, level, flags),
+		State:     StatePending,
+		CreatedAt: time.Now(),
+		RiskLevel: level,
+		RiskFlags: flags,
+		Verbatim:  commandString(toolName, args),
 	}
 	snap.pendingPerm[refID] = it.ID
 	s.addItem(st, it)
