@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,6 +39,18 @@ type errProvider struct{}
 
 func (errProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	return nil, context.DeadlineExceeded
+}
+
+// countingProvider is a verdictProvider that counts how many times it's asked
+// to Stream, so a test can prove the verifier was (not) invoked.
+type countingProvider struct {
+	calls *atomic.Int32
+	text  string
+}
+
+func (p countingProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	p.calls.Add(1)
+	return verdictProvider{text: p.text}.Stream(ctx, req)
 }
 
 func newGoalDriverContext(b EventBus, agent AgentController, verdictJSON string) *SessionContext {
@@ -517,7 +530,7 @@ func TestBuildGoalEvidence_IncludesDiffAndChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ev := buildGoalEvidence(context.Background(), dir, "I changed the file")
+	ev, _ := buildGoalEvidence(context.Background(), dir, "I changed the file")
 	if !strings.Contains(ev, "DIFF vs HEAD") || !strings.Contains(ev, "MODIFIED CONTENT") {
 		t.Fatalf("evidence should contain the real diff, got:\n%s", ev)
 	}
@@ -540,4 +553,155 @@ func TestGoalDriver_InactiveGoal_NoOp(t *testing.T) {
 	// Goal never entered.
 	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1})
 	expectNone(endedCh, b, t)
+}
+
+// newGoalRepoWithFailingChecks creates a git repo whose .moa/verify.json defines
+// a check that always fails, so the deterministic gate is red. Returns the dir.
+func newGoalRepoWithFailingChecks(t *testing.T, verifyJSON string) string {
+	t.Helper()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@t.t")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".moa"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".moa", "verify.json"), []byte(verifyJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "init")
+	return dir
+}
+
+// TestGoalDriver_CheckGate_OverridesSatisfiedVerdict is the core guard for the
+// #4 hard gate: when a red .moa/verify.json is present, the goal is NOT done —
+// and the LLM verifier is SKIPPED entirely (the free checks already settled it,
+// so paying the model just to discard its verdict would burn money). The goal
+// keeps going and the failing check output reaches the maker as feedback.
+func TestGoalDriver_CheckGate_OverridesSatisfiedVerdict(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	// A large send delay parks the relaunched run so it can't cascade into more
+	// iterations while we assert.
+	fa := &fakeAgent{sendDelay: time.Hour}
+	sctx := newGoalDriverContext(b, fa, `{"satisfied":true,"feedback":"looks great to me"}`)
+	// Count verifier invocations: with red checks the verifier must never run.
+	var verifierCalls atomic.Int32
+	sctx.ProviderFactory = func(core.Model) (core.Provider, error) {
+		return countingProvider{calls: &verifierCalls, text: `{"satisfied":true,"feedback":"looks great to me"}`}, nil
+	}
+	// A check that always fails: the gate must be red.
+	dir := newGoalRepoWithFailingChecks(t, `{"checks":[{"name":"test","command":"exit 1"}]}`)
+	sctx.CWD = dir
+	RegisterHandlers(sctx)
+
+	iterCh := make(chan GoalIterationEnded, 4)
+	b.Subscribe(func(e GoalIterationEnded) { iterCh <- e })
+	endedCh := make(chan GoalEnded, 4)
+	b.Subscribe(func(e GoalEnded) { endedCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{WorkDir: dir})
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "all done, tests pass", HadEdits: true})
+
+	iter := drainChan(iterCh, b, t)
+	if iter.Satisfied {
+		t.Fatal("the hard gate must override a satisfied verdict when checks are red")
+	}
+	if !strings.Contains(iter.Feedback, "checks") && !strings.Contains(iter.Feedback, "test") {
+		t.Fatalf("gate feedback should mention the failing checks, got:\n%s", iter.Feedback)
+	}
+	if n := verifierCalls.Load(); n != 0 {
+		t.Fatalf("verifier must be skipped when checks are red (no money burned), but it ran %d time(s)", n)
+	}
+	expectNone(endedCh, b, t)
+	if !sctx.Goal.Active() {
+		t.Fatal("goal must stay active (not closed) when the gate is red")
+	}
+}
+
+// TestGoalDriver_CheckGate_GreenAllowsSatisfied confirms the gate only blocks a
+// RED result: with passing checks, a satisfied verdict still closes the goal.
+func TestGoalDriver_CheckGate_GreenAllowsSatisfied(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newGoalDriverContext(b, fa, `{"satisfied":true,"feedback":"done"}`)
+	dir := newGoalRepoWithFailingChecks(t, `{"checks":[{"name":"test","command":"exit 0"}]}`)
+	sctx.CWD = dir
+	RegisterHandlers(sctx)
+
+	iterCh := make(chan GoalIterationEnded, 4)
+	b.Subscribe(func(e GoalIterationEnded) { iterCh <- e })
+	endedCh := make(chan GoalEnded, 4)
+	b.Subscribe(func(e GoalEnded) { endedCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{WorkDir: dir})
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "done", HadEdits: true})
+
+	iter := drainChan(iterCh, b, t)
+	if !iter.Satisfied {
+		t.Fatalf("green checks + satisfied verdict must close the goal, got %+v", iter)
+	}
+	ended := drainChan(endedCh, b, t)
+	if ended.Reason != "objective met" {
+		t.Fatalf("expected 'objective met', got %q", ended.Reason)
+	}
+}
+
+// TestGoalDriver_RecordsVerdictMemory verifies the verifier's memory is
+// accumulated across iterations: each finished verdict is recorded so the next
+// verification can be reminded of it.
+func TestGoalDriver_RecordsVerdictMemory(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{sendDelay: time.Hour}
+	sctx := newGoalDriverContext(b, fa, `{"satisfied":false,"feedback":"phase 2 missing in api.go"}`)
+	RegisterHandlers(sctx)
+
+	iterCh := make(chan GoalIterationEnded, 4)
+	b.Subscribe(func(e GoalIterationEnded) { iterCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{MaxStalled: 5})
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "did phase 1", HadEdits: true})
+
+	_ = drainChan(iterCh, b, t)
+	prior := sctx.Goal.PriorVerdicts()
+	if len(prior) != 1 {
+		t.Fatalf("expected 1 recorded verdict, got %d", len(prior))
+	}
+	if prior[0].Satisfied {
+		t.Fatal("recorded verdict should be unsatisfied")
+	}
+	if !strings.Contains(prior[0].Feedback, "phase 2 missing") {
+		t.Fatalf("recorded feedback should carry the verifier's note, got %q", prior[0].Feedback)
+	}
+}
+
+// TestSummarizePriorVerdicts checks the memo formatting handed to the verifier.
+func TestSummarizePriorVerdicts(t *testing.T) {
+	if got := summarizePriorVerdicts(nil); got != "" {
+		t.Fatalf("empty history should summarize to empty, got %q", got)
+	}
+	got := summarizePriorVerdicts([]goal.IterationVerdict{
+		{Iteration: 1, Satisfied: false, Feedback: "missing X\nand Y"},
+		{Iteration: 2, Satisfied: false, Feedback: "still missing Y"},
+	})
+	if !strings.Contains(got, "Iteration 1: not satisfied") || !strings.Contains(got, "Iteration 2: not satisfied") {
+		t.Fatalf("summary should list each iteration, got:\n%s", got)
+	}
+	if !strings.Contains(got, "missing X") || !strings.Contains(got, "still missing Y") {
+		t.Fatalf("summary should carry each feedback, got:\n%s", got)
+	}
 }

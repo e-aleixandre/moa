@@ -71,9 +71,22 @@ type Goal struct {
 	// one. Guarded by mu (see LastCommit/SetLastCommit).
 	lastCommit string
 
+	// verdicts records each finished iteration's verdict so the next
+	// verification can be given memory of what was already found lacking,
+	// instead of judging every iteration cold. Guarded by mu.
+	verdicts []IterationVerdict
+
 	// onChange fires after Enter/Exit (for TUI/serve status + system-prompt
 	// rebuild). Called with the mutex released.
 	onChange func(active bool)
+}
+
+// IterationVerdict is one past iteration's outcome, kept so the verifier can be
+// reminded across iterations of what it previously judged unmet.
+type IterationVerdict struct {
+	Iteration int
+	Satisfied bool
+	Feedback  string
 }
 
 // New creates an inactive Goal.
@@ -145,6 +158,7 @@ func (g *Goal) Enter(opts Options) error {
 	g.stalled = 0
 	g.spent = 0
 	g.lastCommit = ""
+	g.verdicts = nil
 	if opts.Timeout > 0 {
 		g.deadline = time.Now().Add(opts.Timeout)
 	} else {
@@ -234,6 +248,31 @@ func (g *Goal) SetLastCommit(hash string) {
 	g.mu.Lock()
 	g.lastCommit = hash
 	g.mu.Unlock()
+}
+
+// RecordVerdict appends a finished iteration's verdict to the goal's memory so
+// the next verification can be reminded of what was previously judged unmet.
+func (g *Goal) RecordVerdict(iteration int, satisfied bool, feedback string) {
+	g.mu.Lock()
+	g.verdicts = append(g.verdicts, IterationVerdict{
+		Iteration: iteration,
+		Satisfied: satisfied,
+		Feedback:  feedback,
+	})
+	g.mu.Unlock()
+}
+
+// PriorVerdicts returns a copy of the recorded iteration verdicts, oldest
+// first, so the driver can summarise them for the verifier.
+func (g *Goal) PriorVerdicts() []IterationVerdict {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.verdicts) == 0 {
+		return nil
+	}
+	out := make([]IterationVerdict, len(g.verdicts))
+	copy(out, g.verdicts)
+	return out
 }
 
 // ensureStateFile creates the STATE.md scaffold if it's missing. An existing

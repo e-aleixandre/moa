@@ -61,16 +61,17 @@ type ProviderFactory func(core.Model) (core.Provider, error)
 
 // VerifyConfig configures a verifier run.
 type VerifyConfig struct {
-	Factory      ProviderFactory
-	VerifierSpec string        // model spec; "" = DefaultVerifierSpec
-	Objective    string        // the goal objective (verbatim /goal text)
-	Evidence     string        // initial hint (diff + checks); NOT authoritative
-	StatePath    string        // path to the goal's STATE.md (shown to the verifier)
-	WorkDir      string        // read-only sandbox root for the verifier's tools
-	Timeout      time.Duration // wall-clock TOTAL per run; 0 = DefaultVerifyTimeout
-	MaxTurns     int           // 0 = defaultVerifierMaxTurns
-	MaxBudget    float64       // 0 = DefaultVerifierMaxBudget
-	OneShot      bool          // legacy tool-less one-shot mode
+	Factory       ProviderFactory
+	VerifierSpec  string        // model spec; "" = DefaultVerifierSpec
+	Objective     string        // the goal objective (verbatim /goal text)
+	Evidence      string        // initial hint (diff + checks); NOT authoritative
+	PriorFeedback string        // summary of earlier iterations' verdicts (memory); may be empty
+	StatePath     string        // path to the goal's STATE.md (shown to the verifier)
+	WorkDir       string        // read-only sandbox root for the verifier's tools
+	Timeout       time.Duration // wall-clock TOTAL per run; 0 = DefaultVerifyTimeout
+	MaxTurns      int           // 0 = defaultVerifierMaxTurns
+	MaxBudget     float64       // 0 = DefaultVerifierMaxBudget
+	OneShot       bool          // legacy tool-less one-shot mode
 }
 
 const verifierSystemPrompt = `You are a strict completion auditor in an autonomous coding loop. You did NOT write the work — your only job is to judge whether the stated OBJECTIVE has actually been met, and to report precisely what is missing if it has not.
@@ -122,7 +123,7 @@ func Verify(ctx context.Context, cfg VerifyConfig) (Verdict, VerifyStats, error)
 	}
 
 	if cfg.OneShot {
-		verdict, stats, err := verifyOneShot(ctx, prov, model, cfg.Objective, cfg.Evidence, timeout)
+		verdict, stats, err := verifyOneShot(ctx, prov, model, cfg.Objective, cfg.Evidence, cfg.PriorFeedback, timeout)
 		return verdict, stats, err
 	}
 	// The agentic verifier's tools are confined to WorkDir. An empty root would
@@ -167,7 +168,7 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	user := buildVerifierPrompt(cfg.Objective, cfg.StatePath, cfg.Evidence)
+	user := buildVerifierPrompt(cfg.Objective, cfg.StatePath, cfg.Evidence, cfg.PriorFeedback)
 
 	// The budget pool is shared across retries: each attempt is capped at what's
 	// left, so recreating the agent can't re-grant the full budget.
@@ -296,13 +297,17 @@ func subtractBudget(remaining, spent float64) float64 {
 
 // buildVerifierPrompt assembles the user message with the objective, the goal
 // state file path, and the initial evidence hint.
-func buildVerifierPrompt(objective, statePath, evidence string) string {
+func buildVerifierPrompt(objective, statePath, evidence, priorFeedback string) string {
 	var b strings.Builder
 	b.WriteString("OBJECTIVE:\n")
 	b.WriteString(strings.TrimSpace(objective))
 	if strings.TrimSpace(statePath) != "" {
 		b.WriteString("\n\nGOAL STATE FILE: ")
 		b.WriteString(strings.TrimSpace(statePath))
+	}
+	if pf := strings.TrimSpace(priorFeedback); pf != "" {
+		b.WriteString("\n\nEARLIER VERIFICATIONS (your own prior verdicts — recheck whether each point is now addressed; do NOT assume it still holds without looking):\n")
+		b.WriteString(pf)
 	}
 	b.WriteString("\n\nINITIAL EVIDENCE (a hint — verify it yourself):\n")
 	b.WriteString(strings.TrimSpace(evidence))
@@ -388,8 +393,12 @@ func newVerifierRegistry(workDir string) (*core.Registry, error) {
 // TOTAL usage/cost across all attempts (including billed failed retries) so the
 // driver charges the goal for everything spent, and shares one wall-clock
 // deadline across retries.
-func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, objective, evidence string, timeout time.Duration) (Verdict, VerifyStats, error) {
-	user := fmt.Sprintf("OBJECTIVE:\n%s\n\nEVIDENCE:\n%s", strings.TrimSpace(objective), strings.TrimSpace(evidence))
+func verifyOneShot(ctx context.Context, prov core.Provider, model core.Model, objective, evidence, priorFeedback string, timeout time.Duration) (Verdict, VerifyStats, error) {
+	user := fmt.Sprintf("OBJECTIVE:\n%s", strings.TrimSpace(objective))
+	if pf := strings.TrimSpace(priorFeedback); pf != "" {
+		user += "\n\nEARLIER VERIFICATIONS (your own prior verdicts — recheck each point, don't assume it still holds):\n" + pf
+	}
+	user += "\n\nEVIDENCE:\n" + strings.TrimSpace(evidence)
 	req := core.Request{
 		Model:    model,
 		System:   verifierSystemPrompt,

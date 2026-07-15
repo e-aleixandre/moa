@@ -201,6 +201,11 @@ func FormatResult(r Result) string {
 	return sb.String()
 }
 
+// ErrNoConfig is returned by Execute when the project has no .moa/verify.json.
+// Callers that gate on check results (e.g. the goal verifier) use it to tell
+// "no checks defined" apart from "checks defined but failing".
+var ErrNoConfig = errors.New("no .moa/verify.json found — create one to define verification checks")
+
 // Execute is the single entry point for running verification.
 // Both the verify tool and the TUI /verify command call this.
 func Execute(ctx context.Context, cwd string) (Result, error) {
@@ -209,7 +214,7 @@ func Execute(ctx context.Context, cwd string) (Result, error) {
 		return Result{}, fmt.Errorf("verify config: %w", err)
 	}
 	if cfg == nil {
-		return Result{}, errors.New("no .moa/verify.json found — create one to define verification checks")
+		return Result{}, ErrNoConfig
 	}
 	return Run(ctx, cwd, *cfg), nil
 }

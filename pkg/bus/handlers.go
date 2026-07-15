@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1266,34 +1267,54 @@ func RegisterHandlers(sctx *SessionContext) {
 				return
 			}
 
-			evidence := buildGoalEvidence(evidenceCtx, goalWorkDir(sctx, info), e.FinalText)
+			evidence, checkGate := buildGoalEvidence(evidenceCtx, goalWorkDir(sctx, info), e.FinalText)
 			evidenceCancel() // done with the evidence phase; free it before verifying
 
-			// Clamp the verifier's own budget so the loop's cumulative spend can't
-			// blow the goal's total budget: cap it at whatever pool remains, up to
-			// the per-run default.
-			verifyBudget := goal.DefaultVerifierMaxBudget
-			if info.TotalBudget > 0 {
-				remaining := info.TotalBudget - sctx.Goal.Spent()
-				if remaining <= 0 {
-					stopGoal(sctx, "reached total budget")
-					return
+			// HARD GATE, evaluated BEFORE spending a cent on the verifier: a
+			// project that defines its own checks (.moa/verify.json) cannot be
+			// declared done while those checks are red. The checks are free (we
+			// already ran them for the evidence), so when they're failing we
+			// settle the iteration deterministically and SKIP the LLM verifier
+			// entirely — paying the model to judge completeness on top of a broken
+			// build would just be burning money to discard its verdict. Projects
+			// without a verify.json have no deterministic gate and fall through to
+			// the verifier as before.
+			var verdict goal.Verdict
+			var stats goal.VerifyStats
+			var err error
+			if checkGate.hasConfig && !checkGate.allPass {
+				verdict = goal.Verdict{
+					Satisfied: false,
+					Feedback:  "Automated checks (.moa/verify.json) are NOT green, so the objective is not complete regardless of how the work looks. Fix them first:\n\n" + checkGate.summary,
 				}
-				if remaining < verifyBudget {
-					verifyBudget = remaining
+			} else {
+				// Clamp the verifier's own budget so the loop's cumulative spend
+				// can't blow the goal's total budget: cap it at whatever pool
+				// remains, up to the per-run default.
+				verifyBudget := goal.DefaultVerifierMaxBudget
+				if info.TotalBudget > 0 {
+					remaining := info.TotalBudget - sctx.Goal.Spent()
+					if remaining <= 0 {
+						stopGoal(sctx, "reached total budget")
+						return
+					}
+					if remaining < verifyBudget {
+						verifyBudget = remaining
+					}
 				}
+				verdict, stats, err = goal.Verify(verifyCtx, goal.VerifyConfig{
+					Factory:       sctx.ProviderFactory,
+					VerifierSpec:  info.VerifierSpec,
+					Objective:     info.Objective,
+					Evidence:      evidence,
+					PriorFeedback: summarizePriorVerdicts(sctx.Goal.PriorVerdicts()),
+					StatePath:     info.StatePath,
+					WorkDir:       goalWorkDir(sctx, info),
+					Timeout:       info.VerifyTimeout,
+					MaxBudget:     verifyBudget,
+					OneShot:       info.VerifyOneShot,
+				})
 			}
-			verdict, stats, err := goal.Verify(verifyCtx, goal.VerifyConfig{
-				Factory:      sctx.ProviderFactory,
-				VerifierSpec: info.VerifierSpec,
-				Objective:    info.Objective,
-				Evidence:     evidence,
-				StatePath:    info.StatePath,
-				WorkDir:      goalWorkDir(sctx, info),
-				Timeout:      info.VerifyTimeout,
-				MaxBudget:    verifyBudget,
-				OneShot:      info.VerifyOneShot,
-			})
 			// Charge whatever the verifier spent against the goal budget, before
 			// judging the verdict, so the ceiling holds even on the winning
 			// iteration.
@@ -1348,6 +1369,10 @@ func RegisterHandlers(sctx *SessionContext) {
 				stopGoal(sctx, "verifier unavailable (paused): "+err.Error())
 				return
 			}
+
+			// Record this iteration's verdict so the next verification starts with
+			// memory of what was already found lacking, instead of judging cold.
+			sctx.Goal.RecordVerdict(it, verdict.Satisfied, verdict.Feedback)
 
 			sctx.Bus.Publish(GoalIterationEnded{
 				SessionID: sctx.SessionID,
@@ -1644,11 +1669,50 @@ func goalFirstKick(info goal.Info) string {
 	return fmt.Sprintf("Start the goal. Read %s, then work the objective: %s", info.StatePath, info.Objective)
 }
 
+// summarizePriorVerdicts condenses earlier iterations' verdicts into a compact
+// memo for the next verification, so the verifier doesn't judge each iteration
+// cold. Only unsatisfied verdicts carry actionable "what was missing" feedback;
+// a satisfied line would only appear if a later gate reopened the goal. Returns
+// "" when there's nothing to report.
+func summarizePriorVerdicts(verdicts []goal.IterationVerdict) string {
+	if len(verdicts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, v := range verdicts {
+		status := "not satisfied"
+		if v.Satisfied {
+			status = "satisfied"
+		}
+		fmt.Fprintf(&b, "- Iteration %d: %s", v.Iteration, status)
+		if fb := strings.TrimSpace(v.Feedback); fb != "" {
+			b.WriteString("\n  ")
+			// Indent multi-line feedback so the list stays readable.
+			b.WriteString(strings.ReplaceAll(fb, "\n", "\n  "))
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// goalCheckGate captures the deterministic outcome of the project's own checks
+// (.moa/verify.json) for one verification. The driver uses it as a hard gate:
+// when a project defines checks and they are red (or didn't run), the goal
+// cannot be declared satisfied no matter what the LLM verdict says.
+type goalCheckGate struct {
+	hasConfig bool   // the project has a .moa/verify.json
+	allPass   bool   // every defined check passed (meaningful only if hasConfig)
+	summary   string // human-readable check output, for maker feedback on failure
+}
+
 // buildGoalEvidence assembles the verifier's evidence: the maker's final text
 // plus the current git state (diff stat + last commit), so the verifier can see
-// whether work was actually committed. Kept short and best-effort.
-func buildGoalEvidence(ctx context.Context, cwd, finalText string) string {
+// whether work was actually committed. It also runs the project's checks once
+// and returns their outcome as a gate the driver enforces deterministically.
+// Kept short and best-effort.
+func buildGoalEvidence(ctx context.Context, cwd, finalText string) (string, goalCheckGate) {
 	var b strings.Builder
+	var gate goalCheckGate
 	if strings.TrimSpace(finalText) != "" {
 		b.WriteString("WORKER'S FINAL MESSAGE:\n")
 		b.WriteString(finalText)
@@ -1687,15 +1751,29 @@ func buildGoalEvidence(ctx context.Context, cwd, finalText string) string {
 		// Objective evidence: actually run the project's checks (build/tests).
 		// A worker claiming "all tests pass" no longer settles it — the verifier
 		// sees the real result. Absent a verify config, say so plainly.
-		if res, err := verify.Execute(ctx, cwd); err != nil {
+		res, err := verify.Execute(ctx, cwd)
+		switch {
+		case errors.Is(err, verify.ErrNoConfig):
+			// No checks defined: no deterministic gate, the verifier decides.
+			b.WriteString("\nAUTOMATED CHECKS: not run (no .moa/verify.json)\n")
+		case err != nil:
+			// The config exists but couldn't be loaded/ran (invalid JSON, ctx
+			// cancelled, …). Treat as a red gate: a project that defines checks
+			// must not be declared done while they can't be shown green.
+			gate.hasConfig = true
+			gate.allPass = false
+			gate.summary = "checks could not be run: " + err.Error()
 			b.WriteString("\nAUTOMATED CHECKS: not run (" + err.Error() + ")\n")
-		} else {
+		default:
+			gate.hasConfig = true
+			gate.allPass = res.AllPass
+			gate.summary = verify.FormatResult(res)
 			b.WriteString("\nAUTOMATED CHECKS (build/tests):\n")
-			b.WriteString(verify.FormatResult(res))
+			b.WriteString(gate.summary)
 			b.WriteString("\n")
 		}
 	}
-	return strings.TrimSpace(b.String())
+	return strings.TrimSpace(b.String()), gate
 }
 
 // runGit runs a read-only git command in dir and returns trimmed, length-capped

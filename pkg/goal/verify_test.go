@@ -199,6 +199,31 @@ func TestVerify_StatePathInPrompt(t *testing.T) {
 	}
 }
 
+// TestVerify_PriorFeedbackInPrompt is the end-to-end guard for the verifier's
+// cross-iteration memory: PriorFeedback must actually reach the model's request,
+// so a later verification is reminded of what an earlier one found unmet.
+func TestVerify_PriorFeedbackInPrompt(t *testing.T) {
+	dir := t.TempDir()
+	prov := &scriptedProvider{steps: []scriptStep{
+		{text: `{"satisfied": false, "feedback": "still not done"}`},
+	}}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.WorkDir = dir
+	cfg.PriorFeedback = "- Iteration 1: not satisfied\n  phase 2 missing in api.go"
+
+	if _, _, err := Verify(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) == 0 {
+		t.Fatal("no request captured")
+	}
+	userText := lastUserText(prov.requests[0])
+	if !strings.Contains(userText, "phase 2 missing in api.go") {
+		t.Fatalf("prompt should carry the prior-iteration memory, got:\n%s", userText)
+	}
+}
+
 // TestVerify_MaxTurnsExhausted: a verifier that only ever calls tools runs out
 // of turns and yields a not-satisfied verdict (not an error). Distinct tool
 // calls avoid the doom-loop guard so we exercise the max-turns cap itself.
