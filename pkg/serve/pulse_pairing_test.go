@@ -253,7 +253,7 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Close() //nolint:errcheck // test cleanup
 	now := time.Now().UTC()
 	store.now = func() time.Time { return now }
 	pairing, err := store.createPairing("token", deviceCredentialTTL)
@@ -282,7 +282,7 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Close() //nolint:errcheck // test cleanup
 	for i := 0; i < devicePairingRate; i++ {
 		if _, err := store.createPairing("token", deviceCredentialTTL); err != nil {
 			t.Fatalf("pairing %d: %v", i, err)
@@ -296,7 +296,7 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Close() //nolint:errcheck // test cleanup
 	locked, err := store.createPairing("token", deviceCredentialTTL)
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +314,7 @@ func TestPulsePairingExpiryRateLimitsHostAndTLSBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Close() //nolint:errcheck // test cleanup
 	attacked, err := store.createPairing("token", deviceCredentialTTL)
 	if err != nil {
 		t.Fatal(err)

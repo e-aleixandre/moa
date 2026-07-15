@@ -52,14 +52,14 @@ func createStoredDeviceCredential(t *testing.T, path string, expiresAt time.Time
 }
 
 type deviceWSSet struct {
-	session *websocket.Conn
+	session *websocket.Conn //nolint:staticcheck // existing server WebSocket library compatibility
 }
 
 func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, credential string) deviceWSSet {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	dial := func(path string) *websocket.Conn {
+	dial := func(path string) *websocket.Conn { //nolint:staticcheck // existing server WebSocket library compatibility
 		conn, _, err := websocket.Dial(ctx, server.URL+path, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential}}}) //nolint:staticcheck
 		if err != nil {
 			t.Fatalf("dial %s: %v", path, err)
@@ -81,7 +81,7 @@ func (set deviceWSSet) close() {
 	_ = set.session.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
 }
 
-func expectDeviceWSClose(t *testing.T, conn *websocket.Conn, name string) {
+func expectDeviceWSClose(t *testing.T, conn *websocket.Conn, name string) { //nolint:staticcheck // existing server WebSocket library compatibility
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -90,7 +90,7 @@ func expectDeviceWSClose(t *testing.T, conn *websocket.Conn, name string) {
 	if err == nil {
 		t.Fatalf("%s received data after device access ended: %s", name, value)
 	}
-	if status := websocket.CloseStatus(err); status != -1 && status != websocket.StatusPolicyViolation {
+	if status := websocket.CloseStatus(err); status != -1 && status != websocket.StatusPolicyViolation { //nolint:staticcheck // existing server WebSocket library compatibility
 		t.Fatalf("%s close status = %v, want policy violation or transport closure; err=%v", name, status, err)
 	}
 }

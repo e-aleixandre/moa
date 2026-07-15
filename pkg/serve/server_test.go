@@ -45,7 +45,7 @@ func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testi
 		if err != nil {
 			return false
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck // polling test cleanup
 		var body struct {
 			Items []map[string]json.RawMessage `json:"items"`
 		}

@@ -444,7 +444,7 @@ func conversationBashExecutable(command string) string {
 		return ""
 	}
 	for _, char := range executable {
-		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || strings.ContainsRune("._/-", char)) {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && !strings.ContainsRune("._/-", char) {
 			return ""
 		}
 	}

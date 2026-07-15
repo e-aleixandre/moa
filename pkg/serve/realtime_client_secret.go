@@ -200,7 +200,7 @@ func mintRealtimeClientSecret(ctx context.Context, client *http.Client, key stri
 	if err != nil {
 		return "", 0, 1, 0
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // response body is read-only
 	if resp.StatusCode == http.StatusTooManyRequests {
 		n, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
 		if n < 1 {

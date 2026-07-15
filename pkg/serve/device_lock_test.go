@@ -20,7 +20,7 @@ func TestDeviceStoreLockHelper(t *testing.T) {
 	if err != nil {
 		os.Exit(2)
 	}
-	defer store.Close()
+	defer store.Close() //nolint:errcheck // helper process exits immediately
 	_, err = store.claim(
 		"198.51.100.10",
 		os.Getenv("MOA_DEVICE_LOCK_PAIRING_ID"),
@@ -83,7 +83,7 @@ func TestDeviceStoreHasExclusiveProcessOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer verify.Close()
+	defer verify.Close() //nolint:errcheck // test cleanup
 	if len(verify.state.Devices) != 1 || verify.state.Devices[0].Label != "second process" {
 		t.Fatalf("second process claim state = %#v", verify.state.Devices)
 	}

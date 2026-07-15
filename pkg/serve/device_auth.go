@@ -207,10 +207,9 @@ func openDeviceStore(path string) (*deviceStore, error) {
 			return nil, fmt.Errorf("decode device store: %w", err)
 		}
 	}
-	key, ok := decodeDeviceKey(store.state.Key)
+	_, ok := decodeDeviceKey(store.state.Key)
 	if !ok {
-		var err error
-		key, err = newDeviceSecret()
+		key, err := newDeviceSecret()
 		if err != nil {
 			_ = lock.Close()
 			return nil, fmt.Errorf("create device verifier key: %w", err)
@@ -279,7 +278,7 @@ func (s *deviceStore) saveLocked() (err error) {
 		return err
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	defer os.Remove(tmpPath) //nolint:errcheck // best-effort temporary cleanup
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
@@ -309,7 +308,7 @@ func syncDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer dir.Close() //nolint:errcheck // cannot affect the completed directory sync
 	return dir.Sync()
 }
 
@@ -569,32 +568,6 @@ func (s *deviceStore) revoke(id, actor string) error {
 	return errDeviceNotFound
 }
 
-// setDeactivationHook connects credential lifecycle to the Pulse operation
-// ledger. It is installed by NewServer after both stores exist. Revocation
-// waits for this hook, so returning from revoke means pending operations have
-// already been invalidated.
-func (s *deviceStore) setDeactivationHook(hook func(string)) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
-	}
-	s.onDeactivate = hook
-	now := s.now().UTC()
-	inactive := make([]string, 0)
-	for _, device := range s.state.Devices {
-		if device.RevokedAt == nil && device.ExpiresAt.After(now) {
-			s.scheduleExpiryLocked(device)
-		} else {
-			inactive = append(inactive, device.ID)
-		}
-	}
-	s.mu.Unlock()
-	for _, id := range inactive {
-		hook(id)
-	}
-}
-
 func (s *deviceStore) scheduleExpiryLocked(device durableDevice) {
 	if s.closed || device.ID == "" || device.RevokedAt != nil {
 		return
@@ -819,7 +792,7 @@ func validDeviceID(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
 			return false
 		}
 	}
