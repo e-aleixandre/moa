@@ -11,7 +11,9 @@ package pulsebrief
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,20 +21,29 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 )
 
-// DefaultModelSpec is the cheap, fast model used for brief generation when the
-// session's provider has no cheaper same-vendor option (Anthropic).
+// DefaultModelSpec is the cheap, fast Anthropic model used for brief
+// generation for Anthropic sessions.
 const DefaultModelSpec = "haiku"
 
 // cheapModelSpecFor returns a cheap summary-generation model on the SAME
 // provider as the session, so an OpenAI session's transcript isn't shipped to
-// Anthropic (a different vendor) just to summarize it. Falls back to the
-// Anthropic default. Mirrors autotitle.cheapModelSpecFor.
-func cheapModelSpecFor(provider string) string {
-	if provider == "openai" {
-		return "gpt-5.4-mini"
+// Anthropic (a different vendor) just to summarize it. The bool is false when
+// no known cheap same-vendor model exists; callers must then not generate.
+func cheapModelSpecFor(provider string) (string, bool) {
+	switch strings.ToLower(provider) {
+	case "openai":
+		return "gpt-5.4-mini", true
+	case "anthropic":
+		return DefaultModelSpec, true
+	default:
+		return "", false
 	}
-	return DefaultModelSpec
 }
+
+// ErrNoCheapSameVendorModel means the session provider has no configured cheap
+// model for briefs. It is deliberately non-fatal: callers should skip brief
+// generation rather than send the transcript to another vendor.
+var ErrNoCheapSameVendorModel = errors.New("no cheap same-vendor model")
 
 // MaxFieldLen caps each generated field length (in runes).
 const MaxFieldLen = 140
@@ -84,10 +95,15 @@ func (b Brief) IsEmpty() bool {
 	return strings.TrimSpace(b.Attempting) == "" && strings.TrimSpace(b.Progress) == ""
 }
 
+var conversationCloseMarker = regexp.MustCompile(`(?i)<\s*/\s*conversation\s*>`)
+
 // wrapPrompt frames the transcript between explicit markers so the cheap model
 // treats it as data to summarize, not as a live conversation to continue or as
-// instructions directed at it. Mirrors autotitle.wrapPrompt.
+// instructions directed at it. A transcript must not be able to close the data
+// block itself: preserving the text while escaping its closing-marker spelling
+// is framing, not content censorship.
 func wrapPrompt(transcript string) string {
+	transcript = conversationCloseMarker.ReplaceAllStringFunc(transcript, func(string) string { return `<\/conversation>` })
 	return "Here is the recent conversation, between the markers:\n\n" +
 		"<conversation>\n" + transcript + "\n</conversation>"
 }
@@ -110,10 +126,16 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 		return Brief{}, fmt.Errorf("pulsebrief: no conversation content")
 	}
 
-	spec := cheapModelSpecFor(sessionModel.Provider)
+	spec, ok := cheapModelSpecFor(sessionModel.Provider)
+	if !ok {
+		return Brief{}, fmt.Errorf("pulsebrief: %w for provider %q", ErrNoCheapSameVendorModel, sessionModel.Provider)
+	}
 	model, ok := core.ResolveModel(spec)
 	if !ok {
 		return Brief{}, fmt.Errorf("pulsebrief: cannot resolve model %q", spec)
+	}
+	if !strings.EqualFold(model.Provider, sessionModel.Provider) {
+		return Brief{}, fmt.Errorf("pulsebrief: %w for provider %q", ErrNoCheapSameVendorModel, sessionModel.Provider)
 	}
 	prov, err := factory(model)
 	if err != nil {
@@ -165,7 +187,9 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 // parseBrief extracts the ATTEMPTING/PROGRESS fields from the model output. It
 // is deliberately forgiving: it accepts the labels in any case, tolerates extra
 // lines, and returns an empty Brief for the NONE sentinel or when no labeled
-// field is found. Each field is trimmed and length-capped.
+// field is found. A usable brief requires both fields, preventing a new partial
+// response from being combined with a previous response by clients. Each field
+// is trimmed and length-capped.
 func parseBrief(raw string) Brief {
 	if isNoConcreteTask(raw) {
 		return Brief{}
@@ -183,6 +207,9 @@ func parseBrief(raw string) Brief {
 		if v, ok := fieldValue(line, "progress"); ok {
 			b.Progress = cleanField(v)
 		}
+	}
+	if strings.TrimSpace(b.Attempting) == "" || strings.TrimSpace(b.Progress) == "" {
+		return Brief{}
 	}
 	return b
 }
