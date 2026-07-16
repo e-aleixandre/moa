@@ -190,6 +190,8 @@ func handleDownloadFile(mgr *Manager) http.HandlerFunc {
 		w.Header().Set("Content-Type", f.Mime)
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": f.Name}))
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "sandbox")
+		w.Header().Set("Cache-Control", "private, no-store")
 		http.ServeContent(w, r, f.Name, info.ModTime(), file)
 	}
 }

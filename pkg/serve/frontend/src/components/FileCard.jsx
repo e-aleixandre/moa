@@ -1,5 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Download, FileText, FileImage, FileArchive, File as FileIcon, Loader2 } from 'lucide-preact';
+import { FileViewer } from './FileViewer.jsx';
+import { downloadFile } from '../util/file-download.js';
 
 /**
  * Renders a send_file tool result as a download card instead of raw text.
@@ -8,6 +10,7 @@ import { Download, FileText, FileImage, FileArchive, File as FileIcon, Loader2 }
  */
 export function FileCard({ result, status }) {
   const [busy, setBusy] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   if (status !== 'done' || !result) return null;
 
@@ -16,6 +19,7 @@ export function FileCard({ result, status }) {
 
   const { name, size, mime, url } = data;
   const Icon = iconFor(mime);
+  const previewable = isPreviewable(name, mime);
 
   // Fetch the file as a blob and hand it off via the OS share sheet (mobile)
   // or a same-origin blob: URL (desktop), instead of navigating the WebView
@@ -24,29 +28,13 @@ export function FileCard({ result, status }) {
   // chrome-less "file downloaded" view with no way to dismiss it short of
   // force-closing the app — see tmp/bugs.md. blob: URLs never trigger that
   // full-page navigation.
-  const handleClick = async (e) => {
+  const handleDownload = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     if (busy) return;
     setBusy(true);
     try {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`download failed: ${resp.status}`);
-      const blob = await resp.blob();
-      const file = new File([blob], name, { type: mime || blob.type });
-
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file] });
-        return;
-      }
-
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      await downloadFile({ name, mime, url });
     } catch (err) {
       if (err?.name !== 'AbortError') console.error('FileCard download failed:', err);
     } finally {
@@ -54,18 +42,40 @@ export function FileCard({ result, status }) {
     }
   };
 
+  const openPreview = () => previewable && setPreviewOpen(true);
+  const onKeyDown = (e) => {
+    // Only the card itself opens the preview: keydowns bubbling up from the
+    // nested download button (Enter/Space) must not trigger it.
+    if (e.target !== e.currentTarget) return;
+    if (previewable && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      openPreview();
+    }
+  };
+
   return (
-    <div class="file-card">
+    <>
+    <div class={`file-card ${previewable ? 'file-card-previewable' : ''}`} onClick={openPreview} onKeyDown={onKeyDown} role={previewable ? 'button' : undefined} tabIndex={previewable ? 0 : undefined}>
       <Icon class="file-card-icon" />
       <div class="file-card-info">
         <div class="file-card-name">{name}</div>
         <div class="file-card-size">{humanSize(size)}</div>
       </div>
-      <button class="file-card-download" onClick={handleClick} disabled={busy} title="Download">
+      <button class="file-card-download" onClick={handleDownload} disabled={busy} title="Download or share" aria-label="Download or share">
         {busy ? <Loader2 class="spin" /> : <Download />}
       </button>
     </div>
+    {previewOpen && <FileViewer name={name} mime={mime} url={url} size={size} onClose={() => setPreviewOpen(false)} />}
+    </>
   );
+}
+
+export function isPreviewable(name, mime) {
+  const mediaType = (mime || '').split(';', 1)[0].trim().toLowerCase();
+  const lowerName = (name || '').toLowerCase();
+  return mediaType.startsWith('image/') || mediaType.startsWith('text/') || mediaType.includes('markdown') ||
+    mediaType === 'text/html' || lowerName.endsWith('.md') || lowerName.endsWith('.markdown') ||
+    lowerName.endsWith('.html') || lowerName.endsWith('.htm');
 }
 
 
