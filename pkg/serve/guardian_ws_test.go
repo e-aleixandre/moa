@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,8 +83,40 @@ func TestGuardianDeviceAuthInitAndSupersession(t *testing.T) {
 	if msg := readGuardian(t, second); msg.Type != "init" {
 		t.Fatalf("second guardian first message = %+v", msg)
 	}
-	if msg := readGuardian(t, first); msg.Type != "inactive" {
-		t.Fatalf("first guardian was not superseded: %+v", msg)
+	// Supersession revokes the old control channel. An inactive notification may
+	// arrive before the forced close, but the close itself is authoritative.
+	readCtx, readCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer readCancel()
+	var superseded attention.ServerMsg
+	err = wsjson.Read(readCtx, first, &superseded) //nolint:staticcheck
+	if err == nil && superseded.Type != "inactive" {
+		t.Fatalf("first guardian supersession message = %+v", superseded)
+	}
+	if err == nil {
+		if err := wsjson.Read(readCtx, first, &superseded); err == nil { //nolint:staticcheck
+			t.Fatalf("superseded guardian remained open: %+v", superseded)
+		}
+	}
+}
+
+func TestGuardianRejectsTokenAndNetworkOwners(t *testing.T) {
+	mgr, server, _, _ := guardianServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, response, err := websocket.Dial(ctx, server.URL+"/api/pulse/guardian/ws", &websocket.DialOptions{ //nolint:staticcheck
+		HTTPHeader: http.Header{"Cookie": []string{authCookieName + "=owner"}},
+	})
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("token guardian dial err=%v status=%v", err, response)
+	}
+
+	networkHandler := NewServer(mgr, WithDeviceStorePath(filepath.Join(t.TempDir(), "network-devices.json")))
+	networkServer := httptest.NewServer(networkHandler)
+	defer networkServer.Close()
+	_, response, err = websocket.Dial(ctx, networkServer.URL+"/api/pulse/guardian/ws", nil) //nolint:staticcheck
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("network guardian dial err=%v status=%v", err, response)
 	}
 }
 
@@ -113,6 +146,48 @@ func TestGuardianAckAndGetStatus(t *testing.T) {
 	status := readGuardian(t, conn)
 	if status.Type != "init" || len(status.Items) != 1 || status.Items[0].State != attention.StateAcked {
 		t.Fatalf("get_status response = %+v", status)
+	}
+}
+
+func TestGuardianTerminationReplaysUntilAcknowledged(t *testing.T) {
+	mgr, server, _, credential := guardianServer(t)
+	sess, err := mgr.CreateSession(CreateOpts{Title: "termination"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Publish(bus.RunEnded{SessionID: sess.ID, RunGen: 1, FinalText: "completed"})
+	pollUntil(t, time.Second, "durable termination", func() bool {
+		return len(mgr.attention.Snapshot().Terminations) == 1
+	})
+
+	first := dialGuardian(t, server, credential.Credential)
+	init := readGuardian(t, first)
+	if len(init.Terminations) != 1 {
+		t.Fatalf("first init = %+v", init)
+	}
+	term := init.Terminations[0]
+	_ = first.Close(websocket.StatusNormalClosure, "before speech") //nolint:errcheck,staticcheck
+
+	second := dialGuardian(t, server, credential.Credential)
+	defer second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	init = readGuardian(t, second)
+	if len(init.Terminations) != 1 || init.Terminations[0].ID != term.ID {
+		t.Fatalf("termination did not replay after drop: %+v", init)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := wsjson.Write(ctx, second, attention.ClientMsg{Type: "ack_termination", TerminationID: term.ID}); err != nil { //nolint:staticcheck
+		t.Fatal(err)
+	}
+	// Let the server process the acknowledgement before opening the next init.
+	pollUntil(t, time.Second, "termination acknowledgement", func() bool {
+		return len(mgr.attention.Snapshot().Terminations) == 0
+	})
+	_ = second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	third := dialGuardian(t, server, credential.Credential)
+	defer third.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	if init = readGuardian(t, third); len(init.Terminations) != 0 {
+		t.Fatalf("acknowledged termination returned in init: %+v", init)
 	}
 }
 
@@ -149,6 +224,46 @@ func TestGuardianOverflowClosesSocket(t *testing.T) {
 	var raw json.RawMessage
 	if err := wsjson.Read(ctx, conn, &raw); err == nil { //nolint:staticcheck
 		t.Fatal("overflow socket remained readable")
+	}
+}
+
+func TestGuardianSinkSendCloseRace(t *testing.T) {
+	ready := make(chan *guardianSink, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck
+		if err != nil {
+			return
+		}
+		ready <- newGuardianSink(conn)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, server.URL, nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	sink := <-ready
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 16 {
+				sink.Send(attention.ServerMsg{Type: "roster"})
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sink.Close()
+	}()
+	wg.Wait()
+	if sink.Send(attention.ServerMsg{Type: "init"}) {
+		t.Fatal("send succeeded after sink close")
 	}
 }
 

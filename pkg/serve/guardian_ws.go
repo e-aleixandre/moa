@@ -26,6 +26,8 @@ type guardianSink struct {
 	out  chan attention.ServerMsg
 	done chan struct{}
 	once sync.Once
+	mu   sync.Mutex
+	dead bool
 }
 
 func newGuardianSink(conn *websocket.Conn) *guardianSink { //nolint:staticcheck // existing Serve WebSocket transport
@@ -40,15 +42,17 @@ func newGuardianSink(conn *websocket.Conn) *guardianSink { //nolint:staticcheck 
 func (s *guardianSink) ID() uint64 { return s.id }
 
 func (s *guardianSink) Send(msg attention.ServerMsg) bool {
-	select {
-	case <-s.done:
+	s.mu.Lock()
+	if s.dead {
+		s.mu.Unlock()
 		return false
-	default:
 	}
 	select {
 	case s.out <- msg:
+		s.mu.Unlock()
 		return true
 	default:
+		s.mu.Unlock()
 		// The connection, rather than an individual event, is dropped. A later
 		// init is the protocol's explicit recovery mechanism.
 		s.close()
@@ -72,10 +76,15 @@ func (s *guardianSink) runWriter(ctx context.Context) {
 
 func (s *guardianSink) close() {
 	s.once.Do(func() {
+		s.mu.Lock()
+		s.dead = true
 		close(s.done)
+		s.mu.Unlock()
 		_ = s.conn.CloseNow() //nolint:staticcheck // force unblock on overflow/revocation
 	})
 }
+
+func (s *guardianSink) Close() { s.close() }
 
 // handleGuardianWebSocket exposes the single-active Pulse guardian channel.
 // Unlike generic Serve WebSockets, this capability requires a paired device:
@@ -127,11 +136,24 @@ func handleGuardianWebSocket(m *Manager, devices *deviceStore) http.HandlerFunc 
 					sink.Send(attention.ServerMsg{Type: "error", V: attention.ProtocolVersion, RequestID: msg.RequestID, Code: "invalid_ack", Message: "item_id is required"})
 					continue
 				}
-				m.attention.Ack(msg.ItemID)
+				if !m.attention.AckForClient(sink, msg.ItemID) {
+					return
+				}
+			case "ack_termination":
+				if msg.TerminationID == "" {
+					sink.Send(attention.ServerMsg{Type: "error", V: attention.ProtocolVersion, RequestID: msg.RequestID, Code: "invalid_ack_termination", Message: "termination_id is required"})
+					continue
+				}
+				if !m.attention.AckTerminationForClient(sink, msg.TerminationID) {
+					return
+				}
 			case "get_status":
-				sink.Send(m.attention.Snapshot())
+				status, active := m.attention.SnapshotForClient(sink)
+				if !active || !sink.Send(status) {
+					return
+				}
 			default:
-				sink.Send(attention.ServerMsg{Type: "error", V: attention.ProtocolVersion, RequestID: msg.RequestID, Code: "unknown_message", Message: "expected ack or get_status"})
+				sink.Send(attention.ServerMsg{Type: "error", V: attention.ProtocolVersion, RequestID: msg.RequestID, Code: "unknown_message", Message: "expected ack, ack_termination, or get_status"})
 			}
 		}
 	}
