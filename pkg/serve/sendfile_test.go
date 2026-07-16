@@ -277,6 +277,12 @@ func TestDownloadFile_OK(t *testing.T) {
 	if !strings.Contains(cd, "filename") {
 		t.Errorf("Content-Disposition = %q, missing filename", cd)
 	}
+	if csp := resp.Header.Get("Content-Security-Policy"); csp != "sandbox" {
+		t.Errorf("Content-Security-Policy = %q, want sandbox", csp)
+	}
+	if cache := resp.Header.Get("Cache-Control"); cache != "private, no-store" {
+		t.Errorf("Cache-Control = %q, want private, no-store", cache)
+	}
 }
 
 func TestDownloadFile_UnregisteredFileID_404(t *testing.T) {
