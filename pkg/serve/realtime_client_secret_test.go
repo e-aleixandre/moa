@@ -20,7 +20,7 @@ type realtimeRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f realtimeRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-const realtimeBrokerCredentialContractFixture = `{"client_secret":"ek_test-secret","expires_at":1900000000,"transport":"websocket","endpoint":"wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini","model":"gpt-realtime-2.1-mini"}`
+const realtimeBrokerCredentialContractFixture = `{"client_secret":"ek_test-secret","expires_at":1900000000,"transport":"websocket","endpoint":"wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1","model":"gpt-realtime-2.1"}`
 
 func TestRealtimeBrokerCredentialContractFixture(t *testing.T) {
 	var fixture struct {
@@ -92,7 +92,7 @@ func TestRealtimeClientSecretDeviceOnlySchemaAndNoStore(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.ClientSecret != "ek_ephemeral-secret" || response.Transport != "websocket" || response.Endpoint != "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini" || response.Model != "gpt-realtime-2.1-mini" {
+	if response.ClientSecret != "ek_ephemeral-secret" || response.Transport != "websocket" || response.Endpoint != "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1" || response.Model != "gpt-realtime-2.1" {
 		t.Fatalf("unexpected response: %#v", response)
 	}
 	if response.Endpoint != realtimeEndpoint || response.Model != realtimeModel {
