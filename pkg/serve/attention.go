@@ -43,6 +43,10 @@ func handleAttention(m *Manager) http.HandlerFunc {
 		if items == nil {
 			items = []attention.AttentionItem{}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		sessions := m.attention.Roster()
+		if sessions == nil {
+			sessions = []attention.SessionBrief{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items, "sessions": sessions})
 	}
 }

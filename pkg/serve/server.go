@@ -170,6 +170,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/pulse/devices", handlePulseDevices(devices))
 	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))
 	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))
+	mux.HandleFunc("GET /api/pulse/guardian/ws", handleGuardianWebSocket(manager, devices))
 
 	handler := routeAuthorizationMiddleware(csrfMiddleware(bodyTimeoutMiddleware(mux)))
 	// Token auth (when configured) sits under the Host check but above route

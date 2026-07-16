@@ -358,7 +358,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
 		scheduler:       scheduler,
-		attention:       attention.New(attention.Config{}),
+		attention:       attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
 		conversationKey: conversationKey,
 	}
 	m.attention.Start()

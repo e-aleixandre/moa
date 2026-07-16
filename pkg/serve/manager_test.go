@@ -524,6 +524,21 @@ func TestCreateSession_InvalidModel(t *testing.T) {
 	}
 }
 
+func TestManagerAttentionUsesConfiguredSTTLanguage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(), t.TempDir(), core.MoaConfig{DisableSandbox: true, STTLanguage: "es"})
+	sess, err := mgr.CreateSession(CreateOpts{Title: "facturas"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Publish(bus.AskUserRequested{SessionID: sess.ID, ID: "ask_es", Questions: []bus.AskQuestion{{Text: "¿Continuamos?"}}})
+	pollUntil(t, time.Second, "Spanish attention", func() bool {
+		items := mgr.attention.Status()
+		return len(items) == 1 && strings.HasPrefix(items[0].Spoken, "En facturas")
+	})
+}
+
 // TestCreateSession_CustomProviderModelStillAllowed ensures F16/A6 doesn't
 // regress support for genuine custom models expressed as "provider/model"
 // that simply aren't in the registry.

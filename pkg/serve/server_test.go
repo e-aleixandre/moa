@@ -17,6 +17,7 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
+	"github.com/ealeixandre/moa/pkg/attention"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
@@ -49,9 +50,10 @@ func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testi
 		}
 		defer resp.Body.Close() //nolint:errcheck // polling test cleanup
 		var body struct {
-			Items []map[string]json.RawMessage `json:"items"`
+			Items    []map[string]json.RawMessage `json:"items"`
+			Sessions []attention.SessionBrief     `json:"sessions"`
 		}
-		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&body) != nil || len(body.Items) != 1 {
+		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&body) != nil || len(body.Items) != 1 || len(body.Sessions) != 1 {
 			return false
 		}
 		item := body.Items[0]
@@ -71,7 +73,8 @@ func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testi
 			}
 		}
 		_, hasLegacyConfirm := item["requires_verbatim_confirm"]
-		return refID == "perm_attention_api" && riskLevel == "high" &&
+		return body.Sessions[0].SessionID == sess.ID && body.Sessions[0].PendingPerm == 1 &&
+			refID == "perm_attention_api" && riskLevel == "high" &&
 			hasDestructive && verbatim == "rm -rf /tmp/build" && !hasLegacyConfirm
 	})
 }
