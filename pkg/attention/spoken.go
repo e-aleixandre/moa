@@ -9,7 +9,7 @@ import (
 
 // spoken.go — deterministic "written for the ear" templates.
 //
-// Phase 1A redaction is 100% deterministic (no model). Language follows the
+// Phase 1A wording is 100% deterministic (no model). Language follows the
 // server's configured STT language (en/es; "auto" -> en), so briefings match
 // the user's spoken language (design §7). Every template prefixes the session
 // alias so audio-only users always know which conversation an item is about.
@@ -188,41 +188,25 @@ func (l lang) spokenRunOK(alias, finalText string, hadEdits bool) string {
 }
 
 // terminationSummary retains a compact text preview for a durable completion
-// notice. It strips fenced/code-diff sections before applying a byte (not rune)
-// bound so the wire contract remains small even for very long agent answers.
+// notice. It limits only wire size: owner-authorized content is preserved
+// verbatim until the valid UTF-8 byte bound.
 func terminationSummary(s string) string {
-	var kept []string
-	inFence := false
-	for _, line := range strings.Split(s, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			inFence = !inFence
-			continue
-		}
-		if strings.HasPrefix(trimmed, "diff --git") {
-			break
-		}
-		if inFence || strings.HasPrefix(trimmed, "@@") ||
-			strings.HasPrefix(trimmed, "+++") || strings.HasPrefix(trimmed, "---") ||
-			(strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "+ ")) ||
-			(strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "- ")) {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	s = strings.Join(kept, "\n")
-	return truncateUTF8Bytes(strings.TrimSpace(stripMarkdown(s)), 512)
+	return truncateUTF8Bytes(s, 512)
 }
 
 func truncateUTF8Bytes(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	end := max
+	const suffix = "…"
+	if max < len(suffix) {
+		return ""
+	}
+	end := max - len(suffix)
 	for end > 0 && (s[end]&0xc0) == 0x80 {
 		end--
 	}
-	return strings.TrimSpace(s[:end]) + "…"
+	return s[:end] + suffix
 }
 
 // spokenGoalEnded narrates a goal loop stopping.

@@ -34,9 +34,10 @@ type ServerMsg struct {
 	// whose Termination metadata is retained for recovery in init.
 	Briefing *Briefing `json:"briefing,omitempty"`
 
-	// terminations contains successful run completions which were not delivered
-	// while a guardian was connected. It appears only in init and is replaced by
-	// the next init, like Items and Sessions.
+	// terminations contains successful run completions awaiting explicit client
+	// acknowledgement. It appears only in init and is replaced by the next init,
+	// like Items and Sessions. Clients must deduplicate by ID and send
+	// ack_termination only after speaking the notice.
 	Terminations []RunTermination `json:"terminations,omitempty"`
 
 	// error
@@ -97,12 +98,14 @@ type TerminationRef struct {
 	MessagesURL string `json:"messages_url"`
 }
 
-// ClientMsg is one message received from the active voice client. Phase 1A
-// vocabulary is just ack + get_status (design §4, get_digest removed from v1).
+// ClientMsg is one message received from the active voice client. ack confirms
+// an attention item; ack_termination confirms a run notice after it was
+// spoken; get_status requests an authoritative init snapshot.
 type ClientMsg struct {
-	Type      string `json:"type"`       // "ack" | "get_status"
-	RequestID string `json:"request_id"` // echoed on errors
-	ItemID    string `json:"item_id"`    // for ack
+	Type          string `json:"type"`           // "ack" | "ack_termination" | "get_status"
+	RequestID     string `json:"request_id"`     // echoed on errors
+	ItemID        string `json:"item_id"`        // for ack
+	TerminationID string `json:"termination_id"` // for ack_termination
 }
 
 // whitelisted reports whether a bus event is one the Attention Service acts on

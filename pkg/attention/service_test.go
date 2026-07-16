@@ -28,6 +28,12 @@ func (f *fakeClient) Send(m ServerMsg) bool {
 }
 func (f *fakeClient) ID() uint64 { return f.cid }
 
+func (f *fakeClient) Close() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dead = true
+}
+
 func (f *fakeClient) messages() []ServerMsg {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -303,6 +309,32 @@ func TestSingleActiveClientSupersedes(t *testing.T) {
 		_, ok := c2.lastOfType("attention")
 		return ok
 	})
+}
+
+func TestSupersededClientCannotAcknowledge(t *testing.T) {
+	s := newTestService(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	defer s.Attach(b, "s", "a", "A")()
+	b.Publish(bus.PermissionRequested{SessionID: "s", ID: "perm_1", ToolName: "bash", Args: map[string]any{"command": "ls"}})
+	eventually(t, "pending item", func() bool { return len(s.Status()) == 1 })
+
+	c1 := &fakeClient{cid: 1}
+	c2 := &fakeClient{cid: 2}
+	s.SetActiveClient(c1)
+	s.SetActiveClient(c2)
+	eventually(t, "first client closed", func() bool {
+		c1.mu.Lock()
+		defer c1.mu.Unlock()
+		return c1.dead
+	})
+	itemID := s.Status()[0].ID
+	if s.AckForClient(c1, itemID) {
+		t.Fatal("superseded client acknowledgement was accepted")
+	}
+	if got := s.Status()[0].State; got != StateAnnounced {
+		t.Fatalf("superseded acknowledgement changed item state to %q", got)
+	}
 }
 
 func TestInitIsAuthoritativeOnConnect(t *testing.T) {

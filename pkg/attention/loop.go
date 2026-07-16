@@ -2,6 +2,7 @@ package attention
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"time"
 
@@ -63,7 +64,27 @@ func (s *Service) handleCtrl(st *loopState, c ctrlMsg) {
 			st.client = nil
 		}
 	case ctrlAck:
+		if !st.accepts(c.client) {
+			if c.reply != nil {
+				c.reply <- ctrlReply{}
+			}
+			return
+		}
 		s.doAck(st, c.ack)
+		if c.reply != nil {
+			c.reply <- ctrlReply{active: true}
+		}
+	case ctrlAckTermination:
+		if !st.accepts(c.client) {
+			if c.reply != nil {
+				c.reply <- ctrlReply{}
+			}
+			return
+		}
+		s.doAckTermination(st, c.termAck)
+		if c.reply != nil {
+			c.reply <- ctrlReply{active: true}
+		}
 	case ctrlUpdateMeta:
 		s.doUpdateMeta(st, c.meta)
 	case ctrlGetStatus:
@@ -73,7 +94,13 @@ func (s *Service) handleCtrl(st *loopState, c ctrlMsg) {
 		}
 	case ctrlInit:
 		// Snapshot for an explicit client get_status or the HTTP roster read.
-		reply := ctrlReply{items: st.unresolvedItems(), sessions: st.roster(), terminations: st.undeliveredTerminations()}
+		if !st.accepts(c.client) {
+			if c.reply != nil {
+				c.reply <- ctrlReply{}
+			}
+			return
+		}
+		reply := ctrlReply{items: st.unresolvedItems(), sessions: st.roster(), terminations: st.undeliveredTerminations(), active: true}
 		if c.reply != nil {
 			c.reply <- reply
 		}
@@ -138,18 +165,17 @@ func (s *Service) doDetach(st *loopState, sessionID string) {
 
 func (s *Service) doSetClient(st *loopState, c ClientSink) {
 	// Single active client: the newcomer becomes the sink; the previous one is
-	// told it's inactive.
+	// told it's inactive and its control channel is revoked.
 	if st.client != nil && c != nil && st.client.ID() != c.ID() {
 		st.client.Send(ServerMsg{Type: "inactive", V: ProtocolVersion})
+		st.client.Close()
 	}
 	st.client = c
 	// init is authoritative: send the full unresolved set + the session roster.
 	if c != nil {
 		terminations := st.undeliveredTerminations()
-		if c.Send(ServerMsg{Type: "init", V: ProtocolVersion,
+		if !c.Send(ServerMsg{Type: "init", V: ProtocolVersion,
 			Items: st.unresolvedItems(), Sessions: st.roster(), Terminations: terminations}) {
-			st.markTerminationsDelivered(terminations)
-		} else {
 			st.client = nil
 		}
 	}
@@ -189,6 +215,21 @@ func (s *Service) doAck(st *loopState, itemID string) {
 	if st.inflightP0 == itemID {
 		st.inflightP0 = ""
 		s.promoteNextP0(st)
+	}
+}
+
+func (s *Service) doAckTermination(st *loopState, terminationID string) {
+	if terminationID == "" {
+		return
+	}
+	for _, snap := range st.snaps {
+		for i, term := range snap.terminations {
+			if term.ID != terminationID {
+				continue
+			}
+			snap.terminations = append(snap.terminations[:i], snap.terminations[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -377,14 +418,14 @@ func (s *Service) notifyNew(st *loopState, it *AttentionItem) {
 	}
 }
 
-// emitRunTermination keeps the normal live briefing, but retains the latest
-// undelivered successful run per session for the next authoritative init. A
-// client receives it at least once: either as the immediate briefing or in a
-// later init after reconnecting. Duplicate RunEnded events for one run share a
+// emitRunTermination keeps the normal live briefing and retains every recent
+// successful run until the guardian explicitly acknowledges that it was spoken.
+// A client receives it at least once: live when connected and on every init
+// until acknowledgement. Duplicate RunEnded events for one run share a
 // signature and do not generate duplicate narration.
 func (s *Service) emitRunTermination(st *loopState, snap *sessionSnapshot, e bus.RunEnded) {
 	sig := fmt.Sprintf("run:%d:%v:%s", e.RunGen, e.HadEdits, e.FinalText)
-	if snap.lastTerminationSignature == sig {
+	if _, exists := snap.terminationSignatures[sig]; exists {
 		return
 	}
 	term := RunTermination{
@@ -399,17 +440,24 @@ func (s *Service) emitRunTermination(st *loopState, snap *sessionSnapshot, e bus
 			MessagesURL: "/api/sessions/" + snap.id + "/messages",
 		},
 	}
-	snap.lastTermination = &term
-	snap.lastTerminationSignature = sig
-	snap.terminationDelivered = false
+	if len(snap.terminations) >= maxTerminationsPerSession {
+		dropped := snap.terminations[0]
+		snap.terminations = snap.terminations[1:]
+		log.Printf("attention: dropping unacknowledged run termination %s for session %s after queue overflow", dropped.ID, snap.id)
+	}
+	snap.terminations = append(snap.terminations, term)
+	if len(snap.terminationSigOrder) >= maxTerminationSignatures {
+		delete(snap.terminationSignatures, snap.terminationSigOrder[0])
+		snap.terminationSigOrder = snap.terminationSigOrder[1:]
+	}
+	snap.terminationSignatures[sig] = struct{}{}
+	snap.terminationSigOrder = append(snap.terminationSigOrder, sig)
 
 	if st.client == nil {
 		return
 	}
 	b := Briefing{Priority: P2Progress, Kind: KindRunOK, SessionID: snap.id, Alias: snap.alias, Spoken: term.Spoken, Termination: &term}
-	if st.client.Send(ServerMsg{Type: "briefing", V: ProtocolVersion, Briefing: &b}) {
-		snap.terminationDelivered = true
-	} else {
+	if !st.client.Send(ServerMsg{Type: "briefing", V: ProtocolVersion, Briefing: &b}) {
 		st.client = nil
 	}
 }
@@ -515,27 +563,21 @@ func (st *loopState) roster() []SessionBrief {
 }
 
 func (st *loopState) undeliveredTerminations() []RunTermination {
-	ids := make([]string, 0, len(st.snaps))
-	for id := range st.snaps {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
 	var out []RunTermination
-	for _, id := range ids {
-		snap := st.snaps[id]
-		if snap.lastTermination != nil && !snap.terminationDelivered {
-			out = append(out, *snap.lastTermination)
-		}
+	for _, snap := range st.snaps {
+		out = append(out, snap.terminations...)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
 	return out
 }
 
-func (st *loopState) markTerminationsDelivered(terminations []RunTermination) {
-	for _, term := range terminations {
-		if snap := st.snaps[term.SessionID]; snap != nil && snap.lastTermination != nil && snap.lastTermination.ID == term.ID {
-			snap.terminationDelivered = true
-		}
-	}
+func (st *loopState) accepts(c ClientSink) bool {
+	return c == nil || (st.client != nil && st.client.ID() == c.ID())
 }
 
 func (st *loopState) hasUnresolvedError(sessionID string) bool {

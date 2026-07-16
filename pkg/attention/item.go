@@ -111,7 +111,7 @@ type AttentionItem struct {
 	Verbatim string `json:"verbatim,omitempty"`
 }
 
-// clone returns a deep-enough copy for safe hand-off across the actor boundary.
+// clone returns a deep-enough copy for hand-off across the actor boundary.
 // RiskFlags is the only slice; everything else is a value type.
 func (it AttentionItem) clone() AttentionItem {
 	if it.RiskFlags != nil {

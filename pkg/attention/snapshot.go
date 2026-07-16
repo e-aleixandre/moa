@@ -36,23 +36,24 @@ type sessionSnapshot struct {
 	// feedback) isn't narrated twice. Keyed by Kind.
 	lastBriefSig map[Kind]string
 
-	// lastTermination is retained until it has been put on a live guardian
-	// connection. It is deliberately not an attention item: run completion
-	// requires no user action.
-	lastTermination          *RunTermination
-	lastTerminationSignature string
-	terminationDelivered     bool
+	// terminations is a bounded FIFO of successful runs awaiting the guardian's
+	// explicit spoken acknowledgement. It is deliberately not an attention
+	// item: run completion requires no user action.
+	terminations          []RunTermination
+	terminationSignatures map[string]struct{}
+	terminationSigOrder   []string
 }
 
 func newSessionSnapshot(id, alias, title string, gen uint64) *sessionSnapshot {
 	return &sessionSnapshot{
-		id:           id,
-		gen:          gen,
-		alias:        alias,
-		title:        title,
-		state:        bus.StateIdle,
-		pendingPerm:  make(map[string]string),
-		pendingAsk:   make(map[string]string),
-		lastBriefSig: make(map[Kind]string),
+		id:                    id,
+		gen:                   gen,
+		alias:                 alias,
+		title:                 title,
+		state:                 bus.StateIdle,
+		pendingPerm:           make(map[string]string),
+		pendingAsk:            make(map[string]string),
+		lastBriefSig:          make(map[Kind]string),
+		terminationSignatures: make(map[string]struct{}),
 	}
 }

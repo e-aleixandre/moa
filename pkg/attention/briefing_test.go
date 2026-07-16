@@ -2,8 +2,10 @@ package attention
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 )
@@ -45,7 +47,7 @@ func TestRunOKEmitsProgressBriefing(t *testing.T) {
 	}
 }
 
-func TestUndeliveredRunTerminationIsIncludedInInitOnce(t *testing.T) {
+func TestRunTerminationIsReplayedUntilAcknowledged(t *testing.T) {
 	s := newTestService(t)
 	b := bus.NewLocalBus()
 	defer b.Close()
@@ -59,25 +61,43 @@ func TestUndeliveredRunTerminationIsIncludedInInitOnce(t *testing.T) {
 		t.Fatalf("completion must not become a P0 item, got %+v", items)
 	}
 
-	// Now connect: init carries the completion exactly once.
+	// Now connect: init carries the completion. A connection drop before speech
+	// acknowledgement must not make it disappear.
 	client := &fakeClient{cid: 1}
 	s.SetActiveClient(client)
+	var term RunTermination
 	eventually(t, "init carries termination", func() bool {
 		m, ok := client.lastOfType("init")
-		return ok && len(m.Terminations) == 1 && m.Terminations[0].Ref.RunGen == 7
+		if !ok || len(m.Terminations) != 1 || m.Terminations[0].Ref.RunGen != 7 {
+			return false
+		}
+		term = m.Terminations[0]
+		return true
 	})
 
-	// It was handed to a live sink, so a later reconnect does not duplicate it.
+	// A reconnect before ack receives the same durable ID again.
 	s.ClearActiveClient(client)
 	client2 := &fakeClient{cid: 2}
 	s.SetActiveClient(client2)
 	eventually(t, "second init", func() bool {
 		m, ok := client2.lastOfType("init")
+		return ok && len(m.Terminations) == 1 && m.Terminations[0].ID == term.ID
+	})
+
+	// Only the explicit post-speech acknowledgement removes it.
+	if !s.AckTerminationForClient(client2, term.ID) {
+		t.Fatal("active client acknowledgement was rejected")
+	}
+	s.ClearActiveClient(client2)
+	client3 := &fakeClient{cid: 3}
+	s.SetActiveClient(client3)
+	eventually(t, "acknowledged termination absent", func() bool {
+		m, ok := client3.lastOfType("init")
 		return ok && len(m.Terminations) == 0
 	})
 }
 
-func TestRunTerminationContainsBoundedNonCodeSummaryAndDedupes(t *testing.T) {
+func TestRunTerminationContainsBoundedUnchangedSummaryAndDedupes(t *testing.T) {
 	s := newTestService(t)
 	b := bus.NewLocalBus()
 	defer b.Close()
@@ -93,11 +113,69 @@ func TestRunTerminationContainsBoundedNonCodeSummaryAndDedupes(t *testing.T) {
 		return len(briefingsOf(client)) == 1 && briefingsOf(client)[0].Termination != nil
 	})
 	term := briefingsOf(client)[0].Termination
-	if len(term.Summary) > 512 || contains(term.Summary, "secret code") || contains(term.Summary, "leaked diff") {
-		t.Fatalf("unsafe termination summary: %#v", term.Summary)
+	if len(term.Summary) > 512 || !contains(term.Summary, "secret code") || !contains(term.Summary, "leaked diff") {
+		t.Fatalf("termination summary changed content: %#v", term.Summary)
 	}
 	if term.Ref.SessionID != "s" || term.Ref.RunGen != 9 || term.Ref.MessagesURL != "/api/sessions/s/messages" || term.ID == "" {
 		t.Fatalf("bad termination ref: %+v", term)
+	}
+}
+
+func TestTerminationSummaryRespectsByteBoundAndUTF8(t *testing.T) {
+	if got := terminationSummary(strings.Repeat("a", 513)); len(got) != 512 || got != strings.Repeat("a", 509)+"…" {
+		t.Fatalf("ASCII summary = %q (%d bytes)", got, len(got))
+	}
+	input := strings.Repeat("界", 171) // 513 bytes
+	got := terminationSummary(input)
+	if len(got) > 512 || !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
+		t.Fatalf("UTF-8 summary = %q (%d bytes)", got, len(got))
+	}
+}
+
+func TestAllOfflineTerminationsAppearInInit(t *testing.T) {
+	s := newTestService(t)
+	b1 := bus.NewLocalBus()
+	b2 := bus.NewLocalBus()
+	defer b1.Close()
+	defer b2.Close()
+	defer s.Attach(b1, "s1", "one", "One")()
+	defer s.Attach(b2, "s2", "two", "Two")()
+
+	b1.Publish(bus.RunEnded{SessionID: "s1", RunGen: 1, FinalText: "first"})
+	b1.Publish(bus.RunEnded{SessionID: "s1", RunGen: 2, FinalText: "second"})
+	b2.Publish(bus.RunEnded{SessionID: "s2", RunGen: 1, FinalText: "third"})
+	eventually(t, "offline terminations retained", func() bool {
+		return len(s.Snapshot().Terminations) == 3
+	})
+
+	client := &fakeClient{cid: 1}
+	s.SetActiveClient(client)
+	eventually(t, "all offline terminations in init", func() bool {
+		m, ok := client.lastOfType("init")
+		if !ok || len(m.Terminations) != 3 {
+			return false
+		}
+		seen := make(map[string]uint64)
+		for _, term := range m.Terminations {
+			seen[term.SessionID] = term.Ref.RunGen
+		}
+		return seen["s1"] == 2 && seen["s2"] == 1
+	})
+	// Both different runs from s1 are present, rather than just its latest.
+	m, _ := client.lastOfType("init")
+	for i := 1; i < len(m.Terminations); i++ {
+		if m.Terminations[i].CreatedAt.Before(m.Terminations[i-1].CreatedAt) {
+			t.Fatalf("terminations are not time ordered: %+v", m.Terminations)
+		}
+	}
+	var s1Runs []uint64
+	for _, term := range m.Terminations {
+		if term.SessionID == "s1" {
+			s1Runs = append(s1Runs, term.Ref.RunGen)
+		}
+	}
+	if len(s1Runs) != 2 || s1Runs[0] != 1 || s1Runs[1] != 2 {
+		t.Fatalf("s1 terminations = %+v", s1Runs)
 	}
 }
 

@@ -41,6 +41,9 @@ type ClientSink interface {
 	Send(msg ServerMsg) bool
 	// ID identifies the connection so the loop can detect supersession.
 	ID() uint64
+	// Close revokes this sink. A superseded guardian must not retain a live
+	// control channel.
+	Close()
 }
 
 // Bounds on live state (design §2.3). Small: this is a single-user host.
@@ -49,6 +52,10 @@ const (
 	maxInboxCrit  = 64  // P0/control — never dropped
 	maxInboxNorm  = 256 // future non-P0 — drop+log on overflow
 	ackEscalation = 30 * time.Second
+	// maxTerminationsPerSession bounds durable notices while a guardian is
+	// offline. Overflow drops the oldest notice and is logged.
+	maxTerminationsPerSession = 32
+	maxTerminationSignatures  = maxTerminationsPerSession * 2
 )
 
 // Service is the attention brain. Construct with New, wire sessions with Attach,
@@ -85,6 +92,8 @@ type ctrlMsg struct {
 	session *attachReq
 	detach  string // sessionID for detach
 	ack     string // attention item id for ack
+	termAck string // durable run termination id for ack_termination
+	client  ClientSink
 	// setClient swaps the active client (single-active policy).
 	setClient ClientSink
 	// clearClient removes a client if it is still the active one.
@@ -109,6 +118,7 @@ const (
 	ctrlSetClient
 	ctrlClearClient
 	ctrlAck
+	ctrlAckTermination
 	ctrlGetStatus // reply with snapshot of unresolved items
 	ctrlInit      // reply with the full init payload for a new client
 	ctrlUpdateMeta
@@ -139,6 +149,7 @@ type ctrlReply struct {
 	items        []AttentionItem
 	sessions     []SessionBrief
 	terminations []RunTermination
+	active       bool
 }
 
 // New creates a Service. It does not start the loop; call Start.
@@ -153,7 +164,7 @@ func New(cfg Config) *Service {
 	}
 }
 
-// Start launches the actor loop. Idempotent-safe to call once.
+// Start launches the actor loop. Call it once.
 func (s *Service) Start() {
 	s.wg.Add(1)
 	go s.loop()
@@ -315,6 +326,23 @@ func (s *Service) Ack(itemID string) {
 	s.sendCtrl(ctrlMsg{kind: ctrlAck, ack: itemID})
 }
 
+// AckTermination confirms that the guardian has spoken a durable run
+// termination. Until this acknowledgement, every init replays it.
+func (s *Service) AckTermination(terminationID string) {
+	s.sendCtrl(ctrlMsg{kind: ctrlAckTermination, termAck: terminationID})
+}
+
+// AckForClient acknowledges an item only if c is still the active guardian.
+// It prevents a superseded socket from issuing commands after replacement.
+func (s *Service) AckForClient(c ClientSink, itemID string) bool {
+	return s.sendCtrlReply(ctrlMsg{kind: ctrlAck, ack: itemID, client: c}).active
+}
+
+// AckTerminationForClient confirms a termination only if c is still active.
+func (s *Service) AckTerminationForClient(c ClientSink, terminationID string) bool {
+	return s.sendCtrlReply(ctrlMsg{kind: ctrlAckTermination, termAck: terminationID, client: c}).active
+}
+
 // Status returns the current unresolved items (for get_status).
 func (s *Service) Status() []AttentionItem {
 	return s.sendCtrlReply(ctrlMsg{kind: ctrlGetStatus}).items
@@ -337,6 +365,23 @@ func (s *Service) Snapshot() ServerMsg {
 		Sessions:     r.sessions,
 		Terminations: r.terminations,
 	}
+}
+
+// SnapshotForClient returns the authoritative init payload only while c is
+// the active guardian. This prevents a superseded socket from serving control
+// responses after it has been replaced.
+func (s *Service) SnapshotForClient(c ClientSink) (ServerMsg, bool) {
+	r := s.sendCtrlReply(ctrlMsg{kind: ctrlInit, client: c})
+	if !r.active {
+		return ServerMsg{}, false
+	}
+	return ServerMsg{
+		Type:         "init",
+		V:            ProtocolVersion,
+		Items:        r.items,
+		Sessions:     r.sessions,
+		Terminations: r.terminations,
+	}, true
 }
 
 // UpdateMeta updates a session's spoken alias and human title (e.g. after
