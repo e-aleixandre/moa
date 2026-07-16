@@ -2,6 +2,7 @@ package attention
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ealeixandre/moa/pkg/bus"
 )
@@ -117,4 +118,21 @@ func TestUpdateMetaRefreshesAlias(t *testing.T) {
 	// Unknown session is a no-op (must not panic or create anything).
 	s.UpdateMeta("ghost", "x", "X")
 	eventually(t, "still one session", func() bool { return len(rosterOf(client)) == 1 })
+}
+
+func TestUpdateBriefRefreshesRoster(t *testing.T) {
+	s := newTestService(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	defer s.Attach(b, "s", "x", "X")()
+	client := &fakeClient{cid: 1}
+	s.SetActiveClient(client)
+
+	updated := time.Now().UTC().Round(0)
+	s.UpdateBrief("s", "Implement the roster brief", "tests are running", updated)
+	eventually(t, "roster has session brief", func() bool {
+		r := rosterOf(client)
+		return len(r) == 1 && r[0].Attempting == "Implement the roster brief" &&
+			r[0].Progress == "tests are running" && r[0].BriefUpdated.Equal(updated)
+	})
 }

@@ -100,6 +100,7 @@ type ctrlMsg struct {
 	clearClient ClientSink
 	// meta updates a session's alias/title (from auto-title or manual rename).
 	meta  *metaUpdate
+	brief *briefUpdate
 	reply chan ctrlReply
 }
 
@@ -108,6 +109,15 @@ type metaUpdate struct {
 	sessionID string
 	alias     string
 	title     string
+}
+
+// briefUpdate carries the generated status prose for an attached session.
+// Actionable session state remains derived from bus events in the actor.
+type briefUpdate struct {
+	sessionID  string
+	attempting string
+	progress   string
+	updated    time.Time
 }
 
 type ctrlKind int
@@ -122,6 +132,7 @@ const (
 	ctrlGetStatus // reply with snapshot of unresolved items
 	ctrlInit      // reply with the full init payload for a new client
 	ctrlUpdateMeta
+	ctrlUpdateBrief
 )
 
 type attachReq struct {
@@ -135,6 +146,7 @@ type attachReq struct {
 	seedAsk   []seedPending
 	seedState bus.SessionState
 	seedError string
+	seedBrief *briefUpdate
 }
 
 type seedPending struct {
@@ -196,7 +208,7 @@ func (s *Service) nextTerminationID() string {
 //
 // aliasTitle is (alias, title); seedInfo is the current pending approval state
 // (may be zero). Returns a detach func to append to the session's unsub list.
-func (s *Service) Attach(b bus.EventBus, sessionID, alias, title string) func() {
+func (s *Service) Attach(b bus.EventBus, sessionID, alias, title string, initialBrief ...SessionBrief) func() {
 	gen := s.genSeq.Add(1)
 	// Subscribe before reading the seed snapshot, but keep events behind a
 	// per-attach gate until the actor owns the session. This closes the
@@ -225,6 +237,13 @@ func (s *Service) Attach(b bus.EventBus, sessionID, alias, title string) func() 
 	req.alias = alias
 	req.title = title
 	req.gen = gen
+	if len(initialBrief) > 0 {
+		brief := initialBrief[0]
+		req.seedBrief = &briefUpdate{
+			sessionID: sessionID, attempting: brief.Attempting,
+			progress: brief.Progress, updated: brief.BriefUpdated,
+		}
+	}
 	if info, err := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](b, bus.GetPendingApproval{}); err == nil {
 		if info.Permission != nil {
 			req.seedPerm = append(req.seedPerm, seedPending{
@@ -390,5 +409,14 @@ func (s *Service) SnapshotForClient(c ClientSink) (ServerMsg, bool) {
 func (s *Service) UpdateMeta(sessionID, alias, title string) {
 	s.sendCtrl(ctrlMsg{kind: ctrlUpdateMeta, meta: &metaUpdate{
 		sessionID: sessionID, alias: alias, title: title,
+	}})
+}
+
+// UpdateBrief updates a session's LLM-generated status prose. No-op if the
+// session is not attached. Refreshes the client roster; actionable state is
+// still maintained independently from live bus events.
+func (s *Service) UpdateBrief(sessionID, attempting, progress string, updated time.Time) {
+	s.sendCtrl(ctrlMsg{kind: ctrlUpdateBrief, brief: &briefUpdate{
+		sessionID: sessionID, attempting: attempting, progress: progress, updated: updated,
 	}})
 }

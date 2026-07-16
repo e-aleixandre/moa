@@ -87,6 +87,8 @@ func (s *Service) handleCtrl(st *loopState, c ctrlMsg) {
 		}
 	case ctrlUpdateMeta:
 		s.doUpdateMeta(st, c.meta)
+	case ctrlUpdateBrief:
+		s.doUpdateBrief(st, c.brief)
 	case ctrlGetStatus:
 		reply := ctrlReply{items: st.unresolvedItems()}
 		if c.reply != nil {
@@ -123,6 +125,11 @@ func (s *Service) doAttach(st *loopState, req *attachReq) {
 	}
 	if req.seedState != "" {
 		snap.state = req.seedState
+	}
+	if req.seedBrief != nil {
+		snap.attempting = req.seedBrief.attempting
+		snap.progress = req.seedBrief.progress
+		snap.briefUpdated = req.seedBrief.updated
 	}
 	if req.seedState == bus.StateError {
 		s.ensureErrorItem(st, snap, req.seedError)
@@ -201,6 +208,23 @@ func (s *Service) doUpdateMeta(st *loopState, m *metaUpdate) {
 	if changed {
 		s.notifyRoster(st)
 	}
+}
+
+func (s *Service) doUpdateBrief(st *loopState, b *briefUpdate) {
+	if b == nil {
+		return
+	}
+	snap, ok := st.snaps[b.sessionID]
+	if !ok {
+		return
+	}
+	if snap.attempting == b.attempting && snap.progress == b.progress && snap.briefUpdated.Equal(b.updated) {
+		return
+	}
+	snap.attempting = b.attempting
+	snap.progress = b.progress
+	snap.briefUpdated = b.updated
+	s.notifyRoster(st)
 }
 
 func (s *Service) doAck(st *loopState, itemID string) {
@@ -551,12 +575,15 @@ func (st *loopState) roster() []SessionBrief {
 	for _, id := range ids {
 		snap := st.snaps[id]
 		out = append(out, SessionBrief{
-			SessionID:   snap.id,
-			Alias:       snap.alias,
-			Title:       snap.title,
-			State:       string(snap.state),
-			PendingAsks: len(snap.pendingAsk),
-			PendingPerm: len(snap.pendingPerm),
+			SessionID:    snap.id,
+			Alias:        snap.alias,
+			Title:        snap.title,
+			State:        string(snap.state),
+			PendingAsks:  len(snap.pendingAsk),
+			PendingPerm:  len(snap.pendingPerm),
+			Attempting:   snap.attempting,
+			Progress:     snap.progress,
+			BriefUpdated: snap.briefUpdated,
 		})
 	}
 	return out

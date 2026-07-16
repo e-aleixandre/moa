@@ -1,6 +1,10 @@
 package attention
 
-import "github.com/ealeixandre/moa/pkg/bus"
+import (
+	"time"
+
+	"github.com/ealeixandre/moa/pkg/bus"
+)
 
 // snapshot.go — per-session aggregated state owned by Service.loop.
 //
@@ -18,6 +22,12 @@ type sessionSnapshot struct {
 	alias string           // pronounceable name for speech
 	title string           // human title (may change via auto-title)
 	state bus.SessionState // real state type from the bus, not a raw string
+
+	// LLM-generated status prose. Unlike state and pending counts, this may
+	// age; callers keep the actionable fields derived from live bus state.
+	attempting   string
+	progress     string
+	briefUpdated time.Time
 
 	// Pending requests, keyed by moa's real ref id (perm_%d / ask_%d). Maps,
 	// not single values: ApprovalManager can hold more than one (verified in

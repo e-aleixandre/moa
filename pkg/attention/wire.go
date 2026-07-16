@@ -52,12 +52,15 @@ type ServerMsg struct {
 // /api/sessions/{id}/... The client never derives what an agent is doing from
 // the bus — the server hands it this compact, authoritative view.
 type SessionBrief struct {
-	SessionID   string `json:"session_id"`
-	Alias       string `json:"alias"`
-	Title       string `json:"title"`
-	State       string `json:"state"`         // idle | running | permission | error
-	PendingAsks int    `json:"pending_asks"`  // count of unanswered questions
-	PendingPerm int    `json:"pending_perms"` // count of unresolved permissions
+	SessionID    string    `json:"session_id"`
+	Alias        string    `json:"alias"`
+	Title        string    `json:"title"`
+	State        string    `json:"state"`         // idle | running | permission | error
+	PendingAsks  int       `json:"pending_asks"`  // count of unanswered questions
+	PendingPerm  int       `json:"pending_perms"` // count of unresolved permissions
+	Attempting   string    `json:"brief_attempting,omitempty"`
+	Progress     string    `json:"brief_progress,omitempty"`
+	BriefUpdated time.Time `json:"brief_updated,omitzero"`
 }
 
 // Briefing is an ephemeral spoken note about progress (a run finished, a goal

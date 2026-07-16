@@ -125,5 +125,9 @@ func (m *Manager) generateSessionBrief(sess *ManagedSession) {
 	sess.briefAttempting = brief.Attempting
 	sess.briefProgress = brief.Progress
 	sess.briefUpdated = time.Now()
+	attempting, progress, updated := sess.briefAttempting, sess.briefProgress, sess.briefUpdated
 	sess.mu.Unlock()
+	if m.attention != nil {
+		m.attention.UpdateBrief(sess.ID, attempting, progress, updated)
+	}
 }

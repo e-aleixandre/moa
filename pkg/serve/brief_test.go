@@ -211,6 +211,19 @@ func TestSessionInfo_BriefDTOFields(t *testing.T) {
 	}
 }
 
+func TestSessionBrief_UpdatesAttentionRoster(t *testing.T) {
+	p := &briefTestProvider{}
+	mgr, sess := newBriefTestSession(t, p, "gpt-5.3-codex")
+	sendAndWaitForBrief(t, mgr, sess, p)
+
+	pollUntil(t, time.Second, "attention roster brief", func() bool {
+		roster := mgr.attention.Roster()
+		return len(roster) == 1 && roster[0].SessionID == sess.ID &&
+			roster[0].Attempting == "Repair the brief integration" &&
+			roster[0].Progress == "tests are running" && !roster[0].BriefUpdated.IsZero()
+	})
+}
+
 func TestSessionBrief_UnknownProviderDoesNotGenerate(t *testing.T) {
 	p := &briefTestProvider{}
 	mgr, sess := newBriefTestSession(t, p, "google/gemini-test")

@@ -15,7 +15,15 @@ func (m *Manager) subscribeAttention(sess *ManagedSession) {
 	if m.attention == nil {
 		return
 	}
-	detach := m.attention.Attach(sess.runtime.Bus, sess.ID, attentionAlias(sess.Title), sess.Title)
+	sess.mu.Lock()
+	title := sess.Title
+	brief := attention.SessionBrief{
+		Attempting:   sess.briefAttempting,
+		Progress:     sess.briefProgress,
+		BriefUpdated: sess.briefUpdated,
+	}
+	sess.mu.Unlock()
+	detach := m.attention.Attach(sess.runtime.Bus, sess.ID, attentionAlias(title), title, brief)
 	sess.pushUnsubs = append(sess.pushUnsubs, detach)
 }
 
