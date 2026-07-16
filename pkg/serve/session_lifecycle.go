@@ -412,6 +412,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
 	m.subscribeSessionBrief(sess)
+	// A resumed transcript has no in-memory brief after a server restart. Queue
+	// one refresh rather than generating synchronously: briefPending coalesces
+	// this with any immediate bus trigger, while briefRunning and the per-session
+	// cooldown keep each resumed session to one cheap-model call at a time.
+	if opts != nil && len(sess.History()) > 0 && sess.briefUpdated.IsZero() {
+		m.scheduleSessionBrief(sess)
+	}
 	m.subscribeCacheClock(sess)
 	m.subscribeAttention(sess)
 

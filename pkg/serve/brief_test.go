@@ -10,6 +10,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/session"
 )
 
 const briefTestResponse = "ATTEMPTING: Repair the brief integration\nPROGRESS: tests are running"
@@ -222,6 +223,45 @@ func TestSessionBrief_UpdatesAttentionRoster(t *testing.T) {
 			roster[0].Attempting == "Repair the brief integration" &&
 			roster[0].Progress == "tests are running" && !roster[0].BriefUpdated.IsZero()
 	})
+}
+
+func TestResumeSession_SchedulesMissingBrief(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	root := t.TempDir()
+	sessionBase := t.TempDir()
+	store, err := session.NewFileStore(sessionBase, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := store.Create()
+	saved.Metadata = map[string]any{"model": "gpt-5.3-codex", "cwd": root}
+	saved.Messages = []core.AgentMessage{core.WrapMessage(core.NewUserMessage("repair the resumed brief"))}
+	if err := store.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &briefTestProvider{}
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return p, nil },
+		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:   root,
+		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
+		SessionBaseDir:  sessionBase,
+	})
+	t.Cleanup(mgr.Shutdown)
+
+	sess, err := mgr.ResumeSession(saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, briefDebounce+time.Second, "resumed session brief", func() bool {
+		return p.briefCalls() == 1
+	})
+	if info := sess.info(); info.BriefAttempting != "Repair the brief integration" || info.BriefUpdated.IsZero() {
+		t.Fatalf("resumed session brief = %+v", info)
+	}
 }
 
 func TestSessionBrief_UnknownProviderDoesNotGenerate(t *testing.T) {
