@@ -109,6 +109,13 @@ export async function loadSessions() {
         // stale poll only if the poll started before the archive call
         // resolved; the next poll (≤3s desktop / ≤15s mobile) self-corrects.
         archived: info.archived || false,
+        // Server-owned session brief (cheap LLM status summary): attempting /
+        // progress prose + freshness stamp. No WS event tracks it, so the poll
+        // is the source of truth. Preserve the prior value when the poll omits
+        // it (omitempty) so a not-yet-generated brief doesn't flicker.
+        briefAttempting: info.brief_attempting ?? (existing ? existing.briefAttempting : ''),
+        briefProgress: info.brief_progress ?? (existing ? existing.briefProgress : ''),
+        briefUpdated: info.brief_updated ? Date.parse(info.brief_updated) : (existing ? existing.briefUpdated : 0),
       };
 		if (samePolledSession(existing, next)) {
 			sessions[info.id] = existing;

@@ -163,6 +163,31 @@
   margin-top: -2px;
 }
 .overview-card-empty { color: var(--surface2); font-style: italic; }
+.overview-card-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+  line-height: 1.4;
+  min-width: 0;
+}
+.overview-card-brief-attempting {
+  color: var(--subtext0);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.overview-card-brief-progress {
+  color: var(--overlay1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 .overview-card-footer { display: flex; align-items: center; justify-content: space-between; }
 .overview-card-close {
   display: flex;

@@ -104,6 +104,14 @@ export function SessionOverview({ state, onSelect, onNewSession, onOpenPairing }
         {path && !groupByProject && (
           <div class="overview-card-path" title={sess.cwd}>{path}</div>
         )}
+        {sess.briefAttempting && (
+          <div class="overview-card-brief" title={sess.briefProgress || ''}>
+            <span class="overview-card-brief-attempting">{sess.briefAttempting}</span>
+            {sess.briefProgress && (
+              <span class="overview-card-brief-progress">{sess.briefProgress}</span>
+            )}
+          </div>
+        )}
         <div class="overview-card-preview">
           {lastMsg || <span class="overview-card-empty">No messages yet</span>}
         </div>
