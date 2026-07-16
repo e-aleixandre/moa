@@ -264,7 +264,7 @@ func buildPrompt(msgs []core.AgentMessage) string {
 		default:
 			continue
 		}
-		text := firstText(msg.Content)
+		text := allText(msg.Content)
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
@@ -300,11 +300,14 @@ func buildPrompt(msgs []core.AgentMessage) string {
 	return strings.TrimSpace(joined)
 }
 
-func firstText(content []core.Content) string {
+// allText joins every text block in a message while deliberately excluding
+// tool, thinking, and native-content metadata from the summary prompt.
+func allText(content []core.Content) string {
+	var text []string
 	for _, c := range content {
 		if c.Type == "text" && c.Text != "" {
-			return c.Text
+			text = append(text, c.Text)
 		}
 	}
-	return ""
+	return strings.Join(text, "\n")
 }

@@ -133,6 +133,24 @@ func TestBuildPrompt_SkipsNonUserAssistant(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_UsesAllTextBlocksButSkipsToolMetadata(t *testing.T) {
+	msgs := []core.AgentMessage{{Message: core.Message{
+		Role: "assistant",
+		Content: []core.Content{
+			core.TextContent("first text block"),
+			{Type: "tool_call", Text: "tool metadata must be excluded"},
+			core.TextContent("second text block"),
+		},
+	}}}
+	got := buildPrompt(msgs)
+	if !strings.Contains(got, "first text block") || !strings.Contains(got, "second text block") {
+		t.Fatalf("buildPrompt omitted a text block: %q", got)
+	}
+	if strings.Contains(got, "tool metadata must be excluded") {
+		t.Fatalf("buildPrompt included tool metadata: %q", got)
+	}
+}
+
 func TestGenerate_EndToEnd(t *testing.T) {
 	factory := func(core.Model) (core.Provider, error) {
 		return &fakeProvider{response: "ATTEMPTING: Fix login\nPROGRESS: green tests"}, nil
