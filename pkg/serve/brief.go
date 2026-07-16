@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"errors"
 	"log/slog"
 	"time"
 
@@ -14,6 +15,11 @@ import (
 // permission request, say) must not fire N cheap-model calls.
 const briefDebounce = 2 * time.Second
 
+// briefCooldown caps cheap-model calls for a repeatedly failing or noisy
+// session. It is measured from the start of an attempt so provider failures
+// cannot turn every RunEnded into another call.
+const briefCooldown = 10 * time.Second
+
 // subscribeSessionBrief regenerates the session's status brief (a cheap
 // same-vendor LLM call) on the events that meaningfully change what the session
 // is attempting or how it's going. It mirrors subscribeAutoTitle but, unlike a
@@ -24,6 +30,11 @@ const briefDebounce = 2 * time.Second
 // needed and the live state are derived from the session in info(), never from
 // the model, so the actionable data can't go stale even when the prose is a few
 // minutes old.
+//
+// This feature is web/Pulse-only by design: a per-session summary serves
+// multi-session views (the web dashboard and Pulse voice), while the TUI works
+// inside one live session where that summary is redundant. The shared logic is
+// kept in pkg/pulsebrief should a future TUI multi-session view need it.
 func (m *Manager) subscribeSessionBrief(sess *ManagedSession) {
 	if m.providerFactory == nil {
 		return
@@ -81,16 +92,36 @@ func (m *Manager) generateSessionBrief(sess *ManagedSession) {
 	if err != nil || len(msgs) == 0 {
 		return
 	}
+	// Record attempts, including failed ones, so a failing session cannot make
+	// one cheap-model request per run-end event.
+	sess.mu.Lock()
+	if time.Since(sess.briefLastAttempt) < briefCooldown {
+		sess.mu.Unlock()
+		return
+	}
+	sess.briefLastAttempt = time.Now()
+	sess.mu.Unlock()
+
 	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
 	brief, err := pulsebrief.Generate(sess.infra.sessionCtx, m.providerFactory, sessionModel, msgs)
 	if err != nil {
+		if errors.Is(err, pulsebrief.ErrNoCheapSameVendorModel) {
+			return
+		}
 		slog.Debug("pulsebrief: generation failed", "session", sess.ID, "error", err)
 		return
 	}
-	if brief.IsEmpty() || sess.deleted.Load() {
+	if brief.IsEmpty() {
 		return
 	}
 	sess.mu.Lock()
+	// Delete takes this same lock while setting deleted, so the check and all
+	// three writes are one operation: no late generator can restore a brief on
+	// a deleted session.
+	if sess.deleted.Load() {
+		sess.mu.Unlock()
+		return
+	}
 	sess.briefAttempting = brief.Attempting
 	sess.briefProgress = brief.Progress
 	sess.briefUpdated = time.Now()

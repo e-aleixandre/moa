@@ -455,7 +455,11 @@ func (m *Manager) Delete(id string) error {
 
 	// Stop Web Push subscribers BEFORE closing the runtime, so events drained
 	// during bus shutdown cannot notify for a session that no longer exists.
+	// Coordinate with the final brief write: a generator holds sess.mu while it
+	// checks deleted and stores the three brief fields.
+	sess.mu.Lock()
 	sess.deleted.Store(true)
+	sess.mu.Unlock()
 	for _, unsub := range sess.pushUnsubs {
 		unsub()
 	}

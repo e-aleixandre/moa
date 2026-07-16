@@ -67,6 +67,9 @@ type ManagedSession struct {
 	briefAttempting string
 	briefProgress   string
 	briefUpdated    time.Time
+	// briefLastAttempt rate-limits brief generation after noisy events or
+	// provider failures. Protected by mu; see briefCooldown in brief.go.
+	briefLastAttempt time.Time
 	// lastRunAt is when the most recent run finished. For Anthropic models the
 	// prompt cache is refreshed on every request, so it stays warm until
 	// lastRunAt + cacheTTL; the UI uses this to warn when writing would incur a
