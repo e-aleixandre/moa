@@ -1,7 +1,7 @@
 // session-actions.js — API-backed session operations
 
 import { api } from './api.js';
-import { normalizeHistory } from './ws-handlers.js';
+import { normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
 import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
@@ -400,6 +400,9 @@ export async function openPersistedSubagent(id, jobId) {
   }
   const t = await api('GET', `/api/sessions/${id}/subagents/${jobId}`);
   if (!t) return;
+  const transcript = t.order === 'newest_first'
+    ? [...(t.messages || [])].reverse()
+    : (t.messages || []);
   const usage = (t.cost_usd || (t.usage && (t.usage.input || t.usage.output)))
     ? {
         inputTokens: (t.usage && t.usage.input) || 0,
@@ -414,7 +417,7 @@ export async function openPersistedSubagent(id, jobId) {
     model: t.model || '',
     status: t.status || 'completed',
     async: !!t.async,
-    messages: normalizeHistory(t.messages || []),
+    messages: normalizeConversationProjection(transcript),
     streamingText: null,
     thinkingText: null,
     usage,

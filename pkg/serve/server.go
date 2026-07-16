@@ -120,8 +120,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/bash-jobs/{jobID}/cancel", handleCancelBashJob(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleListSubagents(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleGetSubagent(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleSubagentList(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleSubagentConversation(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
@@ -573,7 +573,6 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		if lease != nil {
 			leaseDone = lease.Done()
 		}
-
 		// Track live viewers of this session — gates "run finished / errored"
 		// push notifications (see subscribePush): if a browser is watching, no push.
 		sess.wsConns.Add(1)
@@ -810,49 +809,6 @@ func handleSteerSubagent(mgr *Manager) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"queued": queued})
-		}
-	}
-}
-
-// handleListSubagents returns the persisted subagent transcripts for a session
-// (metadata only — messages omitted to keep the list light).
-func handleListSubagents(mgr *Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		list, err := mgr.ListSubagentTranscripts(r.PathValue("id"))
-		switch {
-		case errors.Is(err, ErrNotFound):
-			http.Error(w, "not found", http.StatusNotFound)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			out := make([]map[string]any, 0, len(list))
-			for _, t := range list {
-				m := map[string]any{
-					"job_id": t.JobID, "task": t.Task, "model": t.Model,
-					"status": t.Status, "async": t.Async, "cost_usd": t.CostUSD,
-				}
-				if t.Usage != nil {
-					m["input_tokens"] = t.Usage.Input
-					m["output_tokens"] = t.Usage.Output
-				}
-				out = append(out, m)
-			}
-			writeJSON(w, http.StatusOK, out)
-		}
-	}
-}
-
-// handleGetSubagent returns one persisted subagent transcript (with messages).
-func handleGetSubagent(mgr *Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		t, err := mgr.GetSubagentTranscript(r.PathValue("id"), r.PathValue("jobID"))
-		switch {
-		case errors.Is(err, ErrNotFound):
-			http.Error(w, "not found", http.StatusNotFound)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			writeJSON(w, http.StatusOK, t)
 		}
 	}
 }

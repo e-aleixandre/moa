@@ -8,8 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
-	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,7 +41,6 @@ type ConversationMessage struct {
 	Tool          string    `json:"tool,omitempty"`
 	Action        string    `json:"action,omitempty"`
 	Target        string    `json:"target,omitempty"`
-	Summary       string    `json:"summary,omitempty"`
 	Status        string    `json:"status,omitempty"`
 }
 
@@ -88,6 +86,9 @@ type conversationProjection struct {
 type conversationCursor struct {
 	SessionID string `json:"s"`
 	BeforeID  string `json:"b"`
+	// Scope binds cursors for other conversation-like resources to their
+	// resource ID. Empty is the parent-session conversation.
+	Scope string `json:"p,omitempty"`
 }
 
 func handleConversationMessages(m *Manager) http.HandlerFunc {
@@ -132,7 +133,7 @@ func handleConversationMessages(m *Manager) http.HandlerFunc {
 		beforeID := ""
 		if raw := r.URL.Query().Get("cursor"); raw != "" {
 			cursor, err := m.decodeConversationCursor(raw)
-			if err != nil || cursor.SessionID != snapshot.id || cursor.BeforeID == "" {
+			if err != nil || cursor.SessionID != snapshot.id || cursor.BeforeID == "" || cursor.Scope != "" {
 				http.Error(w, "invalid cursor", http.StatusBadRequest)
 				return
 			}
@@ -259,18 +260,7 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 		}
 		seenIDs[baseID]++
 		text, omitted, truncated := safeDisplayText(msg.Content)
-		if strings.TrimSpace(text) == "" && !omitted {
-			// An assistant turn made entirely of tool calls is represented by the
-			// individual tool items below, not by an empty assistant item.
-			if msg.Role != "assistant" || !hasToolCalls(msg.Content) {
-				continue
-			}
-		}
-		showMessage := strings.TrimSpace(text) != "" || omitted
-		if msg.Role == "assistant" && strings.TrimSpace(text) == "" && onlyThinkingAndToolCalls(msg.Content) {
-			showMessage = false
-		}
-		if showMessage {
+		if shouldShowConversationMessage(msg.Role, text, omitted, msg.Content) {
 			item := ConversationMessage{ID: id, Role: msg.Role, Text: text, Omitted: omitted, Truncated: truncated}
 			if msg.Timestamp > 0 {
 				item.Timestamp = time.Unix(msg.Timestamp, 0).UTC()
@@ -297,7 +287,6 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 				Tool:      block.ToolName,
 				Action:    action,
 				Target:    target,
-				Summary:   "Tool activity",
 				Status:    "pending",
 				Timestamp: conversationTimestamp(msg.Timestamp),
 			}
@@ -314,6 +303,23 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 		}
 	}
 	return conversationProjection{messages: out, toolDetails: details}
+}
+
+// shouldShowConversationMessage keeps parent and subagent transcript
+// projections consistent when content has no visible text.
+func shouldShowConversationMessage(role, text string, omitted bool, content []core.Content) bool {
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" && !omitted {
+		// An assistant turn made entirely of tool calls is represented by the
+		// individual tool items below, not by an empty assistant item.
+		if role != "assistant" || !hasToolCalls(content) {
+			return false
+		}
+	}
+	if role == "assistant" && trimmedText == "" && onlyThinkingAndToolCalls(content) {
+		return false
+	}
+	return trimmedText != "" || omitted
 }
 
 func hasToolCalls(content []core.Content) bool {
@@ -395,31 +401,22 @@ func conversationTail(value string, maxBytes int) string {
 	return value[start:]
 }
 
-// conversationToolActivity exposes only the reviewed, non-sensitive parts of
-// arguments for known tools. Unknown tools deliberately have no action or
-// target: the tool name remains available for display without projecting
-// arbitrary args.
+// conversationToolActivity exposes a bounded description of every tool's
+// arguments. The transcript's default budget excludes result output, not input
+// arguments: owner-authorized clients need to know what each tool was asked to
+// do, including MCP and other unknown tools.
 func conversationToolActivity(name string, args map[string]any) (action, target string) {
+	action = name
 	switch name {
-	case "read", "edit", "write", "ls", "send_file":
-		return name, conversationToolValue(args, "path")
 	case "bash":
-		return name, conversationBashExecutable(conversationToolString(args, "command"))
-	case "find", "grep":
-		return name, conversationToolValue(args, "path")
+		return action, conversationToolText(conversationToolString(args, "command"))
 	case "fetch_content":
-		return "fetch", conversationFetchHostname(conversationToolString(args, "url"))
-	case "web_search":
-		return name, ""
+		action = "fetch"
+		return action, conversationToolText(conversationToolString(args, "url"))
 	case "subagent":
-		return name, ""
-	default:
-		return "", ""
+		return action, conversationToolText(conversationToolString(args, "task"))
 	}
-}
-
-func conversationToolValue(args map[string]any, key string) string {
-	return conversationToolText(conversationToolString(args, key))
+	return action, conversationToolArguments(args)
 }
 
 func conversationToolString(args map[string]any, key string) string {
@@ -427,49 +424,55 @@ func conversationToolString(args map[string]any, key string) string {
 	return value
 }
 
-// conversationBashExecutable returns only a simple command's basename. It is
-// deliberately conservative: shell syntax, quoting, assignments, and unusual
-// executable names produce no target rather than risking an argument leak.
-func conversationBashExecutable(command string) string {
-	command = strings.TrimSpace(command)
-	if command == "" || !utf8.ValidString(command) || strings.ContainsAny(command, "\r\n'\"`\\$&|;<>") || strings.ContainsAny(command, "()[]{}*?!~") {
+func conversationToolArguments(args map[string]any) string {
+	if len(args) == 0 {
 		return ""
 	}
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return ""
+	encoded, err := json.Marshal(args)
+	if err == nil {
+		return conversationToolText(string(encoded))
 	}
-	executable := fields[0]
-	if strings.Contains(executable, "=") || strings.HasPrefix(executable, "-") {
-		return ""
-	}
-	for _, char := range executable {
-		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && !strings.ContainsRune("._/-", char) {
-			return ""
-		}
-	}
-	executable = path.Base(executable)
-	if executable == "." || executable == "" {
-		return ""
-	}
-	return conversationToolText(executable)
-}
 
-func conversationFetchHostname(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+	// json.Marshal rejects an entire argument map when only one value is not
+	// serializable. Preserve the serializable values in a deterministic order
+	// instead of fmt.Sprint's map-order-dependent output.
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value, valueErr := json.Marshal(args[key])
+		if valueErr != nil {
+			continue
+		}
+		quotedKey, _ := json.Marshal(key)
+		parts = append(parts, string(quotedKey)+":"+string(value))
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return conversationToolText(strings.TrimSuffix(strings.ToLower(parsed.Hostname()), "."))
+	return conversationToolText("{" + strings.Join(parts, ",") + "}")
 }
 
 func conversationToolText(value string) string {
-	value = strings.Join(strings.Fields(value), " ")
-	value = strings.ToValidUTF8(value, "�")
+	value = strings.ToValidUTF8(strings.TrimSpace(value), "�")
 	if len(value) <= maxConversationToolSummaryBytes {
 		return value
 	}
-	return conversationTail(value, maxConversationToolSummaryBytes-3) + "..."
+	return conversationHead(value, maxConversationToolSummaryBytes-3) + "..."
+}
+
+func conversationHead(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	end := min(len(value), maxBytes)
+	for end > 0 && end < len(value) && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end]
 }
 
 func safeDisplayText(content []core.Content) (text string, omitted, truncated bool) {

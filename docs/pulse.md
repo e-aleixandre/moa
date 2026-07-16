@@ -38,24 +38,23 @@ El contrato de lectura prioriza presupuesto, no censura:
 
 - los mensajes visibles se entregan completos, con límites defensivos;
 - la actividad de tools entrega de inicio `tool`, `action`, `target`, estado y
-  tiempo, sin argumentos crudos ni salida completa. `target` solo conserva el
-  `path` de `read`, `edit`, `write`, `ls` y `send_file`; para `find` y `grep`,
-  solo su `path`; para `bash`, únicamente el ejecutable base cuando se puede
-  determinar conservadoramente; y para `fetch_content`, solo el hostname
-  normalizado. Las búsquedas web y los subagentes no exponen target. Tools
-  desconocidas no exponen `action` ni `target`; `summary` es el fallback neutro
-  inglés `Tool activity`;
+  tiempo, con argumentos reales compactados en `target` a un máximo de 512 B,
+  pero sin salida completa. `bash` conserva el comando completo,
+  `fetch_content` la URL completa, los subagentes su `task`, y las tools
+  desconocidas o MCP sus argumentos como JSON compacto; `action` identifica la
+  tool (con `fetch_content` presentado como `fetch`);
 - la salida de una tool se consulta explícitamente con
   `GET /api/sessions/{id}/messages?detail=full&item_id={tool-item-id}` y se
-  devuelve como un tail acotado, nunca ilimitado;
+  devuelve como un tail acotado, nunca ilimitado. El mismo `detail=full` está
+  disponible para tools de transcripts de subagente en
+  `GET /api/sessions/{id}/subagents/{jobID}?detail=full&item_id={tool-item-id}`;
 - el historial se recupera incrementalmente.
 
 Los mensajes de agentes son contexto conversacional, no una afirmación
 verificada de estado por sí mismos.
 
-El frontend web actual no consume el endpoint genérico de transcript, por lo
-que este cambio de contrato no requiere un cambio de frontend. Pulse y futuros
-clientes deben usar los campos aditivos `action` y `target`.
+El frontend web usa esta proyección al abrir un subagente persistido; Pulse y
+futuros clientes deben usar los campos aditivos `action` y `target`.
 
 ## Acciones
 

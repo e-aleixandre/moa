@@ -127,6 +127,52 @@ export function normalizeHistory(raw) {
   return result;
 }
 
+// normalizeConversationProjection adapts the REST transcript DTO used by
+// persisted subagents to MessageList's established render model. Tool result
+// output is outside the default transcript budget, but action and target are
+// retained so persisted activity is as informative as live activity.
+export function normalizeConversationProjection(raw) {
+  return (raw || []).map(item => {
+    if (item.role === 'tool') {
+      const status = item.status === 'ok' ? 'done'
+        : item.status === 'pending' ? 'running'
+          : item.status || 'running';
+      return {
+        _type: 'tool_start',
+        tool_call_id: item.id,
+        tool_name: item.tool || 'tool',
+        args: projectionToolArgs(item),
+        activity: { action: item.action || '', target: item.target || '' },
+        status,
+        result: null,
+      };
+    }
+    return {
+      role: item.role,
+      _msg_id: item.id,
+      content: item.text ? [{ type: 'text', text: item.text }] : [],
+    };
+  });
+}
+
+function projectionToolArgs(item) {
+  const target = item.target || '';
+  if (target.startsWith('{')) {
+    try {
+      const args = JSON.parse(target);
+      if (args && typeof args === 'object' && !Array.isArray(args)) return args;
+    } catch { /* truncated JSON remains useful as a display target below */ }
+  }
+  if (!target) return {};
+  switch (item.tool) {
+    case 'bash': return { command: target };
+    case 'fetch_content': return { url: target };
+    case 'subagent': return { task: target };
+    case 'web_search': return { query: target };
+    default: return { target };
+  }
+}
+
 function parseShellBody(body) {
   if (!body.startsWith('$ ')) return { command: '', output: body };
   const rest = body.slice(2);

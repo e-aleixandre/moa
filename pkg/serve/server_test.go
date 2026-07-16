@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
@@ -1188,7 +1190,14 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 		CostUSD: 0.01,
 		Usage:   &core.Usage{Input: 50, Output: 20},
 		Messages: []core.AgentMessage{
-			{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("done")}}},
+			{Message: core.Message{MsgID: "child-user", Role: "user", Content: []core.Content{core.TextContent("investigate this")}}},
+			{Message: core.Message{MsgID: "child-assistant", Role: "assistant", Content: []core.Content{
+				core.TextContent("done"),
+				core.ToolCallContent("read-call", "read", map[string]any{"path": "safe.txt", "secret": "private argument"}),
+				core.ToolCallContent("write-call", "write", map[string]any{"path": "other.txt"}),
+			}}},
+			{Message: core.Message{Role: "tool_result", ToolCallID: "read-call", ToolName: "read", Content: []core.Content{core.TextContent("private tool output")}}},
+			{Message: core.Message{Role: "tool_result", ToolCallID: "write-call", ToolName: "write", Content: []core.Content{core.TextContent("other tool output")}}},
 		},
 	}
 	if err := store.Save(tr); err != nil {
@@ -1200,23 +1209,73 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list status = %d", resp.StatusCode)
 	}
-	var list []map[string]any
+	var list subagentListResponse
 	_ = json.NewDecoder(resp.Body).Decode(&list)
 	resp.Body.Close() //nolint:errcheck
-	if len(list) != 1 || list[0]["job_id"] != "sa-test1" {
+	if list.SessionID != sess.ID || len(list.Subagents) != 1 || list.Subagents[0].JobID != "sa-test1" || list.Subagents[0].Task != "investigate" || list.Subagents[0].Model != "haiku" {
 		t.Fatalf("unexpected list: %+v", list)
 	}
 
-	// GET one (with messages)
+	// GET one returns the projected, paginated conversation. Tool-call
+	// arguments are available as bounded activity metadata; result output is not.
 	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/sa-test1", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get status = %d", resp.StatusCode)
 	}
-	var got session.SubagentTranscript
+	var got subagentConversationResponse
 	_ = json.NewDecoder(resp.Body).Decode(&got)
 	resp.Body.Close() //nolint:errcheck
-	if got.JobID != "sa-test1" || len(got.Messages) != 1 {
+	if got.JobID != "sa-test1" || got.Task != "investigate" || got.Order != "newest_first" || len(got.Messages) != 4 || got.Messages[1].Role != "tool" || got.Messages[1].Text != "" || !strings.Contains(got.Messages[1].Target, "safe.txt") || !strings.Contains(got.Messages[1].Target, "private argument") {
 		t.Fatalf("unexpected transcript: %+v", got)
+	}
+	encoded, _ := json.Marshal(got)
+	for _, forbidden := range []string{"private tool output", "tool_call_id"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("subagent response leaked tool result %q: %s", forbidden, encoded)
+		}
+	}
+	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/sa-test1?limit=2", "")
+	var firstPage subagentConversationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&firstPage); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if len(firstPage.Messages) != 2 || !firstPage.HasMore || firstPage.NextCursor == "" {
+		t.Fatalf("subagent first page = %+v", firstPage)
+	}
+	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/sa-test1?cursor="+firstPage.NextCursor, "")
+	var secondPage subagentConversationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&secondPage); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if len(secondPage.Messages) != 2 || secondPage.Messages[0].Role != "assistant" || secondPage.Messages[1].Role != "user" || secondPage.HasMore {
+		t.Fatalf("subagent second page = %+v", secondPage)
+	}
+	if resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/messages?cursor="+firstPage.NextCursor, ""); resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close() //nolint:errcheck
+		t.Fatalf("subagent cursor accepted by parent conversation = %d", resp.StatusCode)
+	}
+	resp.Body.Close() //nolint:errcheck
+
+	// Tool result detail uses the requested tool item rather than another call
+	// from the same assistant turn.
+	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/sa-test1?detail=full", "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("subagent detail without item_id = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close() //nolint:errcheck
+	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/sa-test1?detail=full&item_id="+url.QueryEscape(got.Messages[1].ID), "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("subagent tool detail = %d, want 200", resp.StatusCode)
+	}
+	var detail conversationToolDetailResponse
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if detail.Output != "private tool output" || detail.Truncated {
+		t.Fatalf("read item detail = %+v, want read output only", detail)
 	}
 
 	// GET missing → 404
@@ -1225,6 +1284,37 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 		t.Fatalf("missing get status = %d, want 404", resp.StatusCode)
 	}
 	resp.Body.Close() //nolint:errcheck
+}
+
+func TestSafeSubagentConversationMessagesBoundsVisibleText(t *testing.T) {
+	projection := safeSubagentConversationMessages([]core.AgentMessage{
+		{Message: core.Message{MsgID: "large", Role: "assistant", Content: []core.Content{core.TextContent(strings.Repeat("é", maxConversationTextBytes))}}},
+	})
+	if len(projection.messages) != 1 {
+		t.Fatalf("messages = %#v", projection.messages)
+	}
+	item := projection.messages[0]
+	if !item.Truncated || len(item.Text) > maxConversationTextBytes || !utf8.ValidString(item.Text) {
+		t.Fatalf("bounded subagent text = %#v", item)
+	}
+}
+
+func TestSafeSubagentConversationMessagesOmitsThinkingToolAssistantTurn(t *testing.T) {
+	projection := safeSubagentConversationMessages([]core.AgentMessage{
+		{Message: core.Message{MsgID: "assistant", Role: "assistant", Content: []core.Content{
+			core.ThinkingContent("private reasoning"),
+			core.ToolCallContent("call", "bash", map[string]any{"command": "pwd"}),
+		}}},
+		{Message: core.Message{Role: "tool_result", ToolCallID: "call", Content: []core.Content{core.TextContent("/workspace")}}},
+	})
+
+	if len(projection.messages) != 1 {
+		t.Fatalf("messages = %#v, want only a tool item", projection.messages)
+	}
+	item := projection.messages[0]
+	if item.Role != "tool" || item.ID != "tool:assistant:1" || item.Tool != "bash" || item.Status != "ok" {
+		t.Fatalf("tool item = %#v", item)
+	}
 }
 
 func TestPromoteSubagentEndpoint(t *testing.T) {

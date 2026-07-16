@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -9,6 +9,22 @@ function seedSession(id) {
 
 beforeEach(() => {
   setState({ sessions: {} });
+});
+
+test('normalizeConversationProjection preserves persisted tool activity', () => {
+  const [tool] = normalizeConversationProjection([{
+    id: 'tool:child:0', role: 'tool', tool: 'bash', action: 'bash',
+    target: '{"command":"go test ./pkg/serve --token complete"}', status: 'ok',
+  }]);
+
+  expect(tool).toMatchObject({
+    _type: 'tool_start',
+    tool_call_id: 'tool:child:0',
+    tool_name: 'bash',
+    args: { command: 'go test ./pkg/serve --token complete' },
+    activity: { action: 'bash', target: '{"command":"go test ./pkg/serve --token complete"}' },
+    status: 'done',
+  });
 });
 
 test('handleWsSubagentStart creates a running entry with async flag', () => {

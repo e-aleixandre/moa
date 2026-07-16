@@ -11,7 +11,7 @@ function ToolCallView({ tool, sessionId }) {
   const [modalOpen, setModalOpen] = useState(false);
 
   const { verb, cls: verbCls } = toolVerb(tool.tool_name);
-  const path = toolPath(tool.tool_name, tool.args);
+  const path = toolPath(tool.tool_name, tool.args) || tool.activity?.target || '';
 
   // Subagent cards (tool_call_id "subagent-<jobID>") can be reopened as a
   // navigable sub-conversation, loading the persisted transcript from disk.
