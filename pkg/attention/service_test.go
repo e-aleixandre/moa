@@ -339,6 +339,26 @@ func TestSlowClientDoesNotBlockService(t *testing.T) {
 	eventually(t, "service still responsive", func() bool { return len(s.Status()) == 1 })
 }
 
+func TestUndeliveredHookOnlyFiresForP0WithoutClient(t *testing.T) {
+	called := make(chan AttentionItem, 1)
+	s := New(Config{Lang: "en", OnUndelivered: func(item AttentionItem) { called <- item }})
+	s.Start()
+	t.Cleanup(s.Close)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	defer s.Attach(b, "s", "a", "A")()
+
+	b.Publish(bus.PermissionRequested{SessionID: "s", ID: "perm_1", ToolName: "bash", Args: map[string]any{"command": "ls"}})
+	select {
+	case item := <-called:
+		if item.Kind != KindPermission || item.RefID != "perm_1" {
+			t.Fatalf("hook item = %+v", item)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("undelivered hook was not called")
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (indexOf(haystack, needle) >= 0)
 }

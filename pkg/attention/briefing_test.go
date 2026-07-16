@@ -45,26 +45,59 @@ func TestRunOKEmitsProgressBriefing(t *testing.T) {
 	}
 }
 
-func TestProgressBriefingIsLiveOnly(t *testing.T) {
+func TestUndeliveredRunTerminationIsIncludedInInitOnce(t *testing.T) {
 	s := newTestService(t)
 	b := bus.NewLocalBus()
 	defer b.Close()
 	defer s.Attach(b, "s", "x", "X")()
 
-	// NO client connected: a finished run must produce no stored state and,
-	// crucially, must not block or buffer.
-	b.Publish(bus.RunEnded{SessionID: "s", FinalText: "done", HadEdits: false})
+	// NO client connected: the normal briefing is absent, but completion is
+	// retained for the next init so a mobile network flap cannot lose it.
+	b.Publish(bus.RunEnded{SessionID: "s", RunGen: 7, FinalText: "done", HadEdits: false})
 	time.Sleep(40 * time.Millisecond)
 	if items := s.Status(); len(items) != 0 {
-		t.Fatalf("no client: nothing should be tracked, got %+v", items)
+		t.Fatalf("completion must not become a P0 item, got %+v", items)
 	}
 
-	// Now connect a client; the past run is NOT replayed (ephemeral).
+	// Now connect: init carries the completion exactly once.
 	client := &fakeClient{cid: 1}
 	s.SetActiveClient(client)
-	time.Sleep(40 * time.Millisecond)
-	if brs := briefingsOf(client); len(brs) != 0 {
-		t.Fatalf("ephemeral briefings must not be replayed on connect, got %+v", brs)
+	eventually(t, "init carries termination", func() bool {
+		m, ok := client.lastOfType("init")
+		return ok && len(m.Terminations) == 1 && m.Terminations[0].Ref.RunGen == 7
+	})
+
+	// It was handed to a live sink, so a later reconnect does not duplicate it.
+	s.ClearActiveClient(client)
+	client2 := &fakeClient{cid: 2}
+	s.SetActiveClient(client2)
+	eventually(t, "second init", func() bool {
+		m, ok := client2.lastOfType("init")
+		return ok && len(m.Terminations) == 0
+	})
+}
+
+func TestRunTerminationContainsBoundedNonCodeSummaryAndDedupes(t *testing.T) {
+	s := newTestService(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	defer s.Attach(b, "s", "x", "X")()
+
+	client := &fakeClient{cid: 1}
+	s.SetActiveClient(client)
+	final := "Finished the API.\n```go\nfmt.Println(\"secret code\")\n```\ndiff --git a/a b/a\n+leaked diff"
+	b.Publish(bus.RunEnded{SessionID: "s", RunGen: 9, FinalText: final, HadEdits: true})
+	b.Publish(bus.RunEnded{SessionID: "s", RunGen: 9, FinalText: final, HadEdits: true})
+
+	eventually(t, "one structured termination", func() bool {
+		return len(briefingsOf(client)) == 1 && briefingsOf(client)[0].Termination != nil
+	})
+	term := briefingsOf(client)[0].Termination
+	if len(term.Summary) > 512 || contains(term.Summary, "secret code") || contains(term.Summary, "leaked diff") {
+		t.Fatalf("unsafe termination summary: %#v", term.Summary)
+	}
+	if term.Ref.SessionID != "s" || term.Ref.RunGen != 9 || term.Ref.MessagesURL != "/api/sessions/s/messages" || term.ID == "" {
+		t.Fatalf("bad termination ref: %+v", term)
 	}
 }
 

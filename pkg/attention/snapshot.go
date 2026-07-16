@@ -35,6 +35,13 @@ type sessionSnapshot struct {
 	// per kind, so a repeated identical verdict (e.g. the same goal-iteration
 	// feedback) isn't narrated twice. Keyed by Kind.
 	lastBriefSig map[Kind]string
+
+	// lastTermination is retained until it has been put on a live guardian
+	// connection. It is deliberately not an attention item: run completion
+	// requires no user action.
+	lastTermination          *RunTermination
+	lastTerminationSignature string
+	terminationDelivered     bool
 }
 
 func newSessionSnapshot(id, alias, title string, gen uint64) *sessionSnapshot {

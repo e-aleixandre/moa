@@ -187,6 +187,44 @@ func (l lang) spokenRunOK(alias, finalText string, hadEdits bool) string {
 	}
 }
 
+// terminationSummary retains a compact text preview for a durable completion
+// notice. It strips fenced/code-diff sections before applying a byte (not rune)
+// bound so the wire contract remains small even for very long agent answers.
+func terminationSummary(s string) string {
+	var kept []string
+	inFence := false
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			continue
+		}
+		if strings.HasPrefix(trimmed, "diff --git") {
+			break
+		}
+		if inFence || strings.HasPrefix(trimmed, "@@") ||
+			strings.HasPrefix(trimmed, "+++") || strings.HasPrefix(trimmed, "---") ||
+			(strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "+ ")) ||
+			(strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "- ")) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	s = strings.Join(kept, "\n")
+	return truncateUTF8Bytes(strings.TrimSpace(stripMarkdown(s)), 512)
+}
+
+func truncateUTF8Bytes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	end := max
+	for end > 0 && (s[end]&0xc0) == 0x80 {
+		end--
+	}
+	return strings.TrimSpace(s[:end]) + "…"
+}
+
 // spokenGoalEnded narrates a goal loop stopping.
 func (l lang) spokenGoalEnded(alias, reason string) string {
 	reason = firstSentence(reason, 140)

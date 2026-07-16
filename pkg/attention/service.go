@@ -24,6 +24,11 @@ type Config struct {
 	// Lang is the resolved briefing language code (e.g. "en", "es"); from
 	// core.GetSTTLanguage. Empty -> English.
 	Lang string
+
+	// OnUndelivered is an optional future push hook. It is called when a P0
+	// item is born without an active guardian; callers can use it to wake a
+	// paired phone without putting APNs policy in this package.
+	OnUndelivered func(AttentionItem)
 }
 
 // ClientSink is the minimal interface the loop uses to push messages to the one
@@ -59,6 +64,7 @@ type Service struct {
 	closeOnce sync.Once
 
 	itemSeq atomic.Uint64 // att_%d generator
+	termSeq atomic.Uint64 // term_%d generator
 	genSeq  atomic.Uint64 // per-attach generation generator
 
 	wg sync.WaitGroup
@@ -130,7 +136,9 @@ type seedPending struct {
 }
 
 type ctrlReply struct {
-	items []AttentionItem
+	items        []AttentionItem
+	sessions     []SessionBrief
+	terminations []RunTermination
 }
 
 // New creates a Service. It does not start the loop; call Start.
@@ -162,6 +170,10 @@ func (s *Service) Close() {
 // nextItemID returns a fresh att_%d id.
 func (s *Service) nextItemID() string {
 	return fmt.Sprintf("att_%d", s.itemSeq.Add(1))
+}
+
+func (s *Service) nextTerminationID() string {
+	return fmt.Sprintf("term_%d", s.termSeq.Add(1))
 }
 
 // -- Public wiring API (called from pkg/serve) ------------------------------
@@ -306,6 +318,25 @@ func (s *Service) Ack(itemID string) {
 // Status returns the current unresolved items (for get_status).
 func (s *Service) Status() []AttentionItem {
 	return s.sendCtrlReply(ctrlMsg{kind: ctrlGetStatus}).items
+}
+
+// Roster returns the current attached-session roster. It is public so HTTP
+// clients can consume the same global attention state as the guardian.
+func (s *Service) Roster() []SessionBrief {
+	return s.sendCtrlReply(ctrlMsg{kind: ctrlInit}).sessions
+}
+
+// Snapshot returns the authoritative guardian init payload. get_status uses
+// this same shape so the caller can replace, rather than merge, local state.
+func (s *Service) Snapshot() ServerMsg {
+	r := s.sendCtrlReply(ctrlMsg{kind: ctrlInit})
+	return ServerMsg{
+		Type:         "init",
+		V:            ProtocolVersion,
+		Items:        r.items,
+		Sessions:     r.sessions,
+		Terminations: r.terminations,
+	}
 }
 
 // UpdateMeta updates a session's spoken alias and human title (e.g. after

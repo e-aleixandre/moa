@@ -1,8 +1,13 @@
 package attention
 
-import "github.com/ealeixandre/moa/pkg/bus"
+import (
+	"time"
 
-// wire.go — the /api/voice/ws protocol (design §4) and the bus event whitelist.
+	"github.com/ealeixandre/moa/pkg/bus"
+)
+
+// wire.go — the /api/pulse/guardian/ws protocol (design §4) and the bus event
+// whitelist.
 //
 // Server->client messages are a small tagged union. init is authoritative: on
 // (re)connect the client REPLACES its local state with it. There is no seq /
@@ -24,10 +29,15 @@ type ServerMsg struct {
 	// attention (a new item) / item_update (state change of an existing item)
 	Item *AttentionItem `json:"item,omitempty"`
 
-	// briefing (Phase 2): an ephemeral progress/terminal note. NOT tracked by
-	// the client, NOT re-sent on reconnect, NOT resolvable — it is spoken once
-	// (if a client is listening) and forgotten.
+	// briefing (Phase 2): an ephemeral progress/terminal note. It is NOT
+	// tracked or resolvable. The sole exception is a successful run completion,
+	// whose Termination metadata is retained for recovery in init.
 	Briefing *Briefing `json:"briefing,omitempty"`
+
+	// terminations contains successful run completions which were not delivered
+	// while a guardian was connected. It appears only in init and is replaced by
+	// the next init, like Items and Sessions.
+	Terminations []RunTermination `json:"terminations,omitempty"`
 
 	// error
 	RequestID string `json:"request_id,omitempty"`
@@ -58,6 +68,33 @@ type Briefing struct {
 	SessionID string   `json:"session_id"` // origin session
 	Alias     string   `json:"alias"`      // pronounceable session name
 	Spoken    string   `json:"spoken"`     // text written for the ear
+
+	// Termination is set only for a successful run completion. It lets a voice
+	// client ask for the full result through the existing messages endpoint.
+	Termination *RunTermination `json:"termination,omitempty"`
+}
+
+// RunTermination is the durable, at-least-once completion notice for one
+// successful agent run. It is not an AttentionItem: it is neither actionable
+// nor resolvable. Ref identifies the transcript containing the full answer;
+// GET /api/sessions/{session_id}/messages is the existing detail endpoint.
+type RunTermination struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"session_id"`
+	Alias     string         `json:"alias"`
+	Spoken    string         `json:"spoken"`
+	Summary   string         `json:"summary"`
+	CreatedAt time.Time      `json:"created_at"`
+	Ref       TerminationRef `json:"ref"`
+}
+
+// TerminationRef points a client at the completed run's transcript. RunGen
+// distinguishes successive runs in a session; the messages endpoint exposes
+// the complete owner-authorized conversation rather than a special voice API.
+type TerminationRef struct {
+	SessionID   string `json:"session_id"`
+	RunGen      uint64 `json:"run_gen"`
+	MessagesURL string `json:"messages_url"`
 }
 
 // ClientMsg is one message received from the active voice client. Phase 1A

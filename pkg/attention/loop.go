@@ -72,8 +72,8 @@ func (s *Service) handleCtrl(st *loopState, c ctrlMsg) {
 			c.reply <- reply
 		}
 	case ctrlInit:
-		// Snapshot of all unresolved items for a freshly-connected client.
-		reply := ctrlReply{items: st.unresolvedItems()}
+		// Snapshot for an explicit client get_status or the HTTP roster read.
+		reply := ctrlReply{items: st.unresolvedItems(), sessions: st.roster(), terminations: st.undeliveredTerminations()}
 		if c.reply != nil {
 			c.reply <- reply
 		}
@@ -145,8 +145,13 @@ func (s *Service) doSetClient(st *loopState, c ClientSink) {
 	st.client = c
 	// init is authoritative: send the full unresolved set + the session roster.
 	if c != nil {
-		c.Send(ServerMsg{Type: "init", V: ProtocolVersion,
-			Items: st.unresolvedItems(), Sessions: st.roster()})
+		terminations := st.undeliveredTerminations()
+		if c.Send(ServerMsg{Type: "init", V: ProtocolVersion,
+			Items: st.unresolvedItems(), Sessions: st.roster(), Terminations: terminations}) {
+			st.markTerminationsDelivered(terminations)
+		} else {
+			st.client = nil
+		}
 	}
 }
 
@@ -257,10 +262,7 @@ func (s *Service) handleRunEnded(st *loopState, snap *sessionSnapshot, e bus.Run
 	// RunEnded{Err} is deduped against a recent StateChanged(error): if we
 	// already have an unresolved error item for this session, don't double it.
 	if e.Err == nil {
-		// Successful run end is a P2 progress briefing (ephemeral, live-only).
-		sig := fmt.Sprintf("run:%v:%d", e.HadEdits, len(e.FinalText))
-		s.emitBriefing(st, snap, KindRunOK, P2Progress,
-			s.lang.spokenRunOK(snap.alias, e.FinalText, e.HadEdits), sig)
+		s.emitRunTermination(st, snap, e)
 		return
 	}
 	s.ensureErrorItem(st, snap, e.Err.Error())
@@ -364,10 +366,50 @@ func (s *Service) addItem(st *loopState, it *AttentionItem) {
 
 func (s *Service) notifyNew(st *loopState, it *AttentionItem) {
 	if st.client == nil {
+		if s.cfg.OnUndelivered != nil && it.Priority == P0Blocking {
+			s.cfg.OnUndelivered(it.clone())
+		}
 		return
 	}
 	c := it.clone()
 	if !st.client.Send(ServerMsg{Type: "attention", V: ProtocolVersion, Item: &c}) {
+		st.client = nil
+	}
+}
+
+// emitRunTermination keeps the normal live briefing, but retains the latest
+// undelivered successful run per session for the next authoritative init. A
+// client receives it at least once: either as the immediate briefing or in a
+// later init after reconnecting. Duplicate RunEnded events for one run share a
+// signature and do not generate duplicate narration.
+func (s *Service) emitRunTermination(st *loopState, snap *sessionSnapshot, e bus.RunEnded) {
+	sig := fmt.Sprintf("run:%d:%v:%s", e.RunGen, e.HadEdits, e.FinalText)
+	if snap.lastTerminationSignature == sig {
+		return
+	}
+	term := RunTermination{
+		ID:        s.nextTerminationID(),
+		SessionID: snap.id,
+		Alias:     snap.alias,
+		Spoken:    s.lang.spokenRunOK(snap.alias, e.FinalText, e.HadEdits),
+		Summary:   terminationSummary(e.FinalText),
+		CreatedAt: time.Now(),
+		Ref: TerminationRef{
+			SessionID: snap.id, RunGen: e.RunGen,
+			MessagesURL: "/api/sessions/" + snap.id + "/messages",
+		},
+	}
+	snap.lastTermination = &term
+	snap.lastTerminationSignature = sig
+	snap.terminationDelivered = false
+
+	if st.client == nil {
+		return
+	}
+	b := Briefing{Priority: P2Progress, Kind: KindRunOK, SessionID: snap.id, Alias: snap.alias, Spoken: term.Spoken, Termination: &term}
+	if st.client.Send(ServerMsg{Type: "briefing", V: ProtocolVersion, Briefing: &b}) {
+		snap.terminationDelivered = true
+	} else {
 		st.client = nil
 	}
 }
@@ -470,6 +512,30 @@ func (st *loopState) roster() []SessionBrief {
 		})
 	}
 	return out
+}
+
+func (st *loopState) undeliveredTerminations() []RunTermination {
+	ids := make([]string, 0, len(st.snaps))
+	for id := range st.snaps {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var out []RunTermination
+	for _, id := range ids {
+		snap := st.snaps[id]
+		if snap.lastTermination != nil && !snap.terminationDelivered {
+			out = append(out, *snap.lastTermination)
+		}
+	}
+	return out
+}
+
+func (st *loopState) markTerminationsDelivered(terminations []RunTermination) {
+	for _, term := range terminations {
+		if snap := st.snaps[term.SessionID]; snap != nil && snap.lastTermination != nil && snap.lastTermination.ID == term.ID {
+			snap.terminationDelivered = true
+		}
+	}
 }
 
 func (st *loopState) hasUnresolvedError(sessionID string) bool {
