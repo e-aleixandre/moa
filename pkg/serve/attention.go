@@ -3,6 +3,8 @@ package serve
 import (
 	"net/http"
 	"strings"
+
+	"github.com/ealeixandre/moa/pkg/attention"
 )
 
 // subscribeAttention attaches a session to the server-owned attention service.
@@ -37,6 +39,10 @@ func handleAttention(m *Manager) http.HandlerFunc {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "attention unavailable"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": m.attention.Status()})
+		items := m.attention.Status()
+		if items == nil {
+			items = []attention.AttentionItem{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 	}
 }
