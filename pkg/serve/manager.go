@@ -58,6 +58,15 @@ type ManagedSession struct {
 	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
 	Archived    bool   // closed-but-kept (presentation-only); see session.Session.Archived
 	Updated     time.Time
+	// briefAttempting/briefProgress are the cheap LLM-generated status prose
+	// (what the session is attempting, how it's going) surfaced to voice/mobile
+	// clients. This is prose that can age; the actionable state (idle/running/
+	// permission, pending asks) is NOT here — it's derived live in info() so it
+	// never lies even when the prose is stale. briefUpdated is the freshness
+	// stamp the client uses. See brief.go. TODO: persist across restarts.
+	briefAttempting string
+	briefProgress   string
+	briefUpdated    time.Time
 	// lastRunAt is when the most recent run finished. For Anthropic models the
 	// prompt cache is refreshed on every request, so it stays warm until
 	// lastRunAt + cacheTTL; the UI uses this to warn when writing would incur a
@@ -102,7 +111,12 @@ type ManagedSession struct {
 	wsConns    atomic.Int32
 	deleted    atomic.Bool
 	autoTitled atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
-	pushUnsubs []func()
+	// briefGen serializes brief regeneration (see brief.go): briefPending marks
+	// a coalesced regeneration request; briefRunning is the one-flight guard so
+	// two generations for the same session never overlap.
+	briefPending atomic.Bool
+	briefRunning atomic.Bool
+	pushUnsubs   []func()
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -154,6 +168,14 @@ type SessionInfo struct {
 	// stays correct across reconnects. Only meaningful while State is running or
 	// permission.
 	RunStartedAt time.Time `json:"run_started_at,omitzero"`
+	// BriefAttempting/BriefProgress are the cheap LLM-generated status prose:
+	// what the session is attempting and how it's going. Prose that can age;
+	// the actionable state is State/PermissionMode above (derived live), never
+	// baked into this prose. BriefUpdated is the freshness stamp. Empty until
+	// the first brief is generated. See brief.go.
+	BriefAttempting string    `json:"brief_attempting,omitempty"`
+	BriefProgress   string    `json:"brief_progress,omitempty"`
+	BriefUpdated    time.Time `json:"brief_updated,omitzero"`
 }
 
 const (
@@ -232,6 +254,10 @@ func (s *ManagedSession) info() SessionInfo {
 		ContextPercent: ctxPct,
 		PermissionMode: permMode,
 		CostUSD:        cost,
+
+		BriefAttempting: s.briefAttempting,
+		BriefProgress:   s.briefProgress,
+		BriefUpdated:    s.briefUpdated,
 	}
 	s.mu.Unlock()
 	// Prompt caching with a refreshable TTL is Anthropic-specific; only surface

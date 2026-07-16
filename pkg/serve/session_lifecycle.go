@@ -411,6 +411,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// respective feature is unavailable).
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
+	m.subscribeSessionBrief(sess)
 	m.subscribeCacheClock(sess)
 	m.subscribeAttention(sess)
 
