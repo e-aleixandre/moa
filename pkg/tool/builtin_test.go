@@ -856,6 +856,10 @@ func TestHeadTailBuffer_SpillFile(t *testing.T) {
 	var b headTailBuffer
 	b.headMax = 10
 	b.tailMax = 10
+	// Do not depend on the process-wide spill directory/budget: it can contain
+	// retained output from a prior process and make this unit test empty.
+	b.SpillDir = t.TempDir()
+	b.spillBudget = newSpillBudget(1 << 20)
 
 	// Write 50 bytes — should trigger spill
 	data := "HHHHHHHHHH" + "MMMMMMMMMMMMMMMMMMMM" + "TTTTTTTTTT"
