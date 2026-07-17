@@ -38,7 +38,7 @@ CLI flags override both at runtime. Project config extends global config; some f
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `permissions.mode` | string | `yolo`, `ask`, `auto` |
+| `permissions.mode` | string | `yolo`, `ask`, `auto` (default `yolo`) |
 | `permissions.allow` | []string | Glob patterns auto-approved in `ask` mode |
 | `permissions.deny` | []string | Glob patterns always denied |
 | `permissions.model` | string | Model for `auto` mode evaluator |
@@ -127,6 +127,7 @@ Project-specific files live in `<cwd>/.moa/`:
 | `MOA_CONFIG_DIR` | Overrides where the auth/credential store lives (default `~/.config/moa`). Useful for containers or custom deployments |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 | `MOA_NO_UPDATE_CHECK=1` | Disables the best-effort GitHub release check for this process |
+| `MOA_ATTACHMENTS_DIR` | Base directory for `moa serve` attachment storage (default `/tmp/moa`); detailed in [Web UI](./serve.md) |
 
 ## `AGENTS.md`
 

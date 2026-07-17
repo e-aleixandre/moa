@@ -11,6 +11,7 @@ Moa is a coding agent runtime in Go. One core, three interfaces: TUI, web UI, an
 - **Sessions**: persist, resume, browse previous conversations
 - **Subagents**: spawn child agents, sync or async
 - **Memory**: cross-session persistent project notes
+- **Skills**: loadable knowledge packs discovered from `.moa/skills/` or `~/.config/moa/skills/`, pulled in on demand via the `load_skill` tool
 - **Budget & limits**: per-run USD caps, turn limits, duration limits
 - **Checkpoint / undo**: revert file changes per agent turn
 - **Context compaction**: automatic summarization when context grows large
@@ -40,7 +41,14 @@ All state lives under `~/.config/moa/`:
 | `auth.json` | Provider credentials |
 | `sessions/` | Saved sessions |
 | `prompts/` | Global prompt templates |
+| `skills/` | Global skill packs (`<name>/SKILL.md`) |
+| `global/memory/` | Global memory facts (user, feedback) |
+| `projects/<hash>/memory/` | Per-workspace project memory facts |
 | `.mcp.json` | Global MCP server definitions |
+| `devices.json` | Paired Pulse device credentials |
+| `update.json` | Cached release-check state |
+| `vapid.json` | Web-push VAPID keypair |
+| `push_subscriptions.json` | Web-push subscriptions |
 
 Project-level config goes in `<cwd>/.moa/` — see [Configuration](./configuration.md).
 

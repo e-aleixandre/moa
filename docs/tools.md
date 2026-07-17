@@ -111,12 +111,12 @@ the parent's numbers, and have **no** budget/`$` cap of their own):
 
 | Limit | Default | Config key (`config.json`) |
 | --- | --- | --- |
-| Max turns | 30 | `subagent_max_turns` |
+| Max turns | 100 | `subagent_max_turns` |
 | Max run duration | 10m | `subagent_max_run_duration` (Go duration, e.g. `"15m"`) |
 | Max concurrent async jobs | 5 | `subagent_max_concurrent_async` |
 
-Context compaction is disabled for children (they run short, focused tasks);
-raising `subagent_max_turns` substantially may warrant enabling it.
+Context compaction is enabled for children, with the same defaults as the main
+session, so a long-running child won't fail by exhausting its turn budget.
 
 Children cannot spawn their own subagents, use `memory`, or call `ask_user`.
 
@@ -144,7 +144,19 @@ Define tools as JSON files in `.moa/tools/`:
 }
 ```
 
-Each file defines one tool that runs a shell command. The tool is registered automatically when Moa starts in that project.
+Each file defines one tool that runs a shell command. The tool is registered
+automatically when Moa starts in that project — but only for directories the
+user has explicitly *trusted* (like `.mcp.json` and repo-local config), so an
+untrusted repo can't register shell-executing tools that auto-run at the first
+prompt.
+
+Optional fields and parameters:
+
+- `timeout` — max seconds the command may run before it's killed (default `60`).
+- `args` — a runtime tool parameter (string). When supplied, it's passed
+  positionally to the command, which can reference it as `"$1"`, `"$@"`, etc.
+  Passing it positionally (not interpolated into the command) avoids shell
+  injection.
 
 ## Verify
 

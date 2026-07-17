@@ -31,6 +31,7 @@
 | `pkg/askuser/` | `ask_user` tool bridge to UI |
 | `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`). The verifier is a read-only mini-agent (read/grep/find/ls) that inspects the repo to judge completion, and carries memory of its earlier verdicts across iterations; `--verify-oneshot` falls back to the legacy tool-less check. When the project defines `.moa/verify.json`, red checks are a hard gate — the goal can't be declared done while they fail, whatever the verdict says |
 | `pkg/autotitle/` | Generates short session titles from the conversation via a cheap LLM call |
+| `pkg/pulsebrief/` | Generates a per-session status brief (attempting/progress) via a cheap same-vendor LLM call; feeds the web dashboard and Pulse voice (web/Pulse-only) |
 
 ### Providers
 
@@ -47,7 +48,7 @@
 | Package | Role |
 |---------|------|
 | `pkg/tui/` | Bubble Tea terminal application |
-| `pkg/serve/` | HTTP/WebSocket server + web UI session manager |
+| `pkg/serve/` | HTTP/WebSocket server + web UI session manager; also hosts the Pulse backend (device pairing, guardian WebSocket, Realtime client-secret broker, session brief) |
 
 ### Infrastructure
 
@@ -65,6 +66,8 @@
 | `pkg/usage/` | Polls Anthropic's undocumented endpoint for Claude subscription plan usage |
 | `pkg/attention/` | Attention Service: consumes every session's event bus and produces a priority-ordered attention queue |
 | `pkg/schedule/` | Durable one-shot schedule records (backs the web `/schedule` command) |
+| `pkg/release/` | Build metadata and best-effort release update checks |
+| `pkg/ansi/` | Strips terminal control sequences from untrusted text before rendering |
 
 ## Execution model
 

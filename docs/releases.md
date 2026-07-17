@@ -13,7 +13,9 @@ into a dated version section in [CHANGELOG.md](../CHANGELOG.md).
 ## Release checklist
 
 1. Confirm the version and release scope follow SemVer; curate `CHANGELOG.md`.
-2. Rebuild the embedded frontend: `cd pkg/serve/frontend && bun esbuild.mjs`.
+2. Rebuild the embedded frontend. CI uses `npm ci && npm run build` in
+   `pkg/serve/frontend`; locally, `bun esbuild.mjs` from that directory is an
+   equivalent alternative when npm is unavailable.
 3. Verify the tree: `gofmt` changed Go files, then run `go test ./...`, `go vet
    ./...`, and `go build ./...` (plus relevant frontend tests).
 4. Build the release with version, commit, and date injected through ldflags.

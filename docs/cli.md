@@ -8,7 +8,7 @@
 | `-model` | `sonnet` | Model alias or `provider/model-id` |
 | `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` |
 | `-max-turns` | 0 (unlimited) | Max agent turns per run |
-| `-max-budget` | 0 (unlimited) | Max USD spend per run |
+| `-max-budget` | from config | Max USD spend per run (`-1` sentinel = use `config.json`; an explicit `0` means unlimited) |
 | `-yolo` | false | Disable sandbox and all permissions |
 | `-permissions` | from config | `yolo`, `ask`, `auto` |
 | `-permissions-model` | | Model for `auto` mode evaluator |
@@ -20,6 +20,14 @@
 | `-output` | `text` | `text` or `json` (JSON-lines) |
 | `-login` | | `anthropic`, `openai`, `openai-transcribe` |
 | `-logout` | | Remove stored credentials for provider |
+
+## Version subcommand
+
+```bash
+moa version   # or: moa --version, moa -v
+```
+
+Prints the version, commit, and build date.
 
 ## Serve subcommand
 

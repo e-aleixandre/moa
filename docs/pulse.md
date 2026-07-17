@@ -19,9 +19,11 @@ el feed visual narrativo de sesiones y conversaciones es una fase posterior.
 
 - Moa conserva la realidad canónica de sesiones, mensajes, eventos y acciones.
 - La API de Moa es genérica y la comparten Serve web y Pulse. No hay una
-  proyección, endpoint de operaciones ni WebSocket específicos de Pulse.
-- Las únicas piezas Pulse-aware en Moa son el pairing de dispositivos y el
-  broker de client secrets Realtime.
+  proyección ni endpoint de operaciones específico de Pulse; la lectura y las
+  acciones van por las rutas genéricas.
+- Las piezas Pulse-aware en Moa son el pairing de dispositivos, el broker de
+  client secrets Realtime, el canal guardián (`GET /api/pulse/guardian/ws`) y el
+  brief de sesión (`pkg/pulsebrief` + `pkg/serve/brief.go`).
 - El audio viaja directamente entre iPhone y OpenAI Realtime. Moa no lo recibe,
   no lo proxya y no lo persiste.
 - Las tools de Realtime se ejecutan en la app Swift mediante llamadas tipadas a
@@ -75,13 +77,36 @@ esa decisión. En particular, `requires_verbatim_confirm` ya no forma parte del
 contrato de attention; Moa no tiene versionado formal de API y los clientes no
 deben depender de ese campo.
 
+### Canal guardián
+
+Además de `GET /api/attention` (pull informativo), existe un canal push
+específico de Pulse: `GET /api/pulse/guardian/ws` (`handleGuardianWebSocket` en
+`pkg/serve/guardian_ws.go`). A diferencia de los WebSocket genéricos de Serve,
+requiere un dispositivo emparejado: token o dueño de red no pueden suplantar a
+un handset revocable.
+
+Es un canal de **un solo cliente activo** sobre el Attention Service
+(`pkg/attention`): `SetActiveClient` instala el sink y le envía de inmediato un
+`init` autoritativo; un nuevo cliente desplaza al anterior. El cliente confirma
+elementos con `ack` (`AckForClient`) y terminaciones de run con `ack_termination`
+(`AckTerminationForClient`), ambos válidos solo mientras sigue siendo el cliente
+activo; `get_status` re-pide el snapshot. El sink nunca bloquea al actor de
+attention: un peer saturado pierde la conexión y se repara con el siguiente
+`init`. Este canal es la base de la narración por voz y los controles de
+pantalla bloqueada del modo Guardián.
+
 ## Fases
 
-1. **Base servidor:** eliminar Ops/operations heredados, autorizar al
+1. **Base servidor** *(hecha):* eliminar Ops/operations heredados, autorizar al
    dispositivo emparejado sobre la API genérica y exponer transcript con
    actividad de tools.
-2. **Llamada usable:** tools Realtime, llamada continua con VAD, reconexión,
-   audio de fondo y Bluetooth.
-3. **Feed visual:** sesiones y conversaciones narrativas con las mismas fuentes
-   de datos que usan las tools.
-4. **CarPlay.**
+2. **Llamada usable** *(hecha):* tools Realtime, llamada continua con VAD,
+   reconexión, audio de fondo y Bluetooth.
+3. **Modo Guardián v2** *(implementado en el servidor):* Attention Service con
+   cola priorizada (`pkg/attention`), canal guardián de un solo cliente activo
+   (`GET /api/pulse/guardian/ws`), brief de sesión (`pkg/pulsebrief`) y el
+   soporte de narración/terminaciones que alimenta los controles de pantalla
+   bloqueada.
+4. **Feed visual** *(pendiente):* sesiones y conversaciones narrativas con las
+   mismas fuentes de datos que usan las tools.
+5. **CarPlay** *(pendiente).*

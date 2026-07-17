@@ -22,6 +22,8 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input
+- Pair a Pulse device by scanning a **QR code** (or manual code), created from the top bar (`POST /api/pulse/pairings`)
+- **Version indicator** in the top bar that links to the latest release when an update is available
 
 ## Keyboard shortcuts
 
@@ -30,6 +32,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 | `⌘K` / `Alt+K` | Open session palette |
 | `⌘1..9` / `Alt+1..9` | Focus pane by number |
 | `⌘.` / `Alt+.` | Toggle voice input |
+| `⌘O` / `Alt+O` | Toggle the session overview (mobile) |
 | `Esc` | Close palette / go back |
 
 On non-Mac platforms, `Alt` replaces `⌘` to avoid browser shortcut conflicts.
@@ -57,6 +60,21 @@ The composer accepts file attachments (paperclip icon, drag-and-drop, or paste).
 
 In the conversation history, each attachment is tagged so you can tell which path it took: **enviado al modelo** (native image/PDF), a collapsible inline chip, or **guardado en disco** (with the on-disk path).
 
+### Files sent by the agent
+
+The reverse direction is also supported: the agent can **send you a file** with the
+`send_file` tool. It renders in the chat as a **download card** (name, size, type icon)
+that fetches the file as a blob and hands it off via the OS share sheet on mobile or a
+same-origin download on desktop. Files are served from a per-session, in-memory allowlist
+(`GET /api/sessions/{id}/files/{fileID}`); the path never comes from the request, and the
+descriptor is re-checked right before serving. Like disk attachments, these registrations
+are in-memory only — they 404 after the session is deleted or the server restarts.
+
+Text, Markdown and image files can be **previewed inline** in an embedded viewer. HTML files
+get a live **preview rendered in a sandboxed `iframe`** (`sandbox="allow-scripts"`, no
+`allow-same-origin`, plus a strict `Content-Security-Policy`), with an inspector button to
+review any external resources the page references before it loads.
+
 ### Files saved to disk are ephemeral
 
 - They live under `/tmp/moa/<session-id>/` and are **deleted when you delete the session**.
@@ -67,7 +85,7 @@ In the conversation history, each attachment is tagged so you can tell which pat
 
 - Up to **8 attachments** per message.
 - **32 MB** per file; **64 MB** decoded total per message; **200 MB** on-disk per session.
-- Native PDFs are additionally capped at **24 MB per message** and **48 MB cumulative across the session's history** (because a native PDF is re-sent to the model every turn); PDFs beyond those caps fall back to disk instead.
+- Native binary content (images, plus any natively-forwarded documents) is additionally capped at **48 MB cumulative across the session's history** (`maxSessionNativeDocBytes`), because native blocks are re-sent to the model every turn; individual images are capped at **5 MB** decoded. Content beyond the cumulative budget falls back to disk instead.
 - Files that exceed the client-side cap are rejected before upload. Raising these limits would require changing the transport (currently base64-in-JSON), which is out of scope.
 - The base directory can be overridden with the `MOA_ATTACHMENTS_DIR` environment variable (default `/tmp/moa`).
 
@@ -79,7 +97,7 @@ You don't have to wait for a run to finish before lining up your next move. What
 - **Slash commands** typed mid-run are classified by what they do:
   - **Queued** (`/compact`, `/clear`, `/model`, `/thinking`, `/verify`, `/goal <objective>`) — these rewrite or reconfigure the conversation, so they can't run in the middle of a live turn. They wait in the queue as a **command** chip and run at the next idle point, in order relative to your messages. So `message → /compact → message` compacts *after* the first message lands and *before* the second.
   - **Instant** (`/rename`, `/permissions`, `/path`, `/tasks`, `/schedule`, `/goal status`, `/goal stop`) — these only touch side state, so they run immediately without waiting.
-  - **Refused** (`/undo`, `/branch`, `/back`, `/plan`) — these only make sense against a settled conversation and are rejected while the agent is working; stop the run first.
+  - **Rejected** (`/undo`, `/branch`, `/back`, `/plan`) — these only make sense against a settled conversation and are rejected while the agent is working (the `reject` queue policy); stop the run first.
 - **Attachments** can be added to a mid-run message too (the paperclip is no longer disabled while a run is in flight); the image/file rides along with the steered message.
 - **Editing the queue**: click the queued chip (or `Alt+↑`) to pull everything back into the composer for editing — this cancels the not-yet-delivered items so you don't get both the originals and your edit. Queued images can't be pulled back (only their count is tracked client-side), so re-attach them if needed.
 - **Stopping**: pressing Stop/`Esc` while a run is in flight dumps whatever was queued back into the composer, so nothing you lined up is silently lost.
@@ -97,7 +115,7 @@ paired device
 may call `POST /api/pulse/realtime/client-secret` with exactly `{}` to receive a
 Realtime client secret requested for 60 seconds (Moa accepts at most an additional
 5 seconds for OpenAI clock/transport skew). This is a device-only route: owner cookies and
-tokens cannot mint it. Moa sends only the server-controlled `gpt-realtime-2.1-mini`
+tokens cannot mint it. Moa sends only the server-controlled `gpt-realtime-2.1`
 Realtime configuration to OpenAI and returns a minimal credential DTO; Pulse then talks directly to
 OpenAI. Moa does not proxy, store, or log audio, SDP, conversation data, the
 client secret, or the permanent API key. Revocation prevents a subsequent mint
@@ -131,6 +149,19 @@ echo-confirmation requirement from the queue. Serve has no formal API version;
 this is the current attention contract.
 
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
+
+## REST endpoints
+
+Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/version` | Current version and whether an update is available |
+| `GET /api/capabilities` | Server/session capabilities (providers, features) |
+| `GET /api/usage` | Usage/cost readout |
+| `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
+| `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
+| `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
 
 ## Frontend development
 
