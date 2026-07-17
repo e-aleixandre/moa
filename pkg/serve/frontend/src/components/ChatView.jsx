@@ -11,10 +11,9 @@ import { ModelPill } from './ModelPill.jsx';
 import { TaskBar } from './TaskBar.jsx';
 import { TabBar } from './TabBar.jsx';
 import { RewindSheet } from './RewindSheet.jsx';
-import { VersionIndicator } from './LayoutBar.jsx';
 import { sessionDotState } from '../util/format.js';
 
-export function ChatView({ state, onToggleOverview, onOpenPalette, version }) {
+export function ChatView({ state, onToggleOverview, onOpenPalette }) {
   const session = state.activeSession ? state.sessions[state.activeSession] : null;
   const touchStart = useRef(null);
   const [rewindOpen, setRewindOpen] = useState(false);
@@ -41,7 +40,6 @@ export function ChatView({ state, onToggleOverview, onOpenPalette, version }) {
             <span class="chat-header-title">moa</span>
             <ChevronDown class="chat-header-chevron" />
           </button>
-          <VersionIndicator version={version} />
           <NotificationSettings state={state} />
         </div>
         <div class="empty-state">
@@ -66,7 +64,6 @@ export function ChatView({ state, onToggleOverview, onOpenPalette, version }) {
           <span class="chat-header-title">{session.title || 'Untitled'}</span>
           <ChevronDown class="chat-header-chevron" />
         </button>
-        <VersionIndicator version={version} />
         {session.subagentCount > 0 && (
           <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
         )}

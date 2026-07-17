@@ -153,7 +153,7 @@ function App() {
             version={version}
           />
         ) : (
-          <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} version={version} />
+          <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} />
         )}
         <ToastContainer />
         <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} />

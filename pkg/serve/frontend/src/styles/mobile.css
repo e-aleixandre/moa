@@ -444,7 +444,6 @@
   text-overflow: ellipsis;
 }
 .chat-header-chevron { width: 14px; height: 14px; color: var(--overlay1); flex-shrink: 0; }
-.chat-header .version-indicator { flex-shrink: 0; padding: 4px 0; font-size: 10px; }
 
 /* ─── Mobile responsive overrides ──────────────────────────── */
 
