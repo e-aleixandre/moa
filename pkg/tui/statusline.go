@@ -24,6 +24,7 @@ type StatusLine struct {
 // Segment is a single piece of the status line, rendered at a given priority.
 // Lower priority values render further left.
 type Segment struct {
+	Key      string // stable segment identifier, used for special rendering rules
 	Text     string // rendered text (may include ANSI via lipgloss)
 	Priority int    // sort order: lower = further left
 }
@@ -44,7 +45,7 @@ func (sl *StatusLine) Set(key, text string, priority int) {
 		delete(sl.segments, key)
 		return
 	}
-	sl.segments[key] = Segment{Text: text, Priority: priority}
+	sl.segments[key] = Segment{Key: key, Text: text, Priority: priority}
 }
 
 // Remove deletes a segment by key.
@@ -87,9 +88,14 @@ func (sl *StatusLine) View(width int) string {
 		return ordered[i].Priority < ordered[j].Priority
 	})
 
-	parts := make([]string, len(ordered))
-	for i, seg := range ordered {
-		parts[i] = seg.Text
+	parts := make([]string, 0, len(ordered))
+	version := ""
+	for _, seg := range ordered {
+		if seg.Key == SegmentVersion {
+			version = seg.Text
+			continue
+		}
+		parts = append(parts, seg.Text)
 	}
 
 	content := strings.Join(parts, statusLineSep)
@@ -98,7 +104,21 @@ func (sl *StatusLine) View(width int) string {
 	content = strings.ReplaceAll(content, "\n", " ")
 	if width > 0 {
 		pl := sl.style.GetPaddingLeft() + sl.style.GetPaddingRight()
-		content = truncateVisible(content, width-pl)
+		available := width - pl
+		if version != "" {
+			version = strings.ReplaceAll(version, "\n", " ")
+			if content != "" && available > lipgloss.Width(version)+lipgloss.Width(statusLineSep) {
+				content = truncateVisible(content, available-lipgloss.Width(version)-lipgloss.Width(statusLineSep)) + statusLineSep + version
+			} else {
+				content = version
+			}
+		}
+		content = truncateVisible(content, available)
+	} else if version != "" {
+		if content != "" {
+			content += statusLineSep
+		}
+		content += version
 	}
 	return sl.style.Width(width).Render(content)
 }
@@ -157,6 +177,7 @@ const (
 	SegmentUsage       = "usage"       // plan quota (5h + weekly windows)
 	SegmentUsageExtra  = "usage_extra" // pay-as-you-go spend alert
 	SegmentOverage     = "overage"     // this session is drawing on extra usage NOW
+	SegmentVersion     = "version"
 )
 
 // Segment priorities (lower = further left).
@@ -175,6 +196,7 @@ const (
 	PriorityCacheCold   = 86 // right after the cache-hit meter it replaces
 	PriorityUsage       = 87 // grouped with the other meters
 	PriorityContext     = 90 // rightmost of the built-ins
+	PriorityVersion     = 100
 )
 
 // statusLineSep is rebuilt by RebuildUI via rebuildStatusLineVars.
@@ -196,6 +218,16 @@ func rebuildStatusLineVars() {
 	statusLineContextLowStyle = lipgloss.NewStyle().Foreground(t.Green)
 	statusLineContextMedStyle = lipgloss.NewStyle().Foreground(t.Yellow)
 	statusLineContextHighStyle = lipgloss.NewStyle().Foreground(t.Red)
+}
+
+// UpdateVersionSegment shows the build version, optionally with a newer stable
+// release indicator. The check itself is performed asynchronously by appModel.
+func (sl *StatusLine) UpdateVersionSegment(current, latest string) {
+	text := statusLineKeyStyle.Render(current)
+	if latest != "" {
+		text += statusLineValueStyle.Render(" ↑ " + latest)
+	}
+	sl.Set(SegmentVersion, text, PriorityVersion)
 }
 
 // UpdateModelSegment sets the model segment.

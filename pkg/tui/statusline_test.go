@@ -101,6 +101,21 @@ func TestStatusLine_UpdateModelSegment(t *testing.T) {
 	}
 }
 
+func TestStatusLine_UpdateVersionSegment(t *testing.T) {
+	sl := NewStatusLine(plainStyle())
+	sl.UpdateModelSegment("a-long-model-name")
+	sl.UpdateThinkingSegment("high")
+	sl.UpdatePermissionsSegment("ask")
+	sl.UpdateContextSegment(42)
+	sl.UpdateVersionSegment("v0.8.1", "v0.9.0")
+	if got := sl.View(120); !strings.Contains(got, "v0.8.1 ↑ v0.9.0") {
+		t.Fatalf("version update indicator missing: %q", got)
+	}
+	if got := sl.View(40); !strings.Contains(got, "v0.8.1") {
+		t.Fatalf("version must survive narrow status-line truncation: %q", got)
+	}
+}
+
 func TestStatusLine_UpdateContextSegment(t *testing.T) {
 	sl := NewStatusLine(plainStyle())
 	sl.UpdateContextSegment(42)

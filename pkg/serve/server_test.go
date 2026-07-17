@@ -20,6 +20,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/attention"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/release"
 	"github.com/ealeixandre/moa/pkg/session"
 )
 
@@ -77,6 +78,26 @@ func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testi
 			refID == "perm_attention_api" && riskLevel == "high" &&
 			hasDestructive && verbatim == "rm -rf /tmp/build" && !hasLegacyConfirm
 	})
+}
+
+func TestVersionAPI(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "0.8.1", Commit: "abc", Date: "today"}})
+	srv := httptest.NewServer(NewServer(mgr))
+	defer srv.Close()
+	resp := apiReq(t, srv, "GET", "/api/version", "")
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var got release.Result
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Current != "v0.8.1" || got.UpdateAvailable {
+		t.Fatalf("unexpected version response: %#v", got)
+	}
 }
 
 func newTestServerWithRoot(t *testing.T, root string) (*httptest.Server, *Manager, context.CancelFunc) {

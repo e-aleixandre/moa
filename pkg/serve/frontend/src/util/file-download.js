@@ -8,8 +8,16 @@ export async function downloadFile({ name, mime, url }) {
   const blob = await resp.blob();
   const file = new File([blob], name, { type: mime || blob.type });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    await navigator.share({ files: [file] });
-    return;
+    try {
+      await navigator.share({ files: [file] });
+      return;
+    } catch (error) {
+      // An AbortError means the user dismissed the share sheet, which should
+      // not silently turn into a download. Some installed mobile PWAs instead
+      // reject an unavailable share sheet with NotAllowedError; fall through
+      // to the normal blob download in that case.
+      if (error?.name === 'AbortError') throw error;
+    }
   }
 
   const blobUrl = URL.createObjectURL(blob);

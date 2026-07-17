@@ -102,6 +102,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/models", handleListModels())
+	mux.HandleFunc("GET /api/version", handleVersion(manager))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
@@ -200,6 +201,12 @@ func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func handleVersion(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, mgr.Version())
+	}
 }
 
 // bodyTimeoutMiddleware bounds how long a request body may take to arrive,

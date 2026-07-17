@@ -18,6 +18,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
+	"github.com/ealeixandre/moa/pkg/release"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/usage"
@@ -162,7 +163,9 @@ type appModel struct {
 	promptTemplates []promptpkg.Template
 
 	// Plan usage (account-global; shared poller, refreshed on a timer)
-	usagePoller *usage.Poller
+	usagePoller        *usage.Poller
+	updateChecker      *release.Checker
+	updateCheckEnabled bool
 	// Last-known plan-quota percents (-1 = unknown), so a per-request rate-limit
 	// header carrying only one window updates that window without wiping the
 	// other — matching the web widget's per-window behavior.
@@ -192,6 +195,9 @@ type Config struct {
 	CacheTTL              time.Duration                           // prompt-cache retention (Anthropic); drives the "cache cold" hint
 	UsagePoller           *usage.Poller                           // plan usage poller (nil = usage tracking disabled)
 	ProviderFactory       func(core.Model) (core.Provider, error) // one-shot LLM calls (auto-titling); nil disables
+	ReleaseInfo           release.Info                            // build metadata shown immediately in the status line
+	UpdateChecker         *release.Checker                        // optional stable-release checker
+	UpdateCheckEnabled    bool                                    // false disables the asynchronous check
 }
 
 // isStructuralBusEvent returns true for events that must not be dropped.
@@ -258,9 +264,14 @@ func New(ctx context.Context, cfg Config) appModel {
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		promptTemplates:      cfg.PromptTemplates,
 		usagePoller:          cfg.UsagePoller,
+		updateChecker:        cfg.UpdateChecker,
+		updateCheckEnabled:   cfg.UpdateCheckEnabled,
 		lastFiveHPct:         -1,
 		lastWeekPct:          -1,
 		voice:                voiceRecorder{transcriber: cfg.Transcriber, language: cfg.STTLanguage},
+	}
+	if cfg.ReleaseInfo.Version != "" {
+		m.statusBar.UpdateVersionSegment(cfg.ReleaseInfo.DisplayVersion(), "")
 	}
 	m.filePicker.SetWorkDir(cfg.CWD)
 
@@ -314,8 +325,25 @@ func (m appModel) Init() tea.Cmd {
 	if m.usagePoller != nil {
 		cmds = append(cmds, tea.Tick(usagePollInterval, func(time.Time) tea.Msg { return usageTickMsg{} }))
 	}
+	if m.updateCheckCmd() != nil {
+		cmds = append(cmds, m.updateCheckCmd(), tea.Tick(release.CheckInterval, func(time.Time) tea.Msg { return updateCheckTickMsg{} }))
+	}
 	// Initial session display on first WindowSizeMsg handled in Update.
 	return tea.Batch(cmds...)
+}
+
+type updateCheckMsg struct{ result release.Result }
+type updateCheckTickMsg struct{}
+
+func (m appModel) updateCheckCmd() tea.Cmd {
+	if !m.updateCheckEnabled || m.updateChecker == nil {
+		return nil
+	}
+	checker, ctx := m.updateChecker, m.baseCtx
+	return func() tea.Msg {
+		result, _ := checker.Check(ctx) // intentionally silent: an update check never disrupts work
+		return updateCheckMsg{result: result}
+	}
 }
 
 const usagePollInterval = 60 * time.Second
@@ -482,6 +510,19 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case usageMsg:
 		m.applyUsage(msg.snap)
 		return m, nil
+
+	case updateCheckMsg:
+		if msg.result.UpdateAvailable {
+			m.statusBar.UpdateVersionSegment(msg.result.Current, msg.result.Latest)
+		}
+		return m, nil
+
+	case updateCheckTickMsg:
+		cmds := []tea.Cmd{tea.Tick(release.CheckInterval, func(time.Time) tea.Msg { return updateCheckTickMsg{} })}
+		if c := m.updateCheckCmd(); c != nil {
+			cmds = append(cmds, c)
+		}
+		return m, tea.Batch(cmds...)
 
 	case usageTickMsg:
 		cmds := []tea.Cmd{tea.Tick(usagePollInterval, func(time.Time) tea.Msg { return usageTickMsg{} })}

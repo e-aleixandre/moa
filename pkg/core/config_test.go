@@ -652,6 +652,25 @@ func TestMergeConfigs_PersistentShell_NilFallsThrough(t *testing.T) {
 	}
 }
 
+func TestIsUpdateCheckEnabledAndProjectOverride(t *testing.T) {
+	if !IsUpdateCheckEnabled(MoaConfig{}) {
+		t.Error("update checks should default to enabled")
+	}
+	disabled, enabled := false, true
+	merged := mergeConfigs(MoaConfig{}, MoaConfig{UpdateCheck: &disabled})
+	if IsUpdateCheckEnabled(merged) {
+		t.Error("project false should disable update checks")
+	}
+	merged = mergeConfigs(MoaConfig{UpdateCheck: &disabled}, MoaConfig{UpdateCheck: &enabled})
+	if IsUpdateCheckEnabled(merged) {
+		t.Error("project config must not re-enable a global update-check opt-out")
+	}
+	merged = mergeConfigs(MoaConfig{UpdateCheck: &enabled}, MoaConfig{UpdateCheck: &disabled})
+	if IsUpdateCheckEnabled(merged) {
+		t.Error("project config may disable update checks")
+	}
+}
+
 func TestGetSTTLanguage(t *testing.T) {
 	cases := []struct {
 		name string

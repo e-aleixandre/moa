@@ -14,7 +14,17 @@ function LayoutPreview({ preset }) {
   );
 }
 
-export function LayoutBar({ state, onOpenPalette, onOpenPairing }) {
+export function VersionIndicator({ version }) {
+  if (!version?.current) return <span class="version-indicator" title="Version unavailable">version unavailable</span>;
+  if (version.update_available) {
+    return <a class="version-indicator update" href="https://github.com/ealeixandre/moa/releases/latest" target="_blank" rel="noreferrer" title={`Update available: ${version.latest}`}>
+      {version.current} ↑ {version.latest}
+    </a>;
+  }
+  return <span class="version-indicator" title="Moa version">{version.current}</span>;
+}
+
+export function LayoutBar({ state, onOpenPalette, onOpenPairing, version }) {
 	const attentionItems = state.attentionItems || [];
 	const openAttentionSession = (sessionId) => {
 		if (sessionId) assignToTile(state.focusedTile, sessionId);
@@ -64,6 +74,7 @@ export function LayoutBar({ state, onOpenPalette, onOpenPairing }) {
           ))}
         </div>
       )}
+      <VersionIndicator version={version} />
       <NotificationSettings state={state} />
     </div>
   );
