@@ -49,3 +49,4 @@ Project-level config goes in `<cwd>/.moa/` — see [Configuration](./configurati
 - [Quickstart](./quickstart.md) — get running in 2 minutes
 - [Configuration](./configuration.md) — all config options
 - [Architecture](./architecture.md) — how it's built
+- [Releases](./releases.md) — release conventions and checklist

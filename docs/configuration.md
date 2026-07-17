@@ -75,6 +75,7 @@ CLI flags override both at runtime. Project config extends global config; some f
 | `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
 | `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids Whisper mis-detecting short clips. Use `"auto"` to let the model detect |
 | `persistent_shell` | bool | `true` | Whether `bash` persists working directory and exported env between calls in a session |
+| `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
 
 ### Subagents
 
@@ -125,6 +126,7 @@ Project-specific files live in `<cwd>/.moa/`:
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)) |
 | `MOA_CONFIG_DIR` | Overrides where the auth/credential store lives (default `~/.config/moa`). Useful for containers or custom deployments |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
+| `MOA_NO_UPDATE_CHECK=1` | Disables the best-effort GitHub release check for this process |
 
 ## `AGENTS.md`
 

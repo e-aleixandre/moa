@@ -17,6 +17,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/files"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/push"
+	"github.com/ealeixandre/moa/pkg/release"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
@@ -278,6 +279,8 @@ type Manager struct {
 	// Invalidated on successful edit tool completions.
 	fileScanner *files.Scanner
 	scheduler   *schedulerService
+	versionMu   sync.RWMutex
+	version     release.Result
 }
 
 // ManagerConfig configures a Manager.
@@ -296,7 +299,10 @@ type ManagerConfig struct {
 	SessionBaseDir string // root for session stores; empty = default
 	// SchedulePath overrides the durable schedules file. Empty stores it beside
 	// the session base directory.
-	SchedulePath string
+	SchedulePath       string
+	ReleaseInfo        release.Info
+	UpdateChecker      *release.Checker
+	UpdateCheckEnabled bool
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -345,12 +351,41 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
 		scheduler:       scheduler,
+		version:         release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
+	}
+	if cfg.UpdateCheckEnabled && cfg.UpdateChecker != nil {
+		go func() {
+			check := func() {
+				result, _ := cfg.UpdateChecker.Check(ctx) // update checks are deliberately best-effort and silent
+				m.versionMu.Lock()
+				m.version = result
+				m.versionMu.Unlock()
+			}
+			check()
+			ticker := time.NewTicker(release.CheckInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					check()
+				}
+			}
+		}()
 	}
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
 	}
 	reapStaleAttachments()
 	return m
+}
+
+// Version returns the build version and last best-effort update result.
+func (m *Manager) Version() release.Result {
+	m.versionMu.RLock()
+	defer m.versionMu.RUnlock()
+	return m.version
 }
 
 func (m *Manager) loadConfig(cwd string) core.MoaConfig {

@@ -52,6 +52,7 @@
 .overview-title { font-size: 22px; font-weight: 700; color: var(--text); }
 .overview-hint  { font-size: 11px; color: var(--overlay0); }
 .overview-header-actions { display: flex; align-items: center; gap: 6px; }
+.overview-header-actions .version-indicator { padding: 4px 2px; }
 .overview-group-toggle {
   display: flex;
   align-items: center;
@@ -443,6 +444,7 @@
   text-overflow: ellipsis;
 }
 .chat-header-chevron { width: 14px; height: 14px; color: var(--overlay1); flex-shrink: 0; }
+.chat-header .version-indicator { flex-shrink: 0; padding: 4px 0; font-size: 10px; }
 
 /* ─── Mobile responsive overrides ──────────────────────────── */
 

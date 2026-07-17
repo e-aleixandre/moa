@@ -14,7 +14,17 @@ function LayoutPreview({ preset }) {
   );
 }
 
-export function LayoutBar({ state, onOpenPalette }) {
+export function VersionIndicator({ version }) {
+  if (!version?.current) return <span class="version-indicator" title="Version unavailable">version unavailable</span>;
+  if (version.update_available) {
+    return <a class="version-indicator update" href="https://github.com/ealeixandre/moa/releases/latest" target="_blank" rel="noreferrer" title={`Update available: ${version.latest}`}>
+      {version.current} ↑ {version.latest}
+    </a>;
+  }
+  return <span class="version-indicator" title="Moa version">{version.current}</span>;
+}
+
+export function LayoutBar({ state, onOpenPalette, version }) {
   return (
     <div class="layout-bar">
       <button
@@ -45,6 +55,7 @@ export function LayoutBar({ state, onOpenPalette }) {
         <PanelBottom />
       </button>
       <div class="layout-bar-spacer" />
+      <VersionIndicator version={version} />
       <NotificationSettings state={state} />
     </div>
   );

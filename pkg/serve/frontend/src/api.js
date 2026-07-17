@@ -33,6 +33,10 @@ export async function api(method, path, body) {
   return JSON.parse(text);
 }
 
+export function getVersion() {
+  return api('GET', '/api/version');
+}
+
 // --- Centralized WS Manager ---
 
 const connections = new Map();    // sessionId → { ws, backoff, timer }

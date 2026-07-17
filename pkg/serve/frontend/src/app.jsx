@@ -2,7 +2,7 @@ import { render } from 'preact';
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { store } from './store.js';
 import { loadSessions, startPolling, stopPolling, startUsagePolling, stopUsagePolling } from './session-actions.js';
-import { reconnectAll } from './api.js';
+import { getVersion, reconnectAll } from './api.js';
 import {
   setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex, openSession,
 } from './tile-actions.js';
@@ -23,6 +23,7 @@ function App() {
   const [overview, setOverview] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteMode, setPaletteMode] = useState('search');
+  const [version, setVersion] = useState(null);
 
   useEffect(() => store.subscribe(setState), []);
 
@@ -32,6 +33,18 @@ function App() {
     handler(mq);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  // Version state changes at most once per six-hour server cache window. Poll
+  // lightly so a long-lived dashboard eventually reflects a completed check.
+  useEffect(() => {
+    let retry;
+    const refresh = () => getVersion().then(setVersion).catch(() => {
+      retry = setTimeout(refresh, 60 * 1000);
+    });
+    refresh();
+    const timer = setInterval(refresh, 6 * 60 * 60 * 1000);
+    return () => { clearInterval(timer); clearTimeout(retry); };
   }, []);
 
   useEffect(() => {
@@ -137,9 +150,10 @@ function App() {
             state={state}
             onSelect={() => setOverview(false)}
             onNewSession={() => { setOverview(false); openPalette('create'); }}
+            version={version}
           />
         ) : (
-          <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} />
+          <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} version={version} />
         )}
         <ToastContainer />
         <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} />
@@ -150,7 +164,7 @@ function App() {
   return (
     <div class="app desktop">
       <div class="main">
-        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} />
+        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} version={version} />
         <TileTree state={state} />
       </div>
       <ToastContainer />

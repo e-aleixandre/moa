@@ -68,6 +68,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/models", handleListModels())
+	mux.HandleFunc("GET /api/version", handleVersion(manager))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
@@ -124,6 +125,12 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
 	return hostMiddleware(o.allowedHosts, handler)
+}
+
+func handleVersion(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, mgr.Version())
+	}
 }
 
 // bodyTimeoutMiddleware bounds how long a request body may take to arrive,

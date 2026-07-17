@@ -84,6 +84,7 @@ type MoaConfig struct {
 	MemoryEnabled          *bool                `json:"memory_enabled,omitempty"`                // nil = true (enabled by default)
 	AutoVerify             *bool                `json:"auto_verify,omitempty"`                   // nil = false (disabled by default)
 	PersistentShell        *bool                `json:"persistent_shell,omitempty"`              // nil = true (enabled by default)
+	UpdateCheck            *bool                `json:"update_check,omitempty"`                  // nil = true (check stable releases at most every 6h)
 	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
 	STTLanguage            string               `json:"stt_language,omitempty"`                  // Speech-to-text language as ISO-639-1 (e.g. "es", "en"). Empty = "en"; "auto" lets the model detect.
 	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`            // Max turns per subagent run. 0 = use package default.
@@ -113,6 +114,12 @@ func IsPersistentShellEnabled(cfg MoaConfig) bool {
 		return *cfg.PersistentShell
 	}
 	return true
+}
+
+// IsUpdateCheckEnabled returns whether release update checks are enabled.
+// They are enabled by default; MOA_NO_UPDATE_CHECK=1 is handled by pkg/release.
+func IsUpdateCheckEnabled(cfg MoaConfig) bool {
+	return cfg.UpdateCheck == nil || *cfg.UpdateCheck
 }
 
 // GetCacheTTL returns the prompt-cache TTL for the interactive agent. Only "1h"
@@ -319,6 +326,15 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.PersistentShell = override.PersistentShell
 	} else {
 		merged.PersistentShell = base.PersistentShell
+	}
+	// A global opt-out is a privacy preference, not a project setting: a
+	// trusted repository must never silently turn GitHub requests back on.
+	if base.UpdateCheck != nil && !*base.UpdateCheck {
+		merged.UpdateCheck = base.UpdateCheck
+	} else if override.UpdateCheck != nil {
+		merged.UpdateCheck = override.UpdateCheck
+	} else {
+		merged.UpdateCheck = base.UpdateCheck
 	}
 	merged.SubagentMaxTurns = mergeScalar(base.SubagentMaxTurns, override.SubagentMaxTurns)
 	merged.SubagentMaxRunDuration = mergeScalar(base.SubagentMaxRunDuration, override.SubagentMaxRunDuration)

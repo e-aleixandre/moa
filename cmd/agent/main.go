@@ -24,6 +24,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
+	"github.com/ealeixandre/moa/pkg/release"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/tool"
 	"github.com/ealeixandre/moa/pkg/tui"
@@ -72,7 +73,7 @@ func main() {
 			runServe(os.Args[2:])
 			return
 		case "version", "--version", "-v":
-			fmt.Printf("moa %s (commit %s, built %s)\n", version, commit, date)
+			fmt.Printf("moa %s\n", (release.Info{Version: version, Commit: commit, Date: date}).String())
 			return
 		}
 	}
@@ -460,11 +461,14 @@ func main() {
 					cfg.PinnedModels = ids
 				})
 			},
-			Transcriber:     transcriber,
-			STTLanguage:     core.GetSTTLanguage(moaCfg),
-			CacheTTL:        core.CacheTTLDuration(moaCfg),
-			UsagePoller:     newAnthropicUsagePoller(authStore),
-			ProviderFactory: providerFactory,
+			Transcriber:        transcriber,
+			STTLanguage:        core.GetSTTLanguage(moaCfg),
+			CacheTTL:           core.CacheTTLDuration(moaCfg),
+			UsagePoller:        newAnthropicUsagePoller(authStore),
+			ProviderFactory:    providerFactory,
+			ReleaseInfo:        release.Info{Version: version, Commit: commit, Date: date},
+			UpdateChecker:      release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
+			UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
 		})
 		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(24))
 		if _, err := prog.Run(); err != nil {
