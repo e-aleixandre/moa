@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
-import { Download, FileText, FileImage, FileArchive, File as FileIcon, Loader2 } from 'lucide-preact';
+import { Download, FileText, FileImage, FileArchive, File as FileIcon, Info, Loader2 } from 'lucide-preact';
 import { FileViewer } from './FileViewer.jsx';
+import { HtmlResourceInfo } from './HtmlResourceInfo.jsx';
 import { downloadFile } from '../util/file-download.js';
 
 /**
@@ -11,6 +12,7 @@ import { downloadFile } from '../util/file-download.js';
 export function FileCard({ result, status }) {
   const [busy, setBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [resourceInfoOpen, setResourceInfoOpen] = useState(false);
 
   if (status !== 'done' || !result) return null;
 
@@ -20,6 +22,7 @@ export function FileCard({ result, status }) {
   const { name, size, mime, url } = data;
   const Icon = iconFor(mime);
   const previewable = isPreviewable(name, mime);
+  const htmlPreviewable = isHTMLPreviewable(name, mime);
 
   // Fetch the file as a blob and hand it off via the OS share sheet (mobile)
   // or a same-origin blob: URL (desktop), instead of navigating the WebView
@@ -43,29 +46,28 @@ export function FileCard({ result, status }) {
   };
 
   const openPreview = () => previewable && setPreviewOpen(true);
-  const onKeyDown = (e) => {
-    // Only the card itself opens the preview: keydowns bubbling up from the
-    // nested download button (Enter/Space) must not trigger it.
-    if (e.target !== e.currentTarget) return;
-    if (previewable && (e.key === 'Enter' || e.key === ' ')) {
-      e.preventDefault();
-      openPreview();
-    }
+  const openResourceInfo = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResourceInfoOpen(true);
   };
-
   return (
     <>
-    <div class={`file-card ${previewable ? 'file-card-previewable' : ''}`} onClick={openPreview} onKeyDown={onKeyDown} role={previewable ? 'button' : undefined} tabIndex={previewable ? 0 : undefined}>
-      <Icon class="file-card-icon" />
-      <div class="file-card-info">
-        <div class="file-card-name">{name}</div>
-        <div class="file-card-size">{humanSize(size)}</div>
-      </div>
+    <div class="file-card">
+      <button class={`file-card-open ${previewable ? 'file-card-previewable' : ''}`} onClick={openPreview} disabled={!previewable}>
+        <Icon class="file-card-icon" />
+        <div class="file-card-info">
+          <div class="file-card-name">{name}</div>
+          <div class="file-card-size">{humanSize(size)}</div>
+        </div>
+      </button>
+      {htmlPreviewable && <button class="file-card-resource-info" onClick={openResourceInfo} title="Inspect external resources" aria-label="Inspect external resources"><Info /></button>}
       <button class="file-card-download" onClick={handleDownload} disabled={busy} title="Download or share" aria-label="Download or share">
         {busy ? <Loader2 class="spin" /> : <Download />}
       </button>
     </div>
     {previewOpen && <FileViewer name={name} mime={mime} url={url} size={size} onClose={() => setPreviewOpen(false)} />}
+    {resourceInfoOpen && <HtmlResourceInfo name={name} url={url} onClose={() => setResourceInfoOpen(false)} />}
     </>
   );
 }
@@ -76,6 +78,12 @@ export function isPreviewable(name, mime) {
   return mediaType.startsWith('image/') || mediaType.startsWith('text/') || mediaType.includes('markdown') ||
     mediaType === 'text/html' || lowerName.endsWith('.md') || lowerName.endsWith('.markdown') ||
     lowerName.endsWith('.html') || lowerName.endsWith('.htm');
+}
+
+export function isHTMLPreviewable(name, mime) {
+  const mediaType = (mime || '').split(';', 1)[0].trim().toLowerCase();
+  const lowerName = (name || '').toLowerCase();
+  return mediaType === 'text/html' || lowerName.endsWith('.html') || lowerName.endsWith('.htm');
 }
 
 

@@ -9,6 +9,7 @@
   border-top: 1px solid rgba(69,71,90,0.5);
 }
 
+.file-card-open { min-width: 0; flex: 1; display: flex; align-items: center; gap: 12px; margin: -10px 0 -10px -14px; padding: 10px 0 10px 14px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; }
 .file-card-previewable { cursor: pointer; }
 .file-card-previewable:hover { background: var(--surface0); }
 .file-card-previewable:focus-visible { outline: 2px solid var(--peach); outline-offset: -2px; }
@@ -39,7 +40,7 @@
   color: var(--subtext1);
 }
 
-.file-card-download {
+.file-card-download, .file-card-resource-info {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -54,14 +55,14 @@
   font: inherit;
   transition: background 0.15s ease;
 }
-.file-card-download:hover {
+.file-card-download:hover, .file-card-resource-info:hover {
   background: var(--surface1);
 }
 .file-card-download:disabled {
   cursor: default;
   opacity: 0.7;
 }
-.file-card-download .lucide {
+.file-card-download .lucide, .file-card-resource-info .lucide {
   width: 18px;
   height: 18px;
 }

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Download, Loader2, X } from 'lucide-preact';
 import { renderMarkdown } from '../util/markdown.js';
 import { downloadFile } from '../util/file-download.js';
+import { readCapped } from '../util/file-preview.js';
+import { buildHTMLSrcdoc, HTML_PREVIEW_SANDBOX } from '../util/html-preview.js';
 
 const MAX_PREVIEW_SIZE = 2 * 1024 * 1024;
 const MAX_HIGHLIGHT_SIZE = 150 * 1024;
@@ -112,7 +114,7 @@ export function FileViewer({ name, mime, url, size, onClose }) {
         {state.kind === 'loading' && <div class="file-viewer-status"><Loader2 class="spin" /> Loading preview…</div>}
         {state.kind === 'image' && <div class="file-viewer-image-wrap"><img src={state.url} alt={name} /></div>}
         {state.kind === 'document' && (
-          <iframe class="file-viewer-frame" sandbox="" srcdoc={state.srcdoc} referrerpolicy="no-referrer" title={name} />
+          <iframe class="file-viewer-frame" sandbox={HTML_PREVIEW_SANDBOX} srcdoc={state.srcdoc} referrerpolicy="no-referrer" title={name} />
         )}
         {state.kind === 'expired' && <StatusMessage>El enlace ha caducado (el servidor se reinició) — pídele al agente que lo reenvíe</StatusMessage>}
         {state.kind === 'too-large' && <StatusMessage>Demasiado grande para previsualizar</StatusMessage>}
@@ -141,34 +143,6 @@ function previewKind(name, mime) {
   return 'text';
 }
 
-// readCapped materializes a response body into a Blob, aborting as soon as it
-// exceeds max bytes so an oversized (or lying-about-its-size) file can't be
-// buffered whole in memory. Rejects with { tooLarge: true } past the cap.
-async function readCapped(resp, max) {
-  const declared = Number(resp.headers.get('content-length'));
-  if (declared && declared > max) throw Object.assign(new Error('too large'), { tooLarge: true });
-  const type = resp.headers.get('content-type') || '';
-  const reader = resp.body?.getReader?.();
-  if (!reader) {
-    const blob = await resp.blob();
-    if (blob.size > max) throw Object.assign(new Error('too large'), { tooLarge: true });
-    return blob;
-  }
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    if (total > max) {
-      reader.cancel();
-      throw Object.assign(new Error('too large'), { tooLarge: true });
-    }
-    chunks.push(value);
-  }
-  return new Blob(chunks, { type });
-}
-
 function looksBinary(text) {
   if (text.includes('\0')) return true;
   const replacements = (text.match(/\uFFFD/g) || []).length;
@@ -184,7 +158,10 @@ function escapeHtml(text) {
 export function buildSrcdoc(kind, content) {
   let body;
   if (kind === 'html') {
-    body = content;
+    // HTML previews intentionally support interactive, externally styled
+    // mockups. The iframe still has an opaque sandboxed origin and cannot
+    // access moa's DOM, cookies, or storage.
+    return buildHTMLSrcdoc(content, iframeStyles);
   } else if (kind === 'markdown' && content.length <= MAX_HIGHLIGHT_SIZE) {
     body = `<article class="msg-assistant">${renderMarkdown(content)}</article>`;
   } else {
