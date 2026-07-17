@@ -16,7 +16,7 @@ mock.module('./api.js', () => ({
 }));
 
 const { store, setState } = await import('./store.js');
-const { loadSessions, sendMessage } = await import('./session-actions.js');
+const { loadSessions, openPersistedSubagent, sendMessage } = await import('./session-actions.js');
 
 beforeEach(() => {
   setState({ sessions: {}, tileTree: null, activeSession: null });
@@ -81,4 +81,22 @@ test('sendMessage mid-run without images omits the images field', async () => {
   const steers = store.get().sessions.s1.pendingSteers;
   expect(steers).toHaveLength(1);
   expect(steers[0].images).toBeUndefined();
+});
+
+test('openPersistedSubagent restores newest-first transcripts to chronological order', async () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {} } } });
+  apiResponse = {
+    order: 'newest_first',
+    task: 'inspect ordering',
+    messages: [
+      { id: 'newest-tool', role: 'tool', tool: 'bash', status: 'ok', target: '{"command":"go test"}' },
+      { id: 'older-user', role: 'user', text: 'run the tests' },
+    ],
+  };
+
+  await openPersistedSubagent('s1', 'job-1');
+
+  const messages = store.get().sessions.s1.subagents['job-1'].messages;
+  expect(messages[0]).toMatchObject({ role: 'user', _msg_id: 'older-user' });
+  expect(messages[1]).toMatchObject({ _type: 'tool_start', tool_call_id: 'newest-tool' });
 });

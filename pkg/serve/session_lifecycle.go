@@ -411,7 +411,16 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// respective feature is unavailable).
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
+	m.subscribeSessionBrief(sess)
+	// A resumed transcript has no in-memory brief after a server restart. Queue
+	// one refresh rather than generating synchronously: briefPending coalesces
+	// this with any immediate bus trigger, while briefRunning and the per-session
+	// cooldown keep each resumed session to one cheap-model call at a time.
+	if opts != nil && len(sess.History()) > 0 && sess.briefUpdated.IsZero() {
+		m.scheduleSessionBrief(sess)
+	}
 	m.subscribeCacheClock(sess)
+	m.subscribeAttention(sess)
 
 	return sess, nil
 }
@@ -446,7 +455,6 @@ func (m *Manager) Delete(id string) error {
 	}
 	delete(m.sessions, id)
 	m.mu.Unlock()
-
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {
 		sess.persister.markDeleted()
@@ -454,7 +462,11 @@ func (m *Manager) Delete(id string) error {
 
 	// Stop Web Push subscribers BEFORE closing the runtime, so events drained
 	// during bus shutdown cannot notify for a session that no longer exists.
+	// Coordinate with the final brief write: a generator holds sess.mu while it
+	// checks deleted and stores the three brief fields.
+	sess.mu.Lock()
 	sess.deleted.Store(true)
+	sess.mu.Unlock()
 	for _, unsub := range sess.pushUnsubs {
 		unsub()
 	}
@@ -673,6 +685,9 @@ func (m *Manager) Shutdown() {
 		// RunEnded→save could race a caller that removes the session dir right
 		// after Shutdown (e.g. t.TempDir cleanup in tests). Idempotent.
 		s.runtime.Close()
+	}
+	if m.attention != nil {
+		m.attention.Close()
 	}
 }
 

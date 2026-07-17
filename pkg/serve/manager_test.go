@@ -2,14 +2,17 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/attention"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -127,6 +130,7 @@ func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.P
 		for _, id := range ids {
 			_ = mgr.Delete(id)
 		}
+		mgr.Shutdown()
 	})
 	return mgr
 }
@@ -185,6 +189,71 @@ func TestCreateSession(t *testing.T) {
 	list := mgr.List()
 	if len(list) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(list))
+	}
+}
+
+func TestManagerAttentionTracksAndClearsSessionPermission(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "deploy api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sess.runtime.Bus.Publish(bus.PermissionRequested{
+		SessionID: sess.ID,
+		ID:        "perm_voice_test",
+		ToolName:  "bash",
+		Args:      map[string]any{"command": "git status"},
+	})
+	pollUntil(t, time.Second, "attention permission", func() bool {
+		items := mgr.attention.Status()
+		return len(items) == 1 && items[0].RefID == "perm_voice_test" && items[0].SessionID == sess.ID
+	})
+
+	sess.runtime.Bus.Publish(bus.PermissionResolved{SessionID: sess.ID, ID: "perm_voice_test"})
+	pollUntil(t, time.Second, "resolved attention permission", func() bool {
+		return len(mgr.attention.Status()) == 0
+	})
+}
+
+func TestSessionInfoSerializesAttentionActivity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "activity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sess.runtime.Bus.Publish(bus.ToolExecStarted{
+		SessionID: sess.ID, ToolCallID: "tool-1", ToolName: "bash",
+		Args: map[string]any{"command": "phpstan analyse"},
+	})
+
+	var info SessionInfo
+	pollUntil(t, time.Second, "session activity", func() bool {
+		list := mgr.List()
+		if len(list) != 1 || list[0].Activity == nil {
+			return false
+		}
+		info = list[0]
+		return true
+	})
+	encoded, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dto struct {
+		Activity *attention.SessionActivity `json:"activity"`
+	}
+	if err := json.Unmarshal(encoded, &dto); err != nil {
+		t.Fatal(err)
+	}
+	want := &attention.SessionActivity{Kind: "tool", Tool: "bash", Detail: "phpstan analyse"}
+	if !reflect.DeepEqual(dto.Activity, want) {
+		t.Fatalf("activity = %+v, want %+v", dto.Activity, want)
 	}
 }
 
@@ -495,6 +564,21 @@ func TestCreateSession_InvalidModel(t *testing.T) {
 	if !errors.Is(err, ErrInvalidModel) {
 		t.Fatalf("expected ErrInvalidModel for unknown bare model, got: %v", err)
 	}
+}
+
+func TestManagerAttentionUsesConfiguredSTTLanguage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(), t.TempDir(), core.MoaConfig{DisableSandbox: true, STTLanguage: "es"})
+	sess, err := mgr.CreateSession(CreateOpts{Title: "facturas"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Publish(bus.AskUserRequested{SessionID: sess.ID, ID: "ask_es", Questions: []bus.AskQuestion{{Text: "¿Continuamos?"}}})
+	pollUntil(t, time.Second, "Spanish attention", func() bool {
+		items := mgr.attention.Status()
+		return len(items) == 1 && strings.HasPrefix(items[0].Spoken, "En facturas")
+	})
 }
 
 // TestCreateSession_CustomProviderModelStillAllowed ensures F16/A6 doesn't
@@ -877,6 +961,9 @@ func TestResumeSession_KeepsSystemPrompt(t *testing.T) {
 		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
 		SessionBaseDir:  sessionBase,
 	})
+	// The run reaching idle only schedules its persistence snapshot. Shut down
+	// before TempDir cleanup so the persistence reactor has drained its save.
+	t.Cleanup(mgr.Shutdown)
 
 	sess, err := mgr.ResumeSession(saved.ID)
 	if err != nil {

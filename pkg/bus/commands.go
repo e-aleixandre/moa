@@ -256,6 +256,16 @@ type ResolvePermission struct {
 	AllowPattern string
 }
 
+// ResolvePermissionExact resolves a reviewed one-off permission only when the
+// current pending request still exactly matches Snapshot. It has no allow,
+// rule, or feedback field, so callers cannot create a permanent rule or inject
+// text into the pending tool's result.
+type ResolvePermissionExact struct {
+	SessionID string
+	Snapshot  PermissionDecisionSnapshot
+	Approved  bool
+}
+
 // AddPermissionRule adds a natural-language rule to auto-mode while a
 // permission request is pending. The request stays open — the user can
 // still approve/deny. This is NOT "always allow this request".

@@ -4,6 +4,7 @@ package serve
 
 import (
 	"context"
+	"crypto/rand"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/attention"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/files"
@@ -57,6 +59,18 @@ type ManagedSession struct {
 	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
 	Archived    bool   // closed-but-kept (presentation-only); see session.Session.Archived
 	Updated     time.Time
+	// briefAttempting/briefProgress are the cheap LLM-generated status prose
+	// (what the session is attempting, how it's going) surfaced to voice/mobile
+	// clients. This is prose that can age; the actionable state (idle/running/
+	// permission, pending asks) is NOT here — it's derived live in info() so it
+	// never lies even when the prose is stale. briefUpdated is the freshness
+	// stamp the client uses. See brief.go. TODO: persist across restarts.
+	briefAttempting string
+	briefProgress   string
+	briefUpdated    time.Time
+	// briefLastAttempt rate-limits brief generation after noisy events or
+	// provider failures. Protected by mu; see briefCooldown in brief.go.
+	briefLastAttempt time.Time
 	// lastRunAt is when the most recent run finished. For Anthropic models the
 	// prompt cache is refreshed on every request, so it stays warm until
 	// lastRunAt + cacheTTL; the UI uses this to warn when writing would incur a
@@ -101,7 +115,12 @@ type ManagedSession struct {
 	wsConns    atomic.Int32
 	deleted    atomic.Bool
 	autoTitled atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
-	pushUnsubs []func()
+	// briefGen serializes brief regeneration (see brief.go): briefPending marks
+	// a coalesced regeneration request; briefRunning is the one-flight guard so
+	// two generations for the same session never overlap.
+	briefPending atomic.Bool
+	briefRunning atomic.Bool
+	pushUnsubs   []func()
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -126,23 +145,24 @@ type serveInfra struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID             string       `json:"id"`
-	Title          string       `json:"title"`
-	Archived       bool         `json:"archived,omitempty"`
-	State          SessionState `json:"state"`
-	Model          string       `json:"model"`
-	Provider       string       `json:"provider"`
-	Thinking       string       `json:"thinking"`
-	CWD            string       `json:"cwd"`
-	Created        time.Time    `json:"created"`
-	Updated        time.Time    `json:"updated"`
-	Error          string       `json:"error,omitempty"`
-	UntrustedMCP   bool         `json:"untrusted_mcp,omitempty"`
-	PlanMode       string       `json:"plan_mode,omitempty"`
-	PlanFile       string       `json:"plan_file,omitempty"`
-	ContextPercent int          `json:"context_percent"` // 0-100, -1 if unknown
-	PermissionMode string       `json:"permission_mode"` // "yolo", "ask", "auto"
-	CostUSD        float64      `json:"cost_usd"`        // accumulated session spend (main run + subagents)
+	ID             string                     `json:"id"`
+	Title          string                     `json:"title"`
+	Archived       bool                       `json:"archived,omitempty"`
+	State          SessionState               `json:"state"`
+	Model          string                     `json:"model"`
+	Provider       string                     `json:"provider"`
+	Thinking       string                     `json:"thinking"`
+	CWD            string                     `json:"cwd"`
+	Created        time.Time                  `json:"created"`
+	Updated        time.Time                  `json:"updated"`
+	Error          string                     `json:"error,omitempty"`
+	UntrustedMCP   bool                       `json:"untrusted_mcp,omitempty"`
+	PlanMode       string                     `json:"plan_mode,omitempty"`
+	PlanFile       string                     `json:"plan_file,omitempty"`
+	ContextPercent int                        `json:"context_percent"` // 0-100, -1 if unknown
+	PermissionMode string                     `json:"permission_mode"` // "yolo", "ask", "auto"
+	CostUSD        float64                    `json:"cost_usd"`        // accumulated session spend (main run + subagents)
+	Activity       *attention.SessionActivity `json:"activity,omitempty"`
 	// CacheExpiresAt is when the Anthropic prompt cache for this session goes
 	// cold (last run + cache TTL). Zero/omitted when not applicable (no run yet,
 	// or a non-Anthropic model that doesn't use TTL-based prompt caching). The
@@ -153,6 +173,14 @@ type SessionInfo struct {
 	// stays correct across reconnects. Only meaningful while State is running or
 	// permission.
 	RunStartedAt time.Time `json:"run_started_at,omitzero"`
+	// BriefAttempting/BriefProgress are the cheap LLM-generated status prose:
+	// what the session is attempting and how it's going. Prose that can age;
+	// the actionable state is State/PermissionMode above (derived live), never
+	// baked into this prose. BriefUpdated is the freshness stamp. Empty until
+	// the first brief is generated. See brief.go.
+	BriefAttempting string    `json:"brief_attempting,omitempty"`
+	BriefProgress   string    `json:"brief_progress,omitempty"`
+	BriefUpdated    time.Time `json:"brief_updated,omitzero"`
 }
 
 const (
@@ -231,6 +259,10 @@ func (s *ManagedSession) info() SessionInfo {
 		ContextPercent: ctxPct,
 		PermissionMode: permMode,
 		CostUSD:        cost,
+
+		BriefAttempting: s.briefAttempting,
+		BriefProgress:   s.briefProgress,
+		BriefUpdated:    s.briefUpdated,
 	}
 	s.mu.Unlock()
 	// Prompt caching with a refreshable TTL is Anthropic-specific; only surface
@@ -250,12 +282,46 @@ func (s *ManagedSession) info() SessionInfo {
 	return info
 }
 
+// sessionInfo uses attention as the single owner of live activity, avoiding a
+// second, potentially divergent event tracker in ManagedSession.
+func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
+	info := s.info()
+	if m.attention == nil {
+		return info
+	}
+	for _, brief := range m.attention.Roster() {
+		if brief.SessionID == s.ID {
+			info.Activity = brief.Activity
+			break
+		}
+	}
+	return info
+}
+
+// activityIndex snapshots the attention roster once and indexes live activity
+// by session id, so List() doesn't round-trip to the actor per session.
+func (m *Manager) activityIndex() map[string]*attention.SessionActivity {
+	if m.attention == nil {
+		return nil
+	}
+	roster := m.attention.Roster()
+	idx := make(map[string]*attention.SessionActivity, len(roster))
+	for _, brief := range roster {
+		if brief.Activity != nil {
+			idx[brief.SessionID] = brief.Activity
+		}
+	}
+	return idx
+}
+
 // Manager owns all active sessions.
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*ManagedSession
 	resuming map[string]struct{}
 	baseCtx  context.Context
+
+	conversationKey []byte // process-local HMAC key for read cursors
 
 	providerFactory func(model core.Model) (core.Provider, error)
 	transcriber     core.Transcriber // nil when no speech-to-text is available
@@ -279,8 +345,11 @@ type Manager struct {
 	// Invalidated on successful edit tool completions.
 	fileScanner *files.Scanner
 	scheduler   *schedulerService
-	versionMu   sync.RWMutex
-	version     release.Result
+	// attention normalizes cross-session blocking state for future voice and
+	// digest clients. It owns no session state and is stopped on Shutdown.
+	attention *attention.Service
+	versionMu sync.RWMutex
+	version   release.Result
 }
 
 // ManagerConfig configures a Manager.
@@ -334,6 +403,12 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
 		}
 	}
+	conversationKey, err := newConversationKey()
+	if err != nil {
+		// A nil key only makes cursors unusable; reads without a cursor remain
+		// safe. Do not reuse a user-provided secret or persist transcript state.
+		slog.Warn("conversation cursor key unavailable", "error", err)
+	}
 	m := &Manager{
 		sessions:        make(map[string]*ManagedSession),
 		resuming:        make(map[string]struct{}),
@@ -351,6 +426,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
 		scheduler:       scheduler,
+		attention:       attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
+		conversationKey: conversationKey,
 		version:         release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
 	if cfg.UpdateCheckEnabled && cfg.UpdateChecker != nil {
@@ -374,11 +451,18 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			}
 		}()
 	}
+	m.attention.Start()
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
 	}
 	reapStaleAttachments()
 	return m
+}
+
+func newConversationKey() ([]byte, error) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	return key, err
 }
 
 // Version returns the build version and last best-effort update result.
@@ -482,7 +566,6 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	}
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
-
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
 			return "", "", err
@@ -526,11 +609,14 @@ func (m *Manager) List() []SessionInfo {
 	m.mu.RUnlock()
 
 	list := make([]SessionInfo, 0)
+	activity := m.activityIndex()
 	for _, s := range active {
 		if s == nil {
 			continue // nil placeholder during ResumeSession
 		}
-		list = append(list, s.info())
+		info := s.info()
+		info.Activity = activity[s.ID]
+		list = append(list, info)
 	}
 
 	// Merge saved sessions from all project directories (cached).

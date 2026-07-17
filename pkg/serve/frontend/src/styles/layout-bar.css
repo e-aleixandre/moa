@@ -57,6 +57,35 @@
 
 .layout-bar-spacer { flex: 1; }
 
+.layout-attention {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(48vw, 520px);
+  padding: 3px 6px;
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.layout-attention > .lucide { width: 13px; height: 13px; flex: none; }
+.layout-attention > span { font-weight: 700; }
+.layout-attention button {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  background: var(--base);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.layout-attention button:hover { background: var(--surface0); }
+
 .version-indicator {
   color: var(--overlay0);
   font-family: var(--mono);

@@ -104,6 +104,27 @@ func runServe(args []string) {
 	srv := serve.NewServer(mgr,
 		serve.WithAllowedHosts(splitCSV(*allowedHosts)),
 		serve.WithAuthToken(token, false),
+		serve.WithDeviceAuthentication(),
+		serve.WithRealtimeClientSecretBroker(func() (string, bool) {
+			// Priority:
+			//  1) dedicated OpenAI API key ("openai-transcribe" slot, shared
+			//     with Whisper STT — both are auxiliary features that need a
+			//     plain OpenAI API key). Kept separate from the main "openai"
+			//     credential so the agent can stay on an OpenAI OAuth
+			//     subscription: OAuth cannot mint Realtime client secrets, and
+			//     putting a plain OPENAI_API_KEY in the environment would
+			//     otherwise divert every agent call to paid API billing.
+			if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Type == "api_key" && cred.Key != "" {
+				return cred.Key, true
+			}
+			//  2) OPENAI_API_KEY env / main "openai" credential, but only when
+			//     it is an API key (never an OAuth token).
+			if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+				return key, !auth.IsOAuthToken(key)
+			}
+			credential, ok := authStore.Get("openai")
+			return credential.Key, ok && credential.Type == "api_key" && credential.Key != ""
+		}, nil),
 	)
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)

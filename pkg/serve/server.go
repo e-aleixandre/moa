@@ -36,6 +36,23 @@ type serverOptions struct {
 	allowedHosts []string
 	token        string
 	secureCookie bool
+	devicePath   string
+	deviceAuth   bool
+	realtimeKey  RealtimeAPIKeyFunc
+	realtimeHTTP *http.Client
+}
+
+// RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
+// for missing credentials and OAuth credentials.
+type RealtimeAPIKeyFunc func() (key string, ok bool)
+
+// WithRealtimeClientSecretBroker supplies the narrowly scoped capability used
+// to mint OpenAI Realtime client secrets. The key is never retained by Serve.
+func WithRealtimeClientSecretBroker(key RealtimeAPIKeyFunc, client *http.Client) ServerOption {
+	return func(o *serverOptions) {
+		o.realtimeKey = key
+		o.realtimeHTTP = client
+	}
 }
 
 // ServerOption configures optional NewServer behavior.
@@ -58,6 +75,23 @@ func WithAuthToken(token string, secureCookie bool) ServerOption {
 	}
 }
 
+// WithDeviceStorePath overrides the private device credential store. It is
+// primarily useful for embedded deployments and tests; normal Serve uses
+// ~/.config/moa/devices.json (or MOA_CONFIG_DIR/devices.json).
+func WithDeviceStorePath(path string) ServerOption {
+	return func(o *serverOptions) {
+		o.devicePath = path
+		o.deviceAuth = true
+	}
+}
+
+// WithDeviceAuthentication enables Pulse device pairing and credentials when
+// Serve is embedded without a shared token. The CLI enables it by default;
+// tests and other embedders opt in explicitly.
+func WithDeviceAuthentication() ServerOption {
+	return func(o *serverOptions) { o.deviceAuth = true }
+}
+
 // NewServer returns an http.Handler wired to the given manager.
 func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	var o serverOptions
@@ -70,9 +104,11 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/models", handleListModels())
 	mux.HandleFunc("GET /api/version", handleVersion(manager))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
+	mux.HandleFunc("GET /api/attention", handleAttention(manager))
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/messages", handleConversationMessages(manager))
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/archive", handleArchiveSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
@@ -85,8 +121,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/bash-jobs/{jobID}/cancel", handleCancelBashJob(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleListSubagents(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleGetSubagent(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleSubagentList(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleSubagentConversation(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
@@ -116,15 +152,55 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	}
 	mux.Handle("GET /", staticHandler)
 
-	handler := csrfMiddleware(bodyTimeoutMiddleware(mux))
-	// Token auth (when configured) sits under the Host check but above CSRF, so
-	// it also guards the WebSocket, push, and static routes via the cookie.
+	var devices *deviceStore
+	if o.token != "" || o.deviceAuth {
+		path := o.devicePath
+		if path == "" {
+			path = defaultDeviceStorePath()
+		}
+		var err error
+		devices, err = openDeviceStore(path)
+		if err != nil {
+			slog.Warn("device authentication disabled", "error", err)
+		}
+	}
+	// Device handlers receive the store selected above; the rest of Serve stays
+	// independent of device pairing.
+	mux.HandleFunc("POST /api/pulse/pairings", handlePulsePairing(devices))
+	mux.HandleFunc("POST /api/pulse/pairings/claim", handlePulsePairingClaim(devices))
+	mux.HandleFunc("GET /api/pulse/devices", handlePulseDevices(devices))
+	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))
+	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))
+	mux.HandleFunc("GET /api/pulse/guardian/ws", handleGuardianWebSocket(manager, devices))
+
+	handler := routeAuthorizationMiddleware(csrfMiddleware(bodyTimeoutMiddleware(mux)))
+	// Token auth (when configured) sits under the Host check but above route
+	// authorization and CSRF, so it also guards the WebSocket, push, and static
+	// routes via the cookie.
 	if o.token != "" {
-		handler = authMiddleware(o.token, o.secureCookie, handler)
+		handler = authMiddleware(o.token, o.secureCookie, devices, handler)
+	} else {
+		// Without a shared token, Serve's selected network boundary
+		// (localhost/Tailscale) is the owner boundary. Device credentials remain
+		// individually revocable while sharing the generic owner API.
+		handler = networkOwnerMiddleware(devices, handler)
 	}
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
-	return hostMiddleware(o.allowedHosts, handler)
+	return pulseNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler))
+}
+
+// pulseNoStoreMiddleware covers responses that may carry short-lived Pulse
+// secrets before authentication and Host validation, including errors emitted
+// by those outer security boundaries.
+func pulseNoStoreMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim":
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func handleVersion(mgr *Manager) http.HandlerFunc {
@@ -160,41 +236,9 @@ const authCookieName = "moa_auth"
 // acceptably sporadic.
 const authCookieMaxAge = int(90 * 24 * time.Hour / time.Second)
 
-// authMiddleware gates every request behind an opt-in shared token. A request
-// passes if it carries a valid auth cookie or a correct ?token=<secret> query
-// param. In the query case it sets an HttpOnly cookie and redirects to the same
-// URL without the param, so the token does not linger in history/logs and every
-// later request (WebSocket and push endpoints included) authenticates via the
-// cookie — no frontend changes needed. Anything else gets 401. The token is
-// compared in constant time.
-func authMiddleware(token string, secureCookie bool, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if c, err := r.Cookie(authCookieName); err == nil && tokenEqual(c.Value, token) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if tok := r.URL.Query().Get("token"); tok != "" && tokenEqual(tok, token) {
-			http.SetCookie(w, &http.Cookie{
-				Name:     authCookieName,
-				Value:    token,
-				Path:     "/",
-				MaxAge:   authCookieMaxAge,
-				HttpOnly: true,
-				SameSite: http.SameSiteLaxMode,
-				Secure:   secureCookie,
-			})
-			// Redirect to the same URL without the token query param.
-			u := *r.URL
-			params := u.Query()
-			params.Del("token")
-			u.RawQuery = params.Encode()
-			http.Redirect(w, r, u.RequestURI(), http.StatusFound)
-			return
-		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	})
-}
-
+// authMiddleware accepts the existing shared-token cookie/query flow and, when
+// configured, a revocable device credential. Query-token authentication keeps
+// its redirect behavior so the shared secret does not remain in a URL.
 func tokenEqual(got, want string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
@@ -295,7 +339,7 @@ func handleCreateSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusCreated, sess.info())
+		writeJSON(w, http.StatusCreated, mgr.sessionInfo(sess))
 	}
 }
 
@@ -306,7 +350,7 @@ func handleGetSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, sess.info())
+		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
 	}
 }
 
@@ -523,7 +567,20 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
-
+		lease, err := deviceLeaseForWebSocket(r, func(string) {
+			_ = conn.CloseNow() //nolint:staticcheck // revoke/expiry must not wait for a peer close handshake
+		})
+		if err != nil {
+			_ = conn.CloseNow() //nolint:staticcheck
+			return
+		}
+		if lease != nil {
+			defer lease.release()
+		}
+		var leaseDone <-chan struct{}
+		if lease != nil {
+			leaseDone = lease.Done()
+		}
 		// Track live viewers of this session — gates "run finished / errored"
 		// push notifications (see subscribePush): if a browser is watching, no push.
 		sess.wsConns.Add(1)
@@ -548,7 +605,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		sText, sThinking, _, cut := sess.runtime.Context().SnapshotStreamingWithCut()
 		initData := buildInitData(sess, bus.StreamingAggregate{Text: sText, Thinking: sThinking})
 		initData.LastSeq = cut
-		if err := wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}); err != nil {
+		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
 			return
 		}
 
@@ -577,6 +634,9 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 				if evt.Seq <= cut {
 					continue
 				}
+				if deviceLeaseClosed(lease) {
+					return
+				}
 				if err := wsWriteJSON(ctx, conn, evt); err != nil {
 					return
 				}
@@ -589,6 +649,8 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 				}
 			case <-reactor.Done():
 				conn.Close(websocket.StatusGoingAway, "session closed") //nolint:errcheck,staticcheck
+				return
+			case <-leaseDone:
 				return
 			case <-ctx.Done():
 				return
@@ -632,7 +694,7 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, sess.info())
+		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
 	}
 }
 
@@ -655,7 +717,7 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, sess.info())
+		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
 	}
 }
 
@@ -755,49 +817,6 @@ func handleSteerSubagent(mgr *Manager) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"queued": queued})
-		}
-	}
-}
-
-// handleListSubagents returns the persisted subagent transcripts for a session
-// (metadata only — messages omitted to keep the list light).
-func handleListSubagents(mgr *Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		list, err := mgr.ListSubagentTranscripts(r.PathValue("id"))
-		switch {
-		case errors.Is(err, ErrNotFound):
-			http.Error(w, "not found", http.StatusNotFound)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			out := make([]map[string]any, 0, len(list))
-			for _, t := range list {
-				m := map[string]any{
-					"job_id": t.JobID, "task": t.Task, "model": t.Model,
-					"status": t.Status, "async": t.Async, "cost_usd": t.CostUSD,
-				}
-				if t.Usage != nil {
-					m["input_tokens"] = t.Usage.Input
-					m["output_tokens"] = t.Usage.Output
-				}
-				out = append(out, m)
-			}
-			writeJSON(w, http.StatusOK, out)
-		}
-	}
-}
-
-// handleGetSubagent returns one persisted subagent transcript (with messages).
-func handleGetSubagent(mgr *Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		t, err := mgr.GetSubagentTranscript(r.PathValue("id"), r.PathValue("jobID"))
-		switch {
-		case errors.Is(err, ErrNotFound):
-			http.Error(w, "not found", http.StatusNotFound)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			writeJSON(w, http.StatusOK, t)
 		}
 	}
 }

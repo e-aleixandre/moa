@@ -1,5 +1,5 @@
-import { Search, PanelRight, PanelBottom } from 'lucide-preact';
-import { applyPreset, addPane } from '../tile-actions.js';
+import { Search, PanelRight, PanelBottom, Bell, QrCode } from 'lucide-preact';
+import { applyPreset, addPane, assignToTile } from '../tile-actions.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
 import { PRESETS } from '../layoutPresets.js';
 import { NotificationSettings } from './NotificationSettings.jsx';
@@ -24,7 +24,12 @@ export function VersionIndicator({ version }) {
   return <span class="version-indicator" title="Moa version">{version.current}</span>;
 }
 
-export function LayoutBar({ state, onOpenPalette, version }) {
+export function LayoutBar({ state, onOpenPalette, onOpenPairing, version }) {
+	const attentionItems = state.attentionItems || [];
+	const openAttentionSession = (sessionId) => {
+		if (sessionId) assignToTile(state.focusedTile, sessionId);
+	};
+
   return (
     <div class="layout-bar">
       <button
@@ -35,6 +40,9 @@ export function LayoutBar({ state, onOpenPalette, version }) {
         <Search />
         <span>Sessions</span>
         <kbd class="shortcut-hint">{formatShortcut('K', { mod: true })}</kbd>
+      </button>
+      <button class="layout-btn" onClick={onOpenPairing} title="Pair Pulse">
+        <QrCode />
       </button>
       <div class="layout-bar-divider" />
       {PRESETS.map((p) => (
@@ -55,6 +63,17 @@ export function LayoutBar({ state, onOpenPalette, version }) {
         <PanelBottom />
       </button>
       <div class="layout-bar-spacer" />
+      {attentionItems.length > 0 && (
+        <div class="layout-attention" aria-label="Needs attention">
+          <Bell />
+          <span>Needs attention</span>
+          {attentionItems.map(item => (
+            <button key={item.id} title={item.spoken} onClick={() => openAttentionSession(item.session_id)}>
+              {item.alias || item.spoken}
+            </button>
+          ))}
+        </div>
+      )}
       <VersionIndicator version={version} />
       <NotificationSettings state={state} />
     </div>

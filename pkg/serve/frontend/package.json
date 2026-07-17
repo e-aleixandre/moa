@@ -9,7 +9,8 @@
     "highlight.js": "^11.11.0",
     "lucide-preact": "^0.577.0",
     "marked": "^15.0.0",
-    "preact": "^10.25.0"
+    "preact": "^10.25.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

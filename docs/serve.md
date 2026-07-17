@@ -88,7 +88,49 @@ You don't have to wait for a run to finish before lining up your next move. What
 
 ## Security
 
-By default `moa serve` has **no authentication** — anyone who can reach the port controls your agents. For access beyond `127.0.0.1`, pass `--token <secret>` (or set `MOA_SERVE_TOKEN`) to require a session cookie or `?token=<secret>` on every request; visiting that URL once sets an `HttpOnly` cookie for subsequent requests. Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on state-changing requests — everything except `GET` and `HEAD` (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it.
+By default `moa serve` has **no authentication** — anyone who can reach the port controls your agents. For access beyond `127.0.0.1`, pass `--token <secret>` (or set `MOA_SERVE_TOKEN`) to require a session cookie or `?token=<secret>` on every request; visiting that URL once sets an `HttpOnly` cookie for subsequent requests. The owner boundary is therefore either that token, when configured, or the operator-selected network boundary (localhost/Tailscale) when it is not. That owner can pair a revocable Pulse device. A claimed device authenticates REST and WebSocket requests with `Authorization: Moa-Device <device-id>.<secret>`; its credential is separate from the owner token and is rejected outside direct loopback unless the request uses TLS. Pairing and device credentials are not accepted in URLs.
+
+When a normal OpenAI API key is configured for auxiliary features (the
+`openai-transcribe` credential, set with `moa --login openai-transcribe`, or a
+plain `OPENAI_API_KEY` / API-key `openai` credential — never OpenAI OAuth), a
+paired device
+may call `POST /api/pulse/realtime/client-secret` with exactly `{}` to receive a
+Realtime client secret requested for 60 seconds (Moa accepts at most an additional
+5 seconds for OpenAI clock/transport skew). This is a device-only route: owner cookies and
+tokens cannot mint it. Moa sends only the server-controlled `gpt-realtime-2.1-mini`
+Realtime configuration to OpenAI and returns a minimal credential DTO; Pulse then talks directly to
+OpenAI. Moa does not proxy, store, or log audio, SDP, conversation data, the
+client secret, or the permanent API key. Revocation prevents a subsequent mint
+from being delivered once it wins the device lifecycle boundary; it cannot recall
+a client secret already delivered, which may remain usable until its OpenAI expiry.
+The route has the same Host, CSRF,
+TLS/loopback, revocation, concurrency, and rate-limit protections as other
+paired-device operations.
+
+An emparejado Pulse device represents the owner on Serve's **generic API**:
+it can read sessions, conversations and activity and use the same generic
+actions as the web client. This is deliberate: Pulse is a client of Moa, not a
+separate restricted product surface. The exceptions are pairing administration:
+only the network/token owner can create pairings, list paired devices or revoke
+a device. An already paired device cannot extend its own authority.
+
+## Attention queue and permission decisions
+
+`GET /api/attention` returns an informational, cross-session snapshot of
+unresolved attention items. It describes what needs the owner's attention; it
+does not define an approval or echo-confirmation protocol. For a permission
+item, an owner-authorized client uses its `session_id` and `ref_id` with the
+existing generic `POST /api/sessions/{id}/permission` action to decide it.
+
+Permission items retain `risk_level`, `risk_flags`, and `verbatim` so a client
+can present or read the assessed risk and exact command before making that
+generic decision. They are information for the client and owner, not a
+server-enforced confirmation ceremony. The attention item intentionally no
+longer includes `requires_verbatim_confirm`; clients must not infer an
+echo-confirmation requirement from the queue. Serve has no formal API version;
+this is the current attention contract.
+
+Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
 
 ## Frontend development
 

@@ -16,7 +16,7 @@ function getCaps() {
     .catch(() => ({}));
 }
 
-export function CommandPalette({ open, onClose, state, initialMode = 'search' }) {
+export function CommandPalette({ open, onClose, state, initialMode = 'search', onOpenPairing }) {
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mode, setMode] = useState(initialMode);
@@ -96,6 +96,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
     const result = [];
 
     result.push({ type: 'action', id: '__new', label: 'New session…' });
+    result.push({ type: 'action', id: '__pair-pulse', label: 'Pair Pulse…' });
 
     const q = query.toLowerCase().trim();
     // Order by most-recently-used first (consistent with the mobile dashboard),
@@ -199,6 +200,11 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
       setMode('create');
       return;
     }
+    if (item.type === 'action' && item.id === '__pair-pulse') {
+      onClose();
+      onOpenPairing();
+      return;
+    }
     if (item.type === 'session') {
       if (item.archived) {
         // Reopen: the server also auto-unarchives on resume/send, but for
@@ -221,7 +227,7 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search' })
       }
       onClose();
     }
-  }, [state.focusedTile, onClose]);
+  }, [state.focusedTile, onClose, onOpenPairing]);
 
   const handleSelectCreate = useCallback(async (item) => {
     if (creating) return;

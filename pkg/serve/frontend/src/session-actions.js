@@ -1,7 +1,7 @@
 // session-actions.js — API-backed session operations
 
 import { api } from './api.js';
-import { normalizeHistory } from './ws-handlers.js';
+import { normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
 import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
@@ -41,7 +41,10 @@ function samePolledSession(existing, next) {
 
 export async function loadSessions() {
   try {
-    const list = await api('GET', '/api/sessions');
+    const [list, attention] = await Promise.all([
+      api('GET', '/api/sessions'),
+      api('GET', '/api/attention'),
+    ]);
     // Read the store AFTER the round-trip: WS handlers may have updated
     // sessions while the request was in flight, and rebuilding from a
     // pre-await snapshot would silently revert those (lost messages, perms).
@@ -106,6 +109,13 @@ export async function loadSessions() {
         // stale poll only if the poll started before the archive call
         // resolved; the next poll (≤3s desktop / ≤15s mobile) self-corrects.
         archived: info.archived || false,
+        // Server-owned session brief (cheap LLM status summary): attempting /
+        // progress prose + freshness stamp. No WS event tracks it, so the poll
+        // is the source of truth. Preserve the prior value when the poll omits
+        // it (omitempty) so a not-yet-generated brief doesn't flicker.
+        briefAttempting: info.brief_attempting ?? (existing ? existing.briefAttempting : ''),
+        briefProgress: info.brief_progress ?? (existing ? existing.briefProgress : ''),
+        briefUpdated: info.brief_updated ? Date.parse(info.brief_updated) : (existing ? existing.briefUpdated : 0),
       };
 		if (samePolledSession(existing, next)) {
 			sessions[info.id] = existing;
@@ -125,7 +135,9 @@ export async function loadSessions() {
         }
       }
     }
-		if (sessionsChanged) setState({ sessions });
+		if (sessionsChanged || attention) {
+			setState({ sessions, attentionItems: attention?.items || [] });
+		}
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     const currentState = store.get();
@@ -395,6 +407,9 @@ export async function openPersistedSubagent(id, jobId) {
   }
   const t = await api('GET', `/api/sessions/${id}/subagents/${jobId}`);
   if (!t) return;
+  const transcript = t.order === 'newest_first'
+    ? [...(t.messages || [])].reverse()
+    : (t.messages || []);
   const usage = (t.cost_usd || (t.usage && (t.usage.input || t.usage.output)))
     ? {
         inputTokens: (t.usage && t.usage.input) || 0,
@@ -409,7 +424,7 @@ export async function openPersistedSubagent(id, jobId) {
     model: t.model || '',
     status: t.status || 'completed',
     async: !!t.async,
-    messages: normalizeHistory(t.messages || []),
+    messages: normalizeConversationProjection(transcript),
     streamingText: null,
     thinkingText: null,
     usage,

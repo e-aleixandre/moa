@@ -1,5 +1,5 @@
 import { useCallback, useRef, useMemo } from 'preact/hooks';
-import { Plus, Archive, Trash2, FolderTree } from 'lucide-preact';
+import { Plus, Archive, Trash2, FolderTree, QrCode } from 'lucide-preact';
 import { setActiveSession } from '../tile-actions.js';
 import { resumeSession, deleteSession, archiveSession } from '../session-actions.js';
 import { setState } from '../store.js';
@@ -7,7 +7,7 @@ import { addToast } from '../notifications.js';
 import { shortPath, projectKey, projectLabel, sessionDotState, isRecentSession } from '../util/format.js';
 import { VersionIndicator } from './LayoutBar.jsx';
 
-export function SessionOverview({ state, onSelect, onNewSession, version }) {
+export function SessionOverview({ state, onSelect, onNewSession, onOpenPairing, version }) {
   const touchStart = useRef(null);
 
   // Close-gesture handlers live ONLY on the header/grabber, not the scrollable
@@ -73,9 +73,16 @@ export function SessionOverview({ state, onSelect, onNewSession, version }) {
   }, []);
 
   const groupByProject = state.groupByProject;
+	const attentionItems = state.attentionItems || [];
   const toggleGroup = useCallback(() => {
     setState(s => ({ groupByProject: !s.groupByProject }));
   }, []);
+
+	const openAttentionSession = useCallback((id) => {
+		if (!id) return;
+		setActiveSession(id);
+		onSelect();
+	}, [onSelect]);
 
   const renderCard = (sess) => {
     const isActive = state.activeSession === sess.id;
@@ -97,6 +104,14 @@ export function SessionOverview({ state, onSelect, onNewSession, version }) {
         </div>
         {path && !groupByProject && (
           <div class="overview-card-path" title={sess.cwd}>{path}</div>
+        )}
+        {sess.briefAttempting && (
+          <div class="overview-card-brief" title={sess.briefProgress || ''}>
+            <span class="overview-card-brief-attempting">{sess.briefAttempting}</span>
+            {sess.briefProgress && (
+              <span class="overview-card-brief-progress">{sess.briefProgress}</span>
+            )}
+          </div>
         )}
         <div class="overview-card-preview">
           {lastMsg || <span class="overview-card-empty">No messages yet</span>}
@@ -183,6 +198,9 @@ export function SessionOverview({ state, onSelect, onNewSession, version }) {
         <span class="overview-title">Sessions</span>
         <div class="overview-header-actions">
           <VersionIndicator version={version} />
+          <button class="overview-group-toggle" title="Pair Pulse" aria-label="Pair Pulse" onClick={onOpenPairing}>
+            <QrCode />
+          </button>
           <button
             class={`overview-group-toggle ${groupByProject ? 'on' : ''}`}
             title={groupByProject ? 'Grouping by project' : 'Group by project'}
@@ -193,6 +211,22 @@ export function SessionOverview({ state, onSelect, onNewSession, version }) {
           </button>
         </div>
       </div>
+
+      {attentionItems.length > 0 && (
+        <section class="overview-attention" aria-label="Needs attention">
+          <div class="overview-attention-title">Needs attention</div>
+          {attentionItems.map(item => (
+            <button
+              key={item.id}
+              class={`overview-attention-item ${item.kind || ''}`}
+              onClick={() => openAttentionSession(item.session_id)}
+            >
+              <span>{item.spoken}</span>
+              <small>{item.alias || 'Open session'}</small>
+            </button>
+          ))}
+        </section>
+      )}
 
       {groupByProject ? (
         <div class="overview-groups">
