@@ -52,15 +52,26 @@ type ServerMsg struct {
 // /api/sessions/{id}/... The client never derives what an agent is doing from
 // the bus — the server hands it this compact, authoritative view.
 type SessionBrief struct {
-	SessionID    string    `json:"session_id"`
-	Alias        string    `json:"alias"`
-	Title        string    `json:"title"`
-	State        string    `json:"state"`         // idle | running | permission | error
-	PendingAsks  int       `json:"pending_asks"`  // count of unanswered questions
-	PendingPerm  int       `json:"pending_perms"` // count of unresolved permissions
-	Attempting   string    `json:"brief_attempting,omitempty"`
-	Progress     string    `json:"brief_progress,omitempty"`
-	BriefUpdated time.Time `json:"brief_updated,omitzero"`
+	SessionID    string           `json:"session_id"`
+	Alias        string           `json:"alias"`
+	Title        string           `json:"title"`
+	State        string           `json:"state"`         // idle | running | permission | error
+	PendingAsks  int              `json:"pending_asks"`  // count of unanswered questions
+	PendingPerm  int              `json:"pending_perms"` // count of unresolved permissions
+	Activity     *SessionActivity `json:"activity,omitempty"`
+	Attempting   string           `json:"brief_attempting,omitempty"`
+	Progress     string           `json:"brief_progress,omitempty"`
+	BriefUpdated time.Time        `json:"brief_updated,omitzero"`
+}
+
+// SessionActivity is the freshest live action a session is performing, as
+// structured data the voice client narrates (never prose the server localizes).
+type SessionActivity struct {
+	Kind   string `json:"kind"`             // "subagent" | "tool"
+	Detail string `json:"detail,omitempty"` // subagent task, or tool target (bash command, etc.), bounded
+	Tool   string `json:"tool,omitempty"`   // tool name when kind=="tool" (bash, edit, fetch_content, ...)
+	Model  string `json:"model,omitempty"`  // child model when kind=="subagent"
+	Count  int    `json:"count,omitempty"`  // number of active subagents when kind=="subagent"
 }
 
 // Briefing is an ephemeral spoken note about progress (a run finished, a goal
@@ -113,8 +124,8 @@ type ClientMsg struct {
 
 // whitelisted reports whether a bus event is one the Attention Service acts on
 // in Phase 1A. Everything else (deltas, tool streaming, cost, context, tasks,
-// subagents, compaction, config) is ignored here — future phases extend this
-// list, they never fall back to "everything minus noise" (review point 3).
+// compaction, config) is ignored here — future phases extend this list, they
+// never fall back to "everything minus noise" (review point 3).
 func whitelisted(ev any) bool {
 	switch ev.(type) {
 	case bus.AskUserRequested,
@@ -124,6 +135,10 @@ func whitelisted(ev any) bool {
 		bus.StateChanged,
 		bus.RunStarted,
 		bus.RunEnded,
+		bus.SubagentStarted,
+		bus.SubagentEnded,
+		bus.ToolExecStarted,
+		bus.ToolExecEnded,
 		// Phase 2: progress/terminal briefings.
 		bus.GoalEnded,
 		bus.GoalIterationEnded,

@@ -2,14 +2,17 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/attention"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
@@ -213,6 +216,45 @@ func TestManagerAttentionTracksAndClearsSessionPermission(t *testing.T) {
 	pollUntil(t, time.Second, "resolved attention permission", func() bool {
 		return len(mgr.attention.Status()) == 0
 	})
+}
+
+func TestSessionInfoSerializesAttentionActivity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "activity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sess.runtime.Bus.Publish(bus.ToolExecStarted{
+		SessionID: sess.ID, ToolCallID: "tool-1", ToolName: "bash",
+		Args: map[string]any{"command": "phpstan analyse"},
+	})
+
+	var info SessionInfo
+	pollUntil(t, time.Second, "session activity", func() bool {
+		list := mgr.List()
+		if len(list) != 1 || list[0].Activity == nil {
+			return false
+		}
+		info = list[0]
+		return true
+	})
+	encoded, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dto struct {
+		Activity *attention.SessionActivity `json:"activity"`
+	}
+	if err := json.Unmarshal(encoded, &dto); err != nil {
+		t.Fatal(err)
+	}
+	want := &attention.SessionActivity{Kind: "tool", Tool: "bash", Detail: "phpstan analyse"}
+	if !reflect.DeepEqual(dto.Activity, want) {
+		t.Fatalf("activity = %+v, want %+v", dto.Activity, want)
+	}
 }
 
 func TestManagerConfigLoaderIsUsedForSessionBuild(t *testing.T) {

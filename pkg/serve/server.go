@@ -332,7 +332,7 @@ func handleCreateSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusCreated, sess.info())
+		writeJSON(w, http.StatusCreated, mgr.sessionInfo(sess))
 	}
 }
 
@@ -343,7 +343,7 @@ func handleGetSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, sess.info())
+		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
 	}
 }
 
@@ -687,7 +687,7 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, sess.info())
+		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
 	}
 }
 
@@ -710,7 +710,7 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, sess.info())
+		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
 	}
 }
 

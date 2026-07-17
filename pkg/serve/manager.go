@@ -144,23 +144,24 @@ type serveInfra struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID             string       `json:"id"`
-	Title          string       `json:"title"`
-	Archived       bool         `json:"archived,omitempty"`
-	State          SessionState `json:"state"`
-	Model          string       `json:"model"`
-	Provider       string       `json:"provider"`
-	Thinking       string       `json:"thinking"`
-	CWD            string       `json:"cwd"`
-	Created        time.Time    `json:"created"`
-	Updated        time.Time    `json:"updated"`
-	Error          string       `json:"error,omitempty"`
-	UntrustedMCP   bool         `json:"untrusted_mcp,omitempty"`
-	PlanMode       string       `json:"plan_mode,omitempty"`
-	PlanFile       string       `json:"plan_file,omitempty"`
-	ContextPercent int          `json:"context_percent"` // 0-100, -1 if unknown
-	PermissionMode string       `json:"permission_mode"` // "yolo", "ask", "auto"
-	CostUSD        float64      `json:"cost_usd"`        // accumulated session spend (main run + subagents)
+	ID             string                     `json:"id"`
+	Title          string                     `json:"title"`
+	Archived       bool                       `json:"archived,omitempty"`
+	State          SessionState               `json:"state"`
+	Model          string                     `json:"model"`
+	Provider       string                     `json:"provider"`
+	Thinking       string                     `json:"thinking"`
+	CWD            string                     `json:"cwd"`
+	Created        time.Time                  `json:"created"`
+	Updated        time.Time                  `json:"updated"`
+	Error          string                     `json:"error,omitempty"`
+	UntrustedMCP   bool                       `json:"untrusted_mcp,omitempty"`
+	PlanMode       string                     `json:"plan_mode,omitempty"`
+	PlanFile       string                     `json:"plan_file,omitempty"`
+	ContextPercent int                        `json:"context_percent"` // 0-100, -1 if unknown
+	PermissionMode string                     `json:"permission_mode"` // "yolo", "ask", "auto"
+	CostUSD        float64                    `json:"cost_usd"`        // accumulated session spend (main run + subagents)
+	Activity       *attention.SessionActivity `json:"activity,omitempty"`
 	// CacheExpiresAt is when the Anthropic prompt cache for this session goes
 	// cold (last run + cache TTL). Zero/omitted when not applicable (no run yet,
 	// or a non-Anthropic model that doesn't use TTL-based prompt caching). The
@@ -278,6 +279,38 @@ func (s *ManagedSession) info() SessionInfo {
 		info.RunStartedAt = runStartedAt
 	}
 	return info
+}
+
+// sessionInfo uses attention as the single owner of live activity, avoiding a
+// second, potentially divergent event tracker in ManagedSession.
+func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
+	info := s.info()
+	if m.attention == nil {
+		return info
+	}
+	for _, brief := range m.attention.Roster() {
+		if brief.SessionID == s.ID {
+			info.Activity = brief.Activity
+			break
+		}
+	}
+	return info
+}
+
+// activityIndex snapshots the attention roster once and indexes live activity
+// by session id, so List() doesn't round-trip to the actor per session.
+func (m *Manager) activityIndex() map[string]*attention.SessionActivity {
+	if m.attention == nil {
+		return nil
+	}
+	roster := m.attention.Roster()
+	idx := make(map[string]*attention.SessionActivity, len(roster))
+	for _, brief := range roster {
+		if brief.Activity != nil {
+			idx[brief.SessionID] = brief.Activity
+		}
+	}
+	return idx
 }
 
 // Manager owns all active sessions.
@@ -541,11 +574,14 @@ func (m *Manager) List() []SessionInfo {
 	m.mu.RUnlock()
 
 	list := make([]SessionInfo, 0)
+	activity := m.activityIndex()
 	for _, s := range active {
 		if s == nil {
 			continue // nil placeholder during ResumeSession
 		}
-		list = append(list, s.info())
+		info := s.info()
+		info.Activity = activity[s.ID]
+		list = append(list, info)
 	}
 
 	// Merge saved sessions from all project directories (cached).

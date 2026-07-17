@@ -284,6 +284,23 @@ func (s *Service) handleEvent(st *loopState, m inboxMsg) {
 	case bus.RunStarted:
 		// Entering a run clears a stale error snapshot; no item.
 		snap.lastError = ""
+	case bus.SubagentStarted:
+		snap.startSubagent(e.JobID, e.Task, e.Model)
+		s.notifyRoster(st)
+	case bus.SubagentEnded:
+		if snap.endSubagent(e.JobID) {
+			s.notifyRoster(st)
+		}
+	case bus.ToolExecStarted:
+		if e.ToolName == "subagent" {
+			return
+		}
+		// Tool churn is high-frequency; do not push a roster per tool. The
+		// authoritative roster is read fresh on demand (list_sessions / init),
+		// and subagent start/end already pushes the coarse "what now" changes.
+		snap.startTool(e.ToolCallID, e.ToolName, e.Args)
+	case bus.ToolExecEnded:
+		snap.endTool(e.ToolCallID)
 	case bus.GoalEnded:
 		s.emitBriefing(st, snap, KindGoalEnded, P1Terminal,
 			s.lang.spokenGoalEnded(snap.alias, e.Reason), e.Reason)
@@ -324,13 +341,21 @@ func (s *Service) handleStateChange(st *loopState, snap *sessionSnapshot, state 
 }
 
 func (s *Service) handleRunEnded(st *loopState, snap *sessionSnapshot, e bus.RunEnded) {
+	clearedActivity := snap.clearRunTools()
 	// RunEnded{Err} is deduped against a recent StateChanged(error): if we
 	// already have an unresolved error item for this session, don't double it.
 	if e.Err == nil {
 		s.emitRunTermination(st, snap, e)
+		if clearedActivity {
+			s.notifyRoster(st)
+		}
 		return
 	}
+	itemCount := len(st.items)
 	s.ensureErrorItem(st, snap, e.Err.Error())
+	if clearedActivity && len(st.items) == itemCount {
+		s.notifyRoster(st)
+	}
 }
 
 func (s *Service) ensureErrorItem(st *loopState, snap *sessionSnapshot, msg string) {
@@ -581,6 +606,7 @@ func (st *loopState) roster() []SessionBrief {
 			State:        string(snap.state),
 			PendingAsks:  len(snap.pendingAsk),
 			PendingPerm:  len(snap.pendingPerm),
+			Activity:     snap.activity(),
 			Attempting:   snap.attempting,
 			Progress:     snap.progress,
 			BriefUpdated: snap.briefUpdated,
