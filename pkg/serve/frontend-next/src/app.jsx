@@ -1,6 +1,7 @@
 import { render } from "preact";
 import "./index.css";
 import { Catalog } from "./catalog/catalog.jsx";
+import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
 import { ConversationScreen, PaneGridScreen } from "./layout/index.js";
 
 const welcomeStyle = {
@@ -69,6 +70,7 @@ function CatalogScreen() {
 const VIEWS = [
   { key: null, label: "Conversation", href: "?" },
   { key: "grid", label: "Panes", href: "?view=grid" },
+  { key: "live", label: "Live", href: "?view=live" },
   { key: "catalog", label: "Catalog", href: "?view=catalog" },
 ];
 
@@ -121,8 +123,9 @@ function ViewSwitch({ current }) {
 }
 
 // view — alterna entre las pantallas de escritorio: conversación (Fase 2,
-// por defecto), grid de paneles (Fase 3A) y catálogo de primitivas (Fase
-// 0/1). `?view=grid` abre PaneGridScreen, `?view=catalog` el catálogo,
+// por defecto), grid de paneles (Fase 3A), estados en vivo (Fase 3B) y
+// catálogo de primitivas (Fase 0/1). `?view=grid` abre PaneGridScreen,
+// `?view=live` abre LiveStatesGallery, `?view=catalog` el catálogo,
 // cualquier otro valor (o ausencia) muestra la conversación.
 const params = new URLSearchParams(location.search);
 const view = params.get("view");
@@ -141,6 +144,14 @@ function App() {
       <>
         <ViewSwitch current="grid" />
         <PaneGridScreen />
+      </>
+    );
+  }
+  if (view === "live") {
+    return (
+      <>
+        <ViewSwitch current="live" />
+        <LiveStatesGallery />
       </>
     );
   }

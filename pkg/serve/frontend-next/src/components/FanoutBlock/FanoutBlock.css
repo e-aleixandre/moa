@@ -1,0 +1,217 @@
+.fanout {
+  border: 1px solid color-mix(in srgb, var(--sky) 25%, var(--surface0));
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin: var(--space-1) 0 var(--space-5);
+  max-width: var(--content-block);
+  background: color-mix(in srgb, var(--mantle) 70%, transparent);
+}
+
+.fanout .fanout-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: color-mix(in srgb, var(--sky) 6%, var(--mantle));
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+}
+
+.fanout .fanout-head b {
+  color: var(--sky);
+  font-weight: var(--weight-semibold);
+}
+
+.fanout .fanout-head .n {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  margin-left: auto;
+}
+
+.fanout .agent-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 70px;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+}
+
+.fanout .agent-row:last-child {
+  border-bottom: none;
+}
+
+.fanout .agent-id {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.fanout .agent-live {
+  min-width: 0;
+}
+
+.fanout .agent-live .act {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.fanout .agent-live .act .cur {
+  color: var(--subtext0);
+}
+
+.fanout .agent-live .act .cur::after {
+  content: "▌";
+  color: var(--sky);
+  animation: fanout-cursor-blink 1s steps(2) infinite;
+  font-size: var(--text-micro);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fanout .agent-live .act .cur::after {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+.fanout .agent-time {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  text-align: right;
+}
+
+/* indeterminate progress bar under the running action line */
+.fanout .ibar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface0);
+  overflow: hidden;
+  position: relative;
+}
+
+.fanout .ibar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--blue), transparent);
+  animation: fanout-ibar-slide 1.6s ease-in-out infinite;
+}
+
+.fanout .ibar.c-sky i {
+  background: linear-gradient(90deg, transparent, var(--sky), transparent);
+}
+
+.fanout .ibar.c-teal i {
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+}
+
+.fanout .ibar.c-mauve i {
+  background: linear-gradient(90deg, transparent, var(--mauve), transparent);
+}
+
+.fanout .ibar.c-blue i {
+  background: linear-gradient(90deg, transparent, var(--blue), transparent);
+}
+
+@keyframes fanout-ibar-slide {
+  0% {
+    left: -36%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fanout .ibar i {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.35;
+  }
+}
+
+/* finished agent row */
+.fanout .agent-row.done {
+  background: color-mix(in srgb, var(--green) 4%, transparent);
+}
+
+.fanout .agent-row.done .agent-id .nm {
+  color: var(--green);
+}
+
+.fanout .agent-row.done .result {
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fanout .agent-row.done .result .fanout-result-chip {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+  flex: none;
+}
+
+.fanout .agent-row.done .result .desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fanout .agent-row.done .view {
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--peach);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: right;
+  padding: 0;
+}
+
+.fanout .agent-row.done .view:hover {
+  text-decoration: underline;
+}
+
+.fanout .agent-row.done .view:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.fanout .check {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+@keyframes fanout-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}

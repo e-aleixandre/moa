@@ -215,3 +215,32 @@
   font-size: var(--text-xs);
   flex: none;
 }
+
+/* p-foot — pulso del pane (Fase 3B: "● streaming", "waiting 0:42"…), footer
+   opcional entre el body y el composer falso. */
+.pane .p-foot {
+  flex: none;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  color: var(--overlay0);
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.pane .p-foot .pulse-b {
+  color: var(--blue);
+}
+
+.pane .p-foot .pulse-y {
+  color: var(--yellow);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pane .p-foot .spacer {
+  margin-left: auto;
+}

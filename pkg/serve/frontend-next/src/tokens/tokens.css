@@ -120,6 +120,13 @@
   /* Layout — medidas estructurales compartidas entre pantallas */
   --spine-width: 264px;
 
+  /* Anchos de contenido — columnas legibles de bloques del stream y páginas.
+     Semánticos y reutilizables (varios componentes comparten el de bloque). */
+  --content-narrow: 560px;
+  --content-block:  680px;
+  --content-wide:   860px;
+  --content-page:  1180px;
+
   /* Tempos semánticos — para animaciones vivas (breathing, shimmer) */
   --breath-running:   1800ms;
   --breath-attention: 1100ms;

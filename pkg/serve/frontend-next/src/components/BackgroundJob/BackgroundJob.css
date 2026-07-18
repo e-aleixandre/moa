@@ -1,0 +1,141 @@
+.bg-job {
+  max-width: var(--content-block);
+}
+
+.bg-job .bgjob {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-5);
+  background: color-mix(in srgb, var(--mantle) 70%, transparent);
+}
+
+.bg-job .bgjob .tag {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 11%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  flex: none;
+}
+
+.bg-job .bgjob .cmd {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.bg-job .bgjob .cmd .tail {
+  color: var(--overlay0);
+}
+
+.bg-job .bgjob .elapsed {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  flex: none;
+}
+
+.bg-job .bgjob .peek {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--overlay1);
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex: none;
+  padding: 2px;
+}
+
+.bg-job .bgjob .peek:hover {
+  color: var(--text);
+}
+
+.bg-job .bgjob .peek:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.bg-job .bgjob .peek .peek-caret {
+  transition: transform var(--duration) var(--ease);
+}
+
+.bg-job .bgjob .peek .peek-caret.up {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-job .bgjob .peek .peek-caret {
+    transition: none;
+  }
+}
+
+/* live log tail under the bgjob strip */
+.bg-job .logtail {
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--overlay1);
+  padding: var(--space-3) var(--space-4);
+  margin: calc(-1 * var(--space-2)) 0 var(--space-5);
+  overflow: hidden;
+  position: relative;
+}
+
+.bg-job .logtail::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 26px;
+  background: linear-gradient(var(--crust), transparent);
+  pointer-events: none;
+}
+
+.bg-job .logtail .ln {
+  white-space: pre;
+}
+
+.bg-job .logtail .ln.t-ok {
+  color: var(--green);
+}
+
+.bg-job .logtail .ln.t-dim {
+  color: var(--surface2);
+}
+
+.bg-job .logtail .ln .ln-cursor::after {
+  content: "▌";
+  color: var(--teal);
+  animation: logtail-cursor-blink 1s steps(2) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-job .logtail .ln .ln-cursor::after {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+@keyframes logtail-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}

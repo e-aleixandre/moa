@@ -1,0 +1,157 @@
+.lsg {
+  max-width: var(--content-page);
+  margin: 0 auto;
+  padding: var(--space-10) var(--space-8) var(--space-12);
+}
+
+.lsg-head h1 {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.lsg-head h1 em {
+  font-style: normal;
+  background: linear-gradient(90deg, var(--blue), var(--sky));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lsg-head p {
+  color: var(--overlay1);
+  margin-top: var(--space-2);
+  max-width: 66ch;
+  font-size: var(--text-md);
+}
+
+.lsg-section {
+  margin-top: var(--space-12);
+}
+
+.lsg-section h2 {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--blue);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.lsg-section h2::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--surface0);
+}
+
+.lsg-section h2 .alt {
+  color: var(--overlay0);
+  letter-spacing: var(--tracking-tight);
+  text-transform: none;
+  font-weight: var(--weight-normal);
+  font-size: var(--text-sm);
+}
+
+.lsg-caption {
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+  margin-top: var(--space-3);
+  max-width: 76ch;
+}
+
+.lsg-caption b {
+  color: var(--overlay1);
+  font-weight: var(--weight-medium);
+}
+
+.lsg-caption code {
+  font-family: var(--mono);
+  font-size: 0.95em;
+  color: var(--subtext0);
+}
+
+/* ── conversation mock shell (sections 1 & 2) ── */
+
+.lsg-convo {
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  max-width: var(--content-wide);
+}
+
+.lsg-convo-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--surface0);
+  background: color-mix(in srgb, var(--mantle) 50%, var(--base));
+}
+
+.lsg-convo-head .title {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+}
+
+.lsg-convo-head .path {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+.lsg-convo-head .mp {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--lavender);
+  background: var(--surface0);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+.lsg-convo-body {
+  padding: var(--space-5) var(--space-6) 2px;
+}
+
+.lsg-convo .agent-tray,
+.lsg-convo .composer-wrap,
+.lsg-convo .status-strip {
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
+  max-width: none;
+}
+
+/* ── grid alive mock shell (section 3) ── */
+
+.lsg-gridmock {
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--crust);
+}
+
+.lsg-gm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5px;
+  padding: 5px;
+  min-height: 330px;
+}
+
+.lsg-gm-grid .pane {
+  min-height: 0;
+}
+
+.lsg-ticker-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--sky);
+}

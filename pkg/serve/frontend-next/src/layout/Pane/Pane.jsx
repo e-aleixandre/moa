@@ -11,6 +11,12 @@ import "./Pane.css";
 // ThinkingMeter variant="glyph" en vez de texto literal: así el nivel de
 // pensamiento queda accesible/real en vez de un string estático, y no se
 // duplica la lógica de niveles que ya vive en la primitiva.
+//
+// `footer` (Fase 3B) — slot opcional para el pulso del pane ("● streaming",
+// "waiting 0:42"…), como en la sección "grid alive" del mockup de live
+// states. `hideComposer` oculta el input falso cuando el footer ya cierra el
+// panel visualmente (evita duplicar affordances de envío en los panes vivos
+// de la galería de demo).
 export function Pane({
   title,
   path,
@@ -26,6 +32,8 @@ export function Pane({
   onMaximize,
   onClose,
   children,
+  footer,
+  hideComposer = false,
 }) {
   const classes = [
     "pane",
@@ -86,10 +94,14 @@ export function Pane({
 
       <div class="p-body">{children}</div>
 
-      <div class="p-input">
-        <span class="p-input-text">Message moa…</span>
-        <span class="send" aria-hidden="true">↑</span>
-      </div>
+      {footer && <div class="p-foot">{footer}</div>}
+
+      {!hideComposer && (
+        <div class="p-input">
+          <span class="p-input-text">Message moa…</span>
+          <span class="send" aria-hidden="true">↑</span>
+        </div>
+      )}
     </section>
   );
 }

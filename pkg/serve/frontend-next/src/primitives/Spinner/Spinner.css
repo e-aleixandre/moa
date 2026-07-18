@@ -1,0 +1,40 @@
+.spinner {
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+  border: 2px solid color-mix(in srgb, var(--blue) 30%, transparent);
+  border-top-color: var(--blue);
+  animation: spinner-spin 1s linear infinite;
+}
+
+.spinner.c-blue {
+  border-color: color-mix(in srgb, var(--blue) 30%, transparent);
+  border-top-color: var(--blue);
+}
+
+.spinner.c-sky {
+  border-color: color-mix(in srgb, var(--sky) 30%, transparent);
+  border-top-color: var(--sky);
+}
+
+.spinner.c-teal {
+  border-color: color-mix(in srgb, var(--teal) 30%, transparent);
+  border-top-color: var(--teal);
+}
+
+.spinner.c-mauve {
+  border-color: color-mix(in srgb, var(--mauve) 30%, transparent);
+  border-top-color: var(--mauve);
+}
+
+@keyframes spinner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
