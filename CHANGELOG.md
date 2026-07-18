@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-18
+
+### Fixed
+
+- The new-session sheet could get stuck open with an unresponsive Close button
+  (a leftover reference threw on open); its X now reliably closes it.
+
 ## [0.10.0] - 2026-07-18
 
 ### Added
