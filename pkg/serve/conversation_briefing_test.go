@@ -311,6 +311,49 @@ func TestConversationMessagesExcludeThinkingAndCustomByDefault(t *testing.T) {
 	}
 }
 
+// A session that has compacted at least once stamps compaction_epoch onto every
+// subsequent assistant message (usage tracking). The transcript projection must
+// still show those replies: dropping any message with non-empty Custom made the
+// agent's final answer vanish from /messages after a compaction, so Pulse's
+// read_session reported the owner's own turn as the newest message even though
+// the agent had already answered.
+func TestConversationMessagesKeepsRepliesCarryingCompactionEpoch(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "post-compaction"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendConversationTestMessage(sess, "u1", "user", "please summarize", nil)
+	appendConversationTestMessage(sess, "a1", "assistant", "here is the summary", map[string]any{"compaction_epoch": 2})
+	// A genuine injected extension must still stay hidden.
+	appendConversationTestMessage(sess, "sub", "user", "subagent injection", map[string]any{"source": "subagent"})
+
+	handler := NewServer(mgr)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages = %d: %s", rec.Code, rec.Body.String())
+	}
+	var page conversationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 2 {
+		t.Fatalf("messages = %#v", page.Messages)
+	}
+	if page.Messages[0].ID != "a1" || page.Messages[0].Role != "assistant" || page.Messages[0].Text != "here is the summary" {
+		t.Fatalf("newest message should be the assistant reply: %#v", page.Messages[0])
+	}
+	if page.Messages[1].ID != "u1" {
+		t.Fatalf("second message should be the user turn: %#v", page.Messages[1])
+	}
+	if strings.Contains(rec.Body.String(), "subagent injection") {
+		t.Fatalf("injected extension leaked: %s", rec.Body.String())
+	}
+}
+
 func TestConversationMessagesCursorContinuesOlderAcrossLiveTail(t *testing.T) {
 	mgr := newTestManager(t, context.Background(), newMockProvider())
 	sess, err := mgr.CreateSession(CreateOpts{Title: "paging"})

@@ -243,7 +243,7 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 	for index, msg := range messages {
 		// Custom messages are extensions (shell, subagent and internal injected
 		// notifications), not owner-authored display conversation.
-		if (msg.Role != "user" && msg.Role != "assistant") || len(msg.Custom) != 0 {
+		if (msg.Role != "user" && msg.Role != "assistant") || isExtensionMessage(msg.Custom) {
 			continue
 		}
 		id := msg.MsgID
@@ -303,6 +303,28 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 		}
 	}
 	return conversationProjection{messages: out, toolDetails: details}
+}
+
+// isExtensionMessage reports whether a user/assistant message is an injected
+// extension (subagent/goal/shell/schedule/model-switch and other internal
+// notifications) that must stay out of the owner-facing transcript, as opposed
+// to an ordinary reply that merely carries benign display metadata.
+//
+// The agent loop stamps compaction_epoch onto every assistant message once a
+// session has compacted (usage tracking); that key alone must NOT hide the
+// message. Treating any non-empty Custom as an extension silently dropped every
+// post-compaction assistant reply from /messages — so read_session surfaced the
+// user's own turn as the newest message even after the agent had answered.
+func isExtensionMessage(custom map[string]any) bool {
+	if len(custom) == 0 {
+		return false
+	}
+	for key := range custom {
+		if key != "compaction_epoch" {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldShowConversationMessage keeps parent and subagent transcript
