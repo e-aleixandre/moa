@@ -5,17 +5,16 @@ export function Button({
   variant = "solid",
   size = "md",
   type = "button",
+  className = "",
   children,
   disabled = false,
   ...rest
 }) {
+  const classes = [`button`, `variant-${variant}`, `size-${size}`, className]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <button
-      class={`button variant-${variant} size-${size}`}
-      type={type}
-      disabled={disabled}
-      {...rest}
-    >
+    <button class={classes} type={type} disabled={disabled} {...rest}>
       {children}
     </button>
   );

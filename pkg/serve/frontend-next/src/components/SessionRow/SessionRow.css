@@ -1,0 +1,218 @@
+/* SessionRow — 3 variantes conmutables: pill (A) · tab (B) · card (C) */
+
+.session-row {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.session-row .session-row-hit {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-row .session-row-hit:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.session-row .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* El botón de cerrar se mantiene siempre en el árbol/tabbable (nunca
+   display:none), solo se oculta visualmente por defecto y se revela al
+   hacer hover del contenedor o al recibir foco por teclado. */
+.session-row .x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: var(--space-1);
+  color: var(--overlay0);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.session-row:hover .x,
+.session-row .x:focus-within,
+.session-row .x:focus-visible {
+  opacity: 1;
+}
+
+.session-row .x:hover {
+  color: var(--red);
+}
+
+.session-row .x:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ── variant A: round pill ───────────────────────────────────────── */
+
+.session-row.variant-pill {
+  gap: var(--space-2);
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-full);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-base);
+  color: var(--subtext1);
+  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.session-row.variant-pill .session-row-hit {
+  gap: var(--space-2);
+}
+
+.session-row.variant-pill:hover {
+  border-color: var(--surface1);
+  color: var(--text);
+}
+
+.session-row.variant-pill.on {
+  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
+  color: var(--text);
+  background: color-mix(in srgb, var(--peach) 8%, var(--mantle));
+}
+
+.session-row.variant-pill .unseen {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--peach);
+  flex: none;
+}
+
+.session-row.variant-pill.needs-yellow {
+  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 6%, var(--mantle));
+}
+
+.session-row.variant-pill.needs-red {
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 6%, var(--mantle));
+}
+
+/* ── variant B: underline tab ────────────────────────────────────── */
+
+.session-row.variant-tab {
+  font-size: var(--text-base);
+  color: var(--overlay1);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+}
+
+.session-row.variant-tab .session-row-hit {
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+}
+
+.session-row.variant-tab:hover {
+  color: var(--subtext1);
+}
+
+.session-row.variant-tab.on {
+  color: var(--text);
+  border-bottom-color: var(--peach);
+}
+
+.session-row.variant-tab.needs-yellow {
+  color: var(--yellow);
+}
+
+.session-row.variant-tab.needs-red {
+  color: var(--red);
+}
+
+.session-row.variant-tab .unseen {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--peach);
+  flex: none;
+}
+
+.session-row.variant-tab .n {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+/* ── variant C: stacked card ─────────────────────────────────────── */
+
+.session-row.variant-card {
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 170px;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--duration) var(--ease);
+}
+
+.session-row.variant-card .session-row-hit {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  width: 100%;
+}
+
+.session-row.variant-card:hover {
+  border-color: var(--surface1);
+}
+
+.session-row.variant-card.on {
+  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
+}
+
+.session-row.variant-card .r1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.session-row.variant-card .r2 {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+  padding-left: var(--space-4);
+}
+
+.session-row.variant-card.needs-yellow .r1,
+.session-row.variant-card.needs-yellow .r2 {
+  color: var(--yellow);
+}
+
+.session-row.variant-card.needs-red .r1,
+.session-row.variant-card.needs-red .r2 {
+  color: var(--red);
+}
+
+.session-row.variant-card .x {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+}

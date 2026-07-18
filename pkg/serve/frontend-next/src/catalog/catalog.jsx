@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { PrimitivesGallery } from "./primitives-gallery.jsx";
+import { MoleculesGallery } from "./molecules-gallery.jsx";
 import "./catalog.css";
 
 // Todos los valores se LEEN de tokens.css en runtime (getComputedStyle), no se
@@ -229,6 +230,7 @@ export function Catalog() {
       </section>
 
       <PrimitivesGallery />
+      <MoleculesGallery />
     </div>
   );
 }

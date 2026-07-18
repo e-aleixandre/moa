@@ -1,0 +1,38 @@
+.segmented {
+  display: flex;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+}
+
+.segmented .segmented-item {
+  flex: 1;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  padding: var(--space-1) 0;
+  border-radius: var(--radius-sm);
+  color: var(--overlay1);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+  letter-spacing: var(--tracking-wide);
+}
+
+.segmented .segmented-item:hover {
+  color: var(--text);
+}
+
+.segmented .segmented-item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.segmented .segmented-item.on {
+  background: color-mix(in srgb, var(--mauve) 20%, transparent);
+  color: var(--mauve);
+  font-weight: var(--weight-semibold);
+}

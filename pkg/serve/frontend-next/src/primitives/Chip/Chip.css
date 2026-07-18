@@ -57,3 +57,15 @@ button.chip:disabled {
   border-color: color-mix(in srgb, var(--red) 35%, var(--surface0));
   color: var(--red);
 }
+
+.chip.tone-warning {
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+.chip.size-sm {
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  gap: var(--space-1);
+}

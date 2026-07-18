@@ -65,3 +65,21 @@
 .button.variant-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--red) 12%, transparent);
 }
+
+.button.variant-success {
+  background: var(--green);
+  color: var(--crust);
+}
+
+.button.variant-success:hover:not(:disabled) {
+  box-shadow: 0 0 16px color-mix(in srgb, var(--green) 40%, transparent);
+}
+
+.button.variant-danger-solid {
+  background: var(--red);
+  color: var(--crust);
+}
+
+.button.variant-danger-solid:hover:not(:disabled) {
+  box-shadow: 0 0 16px color-mix(in srgb, var(--red) 40%, transparent);
+}

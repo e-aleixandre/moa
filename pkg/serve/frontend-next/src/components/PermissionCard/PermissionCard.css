@@ -1,0 +1,144 @@
+.perm-card {
+  width: 100%;
+  max-width: 560px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--surface0));
+  background: linear-gradient(
+      color-mix(in srgb, var(--yellow) 6%, transparent),
+      color-mix(in srgb, var(--yellow) 6%, transparent)
+    ),
+    var(--mantle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  animation: perm-card-glow 2.2s ease-in-out infinite;
+}
+
+@keyframes perm-card-glow {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--yellow) 9%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .perm-card {
+    animation: none;
+  }
+}
+
+.perm-card.danger {
+  border-color: color-mix(in srgb, var(--red) 50%, var(--surface0));
+  background: linear-gradient(
+      color-mix(in srgb, var(--red) 6%, transparent),
+      color-mix(in srgb, var(--red) 6%, transparent)
+    ),
+    var(--mantle);
+  animation: none;
+}
+
+.perm-card .perm-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.perm-card .perm-head .p-icon {
+  display: inline-flex;
+  color: var(--yellow);
+}
+
+.perm-card.danger .perm-head .p-icon {
+  color: var(--red);
+}
+
+.perm-card .perm-head .p-t {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+  color: var(--yellow);
+}
+
+.perm-card.danger .perm-head .p-t {
+  color: var(--red);
+}
+
+.perm-card .perm-head .p-timer {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+}
+
+.perm-card .scope {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.perm-card .perm-cmd {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--crust);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--surface0);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.perm-card .perm-cmd .dollar {
+  color: var(--green);
+}
+
+.perm-card .perm-cmd .danger {
+  color: var(--red);
+  font-weight: var(--weight-semibold);
+}
+
+.perm-card .perm-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.perm-card .perm-actions .btn-always {
+  border-color: var(--surface1);
+  color: var(--subtext1);
+}
+
+.perm-card .perm-actions .btn-always:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--green);
+  background: transparent;
+}
+
+.perm-card .perm-actions .btn-always b {
+  font-family: var(--mono);
+  font-weight: var(--weight-medium);
+}
+
+.perm-card .perm-actions .btn-deny:hover:not(:disabled) {
+  color: var(--red);
+}
+
+.perm-card.danger .perm-actions .btn-deny {
+  border: 1px solid var(--surface1);
+  color: var(--subtext1);
+}
+
+.perm-card.danger .perm-actions .btn-deny:hover:not(:disabled) {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: transparent;
+}
+
+.perm-card .perm-actions .hint {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
