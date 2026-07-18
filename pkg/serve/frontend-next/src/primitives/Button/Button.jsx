@@ -1,6 +1,6 @@
 import "./Button.css";
 
-// Button — botón de acción genérico.
+// Button — generic action button.
 export function Button({
   variant = "solid",
   size = "md",

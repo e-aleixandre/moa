@@ -7,10 +7,10 @@ import {
 } from "../../components/index.js";
 import "./Stream.css";
 
-// Stream — el área scrollable de conversación: separador de fecha, prompt
-// del usuario, documento del asistente con ledgers/diff intercalados, y la
-// tarjeta de permiso pendiente. Datos mock fieles al mockup
-// conversation-desktop.html, traducidos a inglés.
+// Stream — the scrollable conversation area: date separator, user prompt,
+// assistant document with ledgers/diff interleaved, and the pending
+// permission card. Mock data faithful to the conversation-desktop.html
+// mockup, translated to English.
 const DIFF_TEXT = `--- a/pkg/serve/ws.go
 +++ b/pkg/serve/ws.go
 @@ -262,8 +262,9 @@

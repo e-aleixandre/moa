@@ -17,9 +17,9 @@ import diff from "highlight.js/lib/languages/diff";
 import dockerfile from "highlight.js/lib/languages/dockerfile";
 import "./CodeBlock.css";
 
-// Registro selectivo de lenguajes (core + languages/* elegidos) — evita tirar
-// del build completo de highlight.js (~190 lenguajes, >1MB minif). Ver nota
-// de bundle en el README de este bloque.
+// Selective language registration (core + chosen languages/*) — avoids pulling
+// in the full highlight.js build (~190 languages, >1MB minified). See bundle
+// note in this block's README.
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("python", python);
@@ -36,10 +36,10 @@ hljs.registerLanguage("sql", sql);
 hljs.registerLanguage("diff", diff);
 hljs.registerLanguage("dockerfile", dockerfile);
 
-// escapeHtml — escapa el texto plano antes de inyectarlo como HTML. Función
-// pura (sin tocar el DOM), usada solo por el fallback de highlight() cuando
-// el lenguaje no está registrado — hljs.highlight con lenguaje conocido ya
-// escapa el código por su cuenta.
+// escapeHtml — escapes plain text before injecting it as HTML. Pure
+// function (doesn't touch the DOM), used only by highlight()'s fallback when
+// the language isn't registered — hljs.highlight with a known language already
+// escapes the code on its own.
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -54,17 +54,17 @@ function highlight(code, lang) {
       // fall through to plain text below
     }
   }
-  // Sin lenguaje reconocido: texto plano escapado (sin auto-detect, que es
-  // más caro y menos predecible para bloques cortos).
+  // No recognized language: escaped plain text (no auto-detect, which is
+  // more expensive and less predictable for short blocks).
   return escapeHtml(code);
 }
 
 
-// CodeBlock — bloque de código con cabecera (lenguaje + fichero opcional +
-// copiar) y cuerpo resaltado con highlight.js (core + lenguajes registrados
-// arriba). `code` es el texto plano; `lang` es un id de highlight.js.
-// `showHeader={false}` oculta la cabecera (lang/fichero/copiar) para usos
-// densos donde solo interesa el cuerpo (p.ej. el mini-code de un pane).
+// CodeBlock — code block with a header (language + optional filename +
+// copy) and a body highlighted with highlight.js (core + languages registered
+// above). `code` is the plain text; `lang` is a highlight.js id.
+// `showHeader={false}` hides the header (lang/filename/copy) for
+// dense uses where only the body matters (e.g. a pane's mini-code).
 export function CodeBlock({ code = "", lang, filename, showHeader = true, className = "", ...rest }) {
   const [copied, setCopied] = useState(false);
   const html = highlight(code, lang);
@@ -75,7 +75,7 @@ export function CodeBlock({ code = "", lang, filename, showHeader = true, classN
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // clipboard no disponible (permisos/contexto no seguro): no-op visual.
+      // clipboard not available (permissions/insecure context): visual no-op.
     }
   }
 

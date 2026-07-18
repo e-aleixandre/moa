@@ -6,11 +6,11 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import "./ConversationScreen.css";
 
-// ConversationScreen — organism raíz de la pantalla de conversación de
-// escritorio: grid de 2 columnas (Spine + columna principal), replicando
-// .app/.main del mockup conversation-desktop.html. Encapsula el 100vh y el
-// overflow controlado (el scroll vive solo en Stream) sin tocar el body
-// global, para no romper el catálogo.
+// ConversationScreen — root organism of the desktop conversation
+// screen: 2-column grid (Spine + main column), replicating
+// .app/.main from the conversation-desktop.html mockup. Encapsulates the 100vh and
+// controlled overflow (scroll only lives in Stream) without touching the
+// global body, so as not to break the catalog.
 export function ConversationScreen() {
   return (
     <div class="conversation-screen">

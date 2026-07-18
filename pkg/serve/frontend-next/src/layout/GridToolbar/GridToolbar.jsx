@@ -1,9 +1,9 @@
 import { SquareSplitHorizontal, SquareSplitVertical, Bell } from "lucide-preact";
 import "./GridToolbar.css";
 
-// PRESETS — cada preset dibuja un mini layout con divs (`i` = tile). El
-// preset activo se resalta en peach. Son botones reales (no solo decorativos)
-// para que un usuario de teclado/lector de pantalla pueda cambiar el layout.
+// PRESETS — each preset draws a mini layout with divs (`i` = tile). The
+// active preset is highlighted in peach. They're real buttons (not just decorative)
+// so a keyboard/screen-reader user can change the layout.
 const PRESETS = [
   { key: "p1", label: "1 pane", tiles: 1 },
   { key: "p2", label: "2 panes", tiles: 2 },
@@ -11,9 +11,9 @@ const PRESETS = [
   { key: "p4", label: "4 panes", tiles: 4 },
 ];
 
-// GridToolbar — barra superior de la vista grid: ocupa el mismo slot que
-// ChatHead en la vista de conversación. Presets de layout + splits + hint +
-// attention lamp (a la derecha).
+// GridToolbar — top bar of the grid view: occupies the same slot as
+// ChatHead in the conversation view. Layout presets + splits + hint +
+// attention lamp (on the right).
 export function GridToolbar({
   paneCount = 3,
   preset = "p3",

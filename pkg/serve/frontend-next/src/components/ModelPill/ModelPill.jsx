@@ -1,9 +1,9 @@
 import { ThinkingMeter } from "../../primitives/index.js";
 import "./ModelPill.css";
 
-// ModelPill — pastilla de modelo con el ThinkingMeter (variant "bars" por
-// defecto) incrustado. `accent` tiñe el nombre del modelo (sol=lavender,
-// fable=peach, terra=teal… cualquier token de color válido).
+// ModelPill — model pill with the ThinkingMeter (variant "bars" by
+// default) embedded. `accent` tints the model name (sol=lavender,
+// fable=peach, terra=teal… any valid color token).
 export function ModelPill({
   model,
   level = "off",

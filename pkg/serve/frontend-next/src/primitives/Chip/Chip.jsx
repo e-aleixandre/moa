@@ -1,8 +1,8 @@
 import "./Chip.css";
 
-// Chip — píldora genérica pequeña. Base para tray chips, strip móvil, tags.
-// Acepta cualquier hijo (p.ej. un StateDot) y opcionalmente un tono semántico
-// y un tamaño ("md" por defecto, "sm" compacto).
+// Chip — small generic pill. Base for tray chips, mobile strip, tags.
+// Accepts any child (e.g. a StateDot) and optionally a semantic tone
+// and a size ("md" by default, "sm" compact).
 export function Chip({ children, tone, size = "md", mono = false, onClick, ...rest }) {
   const classes = ["chip"];
   if (tone) classes.push(`tone-${tone}`);

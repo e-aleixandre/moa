@@ -12,8 +12,8 @@ import {
 } from "lucide-preact";
 import "./ActivityLedger.css";
 
-// TOOL_ICONS — mapa tool → icono lucide, usado por LedgerRow. `Wrench` es el
-// fallback para tools no mapeadas explícitamente.
+// TOOL_ICONS — tool → lucide icon map, used by LedgerRow. `Wrench` is the
+// fallback for tools not explicitly mapped.
 const TOOL_ICONS = {
   read: FileText,
   grep: Search,
@@ -33,9 +33,9 @@ function toolIcon(tool) {
   return TOOL_ICONS[tool] || Wrench;
 }
 
-// LedgerRow — una fila del activity ledger. Clicable para expandir/colapsar
-// un `body` mono con la salida de la tool. Estado interno por defecto
-// (`defaultOpen`); puede controlarse pasando `open`/`onToggle`.
+// LedgerRow — a single activity ledger row. Clickable to expand/collapse
+// a mono `body` with the tool's output. Internal state by default
+// (`defaultOpen`); can be controlled by passing `open`/`onToggle`.
 export function LedgerRow({
   tool,
   arg,
@@ -87,14 +87,14 @@ export function LedgerRow({
   );
 }
 
-// ActivityLedger — contenedor de filas de tool calls colapsables.
-// `rows` es un array de props para LedgerRow. El estado abierto/cerrado de
-// cada fila vive en LedgerRow (useState) y se asocia a la fila vía `key`;
-// usar el índice como key haría que insertar/reordenar filas reasignase el
-// estado de expansión a la fila equivocada. El consumidor DEBERÍA pasar un
-// `row.key`/`row.id` estable (p.ej. el id del tool call). Si no lo hace,
-// derivamos una key best-effort del contenido — no es tan robusta como un id
-// real, pero es mejor que el índice puro.
+// ActivityLedger — container for collapsible tool-call rows.
+// `rows` is an array of props for LedgerRow. Each row's open/closed state
+// lives in LedgerRow (useState) and is tied to the row via `key`;
+// using the index as key would make inserting/reordering rows reassign
+// the expansion state to the wrong row. The consumer SHOULD pass a
+// stable `row.key`/`row.id` (e.g. the tool call's id). If it doesn't,
+// we derive a best-effort key from the content — not as robust as a real
+// id, but better than a plain index.
 function rowKey(row, i) {
   if (row.key != null) return row.key;
   if (row.id != null) return row.id;

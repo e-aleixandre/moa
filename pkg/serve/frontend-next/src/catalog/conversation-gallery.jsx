@@ -90,9 +90,9 @@ const LEDGER_FIX_ROWS = [
   },
 ];
 
-// ConversationGallery — reproduce el flujo del mockup Studio (conversation-
-// desktop.html): waypoint del usuario, documento del asistente con ledgers y
-// bloques de código, y el cursor de streaming al final del último párrafo.
+// ConversationGallery — reproduces the Studio mockup flow (conversation-
+// desktop.html): user waypoint, assistant document with ledgers and
+// code blocks, and the streaming cursor at the end of the last paragraph.
 export function ConversationGallery() {
   const [streaming, setStreaming] = useState(true);
   return (

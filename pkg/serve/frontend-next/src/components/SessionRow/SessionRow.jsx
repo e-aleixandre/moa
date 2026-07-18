@@ -2,20 +2,20 @@ import { X } from "lucide-preact";
 import { StateDot } from "../../primitives/index.js";
 import "./SessionRow.css";
 
-// SessionRow — la pieza de sesión, un único componente con 3 variantes
-// conmutables (pill | tab | card) para comparar en vivo las direcciones
-// A/B/C, igual que ThinkingMeter con `variant`.
+// SessionRow — the session piece, a single component with 3 switchable
+// variants (pill | tab | card) to compare directions A/B/C live,
+// just like ThinkingMeter with `variant`.
 //
-// `state` "permission" y "error" tiñen toda la fila ("needs you"), no solo el
-// punto: permission usa amarillo (como el mockup), error usa la misma pauta
-// en rojo para mantener la convención de semáforo del sistema.
+// `state` "permission" and "error" tint the whole row ("needs you"), not just the
+// dot: permission uses yellow (like the mockup), error uses the same pattern
+// in red to keep the system's traffic-light convention.
 const NEEDS_TONE = {
   permission: "yellow",
   error: "red",
 };
 
-// Sufijo añadido al nombre accesible del botón cuando el estado es relevante
-// para quien usa lector de pantalla (no solo color/icono).
+// Suffix added to the button's accessible name when the state is relevant
+// for screen reader users (not just color/icon).
 const STATE_LABEL_SUFFIX = {
   permission: ", requires permission",
   error: ", error",

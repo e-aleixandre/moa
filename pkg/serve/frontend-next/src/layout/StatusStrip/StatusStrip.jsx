@@ -1,7 +1,7 @@
 import "./StatusStrip.css";
 
-// StatusStrip — tira mono bajo el composer: anillo de contexto, tokens,
-// tarea en curso y gasto de hoy.
+// StatusStrip — mono strip under the composer: context ring, tokens,
+// current task and today's spend.
 export function StatusStrip({
   ctxPercent = 62,
   tokensUp = "41.2k",

@@ -1,7 +1,7 @@
 import "./IconButton.css";
 
-// IconButton — botón cuadrado solo-icono (headers: rewind, settings, etc.)
-// `children` es un icono de lucide-preact; `label` alimenta el aria-label.
+// IconButton — square icon-only button (headers: rewind, settings, etc.)
+// `children` is a lucide-preact icon; `label` feeds the aria-label.
 export function IconButton({
   children,
   label,

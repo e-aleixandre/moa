@@ -2,14 +2,14 @@ import { useState } from "preact/hooks";
 import { Copy, Check } from "lucide-preact";
 import "./DiffBlock.css";
 
-// parseUnifiedDiff — parser simple y robusto de un diff unificado (formato
-// `git diff`/`diff -u`): entiende cabeceras `@@ -a,b +c,d @@`, líneas de
-// contexto, `+` (add) y `-` (del). Ignora metadatos (`diff --git`, `index `,
-// `--- `/`+++ `) y la marca `\ No newline at end of file` — ninguno de ellos
-// se numera ni se muestra como línea de contexto. Las líneas de contenido
-// solo se procesan tras haber visto una cabecera de hunk `@@`; cualquier
-// cosa antes de eso (o metadatos no reconocidos) se descarta.
-// Devuelve un array de {oldNo, newNo, type, text} listo para <DiffBlock>.
+// parseUnifiedDiff — simple, robust parser for a unified diff (`git diff`/
+// `diff -u` format): understands `@@ -a,b +c,d @@` headers, context
+// lines, `+` (add) and `-` (del). Ignores metadata (`diff --git`, `index `,
+// `--- `/`+++ `) and the `\ No newline at end of file` marker — none of them
+// is numbered or shown as a context line. Content lines
+// are only processed after seeing a `@@` hunk header; anything
+// before that (or unrecognized metadata) is discarded.
+// Returns an array of {oldNo, newNo, type, text} ready for <DiffBlock>.
 export function parseUnifiedDiff(diffText) {
   const lines = diffText.split("\n");
   const out = [];
@@ -46,10 +46,10 @@ export function parseUnifiedDiff(diffText) {
 }
 
 
-// DiffBlock — variante diff del CodeBlock: cabecera "diff" en teal + fichero
-// + copy, cuerpo con líneas numeradas (add/del/ctx). Acepta `lines` ya
-// estructuradas ({oldNo?, newNo?, type, text}) o `diffText` (unified diff
-// crudo, parseado con parseUnifiedDiff).
+// DiffBlock — diff variant of CodeBlock: "diff" header in teal + filename
+// + copy, body with numbered lines (add/del/ctx). Accepts already-
+// structured `lines` ({oldNo?, newNo?, type, text}) or raw `diffText`
+// (unified diff, parsed with parseUnifiedDiff).
 export function DiffBlock({ lines, diffText, filename, className = "", ...rest }) {
   const [copied, setCopied] = useState(false);
   const rows = lines ?? (diffText ? parseUnifiedDiff(diffText) : []);
@@ -65,7 +65,7 @@ export function DiffBlock({ lines, diffText, filename, className = "", ...rest }
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // clipboard no disponible: no-op visual.
+      // clipboard not available: visual no-op.
     }
   }
 

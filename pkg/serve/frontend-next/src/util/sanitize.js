@@ -1,10 +1,10 @@
 import DOMPurify from "dompurify";
 
-// sanitizeHtml — allowlist para contenido de conversación renderizado desde
-// markdown (waypoints de usuario, documentos del asistente). DOMPurify ya
-// quita <script> y atributos on* por defecto; aquí además restringimos el
-// conjunto de tags/atributos permitidos a lo que el pipeline markdown genera,
-// para no dejar colarse SVG/MathML ni atributos exóticos.
+// sanitizeHtml — allowlist for conversation content rendered from markdown
+// (user waypoints, assistant documents). DOMPurify already strips <script>
+// and on* attributes by default; here we further restrict the set of allowed
+// tags/attributes to what the markdown pipeline generates, so SVG/MathML and
+// exotic attributes can't slip through.
 const ALLOWED_TAGS = [
   "p", "strong", "em", "b", "i", "code", "pre",
   "ul", "ol", "li", "a",
@@ -19,15 +19,14 @@ export function sanitizeHtml(html) {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
-    // Enlaces siempre con rel seguro: sin esto un <a target="_blank"> del
-    // asistente podría abusar de window.opener sobre el documento origen.
+    // Links always with a safe rel: without this an assistant <a target="_blank">
+    // could abuse window.opener against the origin document.
     ADD_ATTR: ["target", "rel"],
   });
 }
 
-// Fuerza target/rel seguros en cualquier <a> tras sanitizar (DOMPurify no
-// reescribe atributos existentes, solo permite/deniega, así que lo hacemos
-// como hook).
+// Forces safe target/rel on any <a> after sanitizing (DOMPurify does not
+// rewrite existing attributes, it only allows/denies, so we do it as a hook).
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (node.tagName === "A") {
     node.setAttribute("target", "_blank");

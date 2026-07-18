@@ -3,8 +3,8 @@ import { Plus, Slash, ArrowUp } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import "./Composer.css";
 
-// Composer — área de entrada del mensaje: textarea + barra inferior con
-// attach, slash commands, nota de cola y botón de enviar.
+// Composer — message input area: textarea + bottom bar with
+// attach, slash commands, queue note and send button.
 export function Composer({
   value,
   onChange,

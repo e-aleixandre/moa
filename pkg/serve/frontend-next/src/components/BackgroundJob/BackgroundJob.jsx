@@ -2,17 +2,17 @@ import { useState } from "preact/hooks";
 import { ChevronDown } from "lucide-preact";
 import "./BackgroundJob.css";
 
-// BackgroundJob — strip de trabajo en background (bash async) dentro del
-// stream de conversación: vive como pieza de contenido entre párrafos del
-// documento del asistente, igual que FanoutBlock/ActivityLedger — de ahí que
-// esté en components/ y no en layout/.
+// BackgroundJob — background-work strip (async bash) inside the
+// conversation stream: lives as a content piece between paragraphs of the
+// assistant document, just like FanoutBlock/ActivityLedger — hence why
+// it's in components/ and not layout/.
 //
-// El "peek" despliega un logtail mono con las últimas líneas; el estado
-// abierto/cerrado es local (useState) y se expone con aria-expanded en el
-// botón, igual que el patrón de LedgerRow (ActivityLedger) para filas
-// colapsables. Todo vive bajo un único root `.bg-job` (strip + logtail), en
-// vez de dos hermanos sueltos, para mantener el CSS co-locado bajo una sola
-// raíz de componente.
+// The "peek" expands a mono logtail with the last lines; the open/closed
+// state is local (useState) and exposed with aria-expanded on the
+// button, same pattern as LedgerRow (ActivityLedger) for collapsible
+// rows. Everything lives under a single `.bg-job` root (strip + logtail),
+// instead of two loose siblings, to keep the CSS co-located under a single
+// component root.
 export function BackgroundJob({
   jobLabel = "BG · JOB",
   cmd,

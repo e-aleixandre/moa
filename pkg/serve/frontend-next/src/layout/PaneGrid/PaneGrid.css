@@ -9,7 +9,7 @@
   position: relative;
 }
 
-/* splitter hint — puramente visual por ahora (ver TODO en PaneGrid.jsx) */
+/* splitter hint — purely visual for now (see TODO in PaneGrid.jsx) */
 .pane-grid .split-x {
   position: absolute;
   top: 0;
@@ -38,7 +38,7 @@
   min-height: 0;
 }
 
-/* ghost pane — empty slot invitando a añadir sesión */
+/* ghost pane — empty slot inviting to add a session */
 .pane-grid .ghost {
   border: 1.5px dashed color-mix(in srgb, var(--mauve) 55%, transparent);
   border-radius: var(--radius-lg);
@@ -83,8 +83,8 @@
   text-align: center;
 }
 
-/* ── contenido de pane: pieces reutilizadas del vocabulario de Stream,
-   en densidad reducida para caber en un panel pequeño ── */
+/* ── pane content: pieces reused from Stream's vocabulary,
+   at reduced density to fit in a small panel ── */
 
 .pane-grid .p-body p {
   color: var(--subtext1);
@@ -125,8 +125,8 @@
   margin-bottom: 2px;
 }
 
-/* mini-ledger — ActivityLedger reutilizada, densidad reducida (padding y
-   tamaño de fila más pequeños que la del Stream principal). */
+/* mini-ledger — reused ActivityLedger, reduced density (smaller padding and
+   row size than the main Stream's). */
 .pane-grid .mini-ledger {
   margin: 4px 0 var(--space-3);
   font-size: var(--text-xs);
@@ -142,9 +142,9 @@
   width: 38px;
 }
 
-/* mini-code — CodeBlock reutilizado en densidad de panel (usa showHeader=false
-   para ocultar lang/copy, que no encajan en la altura objetivo del mockup: la
-   referencia solo muestra el <pre>). Aquí solo ajustamos densidad. */
+/* mini-code — CodeBlock reused at panel density (uses showHeader=false
+   to hide lang/copy, which don't fit the mockup's target height: the
+   reference only shows the <pre>). Here we just adjust density. */
 .pane-grid .mini-code {
   margin-bottom: var(--space-3);
 }
@@ -158,8 +158,8 @@
   line-height: var(--leading-normal);
 }
 
-/* err-note — nota de error inline dentro del pane (PermissionCard no aplica
-   aquí: no es una petición de permiso, es un fallo con acción de retry). */
+/* err-note — inline error note inside the pane (PermissionCard doesn't apply
+   here: it's not a permission request, it's a failure with a retry action). */
 .pane-grid .err-note {
   border: 1px solid color-mix(in srgb, var(--red) 40%, var(--surface0));
   background: color-mix(in srgb, var(--red) 7%, transparent);
@@ -203,9 +203,9 @@
   outline-offset: var(--focus-ring-offset);
 }
 
-/* PermissionCard dentro de un pane pequeño: reducimos su padding/tamaño
-   máximo para que quepa sin desbordar el panel (el componente en sí no
-   cambia, solo su contexto de layout aquí). */
+/* PermissionCard inside a small pane: we reduce its padding/max size
+   so it fits without overflowing the panel (the component itself doesn't
+   change, only its layout context here). */
 .pane-grid .pane .perm-card {
   max-width: none;
   padding: var(--space-3) var(--space-4);

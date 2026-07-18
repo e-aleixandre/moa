@@ -38,9 +38,9 @@ button, input, textarea, select {
   color: inherit;
 }
 
-/* Suelo de 16px para campos editables: evita el auto-zoom de iOS Safari al
-   enfocarlos en la PWA. Cualquier componente puede subir el tamaño, nunca
-   bajarlo por debajo de --text-input. */
+/* 16px floor for editable fields: avoids iOS Safari auto-zoom when focusing
+   them in the PWA. Any component may raise the size, but never lower it
+   below --text-input. */
 input, textarea, select {
   font-size: var(--text-input);
 }

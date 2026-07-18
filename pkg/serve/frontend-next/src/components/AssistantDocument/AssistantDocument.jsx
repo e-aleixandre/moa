@@ -1,12 +1,12 @@
 import { sanitizeHtml } from "../../util/sanitize.js";
 import "./AssistantDocument.css";
 
-// AssistantDocument — flujo de "documento" del trabajo del agente: párrafos,
-// listas, títulos de sección, code inline. No impone estructura interna: el
-// consumidor compone los bloques hijos (párrafos, ActivityLedger, CodeBlock,
-// DiffBlock…) como children, o pasa `html` ya renderizado (markdown).
-// `streaming` pinta el cursor parpadeante al final del documento, como
-// hermano posterior al contenido — igual en modo `html` y modo children.
+// AssistantDocument — "document" flow of the agent's work: paragraphs,
+// lists, section headings, inline code. Doesn't impose internal structure: the
+// consumer composes the child blocks (paragraphs, ActivityLedger, CodeBlock,
+// DiffBlock…) as children, or passes already-rendered `html` (markdown).
+// `streaming` paints the blinking cursor at the end of the document, as a
+// sibling after the content — same in `html` mode and children mode.
 export function AssistantDocument({
   children,
   html,

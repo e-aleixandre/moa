@@ -3,8 +3,8 @@ import { StateDot, Kbd, IconButton } from "../../primitives/index.js";
 import { ModelPill } from "../../components/index.js";
 import "./ChatHead.css";
 
-// ChatHead — cabecera de la columna principal: breadcrumb de sesión
-// (estado + título + ruta) y acciones (modelo, grid toggle, rewind,
+// ChatHead — main column header: session breadcrumb
+// (state + title + path) and actions (model, grid toggle, rewind,
 // notifications, session settings).
 export function ChatHead({
   title = "ws race fix",

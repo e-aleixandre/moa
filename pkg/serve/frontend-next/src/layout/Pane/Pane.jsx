@@ -2,21 +2,21 @@ import { Rewind, Maximize2, X } from "lucide-preact";
 import { StateDot, IconButton, ThinkingMeter } from "../../primitives/index.js";
 import "./Pane.css";
 
-// Pane — un panel individual del grid. Reutiliza StateDot/IconButton/
-// ThinkingMeter de las primitivas; el header reproduce el patrón compacto de
-// ChatHead pero más denso (esto vive en una rejilla, no en la columna
-// principal).
+// Pane — a single grid panel. Reuses StateDot/IconButton/
+// ThinkingMeter from the primitives; the header reproduces ChatHead's
+// compact pattern but denser (this lives in a grid, not in the main
+// column).
 //
-// El badge de modelo mono ("sol ▰▰▱▱" en el mockup) se construye con
-// ThinkingMeter variant="glyph" en vez de texto literal: así el nivel de
-// pensamiento queda accesible/real en vez de un string estático, y no se
-// duplica la lógica de niveles que ya vive en la primitiva.
+// The mono model badge ("sol ▰▰▱▱" in the mockup) is built with
+// ThinkingMeter variant="glyph" instead of literal text: this way the
+// thinking level stays accessible/real instead of a static string, and the
+// level logic already living in the primitive isn't duplicated.
 //
-// `footer` (Fase 3B) — slot opcional para el pulso del pane ("● streaming",
-// "waiting 0:42"…), como en la sección "grid alive" del mockup de live
-// states. `hideComposer` oculta el input falso cuando el footer ya cierra el
-// panel visualmente (evita duplicar affordances de envío en los panes vivos
-// de la galería de demo).
+// `footer` (Phase 3B) — optional slot for the pane's pulse ("● streaming",
+// "waiting 0:42"…), like in the "grid alive" section of the live
+// states mockup. `hideComposer` hides the fake input when the footer already
+// visually closes the panel (avoids duplicating send affordances in the live
+// panes of the demo gallery).
 export function Pane({
   title,
   path,
@@ -43,9 +43,9 @@ export function Pane({
     .filter(Boolean)
     .join(" ");
 
-  // El estado del pane (running/permission/error) va codificado por color y
-  // animación en el StateDot; para lectores de pantalla lo exponemos como
-  // texto en el nombre accesible del panel y del propio punto.
+  // The pane's state (running/permission/error) is encoded via color and
+  // animation on the StateDot; for screen readers we expose it as
+  // text in the panel's and the dot's accessible names.
   const STATE_LABEL = {
     running: "running",
     permission: "requires permission",

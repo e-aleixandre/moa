@@ -1,10 +1,10 @@
 import "./Spinner.css";
 
-// Spinner — anillo giratorio pequeño para indicar trabajo en curso. Extrae y
-// tokeniza el patrón que ya vivía duplicado en AgentTray (agent-spinner):
-// aquí gana una variante de color (blue/sky/teal/mauve) para poder distinguir
-// varios subagentes en paralelo sin inventar un nuevo patrón por cada sitio
-// que lo necesite (FanoutBlock, AgentTray, tool tickers, etc.).
+// Spinner — small spinning ring to signal work in progress. Extracts and
+// tokenizes the pattern that was already duplicated in AgentTray (agent-spinner):
+// here it gains a color variant (blue/sky/teal/mauve) to tell apart several
+// parallel subagents without inventing a new pattern for each place that needs
+// it (FanoutBlock, AgentTray, tool tickers, etc.).
 const COLORS = ["blue", "sky", "teal", "mauve"];
 
 const DEFAULT_SIZE = 11;

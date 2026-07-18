@@ -2,14 +2,14 @@ import { Check } from "lucide-preact";
 import "./AgentTray.css";
 import { Spinner } from "../../primitives/index.js";
 
-// AgentTray — fila de chips de subagentes/herramientas vivas, encima del
-// composer. Cada chip: spinner + nombre coloreado + qué hace + tiempo mono.
-// El spinner reutiliza la primitiva Spinner (mismo patrón que antes vivía
-// duplicado aquí como .agent-spinner, ahora tokenizado con variantes de color
-// para poder distinguir varios agentes en paralelo — ver FanoutBlock).
+// AgentTray — row of live subagent/tool chips, above the
+// composer. Each chip: spinner + colored name + what it's doing + mono time.
+// The spinner reuses the Spinner primitive (same pattern that used to live
+// duplicated here as .agent-spinner, now tokenized with color variants
+// to distinguish several agents in parallel — see FanoutBlock).
 //
-// state: "running" (default, spinner) | "done" (check verde + badge peach
-// "unseen" pulsante, Fase 3B — mirrors the finished-but-unread row of
+// state: "running" (default, spinner) | "done" (green check + pulsing peach
+// "unseen" badge, Phase 3B — mirrors the finished-but-unread row of
 // FanoutBlock when you've scrolled away from the stream).
 const AGENTS = [
   { key: "terra", who: "terra", color: "sky", what: "reviewing diff · pkg/serve", time: "2m 14s" },

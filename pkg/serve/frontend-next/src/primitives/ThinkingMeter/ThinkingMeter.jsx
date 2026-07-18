@@ -1,7 +1,7 @@
 import "./ThinkingMeter.css";
 
-// ThinkingMeter — un único componente con 3 variantes conmutables (bars |
-// dial | glyph) para poder comparar cuál gusta más antes de fijar una.
+// ThinkingMeter — a single component with 3 switchable variants (bars |
+// dial | glyph) so we can compare which one we like before settling on one.
 const LEVELS = ["off", "low", "medium", "high", "xhigh"];
 
 function levelToFilled(level) {

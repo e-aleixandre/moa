@@ -1,7 +1,7 @@
 import "./Card.css";
 
-// Card — contenedor genérico reutilizable (fondo, borde, radius). No impone
-// layout interno; el consumidor decide con className/estilos propios.
+// Card — generic reusable container (background, border, radius). Doesn't impose
+// internal layout; the consumer decides with its own className/styles.
 export function Card({ children, className = "", ...rest }) {
   return (
     <div class={`card ${className}`.trim()} {...rest}>

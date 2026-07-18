@@ -13,11 +13,11 @@ import { AgentTray, Composer, StatusStrip, Pane, GridToolbar } from "../layout/i
 import { StateDot } from "../primitives/index.js";
 import "./live-states-gallery.css";
 
-// LiveStatesGallery — reproduce las 3 secciones de live-states.html: fan-out
-// de subagentes en paralelo, un job en background con log tail desplegable,
-// y el grid con tres panes vivos a la vez. Todo reutiliza primitivas y
-// componentes ya existentes (Pane, AgentTray, AssistantDocument, ...); no se
-// inventa maquetación nueva salvo lo que pide explícitamente la fase
+// LiveStatesGallery — reproduces the 3 sections of live-states.html: parallel
+// subagent fan-out, a background job with a collapsible log tail,
+// and the grid with three live panes at once. Everything reuses existing
+// primitives and components (Pane, AgentTray, AssistantDocument, ...); no
+// new layout is invented beyond what the phase explicitly requires
 // (FanoutBlock, BackgroundJob, StreamingSkeleton/TypingDots, ToolTicker).
 
 const FANOUT_AGENTS = [

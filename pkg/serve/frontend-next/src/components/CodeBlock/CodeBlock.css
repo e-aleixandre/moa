@@ -67,8 +67,8 @@
   color: var(--text);
 }
 
-/* highlight.js theme — mapeado a tokens Mocha, siguiendo la convención
-   .tok-* del mockup (k=mauve, f=blue, s=green, c=overlay0 italic, n=peach,
+/* highlight.js theme — mapped to Mocha tokens, following the mockup's
+   .tok-* convention (k=mauve, f=blue, s=green, c=overlay0 italic, n=peach,
    t=yellow). */
 .code pre .hljs-keyword,
 .code pre .hljs-selector-tag,

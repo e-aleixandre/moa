@@ -58,8 +58,8 @@
   margin: var(--space-5) 0 var(--space-3);
 }
 
-/* Streaming cursor: siempre un <span class="doc-cursor"> como último hermano
-   del contenido (wrapper .doc-html en modo html, o children en modo hijos). */
+/* Streaming cursor: always a <span class="doc-cursor"> as the last sibling
+   of the content (.doc-html wrapper in html mode, or children in children mode). */
 .doc .doc-cursor {
   content: "";
   display: inline-block;

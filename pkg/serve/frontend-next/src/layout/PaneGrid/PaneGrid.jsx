@@ -3,7 +3,7 @@ import { Pane } from "../Pane/Pane.jsx";
 import { ActivityLedger, CodeBlock, PermissionCard } from "../../components/index.js";
 import "./PaneGrid.css";
 
-// Contenido mock de cada pane, fiel a panes-desktop.html (textos en inglés).
+// Mock content for each pane, faithful to panes-desktop.html (English text).
 
 const WS_RACE_LEDGER = [
   { tool: "read", arg: { text: "pkg/serve/ws.go", detail: "210–340" }, out: "130 ln", status: "ok" },
@@ -67,16 +67,16 @@ function MigrateSqliteBody() {
   );
 }
 
-// PaneGrid — contenedor de la rejilla de panes. Reproduce el layout del
-// mockup: split-x vertical (hint de resize, sin lógica real todavía), un
-// pane "tall" focused a la izquierda, y una columna derecha con permiso +
-// una fila inferior (error + ghost).
+// PaneGrid — container for the pane grid. Reproduces the mockup's
+// layout: vertical split-x (resize hint, no real logic yet), a
+// focused "tall" pane on the left, and a right column with a permission +
+// a bottom row (error + ghost).
 export function PaneGrid({ onAddPane }) {
   return (
     <div class="pane-grid">
-      {/* TODO(fase-resize): el split-x es solo un hint visual (resalta al
-          hover); el resize real de columnas/filas llega en una fase
-          posterior con estado de layout persistido. */}
+      {/* TODO(resize-phase): split-x is just a visual hint (highlights on
+          hover); real column/row resizing arrives in a later phase
+          with persisted layout state. */}
       <div class="split-x" title="Drag to resize" aria-hidden="true" />
 
       <Pane

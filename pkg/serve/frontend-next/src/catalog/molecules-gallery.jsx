@@ -198,8 +198,8 @@ function SheetDemo() {
   );
 }
 
-// MoleculesGallery — muestra las moléculas del sistema de componentes
-// (Fase 1, bloque 2) en sus variantes/estados, para revisión visual en /next.
+// MoleculesGallery — shows the component system's molecules
+// (Phase 1, block 2) in their variants/states, for visual review on /next.
 export function MoleculesGallery() {
   return (
     <section>

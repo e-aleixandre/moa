@@ -142,8 +142,8 @@ function ThinkingMeterTable() {
   );
 }
 
-// PrimitivesGallery — muestra los átomos del sistema de componentes
-// (Fase 1, bloque 1) en todos sus estados, para revisión visual en /next.
+// PrimitivesGallery — shows the component system's atoms
+// (Phase 1, block 1) in all their states, for visual review on /next.
 export function PrimitivesGallery() {
   return (
     <section>

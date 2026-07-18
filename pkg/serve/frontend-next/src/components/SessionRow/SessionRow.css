@@ -1,4 +1,4 @@
-/* SessionRow — 3 variantes conmutables: pill (A) · tab (B) · card (C) */
+/* SessionRow — 3 switchable variants: pill (A) · tab (B) · card (C) */
 
 .session-row {
   display: inline-flex;
@@ -30,9 +30,9 @@
   white-space: nowrap;
 }
 
-/* El botón de cerrar se mantiene siempre en el árbol/tabbable (nunca
-   display:none), solo se oculta visualmente por defecto y se revela al
-   hacer hover del contenedor o al recibir foco por teclado. */
+/* The close button always stays in the tree/tabbable (never
+   display:none), it's only visually hidden by default and revealed on
+   container hover or on receiving keyboard focus. */
 .session-row .x {
   display: inline-flex;
   align-items: center;
@@ -201,9 +201,9 @@
   padding-left: var(--space-4);
 }
 
-/* pane — badge mono opcional (P1/P2/P3…) indicando el pane del grid al que
-   está anclada la sesión. Retrocompatible: si no se pasa `pane`, no se
-   renderiza nada. */
+/* pane — optional mono badge (P1/P2/P3…) indicating the grid pane the
+   session is anchored to. Backward-compatible: if `pane` isn't passed, nothing
+   is rendered. */
 .session-row.variant-card .pane {
   font-family: var(--mono);
   font-size: var(--text-nano);

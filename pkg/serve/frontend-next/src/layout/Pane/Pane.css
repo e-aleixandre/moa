@@ -216,8 +216,8 @@
   flex: none;
 }
 
-/* p-foot — pulso del pane (Fase 3B: "● streaming", "waiting 0:42"…), footer
-   opcional entre el body y el composer falso. */
+/* p-foot — pane pulse (Phase 3B: "● streaming", "waiting 0:42"…), optional
+   footer between the body and the fake composer. */
 .pane .p-foot {
   flex: none;
   padding: var(--space-2) var(--space-4);

@@ -1,16 +1,16 @@
 import { GitFork, Check } from "lucide-preact";
 import "./FanoutBlock.css";
 
-// FanoutBlock — bloque de subagentes en paralelo dentro del stream de
-// conversación (fan-out): vive como pieza de *contenido* entre párrafos de
-// AssistantDocument, igual que ActivityLedger/DiffBlock — por eso está en
-// components/ y no en layout/ (layout/ es para organismos de pantalla como
-// Spine/ChatHead/PaneGrid, no para bloques que aparecen dentro del stream).
+// FanoutBlock — parallel-subagent block inside the conversation
+// stream (fan-out): lives as a *content* piece between paragraphs of
+// AssistantDocument, just like ActivityLedger/DiffBlock — hence why it's in
+// components/ and not layout/ (layout/ is for screen organisms like
+// Spine/ChatHead/PaneGrid, not for blocks that appear inside the stream).
 //
-// Cada fila de agente reutiliza Spinner (mismo patrón tokenizado que
-// AgentTray) para el estado "running", y un check verde para "done". El
-// color de acento (sky/teal/mauve/...) distingue visualmente cada subagente
-// tanto en el spinner como en la barra indeterminada y el nombre.
+// Each agent row reuses Spinner (same tokenized pattern as
+// AgentTray) for the "running" state, and a green check for "done". The
+// accent color (sky/teal/mauve/...) visually distinguishes each subagent
+// in the spinner, the indeterminate bar and the name alike.
 import { Spinner } from "../../primitives/index.js";
 
 function RunningRow({ name, accent = "sky", action, time }) {
@@ -55,10 +55,10 @@ function DoneRow({ name, result, resultDesc, onViewReport }) {
   );
 }
 
-// FanoutBlock — props.agents: array de
+// FanoutBlock — props.agents: array of
 // { id, name, accent, state: "running"|"done", action, time, result, resultDesc, onViewReport }
-// `id` es la clave estable de cada subagente (recomendado para estados vivos
-// que se actualizan/reordenan); si falta, cae al nombre.
+// `id` is each subagent's stable key (recommended for live states
+// that update/reorder); falls back to the name if missing.
 export function FanoutBlock({ task, count, startedAt, agents = [], onViewReport }) {
   const n = count ?? agents.length;
   return (

@@ -1,15 +1,15 @@
 import "./ToolTicker.css";
 
-// ToolTicker — líneas mono que rotan verticalmente para transmitir actividad
-// sin que haya que leerlas con atención (usado dentro de un Pane cuando hay
-// subagentes trabajando pero no hay espacio/necesidad de un ActivityLedger
-// completo). Es su propio componente en components/ (no una extensión de
-// Pane) porque la animación de ciclo vertical es una pieza de contenido
-// autocontenida, reutilizable fuera del grid si hiciera falta.
+// ToolTicker — mono lines that rotate vertically to convey activity
+// without needing to be read closely (used inside a Pane when
+// subagents are working but there's no room/need for a full
+// ActivityLedger). It's its own component in components/ (not an extension of
+// Pane) because the vertical cycle animation is a self-contained
+// content piece, reusable outside the grid if needed.
 //
-// `lines`: array de { id?, tool, text } — como máximo 3 conviven en pantalla a
-// la vez en el mockup (delays escalonados de 2s sobre un ciclo de 6s). El
-// delay es posicional (depende del índice); `id` es solo la key estable.
+// `lines`: array of { id?, tool, text } — at most 3 coexist on screen at
+// once in the mockup (2s staggered delays over a 6s cycle). The
+// delay is positional (depends on the index); `id` is just the stable key.
 export function ToolTicker({ lines = [], className = "", ...rest }) {
   return (
     <div class={`tool-ticker ${className}`.trim()} aria-hidden="true" {...rest}>

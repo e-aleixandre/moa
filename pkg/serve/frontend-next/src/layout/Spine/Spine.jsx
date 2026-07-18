@@ -3,10 +3,10 @@ import { Kbd, IconButton } from "../../primitives/index.js";
 import { SessionRow } from "../../components/index.js";
 import "./Spine.css";
 
-// Spine — barra lateral izquierda de sesiones. Sustituye a la TabBar
-// inferior del frontend actual: cabecera con logo/wordmark/versión, buscador
-// (trigger, no input real todavía), listas ACTIVE/SAVED de SessionRow
-// (variant="card") y pie con estado de Pulse + settings.
+// Spine — left sidebar of sessions. Replaces the current frontend's
+// bottom TabBar: header with logo/wordmark/version, search
+// (trigger, no real input yet), ACTIVE/SAVED lists of SessionRow
+// (variant="card") and footer with Pulse status + settings.
 const ACTIVE_SESSIONS = [
   { key: "ws-race-fix", title: "ws race fix", state: "running", active: true, pane: "P1" },
   {

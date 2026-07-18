@@ -10,11 +10,11 @@ const THINKING_OPTIONS = [
   { value: "xhigh", label: "xhigh" },
 ];
 
-// ModelSelector — popover de selección de modelo + nivel de thinking.
-// `models`: [{ id, name, desc, sigil, accent }]. `accent` es un nombre de
-// token de color (p.ej. "peach"), usado para teñir el sigilo. `thinking` es
-// el valor canónico ("off" | "low" | "medium" | "high" | "xhigh"), el mismo
-// vocabulario que consume ThinkingMeter.
+// ModelSelector — popover for model selection + thinking level.
+// `models`: [{ id, name, desc, sigil, accent }]. `accent` is a color
+// token name (e.g. "peach"), used to tint the sigil. `thinking` is
+// the canonical value ("off" | "low" | "medium" | "high" | "xhigh"), the same
+// vocabulary consumed by ThinkingMeter.
 export function ModelSelector({
   models,
   selected,

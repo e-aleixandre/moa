@@ -53,10 +53,10 @@
   --duration:    150ms;
 
   /* ---------------------------------------------------------------- */
-  /* Ampliación frontend-next — Fase 0                                 */
+  /* frontend-next extension — Phase 0                                 */
   /* ---------------------------------------------------------------- */
 
-  /* Spacing — escala base 4px */
+  /* Spacing — 4px base scale */
   --space-1:     4px;
   --space-2:     8px;
   --space-3:     12px;
@@ -67,9 +67,9 @@
   --space-10:    40px;
   --space-12:    48px;
 
-  /* Typography — tamaños */
-  /* --text-nano/-micro: microtamaños para labels/badges mono (versión, pane
-     badge, tick separators, timestamps del tray). Por debajo de --text-xs. */
+  /* Typography — sizes */
+  /* --text-nano/-micro: micro-sizes for mono labels/badges (version, pane
+     badge, tick separators, tray timestamps). Below --text-xs. */
   --text-nano:   9px;
   --text-micro:  10.5px;
   --text-xs:     11px;
@@ -80,23 +80,23 @@
   --text-xl:     20px;
   --text-2xl:    26px;
 
-  /* Tamaño de código/diff (cuerpo mono de CodeBlock/DiffBlock). Deliberadamente
-     fuera de la escala --text-* general: es un tamaño fino pensado solo para
-     bloques monoespaciados densos. */
+  /* Code/diff size (mono body of CodeBlock/DiffBlock). Deliberately outside
+     the general --text-* scale: a fine size meant only for dense monospaced
+     blocks. */
   --text-code:   12.5px;
 
-  /* Campos editables: nunca por debajo de 16px. iOS Safari hace auto-zoom al
-     enfocar un input/textarea/select con font-size < 16px, lo que resulta muy
-     molesto en la PWA. Este token es el suelo para todo campo de entrada. */
+  /* Editable fields: never below 16px. iOS Safari auto-zooms when focusing an
+     input/textarea/select with font-size < 16px, which is very annoying in the
+     PWA. This token is the floor for every input field. */
   --text-input:  16px;
 
-  /* Typography — pesos */
+  /* Typography — weights */
   --weight-normal:   400;
   --weight-medium:   500;
   --weight-semibold: 600;
   --weight-bold:     700;
 
-  /* Typography — interlineado */
+  /* Typography — line-height */
   --leading-tight:   1.25;
   --leading-normal:  1.5;
   --leading-relaxed: 1.7;
@@ -105,34 +105,34 @@
   --tracking-tight: -0.01em;
   --tracking-wide:   0.08em;
 
-  /* Elevation — sombras suaves sobre fondos oscuros */
+  /* Elevation — soft shadows over dark backgrounds */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.32);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.40);
 
-  /* Z-index — capas */
+  /* Z-index — layers */
   --z-base:    0;
   --z-sticky:  10;
   --z-overlay: 100;
   --z-sheet:   200;
   --z-toast:   300;
 
-  /* Layout — medidas estructurales compartidas entre pantallas */
+  /* Layout — structural measures shared across screens */
   --spine-width: 264px;
 
-  /* Anchos de contenido — columnas legibles de bloques del stream y páginas.
-     Semánticos y reutilizables (varios componentes comparten el de bloque). */
+  /* Content widths — legible columns for stream blocks and pages.
+     Semantic and reusable (several components share the block one). */
   --content-narrow: 560px;
   --content-block:  680px;
   --content-wide:   860px;
   --content-page:  1180px;
 
-  /* Tempos semánticos — para animaciones vivas (breathing, shimmer) */
+  /* Semantic tempos — for live animations (breathing, shimmer) */
   --breath-running:   1800ms;
   --breath-attention: 1100ms;
   --shimmer:          1400ms;
 
-  /* Foco visible — anillo compartido por controles interactivos */
+  /* Visible focus — ring shared by interactive controls */
   --focus-ring:        var(--mauve);
   --focus-ring-width:  2px;
   --focus-ring-offset: 2px;

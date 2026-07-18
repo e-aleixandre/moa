@@ -88,7 +88,7 @@
   mask: radial-gradient(circle, transparent 6px, #000 6.5px);
 }
 
-/* Glyph — tipográfico, bloques mono llenos/vacíos */
+/* Glyph — typographic, filled/empty mono blocks */
 
 .thinking-meter.variant-glyph {
   font-family: var(--mono);

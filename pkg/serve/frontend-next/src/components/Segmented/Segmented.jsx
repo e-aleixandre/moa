@@ -8,10 +8,10 @@ function normalizeOptions(options) {
   });
 }
 
-// Segmented — control segmentado genérico (usado para el nivel de thinking
-// en ModelSelector, pero sin acoplarse a esos valores concretos). Implementa
-// el patrón ARIA radiogroup: roving tabIndex (solo el seleccionado es
-// tabbable) y flechas Izquierda/Derecha/Home/End para cambiar de opción.
+// Segmented — generic segmented control (used for the thinking level
+// in ModelSelector, but without coupling to those specific values). Implements
+// the ARIA radiogroup pattern: roving tabIndex (only the selected item is
+// tabbable) and Left/Right/Home/End arrows to change the option.
 export function Segmented({ options, value, onChange, ...rest }) {
   const items = normalizeOptions(options);
   const rootRef = useRef(null);

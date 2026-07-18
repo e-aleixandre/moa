@@ -4,8 +4,8 @@ import { MoleculesGallery } from "./molecules-gallery.jsx";
 import { ConversationGallery } from "./conversation-gallery.jsx";
 import "./catalog.css";
 
-// Todos los valores se LEEN de tokens.css en runtime (getComputedStyle), no se
-// duplican a mano: el catálogo no puede divergir de la fuente de verdad.
+// All values are READ from tokens.css at runtime (getComputedStyle), not
+// duplicated by hand: the catalog cannot diverge from the source of truth.
 const COLOR_GROUPS = {
   Surfaces: ["crust", "mantle", "base", "surface0", "surface1", "surface2"],
   Text: ["overlay0", "overlay1", "subtext0", "subtext1", "text"],
@@ -13,7 +13,7 @@ const COLOR_GROUPS = {
     "peach", "mauve", "green", "blue", "red", "yellow",
     "sky", "flamingo", "rosewater", "lavender", "teal",
   ],
-  // Semitransparentes: se muestran sobre una superficie conocida (--surface0).
+  // Semi-transparent: shown over a known surface (--surface0).
   "Accent tints (over surface0)": [
     "peach-dim", "peach-med", "peach-glow",
     "mauve-dim", "green-dim", "blue-dim", "red-dim", "yellow-dim",

@@ -6,11 +6,11 @@ import "./Sheet.css";
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-// Sheet — panel modal centrado con overlay. Cierra con Escape y click en el
-// overlay, atrapa el foco mientras está abierto y lo restaura al disparador
-// al cerrar. No hace scroll-lock ni gestiona history todavía (eso llega con
-// la integración móvil, fuera de alcance de este bloque) — la estructura
-// queda lista para engancharlo.
+// Sheet — centered modal panel with overlay. Closes with Escape and click on the
+// overlay, traps focus while open and restores it to the trigger
+// on close. Doesn't do scroll-lock or manage history yet (that comes with
+// the mobile integration, out of scope for this block) — the structure
+// is ready to hook it up.
 export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabelAttr, children, ...rest }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);

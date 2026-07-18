@@ -15,9 +15,9 @@ const TONE_CLASS = {
   info: "info",
 };
 
-// Toast — notificación con borde izquierdo de color semántico. `children` es
-// el cuerpo (título + mensaje libres, el consumidor decide el markup);
-// `action` opcional añade un enlace de acción tipo "Review →".
+// Toast — notification with a semantic-colored left border. `children` is
+// the body (free-form title + message, the consumer decides the markup);
+// optional `action` adds an action link like "Review →".
 export function Toast({ tone = "info", children, action, onDismiss, ...rest }) {
   const Icon = ICONS[tone] || Info;
   const cls = TONE_CLASS[tone] || "info";
@@ -43,8 +43,8 @@ export function Toast({ tone = "info", children, action, onDismiss, ...rest }) {
   );
 }
 
-// ToastTitle/ToastMessage — helpers opcionales para el markup interno más
-// habitual (título + línea secundaria), replicando .tt/.tm del mockup.
+// ToastTitle/ToastMessage — optional helpers for the most common internal
+// markup (title + secondary line), replicating .tt/.tm from the mockup.
 export function ToastTitle({ children }) {
   return <div class="tt">{children}</div>;
 }

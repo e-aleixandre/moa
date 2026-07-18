@@ -36,7 +36,7 @@ button.chip:disabled {
   cursor: not-allowed;
 }
 
-/* Tonos — tiñen borde/texto según el estado semántico que representa el chip */
+/* Tones — tint border/text according to the semantic state the chip represents */
 
 .chip.tone-idle {
   border-color: color-mix(in srgb, var(--green) 35%, var(--surface0));

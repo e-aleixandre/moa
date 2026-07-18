@@ -8,8 +8,8 @@ const isTextEntryTarget = (el) => {
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
 };
 
-// AskUserCard — pregunta del agente con opciones numeradas (keyboard-first,
-// 1/2/3) + texto libre. `options`: [{ label, recommended? }].
+// AskUserCard — agent question with numbered options (keyboard-first,
+// 1/2/3) + free text. `options`: [{ label, recommended? }].
 export function AskUserCard({
   question,
   options = [],

@@ -2,18 +2,18 @@ import { TriangleAlert, AlertOctagon } from "lucide-preact";
 import { Kbd, Button, Chip } from "../../primitives/index.js";
 import "./PermissionCard.css";
 
-// buildCommandFragments — localiza todas las apariciones de dangerTokens en
-// `command` y devuelve un array de fragmentos (string normal o
-// { danger: token }) para renderizar sin recursión. Solapamientos se
-// resuelven prefiriendo el match más largo en la misma posición de inicio;
-// tokens vacíos/no-string se ignoran.
+// buildCommandFragments — locates every occurrence of dangerTokens in
+// `command` and returns an array of fragments (plain string or
+// { danger: token }) to render without recursion. Overlaps are
+// resolved by preferring the longest match at the same start position;
+// empty/non-string tokens are ignored.
 function buildCommandFragments(command, dangerTokens = []) {
   const tokens = (dangerTokens || []).filter(
     (t) => typeof t === "string" && t.length > 0
   );
   if (!tokens.length) return [command];
 
-  // Recolecta todos los matches (start, end) de todos los tokens.
+  // Collects all (start, end) matches for all tokens.
   const matches = [];
   for (const token of tokens) {
     let from = 0;
@@ -26,11 +26,11 @@ function buildCommandFragments(command, dangerTokens = []) {
   }
   if (!matches.length) return [command];
 
-  // Ordena por inicio asc, y en empate por longitud desc (match más largo gana).
+  // Sort by start asc, and on tie by length desc (longest match wins).
   matches.sort((a, b) => a.start - b.start || b.end - a.end - (a.end - a.start));
 
-  // Selecciona matches no solapados, de izquierda a derecha, prefiriendo el
-  // más largo cuando compiten por la misma posición de inicio.
+  // Select non-overlapping matches, left to right, preferring the
+  // longest one when competing for the same start position.
   const selected = [];
   let cursor = 0;
   for (const m of matches) {
