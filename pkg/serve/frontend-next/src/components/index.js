@@ -17,3 +17,4 @@ export { BackgroundJob } from "./BackgroundJob/BackgroundJob.jsx";
 export { StreamingSkeleton, TypingDots } from "./StreamingSkeleton/StreamingSkeleton.jsx";
 export { ToolTicker } from "./ToolTicker/ToolTicker.jsx";
 export { MobileLedger, LedgerIcons } from "./MobileLedger/MobileLedger.jsx";
+export { FileSuggestions } from "./FileSuggestions/FileSuggestions.jsx";

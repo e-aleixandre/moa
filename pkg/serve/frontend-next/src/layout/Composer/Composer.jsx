@@ -1,12 +1,18 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Plus, Slash, ArrowUp, Square } from "lucide-preact";
+import { Plus, Slash, ArrowUp, Square, X } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
+import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import {
-  sendMessage, cancelRun, cancelSteers,
+  sendMessage, cancelRun, cancelSteers, execCommand, execShell, newSteerId,
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
 import { addToast } from "../../data/notifications.js";
 import { combineQueueText, droppedImageCount, queueSummary } from "../../data/composer-queue.js";
+import {
+  slashSuggestions, findMentionToken, computeMentionInsertion, normalizeDashes,
+} from "../../data/composer-suggest.js";
+import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
+import { processFile } from "../../data/util/attachments.js";
 import "./Composer.css";
 
 // Composer — the conversation input: send a message, steer/queue while the
@@ -16,15 +22,22 @@ import "./Composer.css";
 // history — that can't be lifted without churn. It receives `sessionId` and
 // `session` by props (the ConversationScreen container reads them from the
 // store), exactly like the old SPA's InputBar. The queue/recall/abort/history/
-// draft logic is ported faithfully from pkg/serve/frontend/src/components/
-// InputBar.jsx, recording the pieces that belong to later subphases as stubs.
+// draft logic (5D) plus slash commands/@-mentions/attachments/shell escapes/
+// cache warning (5E) are ported faithfully from pkg/serve/frontend/src/
+// components/InputBar.jsx, recording the pieces that belong to later
+// subphases as stubs.
 //
 // Deferred to later subphases (NOT wired here):
-//   5E — slash commands (/…), shell escapes (!…), @-mentions, command-policy.
-//   5E — attachments (the "+" button is a no-op).
 //   5F — permission / ask_user prompts.
 //   5J — subagent steering (viewingSubagent).
 //   5M — voice / push-to-talk on the send button (plain click here).
+
+const MAX_ATTACHMENTS = 8;
+
+// Same broad allow-list as the old SPA's attach <input accept="…">: images
+// plus the file kinds the agent can read off disk (server saves non-image/PDF
+// attachments to disk; images/PDFs go to the model natively).
+const ATTACH_ACCEPT = 'image/*,application/pdf,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.html,.css,.js,.ts,.jsx,.tsx,.go,.py,.sh,.sql,.toml,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.zip,.tar,.gz';
 
 // Per-session input history (survives re-renders, not a page reload). Ported
 // from InputBar: getHistory/pushHistory + cursorRow drive the ↑/↓ recall.
@@ -54,6 +67,7 @@ function saveDraft(id, text) {
 
 export function Composer({ sessionId, session }) {
   const textareaRef = useRef(null);
+  const attachInputRef = useRef(null);
   const sessionState = session?.state;
   const pendingSteers = session?.pendingSteers;
   const busy = sessionState === "running";
@@ -64,6 +78,32 @@ export function Composer({ sessionId, session }) {
   // twice into the textarea. Released once cancelSteers settles.
   const recallInFlight = useRef(false);
 
+  // --- Slash command + @-mention suggestion state ---
+  const [goalFlags, setGoalFlags] = useState([]);
+  const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
+  const [cmdCursor, setCmdCursor] = useState(0);
+  const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
+  const [fileCursor, setFileCursor] = useState(0);
+  const fileAbortRef = useRef(null);
+  const fileDebounceRef = useRef(null);
+
+  // --- Attachments ---
+  const [attachments, setAttachments] = useState([]);
+  // Slots reserved by in-flight addFiles calls, so two concurrent loads (e.g.
+  // paste + picker) can't each independently reserve up to MAX and overshoot.
+  const attachInFlightRef = useRef(0);
+
+  // Fetch /goal flag metadata once on mount (mirrors InputBar's capabilities
+  // check, trimmed to what 5E needs — transcription support is 5M's concern).
+  useEffect(() => {
+    fetch('/api/capabilities', { headers: { 'X-Moa-Request': '1' } })
+      .then(r => r.json())
+      .then(caps => {
+        setGoalFlags(Array.isArray(caps.goal_flags) ? caps.goal_flags : []);
+      })
+      .catch(() => {});
+  }, []);
+
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -71,13 +111,18 @@ export function Composer({ sessionId, session }) {
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   }, []);
 
-  // Restore the persisted draft when this input binds to a session (mount or
-  // session switch). The previous session's draft was already saved on input.
+  // Restore the persisted draft on mount. The composer is keyed by session in
+  // the container, so a session switch remounts this component (tearing down
+  // in-flight file requests / attachment processing and clearing state) rather
+  // than mutating sessionId in place.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.value = loadDraft(sessionId);
     setHasText(!!el.value.trim());
+    setCmdSuggestions(null);
+    setFileSuggestions(null);
+    setAttachments([]);
     autoResize();
   }, [sessionId, autoResize]);
 
@@ -128,39 +173,327 @@ export function Composer({ sessionId, session }) {
     el.selectionStart = el.selectionEnd = el.value.length;
   }, [sessionId, autoResize]);
 
+  // --- Slash command suggestions ---
+  // Recomputes the popup from the textarea's current value/cursor. Ported from
+  // InputBar.updateSuggestions, with the filtering/matching logic factored out
+  // to data/composer-suggest.js (slashSuggestions).
+  const updateSuggestions = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    setCmdSuggestions(slashSuggestions(el.value, el.selectionStart, goalFlags));
+    setCmdCursor(0);
+  }, [goalFlags]);
+
+  // --- File suggestions (@mention) ---
+  const cancelFileRequest = useCallback(() => {
+    if (fileAbortRef.current) {
+      fileAbortRef.current.abort();
+      fileAbortRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount.
+  useEffect(() => {
+    return () => {
+      cancelFileRequest();
+      clearTimeout(fileDebounceRef.current);
+    };
+  }, [cancelFileRequest]);
+
+  const updateFileSuggestions = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el || !sessionId) return;
+    const mention = findMentionToken(el.value, el.selectionStart);
+    if (!mention) {
+      cancelFileRequest();
+      setFileSuggestions(null);
+      return;
+    }
+
+    // Abort previous request.
+    cancelFileRequest();
+    const controller = new AbortController();
+    fileAbortRef.current = controller;
+
+    fetch(`/api/sessions/${sessionId}/files?q=${encodeURIComponent(mention.filter)}&limit=50`, {
+      signal: controller.signal,
+      headers: { 'X-Moa-Request': '1' },
+    })
+      .then(r => r.json())
+      .then(items => {
+        if (!controller.signal.aborted) {
+          setFileSuggestions(items.length > 0 ? items : null);
+          setFileCursor(0);
+        }
+      })
+      .catch(() => {}); // aborted or network error
+  }, [sessionId, cancelFileRequest]);
+
+  const acceptFileMention = useCallback((path, isDir) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const { value, cursor, retrigger } = computeMentionInsertion(el.value, el.selectionStart, path, isDir);
+    el.value = value;
+    el.selectionStart = el.selectionEnd = cursor;
+    setFileSuggestions(null);
+    if (retrigger) setTimeout(updateFileSuggestions, 50); // navigate into directory
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.focus();
+  }, [updateFileSuggestions]);
+
+  const acceptSuggestion = useCallback((cmd) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (cmd.__flag) {
+      const val = el.value;
+      const cursor = el.selectionStart;
+      let tokenStart = cursor;
+      while (tokenStart > 0 && val[tokenStart - 1] !== ' ') tokenStart--;
+      const before = val.slice(0, tokenStart);
+      const after = val.slice(cursor);
+      el.value = before + cmd.name + ' ' + after;
+      const newPos = before.length + cmd.name.length + 1;
+      el.selectionStart = el.selectionEnd = newPos;
+      el.focus();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      setCmdSuggestions(null);
+      return;
+    }
+    if (cmd.args) {
+      el.value = '/' + cmd.name + ' ';
+      setCmdSuggestions(null);
+      el.focus();
+      // Mirror the flag branch: fire input so 5D's draft/hasText/autoResize
+      // stay in sync (a reload before the next keystroke would otherwise lose
+      // the just-picked command).
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      el.value = '/' + cmd.name;
+      setCmdSuggestions(null);
+      handleSendInnerRef.current(el);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Attachments ---
+  const addFiles = useCallback(async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    // Reserve slots atomically against both the committed attachments and any
+    // still-processing ones, so concurrent addFiles calls can't jointly exceed
+    // MAX_ATTACHMENTS.
+    const room = MAX_ATTACHMENTS - attachments.length - attachInFlightRef.current;
+    if (room <= 0) {
+      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'attention' });
+      return;
+    }
+    const toProcess = files.slice(0, room);
+    if (files.length > toProcess.length) {
+      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'attention' });
+    }
+
+    attachInFlightRef.current += toProcess.length;
+    const results = [];
+    try {
+      for (const file of toProcess) {
+        try {
+          results.push(await processFile(file));
+        } catch (e) {
+          addToast({ title: 'Attachment error', detail: e.message, type: 'error' });
+        }
+      }
+    } finally {
+      attachInFlightRef.current -= toProcess.length;
+    }
+    if (results.length > 0) setAttachments((prev) => [...prev, ...results]);
+  }, [attachments.length]);
+
+  const removeAttachment = useCallback((idx) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  const handleAttachClick = useCallback(() => {
+    attachInputRef.current?.click();
+  }, []);
+
+  const handleAttachChange = useCallback((e) => {
+    addFiles(e.target.files);
+    e.target.value = ''; // allow re-selecting the same file
+  }, [addFiles]);
+
+  const handlePaste = useCallback((e) => {
+    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0) return;
+    e.preventDefault();
+    addFiles(files);
+  }, [addFiles]);
+
+  // The composer bar has no dedicated "/" affordance in the old SPA (the popup
+  // only appears once you type "/" yourself). We give the button a concrete
+  // job instead of leaving it a no-op: insert "/" at the cursor and focus, which
+  // opens the same popup as typing it manually.
+  const handleSlashButton = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (el.value === '') {
+      el.value = '/';
+      el.selectionStart = el.selectionEnd = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    el.focus();
+  }, []);
+
   // --- Send / enqueue ---
-  // Ported from InputBar.handleSendInner, trimmed to the 5D scope: normal text
-  // messages only. sendMessage(id, text, []) is the single source of truth for
-  // the send-vs-enqueue decision — an idle/errored session runs the message and
-  // starts a run; a busy session mints a steer chip (optimistic, reconciled by
-  // id) — so the composer just calls it and surfaces failures via a toast
-  // (sendMessage already rolled back its optimistic echo/chip). Slash (/) and
-  // shell (!) prefixes are 5E: for now they go through as plain text.
+  // Ported from InputBar.handleSendInner. Slash commands and shell escapes are
+  // text-only (attaching files to them doesn't make sense — the server would
+  // reject/ignore them anyway); everything else goes through sendMessage, which
+  // is the single source of truth for the send-vs-enqueue decision (an idle/
+  // errored session runs the message and starts a run; a busy session mints a
+  // steer chip, optimistic and reconciled by id).
   const handleSendInner = useCallback(async (el) => {
     if (!el || !sessionId) return;
     const text = el.value.trim();
-    if (!text) return;
+    const atts = attachments;
+    if (!text && atts.length === 0) return;
 
-    // 5E: if (text.startsWith('/') || text.startsWith('!')) classify + route
-    // through command-policy / execShell. Until then, send as normal text.
+    if ((text.startsWith('/') || text.startsWith('!')) && atts.length > 0) {
+      addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments first, or send them in a separate message', type: 'attention' });
+      return;
+    }
 
-    pushHistory(text);
-    el.value = "";
-    saveDraft(sessionId, ""); // sent — drop the persisted draft
+    if (text) pushHistory(text);
+    el.value = '';
+    saveDraft(sessionId, ''); // sent — drop the persisted draft
     setHasText(false);
+    setCmdSuggestions(null);
+    setFileSuggestions(null);
+    setAttachments([]);
     autoResize();
 
+    // Detect slash commands.
+    if (text.startsWith('/')) {
+      // Mobile keyboards autocorrect a typed "--" into an em/en-dash ("—"/"–"),
+      // which breaks flag parsing (/goal … --max 3). Normalize a dash that
+      // starts a token back into "--"; a real em-dash inside prose is left
+      // untouched.
+      const normalized = normalizeDashes(text);
+
+      // While the session is occupied (running / permission) OR the queue rail
+      // is non-empty, a command is classified by policy (mirrors the server's
+      // requireIdle + ClassifyCommand gate): reject commands that can't run
+      // mid-run, and enqueue "queue" commands as a barrier with an optimistic
+      // command chip so they run in strict send order at the next idle point.
+      // An idle session with an empty queue runs everything immediately.
+      const sessNow = store.get().sessions[sessionId];
+      const queueNonEmpty = !!sessNow?.pendingSteers?.length;
+      const occupied = sessionState === 'running' || sessionState === 'permission';
+      let optimisticCmd = null;
+      let cmdId = '';
+      if (occupied || queueNonEmpty) {
+        const policy = classifyCommand(normalized);
+        if (policy === POLICY_REJECT) {
+          addToast({ title: 'Cannot run this now', detail: `${normalized.split(/\s+/)[0]} can't run while the agent is working — stop it first.`, type: 'attention' });
+          return;
+        }
+        if (policy === POLICY_QUEUE) {
+          // Optimistic command chip: minted client-side so it has an
+          // authoritative identity before the POST returns (the server echoes
+          // the same ID on command_queued). Reconciled by ID like a steer chip.
+          cmdId = newSteerId();
+          optimisticCmd = { id: cmdId, text: normalized, command: true };
+          const steers = sessNow?.pendingSteers || [];
+          updateSession(sessionId, { pendingSteers: [...steers, optimisticCmd] });
+        }
+      }
+
+      try {
+        const result = await execCommand(sessionId, normalized, cmdId);
+        if (optimisticCmd) {
+          if (result && result.queued) {
+            // Confirm the chip if it's still there (a concurrent
+            // command_dequeued may already have removed it); never resurrect.
+            const cur = store.get().sessions[sessionId];
+            const list = cur?.pendingSteers;
+            if (list && list.some((s) => s.id === cmdId)) {
+              updateSession(sessionId, {
+                pendingSteers: list.map((s) => (s.id === cmdId ? { ...s, confirmed: true } : s)),
+              });
+            }
+            return; // queued — no immediate outcome to surface
+          }
+          // The run ended before the POST landed: the server found the session
+          // idle and ran the command immediately (queued:false), so no
+          // command_dequeued will retire the optimistic chip. Remove it now and
+          // fall through to surface the immediate outcome (verify/rename/error).
+          const cur = store.get().sessions[sessionId];
+          if (cur?.pendingSteers) {
+            const kept = cur.pendingSteers.filter((s) => s !== optimisticCmd);
+            updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
+          }
+        } else if (result && result.queued) {
+          return; // enqueued server-side without an optimistic chip (e.g. idle→queue race)
+        }
+        if (text.startsWith('/verify') && result) {
+          // Verify ran — surface the pass/fail outcome (the spinner is driven
+          // by the AutoVerify WS events).
+          addToast({
+            title: result.ok ? 'Verify passed' : 'Verify failed',
+            detail: result.message,
+            type: result.ok ? 'done' : 'attention',
+          });
+        } else if (text.startsWith('/rename') && result && result.ok) {
+          // Reflect the new title immediately; the poll would otherwise lag
+          // (up to 15s on mobile). The server has already persisted it.
+          const title = result.message.replace(/^renamed to:\s*/, '');
+          updateSession(sessionId, { title });
+        } else if (result && !result.ok) {
+          addToast({ title: 'Command failed', detail: result.message, type: 'error' });
+        }
+      } catch (e) {
+        // Roll back the optimistic command chip: a rejected enqueue (e.g. 503
+        // queue full, or a network error) must not leave a phantom chip.
+        if (optimisticCmd) {
+          const cur = store.get().sessions[sessionId];
+          if (cur?.pendingSteers) {
+            const kept = cur.pendingSteers.filter((s) => s !== optimisticCmd);
+            updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
+          }
+        }
+        addToast({ title: 'Command error', detail: e.message, type: 'error' });
+      }
+      return;
+    }
+
+    // Shell escape: !! = silent (user-only), ! = context (sent with next message)
+    if (text.startsWith('!')) {
+      const silent = text.startsWith('!!');
+      const command = (silent ? text.slice(2) : text.slice(1)).trim();
+      if (!command) return;
+      try {
+        await execShell(sessionId, command, silent);
+      } catch (e) {
+        addToast({ title: 'Shell error', detail: e.message, type: 'error' });
+      }
+      return;
+    }
+
     try {
-      await sendMessage(sessionId, text, []);
+      await sendMessage(sessionId, text, atts);
     } catch (e) {
-      console.error("Send failed:", e);
+      console.error('Send failed:', e);
       // sendMessage already rolled back the optimistic echo/chip; surface the
       // reason (e.g. a 400) so it's not silent.
-      addToast({ sessionId, title: "Message not sent", detail: String(e.message || e), type: "error" });
+      addToast({ sessionId, title: 'Message not sent', detail: String(e.message || e), type: 'error' });
     }
-  }, [sessionId, pushHistory, autoResize]);
+  }, [sessionId, sessionState, attachments, pushHistory, autoResize]);
 
   const handleSend = useCallback(() => handleSendInner(textareaRef.current), [handleSendInner]);
+  // acceptSuggestion (below) is defined before handleSendInner and has an
+  // intentionally-empty dep array (it's only invoked from event handlers, well
+  // after mount) — this ref keeps it calling the latest handleSendInner
+  // (fresh sessionId/attachments) instead of one closed over at first render.
+  const handleSendInnerRef = useRef(handleSendInner);
+  handleSendInnerRef.current = handleSendInner;
 
   // --- Stop / abort ---
   // Ported from InputBar.handleStop: on abort the agent discards its queued
@@ -222,6 +555,55 @@ export function Composer({ sessionId, session }) {
       }
     }
 
+    // File suggestion navigation (takes priority over cmd suggestions).
+    if (fileSuggestions) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFileCursor(i => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFileCursor(i => Math.min(fileSuggestions.length - 1, i + 1));
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const item = fileSuggestions[fileCursor];
+        acceptFileMention(item.path, item.is_dir);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setFileSuggestions(null);
+        return;
+      }
+    }
+
+    // Command suggestion navigation.
+    if (cmdSuggestions) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCmdCursor(i => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCmdCursor(i => Math.min(cmdSuggestions.length - 1, i + 1));
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        acceptSuggestion(cmdSuggestions[cmdCursor]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setCmdSuggestions(null);
+        return;
+      }
+    }
+
     // Esc aborts the running agent.
     if (e.key === "Escape" && busy) {
       e.preventDefault();
@@ -260,6 +642,7 @@ export function Composer({ sessionId, session }) {
       autoResize();
       saveDraft(sessionId, el.value); // keep the persisted draft in sync
       el.selectionStart = el.selectionEnd = el.value.length;
+      updateSuggestions();
       return;
     }
 
@@ -277,22 +660,100 @@ export function Composer({ sessionId, session }) {
       autoResize();
       saveDraft(sessionId, el.value); // keep the persisted draft in sync
       el.selectionStart = el.selectionEnd = el.value.length;
+      updateSuggestions();
       return;
     }
-  }, [sessionId, busy, handleDequeueSteers, handleStop, handleSend, cursorRow, totalRows, autoResize]);
+  }, [
+    sessionId, busy, fileSuggestions, fileCursor, cmdSuggestions, cmdCursor,
+    handleDequeueSteers, handleStop, handleSend, acceptFileMention, acceptSuggestion,
+    cursorRow, totalRows, autoResize, updateSuggestions,
+  ]);
 
   const handleInput = useCallback((e) => {
     autoResize();
+    updateSuggestions();
     saveDraft(sessionId, e.target.value);
     setHasText(!!e.target.value.trim());
-  }, [sessionId, autoResize]);
+    // File suggestions with debounce.
+    clearTimeout(fileDebounceRef.current);
+    fileDebounceRef.current = setTimeout(updateFileSuggestions, 100);
+  }, [sessionId, autoResize, updateSuggestions, updateFileSuggestions]);
+
+  // Cache-expiry warning: the prompt cache goes cold `cacheExpiresAt` ms after
+  // the last run. We tick a clock while idle so the warning appears on its own
+  // once the cache has expired (writing then pays a fresh cache-write). Only
+  // relevant when the backend reported an expiry (Anthropic models). Ported
+  // from InputBar; the original SPA's copy is in Spanish — this one is in
+  // English per the project's UI-text convention.
+  const cacheExpiresAt = session?.cacheExpiresAt || 0;
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!cacheExpiresAt || busy) return;
+    setNowTick(Date.now());
+    const t = setInterval(() => setNowTick(Date.now()), 15000);
+    return () => clearInterval(t);
+  }, [cacheExpiresAt, busy]);
+  const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
 
   const summary = queueSummary(pendingSteers);
   const placeholder = busy ? "Steer the agent…" : "Message moa — Enter to send, ⇧Enter for a new line, ⌥Enter to queue…";
 
   return (
     <div class="composer-wrap">
+      {cacheExpired && (
+        <div class="cache-warn" title="The prompt cache for this conversation has expired. Your next message will pay for a fresh cache write (more expensive).">
+          <span class="cache-warn-dot" />
+          Prompt cache expired · your next message pays a cache write
+        </div>
+      )}
+      {attachments.length > 0 && (
+        <div class="attach-preview-strip">
+          {attachments.map((a, i) => (
+            <div class="attach-chip" key={i}>
+              {a.isImage
+                ? <img src={`data:${a.mime};base64,${a.data}`} alt={a.name} />
+                : <span class="attach-chip-name">📎 {a.name} <span class="attach-chip-size">({Math.max(1, Math.round(a.size / 1024))} kB)</span></span>
+              }
+              <button type="button" class="attach-chip-remove" onClick={() => removeAttachment(i)} title="Remove">
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div class="composer">
+        <input
+          ref={attachInputRef}
+          type="file"
+          multiple
+          hidden
+          accept={ATTACH_ACCEPT}
+          onChange={handleAttachChange}
+        />
+        {fileSuggestions && !cmdSuggestions && (
+          <FileSuggestions
+            items={fileSuggestions}
+            cursor={fileCursor}
+            onSelect={acceptFileMention}
+            onHover={setFileCursor}
+          />
+        )}
+        {cmdSuggestions && (
+          <div class="cmd-suggestions">
+            {cmdSuggestions.map((cmd, i) => (
+              <div
+                key={cmd.__flag ? cmd.name : '/' + cmd.name}
+                class={`cmd-suggestion-item ${i === cmdCursor ? "selected" : ""}`}
+                onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(cmd); }}
+                onMouseEnter={() => setCmdCursor(i)}
+              >
+                <span class="cmd-suggestion-name">{cmd.__flag ? cmd.name : '/' + cmd.name}</span>
+                {cmd.args && <span class="cmd-suggestion-args">{cmd.args}</span>}
+                <span class="cmd-suggestion-desc">{cmd.desc}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           rows={1}
@@ -301,14 +762,13 @@ export function Composer({ sessionId, session }) {
           placeholder={placeholder}
           onInput={handleInput}
           onKeyDown={handleKey}
+          onPaste={handlePaste}
         />
         <div class="composer-bar">
-          {/* 5E: attach — no-op until the attachments subphase. */}
-          <button type="button" class="composer-btn" title="Attach (coming soon)" aria-label="Attach" onClick={() => { /* 5E */ }}>
+          <button type="button" class="composer-btn" title="Attach files" aria-label="Attach" onClick={handleAttachClick}>
             <Plus size={15} />
           </button>
-          {/* 5E: slash commands — no-op until the command subphase. */}
-          <button type="button" class="composer-btn" title="Slash commands (coming soon)" aria-label="Slash commands" onClick={() => { /* 5E */ }}>
+          <button type="button" class="composer-btn" title="Slash commands" aria-label="Slash commands" onClick={handleSlashButton}>
             <Slash size={14} />
           </button>
           {summary && (

@@ -1,0 +1,59 @@
+/* FileSuggestions — @-mention file picker popup, anchored above the composer
+   textarea. Ported from pkg/serve/frontend/src/styles/input-bar.css
+   (.file-suggestions / .file-suggestion-*), renamed with a `filesug-` prefix. */
+
+.filesug-list {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-overlay);
+}
+
+.filesug-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px; /* comfortable touch target on iOS */
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+  font-size: var(--text-base);
+}
+
+.filesug-item:hover,
+.filesug-item.selected {
+  background: var(--surface0);
+}
+
+.filesug-icon {
+  color: var(--overlay0);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.filesug-item.is-dir .filesug-icon {
+  color: var(--blue);
+}
+
+.filesug-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.filesug-item.is-dir .filesug-path {
+  color: var(--blue);
+}

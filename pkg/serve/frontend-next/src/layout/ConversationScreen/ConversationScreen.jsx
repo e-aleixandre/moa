@@ -168,7 +168,7 @@ export function ConversationScreen({ version }) {
         <Stream session={session} blocks={blocks} />
         {/* 5J: AgentTray — live subagent chips, not connected yet. */}
         <AgentTray agents={[]} />
-        <Composer sessionId={session.id} session={session} />
+        <Composer key={session.id} sessionId={session.id} session={session} />
         <StatusStrip
           ctxPercent={session.contextPercent}
           task={currentTask(session, nowMs)}
