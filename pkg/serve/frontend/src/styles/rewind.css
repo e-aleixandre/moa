@@ -19,128 +19,298 @@
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(17, 17, 27, 0.55);
   display: flex;
   justify-content: center;
   align-items: flex-end;
   padding: 0;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(3px);
 }
 
 .rewind-sheet {
+  --rail-w: 40px;
+  --rail-x: 20px;
+  --node-y: 20px;
+  --rewind-accent: var(--peach);
   width: 100%;
-  max-width: 520px;
-  max-height: 70vh;
+  max-width: 440px;
+  max-height: 88vh;
   background: var(--mantle);
   border: 1px solid var(--surface0);
+  border-bottom: none;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  box-shadow: 0 -8px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 -18px 60px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding-bottom: env(safe-area-inset-bottom);
-  animation: rewind-in 0.14s ease-out;
+  animation: rewind-in 0.26s var(--ease);
 }
 
 @keyframes rewind-in {
-  from { opacity: 0; transform: translateY(16px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0.4; transform: translateY(24px); }
+  to   { opacity: 1; transform: none; }
 }
 
+.rewind-grabber {
+  width: 38px;
+  height: 4px;
+  margin: 10px auto 2px;
+  border-radius: var(--radius-full);
+  background: var(--surface1);
+  flex-shrink: 0;
+}
+
+/* ---------- header ---------- */
 .rewind-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--surface0);
+  gap: 12px;
+  padding: 10px 16px 0;
 }
-
-.rewind-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
+.rewind-head-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--rewind-accent) 14%, transparent);
+  color: var(--rewind-accent);
 }
-.rewind-title .lucide { width: 16px; height: 16px; color: var(--overlay1); }
+.rewind-head-icon .lucide { width: 18px; height: 18px; }
+.rewind-head-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rewind-title { font-size: 16px; font-weight: 650; color: var(--text); letter-spacing: 0.1px; }
+.rewind-sub { font-size: 12px; color: var(--overlay1); margin-top: 1px; }
 
 .rewind-close {
-  background: none;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
   border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
   color: var(--overlay1);
   cursor: pointer;
-  padding: 4px;
-  display: flex;
-  border-radius: var(--radius-sm);
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
 }
-.rewind-close:hover { color: var(--text); background: var(--surface0); }
+.rewind-close:hover { background: var(--surface0); color: var(--text); }
 .rewind-close .lucide { width: 16px; height: 16px; }
 
 .rewind-hint {
-  padding: 10px 16px;
-  font-size: 12px;
+  margin: 12px 16px 0;
+  font-size: 12.5px;
+  color: var(--subtext0);
+  padding: 8px 11px;
+  background: color-mix(in srgb, var(--base) 70%, transparent);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+}
+
+.rewind-legend {
+  display: flex;
+  gap: 14px;
+  margin: 10px 16px 0;
+  padding-bottom: 12px;
+  font-size: 11px;
   color: var(--overlay1);
   border-bottom: 1px solid var(--surface0);
 }
+.rewind-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.rewind-dot { width: 8px; height: 8px; border-radius: var(--radius-full); }
+.rewind-dot.user { background: var(--mauve); }
+.rewind-dot.assistant { box-shadow: inset 0 0 0 2px var(--blue); }
 
-.rewind-list {
+/* ---------- timeline ---------- */
+.rewind-timeline {
   overflow-y: auto;
-  padding: 6px;
+  overscroll-behavior: contain;
+  padding: 8px 10px 18px 0;
 }
 
 .rewind-loading,
 .rewind-empty {
-  padding: 20px 16px;
+  padding: 24px 16px;
   text-align: center;
   font-size: 13px;
   color: var(--overlay0);
 }
 
-.rewind-item {
-  width: 100%;
+/* row = [rail column 40px] [content column flex] */
+.rewind-point {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  align-items: stretch;
+  width: 100%;
   background: none;
   border: none;
-  border-radius: var(--radius-md);
-  color: var(--text);
   cursor: pointer;
   text-align: left;
+  color: var(--text);
+  border-radius: var(--radius-md);
+  -webkit-tap-highlight-color: transparent;
   transition: background var(--duration) var(--ease);
 }
-.rewind-item:hover { background: var(--surface0); }
-.rewind-item:active { background: var(--surface1); }
-.rewind-item:disabled { opacity: 0.5; cursor: default; }
-.rewind-item.current { background: var(--green-dim); }
+.rewind-point:hover,
+.rewind-point:focus-visible {
+  background: color-mix(in srgb, var(--surface0) 45%, transparent);
+  outline: none;
+}
+.rewind-point:active { background: color-mix(in srgb, var(--surface0) 70%, transparent); }
+.rewind-point:disabled { cursor: default; }
 
-.rewind-role { flex-shrink: 0; font-size: 15px; line-height: 1; }
+/* --- column 1: rail + node --- */
+.rewind-rail { flex: none; width: var(--rail-w); position: relative; }
+.rewind-rail::before,
+.rewind-rail::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--rail-x) - 1px);
+  width: 2px;
+  background: var(--rail-color, var(--surface1));
+}
+.rewind-rail::before { top: 0; height: calc(var(--node-y) - 8px); }
+.rewind-rail::after { top: calc(var(--node-y) + 8px); bottom: 0; }
+.rewind-point.first .rewind-rail::before { display: none; }
+.rewind-point.last .rewind-rail::after { display: none; }
 
+/* current path: solid accent rail; other branches: dotted + dimmed */
+.rewind-point.on { --rail-color: var(--rewind-accent); }
+.rewind-point.on .rewind-rail::before,
+.rewind-point.on .rewind-rail::after {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--rewind-accent) 35%, transparent);
+}
+.rewind-point.off .rewind-rail::before,
+.rewind-point.off .rewind-rail::after {
+  box-shadow: none;
+  background: repeating-linear-gradient(to bottom, var(--surface1) 0 3px, transparent 3px 8px);
+}
+
+/* node centered in the rail column */
+.rewind-node {
+  position: absolute;
+  z-index: 1;
+  left: var(--rail-x);
+  top: var(--node-y);
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  transition: transform var(--duration) var(--ease);
+}
+.rewind-point:hover .rewind-node { transform: translate(-50%, -50%) scale(1.25); }
+.rewind-point.user .rewind-node { background: var(--mauve); }
+.rewind-point.assistant .rewind-node { background: var(--mantle); box-shadow: inset 0 0 0 2px var(--blue); }
+.rewind-point.off.user .rewind-node { background: var(--surface2); }
+.rewind-point.off.assistant .rewind-node { box-shadow: inset 0 0 0 2px var(--overlay0); }
+
+/* single "you are here" marker at the tip of the current path */
+.rewind-point.here .rewind-node {
+  width: 15px;
+  height: 15px;
+  background: var(--rewind-accent);
+  box-shadow: none;
+  outline: 4px solid color-mix(in srgb, var(--rewind-accent) 22%, transparent);
+  animation: rewind-pulse 2.4s var(--ease) infinite;
+}
+@keyframes rewind-pulse {
+  0%, 100% { outline-color: color-mix(in srgb, var(--rewind-accent) 22%, transparent); }
+  50%      { outline-color: color-mix(in srgb, var(--rewind-accent) 8%, transparent); }
+}
+
+/* --- column 2: content --- */
+.rewind-body { flex: 1; min-width: 0; padding: 9px 12px 9px 0; }
 .rewind-label {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rewind-point.user .rewind-label { font-weight: 560; color: var(--text); }
+.rewind-point.assistant .rewind-label { font-weight: 400; color: var(--subtext1); }
+.rewind-point.off .rewind-label { color: var(--overlay1); }
+.rewind-point.off.user .rewind-label { color: var(--subtext0); font-weight: 500; }
+
+/* subagent turns: tag + monospace id, single line */
+.rewind-sys { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.rewind-tag {
+  flex: none;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  padding: 1.5px 7px;
+  border-radius: var(--radius-full);
+}
+.rewind-tag.err { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.rewind-tag.muted { color: var(--overlay1); background: color-mix(in srgb, var(--overlay0) 14%, transparent); }
+.rewind-point.off .rewind-tag { color: var(--overlay1); background: color-mix(in srgb, var(--overlay0) 14%, transparent); }
+.rewind-sys-id {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--overlay1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.rewind-branches {
-  flex-shrink: 0;
+.rewind-meta {
   display: flex;
   align-items: center;
-  gap: 2px;
-  font-size: 11px;
-  color: var(--overlay1);
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--overlay0);
+  white-space: nowrap;
+  overflow: hidden;
 }
-.rewind-branches .lucide { width: 12px; height: 12px; }
+.rewind-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+}
+.rewind-chip .lucide { width: 10px; height: 10px; }
+.rewind-chip.branches {
+  color: var(--lavender);
+  border: 1px solid color-mix(in srgb, var(--lavender) 35%, transparent);
+  transition: background var(--duration) var(--ease);
+}
+.rewind-point:hover .rewind-chip.branches { background: color-mix(in srgb, var(--lavender) 12%, transparent); }
+.rewind-chip.here { color: var(--crust); background: var(--rewind-accent); letter-spacing: 0.03em; }
 
-.rewind-current-icon {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  color: var(--green);
+/* "new branch" affordance on hover/focus */
+.rewind-go {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rewind-accent);
+  background: color-mix(in srgb, var(--mantle) 80%, transparent);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease);
+  pointer-events: none;
 }
+.rewind-go .lucide { width: 12px; height: 12px; }
+.rewind-point:hover .rewind-go,
+.rewind-point:focus-visible .rewind-go { opacity: 1; transform: translateY(-50%); }
+.rewind-point.here .rewind-go { display: none; }
