@@ -360,6 +360,13 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 				}
 				am.mu.Unlock()
 
+				// A pending ask_user blocks the run on the user exactly like a
+				// permission prompt does, so surface the same StatePermission —
+				// otherwise the session sits in StateRunning (a "working" blue in
+				// the UI) while it's really waiting on an answer.
+				if am.state != nil {
+					_ = am.state.Transition(StatePermission)
+				}
 				am.bus.Publish(AskUserRequested{
 					SessionID: am.sid,
 					ID:        id,
@@ -399,6 +406,11 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string) error {
 	default:
 	}
 
+	// Mirror permission resolution: the ask blocked the run in StatePermission,
+	// so hand control back to StateRunning now that it's answered.
+	if am.state != nil && am.state.Current() == StatePermission {
+		_ = am.state.Transition(StateRunning)
+	}
 	am.bus.Publish(AskUserResolved{SessionID: am.sid, ID: id})
 	return nil
 }
