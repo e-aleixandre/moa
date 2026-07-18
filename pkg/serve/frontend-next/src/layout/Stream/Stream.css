@@ -1,5 +1,13 @@
 .stream {
   flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.stream .stream-scroll {
+  flex: 1;
   overflow-y: auto;
   min-height: 0;
   scroll-behavior: smooth;
@@ -30,8 +38,72 @@
   background: var(--surface0);
 }
 
+/* System line (clear/compact/branch/goal marker, truncation notice): a thin,
+   dimmed separator that closes the current assistant turn. */
+.stream .stream-system {
+  margin: var(--space-5) 0;
+  color: var(--overlay0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-align: center;
+}
+
+/* Assistant prose block: the markdown HTML injected (sanitized) into
+   AssistantDocument. It reuses the .doc typography by sitting inside .doc. */
+.stream .doc-prose > :first-child {
+  margin-top: 0;
+}
+
+.stream .doc-prose > :last-child {
+  margin-bottom: 0;
+}
+
+/* Collapsible thinking block inside an assistant document. */
+.stream .doc-thinking {
+  margin: 0 0 var(--space-4);
+  border-left: 2px solid var(--surface1);
+  padding-left: var(--space-3);
+}
+
+.stream .doc-thinking > summary {
+  cursor: pointer;
+  color: var(--overlay1);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+
+.stream .doc-thinking .doc-thinking-body {
+  margin-top: var(--space-2);
+  color: var(--overlay1);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  line-height: var(--leading-normal);
+}
+
+.stream .stream-new-btn {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-overlay);
+  border: 1px solid var(--surface1);
+  background: var(--crust);
+  color: var(--peach);
+  border-radius: var(--radius-full);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+
+.stream .stream-new-btn:hover {
+  border-color: var(--peach);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .stream {
+  .stream .stream-scroll {
     scroll-behavior: auto;
   }
 }

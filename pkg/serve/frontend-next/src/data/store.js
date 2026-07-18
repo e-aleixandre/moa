@@ -45,6 +45,11 @@ const initialFocused = initialIds.includes(persisted.focusedTile)
 let state = {
   sessions: {},
 
+  // sessionsLoaded flips true after the first loadSessions() resolves, so the
+  // conversation screen can distinguish LOADING (no fetch yet) from EMPTY (fetch
+  // returned no visible session). Set by the App bootstrap.
+  sessionsLoaded: false,
+
   usage: null, // global plan usage snapshot from /api/usage (null until first poll)
 
   tileTree: initialTree,

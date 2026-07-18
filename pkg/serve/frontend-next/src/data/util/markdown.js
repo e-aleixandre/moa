@@ -1,6 +1,34 @@
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
-import hljs from 'highlight.js';
+// frontend-next divergence from the ported engine: import highlight.js core +
+// a selective language subset instead of the full package. The full import
+// pulls ~984KB of languages into the bundle; core + this subset covers the
+// languages moa's assistant emits most. This is a DELIBERATE subset (not the
+// exact CodeBlock list — CodeBlock also registers html/rust/yaml/sql/diff/
+// dockerfile); unregistered fences fall back to escaped plain text below, so
+// they lose highlighting but never break or inject. Register once at module
+// load. (Documented divergence: a highlight-related bugfix in the old SPA's
+// markdown.js does NOT replicate mechanically here — the import differs.)
+import hljs from 'highlight.js/lib/core';
+import javascript from 'highlight.js/lib/languages/javascript';
+import typescript from 'highlight.js/lib/languages/typescript';
+import python from 'highlight.js/lib/languages/python';
+import go from 'highlight.js/lib/languages/go';
+import bash from 'highlight.js/lib/languages/bash';
+import json from 'highlight.js/lib/languages/json';
+import xml from 'highlight.js/lib/languages/xml';
+import css from 'highlight.js/lib/languages/css';
+import markdownLang from 'highlight.js/lib/languages/markdown';
+
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('go', go);
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('markdown', markdownLang);
 
 const marked = new Marked({
   breaks: true,
@@ -24,7 +52,9 @@ const renderer = {
     if (lang && hljs.getLanguage(lang)) {
       highlighted = hljs.highlight(text, { language: lang }).value;
     } else {
-      highlighted = hljs.highlightAuto(text).value;
+      // core build: no highlightAuto (it needs every language registered).
+      // Fall back to escaped plain text for unknown/absent languages.
+      highlighted = escapeHtml(text);
     }
     const langLabel = escapeHtml(lang || '');
     const langClass = langLabel ? ` lang-${langLabel}` : '';

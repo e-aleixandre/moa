@@ -105,14 +105,21 @@ const FANOUT_ACCENTS = ['sky', 'teal', 'mauve', 'peach', 'blue', 'lavender'];
 // mutates the input.
 export function projectStream(session) {
   if (!session) return [];
-  const messages = Array.isArray(session.messages) ? session.messages : [];
+  const allMessages = Array.isArray(session.messages) ? session.messages : [];
+
+  // Cap the rendered history like the old SPA's MessageList: only the last
+  // MAX_MESSAGES_BEFORE_TRUNCATION_NOTE turns are projected, so a very long
+  // conversation stays responsive. `firstRendered` is the absolute offset of
+  // the first kept message, used both to slice and as a stable id base.
+  const firstRendered = Math.max(0, allMessages.length - MAX_MESSAGES_BEFORE_TRUNCATION_NOTE);
+  const messages = firstRendered > 0 ? allMessages.slice(firstRendered) : allMessages;
 
   const blocks = [];
 
   // Truncation notice first, mirroring the old SPA: either the server told us
-  // history was cut, or the list is long enough that older turns are elided.
-  if (session.historyTruncated || messages.length > MAX_MESSAGES_BEFORE_TRUNCATION_NOTE) {
-    blocks.push({ kind: 'system', text: 'Older messages…' });
+  // history was cut, or we elided older turns above.
+  if (session.historyTruncated || firstRendered > 0) {
+    blocks.push({ kind: 'system', id: 'sys-truncated', text: 'Older messages…' });
   }
 
   // Collect every tool_call_id already present in messages so we can dedup
@@ -136,9 +143,15 @@ export function projectStream(session) {
   let currentDoc = null;
   let currentLedger = null;
 
+  // abs = absolute index of the message being processed (stable across polls
+  // as long as older messages aren't dropped), used to derive block ids that
+  // survive re-projection so preact doesn't recycle <details>/BackgroundJob
+  // state into the wrong block.
+  let abs = firstRendered;
+
   function ensureDoc() {
     if (!currentDoc) {
-      currentDoc = { kind: 'document', blocks: [] };
+      currentDoc = { kind: 'document', id: `doc-${abs}`, blocks: [] };
       blocks.push(currentDoc);
       currentLedger = null;
     }
@@ -149,10 +162,11 @@ export function projectStream(session) {
     currentLedger = null;
   }
 
-  for (const msg of messages) {
+  for (let i = 0; i < messages.length; i++, abs++) {
+    const msg = messages[i];
     if (msg && msg._type === 'system') {
       // System line breaks the turn: emit at top level, start fresh doc after.
-      blocks.push({ kind: 'system', text: msg.text || '' });
+      blocks.push({ kind: 'system', id: `sys-${abs}`, text: msg.text || '' });
       currentDoc = null;
       currentLedger = null;
       continue;
@@ -161,7 +175,7 @@ export function projectStream(session) {
     if (msg && msg._type === 'tool_start') {
       const doc = ensureDoc();
       if (!currentLedger) {
-        currentLedger = { type: 'ledger', rows: [] };
+        currentLedger = { type: 'ledger', id: `ledger-${abs}`, rows: [] };
         doc.blocks.push(currentLedger);
       }
       currentLedger.rows.push(toLedgerRow(msg));
@@ -170,6 +184,7 @@ export function projectStream(session) {
       // closes the ledger so subsequent tools open a new one below the diff.
       const diff = toDiffBlock(msg);
       if (diff) {
+        diff.id = `diff-${abs}`;
         doc.blocks.push(diff);
         closeLedger();
       }
@@ -181,7 +196,7 @@ export function projectStream(session) {
       if (text) {
         const doc = ensureDoc();
         closeLedger();
-        doc.blocks.push({ type: 'prose', text });
+        doc.blocks.push({ type: 'prose', id: `prose-${abs}`, text });
       }
       continue;
     }
@@ -191,7 +206,12 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       const attachments = attachmentsOf(msg.content);
-      const wp = { kind: 'waypoint', time: msg.ts, text: joinText(msg.content) };
+      const wp = {
+        kind: 'waypoint',
+        id: `wp-${msg.msg_id || msg._msg_id || abs}`,
+        time: msg.ts,
+        text: joinText(msg.content),
+      };
       if (attachments.length > 0) wp.attachments = attachments;
       blocks.push(wp);
       continue;
@@ -215,18 +235,18 @@ export function projectStream(session) {
   if (live) {
     const doc = ensureDoc();
     closeLedger();
-    if (hasThinking) doc.blocks.push({ type: 'thinking', text: session.thinkingText });
-    if (hasStreamingText) doc.blocks.push({ type: 'prose', text: session.streamingText });
+    if (hasThinking) doc.blocks.push({ type: 'thinking', id: `${doc.id}-thinking`, text: session.thinkingText });
+    if (hasStreamingText) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText });
 
     // Live subagents: a lone one is a ledger row, 2+ overlapping → a fanout.
     if (liveSubs.length === 1) {
-      doc.blocks.push({ type: 'ledger', rows: [liveSubRow(liveSubs[0])] });
+      doc.blocks.push({ type: 'ledger', id: `${doc.id}-livesub`, rows: [liveSubRow(liveSubs[0])] });
     } else if (liveSubs.length >= 2) {
-      doc.blocks.push({ type: 'fanout', agents: liveSubs.map(liveAgent) });
+      doc.blocks.push({ type: 'fanout', id: `${doc.id}-fanout`, agents: liveSubs.map(liveAgent) });
     }
 
     if (liveBash.length > 0) {
-      doc.blocks.push({ type: 'background', jobs: liveBash.map(backgroundJob) });
+      doc.blocks.push({ type: 'background', id: `${doc.id}-bg`, jobs: liveBash.map(backgroundJob) });
     }
 
     doc.kind = 'streaming';

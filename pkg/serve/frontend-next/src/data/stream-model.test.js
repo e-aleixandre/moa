@@ -424,3 +424,36 @@ test('projectStream does not mutate the input session', () => {
   projectStream(s);
   expect(JSON.parse(JSON.stringify(s))).toEqual(snapshot);
 });
+
+// ── 12. stable block ids (Terra 5C: keys must survive re-projection) ─────────
+test('block ids are stable across re-projection and unique', () => {
+  const s = session([
+    user('do it', { msg_id: 'u1' }),
+    assistant('working'),
+    tool('t1', 'read', { path: 'a.js' }),
+    assistant('done'),
+  ]);
+  const a = projectStream(s);
+  const b = projectStream(s); // same input, projected again
+  const idsA = a.map(x => x.id);
+  const idsB = b.map(x => x.id);
+  expect(idsA).toEqual(idsB); // top-level ids identical run to run
+  expect(new Set(idsA).size).toBe(idsA.length); // and unique
+  // sub-block ids inside the document are also present and stable
+  const docA = a.find(x => x.kind === 'document');
+  const docB = b.find(x => x.kind === 'document');
+  expect(docA.blocks.map(x => x.id)).toEqual(docB.blocks.map(x => x.id));
+  expect(docA.blocks.every(x => x.id != null)).toBe(true);
+});
+
+test('growing the conversation keeps earlier block ids unchanged', () => {
+  const base = [
+    user('first', { msg_id: 'u1' }),
+    assistant('reply one'),
+  ];
+  const before = projectStream(session([...base]));
+  const after = projectStream(session([...base, user('second', { msg_id: 'u2' }), assistant('reply two')]));
+  // the first waypoint + first document keep the same ids after new turns arrive
+  expect(after[0].id).toBe(before[0].id);
+  expect(after[1].id).toBe(before[1].id);
+});
