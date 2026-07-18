@@ -243,7 +243,7 @@ export function NewSessionSheet({ state, serverCwd, homeDir, defaultModel, onClo
     <div class="newsession" onKeyDown={onKeyDown}>
       <div class="ns-header">
         <span class="ns-title">New session</span>
-        <button class="ns-close" onClick={onBack || onClose} title="Close"><X /></button>
+        <button class="ns-close" onClick={onClose} title="Close"><X /></button>
       </div>
 
       <div class="ns-searchwrap">

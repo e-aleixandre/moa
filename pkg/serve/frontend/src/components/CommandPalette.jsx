@@ -44,7 +44,6 @@ export function CommandPalette({ open, onClose, state, initialMode = 'search', o
       setQuery('');
       setSelectedIdx(0);
       setMode(initialMode);
-      setCreating(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open, initialMode]);
