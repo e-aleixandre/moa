@@ -8,6 +8,7 @@ moa
 plan.md
 MOA_SERVE_PLAN.md
 pkg/serve/frontend/node_modules/
+pkg/serve/frontend-next/node_modules/
 .plans/
 .moa/goal/
 

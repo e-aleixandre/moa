@@ -29,10 +29,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: pkg/serve/frontend/package-lock.json
+          cache-dependency-path: |
+            pkg/serve/frontend/package-lock.json
+            pkg/serve/frontend-next/package-lock.json
 
       - name: Build frontend
         working-directory: pkg/serve/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build frontend-next
+        working-directory: pkg/serve/frontend-next
         run: |
           npm ci
           npm run build
@@ -59,6 +67,10 @@ jobs:
         working-directory: pkg/serve/frontend
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Audit production frontend-next dependencies
+        working-directory: pkg/serve/frontend-next
+        run: npm audit --omit=dev --audit-level=high
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -73,10 +85,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: pkg/serve/frontend/package-lock.json
+          cache-dependency-path: |
+            pkg/serve/frontend/package-lock.json
+            pkg/serve/frontend-next/package-lock.json
 
       - name: Build frontend
         working-directory: pkg/serve/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build frontend-next
+        working-directory: pkg/serve/frontend-next
         run: |
           npm ci
           npm run build

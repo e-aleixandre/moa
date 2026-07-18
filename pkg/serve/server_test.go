@@ -1191,6 +1191,73 @@ func TestStaticDirOverride(t *testing.T) {
 	}
 }
 
+func TestStaticNextAssets(t *testing.T) {
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	tests := []struct {
+		path     string
+		contains string
+	}{
+		{"/next/", "<div id=\"root\">"},
+		{"/next/app.js", ""},
+		{"/next/app.css", ""},
+	}
+
+	for _, tt := range tests {
+		resp, err := http.Get(srv.URL + tt.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tt.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close() //nolint:errcheck
+		if resp.StatusCode != 200 {
+			t.Errorf("GET %s: expected 200, got %d", tt.path, resp.StatusCode)
+		}
+		if len(body) == 0 {
+			t.Errorf("GET %s: empty body", tt.path)
+		}
+		if tt.contains != "" && !strings.Contains(string(body), tt.contains) {
+			t.Errorf("GET %s: expected body to contain %q", tt.path, tt.contains)
+		}
+	}
+
+	// The new frontend must not shadow the production one at the root.
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 200 {
+		t.Errorf("GET /: expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestStaticNextDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	testContent := "test-next-content"
+	_ = os.WriteFile(filepath.Join(dir, "test.txt"), []byte(testContent), 0644)
+
+	t.Setenv("MOA_SERVE_STATIC_NEXT_DIR", dir)
+
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	resp, err := http.Get(srv.URL + "/next/test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if string(body) != testContent {
+		t.Fatalf("expected %q, got %q", testContent, string(body))
+	}
+}
+
 func TestSubagentTranscriptEndpoints(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

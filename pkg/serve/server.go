@@ -31,6 +31,9 @@ import (
 //go:embed static
 var staticFS embed.FS
 
+//go:embed static-next
+var staticNextFS embed.FS
+
 // serverOptions holds optional hardening configuration for NewServer.
 type serverOptions struct {
 	allowedHosts []string
@@ -151,6 +154,18 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 		staticHandler = http.FileServer(http.FS(sub))
 	}
 	mux.Handle("GET /", staticHandler)
+
+	var staticNextHandler http.Handler
+	if dir := os.Getenv("MOA_SERVE_STATIC_NEXT_DIR"); dir != "" {
+		staticNextHandler = http.FileServer(http.Dir(dir))
+	} else {
+		sub, err := fs.Sub(staticNextFS, "static-next")
+		if err != nil {
+			panic("serve: embedded static filesystem missing 'static-next' subtree: " + err.Error())
+		}
+		staticNextHandler = http.FileServer(http.FS(sub))
+	}
+	mux.Handle("GET /next/", http.StripPrefix("/next", staticNextHandler))
 
 	var devices *deviceStore
 	if o.token != "" || o.deviceAuth {

@@ -1,0 +1,110 @@
+/* Design tokens — Catppuccin Mocha palette + spacing + typography */
+
+:root {
+  /* Surfaces (warm blue-purple darks) */
+  --crust:       #11111b;
+  --mantle:      #181825;
+  --base:        #1e1e2e;
+  --surface0:    #313244;
+  --surface1:    #45475a;
+  --surface2:    #585b70;
+
+  /* Text */
+  --overlay0:    #6c7086;
+  --overlay1:    #7f849c;
+  --subtext0:    #a6adc8;
+  --subtext1:    #bac2de;
+  --text:        #cdd6f4;
+
+  /* Accents */
+  --peach:       #fab387;
+  --peach-dim:   rgba(250,179,135,0.10);
+  --peach-med:   rgba(250,179,135,0.20);
+  --peach-glow:  rgba(250,179,135,0.30);
+  --mauve:       #cba6f7;
+  --mauve-dim:   rgba(203,166,247,0.10);
+  --green:       #a6e3a1;
+  --green-dim:   rgba(166,227,161,0.10);
+  --blue:        #89b4fa;
+  --blue-dim:    rgba(137,180,250,0.10);
+  --red:         #f38ba8;
+  --red-dim:     rgba(243,139,168,0.10);
+  --yellow:      #f9e2af;
+  --yellow-dim:  rgba(249,226,175,0.10);
+  --sky:         #89dceb;
+  --flamingo:    #f2cdcd;
+  --rosewater:   #f5e0dc;
+  --lavender:    #b4befe;
+  --teal:        #94e2d5;
+
+  /* Fonts */
+  --font:        'Outfit', system-ui, sans-serif;
+  --mono:        'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Sizes */
+  --sidebar-w:   252px;
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --ease:        cubic-bezier(0.4, 0, 0.2, 1);
+  --duration:    150ms;
+
+  /* ---------------------------------------------------------------- */
+  /* Ampliación frontend-next — Fase 0                                 */
+  /* ---------------------------------------------------------------- */
+
+  /* Spacing — escala base 4px */
+  --space-1:     4px;
+  --space-2:     8px;
+  --space-3:     12px;
+  --space-4:     16px;
+  --space-5:     20px;
+  --space-6:     24px;
+  --space-8:     32px;
+  --space-10:    40px;
+  --space-12:    48px;
+
+  /* Typography — tamaños */
+  --text-xs:     11px;
+  --text-sm:     12px;
+  --text-base:   14px;
+  --text-md:     15px;
+  --text-lg:     17px;
+  --text-xl:     20px;
+  --text-2xl:    26px;
+
+  /* Typography — pesos */
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Typography — interlineado */
+  --leading-tight:   1.25;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.7;
+
+  /* Typography — tracking (letter-spacing) */
+  --tracking-tight: -0.01em;
+  --tracking-wide:   0.08em;
+
+  /* Elevation — sombras suaves sobre fondos oscuros */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.40);
+
+  /* Z-index — capas */
+  --z-base:    0;
+  --z-sticky:  10;
+  --z-overlay: 100;
+  --z-sheet:   200;
+  --z-toast:   300;
+
+  /* Tempos semánticos — para animaciones vivas (breathing, shimmer) */
+  --breath-running:   1800ms;
+  --breath-attention: 1100ms;
+  --shimmer:          1400ms;
+}

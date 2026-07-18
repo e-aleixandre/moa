@@ -31,7 +31,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: pkg/serve/frontend/package-lock.json
+          cache-dependency-path: |
+            pkg/serve/frontend/package-lock.json
+            pkg/serve/frontend-next/package-lock.json
 
       - name: Validate stable SemVer tag
         run: |
@@ -42,6 +44,12 @@ jobs:
 
       - name: Build frontend
         working-directory: pkg/serve/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build frontend-next
+        working-directory: pkg/serve/frontend-next
         run: |
           npm ci
           npm run build

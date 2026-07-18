@@ -1,0 +1,15 @@
+{
+  "name": "moa-frontend-next",
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch"
+  },
+  "dependencies": {
+    "lucide-preact": "^0.577.0",
+    "preact": "^10.25.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
