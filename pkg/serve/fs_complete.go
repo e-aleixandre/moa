@@ -87,6 +87,15 @@ func handleFSComplete() http.HandlerFunc {
 	}
 }
 
+// userHomeDir returns the current user's home directory, or "" if unavailable.
+// Used by /api/capabilities so the web palette can tildify paths for display.
+func userHomeDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	return ""
+}
+
 // expandHome expands a leading "~" or "~/" in path to the current user's home
 // directory. Paths that don't start with "~" are returned unchanged.
 func expandHome(path string) string {

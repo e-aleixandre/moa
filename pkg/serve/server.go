@@ -834,6 +834,7 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
 			"workspaceRoot": mgr.workspaceRoot,
+			"homeDir":       userHomeDir(),
 			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),
 			"goal_flags":    goalFlags,
 		}
