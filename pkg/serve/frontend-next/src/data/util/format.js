@@ -1,0 +1,276 @@
+export function truncateText(text, max = 2000) {
+  if (!text) return '';
+  if (text.length <= max) return text;
+  return text.substring(0, max) + '\n… (truncated)';
+}
+
+export function formatArgs(args) {
+  if (!args) return '';
+  try {
+    return typeof args === 'string' ? args : JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+/** Classify a tool name into a verb for coloring and display. */
+export function toolVerb(name) {
+  if (!name) return { verb: name, cls: '' };
+  const n = name.toLowerCase();
+  if (n === 'read' || n === 'Read')          return { verb: 'read',   cls: 'read' };
+  if (n === 'write' || n === 'Write')        return { verb: 'write',  cls: 'write' };
+  if (n === 'edit' || n === 'Edit')          return { verb: 'edit',   cls: 'edit' };
+  if (n === 'bash' || n === 'Bash')          return { verb: 'bash',   cls: 'bash' };
+  if (n === 'grep' || n === 'Grep')          return { verb: 'grep',   cls: 'search' };
+  if (n === 'find')                          return { verb: 'find',   cls: 'search' };
+  if (n === 'ls')                            return { verb: 'ls',     cls: 'read' };
+  if (n === 'fetch_content')                 return { verb: 'fetch',  cls: 'fetch' };
+  if (n === 'web_search')                    return { verb: 'search', cls: 'search' };
+  if (n === 'ask_user')                      return { verb: '❓ questions', cls: 'ask-user' };
+  if (n === 'send_file')                     return { verb: '📤 send', cls: 'send-file' };
+  if (n === 'subagent')                      return { verb: '⚡ subagent', cls: 'subagent' };
+  return { verb: name, cls: '' };
+}
+
+/** Extract a short path/command string from tool args for the header. */
+export function toolPath(name, args) {
+  if (!args) return '';
+  const a = typeof args === 'string' ? tryParse(args) : args;
+  if (!a) return '';
+  const n = (name || '').toLowerCase();
+
+  if (n === 'read' || n === 'write' || n === 'edit' || n === 'ls')
+    return a.path || '';
+  if (n === 'send_file') {
+    const p = a.path || '';
+    return p.length > 80 ? p.split('/').pop() : p;
+  }
+  if (n === 'bash')
+    return shortenCmd(a.command || '');
+  if (n === 'grep' || n === 'find')
+    return a.pattern || a.glob || '';
+  if (n === 'fetch_content')
+    return a.url || '';
+  if (n === 'web_search')
+    return a.query || '';
+  if (n === 'ask_user') {
+    const qs = a.questions;
+    if (Array.isArray(qs) && qs.length > 0) {
+      const text = qs[0].question || '';
+      return text.length > 80 ? text.substring(0, 77) + '…' : text;
+    }
+    return '';
+  }
+  if (n === 'subagent') {
+    let task = a.task || '';
+    if (task.length > 80) task = task.substring(0, 77) + '…';
+    const badges = [];
+    if (a.model) badges.push(a.model);
+    if (a.thinking) badges.push('thinking:' + a.thinking);
+    if (Array.isArray(a.tools) && a.tools.length > 0) badges.push(a.tools.join(','));
+    if (badges.length > 0) task += '  [' + badges.join(' · ') + ']';
+    return task;
+  }
+
+  // Fallback: first short string value
+  for (const v of Object.values(a)) {
+    if (typeof v === 'string' && v.length > 0) {
+      return v.length > 80 ? v.substring(0, 80) + '…' : v;
+    }
+  }
+  return '';
+}
+
+/** Extract the most relevant content for the tool preview.
+ * startLine: real 1-based file line for edit previews (0/undefined → number from 1). */
+export function toolPreview(name, args, result, status, startLine) {
+  const n = (name || '').toLowerCase();
+  const a = typeof args === 'string' ? tryParse(args) : (args || {});
+
+  // For write/edit, show the content being written
+  if (n === 'write' && a.content)
+    return { text: a.content, kind: 'input' };
+  if (n === 'edit') {
+    // Use server-computed diff (has real file line numbers).
+    if (result && result.includes('@@')) return { text: result, kind: 'diff' };
+    // Fallback for old results without diff.
+    const oldText = a.oldText || a.old_text || '';
+    const newText = a.newText || a.new_text || '';
+    if (oldText || newText) return { text: formatDiff(oldText, newText, startLine), kind: 'diff' };
+  }
+
+  // ask_user is rendered by AskUserPreview component — skip here.
+  if (n === 'ask_user') return null;
+
+  // send_file is rendered by FileCard component — skip only on success so
+  // errors (e.g. file not found) still show the raw message.
+  if (n === 'send_file' && status === 'done') return null;
+
+  // For everything else, show the result
+  if (result) return { text: result, kind: 'output' };
+
+  return null;
+}
+
+const PREVIEW_LINES = 12;
+
+/** Split preview text showing the first N lines, hiding the rest. */
+export function splitPreview(text, maxLines = PREVIEW_LINES) {
+  if (!text) return { visible: '', hidden: 0, total: 0 };
+  const lines = text.split('\n');
+  const total = lines.length;
+  if (total <= maxLines) return { visible: text, hidden: 0, total };
+  return {
+    visible: lines.slice(0, maxLines).join('\n'),
+    hidden: total - maxLines,
+    total,
+  };
+}
+
+/** Split preview text showing the last N lines (tail mode for streaming). */
+export function splitPreviewTail(text, maxLines = PREVIEW_LINES) {
+  if (!text) return { visible: '', hidden: 0, total: 0 };
+  const lines = text.split('\n');
+  const total = lines.length;
+  if (total <= maxLines) return { visible: text, hidden: 0, total };
+  return {
+    visible: lines.slice(-maxLines).join('\n'),
+    hidden: total - maxLines,
+    total,
+  };
+}
+
+/** Format a simple unified-style diff between old and new text with line numbers.
+ * startLine is the real 1-based file line where oldText starts (defaults to 1). */
+export function formatDiff(oldText, newText, startLine = 1) {
+  const base = (Number.isInteger(startLine) && startLine > 1) ? startLine - 1 : 0;
+  const oldLines = oldText ? oldText.split('\n') : [];
+  const newLines = newText ? newText.split('\n') : [];
+  const lines = [];
+  const maxContext = 3;
+
+  // Find common prefix/suffix to reduce noise.
+  let prefixLen = 0;
+  while (prefixLen < oldLines.length && prefixLen < newLines.length && oldLines[prefixLen] === newLines[prefixLen]) {
+    prefixLen++;
+  }
+  let suffixLen = 0;
+  while (suffixLen < oldLines.length - prefixLen && suffixLen < newLines.length - prefixLen &&
+         oldLines[oldLines.length - 1 - suffixLen] === newLines[newLines.length - 1 - suffixLen]) {
+    suffixLen++;
+  }
+
+  const contextStart = Math.max(0, prefixLen - maxContext);
+  const pad = n => String(n).padStart(3);
+
+  // Context before
+  for (let i = contextStart; i < prefixLen; i++) {
+    lines.push(`${pad(base + i + 1)}   ${oldLines[i]}`);
+  }
+
+  // Removed lines
+  for (let i = prefixLen; i < oldLines.length - suffixLen; i++) {
+    lines.push(`${pad(base + i + 1)} - ${oldLines[i]}`);
+  }
+
+  // Added lines
+  let newStart = prefixLen;
+  for (let i = prefixLen; i < newLines.length - suffixLen; i++) {
+    lines.push(`${pad(base + newStart + 1 + (i - prefixLen))} + ${newLines[i]}`);
+  }
+
+  // Context after
+  const afterStart = oldLines.length - suffixLen;
+  const afterEnd = Math.min(oldLines.length, afterStart + maxContext);
+  for (let i = afterStart; i < afterEnd; i++) {
+    lines.push(`${pad(base + i + 1)}   ${oldLines[i]}`);
+  }
+
+  return lines.join('\n');
+}
+
+function shortenCmd(cmd) {
+  if (!cmd) return '';
+  // Trim and take first line if multiline
+  const first = cmd.trim().split('\n')[0];
+  return first.length > 100 ? first.substring(0, 100) + '…' : first;
+}
+
+function tryParse(s) {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+export function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+/** Strip provider prefix from model string for display. */
+export function shortModel(model) {
+  if (!model) return '';
+  const parts = model.split('/');
+  return parts.length > 1 ? parts.slice(1).join('/') : model;
+}
+
+/** A stable key identifying the project a session belongs to (its cwd). */
+export function projectKey(cwd) {
+  if (!cwd) return '';
+  return cwd.replace(/\/+$/, '');
+}
+
+/** A short, human-friendly project label from a cwd: the last two path
+ *  segments (e.g. "/home/me/dev/moa/main" → "moa/main"). */
+export function projectLabel(cwd) {
+  const p = projectKey(cwd);
+  if (!p) return 'No project';
+  const segs = p.split('/').filter(Boolean);
+  if (segs.length === 0) return '/';
+  return segs.slice(-2).join('/');
+}
+
+/** A compact display of a full path for a session card: collapses the home
+ *  prefix to "~" and keeps the tail readable on narrow screens. */
+export function shortPath(cwd, maxLen = 42) {
+  let p = projectKey(cwd);
+  if (!p) return '';
+  p = p.replace(/^\/home\/[^/]+/, '~').replace(/^\/root/, '~');
+  if (p.length <= maxLen) return p;
+  return '…' + p.slice(-(maxLen - 1));
+}
+
+/** Default window (days) for "recent" session lists. Older sessions are hidden
+ *  from the lists to avoid overload but remain findable via search. */
+export const RECENT_DAYS = 7;
+
+/** Whether a session counts as "recent" (updated within RECENT_DAYS). Sessions
+ *  with no timestamp are treated as recent so they never silently vanish. */
+export function isRecentSession(sess, days = RECENT_DAYS) {
+  if (!sess || !sess.updated) return true;
+  return Date.now() - sess.updated <= days * 24 * 60 * 60 * 1000;
+}
+
+
+/** Returns the state used to color a session's status dot. It mirrors the
+ *  session's own state, except that an idle main agent which has live
+ *  subagents still counts as 'running' — otherwise a session waiting on a
+ *  delegated subagent shows green (idle) despite work being in progress.
+ *  A non-idle main state (running/permission/error) always wins. */
+export function sessionDotState(sess) {
+  if (!sess) return 'idle';
+  if (sess.state && sess.state !== 'idle') return sess.state;
+  if (hasLiveSubagents(sess)) return 'running';
+  return sess.state || 'idle';
+}
+
+function hasLiveSubagents(sess) {
+  if (sess.subagentCount > 0) return true;
+  const subs = sess.subagents;
+  if (subs) {
+    for (const k in subs) {
+      const st = subs[k] && subs[k].status;
+      if (st === 'running' || st === 'cancelling') return true;
+    }
+  }
+  return false;
+}
