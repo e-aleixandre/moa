@@ -45,10 +45,6 @@ const initialFocused = initialIds.includes(persisted.focusedTile)
 let state = {
   sessions: {},
 
-  // Server-owned cross-session blocking items. This is the first visible
-  // surface of the voice-operations attention policy; it is never persisted.
-  attentionItems: [],
-
   usage: null, // global plan usage snapshot from /api/usage (null until first poll)
 
   tileTree: initialTree,

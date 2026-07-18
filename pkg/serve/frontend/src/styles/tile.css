@@ -25,8 +25,12 @@
 .tile.focused::before {
   background: linear-gradient(90deg, var(--peach), var(--mauve));
 }
-.tile.attention::before {
-  background: linear-gradient(90deg, var(--peach), var(--yellow));
+.tile.attention.blocked::before {
+  background: linear-gradient(90deg, var(--yellow), var(--peach));
+  animation: tile-attention-bar 2s ease-in-out infinite;
+}
+.tile.attention.errored::before {
+  background: linear-gradient(90deg, var(--red), var(--peach));
   animation: tile-attention-bar 2s ease-in-out infinite;
 }
 @keyframes tile-attention-bar {

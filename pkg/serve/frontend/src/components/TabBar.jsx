@@ -19,7 +19,7 @@ export function TabBar({ state, onOpenPalette }) {
         const unseen = sess.unseen && !isActive;
         const classes = ['tab-pill'];
         if (isActive) classes.push('active');
-        if (needsAttention && !isActive) classes.push('attention');
+        if (needsAttention && !isActive) classes.push('attention', sess.state === 'error' ? 'errored' : 'blocked');
         if (hasFlash) classes.push('flash');
 
         return (

@@ -364,6 +364,14 @@ export function handleWsInit(id, data) {
     planFile: data.plan_file || null,
     costUSD: data.cost_usd || 0,
     subagents: { ...initSubagents(data.subagents), ...initBashJobs(data.bash_jobs) },
+    // subagentCount is otherwise live-only (WS subagent_count events). If an
+    // async job finished while this pane had no WS (backgrounded on mobile),
+    // that terminal count=0 event was missed and the badge/dot would stay
+    // stuck. The init snapshot's data.subagents lists only *live* jobs
+    // (running/cancelling), so recompute the authoritative async count from it.
+    subagentCount: (data.subagents || []).filter(
+      sa => sa && sa.async && (sa.status === 'running' || sa.status === 'cancelling')
+    ).length,
     goalActive: !!data.goal_active,
     goalObjective: data.goal_active ? (data.goal_objective || '') : null,
     goalWorkDir: data.goal_active ? (data.goal_work_dir || '') : null,

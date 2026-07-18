@@ -108,7 +108,7 @@ export function Drawer({ state, onOpenPalette }) {
                         <span class={`state-dot ${sessionDotState(sess)}`} />
                         <span class="drawer-item-title">{sess.title || 'Untitled'}</span>
                         {(sess.state === 'permission' || sess.state === 'error') && (
-                          <span class="sidebar-attention" />
+                          <span class={`sidebar-attention ${sess.state === 'error' ? 'errored' : 'blocked'}`} />
                         )}
                         <span class="drawer-item-meta">{sess.model}</span>
                         <button

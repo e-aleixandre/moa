@@ -73,35 +73,6 @@
 }
 .overview-group-toggle:active { transform: scale(0.94); }
 
-.overview-attention {
-  margin: 4px 12px 0;
-  padding: 10px;
-  border: 1px solid var(--yellow);
-  border-radius: var(--radius-md);
-  background: var(--yellow-dim);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.overview-attention-title { font-size: 12px; font-weight: 700; color: var(--yellow); }
-.overview-attention-item {
-  appearance: none;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--base);
-  color: var(--text);
-  padding: 8px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font: inherit;
-  font-size: 13px;
-}
-.overview-attention-item small { color: var(--overlay1); font-size: 11px; }
-
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -128,9 +99,13 @@
   border-color: var(--peach);
   box-shadow: 0 0 0 1px var(--peach), 0 4px 12px rgba(250,179,135,0.15);
 }
-.overview-card.attention {
+.overview-card.attention.blocked {
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 1px var(--yellow), 0 4px 12px var(--yellow-dim);
+}
+.overview-card.attention.errored {
   border-color: var(--red);
-  box-shadow: 0 0 0 1px var(--red), 0 4px 12px rgba(243,139,168,0.15);
+  box-shadow: 0 0 0 1px var(--red), 0 4px 12px var(--red-dim);
 }
 
 .overview-card-header { display: flex; align-items: center; gap: 6px; }
@@ -403,8 +378,12 @@
   border-color: var(--peach-med);
   color: var(--text);
 }
-.tab-pill.attention {
-  border-color: var(--peach);
+.tab-pill.attention.blocked {
+  border-color: var(--yellow);
+  animation: attention-pulse 2s ease-in-out infinite;
+}
+.tab-pill.attention.errored {
+  border-color: var(--red);
   animation: attention-pulse 2s ease-in-out infinite;
 }
 .tab-pill.flash { animation: tab-flash 1.2s ease-out; }

@@ -39,20 +39,6 @@ kbd.shortcut-hint {
   pointer-events: none;
 }
 
-/* Subagent badge */
-.subagent-badge {
-  font-size: 11px;
-  color: var(--mauve);
-  font-family: var(--mono);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
-  background: var(--mauve-dim);
-  border-radius: var(--radius-full);
-}
-.subagent-badge .lucide { width: 12px; height: 12px; }
-
 /* Plan mode badge */
 .plan-badge {
   font-size: 10px;
@@ -94,10 +80,11 @@ kbd.shortcut-hint {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--peach);
   animation: attention-pulse 2s ease-in-out infinite;
   flex-shrink: 0;
 }
+.sidebar-attention.blocked { background: var(--yellow); }
+.sidebar-attention.errored { background: var(--red); }
 
 /* Empty state placeholder */
 .empty-state {

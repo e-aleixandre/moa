@@ -70,6 +70,29 @@ test('handleWsInit preserves the bounded-history marker', () => {
   expect(session.messages).toHaveLength(1);
 });
 
+test('handleWsInit clears a stuck subagentCount when no live jobs remain', () => {
+  seedSession('s1');
+  // An async job finished while this pane had no WS, so the terminal count=0
+  // event was missed and the badge/dot stayed stuck at 1.
+  setState({ sessions: { s1: { ...store.get().sessions.s1, subagentCount: 1 } } });
+  handleWsInit('s1', { messages: [], subagents: [] });
+  expect(store.get().sessions.s1.subagentCount).toBe(0);
+});
+
+test('handleWsInit recomputes subagentCount from live async jobs in the snapshot', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [
+      { job_id: 'a', async: true, status: 'running' },
+      { job_id: 'b', async: true, status: 'cancelling' },
+      { job_id: 'c', async: false, status: 'running' }, // sync — not counted
+      { job_id: 'd', async: true, status: 'completed' }, // terminal — not counted
+    ],
+  });
+  expect(store.get().sessions.s1.subagentCount).toBe(2);
+});
+
 test('handleWsInit replaces server-ID steers with the authoritative snapshot', () => {
   seedSession('s1');
   // A chip that already carries a server ID and was confirmed by its POST: the

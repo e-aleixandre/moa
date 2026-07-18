@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState } from 'preact/hooks';
-import { GitFork, ChevronDown, Plus, History } from 'lucide-preact';
+import { ChevronDown, Plus, History } from 'lucide-preact';
 import { MessageList } from './MessageList.jsx';
 import { InputBar } from './InputBar.jsx';
 import { AgentTray } from './AgentTray.jsx';
@@ -64,9 +64,6 @@ export function ChatView({ state, onToggleOverview, onOpenPalette }) {
           <span class="chat-header-title">{session.title || 'Untitled'}</span>
           <ChevronDown class="chat-header-chevron" />
         </button>
-        {session.subagentCount > 0 && (
-          <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
-        )}
         <ModelPill model={session.model} thinking={session.thinking} />
         <button
           class="chat-header-rewind"

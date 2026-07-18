@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'preact/hooks';
 import { memo } from 'preact/compat';
-import { MessageSquarePlus, GripHorizontal, GitFork, Columns2, Rows2, X } from 'lucide-preact';
+import { MessageSquarePlus, GripHorizontal, Columns2, Rows2, X } from 'lucide-preact';
 import { focusTile, assignToTile, swapTiles, splitTile, closeTile } from '../tile-actions.js';
 import { getTileCount } from '../store.js';
 import { formatShortcut } from '../hooks/useHotkeys.js';
@@ -23,7 +23,7 @@ function TileView({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
 
   const classes = ['tile'];
   if (isFocused) classes.push('focused');
-  if (needsAttention) classes.push('attention');
+  if (needsAttention) classes.push('attention', session.state === 'error' ? 'errored' : 'blocked');
   if (session?.flash) classes.push('flash');
   if (dragOver) classes.push('drag-over');
 
@@ -155,9 +155,6 @@ function TileView({ tileId, tileIndex, sessionId, session, usage, isFocused }) {
         <span class="tile-number" title={formatShortcut(String(tileIndex + 1), { mod: true })}>{tileIndex + 1}</span>
         <span class={`state-dot ${sessionDotState(session)}`} />
         <span class="tile-title">{session.title || 'Untitled'}</span>
-        {session.subagentCount > 0 && (
-          <span class="subagent-badge"><GitFork />{session.subagentCount}</span>
-        )}
         <ModelPill model={session.model} thinking={session.thinking} />
         <SettingsDropdown sessionId={sessionId} session={session} />
         <button class="tile-action-btn" onClick={(e) => stop(e, () => splitTile(tileId, 'horizontal'))} title="Split right"><Columns2 /></button>
