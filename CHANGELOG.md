@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-18
+
+### Fixed
+
+- Keep the agent's replies in the owner-facing transcript after a session has
+  compacted. They were dropped from `/api/sessions/{id}/messages`, so Pulse's
+  "read the last message" could report only the owner's own turn even when the
+  agent had already answered.
+
 ## [0.10.1] - 2026-07-18
 
 ### Fixed
