@@ -113,7 +113,9 @@ function FanoutSection() {
         </div>
 
         <AgentTray agents={TRAY_AGENTS} />
-        <Composer queued={null} placeholder="also bump the version in…" />
+        {/* Composer specimen: no session, so it shows the idle default (its
+            queue/activity are driven by a real session in the app). */}
+        <Composer />
         <StatusStrip task="2 agents running · 1 result waiting" ctxPercent={44} tokensUp="58.3k" tokensDown="12.1k" />
       </div>
 
@@ -170,7 +172,7 @@ function BackgroundJobSection() {
           <StreamingSkeleton />
         </div>
 
-        <Composer queued={null} placeholder="Message moa — the running job won't block you…" />
+        <Composer />
         <StatusStrip task="streaming · bg job 2:18" ctxPercent={62} tokensUp="41.2k" tokensDown="8.7k" />
       </div>
 

@@ -10,6 +10,7 @@ import { projectStream } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent } from "../../data/selectors.js";
 import { openSession } from "../../data/tile-actions.js";
 import { shortModel, shortPath } from "../../data/util/format.js";
+import { formatElapsed } from "../../data/util/activity.js";
 import { activityPhase, activityLabel } from "../../data/util/activity.js";
 import "./ConversationScreen.css";
 
@@ -65,18 +66,28 @@ function spineSessions(sessions) {
 }
 
 // currentTask derives the StatusStrip's task label: the first not-done task if
-// the session tracks tasks, else the live activity label (gerund/phase), else
-// nothing (hidden rather than invented).
-function currentTask(session) {
+// the session tracks tasks, else the live activity label (gerund/phase) plus an
+// elapsed timer anchored to `runStartedAtMs`, else nothing (hidden rather than
+// invented). `nowMs` is the ticking clock (see ConversationScreen's interval)
+// so the gerund rotation and the timer advance on their own — the timer origin
+// is always the server-stamped runStartedAtMs, never a client Date.now() start.
+function currentTask(session, nowMs) {
   const tasks = session.tasks || [];
   const pending = tasks.find((t) => t.status !== "done");
   if (pending) return pending.title;
   const phase = activityPhase(session);
-  if (phase) {
-    const elapsed = session.runStartedAtMs ? Date.now() - session.runStartedAtMs : 0;
-    return activityLabel(phase, elapsed);
+  if (!phase) return undefined;
+  const runStartedAtMs = session.runStartedAtMs || 0;
+  const elapsedMs = runStartedAtMs ? Math.max(0, nowMs - runStartedAtMs) : 0;
+  const label = activityLabel(phase, elapsedMs);
+  // Show the timer only for the running phases, not the momentary
+  // compacting/verifying/waiting states where an age counter reads oddly.
+  const showTimer = runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
+  if (showTimer) {
+    const elapsedText = formatElapsed(elapsedMs);
+    return elapsedText ? `${label} · ${elapsedText}` : label;
   }
-  return undefined;
+  return label;
 }
 
 function fmtSpend(costUSD) {
@@ -92,6 +103,19 @@ export function ConversationScreen({ version }) {
   const activeId = focusedSessionId(state);
   const { active, saved } = spineSessions(state.sessions);
   const loaded = state.sessionsLoaded;
+
+  // Activity clock: while the focused session shows live activity, tick once a
+  // second so the StatusStrip's gerund rotation and elapsed timer advance on
+  // their own. The timer origin is the server-stamped runStartedAtMs (read in
+  // currentTask), not this clock — the clock only supplies "now".
+  const activityActive = activityPhase(session) !== null;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!activityActive) return;
+    setNowMs(Date.now());
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [activityActive]);
 
   // onSelectSession routes a Spine click to the focused tile (desktop) via
   // openSession, which leaves the tile showing that session. // 5G: the next's
@@ -144,11 +168,10 @@ export function ConversationScreen({ version }) {
         <Stream session={session} blocks={blocks} />
         {/* 5J: AgentTray — live subagent chips, not connected yet. */}
         <AgentTray agents={[]} />
-        {/* 5D: Composer — send/steer, not connected yet. */}
-        <Composer />
+        <Composer sessionId={session.id} session={session} />
         <StatusStrip
           ctxPercent={session.contextPercent}
-          task={currentTask(session)}
+          task={currentTask(session, nowMs)}
           spend={fmtSpend(session.costUSD)}
         />
       </>

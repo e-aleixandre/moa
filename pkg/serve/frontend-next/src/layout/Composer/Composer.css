@@ -100,6 +100,30 @@
   color: var(--overlay1);
   padding: 0 var(--space-2);
   overflow: hidden;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration) var(--ease);
+}
+
+.composer-wrap button.queue-note:hover {
+  background: var(--surface0);
+}
+
+.composer-wrap button.queue-note:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.composer-wrap .composer-stop {
+  background: linear-gradient(135deg, var(--red), color-mix(in srgb, var(--red) 60%, var(--maroon)));
+}
+
+.composer-wrap .composer-stop:hover {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--red) 35%, transparent);
 }
 
 .composer-wrap .queue-note span {
