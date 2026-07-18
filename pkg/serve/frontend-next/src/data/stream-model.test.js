@@ -1,0 +1,426 @@
+// stream-model.test.js — run with `bun test`
+//
+// Exhaustive coverage of the stream projection: this is the piece of most
+// judgment in phase 5, so the grouping rules (ledgers, fanout, background,
+// streaming, truncation) are pinned here with plain session fixtures.
+import { test, expect } from 'bun:test';
+import { projectStream } from './stream-model.js';
+
+// ── fixture helpers ──────────────────────────────────────────────────────────
+const user = (text, extra = {}) => ({ role: 'user', content: [{ type: 'text', text }], ...extra });
+const assistant = (text) => ({ role: 'assistant', content: [{ type: 'text', text }] });
+const tool = (id, name, args, status = 'done', result = 'ok', extra = {}) => ({
+  _type: 'tool_start', tool_call_id: id, tool_name: name, args, status, result, ...extra,
+});
+const system = (text) => ({ _type: 'system', text });
+const session = (messages, extra = {}) => ({ messages, ...extra });
+
+// ── 1. consecutive tool calls → one ledger of N rows ─────────────────────────
+test('consecutive tool calls without prose form a single ledger', () => {
+  const s = session([
+    tool('t1', 'read', { path: 'a.js' }),
+    tool('t2', 'grep', { pattern: 'foo' }),
+    tool('t3', 'bash', { command: 'ls' }),
+  ]);
+  const blocks = projectStream(s);
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0].kind).toBe('document');
+  expect(blocks[0].blocks).toHaveLength(1);
+  const ledger = blocks[0].blocks[0];
+  expect(ledger.type).toBe('ledger');
+  expect(ledger.rows.map(r => r.id)).toEqual(['t1', 't2', 't3']);
+  expect(ledger.rows.map(r => r.tool)).toEqual(['read', 'grep', 'bash']);
+});
+
+// ── 2. prose splits ledgers ──────────────────────────────────────────────────
+test('prose between tool calls splits into two ledgers', () => {
+  const s = session([
+    tool('t1', 'read', { path: 'a.js' }),
+    assistant('Now I will edit it.'),
+    tool('t2', 'grep', { pattern: 'foo' }),
+  ]);
+  const blocks = projectStream(s);
+  expect(blocks).toHaveLength(1);
+  const doc = blocks[0];
+  expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'prose', 'ledger']);
+  expect(doc.blocks[0].rows).toHaveLength(1);
+  expect(doc.blocks[1].text).toBe('Now I will edit it.');
+  expect(doc.blocks[2].rows).toHaveLength(1);
+});
+
+// ── 3. edit with diff → full-width sibling diff block ─────────────────────────
+test('edit with a server diff emits a full-width diff sibling', () => {
+  const diffResult = '@@ -10,2 +10,2 @@\n-old line\n+new line';
+  const s = session([
+    tool('e1', 'edit', { path: 'src/x.js' }, 'done', diffResult, { start_line: 10 }),
+  ]);
+  const blocks = projectStream(s);
+  const doc = blocks[0];
+  expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'diff']);
+  const diff = doc.blocks[1];
+  expect(diff.filename).toBe('src/x.js');
+  expect(diff.startLine).toBe(10);
+  expect(diff.diffText).toBe(diffResult);
+});
+
+test('a diff closes its ledger so later tools open a new one', () => {
+  const s = session([
+    tool('e1', 'edit', { path: 'x.js' }, 'done', '@@ -1,1 +1,1 @@\n-a\n+b', { start_line: 1 }),
+    tool('t2', 'read', { path: 'y.js' }),
+  ]);
+  const doc = projectStream(s)[0];
+  expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'diff', 'ledger']);
+  expect(doc.blocks[0].rows[0].id).toBe('e1');
+  expect(doc.blocks[2].rows[0].id).toBe('t2');
+});
+
+test('an edit WITHOUT a server unified diff emits no diff block (only its ledger row)', () => {
+  // oldText/newText + start_line but no server diff: toolPreview builds a
+  // formatDiff fallback that is NOT a unified diff (DiffBlock would render it
+  // empty), so we must not emit a diff block — just the ledger row.
+  const s = session([
+    tool('e1', 'edit', { path: 'x.js', oldText: 'foo', newText: 'bar' }, 'done', '', { start_line: 5 }),
+  ]);
+  const doc = projectStream(s)[0];
+  expect(doc.blocks.map(b => b.type)).toEqual(['ledger']);
+  expect(doc.blocks[0].rows[0].id).toBe('e1');
+  expect(doc.blocks.some(b => b.type === 'diff')).toBe(false);
+});
+
+test('an edit WITH a server unified diff emits a diff block', () => {
+  const s = session([
+    tool('e1', 'edit', { path: 'src/x.js', oldText: 'a', newText: 'b' }, 'done', '--- a/src/x.js\n+++ b/src/x.js\n@@ -1,1 +1,1 @@\n-a\n+b', { start_line: 3 }),
+  ]);
+  const doc = projectStream(s)[0];
+  expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'diff']);
+  const diff = doc.blocks[1];
+  expect(diff.filename).toBe('src/x.js');
+  expect(diff.startLine).toBe(3);
+  expect(diff.diffText).toContain('@@');
+});
+
+// ── 4. status mapping ────────────────────────────────────────────────────────
+test('tool status maps done→ok, error→err, rejected→warn', () => {
+  const s = session([
+    tool('t1', 'bash', { command: 'a' }, 'done', 'ok'),
+    tool('t2', 'bash', { command: 'b' }, 'error', 'boom'),
+    tool('t3', 'bash', { command: 'c' }, 'rejected', 'denied'),
+  ]);
+  const rows = projectStream(s)[0].blocks[0].rows;
+  expect(rows.map(r => r.status)).toEqual(['ok', 'err', 'warn']);
+});
+
+// ── 5. LIVE subagents: one → ledger row, two overlapping → fanout ────────────
+// Only subagents still running/cancelling are read from session.subagents;
+// terminated ones live in session.messages (see section 5b below).
+test('two live subagents form a fanout matching the FanoutBlock shape', () => {
+  const s = session([assistant('Delegating.')], {
+    subagents: {
+      j1: { jobId: 'j1', task: 'Analyze auth', model: 'anthropic/sonnet', status: 'running', messages: [] },
+      j2: { jobId: 'j2', task: 'Analyze db', model: 'anthropic/sonnet', status: 'running', messages: [assistant('working')] },
+    },
+  });
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  expect(doc.kind).toBe('streaming'); // live subagents make the turn streaming
+  const fanout = doc.blocks.find(b => b.type === 'fanout');
+  expect(fanout).toBeTruthy();
+  expect(fanout.agents).toHaveLength(2);
+  const byId = Object.fromEntries(fanout.agents.map(a => [a.id, a]));
+  // FanoutBlock consumes { id, name, accent, state, action?, time? }
+  expect(byId.j1.state).toBe('running');
+  expect(byId.j1.name).toBe('Analyze auth');
+  expect(byId.j1.accent).toBeTruthy();
+  expect(byId.j1.action).toBeTruthy();
+  expect(byId.j2.state).toBe('running');
+  // accents cycle by index → the two agents differ
+  expect(byId.j1.accent).not.toBe(byId.j2.accent);
+  // no stray props the component ignores
+  expect(byId.j1.jobId).toBeUndefined();
+  expect(byId.j1.status).toBeUndefined();
+});
+
+test('a single live subagent is a ledger row, not a fanout', () => {
+  const s = session([assistant('Delegating.')], {
+    subagents: {
+      j1: { jobId: 'j1', task: 'Do the thing', model: 'anthropic/sonnet', status: 'running', messages: [] },
+    },
+  });
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger).toBeTruthy();
+  expect(ledger.rows[0].tool).toBe('task');
+  expect(ledger.rows[0].arg.text).toBe('Do the thing');
+});
+
+// ── 5b. TERMINATED subagents come from messages, not session.subagents ───────
+test('a terminated subagent in messages is a ledger row in place, not a fanout', () => {
+  const s = session([
+    assistant('Delegating.'),
+    tool('subagent-j1', 'subagent', { task: 'Analyze auth' }, 'done', 'Found 3 issues in auth'),
+    assistant('The subagent found issues.'),
+  ]);
+  const doc = projectStream(s)[0];
+  // prose, ledger (the subagent card), prose — in chronological order
+  expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'ledger', 'prose']);
+  const ledger = doc.blocks[1];
+  expect(ledger.rows[0].id).toBe('subagent-j1');
+  expect(ledger.rows[0].tool).toBe('subagent');
+  expect(ledger.rows[0].arg.text).toBe('Analyze auth');
+  expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
+});
+
+test('a completed subagent lingering in session.subagents is not duplicated', () => {
+  // It is already in messages as a subagent card; the map still holds it as
+  // completed → must appear exactly once (from messages), never re-emitted.
+  const s = session([
+    assistant('Delegating.'),
+    tool('subagent-j1', 'subagent', { task: 'Analyze auth' }, 'done', 'done text'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', task: 'Analyze auth', status: 'completed', messages: [] },
+    },
+  });
+  const blocks = projectStream(s);
+  // exactly one ledger row references j1, and there is no fanout/background
+  const rows = blocks.flatMap(b => (b.blocks || []).flatMap(x => x.rows || []));
+  expect(rows.filter(r => r.id === 'subagent-j1')).toHaveLength(1);
+  expect(blocks.some(b => (b.blocks || []).some(x => x.type === 'fanout' || x.type === 'background'))).toBe(false);
+});
+
+test('a still-running map entry already carded in messages is deduped by job id', () => {
+  // Race: the completion card reached messages (tool_call_id `subagent-j1`)
+  // but the map entry still reads `running`. The status filter alone would
+  // NOT drop it — only seenJobIds does. So this pins the seenJobIds guard.
+  const s = session([
+    assistant('Delegating.'),
+    tool('subagent-j1', 'subagent', { task: 'Analyze auth' }, 'done', 'done text'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', task: 'Analyze auth', status: 'running', messages: [] },
+    },
+  });
+  const blocks = projectStream(s);
+  const rows = blocks.flatMap(b => (b.blocks || []).flatMap(x => x.rows || []));
+  expect(rows.filter(r => r.id === 'subagent-j1')).toHaveLength(1);
+  expect(blocks.some(b => (b.blocks || []).some(x => x.type === 'fanout' || x.type === 'background'))).toBe(false);
+});
+
+test('a still-running bash map entry already carded in messages is deduped by job id', () => {
+  // handleWsBashComplete uses the `bash-complete-<id>` prefix in messages.
+  const s = session([
+    assistant('Building.'),
+    tool('bash-complete-b1', 'bash', { command: 'go build ./...' }, 'done', 'ok'),
+  ], {
+    subagents: {
+      b1: { jobId: 'b1', kind: 'bash', task: 'go build ./...', status: 'running', messages: [] },
+    },
+  });
+  const blocks = projectStream(s);
+  const rows = blocks.flatMap(b => (b.blocks || []).flatMap(x => x.rows || []));
+  expect(rows.filter(r => r.id === 'bash-complete-b1')).toHaveLength(1);
+  expect(blocks.some(b => (b.blocks || []).some(x => x.type === 'background'))).toBe(false);
+});
+
+test('two sequential terminated subagents form a plain two-row ledger, not a fanout', () => {
+  const s = session([
+    assistant('Delegating two tasks.'),
+    tool('subagent-j1', 'subagent', { task: 'Analyze auth' }, 'done', 'found issues'),
+    tool('subagent-j2', 'subagent', { task: 'Analyze db' }, 'done', 'looks fine'),
+  ]);
+  const doc = projectStream(s)[0];
+  expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'ledger']);
+  const ledger = doc.blocks[1];
+  expect(ledger.rows.map(r => r.id)).toEqual(['subagent-j1', 'subagent-j2']);
+  expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
+});
+
+// ── 6. LIVE async bash job → background block ────────────────────────────────
+test('a live async bash job becomes a background block matching BackgroundJob', () => {
+  const s = session([assistant('Running build.')], {
+    subagents: {
+      b1: {
+        jobId: 'b1', kind: 'bash', task: 'go build ./...', status: 'running',
+        messages: [tool('b1', 'bash', { command: 'go build ./...' }, 'running', null, { streamingResult: 'line1\nline2\ncompiling…' })],
+      },
+    },
+  });
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  const bg = doc.blocks.find(b => b.type === 'background');
+  expect(bg).toBeTruthy();
+  expect(bg.jobs).toHaveLength(1);
+  // BackgroundJob consumes { jobLabel, cmd, progress?, elapsed?, lines }
+  const job = bg.jobs[0];
+  expect(job.cmd).toBe('go build ./...');
+  expect(job.jobLabel).toBeTruthy();
+  expect(Array.isArray(job.lines)).toBe(true);
+  expect(job.lines).toEqual(['line1', 'line2', 'compiling…']);
+  expect(job.jobId).toBe('b1'); // for the external map key
+  // no stray props the component ignores
+  expect(job.tail).toBeUndefined();
+  expect(job.status).toBeUndefined();
+});
+
+test('a live bash job is not counted as a subagent for fanout', () => {
+  const s = session([assistant('x')], {
+    subagents: {
+      b1: { jobId: 'b1', kind: 'bash', task: 'sleep 1', status: 'running', messages: [] },
+      j1: { jobId: 'j1', task: 'analyze', status: 'running', messages: [] },
+    },
+  });
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  // one real subagent → ledger row (not fanout), plus a background block
+  expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
+  expect(doc.blocks.some(b => b.type === 'background')).toBe(true);
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger.rows[0].tool).toBe('task');
+});
+
+// ── 7. live turn → streaming, not document ───────────────────────────────────
+test('streamingText plus a running tool yields a streaming block', () => {
+  const s = session([
+    assistant('Let me check.'),
+    tool('t1', 'bash', { command: 'ls' }, 'running', null),
+  ], { streamingText: 'Still working on it' });
+  const blocks = projectStream(s);
+  const last = blocks[blocks.length - 1];
+  expect(last.kind).toBe('streaming');
+  // the streamed prose is appended to the live document
+  expect(last.blocks.some(b => b.type === 'prose' && b.text === 'Still working on it')).toBe(true);
+});
+
+test('a finished turn is a document, never streaming', () => {
+  const s = session([assistant('All done.'), tool('t1', 'bash', { command: 'ls' }, 'done', 'ok')]);
+  const blocks = projectStream(s);
+  expect(blocks.every(b => b.kind !== 'streaming')).toBe(true);
+  expect(blocks[0].kind).toBe('document');
+});
+
+// ── 8. thinking text → thinking block ────────────────────────────────────────
+test('thinkingText produces a thinking sub-block on the live turn', () => {
+  const s = session([assistant('hmm')], { thinkingText: 'considering options' });
+  const blocks = projectStream(s);
+  const last = blocks[blocks.length - 1];
+  expect(last.kind).toBe('streaming');
+  const thinking = last.blocks.find(b => b.type === 'thinking');
+  expect(thinking).toBeTruthy();
+  expect(thinking.text).toBe('considering options');
+});
+
+// ── 9. history truncation notice ─────────────────────────────────────────────
+test('historyTruncated emits a leading system block', () => {
+  const s = session([user('hi')], { historyTruncated: true });
+  const blocks = projectStream(s);
+  expect(blocks[0].kind).toBe('system');
+  expect(blocks[0].text).toBe('Older messages…');
+});
+
+test('more than 200 messages also triggers the truncation notice', () => {
+  const many = [];
+  for (let i = 0; i < 201; i++) many.push(assistant('x'));
+  const blocks = projectStream(session(many));
+  expect(blocks[0].kind).toBe('system');
+  expect(blocks[0].text).toBe('Older messages…');
+});
+
+// ── 10. multi-turn separation ────────────────────────────────────────────────
+test('two user turns produce two waypoints and two separate documents', () => {
+  const s = session([
+    user('first question'),
+    assistant('first answer'),
+    tool('t1', 'read', { path: 'a.js' }),
+    assistant('more'),
+    user('second question'),
+    assistant('second answer'),
+  ]);
+  const blocks = projectStream(s);
+  const kinds = blocks.map(b => b.kind);
+  expect(kinds).toEqual(['waypoint', 'document', 'waypoint', 'document']);
+  expect(blocks[0].text).toBe('first question');
+  expect(blocks[2].text).toBe('second question');
+  // first document has prose, ledger, prose in order
+  expect(blocks[1].blocks.map(b => b.type)).toEqual(['prose', 'ledger', 'prose']);
+  expect(blocks[3].blocks.map(b => b.type)).toEqual(['prose']);
+});
+
+test('a system line closes the current document', () => {
+  const s = session([
+    assistant('before'),
+    system('✂ Context compacted'),
+    assistant('after'),
+  ]);
+  const blocks = projectStream(s);
+  expect(blocks.map(b => b.kind)).toEqual(['document', 'system', 'document']);
+  expect(blocks[1].text).toBe('✂ Context compacted');
+});
+
+// ── 11. robustness ───────────────────────────────────────────────────────────
+test('null session returns an empty array', () => {
+  expect(projectStream(null)).toEqual([]);
+});
+
+test('empty session returns an empty array', () => {
+  expect(projectStream(session([]))).toEqual([]);
+  expect(projectStream({})).toEqual([]);
+});
+
+test('user message with an image attachment does not break and is preserved', () => {
+  const msg = {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'look at this' },
+      { type: 'image', source: { data: 'xxx' } },
+    ],
+  };
+  const blocks = projectStream(session([msg]));
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0].kind).toBe('waypoint');
+  expect(blocks[0].text).toBe('look at this');
+  expect(blocks[0].attachments).toHaveLength(1);
+  expect(blocks[0].attachments[0].type).toBe('image');
+});
+
+test('user message time is carried through when present', () => {
+  const blocks = projectStream(session([user('hi', { ts: 1234 })]));
+  expect(blocks[0].time).toBe(1234);
+});
+
+test('output blocks are plain serializable objects (no functions)', () => {
+  const s = session([user('q'), assistant('a'), tool('t1', 'read', { path: 'a.js' })]);
+  const blocks = projectStream(s);
+  // round-trips through JSON without loss → confirms pure/serializable
+  expect(JSON.parse(JSON.stringify(blocks))).toEqual(blocks);
+});
+
+test('a tool with undefined args and result does not break', () => {
+  const s = session([{ _type: 'tool_start', tool_call_id: 't1', tool_name: 'read' }]);
+  const blocks = projectStream(s);
+  const row = blocks[0].blocks[0].rows[0];
+  expect(row.id).toBe('t1');
+  expect(row.tool).toBe('read');
+  expect(row.arg.text).toBe('');
+  expect(row.out).toBe('');
+});
+
+test('a live subagent without messages does not break', () => {
+  const s = session([assistant('x')], {
+    subagents: { j1: { jobId: 'j1', task: 'do', status: 'running' } },
+  });
+  const doc = projectStream(s)[projectStream(s).length - 1];
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger.rows[0].tool).toBe('task');
+  expect(ledger.rows[0].arg.text).toBe('do');
+});
+
+test('projectStream does not mutate the input session', () => {
+  const s = session([assistant('x')], {
+    subagents: { j1: { jobId: 'j1', task: 'do', status: 'running', messages: [] } },
+  });
+  const snapshot = JSON.parse(JSON.stringify(s));
+  projectStream(s);
+  expect(JSON.parse(JSON.stringify(s))).toEqual(snapshot);
+});
