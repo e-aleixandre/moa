@@ -7,3 +7,8 @@ export { AskUserCard } from "./AskUserCard/AskUserCard.jsx";
 export { Card } from "./Card/Card.jsx";
 export { Sheet } from "./Sheet/Sheet.jsx";
 export { Toast, ToastTitle, ToastMessage } from "./Toast/Toast.jsx";
+export { UserWaypoint } from "./UserWaypoint/UserWaypoint.jsx";
+export { AssistantDocument } from "./AssistantDocument/AssistantDocument.jsx";
+export { ActivityLedger, LedgerRow } from "./ActivityLedger/ActivityLedger.jsx";
+export { CodeBlock } from "./CodeBlock/CodeBlock.jsx";
+export { DiffBlock, parseUnifiedDiff } from "./DiffBlock/DiffBlock.jsx";

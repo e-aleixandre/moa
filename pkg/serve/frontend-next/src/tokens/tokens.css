@@ -76,6 +76,11 @@
   --text-xl:     20px;
   --text-2xl:    26px;
 
+  /* Tamaño de código/diff (cuerpo mono de CodeBlock/DiffBlock). Deliberadamente
+     fuera de la escala --text-* general: es un tamaño fino pensado solo para
+     bloques monoespaciados densos. */
+  --text-code:   12.5px;
+
   /* Campos editables: nunca por debajo de 16px. iOS Safari hace auto-zoom al
      enfocar un input/textarea/select con font-size < 16px, lo que resulta muy
      molesto en la PWA. Este token es el suelo para todo campo de entrada. */

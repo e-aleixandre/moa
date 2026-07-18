@@ -1,0 +1,129 @@
+.code {
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: var(--space-2) 0 var(--space-5);
+}
+
+.code .code-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--mantle);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--surface0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+}
+
+.code .code-head .lang {
+  color: var(--mauve);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  font-size: var(--text-xs);
+}
+
+.code .code-head .filename {
+  color: var(--overlay1);
+}
+
+.code .code-head .copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+  color: var(--overlay0);
+  background: transparent;
+  border: none;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration) var(--ease);
+}
+
+.code .code-head .copy:hover {
+  color: var(--text);
+}
+
+.code .code-head .copy:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.code pre {
+  background: var(--crust);
+  padding: var(--space-4);
+  margin: 0;
+  overflow-x: auto;
+}
+
+.code pre code {
+  font-family: var(--mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-relaxed);
+  color: var(--text);
+}
+
+/* highlight.js theme — mapeado a tokens Mocha, siguiendo la convención
+   .tok-* del mockup (k=mauve, f=blue, s=green, c=overlay0 italic, n=peach,
+   t=yellow). */
+.code pre .hljs-keyword,
+.code pre .hljs-selector-tag,
+.code pre .hljs-literal,
+.code pre .hljs-section,
+.code pre .hljs-link {
+  color: var(--mauve);
+}
+
+.code pre .hljs-title,
+.code pre .hljs-title.function_,
+.code pre .hljs-built_in,
+.code pre .hljs-name {
+  color: var(--blue);
+}
+
+.code pre .hljs-string,
+.code pre .hljs-addition,
+.code pre .hljs-meta .hljs-string {
+  color: var(--green);
+}
+
+.code pre .hljs-comment,
+.code pre .hljs-quote {
+  color: var(--overlay0);
+  font-style: italic;
+}
+
+.code pre .hljs-number,
+.code pre .hljs-variable,
+.code pre .hljs-template-variable,
+.code pre .hljs-attr {
+  color: var(--peach);
+}
+
+.code pre .hljs-type,
+.code pre .hljs-class .hljs-title,
+.code pre .hljs-symbol,
+.code pre .hljs-bullet {
+  color: var(--yellow);
+}
+
+.code pre .hljs-attribute,
+.code pre .hljs-tag {
+  color: var(--sky);
+}
+
+.code pre .hljs-deletion {
+  color: var(--red);
+}
+
+.code pre .hljs-emphasis {
+  font-style: italic;
+}
+
+.code pre .hljs-strong {
+  font-weight: var(--weight-semibold);
+}

@@ -1,0 +1,87 @@
+.doc {
+  margin: 0 0 var(--space-2);
+  position: relative;
+  padding-left: 2px;
+}
+
+.doc p {
+  color: var(--subtext1);
+  margin: 0 0 var(--space-4);
+  max-width: 68ch;
+  line-height: var(--leading-normal);
+}
+
+.doc p:last-child {
+  margin-bottom: 0;
+}
+
+.doc p strong {
+  color: var(--text);
+  font-weight: var(--weight-semibold);
+}
+
+.doc p code,
+.doc li code {
+  font-family: var(--mono);
+  font-size: 0.87em;
+  color: var(--sky);
+  background: color-mix(in srgb, var(--surface0) 55%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+.doc ul {
+  margin: 0 0 var(--space-4) var(--space-1);
+  list-style: none;
+}
+
+.doc li {
+  color: var(--subtext1);
+  padding-left: var(--space-5);
+  position: relative;
+  margin-bottom: 5px;
+}
+
+.doc li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--mauve);
+}
+
+.doc h4 {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--mauve);
+  margin: var(--space-5) 0 var(--space-3);
+}
+
+/* Streaming cursor: siempre un <span class="doc-cursor"> como último hermano
+   del contenido (wrapper .doc-html en modo html, o children en modo hijos). */
+.doc .doc-cursor {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: var(--mauve);
+  border-radius: 2px;
+  animation: doc-cursor-blink 1s steps(2) infinite;
+}
+
+@keyframes doc-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc .doc-cursor {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+

@@ -1,0 +1,119 @@
+.ledger {
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: var(--space-2) 0 var(--space-5);
+  background: color-mix(in srgb, var(--mantle) 65%, transparent);
+}
+
+.ledger .ledger-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+  text-align: left;
+}
+
+.ledger .ledger-row:disabled {
+  cursor: default;
+}
+
+.ledger .ledger-row:last-child {
+  border-bottom: none;
+}
+
+.ledger .ledger-row:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface0) 35%, transparent);
+}
+
+.ledger .ledger-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.ledger .ledger-row.open {
+  background: color-mix(in srgb, var(--surface0) 30%, transparent);
+}
+
+.ledger .ledger-row .t-ic {
+  width: 20px;
+  display: inline-flex;
+  justify-content: center;
+  flex: none;
+  color: inherit;
+}
+
+.ledger .ledger-row .t-name {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  width: 52px;
+  flex: none;
+}
+
+.ledger .ledger-row .t-arg {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--overlay1);
+}
+
+.ledger .ledger-row .t-arg b {
+  color: var(--subtext1);
+  font-weight: var(--weight-medium);
+}
+
+.ledger .ledger-row .t-out {
+  color: var(--overlay0);
+  font-size: var(--text-xs);
+  flex: none;
+}
+
+.ledger .ledger-row .t-out.ok {
+  color: var(--green);
+}
+
+.ledger .ledger-row .t-out.err {
+  color: var(--red);
+}
+
+.ledger .ledger-body {
+  padding: var(--space-3) var(--space-4) var(--space-4) 44px;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--subtext0);
+  background: var(--crust);
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.ledger .ledger-body:last-child {
+  border-bottom: none;
+}
+
+.ledger .ledger-body .dim {
+  color: var(--overlay0);
+}
+
+.ledger .ledger-body .g {
+  color: var(--green);
+}
+
+.ledger .ledger-body .r {
+  color: var(--red);
+}
+
+.ledger .ledger-body .y {
+  color: var(--yellow);
+}
