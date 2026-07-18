@@ -54,6 +54,46 @@
   flex: none;
 }
 
+/* Draggable header: the whole head is the drag handle in a connected pane. */
+.pane .p-head-drag {
+  cursor: grab;
+}
+
+.pane .p-head-drag:active {
+  cursor: grabbing;
+}
+
+.pane .p-grip {
+  color: var(--surface2);
+  flex: none;
+  opacity: 0.5;
+  transition: opacity var(--duration) var(--ease);
+}
+
+.pane .p-head-drag:hover .p-grip {
+  opacity: 1;
+}
+
+/* Tile number badge (⌘+N target) */
+.pane .p-badge {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  font-weight: var(--weight-bold);
+  color: var(--overlay0);
+  background: var(--surface0);
+  min-width: 17px;
+  height: 17px;
+  line-height: 17px;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+
+.pane.focused .p-badge {
+  color: var(--peach);
+  background: color-mix(in srgb, var(--peach) 16%, var(--base));
+}
+
 .pane .p-head .state-dot {
   flex: none;
 }
@@ -243,4 +283,89 @@
 
 .pane .p-foot .spacer {
   margin-left: auto;
+}
+
+/* ── 5G: drag-and-drop + attention ── */
+
+.pane.drag-over {
+  outline: 2px dashed var(--mauve);
+  outline-offset: -2px;
+}
+
+.pane.attention.blocked {
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--surface1));
+}
+
+.pane.attention.errored {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--surface1));
+}
+
+/* Touch drag ghost (appended to <body> by useTouchDrag) */
+.touch-drag-ghost {
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+}
+
+/* ── 5G: connected pane body — Stream + Composer + blocking ──
+   In a connected pane the body is the live Stream (its own scroll), so we drop
+   the generic p-body padding/overflow and let Stream/Composer own their layout
+   at panel density. */
+.pane .p-body.p-body-live {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane .p-body-live .stream .stream-col {
+  max-width: none;
+  padding: var(--space-4) var(--space-4) var(--space-5);
+}
+
+/* The pane's composer sits flush at the bottom; trim the conversation-screen
+   spacing so it fits a small panel. */
+.pane .composer-wrap {
+  flex: none;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+/* Blocking strip (McpBanner / permission / ask_user) above the composer. */
+.pane .p-blocking {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) 0;
+  overflow-y: auto;
+  max-height: 50%;
+}
+
+/* Empty (session-less) pane dropzone — ports the old .tile-empty. */
+.pane .pane-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--overlay0);
+}
+
+.pane .pane-empty .lucide {
+  width: 34px;
+  height: 34px;
+  color: var(--surface2);
+  stroke-width: 1.25;
+}
+
+.pane .pane-empty-title {
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+}
+
+.pane .pane-empty-hint {
+  font-size: var(--text-xs);
+  color: var(--surface2);
 }

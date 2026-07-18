@@ -127,6 +127,15 @@ export function splitRoot(tree, direction) {
   return createSplit(direction, [tree, createTile()]);
 }
 
+// presetTree generates a preset tree; treeShape returns a structural signature
+// (type + direction, ignoring ids/sessions/ratios) so a container can detect
+// whether the current layout still matches a preset (to highlight it).
+export function treeShape(node) {
+  if (!node) return null;
+  if (node.type === 'tile') return 't';
+  return `(${node.direction[0]}:${treeShape(node.children[0])},${treeShape(node.children[1])})`;
+}
+
 // Generate preset trees (quick-start layouts)
 export function presetTree(id) {
   switch (id) {

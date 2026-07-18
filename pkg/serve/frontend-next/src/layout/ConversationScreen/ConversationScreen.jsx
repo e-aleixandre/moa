@@ -284,7 +284,7 @@ export function ConversationScreen({ version }) {
           modelAccent={modelAccent(session.model)}
           thinkingLevel={session.thinking || "off"}
           onTitleClick={() => { /* 5x: rename / session menu */ }}
-          onGridToggle={() => { /* 5G: pane grid */ }}
+          onGridToggle={() => { window.location.href = "?view=grid"; }}
           onRewind={() => { /* 5x: rewind picker */ }}
           onNotifications={() => { /* 5x: notifications */ }}
           onSessionSettings={() => setSettingsOpen((v) => !v)}

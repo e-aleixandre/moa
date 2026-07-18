@@ -1,116 +1,292 @@
-import { Plus } from "lucide-preact";
+import { useCallback, useMemo, useRef, useState, useEffect } from "preact/hooks";
+import { MessageSquarePlus } from "lucide-preact";
 import { Pane } from "../Pane/Pane.jsx";
-import { ActivityLedger, CodeBlock, PermissionCard } from "../../components/index.js";
+import { Stream } from "../Stream/Stream.jsx";
+import { Composer } from "../Composer/Composer.jsx";
+import { McpBanner, PermissionPrompt, AskUserPrompt } from "../../components/index.js";
+import { snapToRatio } from "../../data/snap.js";
+import {
+  resizeSplit, assignToTile, swapTiles, splitTile, closeTile, focusTile,
+} from "../../data/tile-actions.js";
+import { allTileIds } from "../../data/tileTree.js";
+import { getTileCount } from "../../data/store.js";
+import { projectStream } from "../../data/stream-model.js";
+import { modelAccent } from "../../data/selectors.js";
+import { shortModel, shortPath, sessionDotState } from "../../data/util/format.js";
+import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import "./PaneGrid.css";
 
-// Mock content for each pane, faithful to panes-desktop.html (English text).
+// PaneGrid — 5G. Renders the REAL binary split tree (state.tileTree) recursively:
+// a split node becomes two flex split-panes with a ResizeHandle between them; a
+// leaf becomes a ConnectedPane (session's live Stream + Composer, or an empty
+// dropzone). The old SPA's TileTree.jsx/Tile.jsx are ported 1:1, retargeted to
+// the next's Pane/Stream/Composer.
 
-const WS_RACE_LEDGER = [
-  { tool: "read", arg: { text: "pkg/serve/ws.go", detail: "210–340" }, out: "130 ln", status: "ok" },
-  { tool: "edit", arg: { text: "pkg/serve/ws.go", detail: "resume()" }, out: "+5 −3", status: "ok" },
-  { tool: "bash", arg: "go test -race ./... — full suite", out: "running 0:41", status: "live" },
-];
+// ResizeHandle — pointer-driven splitter. Ported verbatim from the old SPA:
+// pointerdown captures the pointer, pointermove maps the cursor position to a
+// fraction of the split and snaps it (snapToRatio) into resizeSplit(path,ratio),
+// pointerup cleans up.
+function ResizeHandle({ path, direction }) {
+  const isH = direction === "horizontal";
+  // Holds the teardown for an in-flight drag so it can also run on unmount.
+  const cleanupRef = useRef(null);
 
-const WS_RACE_CODE = `// resume: subscribe BEFORE snapshot
-ch := sess.Bus.Subscribe(c.id)
-snap, last := sess.Log.Snapshot(from)
-c.sendAll(snap)
-c.forward(ch, func(e Event) bool { return e.Seq > last })`;
+  const onPointerDown = useCallback((e) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    const parent = handle.parentElement;
+    const rect = parent.getBoundingClientRect();
+    const pointerId = e.pointerId;
 
-function WsRaceFixBody() {
+    handle.setPointerCapture(pointerId);
+    handle.classList.add("active");
+    document.body.style.cursor = isH ? "col-resize" : "row-resize";
+
+    const onPointerMove = (ev) => {
+      const pos = isH ? ev.clientX - rect.left : ev.clientY - rect.top;
+      const total = isH ? rect.width : rect.height;
+      const pct = Math.max(0.15, Math.min(0.85, pos / total));
+      resizeSplit([...path], snapToRatio(pct));
+    };
+
+    // endResize — idempotent teardown. Runs on pointerup, and also on
+    // pointercancel / lostpointercapture (touch interruption, focus loss) so
+    // the cursor, the 'active' class and the native listeners never get stuck.
+    const endResize = () => {
+      if (cleanupRef.current !== endResize) return; // already torn down
+      cleanupRef.current = null;
+      handle.classList.remove("active");
+      document.body.style.cursor = "";
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", onPointerUp);
+      handle.removeEventListener("pointercancel", endResize);
+      handle.removeEventListener("lostpointercapture", endResize);
+      try { handle.releasePointerCapture(pointerId); } catch (_) { /* already released */ }
+    };
+    const onPointerUp = () => endResize();
+
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointercancel", endResize);
+    handle.addEventListener("lostpointercapture", endResize);
+    cleanupRef.current = endResize;
+  }, [path, isH]);
+
+  // If the handle unmounts mid-drag (e.g. a preset change), tear down.
+  useEffect(() => () => { if (cleanupRef.current) cleanupRef.current(); }, []);
+
   return (
-    <>
-      <div class="u-line">
-        <span class="w">You</span>
-        Fix the reconnect race in ws.go, with a regression test.
-      </div>
-      <p>
-        Found it — <code>Subscribe</code> registers after the snapshot read
-        releases its lock, so events in that window are lost. Reordering and
-        draining duplicates by <code>seq</code>:
-      </p>
-      <ActivityLedger className="mini-ledger" rows={WS_RACE_LEDGER} />
-      <CodeBlock className="mini-code" code={WS_RACE_CODE} lang="go" showHeader={false} />
-      <p>Stress test passes 50/50 under <code>-race</code>. Full suite running now…</p>
-    </>
+    <div
+      class={`resize-handle ${isH ? "resize-h" : "resize-v"}`}
+      onPointerDown={onPointerDown}
+    />
   );
 }
 
-function DeployPulseApiBody() {
-  return (
+// ConnectedPane — a leaf tile bound to a real session (or empty). Wires the
+// Pane's optional 5G props to the tile actions and mounts the live Stream +
+// Composer (+ blocking) when a session is assigned.
+function ConnectedPane({ node, state, tileIndex }) {
+  const tileId = node.id;
+  const session = node.sessionId ? state.sessions[node.sessionId] : null;
+  const focused = state.focusedTile === tileId;
+  const [dragOver, setDragOver] = useState(false);
+  const paneRef = useRef(null);
+  const canClose = getTileCount() > 1;
+  const attention = session && (session.state === "permission" || session.state === "error");
+
+  // --- HTML5 drag source (desktop) ---
+  const handleDragStart = useCallback((e) => {
+    e.dataTransfer.setData("text/x-tile-id", String(tileId));
+    if (node.sessionId) e.dataTransfer.setData("text/x-session-id", node.sessionId);
+    e.dataTransfer.effectAllowed = "move";
+    const el = paneRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const ghost = el.cloneNode(true);
+      ghost.style.width = rect.width + "px";
+      ghost.style.height = rect.height + "px";
+      ghost.style.position = "fixed";
+      ghost.style.top = "-9999px";
+      ghost.style.opacity = "0.85";
+      ghost.style.borderRadius = "8px";
+      ghost.style.overflow = "hidden";
+      document.body.appendChild(ghost);
+      e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
+      requestAnimationFrame(() => ghost.remove());
+    }
+  }, [tileId, node.sessionId]);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setDragOver(false), []);
+
+  const applyDrop = useCallback((fromTileId, sid) => {
+    if (fromTileId) {
+      swapTiles(parseInt(fromTileId, 10), tileId);
+      return;
+    }
+    if (sid) assignToTile(tileId, sid);
+  }, [tileId]);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setDragOver(false);
+    applyDrop(e.dataTransfer.getData("text/x-tile-id"), e.dataTransfer.getData("text/x-session-id"));
+  }, [applyDrop]);
+
+  // --- Touch drag source + drop target ---
+  const touchDrag = useTouchDrag({
+    data: { "text/x-tile-id": String(tileId), "text/x-session-id": node.sessionId || "" },
+  });
+
+  useEffect(() => {
+    const el = paneRef.current;
+    if (!el) return;
+    return registerDropTarget(el, {
+      onDragOver: () => setDragOver(true),
+      onDragLeave: () => setDragOver(false),
+      onDrop: (data) => {
+        setDragOver(false);
+        applyDrop(data["text/x-tile-id"], data["text/x-session-id"]);
+      },
+    });
+  }, [applyDrop]);
+
+  // --- Click-to-focus (ported from Tile.handleTileClick) ---
+  const handleFocus = useCallback((e) => {
+    const t = e.target;
+    if (t && t.closest && t.closest('input, textarea, [contenteditable="true"], .ask-user-card, .composer')) {
+      focusTile(tileId, { focusInput: false });
+      return;
+    }
+    focusTile(tileId, { respectSelection: true });
+  }, [tileId]);
+
+  // --- Maximize → back to conversation view with this session focused ---
+  const handleMaximize = useCallback(() => {
+    if (!node.sessionId) return;
+    // Keep the session in the focused tile, then leave the grid: the
+    // conversation screen renders the focused tile's session. A full navigation
+    // (href) is the simplest cross-view hop — the store is persisted, so the
+    // tile assignment survives the reload.
+    assignToTile(tileId, node.sessionId);
+    window.location.href = "?session=" + encodeURIComponent(node.sessionId);
+  }, [tileId, node.sessionId]);
+
+  const commonProps = {
+    paneRef,
+    dataTileId: tileId,
+    tileNumber: tileIndex + 1,
+    focused,
+    dragOver,
+    canClose,
+    draggable: true,
+    onDragStart: handleDragStart,
+    touchDrag,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+    onFocus: handleFocus,
+    onSplitRight: (e) => { e.stopPropagation(); splitTile(tileId, "horizontal"); },
+    onSplitDown: (e) => { e.stopPropagation(); splitTile(tileId, "vertical"); },
+    onClose: (e) => { e.stopPropagation(); closeTile(tileId); },
+  };
+
+  if (!session) {
+    return (
+      <Pane
+        {...commonProps}
+        title="Empty"
+        state="idle"
+        empty
+        hideComposer
+      >
+        <div class="pane-empty">
+          <MessageSquarePlus aria-hidden="true" />
+          <span class="pane-empty-title">Drag a session here</span>
+          <span class="pane-empty-hint">⌘K to pick a session</span>
+        </div>
+      </Pane>
+    );
+  }
+
+  const blocks = projectStream(session);
+  const dotState = sessionDotState(session);
+  const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
+  const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk) ? (
     <>
-      <p>
-        Build is green and the systemd unit is staged. I need your go-ahead
-        to restart the service:
-      </p>
-      <PermissionCard
-        title="moa wants to run"
-        command="systemctl --user restart pulse-api"
+      {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
+      {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+      {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
+    </>
+  ) : null;
+
+  return (
+    <Pane
+      {...commonProps}
+      title={session.title || session.id}
+      state={dotState}
+      path={shortPath(session.cwd) || session.cwd || ""}
+      model={shortModel(session.model) || session.model || ""}
+      modelAccent={modelAccent(session.model)}
+      thinkingLevel={thinking}
+      attention={attention}
+      onMaximize={handleMaximize}
+      blocking={blocking}
+      bodyLive
+      composer={<Composer key={session.id} sessionId={session.id} session={session} />}
+    >
+      <Stream session={session} blocks={blocks} />
+    </Pane>
+  );
+}
+
+// TileNode — recursive render of the tree. `path` accumulates the split path
+// used by resizeSplit (setRatioAtPath).
+function TileNode({ node, state, path, tileIndexMap }) {
+  if (node.type === "tile") {
+    return (
+      <ConnectedPane
+        node={node}
+        state={state}
+        tileIndex={tileIndexMap.get(node.id) ?? 0}
       />
-    </>
-  );
-}
+    );
+  }
 
-function MigrateSqliteBody() {
+  const isH = node.direction === "horizontal";
+  const [a, b] = node.children;
+  const [ra, rb] = node.ratio;
+
   return (
-    <>
-      <div class="err-note">
-        <span class="mono">
-          provider: 429 rate_limited — retrying in 34s (attempt 3/5)
-        </span>
-        <button type="button" class="retry">retry now</button>
+    <div class={`split ${isH ? "split-h" : "split-v"}`}>
+      <div class="split-pane" style={{ flex: ra }}>
+        <TileNode node={a} state={state} path={[...path, 0]} tileIndexMap={tileIndexMap} />
       </div>
-      <p class="dim-p">
-        Paused mid-migration. Schema v7 applied, backfill pending.
-      </p>
-    </>
+      <ResizeHandle path={path} direction={node.direction} />
+      <div class="split-pane" style={{ flex: rb }}>
+        <TileNode node={b} state={state} path={[...path, 1]} tileIndexMap={tileIndexMap} />
+      </div>
+    </div>
   );
 }
 
-// PaneGrid — container for the pane grid. Reproduces the mockup's
-// layout: vertical split-x (resize hint, no real logic yet), a
-// focused "tall" pane on the left, and a right column with a permission +
-// a bottom row (error + ghost).
-export function PaneGrid({ onAddPane }) {
+export function PaneGrid({ state }) {
+  const tileIndexMap = useMemo(() => {
+    const ids = allTileIds(state.tileTree);
+    const m = new Map();
+    ids.forEach((id, i) => m.set(id, i));
+    return m;
+  }, [state.tileTree]);
+
   return (
     <div class="pane-grid">
-      {/* TODO(resize-phase): split-x is just a visual hint (highlights on
-          hover); real column/row resizing arrives in a later phase
-          with persisted layout state. */}
-      <div class="split-x" title="Drag to resize" aria-hidden="true" />
-
-      <Pane
-        variant="tall"
-        focused
-        title="ws race fix"
-        path="~/dev/moa/main"
-        state="running"
-        model="sol"
-        thinkingLevel="medium"
-      >
-        <WsRaceFixBody />
-      </Pane>
-
-      <Pane
-        title="deploy pulse api"
-        path="~/dev/moa/pulse-api"
-        state="permission"
-        titleTone="yellow"
-      >
-        <DeployPulseApiBody />
-      </Pane>
-
-      <div class="pane-grid-row">
-        <Pane title="migrate sqlite" state="error">
-          <MigrateSqliteBody />
-        </Pane>
-
-        <button type="button" class="ghost" onClick={onAddPane}>
-          <span class="big" aria-hidden="true"><Plus size={22} /></span>
-          <span class="ghost-label">Add a pane here</span>
-          <span class="hint">drag a session from the spine, or ⌘K → ⌘⏎</span>
-        </button>
-      </div>
+      <TileNode node={state.tileTree} state={state} path={[]} tileIndexMap={tileIndexMap} />
     </div>
   );
 }

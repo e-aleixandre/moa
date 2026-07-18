@@ -253,8 +253,8 @@ function App() {
     );
   }
   if (view === "grid") {
-    // Real pane grid (presentational until 5G) — no ViewSwitch overlay (D5).
-    return <PaneGridScreen />;
+    // Real, store-connected pane grid (5G) — no ViewSwitch overlay (D5).
+    return <PaneGridScreen version={version} />;
   }
   // Default: real, store-connected conversation screen (5C). No ViewSwitch (D5).
   return <ConversationScreen version={version} />;

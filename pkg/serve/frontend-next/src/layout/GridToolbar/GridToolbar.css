@@ -32,19 +32,17 @@
 }
 
 .grid-toolbar .preset {
-  width: 30px;
-  height: 22px;
   border-radius: var(--radius-sm);
   display: grid;
-  gap: 2px;
-  padding: 4px;
+  place-items: center;
+  padding: 4px 5px;
   cursor: pointer;
   background: transparent;
   border: none;
   transition: background var(--duration) var(--ease);
 }
 
-.grid-toolbar .preset i {
+.grid-toolbar .preset-mini i {
   background: var(--surface1);
   border-radius: 1.5px;
   display: block;
@@ -64,30 +62,8 @@
   background: color-mix(in srgb, var(--peach) 18%, transparent);
 }
 
-.grid-toolbar .preset.on i {
+.grid-toolbar .preset.on .preset-mini i {
   background: var(--peach);
-}
-
-.grid-toolbar .preset.p1 {
-  grid-template-columns: 1fr;
-}
-
-.grid-toolbar .preset.p2 {
-  grid-template-columns: 1fr 1fr;
-}
-
-.grid-toolbar .preset.p3 {
-  grid-template-columns: 1.4fr 1fr;
-  grid-template-rows: 1fr 1fr;
-}
-
-.grid-toolbar .preset.p3 i:first-child {
-  grid-row: 1 / 3;
-}
-
-.grid-toolbar .preset.p4 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
 }
 
 .grid-toolbar .gt-btn {
