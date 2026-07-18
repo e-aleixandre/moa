@@ -117,6 +117,9 @@
   --z-sheet:   200;
   --z-toast:   300;
 
+  /* Layout — medidas estructurales compartidas entre pantallas */
+  --spine-width: 264px;
+
   /* Tempos semánticos — para animaciones vivas (breathing, shimmer) */
   --breath-running:   1800ms;
   --breath-attention: 1100ms;

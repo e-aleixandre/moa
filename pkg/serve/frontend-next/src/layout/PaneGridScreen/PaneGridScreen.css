@@ -1,4 +1,4 @@
-.conversation-screen {
+.pane-grid-screen {
   display: grid;
   grid-template-columns: var(--spine-width) 1fr;
   grid-template-rows: minmax(0, 1fr);
@@ -9,7 +9,7 @@
   font-family: var(--font);
 }
 
-.conversation-screen .conversation-main {
+.pane-grid-screen .pane-grid-main {
   display: flex;
   flex-direction: column;
   min-width: 0;

@@ -63,7 +63,9 @@ function highlight(code, lang) {
 // CodeBlock — bloque de código con cabecera (lenguaje + fichero opcional +
 // copiar) y cuerpo resaltado con highlight.js (core + lenguajes registrados
 // arriba). `code` es el texto plano; `lang` es un id de highlight.js.
-export function CodeBlock({ code = "", lang, filename, className = "", ...rest }) {
+// `showHeader={false}` oculta la cabecera (lang/fichero/copiar) para usos
+// densos donde solo interesa el cuerpo (p.ej. el mini-code de un pane).
+export function CodeBlock({ code = "", lang, filename, showHeader = true, className = "", ...rest }) {
   const [copied, setCopied] = useState(false);
   const html = highlight(code, lang);
 
@@ -79,14 +81,16 @@ export function CodeBlock({ code = "", lang, filename, className = "", ...rest }
 
   return (
     <div class={`code ${className}`.trim()} {...rest}>
-      <div class="code-head">
-        {lang && <span class="lang">{lang}</span>}
-        {filename && <span class="filename">{filename}</span>}
-        <button type="button" class="copy" onClick={copy} aria-label="Copy code">
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          {copied ? "copied" : "copy"}
-        </button>
-      </div>
+      {showHeader && (
+        <div class="code-head">
+          {lang && <span class="lang">{lang}</span>}
+          {filename && <span class="filename">{filename}</span>}
+          <button type="button" class="copy" onClick={copy} aria-label="Copy code">
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            {copied ? "copied" : "copy"}
+          </button>
+        </div>
+      )}
       <pre>
         <code dangerouslySetInnerHTML={{ __html: html }} />
       </pre>

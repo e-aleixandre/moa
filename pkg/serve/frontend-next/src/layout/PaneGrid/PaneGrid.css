@@ -1,0 +1,212 @@
+.pane-grid {
+  flex: 1;
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  min-height: 0;
+  grid-template-columns: 1.35fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  position: relative;
+}
+
+/* splitter hint — puramente visual por ahora (ver TODO en PaneGrid.jsx) */
+.pane-grid .split-x {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(57.4% - 3px);
+  width: 6px;
+  cursor: col-resize;
+  z-index: var(--z-sticky);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.pane-grid .split-x:hover::after {
+  content: "";
+  position: absolute;
+  inset: 20% 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--mauve) 45%, transparent);
+}
+
+.pane-grid .pane-grid-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  min-height: 0;
+}
+
+/* ghost pane — empty slot invitando a añadir sesión */
+.pane-grid .ghost {
+  border: 1.5px dashed color-mix(in srgb, var(--mauve) 55%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--mauve) 4%, transparent);
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  color: var(--overlay1);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.pane-grid .ghost:hover,
+.pane-grid .ghost:focus-visible {
+  border-color: var(--mauve);
+  color: var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 8%, transparent);
+}
+
+.pane-grid .ghost:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.pane-grid .ghost .big {
+  display: flex;
+  justify-content: center;
+}
+
+.pane-grid .ghost .ghost-label {
+  display: block;
+  text-align: center;
+}
+
+.pane-grid .ghost .hint {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+  text-align: center;
+}
+
+/* ── contenido de pane: pieces reutilizadas del vocabulario de Stream,
+   en densidad reducida para caber en un panel pequeño ── */
+
+.pane-grid .p-body p {
+  color: var(--subtext1);
+  margin: 0 0 var(--space-3);
+}
+
+.pane-grid .p-body p code {
+  font-family: var(--mono);
+  font-size: 0.87em;
+  color: var(--sky);
+  background: color-mix(in srgb, var(--surface0) 55%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+
+.pane-grid .p-body .dim-p {
+  color: var(--overlay1);
+  font-size: var(--text-xs);
+}
+
+.pane-grid .u-line {
+  border-left: 3px solid var(--peach);
+  border-radius: 2px var(--radius-md) var(--radius-md) 2px;
+  background: color-mix(in srgb, var(--surface0) 45%, transparent);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.pane-grid .u-line .w {
+  font-size: var(--text-nano);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--peach);
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* mini-ledger — ActivityLedger reutilizada, densidad reducida (padding y
+   tamaño de fila más pequeños que la del Stream principal). */
+.pane-grid .mini-ledger {
+  margin: 4px 0 var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.pane-grid .mini-ledger .ledger-row {
+  padding: 5px var(--space-3);
+  font-size: var(--text-xs);
+  gap: var(--space-2);
+}
+
+.pane-grid .mini-ledger .ledger-row .t-name {
+  width: 38px;
+}
+
+/* mini-code — CodeBlock reutilizado en densidad de panel (usa showHeader=false
+   para ocultar lang/copy, que no encajan en la altura objetivo del mockup: la
+   referencia solo muestra el <pre>). Aquí solo ajustamos densidad. */
+.pane-grid .mini-code {
+  margin-bottom: var(--space-3);
+}
+
+.pane-grid .mini-code pre {
+  padding: var(--space-2) var(--space-3);
+}
+
+.pane-grid .mini-code pre code {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* err-note — nota de error inline dentro del pane (PermissionCard no aplica
+   aquí: no es una petición de permiso, es un fallo con acción de retry). */
+.pane-grid .err-note {
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--surface0));
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--red);
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pane-grid .err-note .mono {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: color-mix(in srgb, var(--red) 70%, var(--text));
+}
+
+.pane-grid .err-note .retry {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--red);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 3px var(--space-3);
+  cursor: pointer;
+}
+
+.pane-grid .err-note .retry:hover {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.pane-grid .err-note .retry:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* PermissionCard dentro de un pane pequeño: reducimos su padding/tamaño
+   máximo para que quepa sin desbordar el panel (el componente en sí no
+   cambia, solo su contexto de layout aquí). */
+.pane-grid .pane .perm-card {
+  max-width: none;
+  padding: var(--space-3) var(--space-4);
+}
