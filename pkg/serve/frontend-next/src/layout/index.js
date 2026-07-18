@@ -9,3 +9,7 @@ export { GridToolbar } from "./GridToolbar/GridToolbar.jsx";
 export { Pane } from "./Pane/Pane.jsx";
 export { PaneGrid } from "./PaneGrid/PaneGrid.jsx";
 export { PaneGridScreen } from "./PaneGridScreen/PaneGridScreen.jsx";
+export { MobileHeader } from "./mobile/MobileHeader/MobileHeader.jsx";
+export { SessionStrip } from "./mobile/SessionStrip/SessionStrip.jsx";
+export { MobileComposer } from "./mobile/MobileComposer/MobileComposer.jsx";
+export { MobileConversationScreen } from "./mobile/MobileConversationScreen/MobileConversationScreen.jsx";

@@ -2,6 +2,7 @@ import { render } from "preact";
 import "./index.css";
 import { Catalog } from "./catalog/catalog.jsx";
 import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
+import { MobileGallery } from "./catalog/mobile-gallery.jsx";
 import { ConversationScreen, PaneGridScreen } from "./layout/index.js";
 
 const welcomeStyle = {
@@ -32,8 +33,8 @@ function Welcome() {
           marginTop: "var(--space-3)",
         }}
       >
-        Andamiaje del nuevo frontend web (Fase 0). Sirve para verificar que los
-        tokens de diseño cargan correctamente antes de construir nada más.
+        Scaffold for the new web frontend (Phase 0). Used to verify that the
+        design tokens load correctly before building anything else.
       </p>
       <a
         href="?view=catalog"
@@ -71,6 +72,7 @@ const VIEWS = [
   { key: null, label: "Conversation", href: "?" },
   { key: "grid", label: "Panes", href: "?view=grid" },
   { key: "live", label: "Live", href: "?view=live" },
+  { key: "mobile", label: "Mobile", href: "?view=mobile" },
   { key: "catalog", label: "Catalog", href: "?view=catalog" },
 ];
 
@@ -100,11 +102,11 @@ function viewSwitchLinkStyle(active) {
   };
 }
 
-// ViewSwitch — nav flotante mínimo entre las tres pantallas de escritorio del
-// frontend-next (conversation / grid / catalog). Solo navegación por enlaces
-// reales (?view=…), sin estado de router: coherente con el patrón ya usado
-// por Welcome/CatalogScreen. Anclado abajo-derecha para no solaparse con la
-// attention lamp de GridToolbar (arriba-derecha) ni con el ChatHead.
+// ViewSwitch — minimal floating nav between the three frontend-next desktop
+// screens (conversation / grid / catalog). Link-only navigation
+// (?view=…), no router state: consistent with the pattern already used
+// by Welcome/CatalogScreen. Anchored bottom-right so it doesn't overlap the
+// attention lamp of GridToolbar (top-right) or the ChatHead.
 function ViewSwitch({ current }) {
   return (
     <nav style={viewSwitchStyle} aria-label="Switch view">
@@ -122,11 +124,11 @@ function ViewSwitch({ current }) {
   );
 }
 
-// view — alterna entre las pantallas de escritorio: conversación (Fase 2,
-// por defecto), grid de paneles (Fase 3A), estados en vivo (Fase 3B) y
-// catálogo de primitivas (Fase 0/1). `?view=grid` abre PaneGridScreen,
-// `?view=live` abre LiveStatesGallery, `?view=catalog` el catálogo,
-// cualquier otro valor (o ausencia) muestra la conversación.
+// view — switches between the desktop screens: conversation (Phase 2,
+// default), pane grid (Phase 3A), live states (Phase 3B) and
+// primitives catalog (Phase 0/1). `?view=grid` opens PaneGridScreen,
+// `?view=live` opens LiveStatesGallery, `?view=catalog` the catalog,
+// any other value (or absence) shows the conversation.
 const params = new URLSearchParams(location.search);
 const view = params.get("view");
 
@@ -152,6 +154,14 @@ function App() {
       <>
         <ViewSwitch current="live" />
         <LiveStatesGallery />
+      </>
+    );
+  }
+  if (view === "mobile") {
+    return (
+      <>
+        <ViewSwitch current="mobile" />
+        <MobileGallery />
       </>
     );
   }

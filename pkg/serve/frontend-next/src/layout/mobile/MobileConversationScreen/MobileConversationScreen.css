@@ -1,0 +1,19 @@
+.mconv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--crust);
+  overflow: hidden;
+}
+
+.mconv-stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-4) var(--space-2);
+}
+
+/* The user's waypoint opens the stream: no extra top margin. */
+.mconv-stream > .waypoint:first-child {
+  margin-top: 0;
+}

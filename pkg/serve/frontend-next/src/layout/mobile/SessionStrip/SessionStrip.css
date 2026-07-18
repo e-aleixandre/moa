@@ -1,0 +1,63 @@
+.mstrip {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  overflow-x: auto;
+  flex: none;
+  background: color-mix(in srgb, var(--mantle) 55%, var(--crust));
+  border-bottom: 1px solid var(--surface0);
+  scrollbar-width: none;
+}
+
+.mstrip:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+.mstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.mstrip-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  min-height: 44px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-full);
+  padding: 6px var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--subtext1);
+  cursor: pointer;
+}
+
+.mstrip-name {
+  white-space: nowrap;
+}
+
+.mstrip-chip.on {
+  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
+  color: var(--text);
+  background: color-mix(in srgb, var(--peach) 8%, var(--base));
+}
+
+.mstrip-chip.needs {
+  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
+  color: var(--yellow);
+}
+
+.mstrip-unseen {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--peach);
+  flex: none;
+}
+
+.mstrip-chip.plus {
+  color: var(--overlay1);
+  border-style: dashed;
+  padding: 6px var(--space-4);
+}
