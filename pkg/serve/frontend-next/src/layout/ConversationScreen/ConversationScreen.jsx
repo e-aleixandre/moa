@@ -1,10 +1,12 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { Spine } from "../Spine/Spine.jsx";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { AgentTray } from "../AgentTray/AgentTray.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented } from "../../components/index.js";
+import { Button } from "../../primitives/index.js";
 import { store } from "../../data/store.js";
 import { projectStream } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent } from "../../data/selectors.js";
@@ -12,6 +14,8 @@ import { openSession } from "../../data/tile-actions.js";
 import { shortModel, shortPath } from "../../data/util/format.js";
 import { formatElapsed } from "../../data/util/activity.js";
 import { activityPhase, activityLabel } from "../../data/util/activity.js";
+import { api } from "../../data/api.js";
+import { configureSession, archiveSession, unarchiveSession } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
@@ -95,6 +99,36 @@ function fmtSpend(costUSD) {
   return `$${costUSD.toFixed(2)}`;
 }
 
+// deriveModelSpecs maps /api/models entries ({id, name, provider, alias?})
+// into the shape ModelSelector expects ({id, name, desc, sigil, accent}). `id`
+// here is the full "provider/id" spec configureSession sends over the wire —
+// matches the old SettingsDropdown's `m.provider + '/' + m.id`.
+function deriveModelSpecs(models) {
+  return (models || []).map((m) => ({
+    id: `${m.provider}/${m.id}`,
+    name: m.name,
+    desc: m.alias || m.provider,
+    sigil: (m.name || m.id || "?").charAt(0).toUpperCase(),
+    accent: modelAccent(m.name),
+  }));
+}
+
+// matchSelectedModel finds the spec whose display name matches the session's
+// current model string (session.model is the display name the backend
+// reports, e.g. "GPT-5.6 Sol" — not the "provider/id" spec).
+function matchSelectedModel(specs, sessionModel) {
+  if (!sessionModel) return undefined;
+  const short = shortModel(sessionModel);
+  const found = specs.find((s) => s.name === sessionModel || s.name === short);
+  return found?.id;
+}
+
+const PERMISSION_MODE_OPTIONS = [
+  { value: "yolo", label: "YOLO" },
+  { value: "ask", label: "ASK" },
+  { value: "auto", label: "AUTO" },
+];
+
 export function ConversationScreen({ version }) {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
@@ -121,6 +155,51 @@ export function ConversationScreen({ version }) {
   // openSession, which leaves the tile showing that session. // 5G: the next's
   // own pane model replaces the tile tree; until then we reuse it verbatim.
   const onSelectSession = (id) => { openSession(id); };
+
+  // --- Model selector popover (ChatHead's ModelPill) ---
+  const [modelOpen, setModelOpen] = useState(false);
+  const [models, setModels] = useState(null); // null = not fetched yet
+  const modelAnchorRef = useRef(null);
+  useEffect(() => {
+    if (!modelOpen || models) return;
+    api("GET", "/api/models").then(setModels).catch(() => setModels([]));
+  }, [modelOpen, models]);
+  useEffect(() => {
+    if (!modelOpen) return;
+    const onDocDown = (e) => {
+      if (modelAnchorRef.current && !modelAnchorRef.current.contains(e.target)) setModelOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setModelOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modelOpen]);
+
+  // --- Session settings popover (ChatHead's MoreHorizontal) ---
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsAnchorRef = useRef(null);
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onDocDown = (e) => {
+      if (settingsAnchorRef.current && !settingsAnchorRef.current.contains(e.target)) setSettingsOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setSettingsOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [settingsOpen]);
+  // Close both popovers when the focused session changes, so a stale popover
+  // from a different session doesn't linger visually.
+  useEffect(() => {
+    setModelOpen(false);
+    setSettingsOpen(false);
+  }, [activeId]);
 
   const spine = (
     <Spine
@@ -149,6 +228,52 @@ export function ConversationScreen({ version }) {
     );
   } else {
     const blocks = projectStream(session);
+    const specs = deriveModelSpecs(models);
+    const selectedModel = matchSelectedModel(specs, session.model);
+    const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
+    const settingsBusy = session.state === "running" || session.state === "permission";
+    const permissionMode = session.permissionMode || "yolo";
+
+    const modelPopover = modelOpen && (
+      <div class="head-popover">
+        <ModelSelector
+          models={specs}
+          selected={selectedModel}
+          thinking={thinking}
+          onSelect={(spec) => configureSession(session.id, { model: spec })}
+          onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+        />
+      </div>
+    );
+
+    const settingsPopover = settingsOpen && (
+      <div class="head-popover session-settings-popover">
+        {settingsBusy && (
+          <div class="session-settings-busy">Settings locked while agent is running</div>
+        )}
+        <div class="session-settings-section">
+          <div class="session-settings-label">Permission mode</div>
+          <Segmented
+            options={PERMISSION_MODE_OPTIONS}
+            value={permissionMode}
+            disabled={settingsBusy}
+            onChange={(mode) => configureSession(session.id, { permissionMode: mode })}
+          />
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="session-settings-archive"
+          onClick={() => {
+            const action = session.archived ? unarchiveSession(session.id) : archiveSession(session.id);
+            Promise.resolve(action).finally(() => setSettingsOpen(false));
+          }}
+        >
+          {session.archived ? "Reopen session" : "Close session"}
+        </Button>
+      </div>
+    );
+
     body = (
       <>
         <ChatHead
@@ -162,10 +287,21 @@ export function ConversationScreen({ version }) {
           onGridToggle={() => { /* 5G: pane grid */ }}
           onRewind={() => { /* 5x: rewind picker */ }}
           onNotifications={() => { /* 5x: notifications */ }}
-          onSessionSettings={() => { /* 5x: session settings */ }}
-          onModelClick={() => { /* 5x: model selector */ }}
+          onSessionSettings={() => setSettingsOpen((v) => !v)}
+          onModelClick={() => setModelOpen((v) => !v)}
+          modelPopover={modelPopover}
+          settingsPopover={settingsPopover}
+          modelAnchorRef={modelAnchorRef}
+          settingsAnchorRef={settingsAnchorRef}
         />
         <Stream session={session} blocks={blocks} />
+        {(session.untrustedMcp || session.pendingPerm || session.pendingAsk) && (
+          <div class="conversation-blocking">
+            {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
+            {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+            {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
+          </div>
+        )}
         {/* 5J: AgentTray — live subagent chips, not connected yet. */}
         <AgentTray agents={[]} />
         <Composer key={session.id} sessionId={session.id} session={session} />

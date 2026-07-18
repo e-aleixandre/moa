@@ -36,3 +36,12 @@
   color: var(--mauve);
   font-weight: var(--weight-semibold);
 }
+
+.segmented .segmented-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.segmented[aria-disabled="true"] {
+  opacity: 0.85;
+}

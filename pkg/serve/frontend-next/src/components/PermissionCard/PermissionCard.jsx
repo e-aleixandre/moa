@@ -67,6 +67,12 @@ function CommandLine({ command, dangerTokens = [] }) {
   );
 }
 
+// PermissionCard is a presentational-only mock used by the galleries and by
+// the real PermissionPrompt container (see ./PermissionPrompt.jsx). The extra
+// props below (disabled, error, onFeedbackToggle/feedbackActive,
+// onRuleToggle/ruleActive, children) are all OPTIONAL and only used by the
+// real container — omitting them (as every gallery demo does) reproduces the
+// exact previous markup/behavior.
 export function PermissionCard({
   title,
   command,
@@ -75,9 +81,16 @@ export function PermissionCard({
   variant = "normal",
   alwaysLabel,
   timer,
+  disabled = false,
+  error,
   onAllow,
   onAlways,
   onDeny,
+  onFeedbackToggle,
+  feedbackActive = false,
+  onRuleToggle,
+  ruleActive = false,
+  children,
   ...rest
 }) {
   const destructive = variant === "destructive";
@@ -107,22 +120,48 @@ export function PermissionCard({
         <span class="dollar">$</span>{" "}
         <CommandLine command={command} dangerTokens={dangerTokens} />
       </div>
+      {error && <div class="perm-error">{error}</div>}
       <div class="perm-actions">
         <Button
           variant={destructive ? "danger-solid" : "success"}
           size="sm"
+          disabled={disabled}
           onClick={onAllow}
         >
           {destructive ? "Allow anyway" : "Allow once"}
         </Button>
         {!destructive && alwaysLabel && (
-          <Button variant="ghost" size="sm" className="btn-always" onClick={onAlways}>
+          <Button variant="ghost" size="sm" className="btn-always" disabled={disabled} onClick={onAlways}>
             Always for <b>{alwaysLabel}</b>
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="btn-deny" onClick={onDeny}>
+        <Button variant="ghost" size="sm" className="btn-deny" disabled={disabled} onClick={onDeny}>
           Deny
         </Button>
+        {onRuleToggle && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="btn-rule"
+            disabled={disabled}
+            aria-pressed={ruleActive}
+            onClick={onRuleToggle}
+          >
+            Add rule
+          </Button>
+        )}
+        {onFeedbackToggle && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="btn-feedback"
+            disabled={disabled}
+            aria-pressed={feedbackActive}
+            onClick={onFeedbackToggle}
+          >
+            + feedback
+          </Button>
+        )}
         <span class="hint">
           {destructive ? (
             "no always for destructive ops"
@@ -133,6 +172,7 @@ export function PermissionCard({
           )}
         </span>
       </div>
+      {children}
     </div>
   );
 }

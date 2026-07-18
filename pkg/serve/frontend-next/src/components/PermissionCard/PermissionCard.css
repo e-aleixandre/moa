@@ -142,3 +142,70 @@
   align-items: center;
   gap: var(--space-1);
 }
+
+.perm-card .perm-actions .btn-rule[aria-pressed="true"],
+.perm-card .perm-actions .btn-feedback[aria-pressed="true"] {
+  border-color: var(--surface1);
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface0) 60%, transparent);
+}
+
+.perm-card .perm-error {
+  font-size: var(--text-xs);
+  color: var(--red);
+  margin-bottom: var(--space-2);
+}
+
+/* Inline editor slot rendered as `children` by PermissionPrompt (feedback /
+   add-rule text inputs) — kept here so it shares the card's visual language. */
+.perm-card .perm-inline-editor {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.perm-card .perm-inline-editor input {
+  flex: 1;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-input);
+  padding: var(--space-2) var(--space-3);
+  outline: none;
+}
+
+.perm-card .perm-inline-editor input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.perm-card .perm-inline-editor input:focus {
+  border-color: var(--yellow);
+}
+
+.perm-card .perm-inline-editor .perm-inline-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--surface1);
+  background: transparent;
+  color: var(--subtext1);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.perm-card .perm-inline-editor .perm-inline-save:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.perm-card .perm-inline-editor .perm-inline-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

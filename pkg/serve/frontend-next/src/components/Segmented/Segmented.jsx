@@ -11,8 +11,11 @@ function normalizeOptions(options) {
 // Segmented — generic segmented control (used for the thinking level
 // in ModelSelector, but without coupling to those specific values). Implements
 // the ARIA radiogroup pattern: roving tabIndex (only the selected item is
-// tabbable) and Left/Right/Home/End arrows to change the option.
-export function Segmented({ options, value, onChange, ...rest }) {
+// tabbable) and Left/Right/Home/End arrows to change the option. `disabled`
+// is optional (default false) — used by the session-settings popover to lock
+// the permission-mode control while the agent is running, without changing
+// the shape any existing caller (e.g. ModelSelector's thinking row) relies on.
+export function Segmented({ options, value, onChange, disabled = false, ...rest }) {
   const items = normalizeOptions(options);
   const rootRef = useRef(null);
 
@@ -22,6 +25,7 @@ export function Segmented({ options, value, onChange, ...rest }) {
   };
 
   const onKeyDown = (event) => {
+    if (disabled) return;
     let idx = items.findIndex((it) => it.id === value);
     if (idx === -1) idx = 0;
     let nextIdx = null;
@@ -42,7 +46,14 @@ export function Segmented({ options, value, onChange, ...rest }) {
   };
 
   return (
-    <div class="segmented" role="radiogroup" ref={rootRef} onKeyDown={onKeyDown} {...rest}>
+    <div
+      class="segmented"
+      role="radiogroup"
+      aria-disabled={disabled || undefined}
+      ref={rootRef}
+      onKeyDown={onKeyDown}
+      {...rest}
+    >
       {items.map((opt) => {
         const on = opt.id === value;
         const isTabbable = value != null ? on : items[0]?.id === opt.id;
@@ -54,8 +65,9 @@ export function Segmented({ options, value, onChange, ...rest }) {
             class={`segmented-item${on ? " on" : ""}`}
             role="radio"
             aria-checked={on}
-            tabIndex={isTabbable ? 0 : -1}
-            onClick={() => onChange?.(opt.id)}
+            tabIndex={disabled ? -1 : (isTabbable ? 0 : -1)}
+            disabled={disabled}
+            onClick={() => !disabled && onChange?.(opt.id)}
           >
             {opt.label}
           </button>

@@ -9,16 +9,25 @@ const isTextEntryTarget = (el) => {
 };
 
 // AskUserCard — agent question with numbered options (keyboard-first,
-// 1/2/3) + free text. `options`: [{ label, recommended? }].
+// 1/2/3) + free text. `options`: [{ label, recommended? }]. The free-text field
+// is uncontrolled by default (keeps its own state — used by the gallery), but
+// becomes controlled when `onFreeChange` is passed: then every keystroke is
+// reported up so a stateful container (AskUserPrompt) can persist the answer
+// per question and restore it when navigating back.
 export function AskUserCard({
   question,
   options = [],
   onPick,
   onSubmitFree,
+  freeValue,
+  onFreeChange,
   placeholder = "Or answer in your own words…",
   ...rest
 }) {
-  const [free, setFree] = useState("");
+  const controlled = onFreeChange != null;
+  const [freeInternal, setFreeInternal] = useState("");
+  const free = controlled ? (freeValue || "") : freeInternal;
+  const setFree = controlled ? onFreeChange : setFreeInternal;
   const rootRef = useRef(null);
 
   const submitFree = (event) => {
@@ -26,7 +35,7 @@ export function AskUserCard({
     const value = free.trim();
     if (!value) return;
     onSubmitFree?.(value);
-    setFree("");
+    if (!controlled) setFreeInternal("");
   };
 
   const onKeyDown = useCallback(

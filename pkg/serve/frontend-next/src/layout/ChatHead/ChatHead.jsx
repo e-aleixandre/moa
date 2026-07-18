@@ -19,6 +19,10 @@ export function ChatHead({
   onNotifications,
   onSessionSettings,
   onModelClick,
+  modelPopover,
+  settingsPopover,
+  modelAnchorRef,
+  settingsAnchorRef,
 }) {
   return (
     <header class="chat-head">
@@ -32,13 +36,16 @@ export function ChatHead({
       </div>
 
       <div class="head-actions">
-        <ModelPill
-          model={model}
-          accent={modelAccent}
-          variant="bars"
-          level={thinkingLevel}
-          onClick={onModelClick}
-        />
+        <div class="head-anchor" ref={modelAnchorRef}>
+          <ModelPill
+            model={model}
+            accent={modelAccent}
+            variant="bars"
+            level={thinkingLevel}
+            onClick={onModelClick}
+          />
+          {modelPopover}
+        </div>
 
         <button type="button" class="grid-toggle" onClick={onGridToggle} title="Back to the grid — this session stays in pane 1">
           <span class="mini" aria-hidden="true"><i /><i /><i /></span>
@@ -52,9 +59,12 @@ export function ChatHead({
         <IconButton label="Notifications" onClick={onNotifications}>
           <Bell size={16} />
         </IconButton>
-        <IconButton label="Session settings" onClick={onSessionSettings}>
-          <MoreHorizontal size={16} />
-        </IconButton>
+        <div class="head-anchor" ref={settingsAnchorRef}>
+          <IconButton label="Session settings" onClick={onSessionSettings}>
+            <MoreHorizontal size={16} />
+          </IconButton>
+          {settingsPopover}
+        </div>
       </div>
     </header>
   );

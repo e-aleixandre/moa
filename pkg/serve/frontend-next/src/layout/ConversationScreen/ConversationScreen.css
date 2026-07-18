@@ -44,3 +44,15 @@
   color: var(--overlay0);
   margin: 0;
 }
+
+/* conversation-blocking — fixed strip between the Stream and the AgentTray/
+   Composer for anything that blocks the turn: untrusted MCP banner, a pending
+   permission, or a pending ask_user. Always visible (outside the Stream's own
+   scroll), stacked in that order, matching the old SPA's input-bar takeover. */
+.conversation-screen .conversation-blocking {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-8) 0;
+}
