@@ -56,10 +56,11 @@
   height: 28px;
   border-radius: 16px;
   background: #000;
-  z-index: var(--z-sticky);
+  z-index: var(--z-toast);
 }
 
 .mgal-screen {
+  position: relative;
   height: 100%;
 }
 

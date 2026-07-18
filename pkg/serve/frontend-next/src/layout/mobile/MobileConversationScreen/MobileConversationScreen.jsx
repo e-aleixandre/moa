@@ -1,3 +1,4 @@
+import { useState } from "preact/hooks";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -9,6 +10,7 @@ import {
 import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
 import { SessionStrip } from "../SessionStrip/SessionStrip.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
+import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import "./MobileConversationScreen.css";
 
 const { FileText, Search, Pencil, Terminal } = LedgerIcons;
@@ -114,13 +116,64 @@ const WORK_ROWS = [
   },
 ];
 
+// DRAWER_SESSIONS — mock data for the sessions bottom-sheet (mockup Phone 2).
+// Exported so the gallery specimen can render the drawer open without
+// duplicating the data.
+export const DRAWER_SESSIONS = [
+  {
+    id: "deploy",
+    title: "deploy pulse api",
+    state: "permission",
+    when: "now",
+    needsLabel: "Needs you:",
+    last: "allow `systemctl --user restart pulse-api`?",
+    path: "~/dev/moa/pulse-api",
+    unseen: true,
+  },
+  {
+    id: "ws",
+    title: "ws race fix",
+    state: "running",
+    when: "now",
+    last: "Running full test suite after the resume() fix…",
+    path: "~/dev/moa/main",
+    active: true,
+  },
+  {
+    id: "frontend",
+    title: "frontend polish",
+    state: "idle",
+    when: "2h",
+    last: "Done — pushed 3 commits, esbuild output rebuilt.",
+    path: "~/dev/moa/frontend-polish",
+  },
+  {
+    id: "sqlite",
+    title: "migrate sqlite",
+    state: "error",
+    when: "18m",
+    last: "provider 429 — retrying in 34s (attempt 3/5)",
+    path: "~/dev/moa/migrate",
+    unseen: true,
+  },
+  {
+    id: "verifier",
+    title: "verifier design notes",
+    state: "saved",
+    when: "3d",
+    last: "Saved · 84 messages",
+    path: "~/dev/moa/main",
+  },
+];
+
 const noop = () => {};
 
 // MobileConversationScreen — root organism of the mobile conversation
 // screen (sub-phase 4A). Combines header + session strip + scrollable stream +
-// composer with mock data faithful to the mockup. The sessions drawer (4B) doesn't
-// exist yet: onOpenSessions is a noop.
+// composer with mock data faithful to the mockup. The sessions drawer (4B) is
+// opened from the header and anchored inside the conversation container.
 export function MobileConversationScreen() {
+  const [drawerOpen, setDrawerOpen] = useState(false);
   return (
     <div class="mconv">
       <MobileHeader
@@ -130,7 +183,7 @@ export function MobileConversationScreen() {
         level="high"
         path="~/dev/moa/main"
         ctx={62}
-        onOpenSessions={noop}
+        onOpenSessions={() => setDrawerOpen(true)}
       />
       <SessionStrip
         sessions={SESSIONS}
@@ -191,6 +244,17 @@ export function MobileConversationScreen() {
         up="41k"
         down="8.7k"
         spend="$1.84"
+      />
+
+      <SessionDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        sessions={DRAWER_SESSIONS}
+        activeCount={4}
+        savedCount={2}
+        onSelect={() => setDrawerOpen(false)}
+        onNew={noop}
+        onEdit={noop}
       />
     </div>
   );

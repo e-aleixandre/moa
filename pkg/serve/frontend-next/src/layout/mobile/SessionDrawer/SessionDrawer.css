@@ -1,0 +1,209 @@
+/* SessionDrawer — mobile bottom-sheet listing every session. Anchors to the
+   nearest positioned ancestor (the phone frame in the gallery), not the
+   window, so it stays inside the device on screen. */
+
+.sdrawer-veil {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-sheet);
+  background: color-mix(in srgb, var(--crust) 55%, transparent);
+  backdrop-filter: blur(3px);
+  animation: sdrawer-fade 160ms ease-out;
+}
+
+.sdrawer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 96px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--mantle);
+  border-radius: 28px 28px 0 0;
+  border-top: 1px solid var(--surface1);
+  box-shadow: 0 -24px 60px rgba(0, 0, 0, 0.5);
+  animation: sdrawer-rise 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.sdrawer-grab {
+  flex: none;
+  width: 44px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--surface2);
+  margin: 12px auto 6px;
+}
+
+.sdrawer-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 6px 22px 14px;
+}
+
+.sdrawer-head h2 {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.sdrawer-head .sdrawer-count {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+.sdrawer-edit {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--mauve);
+}
+
+.sdrawer-edit:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+
+.sdrawer-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* SessionDrawerCard */
+.sdcard {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  min-height: 76px;
+  text-align: left;
+  cursor: pointer;
+  padding: 13px 15px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-lg);
+}
+
+.sdcard:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sdcard.sdcard-active {
+  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
+}
+
+.sdcard.sdcard-needs {
+  border-color: color-mix(in srgb, var(--yellow) 40%, var(--surface0));
+  background: color-mix(in srgb, var(--yellow) 5%, var(--base));
+}
+
+.sdcard-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.sdcard-title {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  color: var(--text);
+}
+
+.sdcard-when {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+}
+
+.sdcard-last {
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sdcard-last b.sdcard-needs-label {
+  color: var(--yellow);
+  font-weight: var(--weight-medium);
+}
+
+.sdcard-path {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+}
+
+.sdcard-unseen {
+  position: absolute;
+  top: 13px;
+  right: 38px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--peach);
+}
+
+.sdrawer-new {
+  flex: none;
+  cursor: pointer;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: 0 14px calc(16px + env(safe-area-inset-bottom));
+  padding: 14px;
+  color: var(--crust);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-md);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    135deg,
+    var(--peach),
+    color-mix(in srgb, var(--peach) 55%, var(--mauve))
+  );
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--peach) 25%, transparent);
+}
+
+.sdrawer-new:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+@keyframes sdrawer-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sdrawer-rise {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sdrawer-veil,
+  .sdrawer {
+    animation: none;
+  }
+}
