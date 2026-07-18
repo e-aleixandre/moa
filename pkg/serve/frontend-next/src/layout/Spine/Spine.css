@@ -1,0 +1,157 @@
+.spine {
+  background: var(--mantle);
+  border-right: 1px solid var(--surface0);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.spine .spine-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+
+.spine .logo {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--peach), var(--mauve));
+  display: grid;
+  place-items: center;
+  color: var(--crust);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-md);
+  letter-spacing: var(--tracking-tight);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--mauve) 30%, transparent);
+  flex: none;
+}
+
+.spine .wordmark {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+  letter-spacing: 0.3px;
+}
+
+.spine .ver {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  color: var(--overlay0);
+  background: var(--surface0);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+.spine .spine-search {
+  margin: 2px var(--space-3) var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  padding: 7px var(--space-3);
+  color: var(--overlay1);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: border-color var(--duration) var(--ease);
+}
+
+.spine .spine-search:hover {
+  border-color: var(--surface1);
+}
+
+.spine .spine-search:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.spine .spine-search .kbd {
+  margin-left: auto;
+}
+
+.spine .spine-sessions {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+.spine .spine-label {
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+}
+
+.spine .spine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+}
+
+.spine .spine-list .session-row {
+  width: 100%;
+}
+
+.spine .new-session {
+  margin: var(--space-1) var(--space-3) var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px dashed var(--surface1);
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: var(--space-2);
+  color: var(--overlay1);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.spine .new-session:hover {
+  border-color: var(--mauve);
+  color: var(--mauve);
+}
+
+.spine .new-session:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.spine .spine-foot {
+  border-top: 1px solid var(--surface0);
+  padding: var(--space-2) var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+}
+
+.spine .spine-foot .pulse-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.spine .spine-foot .pdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--teal);
+  flex: none;
+}
+
+.spine .spine-foot .icon-button {
+  margin-left: auto;
+}

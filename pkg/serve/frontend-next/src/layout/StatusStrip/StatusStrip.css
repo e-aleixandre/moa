@@ -1,0 +1,52 @@
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-2) var(--space-2) 0;
+  max-width: 844px;
+  margin: 0 auto var(--space-4);
+  width: 100%;
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  font-family: var(--mono);
+  flex: none;
+}
+
+.status-strip .status-strip-ctx {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.status-strip .status-strip-ring {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  -webkit-mask: radial-gradient(circle at center, transparent 4.2px, #000 4.5px);
+  mask: radial-gradient(circle at center, transparent 4.2px, #000 4.5px);
+}
+
+.status-strip .status-strip-task {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--subtext0);
+}
+
+.status-strip .status-strip-task::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--blue);
+  flex: none;
+}
+
+.status-strip .status-strip-spend {
+  margin-left: auto;
+}
+
+.status-strip .status-strip-spend b {
+  color: var(--subtext0);
+  font-weight: var(--weight-medium);
+}

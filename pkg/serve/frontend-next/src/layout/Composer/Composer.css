@@ -1,0 +1,114 @@
+.composer-wrap {
+  padding: 0 var(--space-8) var(--space-5);
+  max-width: 844px;
+  margin: 0 auto;
+  width: 100%;
+  flex: none;
+}
+
+.composer-wrap .composer {
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--crust) 70%, transparent);
+}
+
+.composer-wrap .composer:focus-within {
+  border-color: var(--mauve);
+  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--mauve) 14%, transparent),
+    0 8px 32px color-mix(in srgb, var(--crust) 70%, transparent);
+}
+
+.composer-wrap .composer-textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-input);
+  line-height: var(--leading-normal);
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  min-height: 52px;
+}
+
+.composer-wrap .composer-textarea::placeholder {
+  color: var(--overlay0);
+}
+
+.composer-wrap .composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.composer-wrap .composer-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  color: var(--overlay1);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.composer-wrap .composer-btn:hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.composer-wrap .composer-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.composer-wrap .composer-send {
+  margin-left: auto;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: linear-gradient(135deg, var(--peach), color-mix(in srgb, var(--peach) 60%, var(--mauve)));
+  color: var(--crust);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+}
+
+.composer-wrap .composer-send:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--peach) 35%, transparent);
+}
+
+.composer-wrap .composer-send:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.composer-wrap .queue-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  padding: 0 var(--space-2);
+  overflow: hidden;
+}
+
+.composer-wrap .queue-note span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-wrap .queue-note .chip {
+  color: var(--peach);
+  flex: none;
+}

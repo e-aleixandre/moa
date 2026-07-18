@@ -1,0 +1,18 @@
+.conversation-screen {
+  display: grid;
+  grid-template-columns: 264px 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: var(--base);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.conversation-screen .conversation-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--base);
+}

@@ -201,6 +201,37 @@
   padding-left: var(--space-4);
 }
 
+/* pane — badge mono opcional (P1/P2/P3…) indicando el pane del grid al que
+   está anclada la sesión. Retrocompatible: si no se pasa `pane`, no se
+   renderiza nada. */
+.session-row.variant-card .pane {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  color: var(--peach);
+  flex: none;
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--peach) 40%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  line-height: 15px;
+  letter-spacing: 0.05em;
+  background: color-mix(in srgb, var(--peach) 8%, transparent);
+}
+
+.session-row.variant-card:not(.on) .pane {
+  color: var(--overlay1);
+  border-color: var(--surface1);
+  background: transparent;
+}
+
+.session-row.variant-card .unseen {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--peach);
+  flex: none;
+}
+
 .session-row.variant-card.needs-yellow .r1,
 .session-row.variant-card.needs-yellow .r2 {
   color: var(--yellow);

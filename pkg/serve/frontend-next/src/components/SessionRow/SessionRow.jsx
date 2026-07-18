@@ -29,6 +29,7 @@ export function SessionRow({
   unseen = false,
   meta,
   age,
+  pane,
   onClick,
   onClose,
   ...rest
@@ -48,7 +49,7 @@ export function SessionRow({
     onClose?.(event);
   };
 
-  const hitLabel = `${title}${STATE_LABEL_SUFFIX[state] ?? ""}`;
+  const hitLabel = `${title}${pane ? `, pane ${pane}` : ""}${STATE_LABEL_SUFFIX[state] ?? ""}`;
 
   return (
     <span class={classes} {...rest}>
@@ -64,6 +65,8 @@ export function SessionRow({
             <span class="r1">
               <StateDot state={state} size={8} />
               <span class="title" aria-hidden="true">{title}</span>
+              {pane && <span class="pane" aria-hidden="true">{pane}</span>}
+              {unseen && <span class="unseen" aria-hidden="true" />}
             </span>
             {meta && <span class="r2" aria-hidden="true">{meta}</span>}
           </>

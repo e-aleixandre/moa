@@ -68,6 +68,10 @@
   --space-12:    48px;
 
   /* Typography — tamaños */
+  /* --text-nano/-micro: microtamaños para labels/badges mono (versión, pane
+     badge, tick separators, timestamps del tray). Por debajo de --text-xs. */
+  --text-nano:   9px;
+  --text-micro:  10.5px;
   --text-xs:     11px;
   --text-sm:     12px;
   --text-base:   14px;
