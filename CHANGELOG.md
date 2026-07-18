@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-18
+
+### Added
+
+- Redesigned the new-session flow: recent projects as cards (with middle-elided
+  paths and duplicate-name disambiguation) plus a filesystem browser with a
+  tappable breadcrumb, in one shell that reads the same framed on desktop and
+  full-screen on mobile.
+
+### Changed
+
+- Redesigned the rewind branch picker as a conversation timeline: a rail threads
+  the turns, roles show by color (no emojis), and a single "you are here" marker
+  sits at the tip of the current path.
+- A pending `ask_user` now surfaces as the blocked (yellow) state instead of the
+  running (blue) one, so a session waiting on your answer no longer looks busy.
+- Unified session attention colors to the palette: yellow for blocked/waiting,
+  red for errors.
+
+### Removed
+
+- The "Needs attention" box (desktop layout bar and mobile overview) — each
+  session's dot and border already signal its state.
+- The redundant subagent badge from the chat and tile headers (the agent tray
+  below already lists background jobs).
+
+### Fixed
+
+- A stuck subagent count that could keep a session showing as busy after an
+  async job finished while a mobile pane had no live connection.
+
 ## [0.9.0] - 2026-07-17
 
 ### Added
