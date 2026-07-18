@@ -1,0 +1,110 @@
+.thinking-meter.variant-bars {
+  display: flex;
+  gap: 2.5px;
+  align-items: flex-end;
+}
+
+.thinking-meter.variant-bars i {
+  width: 3.5px;
+  border-radius: 1.5px;
+  background: var(--surface2);
+  display: block;
+  font-style: normal;
+}
+
+.thinking-meter.variant-bars i:nth-child(1) {
+  height: 5px;
+}
+
+.thinking-meter.variant-bars i:nth-child(2) {
+  height: 7px;
+}
+
+.thinking-meter.variant-bars i:nth-child(3) {
+  height: 9px;
+}
+
+.thinking-meter.variant-bars i:nth-child(4) {
+  height: 11px;
+}
+
+.thinking-meter.variant-bars i.on {
+  background: var(--mauve);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--mauve) 60%, transparent);
+}
+
+.thinking-meter.variant-bars.hot i.on {
+  background: var(--peach);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--peach) 60%, transparent);
+}
+
+/* Dial — medidor cónico */
+
+.thinking-meter.variant-dial {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: conic-gradient(var(--surface2) 0 100%);
+}
+
+.thinking-meter.variant-dial.level-0 {
+  background: conic-gradient(var(--mauve) 0 0%, var(--surface2) 0% 100%);
+}
+
+.thinking-meter.variant-dial.level-1 {
+  background: conic-gradient(var(--mauve) 0 25%, var(--surface2) 25% 100%);
+}
+
+.thinking-meter.variant-dial.level-2 {
+  background: conic-gradient(var(--mauve) 0 50%, var(--surface2) 50% 100%);
+}
+
+.thinking-meter.variant-dial.level-3 {
+  background: conic-gradient(var(--mauve) 0 75%, var(--surface2) 75% 100%);
+}
+
+.thinking-meter.variant-dial.level-4 {
+  background: conic-gradient(var(--mauve) 0 100%, var(--surface2) 100% 100%);
+}
+
+.thinking-meter.variant-dial.hot.level-1 {
+  background: conic-gradient(var(--peach) 0 25%, var(--surface2) 25% 100%);
+}
+
+.thinking-meter.variant-dial.hot.level-2 {
+  background: conic-gradient(var(--peach) 0 50%, var(--surface2) 50% 100%);
+}
+
+.thinking-meter.variant-dial.hot.level-3 {
+  background: conic-gradient(var(--peach) 0 75%, var(--surface2) 75% 100%);
+}
+
+.thinking-meter.variant-dial.hot.level-4 {
+  background: conic-gradient(var(--peach) 0 100%, var(--surface2) 100% 100%);
+}
+
+.thinking-meter.variant-dial {
+  -webkit-mask: radial-gradient(circle, transparent 6px, #000 6.5px);
+  mask: radial-gradient(circle, transparent 6px, #000 6.5px);
+}
+
+/* Glyph — tipográfico, bloques mono llenos/vacíos */
+
+.thinking-meter.variant-glyph {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  letter-spacing: 1px;
+  line-height: 1;
+}
+
+.thinking-meter.variant-glyph .filled {
+  color: var(--mauve);
+}
+
+.thinking-meter.variant-glyph.hot .filled {
+  color: var(--peach);
+}
+
+.thinking-meter.variant-glyph .empty {
+  color: var(--surface2);
+}

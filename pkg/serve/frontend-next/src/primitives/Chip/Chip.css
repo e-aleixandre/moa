@@ -1,0 +1,59 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  color: var(--subtext1);
+  line-height: 1;
+}
+
+.chip.mono {
+  font-family: var(--mono);
+}
+
+button.chip {
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+}
+
+button.chip:hover {
+  background: var(--surface0);
+  border-color: var(--surface1);
+}
+
+button.chip:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+button.chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Tonos — tiñen borde/texto según el estado semántico que representa el chip */
+
+.chip.tone-idle {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--surface0));
+  color: var(--green);
+}
+
+.chip.tone-running {
+  border-color: color-mix(in srgb, var(--blue) 35%, var(--surface0));
+  color: var(--blue);
+}
+
+.chip.tone-permission {
+  border-color: color-mix(in srgb, var(--yellow) 35%, var(--surface0));
+  color: var(--yellow);
+}
+
+.chip.tone-error {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--surface0));
+  color: var(--red);
+}

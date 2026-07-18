@@ -76,6 +76,11 @@
   --text-xl:     20px;
   --text-2xl:    26px;
 
+  /* Campos editables: nunca por debajo de 16px. iOS Safari hace auto-zoom al
+     enfocar un input/textarea/select con font-size < 16px, lo que resulta muy
+     molesto en la PWA. Este token es el suelo para todo campo de entrada. */
+  --text-input:  16px;
+
   /* Typography — pesos */
   --weight-normal:   400;
   --weight-medium:   500;
@@ -107,4 +112,9 @@
   --breath-running:   1800ms;
   --breath-attention: 1100ms;
   --shimmer:          1400ms;
+
+  /* Foco visible — anillo compartido por controles interactivos */
+  --focus-ring:        var(--mauve);
+  --focus-ring-width:  2px;
+  --focus-ring-offset: 2px;
 }

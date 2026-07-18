@@ -1,0 +1,48 @@
+.state-dot {
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+
+.state-dot.idle {
+  background: var(--green);
+}
+
+.state-dot.running {
+  background: var(--blue);
+  animation: state-dot-breathe-blue var(--breath-running) ease-in-out infinite;
+}
+
+.state-dot.permission {
+  background: var(--yellow);
+  animation: state-dot-breathe-yellow var(--breath-attention) ease-in-out infinite;
+}
+
+.state-dot.error {
+  background: var(--red);
+}
+
+.state-dot.saved {
+  background: var(--overlay0);
+}
+
+@keyframes state-dot-breathe-blue {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--blue) 18%, transparent);
+    opacity: 0.75;
+  }
+}
+
+@keyframes state-dot-breathe-yellow {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--yellow) 22%, transparent);
+    opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .state-dot.running,
+  .state-dot.permission {
+    animation: none;
+  }
+}

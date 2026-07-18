@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { PrimitivesGallery } from "./primitives-gallery.jsx";
 import "./catalog.css";
 
 // Todos los valores se LEEN de tokens.css en runtime (getComputedStyle), no se
@@ -226,6 +227,8 @@ export function Catalog() {
         <TokenTable title="z-index" names={ZINDEX} />
         <TokenTable title="Tempos (animación)" names={TEMPOS} />
       </section>
+
+      <PrimitivesGallery />
     </div>
   );
 }
