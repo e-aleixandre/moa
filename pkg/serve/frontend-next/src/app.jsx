@@ -142,13 +142,26 @@ function useBootstrap() {
 
   useEffect(() => store.subscribe(setState), []);
 
-  // Mobile breakpoint → setMobile.
+  // Mobile breakpoint → setMobile. Also lock the document to the viewport on
+  // mobile (adds .mobile-locked to <html>): the mobile shell owns its own
+  // internal scroll (.mconv-stream), so the page itself must not scroll — on
+  // iOS a scrollable document lets Safari pan the whole page up to reveal a
+  // focused input and never pans it back when the keyboard closes, leaving a
+  // gap and pushing the header out of view (reset.css min-height:100vh made the
+  // document taller than the visual viewport). Locking html/body/#root to the
+  // dynamic viewport height keeps the header pinned.
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
-    const handler = (e) => setMobile(e.matches);
+    const handler = (e) => {
+      setMobile(e.matches);
+      document.documentElement.classList.toggle("mobile-locked", e.matches);
+    };
     handler(mq);
     mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    return () => {
+      mq.removeEventListener("change", handler);
+      document.documentElement.classList.remove("mobile-locked");
+    };
   }, []);
 
   // Version poll: state changes at most once per six-hour server cache window;

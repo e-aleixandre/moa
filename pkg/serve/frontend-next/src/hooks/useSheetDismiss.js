@@ -1,23 +1,25 @@
 import { useRef, useState, useCallback, useEffect } from "preact/hooks";
 
-// useDrawerSwipe — a real swipe-down gesture that opens the mobile SessionDrawer
-// (MOBILE-POLISH-SPEC §4). The header (and session strip) are the gesture
-// surface: a touch that moves net DOWNWARD past a small threshold starts a drag;
-// horizontal-dominant moves are ignored so the strip can still scroll. During
-// the drag the drawer follows the finger — the sheet's translateY and the veil's
-// opacity are written IMPERATIVELY to the DOM (via the refs this hook owns) so a
-// touchmove never re-renders the whole conversation screen. On release the
-// gesture settles: past 40% of the sheet's travel OR a downward flick faster than
-// FLICK_VELOCITY opens it, otherwise it springs back closed.
+// useSheetDismiss — a real swipe-down gesture that DISMISSES (closes) the mobile
+// SessionDrawer (MOBILE-DRAWER-SPEC §1.4). The grab handle and the sheet head
+// are the gesture surface: a touch that moves net DOWNWARD past a small
+// threshold starts a drag; horizontal-dominant or upward moves are ignored so
+// the list can still scroll. During the drag the sheet follows the finger — the
+// sheet's translateY and the veil's opacity are written IMPERATIVELY to the DOM
+// (via the refs this hook owns) so a touchmove never re-renders the whole
+// conversation screen. Finger down → sheet down: natural direct manipulation.
+// On release the gesture settles: past CLOSE_FRACTION of the sheet's travel OR a
+// downward flick faster than FLICK_VELOCITY closes it, otherwise it springs back
+// open.
 //
-// A plain tap (no drag) is left untouched, so the handle's own onClick (and any
-// button under the finger) still fires — the drag is a progressive enhancement
-// on top of the accessible tap path.
+// A plain tap (no drag) is left untouched, so the grab button's own onClick (and
+// any button under the finger) still fires — the drag is a progressive
+// enhancement on top of the accessible tap path.
 
 const BEGIN_THRESHOLD = 12; // px of net downward travel before a drag begins
-const HORIZONTAL_SLOP = 10; // px of horizontal travel that hands off to the strip
-const OPEN_FRACTION = 0.4; // fraction of sheet travel past which release opens
-const FLICK_VELOCITY = 0.5; // px/ms downward flick that opens regardless of travel
+const HORIZONTAL_SLOP = 10; // px of horizontal travel (or upward) that abandons
+const CLOSE_FRACTION = 0.4; // fraction of sheet travel past which release closes
+const FLICK_VELOCITY = 0.5; // px/ms downward flick that closes regardless of travel
 
 // Settle timings/curves — mirror SessionDrawer.css so the imperative settle
 // matches the CSS enter/leave transitions.
@@ -35,7 +37,7 @@ function prefersReducedMotion() {
   );
 }
 
-export function useDrawerSwipe({ onOpen }) {
+export function useSheetDismiss({ onClose }) {
   const sheetRef = useRef(null);
   const veilRef = useRef(null);
   const [dragging, setDragging] = useState(false);
@@ -43,10 +45,10 @@ export function useDrawerSwipe({ onOpen }) {
   const startRef = useRef(null); // { x, y } of the touch that might become a drag
   const activeRef = useRef(false); // has a drag actually begun
   const samplesRef = useRef([]); // recent { t, y } for release velocity
-  const progressRef = useRef(0); // last drag progress 0..1
+  const progressRef = useRef(1); // last drag progress 1..0 (1 = fully open)
   const settleTimerRef = useRef(null); // pending settle() finish timeout
 
-  // Write the sheet/veil to a given progress (0 = closed, 1 = open) with no
+  // Write the sheet/veil to a given progress (1 = open, 0 = closed) with no
   // transition — the direct-manipulation path during a drag.
   const paint = useCallback((p) => {
     const sheet = sheetRef.current;
@@ -62,12 +64,13 @@ export function useDrawerSwipe({ onOpen }) {
   }, []);
 
   // Animate the sheet/veil to the open (target 1) or closed (target 0) rest
-  // position, then hand control back to React: opening commits onOpen(), closing
-  // leaves `open` false so the drawer unmounts. Reduced motion snaps instantly.
+  // position, then hand control back to React: closing commits onClose(),
+  // springing back open leaves `open` true so the drawer stays mounted.
+  // Reduced motion snaps instantly.
   //
   // The inline transform/opacity are DELIBERATELY left in place here — clearing
   // them from the hook would, during the drag→open handoff, drop the sheet back
-  // to its CSS closed rest state for a frame before React applies `.is-open`
+  // to its CSS closed rest state for a frame before React re-applies `.is-open`
   // (a visible jump). SessionDrawer owns the cleanup: it clears the inline
   // styles only once it has committed `.is-open` (open && entered && !dragging).
   const settle = useCallback(
@@ -87,13 +90,13 @@ export function useDrawerSwipe({ onOpen }) {
       }
       const finish = () => {
         settleTimerRef.current = null;
-        if (toOpen) onOpen?.();
+        if (!toOpen) onClose?.();
         setDragging(false);
       };
       if (reduce) finish();
       else settleTimerRef.current = setTimeout(finish, ms);
     },
-    [onOpen]
+    [onClose]
   );
 
   const onTouchStart = useCallback((e) => {
@@ -114,13 +117,13 @@ export function useDrawerSwipe({ onOpen }) {
       if (!activeRef.current) {
         // Not yet a drag — decide whether this gesture is ours.
         if (Math.abs(dx) > HORIZONTAL_SLOP || dy < -HORIZONTAL_SLOP) {
-          // Horizontal (let the strip scroll) or upward — abandon.
+          // Horizontal (let the list scroll) or upward — abandon.
           startRef.current = null;
           return;
         }
         if (dy > BEGIN_THRESHOLD && dy > Math.abs(dx)) {
           activeRef.current = true;
-          setDragging(true); // mounts the drawer in its dragging state
+          setDragging(true); // drawer switches to its dragging state
         } else {
           return;
         }
@@ -130,7 +133,8 @@ export function useDrawerSwipe({ onOpen }) {
       if (e.cancelable) e.preventDefault();
       const sheet = sheetRef.current;
       const travel = sheet ? sheet.offsetHeight : window.innerHeight;
-      const p = Math.max(0, Math.min(1, dy / travel));
+      // Progress runs 1 → 0 as the finger drags the sheet down.
+      const p = Math.max(0, Math.min(1, 1 - dy / travel));
       progressRef.current = p;
       const now = performance.now();
       const s = samplesRef.current;
@@ -158,19 +162,20 @@ export function useDrawerSwipe({ onOpen }) {
       const dt = b.t - a.t;
       if (dt > 0) velocity = (b.y - a.y) / dt;
     }
-    const toOpen = progressRef.current > OPEN_FRACTION || velocity > FLICK_VELOCITY;
+    const progressDropped = 1 - progressRef.current;
+    const toOpen = !(progressDropped > CLOSE_FRACTION || velocity > FLICK_VELOCITY);
     settle(toOpen);
   }, [settle]);
 
   // Cancel any pending settle finish if the hook unmounts mid-animation, so it
-  // can't call onOpen/setDragging after the component is gone.
+  // can't call onClose/setDragging after the component is gone.
   useEffect(() => () => clearTimeout(settleTimerRef.current), []);
 
   return {
     sheetRef,
     veilRef,
     dragging,
-    bind: {
+    grabBind: {
       onTouchStart,
       onTouchMove,
       onTouchEnd: endGesture,

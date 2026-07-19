@@ -342,7 +342,7 @@ export function MobileGallery() {
             </div>
           </div>
           <figcaption class="mgal-caption">
-            Overview drawer — pull down on header
+            Overview drawer — swipe down to close
           </figcaption>
         </figure>
       </div>

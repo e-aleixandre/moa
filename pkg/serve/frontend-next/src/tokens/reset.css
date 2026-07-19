@@ -59,6 +59,29 @@ a {
   min-height: 100vh;
 }
 
+/* Mobile document scroll lock (toggled by app.jsx at the ≤768px breakpoint).
+   The mobile shell (.mconv) owns its own internal scroll; the document itself
+   must not scroll, or iOS Safari pans the whole page to reveal a focused input
+   and never restores it when the keyboard closes (gap at the bottom, header
+   scrolled off). Pin the document chain to the dynamic viewport height. */
+html.mobile-locked,
+html.mobile-locked body,
+html.mobile-locked #root {
+  height: 100vh; /* fallback */
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  /* iOS: stop rubber-band / overscroll chaining to the document. */
+  overscroll-behavior: none;
+}
+
+html.mobile-locked,
+html.mobile-locked body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
 /* App-wide scroller treatment: native scrollbars are a fat light-gray bar over
    --base, foreign to the theme. Thin + themed on the main scrollers (position
    affordance matters in long conversations — don't hide them). Firefox via

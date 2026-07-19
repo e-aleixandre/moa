@@ -1,21 +1,20 @@
-import { RotateCcw, Bell } from "lucide-preact";
+import { RotateCcw, Bell, Layers } from "lucide-preact";
 import { StateDot } from "../../../primitives/index.js";
 import { ModelPill } from "../../../components/index.js";
 import { modelAccent } from "../../../data/selectors.js";
 import "./MobileHeader.css";
 
 // MobileHeader — session header for the mobile conversation screen.
-// A top-center handle (real <button aria-label="Open sessions">) sits above two
-// dense rows: identity (state dot + title + model pill + bell) and a mono meta
-// row (path · ctx · rewind). The dedicated grab/hint band is gone (MOBILE-
-// POLISH-SPEC §3); its "open sessions" job is now honest — the handle both taps
-// open and is the start of the swipe-down gesture (§4). `swipeBind` carries the
-// touch handlers from the parent's useDrawerSwipe hook; the whole header is the
-// gesture surface.
+// A leading Layers icon button (real <button aria-label="Open sessions">) opens
+// the sessions drawer with an honest tap; above it sits nothing — the dedicated
+// grab/hint band is gone (MOBILE-DRAWER-SPEC §1.3). Below the identity row
+// (sessions button + state dot + title + model pill + bell) a mono meta row
+// carries path · ctx · rewind. Closing the drawer is a swipe-down on the sheet
+// itself, not on the header.
 //
 // `empty` variant (EMPTY-STATE-SPEC §2.1): when there is no focused session the
-// header must stop impersonating one — it keeps the handle (tap + swipe still
-// open the drawer) and the bell (device-wide setting), drops the state dot,
+// header must stop impersonating one — it keeps the sessions button (the way
+// into the drawer) and the bell (device-wide setting), drops the state dot,
 // model pill and the whole meta row, and shows the wordmark "moa" styled as
 // chrome (subtext0), not as a session title.
 export function MobileHeader({
@@ -32,21 +31,20 @@ export function MobileHeader({
   notifPopover,
   notifAnchorRef,
   onModelClick,
-  swipeBind,
   empty = false,
 }) {
   const hasCtx = typeof ctx === "number" && ctx >= 0;
   return (
-    <header class="mhead" {...swipeBind}>
-      <button
-        type="button"
-        class="mhead-handle"
-        aria-label="Open sessions"
-        onClick={onOpenSessions}
-      >
-        <span class="mhead-handle-bar" aria-hidden="true" />
-      </button>
+    <header class="mhead">
       <div class="mhead-row">
+        <button
+          type="button"
+          class="mhead-sessions"
+          aria-label="Open sessions"
+          onClick={onOpenSessions}
+        >
+          <Layers size={18} aria-hidden="true" />
+        </button>
         {empty ? (
           <span class="mhead-title mhead-wordmark">moa</span>
         ) : (

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal } from "lucide-preact";
 import { StateDot } from "../../../primitives/index.js";
+import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
 import "./SessionDrawer.css";
 
 const FOCUSABLE_SELECTOR =
@@ -142,10 +143,12 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
           <span class="sdcard-title">{title}</span>
           <span class="sdcard-when">{when}</span>
         </span>
-        <span class="sdcard-last">
-          {needsLabel && <b class="sdcard-needs-label">{needsLabel} </b>}
-          {last}
-        </span>
+        {(needsLabel || last) && (
+          <span class="sdcard-last">
+            {needsLabel && <b class="sdcard-needs-label">{needsLabel} </b>}
+            {last}
+          </span>
+        )}
         <span class="sdcard-path">{path}</span>
       </button>
       <SessionCardMenu
@@ -170,11 +173,11 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
 // rest state. Only the sheet (transform) and veil (opacity) move — the
 // conversation behind stays perfectly still.
 //
-// Swipe-to-open: when the header drag is in progress the parent passes
-// `dragging` + the `veilRef`/`sheetRef` the useDrawerSwipe hook paints
-// imperatively. While dragging we mount the sheet in its `is-drag` state (CSS
-// transitions off) and let the hook drive translate/opacity inline; on release
-// the hook animates to rest and flips `open`, and we clear the inline styles
+// Swipe-to-close: the drawer owns the dismiss gesture end-to-end via
+// useSheetDismiss. While dragging we render the sheet in its `is-drag` state
+// (CSS transitions off) and let the hook drive translate/opacity inline; on
+// release the hook animates to rest and, when it settles closed, calls
+// `onClose` (spring-back to open calls nothing), and we clear the inline styles
 // once the committed CSS state has taken over.
 export function SessionDrawer({
   open,
@@ -187,10 +190,8 @@ export function SessionDrawer({
   onCloseSession,
   onReopenSession,
   onDeleteSession,
-  dragging = false,
-  veilRef,
-  sheetRef,
 }) {
+  const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeTimerRef = useRef(null);
@@ -235,11 +236,11 @@ export function SessionDrawer({
   // is applied would drop the sheet to its closed rest position for a frame.
   useEffect(() => {
     if (!open || !entered || dragging) return;
-    if (sheetRef && sheetRef.current) {
+    if (sheetRef.current) {
       sheetRef.current.style.transition = "";
       sheetRef.current.style.transform = "";
     }
-    if (veilRef && veilRef.current) {
+    if (veilRef.current) {
       veilRef.current.style.transition = "";
       veilRef.current.style.opacity = "";
     }
@@ -316,11 +317,19 @@ export function SessionDrawer({
         tabIndex={-1}
         ref={(el) => {
           panelRef.current = el;
-          if (sheetRef) sheetRef.current = el;
+          sheetRef.current = el;
         }}
       >
-        <div class="sdrawer-grab" aria-hidden="true" />
-        <div class="sdrawer-head">
+        <button
+          type="button"
+          class="sdrawer-grab"
+          aria-label="Close sessions"
+          onClick={() => onClose?.()}
+          {...grabBind}
+        >
+          <span class="sdrawer-grab-bar" aria-hidden="true" />
+        </button>
+        <div class="sdrawer-head" {...grabBind}>
           <h2>Sessions</h2>
           <span class="sdrawer-count">
             {activeCount} active · {savedCount} saved

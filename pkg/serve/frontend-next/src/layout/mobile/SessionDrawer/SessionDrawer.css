@@ -8,7 +8,7 @@
    the `.is-open` class transitions to the open rest state, so both the enter
    AND the leave animate (JS keeps the node mounted through the close). While a
    swipe drag is in progress (`.is-drag`) transitions are disabled and the
-   useDrawerSwipe hook writes transform/opacity inline to follow the finger. */
+   useSheetDismiss hook writes transform/opacity inline to follow the finger. */
 
 .sdrawer-veil {
   position: absolute;
@@ -59,12 +59,34 @@
 }
 
 .sdrawer-grab {
+  position: relative;
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 12px 0 6px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+/* Extend the tap target to ≥44px tall without adding visual height. */
+.sdrawer-grab::after {
+  content: "";
+  position: absolute;
+  inset: -12px 0;
+}
+.sdrawer-grab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.sdrawer-grab-bar {
   width: 44px;
   height: 4px;
   border-radius: var(--radius-full);
   background: var(--surface2);
-  margin: 12px auto 6px;
 }
 
 .sdrawer-head {
@@ -119,7 +141,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-height: 76px;
+  min-height: 56px;
   text-align: left;
   cursor: pointer;
   padding: 13px 15px;

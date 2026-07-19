@@ -10,7 +10,6 @@ import { openPersistedSubagent, configureSession, archiveSession, deleteSession,
 import { api } from "../../../data/api.js";
 import { mobileModelLabel, shortPath, sessionDotState } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
-import { useDrawerSwipe } from "../../../hooks/useDrawerSwipe.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { PermissionPrompt, AskUserPrompt, McpBanner, ModelSelector, Sheet } from "../../../components/index.js";
 import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
@@ -58,6 +57,8 @@ function relAge(updated) {
 // attempting) when present, else the live activity label, else the raw state.
 // There is NO per-session "last message" field in the poll model, so we DO NOT
 // invent a summary — we degrade to the brief, then to the activity/state.
+// Saved sessions render NO brief (return ""): the grey StateDot and the drawer's
+// group counter already carry the "saved" state, so a "Saved" line is redundant.
 // // TODO(5x): a true last-message preview would need the projection or the API
 // to carry one; not added here (out of scope, would touch the backend/model).
 function sessionBrief(sess) {
@@ -67,7 +68,7 @@ function sessionBrief(sess) {
   const phase = activityPhase(sess);
   if (phase === "waiting") return "Waiting for you";
   if (sess.state === "running") return "Working…";
-  if (sess.state === "saved") return "Saved";
+  if (sess.state === "saved") return "";
   return sess.state || "idle";
 }
 
@@ -142,11 +143,6 @@ export function MobileConversationScreen() {
   const [rewindOpen, setRewindOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifAnchorRef = useRef(null);
-  // Swipe-down on the header opens the sessions drawer (MOBILE-POLISH-SPEC §4).
-  // The hook owns the veil/sheet refs it paints during a drag and flips drawer
-  // state open on release; `bind` is spread onto the header (the gesture
-  // surface), `dragging` mounts the drawer mid-drag.
-  const drawerSwipe = useDrawerSwipe({ onOpen: () => setDrawerOpen(true) });
   // Model + thinking sheet (TELEMETRY-SETTINGS-REDESIGN §3.1): the header
   // ModelPill is tappable on mobile too, opening the shared ModelSelector inside
   // a Sheet (which brings overlay-history / back-gesture / scroll-lock). Models
@@ -304,7 +300,6 @@ export function MobileConversationScreen() {
         notifAnchorRef={notifAnchorRef}
         notifPopover={notifOpen && <NotificationSettings soundEnabled={state.soundEnabled} />}
         onModelClick={session ? () => setModelOpen(true) : undefined}
-        swipeBind={drawerSwipe.bind}
         empty={loaded && !session}
       />
       {strip.length > 1 && (
@@ -329,9 +324,6 @@ export function MobileConversationScreen() {
         onCloseSession={(id) => archiveSession(id)}
         onReopenSession={(id) => resumeSession(id)}
         onDeleteSession={(id) => deleteSession(id)}
-        dragging={drawerSwipe.dragging}
-        veilRef={drawerSwipe.veilRef}
-        sheetRef={drawerSwipe.sheetRef}
       />
       {session && (
         <RewindTimeline
