@@ -169,6 +169,7 @@ export const DRAWER_SESSIONS = [
     id: "verifier",
     title: "verifier design notes",
     state: "saved",
+    saved: true,
     when: "3d",
     last: "Saved · 84 messages",
     path: "~/dev/moa/main",
@@ -295,7 +296,9 @@ function DrawerSpecimen() {
         savedCount={2}
         onSelect={noop}
         onNew={noop}
-        onEdit={noop}
+        onCloseSession={noop}
+        onReopenSession={noop}
+        onDeleteSession={noop}
       />
     </>
   );

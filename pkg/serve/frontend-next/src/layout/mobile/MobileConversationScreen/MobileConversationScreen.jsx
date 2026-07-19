@@ -5,7 +5,7 @@ import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId, deriveModelSpecs, matchSelectedModel } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
-import { openPersistedSubagent, configureSession } from "../../../data/session-actions.js";
+import { openPersistedSubagent, configureSession, archiveSession, deleteSession, resumeSession } from "../../../data/session-actions.js";
 import { api } from "../../../data/api.js";
 import { mobileModelLabel, shortPath, sessionDotState } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
@@ -106,6 +106,7 @@ function drawerSessions(sessions, activeId) {
       path: shortPath(s.cwd) || s.cwd || "",
       unseen: !!s.unseen,
       active: s.id === activeId,
+      saved: s.state === "saved",
     };
   };
   return {
@@ -245,6 +246,9 @@ export function MobileConversationScreen() {
         savedCount={savedCount}
         onSelect={onSelectFromDrawer}
         onNew={onNew}
+        onCloseSession={(id) => archiveSession(id)}
+        onReopenSession={(id) => resumeSession(id)}
+        onDeleteSession={(id) => deleteSession(id)}
       />
       {session && (
         <RewindTimeline

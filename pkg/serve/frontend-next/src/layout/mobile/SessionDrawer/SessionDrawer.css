@@ -51,26 +51,10 @@
 }
 
 .sdrawer-head .sdrawer-count {
+  margin-left: auto;
   font-family: var(--mono);
   font-size: var(--text-xs);
   color: var(--overlay0);
-}
-
-.sdrawer-edit {
-  margin-left: auto;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--text-sm);
-  color: var(--mauve);
-}
-
-.sdrawer-edit:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-sm);
 }
 
 .sdrawer-list {
@@ -83,26 +67,40 @@
   gap: var(--space-2);
 }
 
-/* SessionDrawerCard */
+/* SessionDrawerCard — a container holding the tap body + the ⋯ overflow. */
 .sdcard {
   position: relative;
-  overflow: hidden;
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  align-items: stretch;
   width: 100%;
-  min-height: 76px;
-  text-align: left;
-  cursor: pointer;
-  padding: 13px 15px;
   background: var(--base);
   border: 1px solid var(--surface0);
   border-radius: var(--radius-lg);
 }
 
-.sdcard:focus-visible {
+/* The tap body owns the card's own click (select the session). */
+.sdcard-body {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 76px;
+  text-align: left;
+  cursor: pointer;
+  padding: 13px 15px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-lg);
+  color: inherit;
+  font: inherit;
+}
+
+.sdcard-body:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
 .sdcard.sdcard-active {
@@ -155,12 +153,83 @@
 .sdcard-unseen {
   position: absolute;
   top: 13px;
-  right: 38px;
+  right: 13px;
   width: 7px;
   height: 7px;
   border-radius: var(--radius-full);
   background: var(--peach);
 }
+
+/* Per-card ⋯ overflow — session lifecycle actions. */
+.sdcard-menu {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  flex: none;
+}
+
+.sdcard-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  align-self: stretch;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-lg);
+  color: var(--overlay0);
+  cursor: pointer;
+}
+.sdcard-menu-btn:hover { color: var(--text); }
+.sdcard-menu-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+.sdcard-actions {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 6px;
+  z-index: var(--z-overlay);
+  min-width: 208px;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Flip upward when the card is near the bottom of the scrolling list, so the
+   menu isn't clipped by the list's overflow. */
+.sdcard-actions--up {
+  top: auto;
+  bottom: calc(100% - 4px);
+}
+
+.sdcard-action {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+.sdcard-action:hover,
+.sdcard-action:focus-visible {
+  background: var(--surface0);
+  outline: none;
+}
+.sdcard-action-danger { color: var(--red); }
 
 .sdrawer-new {
   flex: none;
