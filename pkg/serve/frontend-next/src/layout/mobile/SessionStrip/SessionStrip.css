@@ -1,8 +1,16 @@
 .mstrip {
   display: flex;
+  align-items: center;
   gap: 6px;
   padding: 6px var(--space-4); /* px structural: tighter strip band (§3) */
   overflow-x: auto;
+  /* overflow-x:auto makes the browser compute overflow-y to auto too; with the
+     content a hair taller than the band that let iOS rubber-band the strip
+     vertically (drag up/down + spring back). Pin the cross axis and constrain
+     the gesture to horizontal panning so the strip only scrolls sideways. */
+  overflow-y: hidden;
+  touch-action: pan-x;
+  overscroll-behavior: contain;
   flex: none;
   background: color-mix(in srgb, var(--mantle) 55%, var(--crust));
   border-bottom: 1px solid var(--surface0);
