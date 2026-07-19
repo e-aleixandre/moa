@@ -50,7 +50,7 @@ function ledgerIcons(iconKeys) {
 // mobileDocChildren mirrors the desktop Stream's docChildren switch, diverging
 // only on `ledger` (→ MobileLedger with a possibly-fused diff sibling) and the
 // diff-skip bookkeeping described above.
-function mobileDocChildren(blocks) {
+function mobileDocChildren(blocks, onOpenSubagent) {
   const out = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -97,7 +97,7 @@ function mobileDocChildren(blocks) {
         );
         break;
       case "fanout":
-        out.push(<FanoutBlock key={b.id} agents={b.agents} />);
+        out.push(<FanoutBlock key={b.id} agents={b.agents} onOpenAgent={onOpenSubagent} />);
         break;
       case "background":
         b.jobs.forEach((job) => out.push(<BackgroundJob key={job.jobId} {...job} />));
@@ -109,7 +109,7 @@ function mobileDocChildren(blocks) {
   return out;
 }
 
-function MobileStreamBlock({ block }) {
+function MobileStreamBlock({ block, onOpenSubagent }) {
   switch (block.kind) {
     case "system":
       return <div class="mstream-system">{block.text}</div>;
@@ -123,7 +123,7 @@ function MobileStreamBlock({ block }) {
     case "streaming":
       return (
         <AssistantDocument streaming={block.kind === "streaming"}>
-          {mobileDocChildren(block.blocks)}
+          {mobileDocChildren(block.blocks, onOpenSubagent)}
         </AssistantDocument>
       );
     default:
@@ -135,7 +135,7 @@ const AT_BOTTOM_PX = 80;
 
 // MobileStream — same stick-to-bottom / "new messages" scroll intent as the
 // desktop Stream, sized for the mobile stream container.
-export function MobileStream({ session, blocks = [] }) {
+export function MobileStream({ session, blocks = [], onOpenSubagent }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   const stickToBottom = useRef(true);
@@ -184,7 +184,7 @@ export function MobileStream({ session, blocks = [] }) {
     <div class="mstream">
       <div class="mconv-stream" ref={containerRef} onScroll={checkScroll}>
         {blocks.map((block) => (
-          <MobileStreamBlock key={block.id} block={block} />
+          <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
         ))}
       </div>
       {showNewBtn && (

@@ -1,6 +1,10 @@
 package bus
 
-import "github.com/ealeixandre/moa/pkg/core"
+import (
+	"time"
+
+	"github.com/ealeixandre/moa/pkg/core"
+)
 
 // ---------------------------------------------------------------------------
 // Query types
@@ -171,6 +175,18 @@ type SubagentSnapshot struct {
 	Status   string
 	Async    bool
 	Messages []core.AgentMessage
+	// StartedAt is when the child began running, so a reconnecting client can
+	// keep computing live elapsed time. Zero when unknown.
+	StartedAt time.Time
+	// Usage/CostUSD carry the child's accumulated usage/cost so far, so live
+	// cost doesn't reset to zero after a reconnect. Usage is nil until the
+	// child has closed at least one message.
+	Usage   *core.Usage
+	CostUSD float64
+	// AccentIndex is the subagent's stable per-session creation ordinal (see
+	// bus.SubagentStarted.AccentIndex), used by clients to derive a
+	// deterministic accent color that survives reconnects.
+	AccentIndex int
 }
 
 // GetBashJobs returns active/recent background bash jobs for reconnecting UIs.

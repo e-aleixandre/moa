@@ -70,6 +70,20 @@ type SubagentInitData struct {
 	Status   string              `json:"status"`
 	Async    bool                `json:"async"`
 	Messages []core.AgentMessage `json:"messages"`
+	// StartedAtMs is the child's start time as epoch milliseconds (same
+	// encoding as InitData.RunStartedAtMs), so a reconnecting client resumes
+	// its live elapsed timer instead of restarting it. Omitted when unknown.
+	StartedAtMs int64 `json:"started_at_ms,omitempty"`
+	// InputTokens/OutputTokens/CostUSD are the child's accumulated usage/cost
+	// so far, so live cost doesn't reset to zero after a reconnect. Omitted
+	// (zero) until the child has closed at least one message.
+	InputTokens  int     `json:"input_tokens,omitempty"`
+	OutputTokens int     `json:"output_tokens,omitempty"`
+	CostUSD      float64 `json:"cost_usd,omitempty"`
+	// AccentIndex is the subagent's stable per-session creation ordinal, used
+	// by the client to derive a deterministic accent color that survives
+	// reconnects (instead of one derived from array/map position).
+	AccentIndex int `json:"accent_index"`
 }
 
 // BashJobInitData restores a live/recent background command after reconnect.
@@ -282,6 +296,26 @@ type SubagentStartData struct {
 	Task  string `json:"task"`
 	Model string `json:"model"`
 	Async bool   `json:"async"`
+	// StartedAtMs is the child's start time as epoch milliseconds (same
+	// encoding as InitData.RunStartedAtMs), so the client can compute live
+	// elapsed time (now - StartedAtMs). Omitted when unknown.
+	StartedAtMs int64 `json:"started_at_ms,omitempty"`
+	// AccentIndex is the subagent's stable per-session creation ordinal (see
+	// SubagentInitData.AccentIndex). Never omitted: 0 is a valid ordinal
+	// (the session's first subagent).
+	AccentIndex int `json:"accent_index"`
+}
+
+// SubagentUsageData carries a subagent's accumulated usage/cost while it is
+// still running, emitted each time the child closes a message. It lets the
+// client show live tokens/cost before the terminal subagent_end. The cost is
+// computed the same way subagent_end computes its total, so the live value
+// stays consistent with the final one.
+type SubagentUsageData struct {
+	JobID        string  `json:"job_id"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
 }
 
 // SubagentEndData is sent when a subagent finishes, carrying its usage/cost.

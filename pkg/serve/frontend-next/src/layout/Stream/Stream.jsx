@@ -25,7 +25,7 @@ import "./Stream.css";
 // the markdown pipeline through DOMPurify, so the output is safe to inject; the
 // component's own sanitizeHtml pass is a second, allowlist-based guard. No raw
 // user/assistant text ever reaches innerHTML unsanitized.
-function docChildren(blocks) {
+function docChildren(blocks, onOpenSubagent) {
   return blocks.map((b) => {
     switch (b.type) {
       case "prose":
@@ -50,7 +50,7 @@ function docChildren(blocks) {
           <DiffBlock key={b.id} diffText={b.diffText} filename={b.filename} />
         );
       case "fanout":
-        return <FanoutBlock key={b.id} agents={b.agents} />;
+        return <FanoutBlock key={b.id} agents={b.agents} onOpenAgent={onOpenSubagent} />;
       case "background":
         return b.jobs.map((job) => (
           <BackgroundJob key={job.jobId} {...job} />
@@ -61,7 +61,7 @@ function docChildren(blocks) {
   });
 }
 
-function StreamBlock({ block }) {
+function StreamBlock({ block, onOpenSubagent }) {
   switch (block.kind) {
     case "system":
       return <div class="stream-system">{block.text}</div>;
@@ -75,7 +75,7 @@ function StreamBlock({ block }) {
     case "streaming":
       return (
         <AssistantDocument streaming={block.kind === "streaming"}>
-          {docChildren(block.blocks)}
+          {docChildren(block.blocks, onOpenSubagent)}
         </AssistantDocument>
       );
     default:
@@ -85,7 +85,7 @@ function StreamBlock({ block }) {
 
 const AT_BOTTOM_PX = 80;
 
-export function Stream({ session, blocks = [] }) {
+export function Stream({ session, blocks = [], onOpenSubagent }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   // stickToBottom is a ref (not state) so the new-content effect reads the
@@ -142,7 +142,7 @@ export function Stream({ session, blocks = [] }) {
       <div class="stream-scroll" ref={containerRef} onScroll={checkScroll}>
         <div class="stream-col">
           {blocks.map((block) => (
-            <StreamBlock key={block.id} block={block} />
+            <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
           ))}
         </div>
       </div>

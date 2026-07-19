@@ -27,6 +27,21 @@
   border-top-color: var(--mauve);
 }
 
+.spinner.c-peach {
+  border-color: color-mix(in srgb, var(--peach) 30%, transparent);
+  border-top-color: var(--peach);
+}
+
+.spinner.c-lavender {
+  border-color: color-mix(in srgb, var(--lavender) 30%, transparent);
+  border-top-color: var(--lavender);
+}
+
+.spinner.c-overlay1 {
+  border-color: color-mix(in srgb, var(--overlay1) 40%, transparent);
+  border-top-color: var(--overlay1);
+}
+
 @keyframes spinner-spin {
   to {
     transform: rotate(360deg);

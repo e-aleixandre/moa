@@ -4,6 +4,7 @@ import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import {
   sendMessage, cancelRun, cancelSteers, execCommand, execShell, newSteerId,
+  steerSubagent,
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
 import { addToast } from "../../data/notifications.js";
@@ -29,8 +30,13 @@ import "./Composer.css";
 //
 // Deferred to later subphases (NOT wired here):
 //   5F — permission / ask_user prompts.
-//   5J — subagent steering (viewingSubagent).
 //   5M — voice / push-to-talk on the send button (plain click here).
+//
+// 5J — subagent steering: when `steer` is set ({ jobId, accent, name }) the
+// composer becomes a STEER box for a live subagent. The STEER tag + accented
+// focus border make it unmistakable who you're writing to; Enter routes the
+// text through steerSubagent(sessionId, jobId, text) instead of sendMessage,
+// and there is no queue/slash/shell semantics (those belong to the parent run).
 
 const MAX_ATTACHMENTS = 8;
 
@@ -65,12 +71,15 @@ function saveDraft(id, text) {
   } catch (_) { /* ignore */ }
 }
 
-export function Composer({ sessionId, session, shortPlaceholder = false }) {
+export function Composer({ sessionId, session, shortPlaceholder = false, steer = null }) {
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
   const sessionState = session?.state;
   const pendingSteers = session?.pendingSteers;
-  const busy = sessionState === "running";
+  // In 5J steer mode the box targets a subagent, not the parent run — so it
+  // must never enter the parent's "busy" affordances (Stop button, Esc-aborts,
+  // queue note). It always shows a Send button that fires a steer.
+  const busy = sessionState === "running" && !steer;
   const [hasText, setHasText] = useState(false);
   // Guards a recall (chip click / Alt+↑) against double-activation before the
   // WS steers_canceled round-trip clears the chips: without it, a second click
@@ -356,6 +365,30 @@ export function Composer({ sessionId, session, shortPlaceholder = false }) {
     const atts = attachments;
     if (!text && atts.length === 0) return;
 
+    // 5J steer mode: everything the user types goes to the live subagent as a
+    // steer. No slash/shell/queue semantics, no attachments (the subagent steer
+    // endpoint is text-only). Clear the box and fire; the caller shows optimistic
+    // feedback / rebounds to the parent if the subagent already finished.
+    if (steer && steer.jobId) {
+      if (!text) return;
+      pushHistory(text);
+      el.value = '';
+      saveDraft(sessionId, '');
+      setHasText(false);
+      setCmdSuggestions(null);
+      setFileSuggestions(null);
+      setAttachments([]);
+      autoResize();
+      try {
+        await steerSubagent(sessionId, steer.jobId, text);
+      } catch (e) {
+        console.error('Steer failed:', e);
+        if (steer.onRebound) steer.onRebound();
+        addToast({ sessionId, title: 'Steer not delivered', detail: String(e.message || e), type: 'error' });
+      }
+      return;
+    }
+
     if ((text.startsWith('/') || text.startsWith('!')) && atts.length > 0) {
       addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments first, or send them in a separate message', type: 'attention' });
       return;
@@ -485,7 +518,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false }) {
       // reason (e.g. a 400) so it's not silent.
       addToast({ sessionId, title: 'Message not sent', detail: String(e.message || e), type: 'error' });
     }
-  }, [sessionId, sessionState, attachments, pushHistory, autoResize]);
+  }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer]);
 
   const handleSend = useCallback(() => handleSendInner(textareaRef.current), [handleSendInner]);
   // acceptSuggestion (below) is defined before handleSendInner and has an
@@ -695,16 +728,27 @@ export function Composer({ sessionId, session, shortPlaceholder = false }) {
   }, [cacheExpiresAt, busy]);
   const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
 
-  const summary = queueSummary(pendingSteers);
+  const summary = steer ? null : queueSummary(pendingSteers);
   // shortPlaceholder (mobile): the multi-line keyboard hint doesn't fit the
   // single-line pill and reads noisy on a phone — use the short prompt.
   const idlePlaceholder = shortPlaceholder
     ? "Message moa…"
     : "Message moa — Enter to send, ⇧Enter for a new line, ⌥Enter to queue…";
-  const placeholder = busy ? "Steer the agent…" : idlePlaceholder;
+  // 5J steer mode overrides everything: this box talks to the subagent.
+  const placeholder = steer
+    ? `Steer ${steer.name || "subagent"} — it reads this before its next step…`
+    : (busy ? "Steer the agent…" : idlePlaceholder);
 
   return (
-    <div class="composer-wrap">
+    <div class={`composer-wrap${steer ? " composer-steer" : ""}`}>
+      {steer && (
+        <div class="composer-steer-tag" style={{ "--steer-accent": `var(--${steer.accent || "peach"})` }}>
+          <span class="composer-steer-label">STEER</span>
+          <span class="composer-steer-name" style={{ color: `var(--${steer.accent || "peach"})` }}>
+            {steer.name || "subagent"}
+          </span>
+        </div>
+      )}
       {cacheExpired && (
         <div class="cache-warn" title="The prompt cache for this conversation has expired. Your next message will pay for a fresh cache write (more expensive).">
           <span class="cache-warn-dot" />

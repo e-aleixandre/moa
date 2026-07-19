@@ -1,9 +1,11 @@
 import { useState, useEffect } from "preact/hooks";
 import { store } from "../../../data/store.js";
+import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
+import { openPersistedSubagent } from "../../../data/session-actions.js";
 import { mobileModelLabel, shortPath, sessionDotState } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
 import { Composer } from "../../Composer/Composer.jsx";
@@ -13,6 +15,7 @@ import { SessionStrip } from "../SessionStrip/SessionStrip.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileStream } from "./MobileStream.jsx";
+import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import "./MobileConversationScreen.css";
 
 // MobileConversationScreen — the CONNECTED root container of the mobile
@@ -139,19 +142,36 @@ export function MobileConversationScreen() {
     const blocks = projectStream(session);
     const blocking =
       session.untrustedMcp || session.pendingPerm || session.pendingAsk;
-    body = (
-      <>
-        <MobileStream session={session} blocks={blocks} />
-        {blocking && (
-          <div class="mconv-blocking">
-            {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
-            {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
-            {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
-          </div>
-        )}
-        <MobileComposer key={session.id} session={session} />
-      </>
-    );
+    if (session.viewingSubagent) {
+      // 5J: the subagent view takes over the whole conversation surface (below
+      // the header/strip), pushed full-screen. onBack clears viewingSubagent.
+      body = (
+        <MobileSubagentView
+          key={session.viewingSubagent}
+          session={session}
+          jobId={session.viewingSubagent}
+          onBack={() => updateSession(session.id, { viewingSubagent: null })}
+        />
+      );
+    } else {
+      body = (
+        <>
+          <MobileStream
+            session={session}
+            blocks={blocks}
+            onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
+          />
+          {blocking && (
+            <div class="mconv-blocking">
+              {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
+              {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+              {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
+            </div>
+          )}
+          <MobileComposer key={session.id} session={session} />
+        </>
+      );
+    }
   }
 
   return (

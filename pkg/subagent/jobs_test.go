@@ -74,6 +74,34 @@ func TestJobStore_RunningCount_ExcludesSync(t *testing.T) {
 	}
 }
 
+// TestJobStore_AccentIndex_IsCreationOrdinalNotReused verifies accentIndex is
+// assigned in creation order and is never reused when an earlier job is
+// removed from the store — the property the reconnect-color-stability fix
+// depends on (position-in-map would renumber survivors after a delete).
+func TestJobStore_AccentIndex_IsCreationOrdinalNotReused(t *testing.T) {
+	s := newJobStore()
+	j0 := s.create("first", "m", func() {})
+	j1 := s.create("second", "m", func() {})
+	j2 := s.create("third", "m", func() {})
+
+	if j0.accentIndex != 0 || j1.accentIndex != 1 || j2.accentIndex != 2 {
+		t.Fatalf("accentIndex = %d,%d,%d, want 0,1,2", j0.accentIndex, j1.accentIndex, j2.accentIndex)
+	}
+
+	// Remove the first job (as if it finished and was cleaned up), then
+	// create a new one — its ordinal must not backfill the freed slot.
+	s.delete(j0.id)
+	j3 := s.create("fourth", "m", func() {})
+	if j3.accentIndex != 3 {
+		t.Fatalf("accentIndex after delete+create = %d, want 3 (no reuse)", j3.accentIndex)
+	}
+
+	snap1, ok := s.snapshot(j1.id)
+	if !ok || snap1.AccentIndex != 1 {
+		t.Fatalf("survivor snapshot AccentIndex = %v (ok=%v), want 1 unchanged", snap1.AccentIndex, ok)
+	}
+}
+
 func TestJobs_Cancel_ReportsExistence(t *testing.T) {
 	s := newJobStore()
 	j := s.create("task", "m", func() {})

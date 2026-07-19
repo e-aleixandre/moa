@@ -10,6 +10,8 @@
 package bus
 
 import (
+	"time"
+
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tasks"
 )
@@ -393,6 +395,30 @@ type SubagentStarted struct {
 	Task      string
 	Model     string
 	Async     bool
+	// StartedAt is when the child agent began running, so live UIs can compute
+	// elapsed time (now - StartedAt) and reconcile it after a reconnect. Zero
+	// when the emitter did not record a start time.
+	StartedAt time.Time
+	// AccentIndex is the subagent's stable per-session creation ordinal
+	// (0, 1, 2, ... assigned once, in creation order, never reused), used by
+	// clients to derive a deterministic accent color that survives WS
+	// reconnects instead of one derived from map iteration order.
+	AccentIndex int
+}
+
+// SubagentUsage carries a subagent's running aggregated usage/cost, published
+// each time the child closes a message (its message_end). It lets live UIs show
+// accumulated tokens/cost while the child is still running, before the terminal
+// SubagentEnded. Cost is computed with the CHILD model's pricing, the same way
+// SubagentEnded computes its final total, so the live value stays consistent
+// with the final one. It is safe to drop under backpressure (lossy): each
+// message_end re-sends the full accumulated total, and SubagentEnded is
+// authoritative.
+type SubagentUsage struct {
+	SessionID string
+	JobID     string
+	Usage     *core.Usage
+	CostUSD   float64
 }
 
 // SubagentEvent transports a single already-typed bus event from a subagent
@@ -542,7 +568,7 @@ func isLossyEvent(event any) bool {
 		return isLossyEvent(se.Inner)
 	}
 	switch event.(type) {
-	case TextDelta, ThinkingDelta, ToolExecUpdate, ToolCallDelta, BashJobOutput:
+	case TextDelta, ThinkingDelta, ToolExecUpdate, ToolCallDelta, BashJobOutput, SubagentUsage:
 		return true
 	default:
 		return false

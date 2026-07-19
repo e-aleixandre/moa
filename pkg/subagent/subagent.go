@@ -78,8 +78,11 @@ type Config struct {
 	OnAsyncJobChange func(count int)
 
 	// OnChildStart is called right before a child agent (sync or async) begins
-	// running, with its jobID/task/model and whether it's async.
-	OnChildStart func(jobID, task, model string, async bool)
+	// running, with its jobID/task/model, whether it's async, its start
+	// time (so live UIs can compute elapsed and reconcile it after a reconnect),
+	// and its stable per-session creation ordinal (accentIndex) for a
+	// deterministic accent color that survives reconnects.
+	OnChildStart func(jobID, task, model string, async bool, startedAt time.Time, accentIndex int)
 
 	// OnChildEvent is called for each typed bus event produced by translating
 	// the child's core.AgentEvent stream (via bus.TranslateAgentEvent). inner
@@ -88,6 +91,13 @@ type Config struct {
 	// cycle: pkg/bus does not import pkg/subagent), so translation happens
 	// here rather than at the call site.
 	OnChildEvent func(jobID string, inner any)
+
+	// OnChildUsage is called each time a child closes a message (its
+	// message_end), with the child's accumulated usage/cost so far (cost using
+	// the CHILD's model pricing). It lets live UIs show running tokens/cost
+	// before the terminal OnChildEnd. Same aggregation as OnChildEnd, so the
+	// live value stays consistent with the final total.
+	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64)
 
 	// OnChildEnd is called once when a child agent (sync or async) finishes,
 	// with its final status and aggregated usage/cost (cost computed with the
@@ -463,7 +473,13 @@ func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core
 
 	if j.isPromoted() {
 		if cfg.OnChildStart != nil {
-			cfg.OnChildStart(j.id, task, model.ID, true)
+			var startedAt time.Time
+			var accentIndex int
+			if snap, ok := jobs.snapshot(j.id); ok {
+				startedAt = snap.StartedAt
+				accentIndex = snap.AccentIndex
+			}
+			cfg.OnChildStart(j.id, task, model.ID, true, startedAt, accentIndex)
 		}
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())
@@ -555,13 +571,29 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		}
 		forwardChildEvent(cfg, j.id, e)
 		if e.Type == core.AgentEventMessageEnd {
-			jobs.setMessages(j.id, child.Messages())
+			msgs := child.Messages()
+			jobs.setMessages(j.id, msgs)
+			// Record and emit running usage/cost so live UIs can show
+			// accumulated tokens/cost before the terminal OnChildEnd. Same
+			// aggregation as OnChildEnd, keeping the live value consistent
+			// with the final total.
+			usage, cost := childUsage(msgs), childCost(model, msgs)
+			jobs.setUsage(j.id, usage, cost)
+			if cfg.OnChildUsage != nil {
+				cfg.OnChildUsage(j.id, usage, cost)
+			}
 		}
 	})
 	defer unsub()
 
 	if cfg.OnChildStart != nil {
-		cfg.OnChildStart(j.id, task, model.ID, !j.isSync())
+		var startedAt time.Time
+		var accentIndex int
+		if snap, ok := jobs.snapshot(j.id); ok {
+			startedAt = snap.StartedAt
+			accentIndex = snap.AccentIndex
+		}
+		cfg.OnChildStart(j.id, task, model.ID, !j.isSync(), startedAt, accentIndex)
 	}
 
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)

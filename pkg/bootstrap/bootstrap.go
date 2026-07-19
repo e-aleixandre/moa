@@ -85,13 +85,15 @@ type SessionConfig struct {
 	OnAsyncJobChange func(count int)
 	OnAsyncComplete  func(jobID, task, status, resultTail string, truncated bool)
 
-	// OnSubagentStart/OnSubagentEvent/OnSubagentEnd are the rich, per-child
-	// streaming sinks (subagent.Config.OnChildStart/OnChildEvent/OnChildEnd).
-	// The caller wires these into its own bus (see cmd/agent's preBus,
-	// pkg/serve's session_lifecycle closure) since bootstrap has no bus
-	// reference of its own. All optional (nil = no-op).
-	OnSubagentStart func(jobID, task, model string, async bool)
+	// OnSubagentStart/OnSubagentEvent/OnSubagentUsage/OnSubagentEnd are the
+	// rich, per-child streaming sinks (subagent.Config.OnChildStart/
+	// OnChildEvent/OnChildUsage/OnChildEnd). The caller wires these into its
+	// own bus (see cmd/agent's preBus, pkg/serve's session_lifecycle closure)
+	// since bootstrap has no bus reference of its own. All optional (nil =
+	// no-op).
+	OnSubagentStart func(jobID, task, model string, async bool, startedAt time.Time, accentIndex int)
 	OnSubagentEvent func(jobID string, inner any)
+	OnSubagentUsage func(jobID string, usage *core.Usage, costUSD float64)
 	OnSubagentEnd   func(jobID, status string, usage *core.Usage, costUSD float64)
 
 	// Background bash callbacks feed the shared session bus/UI. Output is a
@@ -433,6 +435,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MaxConcurrentAsync:  moaCfg.SubagentMaxConcurrent,
 		OnChildStart:        cfg.OnSubagentStart,
 		OnChildEvent:        cfg.OnSubagentEvent,
+		OnChildUsage:        cfg.OnSubagentUsage,
 		OnChildEnd:          cfg.OnSubagentEnd,
 		TranscriptLoader:    cfg.SubagentTranscriptLoader,
 	})

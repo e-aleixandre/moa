@@ -97,8 +97,11 @@ import { gerundFor, formatElapsed } from './util/activity.js';
 
 const MAX_MESSAGES_BEFORE_TRUNCATION_NOTE = 200;
 
-// Fanout accent palette, cycled by agent index (see FanoutBlock.css).
-const FANOUT_ACCENTS = ['sky', 'teal', 'mauve', 'peach', 'blue', 'lavender'];
+// Fanout accent palette, cycled by agent index (see FanoutBlock.css). Exported
+// so the SubagentView (5J) assigns the SAME accent a subagent had in the fanout
+// (single source of truth for the sky/teal/mauve identity) instead of inventing
+// its own palette.
+export const FANOUT_ACCENTS = ['sky', 'teal', 'mauve', 'peach', 'blue', 'lavender'];
 
 // projectStream is the single entry point. Given the store's `session` object
 // it returns the ordered block array described in the contract above. It never
@@ -126,15 +129,7 @@ export function projectStream(session) {
   // live subagents/bash whose terminated card was already pushed here. The
   // completion handlers key those cards as `subagent-<job_id>` /
   // `bash-complete-<job_id>`, so we also index the bare job_id.
-  const seenJobIds = new Set();
-  for (const msg of messages) {
-    if (msg && msg._type === 'tool_start' && msg.tool_call_id) {
-      const id = String(msg.tool_call_id);
-      seenJobIds.add(id);
-      if (id.startsWith('subagent-')) seenJobIds.add(id.slice('subagent-'.length));
-      if (id.startsWith('bash-complete-')) seenJobIds.add(id.slice('bash-complete-'.length));
-    }
-  }
+  const seenJobIds = seenJobIdsOf(messages);
 
   // currentDoc = the document object for the turn currently being built; reset
   // to null at every user message (and system line) so the next assistant
@@ -242,7 +237,11 @@ export function projectStream(session) {
     if (liveSubs.length === 1) {
       doc.blocks.push({ type: 'ledger', id: `${doc.id}-livesub`, rows: [liveSubRow(liveSubs[0])] });
     } else if (liveSubs.length >= 2) {
-      doc.blocks.push({ type: 'fanout', id: `${doc.id}-fanout`, agents: liveSubs.map(liveAgent) });
+      doc.blocks.push({
+        type: 'fanout',
+        id: `${doc.id}-fanout`,
+        agents: liveSubs.map((s) => liveAgent(s, subagentAccentIndex(session.subagents, s.jobId))),
+      });
     }
 
     if (liveBash.length > 0) {
@@ -256,6 +255,77 @@ export function projectStream(session) {
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+// subagentAccentIndex is the STABLE fanout-accent index for one subagent.
+// Prefers the backend-assigned per-session creation ordinal (sub.accentIndex,
+// propagated over WS in subagent_start / the init snapshot — see
+// ws-handlers.js), which is deterministic and survives WS reconnects. Falls
+// back to this subagent's position in session.subagents' insertion order (or
+// array order) only when no backend ordinal is available (older payload,
+// catalog/specimen mocks), matching the previous behavior for those cases.
+// A sibling finishing and dropping out of the live set must never repaint the
+// remaining siblings' colors, so every caller that needs "this subagent's
+// color" (fanout, tray, SubagentView) goes through here instead of indexing
+// into the live-only array.
+export function subagentAccentIndex(subagents, jobId) {
+  if (!subagents) return 0;
+  if (Array.isArray(subagents)) {
+    const sub = subagents.find((s) => s && String(s.jobId) === String(jobId));
+    if (sub && Number.isInteger(sub.accentIndex)) return sub.accentIndex;
+    const i = subagents.findIndex((s) => s && String(s.jobId) === String(jobId));
+    return i >= 0 ? i : 0;
+  }
+  const sub = subagents[jobId];
+  if (sub && Number.isInteger(sub.accentIndex)) return sub.accentIndex;
+  const i = Object.keys(subagents).indexOf(jobId);
+  return i >= 0 ? i : 0;
+}
+
+// seenJobIdsOf collects every tool_call_id present in a message list, indexing
+// the bare job_id for the terminated subagent/bash cards keyed as
+// `subagent-<id>` / `bash-complete-<id>` (see projectStream's dedup). Exported
+// so the AgentTray uses the exact same dedup set the stream does.
+export function seenJobIdsOf(messages) {
+  const seenJobIds = new Set();
+  const list = Array.isArray(messages) ? messages : [];
+  for (const msg of list) {
+    if (msg && msg._type === 'tool_start' && msg.tool_call_id) {
+      const id = String(msg.tool_call_id);
+      seenJobIds.add(id);
+      if (id.startsWith('subagent-')) seenJobIds.add(id.slice('subagent-'.length));
+      if (id.startsWith('bash-complete-')) seenJobIds.add(id.slice('bash-complete-'.length));
+    }
+  }
+  return seenJobIds;
+}
+
+// liveTrayAgents projects a session into the AgentTray's chip descriptors: the
+// LIVE subagents (each carrying its fanout identity accent) followed by the LIVE
+// async bash jobs (no identity accent — INC-22: spinner overlay1 + mono `bash`).
+// It reuses the SAME liveSubagents/liveAgent rules the stream projection uses,
+// so the tray never diverges from the fanout it mirrors. Each descriptor:
+//   { id, kind:'subagent'|'bash', name, accent?, action?, time? }
+export function liveTrayAgents(session) {
+  if (!session) return [];
+  const seen = seenJobIdsOf(session.messages);
+  const { subs, bash } = liveSubagents(session.subagents, seen);
+  const chips = subs.map((sub) => {
+    const a = liveAgent(sub, subagentAccentIndex(session.subagents, sub.jobId));
+    return { id: a.id, kind: 'subagent', name: a.name, accent: a.accent, action: a.action, time: a.time };
+  });
+  for (const job of bash) {
+    const chip = { id: job.jobId, kind: 'bash', name: 'bash', action: bashAction(job) };
+    const time = job.usage && formatElapsed(job.usage.elapsedMs);
+    if (time) chip.time = time;
+    chips.push(chip);
+  }
+  return chips;
+}
+
+// bashAction is the tray's short description of a live bash job: the command.
+function bashAction(job) {
+  return toolPath('bash', { command: job.task || '' }) || firstLine(job.task) || 'running';
+}
 
 function joinText(content) {
   if (!Array.isArray(content)) return '';
@@ -364,8 +434,10 @@ function tryParse(s) {
 // into the LIVE real subagents and LIVE async bash jobs (kind:'bash'). Only
 // entries with status running/cancelling are kept — terminated ones already
 // live in session.messages — and anything whose job_id already appeared in
-// messages is dropped for robustness (dedup).
-function liveSubagents(subagents, seenJobIds) {
+// messages is dropped for robustness (dedup). Exported so the AgentTray (5J)
+// derives its live chips from the SAME rule the stream uses, rather than
+// duplicating "which subagents are alive" logic.
+export function liveSubagents(subagents, seenJobIds) {
   const subs = [];
   const bash = [];
   if (!subagents) return { subs, bash };
@@ -395,7 +467,9 @@ function agentAction(sub) {
 
 // liveAgent builds one FanoutBlock agent descriptor for a live subagent.
 // Shape (see FanoutBlock.jsx): { id, name, accent, state, action?, time? }.
-function liveAgent(sub, i) {
+// Exported so the AgentTray/SubagentView derive the SAME descriptor (identity
+// accent, live action) instead of reimplementing it.
+export function liveAgent(sub, i) {
   const agent = {
     id: sub.jobId,
     name: shortLabel(firstLine(sub.task)) || shortModel(sub.model) || sub.jobId || 'subagent',

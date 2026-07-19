@@ -4,6 +4,7 @@ import "./index.css";
 import { Catalog } from "./catalog/catalog.jsx";
 import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
 import { MobileGallery } from "./catalog/mobile-gallery.jsx";
+import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
 import { CommandPalette } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
@@ -88,6 +89,7 @@ function CatalogScreen() {
 const GALLERY_LINKS = [
   { key: "catalog", label: "Catalog", href: "?view=catalog" },
   { key: "live", label: "Live states", href: "?view=live" },
+  { key: "subagent", label: "Subagent", href: "?view=subagent" },
   { key: "mobile", label: "Mobile", href: "?view=mobile" },
 ];
 
@@ -304,6 +306,14 @@ function App() {
       <>
         <LiveStatesGallery />
         <GalleryNav current="live" />
+      </>
+    );
+  }
+  if (view === "subagent") {
+    return (
+      <>
+        <SubagentGallery />
+        <GalleryNav current="subagent" />
       </>
     );
   }

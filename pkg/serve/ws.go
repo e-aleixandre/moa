@@ -254,8 +254,21 @@ func wsEventFromBus(event any) (Event, bool) {
 			JobID: e.JobID, Task: e.Task, Status: e.Status, Text: e.Text,
 		}}, true
 	case bus.SubagentStarted:
-		return Event{Type: "subagent_start", Data: SubagentStartData{
-			JobID: e.JobID, Task: e.Task, Model: e.Model, Async: e.Async,
+		data := SubagentStartData{
+			JobID: e.JobID, Task: e.Task, Model: e.Model, Async: e.Async, AccentIndex: e.AccentIndex,
+		}
+		if !e.StartedAt.IsZero() {
+			data.StartedAtMs = e.StartedAt.UnixMilli()
+		}
+		return Event{Type: "subagent_start", Data: data}, true
+	case bus.SubagentUsage:
+		var inputTok, outputTok int
+		if e.Usage != nil {
+			inputTok = e.Usage.Input
+			outputTok = e.Usage.Output
+		}
+		return Event{Type: "subagent_usage", Data: SubagentUsageData{
+			JobID: e.JobID, InputTokens: inputTok, OutputTokens: outputTok, CostUSD: e.CostUSD,
 		}}, true
 	case bus.SubagentEnded:
 		var inputTok, outputTok int
@@ -302,6 +315,7 @@ var wsLossyEventTypes = map[string]bool{
 	"tool_update":     true,
 	"tool_call_delta": true,
 	"bash_job_output": true,
+	"subagent_usage":  true,
 }
 
 // countImageContent returns how many image blocks a steer's content carries, so
@@ -418,14 +432,24 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 		data.Subagents = make([]SubagentInitData, len(subagents))
 		for i, sa := range subagents {
 			messages, _ := limitInitHistory(sa.Messages)
-			data.Subagents[i] = SubagentInitData{
-				JobID:    sa.JobID,
-				Task:     sa.Task,
-				Model:    sa.Model,
-				Status:   sa.Status,
-				Async:    sa.Async,
-				Messages: messages,
+			sad := SubagentInitData{
+				JobID:       sa.JobID,
+				Task:        sa.Task,
+				Model:       sa.Model,
+				Status:      sa.Status,
+				Async:       sa.Async,
+				Messages:    messages,
+				AccentIndex: sa.AccentIndex,
 			}
+			if !sa.StartedAt.IsZero() {
+				sad.StartedAtMs = sa.StartedAt.UnixMilli()
+			}
+			if sa.Usage != nil {
+				sad.InputTokens = sa.Usage.Input
+				sad.OutputTokens = sa.Usage.Output
+			}
+			sad.CostUSD = sa.CostUSD
+			data.Subagents[i] = sad
 		}
 	}
 	if len(bashJobs) > 0 {

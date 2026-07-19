@@ -76,8 +76,19 @@
   font-weight: var(--weight-semibold);
 }
 
+/* Bash jobs carry no identity accent (INC-22): mono neutral label. */
+.agent-tray .agent-chip.bash .agent-who {
+  font-family: var(--mono);
+  font-weight: var(--weight-normal);
+  color: var(--overlay1);
+}
+
 .agent-tray .agent-what {
   color: var(--overlay1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
 }
 
 .agent-tray .agent-time {

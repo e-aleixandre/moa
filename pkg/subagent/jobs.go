@@ -57,26 +57,35 @@ type job struct {
 	messages              []core.AgentMessage
 	usage                 *core.Usage
 	costUSD               float64
+	// accentIndex is a per-session creation ordinal (0, 1, 2, ...) assigned
+	// when the job is created, monotonically increasing and never reused
+	// (even once earlier subagents finish). It lets clients derive a stable
+	// accent color that survives WS reconnects, unlike deriving the index
+	// from the subagent's position in a Go map (non-deterministic order,
+	// and finished subagents are dropped from the reconnect snapshot).
+	accentIndex int
 }
 
 type jobSnapshot struct {
-	ID         string
-	Task       string
-	Model      string
-	Status     string
-	Result     string
-	Error      string
-	Progress   []string
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Sync       bool
-	Usage      *core.Usage
-	CostUSD    float64
+	ID          string
+	Task        string
+	Model       string
+	Status      string
+	Result      string
+	Error       string
+	Progress    []string
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	Sync        bool
+	Usage       *core.Usage
+	CostUSD     float64
+	AccentIndex int
 }
 
 type jobStore struct {
-	mu   sync.RWMutex
-	jobs map[string]*job
+	mu         sync.RWMutex
+	jobs       map[string]*job
+	nextAccent int
 }
 
 func newJobStore() *jobStore {
@@ -111,6 +120,13 @@ func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync
 
 		s.mu.Lock()
 		if _, exists := s.jobs[id]; !exists {
+			// accentIndex is the job's creation ordinal within this store
+			// (one store per session): assigned once here, under the same
+			// lock that guards the map, and never reused — nextAccent only
+			// increments, so a finished/removed subagent never frees up its
+			// slot for a later one to collide with.
+			j.accentIndex = s.nextAccent
+			s.nextAccent++
 			s.jobs[id] = j
 			s.mu.Unlock()
 			return j
@@ -183,18 +199,19 @@ func snapshotLocked(j *job) jobSnapshot {
 		}
 	}
 	return jobSnapshot{
-		ID:         j.id,
-		Task:       j.task,
-		Model:      j.model,
-		Status:     j.status,
-		Result:     j.result,
-		Error:      j.err,
-		Progress:   progress,
-		StartedAt:  j.startedAt,
-		FinishedAt: j.finishedAt,
-		Sync:       j.sync,
-		Usage:      j.usage,
-		CostUSD:    j.costUSD,
+		ID:          j.id,
+		Task:        j.task,
+		Model:       j.model,
+		Status:      j.status,
+		Result:      j.result,
+		Error:       j.err,
+		Progress:    progress,
+		StartedAt:   j.startedAt,
+		FinishedAt:  j.finishedAt,
+		Sync:        j.sync,
+		Usage:       j.usage,
+		CostUSD:     j.costUSD,
+		AccentIndex: j.accentIndex,
 	}
 }
 
@@ -507,6 +524,15 @@ type JobInfo struct {
 	Async      bool
 	StartedAt  time.Time
 	FinishedAt time.Time
+	// Usage/CostUSD carry the child's accumulated usage/cost so far (nil Usage
+	// until the child has closed at least one message), so a reconnect snapshot
+	// can restore live cost without resetting it.
+	Usage   *core.Usage
+	CostUSD float64
+	// AccentIndex is the job's stable creation ordinal (see job.accentIndex),
+	// used by clients to pick a deterministic accent color that survives
+	// reconnects.
+	AccentIndex int
 }
 
 // Jobs is a handle onto the subagent job store, returned by RegisterAll.
@@ -534,13 +560,16 @@ func (j *Jobs) Snapshot() []JobInfo {
 			continue
 		}
 		infos = append(infos, JobInfo{
-			JobID:      snap.ID,
-			Task:       snap.Task,
-			Model:      snap.Model,
-			Status:     snap.Status,
-			Async:      !snap.Sync,
-			StartedAt:  snap.StartedAt,
-			FinishedAt: snap.FinishedAt,
+			JobID:       snap.ID,
+			Task:        snap.Task,
+			Model:       snap.Model,
+			Status:      snap.Status,
+			Async:       !snap.Sync,
+			StartedAt:   snap.StartedAt,
+			FinishedAt:  snap.FinishedAt,
+			Usage:       snap.Usage,
+			CostUSD:     snap.CostUSD,
+			AccentIndex: snap.AccentIndex,
 		})
 	}
 	return infos

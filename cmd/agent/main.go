@@ -279,14 +279,19 @@ func main() {
 				Text:   agentText,
 			})
 		},
-		OnSubagentStart: func(jobID, task, model string, async bool) {
+		OnSubagentStart: func(jobID, task, model string, async bool, startedAt time.Time, accentIndex int) {
 			preBus.Publish(bus.SubagentStarted{
-				JobID: jobID, Task: task, Model: model, Async: async,
+				JobID: jobID, Task: task, Model: model, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
 			})
 		},
 		OnSubagentEvent: func(jobID string, inner any) {
 			preBus.Publish(bus.SubagentEvent{
 				JobID: jobID, Inner: inner,
+			})
+		},
+		OnSubagentUsage: func(jobID string, usage *core.Usage, costUSD float64) {
+			preBus.Publish(bus.SubagentUsage{
+				JobID: jobID, Usage: usage, CostUSD: costUSD,
 			})
 		},
 		OnSubagentEnd: func(jobID, status string, usage *core.Usage, costUSD float64) {

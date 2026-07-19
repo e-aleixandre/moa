@@ -5,7 +5,7 @@ import "./Spinner.css";
 // here it gains a color variant (blue/sky/teal/mauve) to tell apart several
 // parallel subagents without inventing a new pattern for each place that needs
 // it (FanoutBlock, AgentTray, tool tickers, etc.).
-const COLORS = ["blue", "sky", "teal", "mauve"];
+const COLORS = ["blue", "sky", "teal", "mauve", "peach", "lavender", "overlay1"];
 
 const DEFAULT_SIZE = 11;
 

@@ -398,7 +398,18 @@ function initSubagents(raw) {
       messages: normalizeHistory(sa.messages || []),
       streamingText: null,
       thinkingText: null,
-      usage: null,
+      // Reconnect-safe: preserve the started-at anchor and accumulated usage
+      // from the snapshot so a reconnected pane doesn't reset the subagent's
+      // elapsed timer or token/cost tally back to nothing.
+      startedAtMs: sa.started_at_ms || null,
+      usage: (sa.input_tokens || sa.output_tokens || sa.cost_usd)
+        ? { inputTokens: sa.input_tokens || 0, outputTokens: sa.output_tokens || 0, costUSD: sa.cost_usd || 0 }
+        : null,
+      // Stable per-session creation ordinal from the server, so the accent
+      // color derived from it survives WS reconnects (see stream-model.js's
+      // subagentAccentIndex). Undefined when the server didn't send one
+      // (older payload/specimen), falling back to position-based derivation.
+      accentIndex: sa.accent_index,
     };
   }
   return out;
@@ -1001,7 +1012,35 @@ export function handleWsSubagentStart(id, data) {
     messages: (existing && existing.messages) || [],
     streamingText: (existing && existing.streamingText) ?? null,
     thinkingText: (existing && existing.thinkingText) ?? null,
+    startedAtMs: data.started_at_ms || (existing && existing.startedAtMs) || null,
     usage: (existing && existing.usage) || null,
+    // See initSubagents: preserved across a promotion echo (existing wins if
+    // the live event omits it, though the backend always sends it).
+    accentIndex: data.accent_index ?? (existing && existing.accentIndex),
+  };
+  updateSession(id, { subagents: subs });
+}
+
+// handleWsSubagentUsage applies the backend's live, cumulative token/cost
+// tally for one subagent (subagent_usage). The backend sends the running
+// total on every event, so this SETS sub.usage rather than accumulating it.
+// Silently ignored if the subagent isn't known yet (e.g. usage arrived before
+// subagent_start, or the subagent was already pruned).
+export function handleWsSubagentUsage(id, jobId, inputTokens, outputTokens, costUSD) {
+  const sess = store.get().sessions[id];
+  if (!sess || !jobId) return;
+  const existing = sess.subagents?.[jobId];
+  if (!existing) return;
+  const subs = {
+    ...sess.subagents,
+    [jobId]: {
+      ...existing,
+      usage: {
+        inputTokens: inputTokens || 0,
+        outputTokens: outputTokens || 0,
+        costUSD: costUSD || 0,
+      },
+    },
   };
   updateSession(id, { subagents: subs });
 }

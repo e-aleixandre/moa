@@ -155,3 +155,15 @@
   font-size: var(--text-micro);
   color: var(--sky);
 }
+
+/* sa-gallery-frame — bounds the (normally full-screen) SubagentView so several
+   specimens can be shown stacked in the ?view=subagent gallery. */
+.sa-gallery-frame {
+  height: 560px;
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+.sa-gallery-frame .subagent-view {
+  height: 100%;
+}

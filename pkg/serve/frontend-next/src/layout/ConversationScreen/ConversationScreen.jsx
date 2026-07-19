@@ -3,12 +3,13 @@ import { Spine } from "../Spine/Spine.jsx";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { AgentTray } from "../AgentTray/AgentTray.jsx";
+import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented } from "../../components/index.js";
 import { Button } from "../../primitives/index.js";
-import { store } from "../../data/store.js";
-import { projectStream } from "../../data/stream-model.js";
+import { store, updateSession } from "../../data/store.js";
+import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent } from "../../data/selectors.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
@@ -17,7 +18,7 @@ import { shortModel, shortPath } from "../../data/util/format.js";
 import { formatElapsed } from "../../data/util/activity.js";
 import { activityPhase, activityLabel } from "../../data/util/activity.js";
 import { api } from "../../data/api.js";
-import { configureSession, archiveSession, unarchiveSession } from "../../data/session-actions.js";
+import { configureSession, archiveSession, unarchiveSession, openPersistedSubagent } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
@@ -239,6 +240,11 @@ export function ConversationScreen({ version }) {
     const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
     const settingsBusy = session.state === "running" || session.state === "permission";
     const permissionMode = session.permissionMode || "yolo";
+    // 5J: when a subagent is being viewed, the SubagentView takes over the main
+    // column (in place of the parent stream/composer/status). Its jobId must
+    // still exist in the session (the view itself rebounds to null via onBack if
+    // it was pruned).
+    const viewingSub = session.viewingSubagent;
 
     const modelPopover = modelOpen && (
       <div class="head-popover">
@@ -300,24 +306,44 @@ export function ConversationScreen({ version }) {
           modelAnchorRef={modelAnchorRef}
           settingsAnchorRef={settingsAnchorRef}
         />
-        <Stream session={session} blocks={blocks} />
-        {(session.untrustedMcp || session.pendingPerm || session.pendingAsk) && (
-          <div class="conversation-blocking">
-            {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
-            {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
-            {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
-          </div>
+        {viewingSub ? (
+          <SubagentView
+            key={viewingSub}
+            session={session}
+            jobId={viewingSub}
+            onBack={() => updateSession(session.id, { viewingSubagent: null })}
+          />
+        ) : (
+          <>
+            <Stream
+              session={session}
+              blocks={blocks}
+              onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
+            />
+            {(session.untrustedMcp || session.pendingPerm || session.pendingAsk) && (
+              <div class="conversation-blocking">
+                {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
+                {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+                {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
+              </div>
+            )}
+            {/* 5J: AgentTray — sticky mirror of the live fanout, connected to
+                the session's live subagents/bash jobs; a chip opens its
+                SubagentView (INC-06). */}
+            <AgentTray
+              agents={liveTrayAgents(session)}
+              onOpen={(id) => openPersistedSubagent(session.id, id)}
+            />
+            <Composer key={session.id} sessionId={session.id} session={session} />
+            <StatusStrip
+              ctxPercent={session.contextPercent}
+              tokensUp={session.runTokensUp}
+              tokensDown={session.runTokensDown}
+              task={currentTask(session, nowMs)}
+              spend={fmtSpend(session.costUSD)}
+            />
+          </>
         )}
-        {/* 5J: AgentTray — live subagent chips, not connected yet. */}
-        <AgentTray agents={[]} />
-        <Composer key={session.id} sessionId={session.id} session={session} />
-        <StatusStrip
-          ctxPercent={session.contextPercent}
-          tokensUp={session.runTokensUp}
-          tokensDown={session.runTokensDown}
-          task={currentTask(session, nowMs)}
-          spend={fmtSpend(session.costUSD)}
-        />
       </>
     );
   }

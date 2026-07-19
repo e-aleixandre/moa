@@ -15,8 +15,10 @@ import (
 )
 
 func TestWsEventFromBus_SubagentStarted(t *testing.T) {
+	startedAt := time.UnixMilli(1_700_000_000_000)
 	ev, ok := wsEventFromBus(bus.SubagentStarted{
 		SessionID: "s1", JobID: "sa-1", Task: "do thing", Model: "haiku", Async: true,
+		StartedAt: startedAt,
 	})
 	if !ok {
 		t.Fatal("expected ok=true")
@@ -28,10 +30,59 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	if !ok {
 		t.Fatalf("Data type = %T, want SubagentStartData", ev.Data)
 	}
-	want := SubagentStartData{JobID: "sa-1", Task: "do thing", Model: "haiku", Async: true}
+	want := SubagentStartData{JobID: "sa-1", Task: "do thing", Model: "haiku", Async: true, StartedAtMs: 1_700_000_000_000}
 	if data != want {
 		t.Fatalf("Data = %+v, want %+v", data, want)
 	}
+
+	t.Run("zero start time omits timestamp", func(t *testing.T) {
+		ev, _ := wsEventFromBus(bus.SubagentStarted{JobID: "sa-2"})
+		if data := ev.Data.(SubagentStartData); data.StartedAtMs != 0 {
+			t.Fatalf("StartedAtMs = %d, want 0 for zero time", data.StartedAtMs)
+		}
+	})
+}
+
+func TestWsEventFromBus_SubagentUsage(t *testing.T) {
+	t.Run("with usage", func(t *testing.T) {
+		ev, ok := wsEventFromBus(bus.SubagentUsage{
+			SessionID: "s1", JobID: "sa-1",
+			Usage:   &core.Usage{Input: 100, Output: 42},
+			CostUSD: 0.0123,
+		})
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if ev.Type != "subagent_usage" {
+			t.Fatalf("Type = %q, want subagent_usage", ev.Type)
+		}
+		data, ok := ev.Data.(SubagentUsageData)
+		if !ok {
+			t.Fatalf("Data type = %T, want SubagentUsageData", ev.Data)
+		}
+		want := SubagentUsageData{JobID: "sa-1", InputTokens: 100, OutputTokens: 42, CostUSD: 0.0123}
+		if data != want {
+			t.Fatalf("Data = %+v, want %+v", data, want)
+		}
+	})
+
+	t.Run("nil usage", func(t *testing.T) {
+		ev, ok := wsEventFromBus(bus.SubagentUsage{SessionID: "s1", JobID: "sa-2", Usage: nil, CostUSD: 0})
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		data := ev.Data.(SubagentUsageData)
+		if data.InputTokens != 0 || data.OutputTokens != 0 {
+			t.Fatalf("expected zero tokens for nil usage, got %+v", data)
+		}
+	})
+
+	t.Run("is lossy", func(t *testing.T) {
+		ev, _ := wsEventFromBus(bus.SubagentUsage{JobID: "sa-1"})
+		if !isLossyWsEvent(ev) {
+			t.Fatal("subagent_usage should be lossy")
+		}
+	})
 }
 
 func TestWsEventFromBus_CommandQueued(t *testing.T) {

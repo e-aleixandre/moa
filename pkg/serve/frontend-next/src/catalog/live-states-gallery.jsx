@@ -47,9 +47,9 @@ const FANOUT_AGENTS = [
 ];
 
 const TRAY_AGENTS = [
-  { key: "changelog", who: "changelog", color: "sky", what: "scanning PRs", time: "1m 12s" },
-  { key: "docs", who: "docs", color: "teal", what: "serve.md", time: "0m 47s" },
-  { key: "tests", who: "tests", state: "done", what: "report ready" },
+  { id: "changelog", kind: "subagent", name: "changelog", accent: "sky", action: "scanning PRs", time: "1m 12s" },
+  { id: "docs", kind: "subagent", name: "docs", accent: "teal", action: "serve.md", time: "0m 47s" },
+  { id: "tests", kind: "bash", name: "bash", action: "go test ./...", time: "0m 09s" },
 ];
 
 const BGJOB_LINES = [

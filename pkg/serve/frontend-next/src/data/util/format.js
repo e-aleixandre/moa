@@ -305,3 +305,12 @@ function hasLiveSubagents(sess) {
   }
   return false;
 }
+
+/** copyToClipboard writes text to the clipboard and resolves true/false so a
+ *  caller can only flash "copied ✓" on real success, never unconditionally.
+ *  A rejected clipboard promise (permissions/insecure context/user gesture
+ *  lost) is swallowed here rather than left as an unhandled rejection. */
+export function copyToClipboard(text) {
+  if (!text || !navigator.clipboard?.writeText) return Promise.resolve(false);
+  return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+}

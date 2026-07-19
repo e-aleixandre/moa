@@ -13,9 +13,14 @@ import "./FanoutBlock.css";
 // in the spinner, the indeterminate bar and the name alike.
 import { Spinner } from "../../primitives/index.js";
 
-function RunningRow({ name, accent = "sky", action, time }) {
+function RunningRow({ name, accent = "sky", action, time, onOpen }) {
+  const Tag = onOpen ? "button" : "div";
   return (
-    <div class="agent-row">
+    <Tag
+      class={`agent-row${onOpen ? " clickable" : ""}`}
+      onClick={onOpen}
+      type={onOpen ? "button" : undefined}
+    >
       <div class="agent-id">
         <Spinner color={accent} />
         <span class="nm" style={{ color: `var(--${accent})` }}>{name}</span>
@@ -29,7 +34,7 @@ function RunningRow({ name, accent = "sky", action, time }) {
         </div>
       </div>
       <div class="agent-time">{time}</div>
-    </div>
+    </Tag>
   );
 }
 
@@ -59,7 +64,9 @@ function DoneRow({ name, result, resultDesc, onViewReport }) {
 // { id, name, accent, state: "running"|"done", action, time, result, resultDesc, onViewReport }
 // `id` is each subagent's stable key (recommended for live states
 // that update/reorder); falls back to the name if missing.
-export function FanoutBlock({ task, count, startedAt, agents = [], onViewReport }) {
+// `onOpenAgent(id)` (5J) opens a running subagent's SubagentView when its row is
+// clicked (INC-06); done rows keep the explicit "view report →" affordance.
+export function FanoutBlock({ task, count, startedAt, agents = [], onViewReport, onOpenAgent }) {
   const n = count ?? agents.length;
   return (
     <div class="fanout">
@@ -72,9 +79,9 @@ export function FanoutBlock({ task, count, startedAt, agents = [], onViewReport 
 
       {agents.map((a) =>
         a.state === "done" ? (
-          <DoneRow key={a.id ?? a.name} {...a} onViewReport={a.onViewReport || onViewReport} />
+          <DoneRow key={a.id ?? a.name} {...a} onViewReport={a.onViewReport || (onOpenAgent && (() => onOpenAgent(a.id))) || onViewReport} />
         ) : (
-          <RunningRow key={a.id ?? a.name} {...a} />
+          <RunningRow key={a.id ?? a.name} {...a} onOpen={onOpenAgent && (() => onOpenAgent(a.id))} />
         )
       )}
     </div>

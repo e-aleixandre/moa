@@ -1,0 +1,291 @@
+/* MobileSubagentView (5J, INC-34) — full-screen push over the mobile
+   conversation. Thin 2px accent thread down the left of the body; header with
+   ‹ back + codename + state and 44px icon actions; sibling strip; task card;
+   MobileStream body; fused now-line + steer composer, or an outcome banner on
+   terminal states. The accent (--sa-accent) is a discreet thread only. */
+.msa {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  background: var(--crust);
+  animation: msa-push-in 250ms ease-out;
+}
+
+@keyframes msa-push-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msa { animation: none; }
+}
+
+.msa-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--surface0);
+  flex: none;
+}
+
+/* 44px hit-areas for back and action icons. */
+.msa-back,
+.msa-abtn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--subtext0);
+  cursor: pointer;
+  flex: none;
+}
+
+.msa-back { margin-left: calc(-1 * var(--space-2)); }
+
+.msa-abtn.cancel { color: var(--overlay1); }
+.msa-abtn.cancel.armed { color: var(--red); }
+.msa-sure {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--red);
+}
+
+.msa-crumb {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.msa-name {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msa-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+}
+
+.msa-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+/* sibling strip */
+.msa-rail {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--surface0);
+  flex: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.msa-rail-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 6px var(--space-3);
+  min-height: 44px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--surface0);
+  background: var(--mantle);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  flex: none;
+  cursor: pointer;
+}
+
+.msa-rail-chip.active { background: var(--surface0); }
+
+/* body: MobileStream + 2px thread */
+.msa-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.msa-body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--sa-accent);
+  z-index: 1;
+}
+
+.msa.thread-completed .msa-body::before { background: var(--green); }
+.msa.thread-failed .msa-body::before { background: var(--red); }
+.msa.thread-cancelled .msa-body::before { background: var(--overlay0); }
+
+.msa-task {
+  margin: var(--space-3) var(--space-4) 0;
+  flex: none;
+}
+
+.msa-task-label {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-1);
+}
+
+/* now-line + steer composer */
+.msa-foot { flex: none; }
+
+.msa-nowline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  border-top: 1px solid var(--surface0);
+}
+
+.msa-now-act {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  color: var(--subtext0);
+}
+
+.msa-now-seg { flex: none; color: var(--overlay0); margin-left: auto; }
+.msa-now-seg + .msa-now-seg { margin-left: 0; }
+
+/* outcome banner */
+.msa-outcome {
+  flex: none;
+  margin: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface0);
+  animation: msa-outcome-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.msa-outcome.completed {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--surface0));
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+
+.msa-outcome.failed {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--surface0));
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+
+.msa-outcome.cancelled {
+  border-color: var(--surface1);
+  background: color-mix(in srgb, var(--overlay0) 6%, transparent);
+}
+
+.msa-outcome-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+}
+
+.msa-outcome.completed b { color: var(--green); }
+.msa-outcome.failed b { color: var(--red); }
+.msa-outcome.cancelled b { color: var(--overlay1); }
+
+.msa-outcome-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.msa-outcome-meta {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+.msa-outcome-chip {
+  margin-top: var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--green);
+}
+
+.msa-outcome-err {
+  margin-top: var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--red);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.msa-outcome-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.msa-outcome-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--surface1);
+  background: var(--mantle);
+  color: var(--subtext0);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.msa-outcome-back {
+  flex: 1;
+  min-height: 44px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--surface1);
+  background: var(--surface0);
+  color: var(--text);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+@keyframes msa-outcome-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msa-outcome { animation: none; }
+}

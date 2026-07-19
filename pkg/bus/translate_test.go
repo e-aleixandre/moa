@@ -132,6 +132,12 @@ func TestTranslateAgentEvent_ToolExecEnd_TasksUpdate(t *testing.T) {
 	}
 }
 
+func TestIsLossyEvent_SubagentUsage(t *testing.T) {
+	if !isLossyEvent(SubagentUsage{SessionID: "s", JobID: "job1"}) {
+		t.Error("isLossyEvent(SubagentUsage) = false, want true")
+	}
+}
+
 func TestIsLossyEvent_SubagentEvent_Unwraps(t *testing.T) {
 	lossyCases := []any{
 		TextDelta{},

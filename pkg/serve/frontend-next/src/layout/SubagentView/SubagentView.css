@@ -1,0 +1,400 @@
+/* SubagentView (5J) — "inside the fork". A thin 2px accent thread frames the
+   body; the header is a breadcrumb; the now-line fuses status+pulse over the
+   steer composer; the outcome banner replaces both on terminal states. The
+   accent (--sa-accent) is set inline from the subagent's fanout identity color
+   and does NOT tint the background — it's a discreet thread + local details
+   only. It turns green/red ONLY on terminal (thread-completed/failed/cancelled).
+*/
+.subagent-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+.subagent-view .sa-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--surface0);
+  flex: none;
+}
+
+.subagent-view .sa-crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--subtext0);
+  font-size: var(--text-sm);
+}
+
+.subagent-view .sa-crumb > svg {
+  color: var(--sa-accent);
+  flex: none;
+}
+
+.subagent-view .sa-crumb-parent {
+  background: none;
+  border: none;
+  color: var(--subtext0);
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-view .sa-crumb-parent:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.subagent-view .sa-crumb-sep {
+  color: var(--overlay0);
+  flex: none;
+}
+
+.subagent-view .sa-crumb-name {
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-view .sa-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex: none;
+}
+
+.subagent-view .sa-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+}
+
+/* Cancel button: 32px visual, ≥44px hit-area via pseudo-element (INC-35). */
+.subagent-view .sa-cancel {
+  position: relative;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--overlay1);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+
+.subagent-view .sa-cancel::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+
+.subagent-view .sa-cancel:hover {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.subagent-view .sa-cancel.armed {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+
+/* ── sibling rail ───────────────────────────────────────────────────────── */
+.subagent-view .sa-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--surface0);
+  overflow-x: auto;
+  flex: none;
+}
+
+.subagent-view .sa-rail-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--surface0);
+  background: var(--mantle);
+  color: var(--subtext0);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 150ms var(--ease);
+}
+
+.subagent-view .sa-rail-chip.active {
+  background: var(--surface0);
+}
+
+.subagent-view .sa-rail-name {
+  font-weight: var(--weight-semibold);
+}
+
+.subagent-view .sa-rail .kbd {
+  margin-left: auto;
+  flex: none;
+}
+
+/* ── body: accent thread + task card + reused Stream ────────────────────── */
+.subagent-view .sa-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* The 2px thread — discreet, no background wash, no glow. */
+.subagent-view .sa-body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--sa-accent);
+  z-index: 1;
+}
+
+.subagent-view .sa-body.thread-completed::before { background: var(--green); }
+.subagent-view .sa-body.thread-failed::before { background: var(--red); }
+.subagent-view .sa-body.thread-cancelled::before { background: var(--overlay0); }
+
+.subagent-view .sa-body-col {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Task card: msg-user shape with the accent border+label. */
+.subagent-view .sa-task {
+  max-width: 844px;
+  margin: var(--space-4) auto 0;
+  width: 100%;
+  padding: 0 var(--space-6);
+  flex: none;
+}
+
+.subagent-view .sa-task-label {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-1);
+}
+
+/* ── fused now-line ─────────────────────────────────────────────────────── */
+.subagent-view .sa-nowline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-8);
+  max-width: 844px;
+  margin: 0 auto;
+  width: 100%;
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+}
+
+.subagent-view .sa-nowline-act {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.subagent-view .sa-nowline-act .cur {
+  color: var(--subtext0);
+}
+
+.subagent-view .sa-nowline-act .cur::after {
+  content: "▌";
+  color: var(--cur-accent, var(--sky));
+  animation: sa-cursor-blink 1s steps(2) infinite;
+  font-size: var(--text-micro);
+}
+
+.subagent-view .sa-ibar {
+  flex: 1;
+  min-width: 40px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface0);
+  overflow: hidden;
+  position: relative;
+}
+
+.subagent-view .sa-ibar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--blue), transparent);
+  animation: sa-ibar-slide 1.6s ease-in-out infinite;
+}
+
+.subagent-view .sa-ibar.c-sky i { background: linear-gradient(90deg, transparent, var(--sky), transparent); }
+.subagent-view .sa-ibar.c-teal i { background: linear-gradient(90deg, transparent, var(--teal), transparent); }
+.subagent-view .sa-ibar.c-mauve i { background: linear-gradient(90deg, transparent, var(--mauve), transparent); }
+.subagent-view .sa-ibar.c-peach i { background: linear-gradient(90deg, transparent, var(--peach), transparent); }
+.subagent-view .sa-ibar.c-blue i { background: linear-gradient(90deg, transparent, var(--blue), transparent); }
+.subagent-view .sa-ibar.c-lavender i { background: linear-gradient(90deg, transparent, var(--lavender), transparent); }
+
+.subagent-view .sa-nowline-time,
+.subagent-view .sa-nowline-tok,
+.subagent-view .sa-nowline-cost {
+  flex: none;
+  color: var(--overlay0);
+}
+
+@keyframes sa-cursor-blink { 50% { opacity: 0; } }
+@keyframes sa-ibar-slide { 0% { left: -36%; } 100% { left: 100%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-view .sa-ibar i { animation: none; left: 0; width: 100%; opacity: 0.35; }
+  .subagent-view .sa-nowline-act .cur::after { animation: none; opacity: 0.6; }
+}
+
+/* ── outcome banner ─────────────────────────────────────────────────────── */
+.subagent-view .sa-outcome {
+  margin: var(--space-3) auto var(--space-5);
+  max-width: 844px;
+  width: 100%;
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface0);
+  flex: none;
+  animation: sa-outcome-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.subagent-view .sa-outcome.completed {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--surface0));
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+
+.subagent-view .sa-outcome.failed {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--surface0));
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+
+.subagent-view .sa-outcome.cancelled {
+  border-color: var(--surface1);
+  background: color-mix(in srgb, var(--overlay0) 6%, transparent);
+}
+
+.subagent-view .sa-outcome-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+}
+
+.subagent-view .sa-outcome.completed .sa-outcome-head b { color: var(--green); }
+.subagent-view .sa-outcome.failed .sa-outcome-head b { color: var(--red); }
+.subagent-view .sa-outcome.cancelled .sa-outcome-head b { color: var(--overlay1); }
+.subagent-view .sa-outcome.failed .sa-outcome-head > svg { color: var(--red); }
+
+.subagent-view .sa-outcome-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.subagent-view .sa-outcome-meta {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+.subagent-view .sa-outcome-chip {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+  margin-left: var(--space-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-view .sa-outcome-err {
+  margin-top: var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--red);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.subagent-view .sa-outcome-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.subagent-view .sa-outcome-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface1);
+  background: var(--mantle);
+  color: var(--subtext0);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.subagent-view .sa-outcome-btn:hover { background: var(--surface0); color: var(--text); }
+
+.subagent-view .sa-outcome-btn.primary {
+  border-color: transparent;
+  background: var(--surface0);
+  color: var(--text);
+}
+
+@keyframes sa-outcome-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-view .sa-outcome { animation: none; }
+}

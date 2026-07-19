@@ -1231,6 +1231,67 @@ func TestSubagentTranscriptAccumulatesMidRun(t *testing.T) {
 	}
 }
 
+// TestSubagentOnChildUsageMidRun verifies that OnChildUsage fires as the child
+// closes messages (message_end), so live UIs can show accumulated tokens/cost
+// before the terminal OnChildEnd.
+func TestSubagentOnChildUsageMidRun(t *testing.T) {
+	releaseTool := make(chan struct{})
+	releaseFinal := make(chan struct{})
+	provider := newMockProvider(
+		gatedToolCallResponse(releaseTool, "tc-1", "noop", map[string]any{}),
+		gateResponse(nil, releaseFinal, "all done"),
+	)
+
+	noop := core.Tool{
+		Name:        "noop",
+		Description: "does nothing",
+		Execute: func(ctx context.Context, args map[string]any, _ func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+
+	reg := core.NewRegistry()
+	_ = reg.Register(noop)
+
+	var mu sync.Mutex
+	usageCalls := 0
+	jobs := newJobStore()
+	sub := newSubagent(Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		ParentTools:     reg,
+		OnChildUsage: func(jobID string, usage *core.Usage, costUSD float64) {
+			mu.Lock()
+			usageCalls++
+			mu.Unlock()
+		},
+	}, jobs)
+
+	res, err := sub.Execute(context.Background(), map[string]any{
+		"task": "do it", "async": true, "tools": []any{"noop"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+
+	// After turn 1's message_end, OnChildUsage must have fired at least once
+	// before the job as a whole finishes.
+	close(releaseTool)
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return usageCalls > 0
+	})
+
+	close(releaseFinal)
+	waitFor(t, 2*time.Second, func() bool {
+		snap, ok := jobs.snapshot(jobID)
+		return ok && snap.Status == statusCompleted
+	})
+}
+
 func TestResolveMaxDuration(t *testing.T) {
 	tests := []struct {
 		name    string
