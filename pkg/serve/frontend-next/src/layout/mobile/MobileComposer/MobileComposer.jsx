@@ -1,9 +1,10 @@
 import { useState, useEffect } from "preact/hooks";
 import { Composer } from "../../Composer/Composer.jsx";
-import { Sheet, UsagePanel } from "../../../components/index.js";
+import { Sheet, UsagePanel, PermissionControl } from "../../../components/index.js";
 import { activityPhase, activityLabel, formatElapsed } from "../../../data/util/activity.js";
 import { fmtCost, fmtReset } from "../../../data/util/usage-pills.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
+import { configureSession } from "../../../data/session-actions.js";
 import "./MobileComposer.css";
 
 // MobileComposer — CONNECTED bottom input for the mobile conversation (5I). It
@@ -78,9 +79,11 @@ export function MobileComposer({ session, usage }) {
       <Composer sessionId={session.id} session={session} shortPlaceholder />
       <div class="mcomposer-status">
         {work && <span class="work">● {work}</span>}
-        <span class={`mstatus-perm perm-${model.perm.mode}`} title={`Permission mode: ${model.perm.mode}`}>
-          {model.perm.mode.toUpperCase()}
-        </span>
+        <PermissionControl
+          mode={model.perm.mode}
+          disabled={session.state === "running" || session.state === "permission"}
+          onChange={(mode) => configureSession(session.id, { permissionMode: mode })}
+        />
         {model.alerts.onExtra && (
           <span class="meter usage-high" title="Served from extra usage (pay-as-you-go)">on extra</span>
         )}

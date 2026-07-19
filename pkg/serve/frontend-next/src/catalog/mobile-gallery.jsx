@@ -3,6 +3,7 @@ import {
   AssistantDocument,
   CodeBlock,
   PermissionCard,
+  PermissionControl,
   MobileLedger,
   LedgerIcons,
 } from "../components/index.js";
@@ -198,7 +199,7 @@ function MobileComposerSpecimen({ status, perm = "yolo", spend }) {
       </div>
       <div class="mcomposer-status">
         <span class="work">● {status}</span>
-        <span class={`mstatus-perm perm-${perm}`}>{perm.toUpperCase()}</span>
+        <PermissionControl mode={perm} onChange={() => {}} />
         <button type="button" class="spend spend-btn" aria-label="Show usage">
           {spend} today
         </button>

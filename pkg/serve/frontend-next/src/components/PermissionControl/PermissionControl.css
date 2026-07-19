@@ -1,0 +1,116 @@
+/* PermissionControl — the permission chip as a control + its 3-option menu.
+   The chip mirrors the StatusStrip perm pill; the menu reuses the head-popover
+   panel chrome (mantle/border/shadow) but opens UPWARD, since the strip lives
+   at the bottom of the viewport. Catppuccin Mocha tokens only. */
+.perm-control {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+/* The chip. Same compact uppercase badge as the other StatusStrip pills, but a
+   button: it carries the ≥44px tap target via a pseudo-element so the visual
+   stays dense (technique already used across the redesign). */
+.perm-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-full);
+  font-family: inherit;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.perm-chip::after {
+  content: "";
+  position: absolute;
+  inset: -13px -6px;
+}
+.perm-chip svg {
+  width: 11px;
+  height: 11px;
+}
+.perm-chip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.perm-chip.perm-yolo { color: var(--green); background: var(--green-dim); }
+.perm-chip.perm-ask { color: var(--yellow); background: var(--yellow-dim); }
+.perm-chip.perm-auto { color: var(--blue); background: var(--blue-dim); }
+.perm-chip:not(:disabled):hover { filter: brightness(1.15); }
+
+/* The menu — opens upward from the chip. */
+.perm-menu {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: var(--z-overlay);
+  width: 220px;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.perm-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  /* comfortable, ≥44px tall row */
+  min-height: 44px;
+}
+.perm-menu-item:hover,
+.perm-menu-item:focus-visible {
+  background: var(--surface0);
+}
+.perm-menu-item.on {
+  background: color-mix(in srgb, var(--surface0) 60%, transparent);
+}
+
+.perm-menu-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  flex: none;
+  color: var(--subtext0);
+}
+.perm-menu-check svg { width: 13px; height: 13px; }
+
+.perm-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.perm-menu-label {
+  font-family: var(--mono);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+  letter-spacing: 0.3px;
+}
+.perm-menu-label.perm-yolo { color: var(--green); }
+.perm-menu-label.perm-ask { color: var(--yellow); }
+.perm-menu-label.perm-auto { color: var(--blue); }
+.perm-menu-desc {
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+}

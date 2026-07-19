@@ -7,7 +7,7 @@ import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented, NotificationSettings, UsagePanel } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
 import { Button } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -127,12 +127,6 @@ function matchSelectedModel(specs, sessionModel) {
   const found = specs.find((s) => s.name === sessionModel || s.name === short);
   return found?.id;
 }
-
-const PERMISSION_MODE_OPTIONS = [
-  { value: "yolo", label: "YOLO" },
-  { value: "ask", label: "ASK" },
-  { value: "auto", label: "AUTO" },
-];
 
 export function ConversationScreen({ version }) {
   const [state, setState] = useState(store.get());
@@ -289,7 +283,6 @@ export function ConversationScreen({ version }) {
     const selectedModel = matchSelectedModel(specs, session.model);
     const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
     const settingsBusy = session.state === "running" || session.state === "permission";
-    const permissionMode = session.permissionMode || "yolo";
     // 5J: when a subagent is being viewed, the SubagentView takes over the main
     // column (in place of the parent stream/composer/status). Its jobId must
     // still exist in the session (the view itself rebounds to null via onBack if
@@ -313,15 +306,6 @@ export function ConversationScreen({ version }) {
         {settingsBusy && (
           <div class="session-settings-busy">Settings locked while agent is running</div>
         )}
-        <div class="session-settings-section">
-          <div class="session-settings-label">Permission mode</div>
-          <Segmented
-            options={PERMISSION_MODE_OPTIONS}
-            value={permissionMode}
-            disabled={settingsBusy}
-            onChange={(mode) => configureSession(session.id, { permissionMode: mode })}
-          />
-        </div>
         <Button
           variant="ghost"
           size="sm"
@@ -404,6 +388,8 @@ export function ConversationScreen({ version }) {
                 session={session}
                 usage={state.usage}
                 onOpenUsage={() => setUsageOpen((v) => !v)}
+                onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
+                permBusy={settingsBusy}
                 showTokens={true}
               />
               {usageOpen && (

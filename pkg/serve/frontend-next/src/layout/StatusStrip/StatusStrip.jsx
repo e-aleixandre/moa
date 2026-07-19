@@ -1,8 +1,9 @@
 import "./StatusStrip.css";
-import { ClipboardList, Map, Shield, Flame, Target, Gauge } from "lucide-preact";
+import { ClipboardList, Map, Flame, Target, Gauge } from "lucide-preact";
 import { fmtTokens } from "../../data/util/format.js";
 import { fmtReset } from "../../data/util/usage-pills.js";
 import { statusStripModel } from "../../data/util/status-strip-model.js";
+import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
 
 // StatusStrip — mono strip under the composer: the app's bottom telemetry line,
 // mirroring the TUI statusline. This is the TWO-LEVEL redesign (TELEMETRY-
@@ -32,6 +33,8 @@ export function StatusStrip({
   session,
   usage,
   onOpenUsage,
+  onPermChange,
+  permBusy = false,
   showTokens = true,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
@@ -63,12 +66,16 @@ export function StatusStrip({
         <span class="status-strip-tokens">↑ {fmtTokens(tokensUp)} · ↓ {fmtTokens(tokensDown)} tok</span>
       )}
 
-      {/* Permission chip. Subphase (a) keeps it a static badge (clean markup);
-          subphase (b) will turn it into the 3-option control. */}
-      <span class={`status-strip-pill perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
-        <Shield />
-        {perm.mode.toUpperCase()}
-      </span>
+      {/* Permission chip — a control (subphase b): tap opens a 3-option menu
+          (never cycles). onPermChange is optional so gallery/other consumers can
+          render it read-only; without it, it's a plain badge. */}
+      {onPermChange ? (
+        <PermissionControl mode={perm.mode} disabled={permBusy} onChange={onPermChange} />
+      ) : (
+        <span class={`status-strip-pill perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
+          {perm.mode.toUpperCase()}
+        </span>
+      )}
 
       {/* Active modes — only rendered when the model reports them (off modes
           are omitted upstream). */}

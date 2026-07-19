@@ -4,6 +4,7 @@ export { ModelSelector } from "./ModelSelector/ModelSelector.jsx";
 export { Segmented } from "./Segmented/Segmented.jsx";
 export { PermissionCard } from "./PermissionCard/PermissionCard.jsx";
 export { PermissionPrompt } from "./PermissionCard/PermissionPrompt.jsx";
+export { PermissionControl } from "./PermissionControl/PermissionControl.jsx";
 export { AskUserCard } from "./AskUserCard/AskUserCard.jsx";
 export { AskUserPrompt } from "./AskUserCard/AskUserPrompt.jsx";
 export { McpBanner } from "./McpBanner/McpBanner.jsx";
