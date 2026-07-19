@@ -1,10 +1,11 @@
 .mhead {
   flex: none;
-  /* Top padding = a compact base + whatever the device's safe-area (notch /
-     status bar) needs. In an installed PWA the inset fills the status-bar zone;
-     in a browser tab (no inset) it collapses to the base so there's no dead
-     space under the address bar. */
-  padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4)
+  /* Top padding = a small breathing gap + the device's real status-bar inset.
+     With viewport-fit=cover the page lays out edge-to-edge under the iOS status
+     bar, so env(safe-area-inset-top) returns its height and the header content
+     sits clear of the clock; in a browser/context with no inset it collapses to
+     just the gap. The mantle gradient fills the reserved zone behind the bar. */
+  padding: calc(var(--space-2) + env(safe-area-inset-top)) var(--space-4)
     var(--space-2);
   background: linear-gradient(
     var(--mantle),
