@@ -1,7 +1,8 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Plus, Slash, ArrowUp, Square, X } from "lucide-preact";
+import { Plus, Slash, ArrowUp, Square, X, Mic, Loader2, ChevronUp } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
+import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import {
   sendMessage, cancelRun, cancelSteers, execCommand, execShell, newSteerId,
   steerSubagent,
@@ -30,7 +31,6 @@ import "./Composer.css";
 //
 // Deferred to later subphases (NOT wired here):
 //   5F — permission / ask_user prompts.
-//   5M — voice / push-to-talk on the send button (plain click here).
 //
 // 5J — subagent steering: when `steer` is set ({ jobId, accent, name }) the
 // composer becomes a STEER box for a live subagent. The STEER tag + accented
@@ -89,6 +89,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
 
   // --- Slash command + @-mention suggestion state ---
   const [goalFlags, setGoalFlags] = useState([]);
+  const [canTranscribe, setCanTranscribe] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
   const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
@@ -102,13 +103,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   // paste + picker) can't each independently reserve up to MAX and overshoot.
   const attachInFlightRef = useRef(0);
 
-  // Fetch /goal flag metadata once on mount (mirrors InputBar's capabilities
-  // check, trimmed to what 5E needs — transcription support is 5M's concern).
+  // Fetch /goal flag metadata + transcription capability once on mount (mirrors
+  // InputBar's capabilities check). `transcribe` drives whether the send button
+  // doubles as a push-to-talk mic (5M).
   useEffect(() => {
     fetch('/api/capabilities', { headers: { 'X-Moa-Request': '1' } })
       .then(r => r.json())
       .then(caps => {
         setGoalFlags(Array.isArray(caps.goal_flags) ? caps.goal_flags : []);
+        setCanTranscribe(!!caps.transcribe);
       })
       .catch(() => {});
   }, []);
@@ -528,6 +531,56 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const handleSendInnerRef = useRef(handleSendInner);
   handleSendInnerRef.current = handleSendInner;
 
+  // --- Voice / push-to-talk (5M) ---
+  // insertAtCursor drops transcribed text at the textarea caret (with a space
+  // separator when needed), then fires input so drafts/hasText/autoResize/
+  // suggestions stay in sync. Ported from InputBar.insertAtCursor.
+  const insertAtCursor = useCallback((text) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const before = el.value.substring(0, start);
+    const after = el.value.substring(end);
+    const sep = before.length > 0 && !/\s$/.test(before) ? ' ' : '';
+    el.value = before + sep + text + after;
+    const newPos = start + sep.length + text.length;
+    el.selectionStart = el.selectionEnd = newPos;
+    el.focus();
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, []);
+
+  const onVoiceError = useCallback((msg) => {
+    addToast({ title: 'Voice input', detail: msg, type: 'error' });
+  }, []);
+
+  const {
+    handlers: voiceHandlers, recording, transcribing, locked: voiceLocked,
+    showSlideHint, supported: voiceSupported, toggleFromShortcut,
+  } = useVoiceGesture({ onTranscript: insertAtCursor, onError: onVoiceError, onSend: handleSend });
+
+  // Voice is usable only when the backend can transcribe AND the browser has a
+  // MediaRecorder + mic (needs a secure context). Steer mode never records — it
+  // targets a subagent, not the parent run.
+  const canVoice = canTranscribe && voiceSupported && !steer;
+
+  // ⌘. (Mac) / Alt+. (elsewhere) toggles push-to-talk for the FOCUSED composer.
+  // Ctrl is deliberately excluded (project rule: ⌘ on Mac / Alt elsewhere,
+  // never Ctrl). Gated to this composer having focus so multi-pane layouts only
+  // toggle the one you're typing in.
+  useEffect(() => {
+    if (!canVoice) return;
+    const onKey = (e) => {
+      if (!((e.metaKey || e.altKey) && !e.ctrlKey && e.key === '.')) return;
+      const el = textareaRef.current;
+      if (!el || document.activeElement !== el) return;
+      e.preventDefault();
+      toggleFromShortcut();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canVoice, toggleFromShortcut]);
+
   // --- Stop / abort ---
   // Ported from InputBar.handleStop: on abort the agent discards its queued
   // steers (they belonged to the now-dead run) without emitting an event, so
@@ -839,11 +892,63 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             <button type="button" class="composer-send composer-stop" aria-label="Stop (Esc)" title="Stop (Esc)" onClick={handleStop}>
               <Square size={14} />
             </button>
-          ) : (
-            <button type="button" class="composer-send" aria-label="Send" onClick={handleSend}>
-              <ArrowUp size={16} />
-            </button>
-          )}
+          ) : (() => {
+            // The send button doubles as push-to-talk (5M): tap = send, hold =
+            // record, slide up while holding = lock hands-free. It only enters
+            // mic mode when voice is usable AND the textarea is empty — with
+            // text to send it stays a plain send button (parity with InputBar).
+            const micMode = canVoice && !hasText;
+
+            let icon = <ArrowUp size={16} />;
+            if (transcribing) icon = <Loader2 size={16} class="spin" />;
+            else if (recording && voiceLocked) icon = <Square size={14} />;
+            else if (recording) icon = <Mic size={16} />;
+            else if (micMode) icon = <Mic size={16} />;
+
+            const cls = [
+              "composer-send",
+              canVoice ? "gesture" : "",
+              recording ? "recording" : "",
+              voiceLocked ? "locked" : "",
+              transcribing ? "transcribing" : "",
+              micMode ? "mic-mode" : "",
+            ].filter(Boolean).join(" ");
+
+            const title = transcribing ? "Transcribing…"
+              : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
+              : micMode ? "Hold to talk · tap to send (⌘. for mic)"
+              : "Send";
+
+            // Attach the push-to-talk pointer gesture only when the button is
+            // actually a mic — empty + voice usable (micMode) — or while a
+            // recording/transcription is live (so a tap still stops it). With
+            // text to send and nothing recording it stays a plain send button,
+            // so a slow press on "Send" can't start a recording.
+            const gestureProps = (micMode || recording || transcribing)
+              ? voiceHandlers
+              : { onClick: handleSend };
+
+            return (
+              <div class="composer-send-wrap">
+                {showSlideHint && (
+                  <div class="voice-lock-hint">
+                    <ChevronUp size={14} />
+                    <span>Slide up to lock</span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  class={cls}
+                  aria-label={micMode ? "Record" : "Send"}
+                  title={title}
+                  disabled={transcribing}
+                  {...gestureProps}
+                >
+                  {icon}
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

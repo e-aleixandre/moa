@@ -302,3 +302,112 @@
   box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--steer-accent, var(--peach)) 16%, transparent),
     0 8px 32px color-mix(in srgb, var(--crust) 70%, transparent);
 }
+
+/* --- Voice / push-to-talk (5M) ------------------------------------------- */
+
+/* Wrapper so the "slide up to lock" hint can float above the send/record
+   button (Telegram-style affordance). */
+.composer-wrap .composer-send-wrap {
+  position: relative;
+  margin-left: auto;
+  display: flex;
+  align-items: stretch;
+}
+.composer-wrap .composer-send-wrap .composer-send {
+  margin-left: 0; /* the wrapper owns the auto margin now */
+}
+
+/* Guarantee a comfortable touch target regardless of icon size (the base
+   button is 34px; bump to the 44px recommended minimum for the mic gesture). */
+.composer-wrap .composer-send.gesture {
+  min-width: 44px;
+  min-height: 44px;
+  /* Swallow touch scrolling/selection while the gesture is active, and stop
+     WebKit hijacking the long-press for Haptic Touch / the callout menu (it
+     fires a pointercancel ~2s in that the reducer promotes to locked). */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Mic mode (empty input, voice available): a neutral surface so it reads as
+   "record" rather than "send". */
+.composer-wrap .composer-send.mic-mode {
+  background: var(--surface0);
+  color: var(--subtext1);
+  box-shadow: none;
+}
+.composer-wrap .composer-send.mic-mode:hover {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+/* Actively recording: red, gently pulsing, white icon for contrast. */
+.composer-wrap .composer-send.recording {
+  background: linear-gradient(135deg, var(--red), color-mix(in srgb, var(--red) 55%, var(--crust)));
+  color: var(--crust);
+  animation: composer-mic-pulse 1.5s ease-in-out infinite;
+}
+.composer-wrap .composer-send.recording:hover {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--red) 35%, transparent);
+}
+/* Locked (hands-free) recording: solid, not pulsing — shows a stop square. */
+.composer-wrap .composer-send.recording.locked {
+  animation: none;
+  background: var(--red);
+}
+
+@keyframes composer-mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Transcribing: neutral surface with a spinning loader. */
+.composer-wrap .composer-send.transcribing {
+  background: var(--surface0);
+  color: var(--mauve);
+  box-shadow: none;
+}
+.composer-wrap .composer-send .spin {
+  animation: composer-spin 1.2s linear infinite;
+}
+@keyframes composer-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* "Slide up to lock" hint floating above the button while a plain hold is
+   recording (before it locks). */
+.composer-wrap .voice-lock-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface0);
+  color: var(--subtext1);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--crust) 60%, transparent);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 20;
+  animation: composer-hint-bob 1.2s ease-in-out infinite;
+}
+@keyframes composer-hint-bob {
+  0%, 100% { transform: translateX(-50%) translateY(0); opacity: 0.9; }
+  50% { transform: translateX(-50%) translateY(-3px); opacity: 1; }
+}
+
+/* Respect reduced-motion: keep the states legible but stop the animations. */
+@media (prefers-reduced-motion: reduce) {
+  .composer-wrap .composer-send.recording { animation: none; }
+  .composer-wrap .composer-send .spin { animation: none; }
+  .composer-wrap .voice-lock-hint { animation: none; }
+}
