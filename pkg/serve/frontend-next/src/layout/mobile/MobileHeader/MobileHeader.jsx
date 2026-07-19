@@ -1,13 +1,13 @@
-import { RotateCcw } from "lucide-preact";
+import { RotateCcw, Bell } from "lucide-preact";
 import { StateDot } from "../../../primitives/index.js";
 import { ModelPill } from "../../../components/index.js";
 import { modelAccent } from "../../../data/selectors.js";
 import "./MobileHeader.css";
 
 // MobileHeader — session header for the mobile conversation screen.
-// Top row: state dot + title + ModelPill (glyph). Mono subrow
-// with path · ctx · rewind. Below, a grab handle + "pull for sessions" which
-// is actually an accessible button (onOpenSessions) — the drag gesture
+// Top row: state dot + title + ModelPill (glyph) + notifications bell. Mono
+// subrow with path · ctx · rewind. Below, a grab handle + "pull for sessions"
+// which is actually an accessible button (onOpenSessions) — the drag gesture
 // arrives in 4B; here it's just the tap shortcut.
 export function MobileHeader({
   state = "idle",
@@ -19,6 +19,9 @@ export function MobileHeader({
   onOpenSessions,
   onRewind,
   rewindDisabled = false,
+  onNotifications,
+  notifPopover,
+  notifAnchorRef,
 }) {
   const hasCtx = typeof ctx === "number" && ctx >= 0;
   return (
@@ -34,6 +37,17 @@ export function MobileHeader({
             accent={modelAccent(model)}
           />
         )}
+        <div class="mhead-notif" ref={notifAnchorRef}>
+          <button
+            type="button"
+            class="mhead-bell"
+            aria-label="Notifications"
+            onClick={onNotifications}
+          >
+            <Bell size={16} aria-hidden="true" />
+          </button>
+          {notifPopover}
+        </div>
       </div>
       <div class="mhead-sub">
         <span class="mhead-meta">

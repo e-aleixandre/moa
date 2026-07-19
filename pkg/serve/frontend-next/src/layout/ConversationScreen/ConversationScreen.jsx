@@ -7,7 +7,7 @@ import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented, NotificationSettings } from "../../components/index.js";
 import { Button } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -207,7 +207,29 @@ export function ConversationScreen({ version }) {
   useEffect(() => {
     setModelOpen(false);
     setSettingsOpen(false);
+    setNotifOpen(false);
   }, [activeId]);
+
+  // --- Notifications popover (ChatHead's Bell) — device-wide push + sound (5N).
+  // Not session-scoped, but anchored in the head next to the other popovers so
+  // it inherits the same click-outside + Escape wiring.
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifAnchorRef = useRef(null);
+  useEffect(() => {
+    if (!notifOpen) return;
+    const unregister = registerOverlay("conv-notif-popover");
+    const onDocDown = (e) => {
+      if (notifAnchorRef.current && !notifAnchorRef.current.contains(e.target)) setNotifOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setNotifOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      unregister();
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [notifOpen]);
 
   // --- Rewind timeline sheet (ChatHead/MobileHeader's Rewind button) ---
   const [rewindOpen, setRewindOpen] = useState(false);
@@ -291,6 +313,12 @@ export function ConversationScreen({ version }) {
       </div>
     );
 
+    const notifPopover = notifOpen && (
+      <div class="head-popover">
+        <NotificationSettings soundEnabled={state.soundEnabled} />
+      </div>
+    );
+
     body = (
       <>
         <ChatHead
@@ -304,13 +332,15 @@ export function ConversationScreen({ version }) {
           onGridToggle={() => { window.location.href = "?view=grid"; }}
           onRewind={() => setRewindOpen(true)}
           rewindDisabled={settingsBusy}
-          onNotifications={() => { /* 5x: notifications */ }}
+          onNotifications={() => setNotifOpen((v) => !v)}
           onSessionSettings={() => setSettingsOpen((v) => !v)}
           onModelClick={() => setModelOpen((v) => !v)}
           modelPopover={modelPopover}
           settingsPopover={settingsPopover}
+          notifPopover={notifPopover}
           modelAnchorRef={modelAnchorRef}
           settingsAnchorRef={settingsAnchorRef}
+          notifAnchorRef={notifAnchorRef}
         />
         {viewingSub ? (
           <SubagentView

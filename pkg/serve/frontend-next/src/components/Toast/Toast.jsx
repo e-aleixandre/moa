@@ -29,13 +29,22 @@ export function Toast({ tone = "info", children, action, onDismiss, ...rest }) {
       <div class="toast-body">
         {children}
         {action && (
-          <button type="button" class="act" onClick={action.onClick}>
+          <button
+            type="button"
+            class="act"
+            onClick={(e) => { e.stopPropagation(); action.onClick?.(e); }}
+          >
             {action.label}
           </button>
         )}
       </div>
       {onDismiss && (
-        <button type="button" class="x" aria-label="Dismiss" onClick={onDismiss}>
+        <button
+          type="button"
+          class="x"
+          aria-label="Dismiss"
+          onClick={(e) => { e.stopPropagation(); onDismiss(e); }}
+        >
           <X size={11} />
         </button>
       )}

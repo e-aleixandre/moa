@@ -22,8 +22,10 @@ export function ChatHead({
   onModelClick,
   modelPopover,
   settingsPopover,
+  notifPopover,
   modelAnchorRef,
   settingsAnchorRef,
+  notifAnchorRef,
 }) {
   return (
     <header class="chat-head">
@@ -57,9 +59,12 @@ export function ChatHead({
         <IconButton label="Rewind" onClick={onRewind} disabled={rewindDisabled}>
           <Rewind size={16} />
         </IconButton>
-        <IconButton label="Notifications" onClick={onNotifications}>
-          <Bell size={16} />
-        </IconButton>
+        <div class="head-anchor" ref={notifAnchorRef}>
+          <IconButton label="Notifications" onClick={onNotifications}>
+            <Bell size={16} />
+          </IconButton>
+          {notifPopover}
+        </div>
         <div class="head-anchor" ref={settingsAnchorRef}>
           <IconButton label="Session settings" onClick={onSessionSettings}>
             <MoreHorizontal size={16} />

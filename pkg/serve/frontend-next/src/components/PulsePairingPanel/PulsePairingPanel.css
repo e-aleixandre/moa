@@ -1,0 +1,156 @@
+/* PulsePairingPanel — QR pairing content inside the shared Sheet. The Sheet
+   owns the overlay/panel/header chrome; this styles only the body. Tokens only
+   (the QR needs a real white plate for scanner contrast — that white is
+   functional, not chrome). */
+
+.pairing-content > p {
+  margin: 0;
+  color: var(--subtext0);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.pairing-note {
+  margin-top: var(--space-2) !important;
+  color: var(--overlay1) !important;
+  font-size: var(--text-xs) !important;
+}
+
+.pairing-create-button,
+.pairing-copy-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--peach);
+  color: var(--crust);
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.pairing-create-button:hover,
+.pairing-copy-button:hover {
+  filter: brightness(1.06);
+}
+
+.pairing-create-button:focus-visible,
+.pairing-copy-button:focus-visible,
+.pairing-manual-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.pairing-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 90px;
+  color: var(--overlay1);
+  font-size: var(--text-sm);
+}
+
+.pairing-state .spinning {
+  animation: pairing-spin 1s linear infinite;
+}
+
+@keyframes pairing-spin {
+  to { transform: rotate(360deg); }
+}
+
+.pairing-error {
+  margin-top: var(--space-3) !important;
+  color: var(--red) !important;
+}
+
+.pairing-instructions {
+  text-align: center;
+}
+
+.pairing-qr {
+  display: grid;
+  place-items: center;
+  margin: var(--space-4) auto var(--space-3);
+  width: min(260px, 100%);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: #fff; /* functional white plate for QR scanner contrast */
+}
+
+.pairing-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.pairing-expiry {
+  color: var(--yellow);
+  text-align: center;
+  font-size: var(--text-sm);
+}
+
+.pairing-manual-toggle {
+  display: block;
+  min-height: 44px;
+  margin: var(--space-3) auto 0;
+  padding: 0 var(--space-2);
+  background: none;
+  border: 0;
+  color: var(--overlay1);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.pairing-manual-toggle:hover {
+  color: var(--text);
+}
+
+.pairing-manual {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+}
+
+.pairing-manual p {
+  margin: 0 0 var(--space-2);
+  color: var(--overlay1);
+  font-size: var(--text-xs);
+}
+
+.pairing-manual label {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--overlay0);
+  font-size: var(--text-xs);
+}
+
+.pairing-manual code {
+  display: block;
+  max-height: 84px;
+  margin-top: 3px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.pairing-copy-button {
+  margin-top: var(--space-3);
+  background: var(--surface1);
+  color: var(--text);
+  font-size: var(--text-xs);
+}

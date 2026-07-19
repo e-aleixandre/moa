@@ -1,4 +1,4 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { store } from "../../../data/store.js";
 import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
@@ -14,6 +14,8 @@ import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
 import { SessionStrip } from "../SessionStrip/SessionStrip.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
+import { NotificationSettings } from "../../../components/index.js";
+import { registerOverlay } from "../../../data/overlays.js";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
@@ -118,6 +120,8 @@ export function MobileConversationScreen() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [rewindOpen, setRewindOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifAnchorRef = useRef(null);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
@@ -128,6 +132,24 @@ export function MobileConversationScreen() {
   const onNew = () => openPalette("create");
 
   useEffect(() => { setRewindOpen(false); }, [activeId]);
+
+  // Notifications popover (Bell in the header) — device-wide push + sound (5N).
+  // Same click-outside + Escape wiring as the desktop head popovers.
+  useEffect(() => {
+    if (!notifOpen) return;
+    const unregister = registerOverlay("mconv-notif-popover");
+    const onDocDown = (e) => {
+      if (notifAnchorRef.current && !notifAnchorRef.current.contains(e.target)) setNotifOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setNotifOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      unregister();
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [notifOpen]);
 
   const strip = stripSessions(state.sessions);
   const { list: drawerList, activeCount, savedCount } = drawerSessions(state.sessions, activeId);
@@ -190,6 +212,9 @@ export function MobileConversationScreen() {
         onOpenSessions={() => setDrawerOpen(true)}
         onRewind={session ? () => setRewindOpen(true) : undefined}
         rewindDisabled={session ? session.state === "running" || session.state === "permission" : true}
+        onNotifications={() => setNotifOpen((v) => !v)}
+        notifAnchorRef={notifAnchorRef}
+        notifPopover={notifOpen && <NotificationSettings soundEnabled={state.soundEnabled} />}
       />
       <SessionStrip
         sessions={strip}

@@ -1,0 +1,35 @@
+/* ToastContainer — the global fixed toast stack (5N). Top-right on desktop; on
+   a narrow viewport it spans the width and clears the status-bar inset. The
+   individual toast chrome lives in Toast.css; this only positions the stack. */
+
+.toast-stack {
+  position: fixed;
+  top: calc(var(--space-4) + env(safe-area-inset-top));
+  right: var(--space-4);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+.toast-stack .toast {
+  pointer-events: auto;
+  animation: toast-in var(--duration) var(--ease);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 768px) {
+  .toast-stack {
+    left: var(--space-3);
+    right: var(--space-3);
+  }
+
+  .toast-stack .toast {
+    max-width: none;
+  }
+}

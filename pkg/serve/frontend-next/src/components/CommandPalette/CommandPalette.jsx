@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "preact/hooks";
 import {
   Search, Plus, LayoutGrid, MessageSquare, CornerDownLeft,
-  ArrowLeft, Folder, FolderOpen, ChevronRight,
+  ArrowLeft, Folder, FolderOpen, ChevronRight, Smartphone,
 } from "lucide-preact";
 import { store } from "../../data/store.js";
 import { closePalette } from "../../data/palette.js";
+import { openPulsePairing } from "../../data/pulse-pairing-panel.js";
 import { fuzzyMatch, fuzzyMatchIndices } from "../../data/fuzzy.js";
 import {
   createSession, resumeSession, unarchiveSession,
@@ -319,9 +320,13 @@ export function CommandPalette({
         run: () => { onClose(); window.location.href = "?view=grid"; },
       });
     }
-    // TODO 5N: Pair Pulse… — omitted until the QR pairing panel exists in
-    // frontend-next. It was dropped rather than shown as a dead-end toast, so
-    // the palette never advertises an action it can't actually perform.
+    // Pair Pulse — opens the QR pairing panel (5N). Available in every context;
+    // pairing is a device-wide action, not session- or view-scoped.
+    list.push({
+      id: "__pair-pulse", label: "Pair Pulse…", sublabel: "connect a phone via QR",
+      icon: <Smartphone size={14} />, accent: "", shortcut: null,
+      run: () => { onClose(); openPulsePairing(); },
+    });
     // TODO 5H nice-to-have: Layout preset actions (grid only), Archive current,
     // Settings — cheap via this action.run() pattern, left out to keep CORE tight.
     return list;

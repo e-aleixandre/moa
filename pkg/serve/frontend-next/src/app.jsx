@@ -6,15 +6,17 @@ import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
 import { MobileGallery } from "./catalog/mobile-gallery.jsx";
 import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
-import { CommandPalette } from "./components/index.js";
+import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
 import { togglePalette, closePalette } from "./data/palette.js";
+import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
 import { hasBlockingOverlay } from "./data/overlays.js";
 import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
+import { refreshPushState } from "./data/push-client.js";
 import {
   setMobile, autoFillTiles, autoSelectMobile, openSession,
 } from "./data/tile-actions.js";
@@ -178,7 +180,9 @@ function useBootstrap() {
     });
     startPolling();
     startUsagePolling();
-    // 5x: registerServiceWorker() / refreshPushState() — PWA + push deferred.
+    // Reconcile the browser's actual push state on load (D4: /next relies on the
+    // root /sw.js, no SW registration here). Guarded internally for unsupported.
+    refreshPushState();
     return () => {
       mounted = false;
       stopPolling();
@@ -239,10 +243,21 @@ function useBootstrap() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // 5x: warm-focus push (SW postMessage), hotkeys (Ctrl+1..9), Pulse pairing
-  // and service-worker registration are wired in later subphases.
+  // 5x: warm-focus push (SW postMessage), hotkeys (Ctrl+1..9), and
+  // service-worker registration for /next are wired in later subphases (D4: no
+  // /next SW in phase 5). Pulse pairing + push subscription land in 5N.
 
   return version;
+}
+
+// GlobalPairingPanel — the Pulse pairing Sheet (5N), mounted ONCE next to
+// GlobalPalette so the ⌘K "Pair Pulse…" action can open it over any real
+// screen. Open state lives in the pulse-pairing-panel controller (a small
+// global pub/sub, not the session store — pairing is device-wide).
+function GlobalPairingPanel() {
+  const [open, setOpen] = useState(isPulsePairingOpen());
+  useEffect(() => subscribePulsePairing(setOpen), []);
+  return <PulsePairingPanel open={open} onClose={closePulsePairing} />;
 }
 
 // GlobalPalette — the ⌘K command palette (5H), mounted ONCE here so it's global
@@ -331,6 +346,8 @@ function App() {
       <>
         <PaneGridScreen version={version} />
         <GlobalPalette />
+        <GlobalPairingPanel />
+        <ToastContainer />
       </>
     );
   }
@@ -345,6 +362,8 @@ function App() {
       <>
         <MobileConversationScreen />
         <GlobalPalette />
+        <GlobalPairingPanel />
+        <ToastContainer />
       </>
     );
   }
@@ -352,6 +371,8 @@ function App() {
     <>
       <ConversationScreen version={version} />
       <GlobalPalette />
+      <GlobalPairingPanel />
+      <ToastContainer />
     </>
   );
 }

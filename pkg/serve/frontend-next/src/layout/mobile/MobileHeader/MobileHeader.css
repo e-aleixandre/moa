@@ -69,6 +69,46 @@
   flex: none;
 }
 
+/* Notifications bell + its anchored popover on the mobile header. The bell sits
+   after the model pill; the popover drops below, right-aligned. */
+.mhead-notif {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.mhead-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -12px -8px -12px 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--overlay1);
+  cursor: pointer;
+  transition: color var(--duration) var(--ease);
+}
+
+.mhead-bell:hover {
+  color: var(--text);
+}
+
+.mhead-bell:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.mhead-notif .notif-dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: var(--z-overlay);
+}
+
 .mhead-sub {
   display: flex;
   align-items: center;
