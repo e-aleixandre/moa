@@ -67,12 +67,12 @@ function ButtonRow() {
 function IconButtonRow() {
   return (
     <div class="gallery-row tight">
-      <IconButton label="Rewind"><Rewind /></IconButton>
-      <IconButton label="Settings"><Settings /></IconButton>
-      <IconButton label="History"><History /></IconButton>
-      <IconButton label="Copy"><Copy /></IconButton>
-      <IconButton label="Delete"><Trash2 /></IconButton>
-      <IconButton label="Close" disabled><X /></IconButton>
+      <IconButton label="Rewind"><Rewind size={15} /></IconButton>
+      <IconButton label="Settings"><Settings size={15} /></IconButton>
+      <IconButton label="History"><History size={15} /></IconButton>
+      <IconButton label="Copy"><Copy size={15} /></IconButton>
+      <IconButton label="Delete"><Trash2 size={15} /></IconButton>
+      <IconButton label="Close" disabled><X size={15} /></IconButton>
     </div>
   );
 }

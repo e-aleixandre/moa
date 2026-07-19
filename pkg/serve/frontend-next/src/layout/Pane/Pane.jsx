@@ -135,27 +135,27 @@ export function Pane({
 
         <div class="p-tools">
           <IconButton label="Rewind" onClick={onRewind}>
-            <Rewind size={13} />
+            <Rewind size={15} />
           </IconButton>
           {onSplitRight && (
             <IconButton label="Split right" onClick={onSplitRight}>
-              <Columns2 size={13} />
+              <Columns2 size={15} />
             </IconButton>
           )}
           {onSplitDown && (
             <IconButton label="Split down" onClick={onSplitDown}>
-              <Rows2 size={13} />
+              <Rows2 size={15} />
             </IconButton>
           )}
           <div class="p-max-wrap">
             <IconButton label="Maximize into conversation view" onClick={onMaximize}>
-              <Maximize2 size={12} />
+              <Maximize2 size={15} />
             </IconButton>
             <span class="p-max-tip" aria-hidden="true">→ conversation view</span>
           </div>
           {canClose && (
             <IconButton label="Close pane" variant="ghost" className="p-close" onClick={onClose}>
-              <X size={12} />
+              <X size={15} />
             </IconButton>
           )}
         </div>

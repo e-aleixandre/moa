@@ -100,7 +100,7 @@ export function SubagentView({ session, jobId, onBack }) {
     >
       <header class="sa-head">
         <IconButton label="Back to parent" onClick={onBack}>
-          <ArrowLeft size={16} />
+          <ArrowLeft size={15} />
         </IconButton>
         <div class="sa-crumb">
           <GitFork size={13} aria-hidden="true" />

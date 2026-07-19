@@ -9,6 +9,7 @@
 .stream .stream-scroll {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden; /* horizontal scrolling is a block affordance (pre/table), never page-level */
   min-height: 0;
   scroll-behavior: smooth;
 }
@@ -17,6 +18,12 @@
   max-width: 780px;
   margin: 0 auto;
   padding: 30px var(--space-8) 40px;
+}
+
+/* A flex/grid child can only honor its blocks' overflow-x if it may shrink. */
+.stream .doc-prose {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .stream .stream-tick {

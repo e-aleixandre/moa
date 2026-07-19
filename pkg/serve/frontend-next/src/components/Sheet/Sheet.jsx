@@ -118,7 +118,7 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
           <div class="sheet-head">
             <h3>{title}</h3>
             <IconButton label="Close" onClick={requestClose}>
-              <X size={16} />
+              <X size={15} />
             </IconButton>
           </div>
         )}

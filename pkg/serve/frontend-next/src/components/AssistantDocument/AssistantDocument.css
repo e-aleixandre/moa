@@ -58,6 +58,111 @@
   margin: var(--space-5) 0 var(--space-3);
 }
 
+/* Containment: the reading column decides width; any block wider than it
+   (code, table, long token) scrolls or wraps inside its own box and never
+   pushes siblings or summons a page-level horizontal scrollbar. */
+.doc {
+  max-width: 100%;
+}
+
+.doc p,
+.doc li {
+  overflow-wrap: break-word; /* break a long URL/hash only when unavoidable */
+}
+
+/* Fenced code from renderMarkdown() (.code-block/.code-block-header/…). Mirrors
+   the CodeBlock component chrome so markdown fences and tool-output blocks read
+   the same; the <pre> is the containment line — it scrolls horizontally. */
+.doc .code-block {
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-width: 100%;
+  margin: var(--space-2) 0 var(--space-5);
+}
+
+.doc .code-block-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--mantle);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--surface0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+}
+
+.doc .code-block-lang {
+  color: var(--mauve);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.doc .code-block-copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--overlay0);
+  background: transparent;
+  border: none;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  transition: color var(--duration) var(--ease);
+}
+
+.doc .code-block-copy:hover {
+  color: var(--text);
+}
+
+.doc .code-block-copy:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.doc .code-block pre {
+  background: var(--crust);
+  padding: var(--space-4);
+  margin: 0;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.doc .code-block pre code {
+  font-family: var(--mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-relaxed);
+  color: var(--text);
+}
+
+/* GFM tables from renderMarkdown() — wide tables scroll inside the wrap. */
+.doc .md-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: var(--space-2) 0 var(--space-4);
+}
+
+.doc .md-table-wrap table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.doc .md-table-wrap th,
+.doc .md-table-wrap td {
+  border: 1px solid var(--surface0);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+
+.doc .md-table-wrap th {
+  background: var(--mantle);
+  color: var(--subtext0);
+  font-weight: var(--weight-semibold);
+}
+
 /* Streaming cursor: always a <span class="doc-cursor"> as the last sibling
    of the content (.doc-html wrapper in html mode, or children in children mode). */
 .doc .doc-cursor {

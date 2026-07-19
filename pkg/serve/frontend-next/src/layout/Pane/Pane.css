@@ -151,7 +151,7 @@
 .pane .p-tools {
   margin-left: auto;
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   align-items: center;
   opacity: 0;
   transition: opacity var(--duration) var(--ease);
@@ -161,11 +161,6 @@
 .pane.focused .p-tools,
 .pane:focus-within .p-tools {
   opacity: 1;
-}
-
-.pane .p-tools .icon-button {
-  width: var(--space-6);
-  height: var(--space-6);
 }
 
 .pane .p-tools .icon-button.variant-ghost.p-close:hover {
@@ -180,7 +175,8 @@
 
 .pane .p-max-tip {
   position: absolute;
-  top: 28px;
+  /* Preserve the existing --space-1 gap below the now-28px action control. */
+  top: var(--space-8);
   right: 0;
   white-space: nowrap;
   font-family: var(--mono);
@@ -323,6 +319,12 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  /* Reading text never compresses with density: prose is --text-base (14px) in
+     single, grid and mobile alike. The pane's --text-sm above is for the mock
+     gallery body; the live stream reads at full size. Density compresses chrome
+     (padding, headers, ledger, badges), not the words. */
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
 }
 
 .pane .p-body-live .stream .stream-col {

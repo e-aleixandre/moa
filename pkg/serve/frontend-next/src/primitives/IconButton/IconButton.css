@@ -1,9 +1,15 @@
 .icon-button {
+  /* Control chrome: one box everywhere the primitive appears (ChatHead, Pane,
+     SubagentView, GridToolbar). 28px sits between --space-6 (24) and --space-8
+     (32) and is shared by the single conversation view and the pane grid, so
+     the same actions read at the same size in both. Not on the --space-* scale,
+     so it's declared once here as a component variable. */
+  --icon-button-size: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-8);
-  height: var(--space-8);
+  width: var(--icon-button-size);
+  height: var(--icon-button-size);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -27,7 +33,10 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+/* The glyph size is owned by CSS (it intentionally overrides lucide's `size`
+   attrs): 15px matches the --text-md optical size and keeps single view and
+   grid identical. Align the JSX `size=` props to 15 so the markup doesn't lie. */
 .icon-button svg {
-  width: var(--space-4);
-  height: var(--space-4);
+  width: 15px;
+  height: 15px;
 }

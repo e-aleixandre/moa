@@ -6,9 +6,12 @@
   background: var(--surface0);
   border: 1px solid var(--surface1);
   border-radius: var(--radius-full);
-  padding: var(--space-2) var(--space-3);
+  /* Chrome height: 4×12 padding + --text-sm ≈ 28px, matching the icon-button
+     box and the grid-toggle it sits next to. The pill stays the only filled
+     control in the header — that is enough emphasis without being the tallest. */
+  padding: var(--space-1) var(--space-3);
   font-family: var(--font);
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   color: var(--text);
   transition: border-color var(--duration) var(--ease);
