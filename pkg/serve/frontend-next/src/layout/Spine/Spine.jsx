@@ -4,6 +4,30 @@ import { SessionRow } from "../../components/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Spine.css";
 
+function SpineVersion({ version }) {
+  if (!version?.current) return null;
+  const current = `v${version.current}`;
+  if (version.update_available && version.latest) {
+    const latest = `v${version.latest}`;
+    return (
+      <a
+        class="ver ver-update"
+        href="https://github.com/ealeixandre/moa/releases/latest"
+        target="_blank"
+        rel="noreferrer"
+        title={`Update available: ${latest}`}
+      >
+        {current} ↑ {latest}
+      </a>
+    );
+  }
+  return (
+    <span class="ver" title="moa version">
+      {current}
+    </span>
+  );
+}
+
 // Spine — left sidebar of sessions. Replaces the current frontend's
 // bottom TabBar: header with logo/wordmark/version, search
 // (trigger, no real input yet), ACTIVE/SAVED lists of SessionRow
@@ -41,7 +65,7 @@ export function Spine({
       <div class="spine-head">
         <span class="logo" aria-hidden="true">m</span>
         <span class="wordmark">moa</span>
-        {version && <span class="ver">{version}</span>}
+        <SpineVersion version={version} />
       </div>
 
       <button type="button" class="spine-search" onClick={onSearch}>

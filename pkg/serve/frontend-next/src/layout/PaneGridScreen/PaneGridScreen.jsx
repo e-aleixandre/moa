@@ -116,7 +116,7 @@ export function PaneGridScreen({ version }) {
   return (
     <div class="pane-grid-screen">
       <Spine
-        version={version?.current ? `v${version.current}` : undefined}
+        version={version}
         activeSessions={active}
         savedSessions={saved}
         activeId={focusedSessionId}

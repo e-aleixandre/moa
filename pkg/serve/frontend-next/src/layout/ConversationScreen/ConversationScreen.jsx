@@ -230,7 +230,7 @@ export function ConversationScreen({ version }) {
 
   const spine = (
     <Spine
-      version={version?.current ? `v${version.current}` : undefined}
+      version={version}
       activeSessions={active}
       savedSessions={saved}
       activeId={activeId}
