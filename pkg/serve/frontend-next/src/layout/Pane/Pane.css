@@ -107,6 +107,14 @@
   font-size: var(--text-base);
   color: var(--text);
   cursor: pointer;
+  /* A long title stays on one line and ellipsizes instead of wrapping to
+     several rows and stretching the header. min-width:0 lets it shrink inside
+     the flex row; the path/model/tools keep their space. */
+  min-width: 0;
+  flex-shrink: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pane .p-title:hover {

@@ -187,6 +187,36 @@ export function autoSelectMobile() {
   }
 }
 
+// releaseStaleSaved drops any session that is currently `saved` (closed) from
+// the places that decide what the conversation surface shows: desktop tiles and
+// the mobile activeSession. Called once at bootstrap, BEFORE autoFillTiles /
+// autoSelectMobile / afterVisibilityChange run, so a persisted focusedTile that
+// restored a now-saved session doesn't render it as if open — nor get silently
+// auto-resumed (a server-side side effect we must never trigger on page load).
+// The user picks what to resume from the empty state; we never do it for them.
+export function releaseStaleSaved() {
+  const state = store.get();
+  const patch = {};
+
+  let tree = state.tileTree;
+  let changed = false;
+  for (const sid of allSessionIds(tree)) {
+    const sess = state.sessions[sid];
+    if (sess && sess.state === 'saved') {
+      tree = clearSession(tree, sid);
+      changed = true;
+    }
+  }
+  if (changed) patch.tileTree = tree;
+
+  const active = state.activeSession;
+  if (active && state.sessions[active]?.state === 'saved') {
+    patch.activeSession = null;
+  }
+
+  if (Object.keys(patch).length > 0) setState(patch);
+}
+
 // Lazy import to break the circular dependency: session-actions → tile-actions
 // → session-actions (via resumeSession). We load it dynamically on first use.
 let _resumeSession = null;
@@ -200,9 +230,23 @@ async function getResumeSession() {
 
 const resumingIds = new Set();
 
+// afterVisibilityChange auto-resumes a saved session that becomes visible — but
+// ONLY after the first (bootstrap) pass. On bootstrap a persisted focusedTile /
+// activeSession may point at a session that is now saved (closed); resuming it
+// then would be a page-load side effect (server process, cost) and would show a
+// closed session as if open. So the first pass RELEASES stale saved sessions
+// instead (EMPTY-STATE-SPEC §1.2) and the user resumes intentionally from the
+// empty state. Every later pass (an intentional open/tap/DnD makes a saved
+// session visible) resumes as before.
+let booted = false;
+
+// Test-only: reset the bootstrap guard so a test can exercise the first-pass
+// (release-not-resume) branch deterministically regardless of order.
+export function __resetBootForTests() { booted = false; }
+
 export function afterVisibilityChange() {
-  const state = store.get();
-  const visible = visibleSessionIds(state);
+  let state = store.get();
+  let visible = visibleSessionIds(state);
 
   // Clear the unread badge for sessions the user can now see (only when the
   // tab is actually in the foreground — a background visibility shuffle
@@ -212,6 +256,15 @@ export function afterVisibilityChange() {
       const sess = state.sessions[id];
       if (sess && sess.unseen) updateSession(id, { unseen: false });
     }
+  }
+
+  if (!booted) {
+    booted = true;
+    releaseStaleSaved();
+    state = store.get();
+    visible = visibleSessionIds(state);
+    syncConnections(visible.filter(id => state.sessions[id]?.state !== 'saved'));
+    return;
   }
 
   for (const id of visible) {

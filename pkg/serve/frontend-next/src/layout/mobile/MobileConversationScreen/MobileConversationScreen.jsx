@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import { Plus } from "lucide-preact";
 import { store } from "../../../data/store.js";
 import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
@@ -117,6 +118,22 @@ function drawerSessions(sessions, activeId) {
   };
 }
 
+// recentSavedSessions builds the 3 most-recent saved sessions for the empty
+// state's RECENT list (EMPTY-STATE-SPEC §2.2). Same card fields the drawer uses,
+// trimmed to what the compact row shows.
+function recentSavedSessions(sessions, limit = 3) {
+  return Object.values(sessions)
+    .filter((s) => !s.archived && s.state === "saved")
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
+    .slice(0, limit)
+    .map((s) => ({
+      id: s.id,
+      title: s.title || s.id,
+      when: relAge(s.updated),
+      path: shortPath(s.cwd) || s.cwd || "",
+    }));
+}
+
 export function MobileConversationScreen() {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
@@ -176,12 +193,65 @@ export function MobileConversationScreen() {
   if (!loaded) {
     body = <div class="mconv-placeholder">Loading sessions…</div>;
   } else if (!session) {
-    body = (
-      <div class="mconv-empty">
-        <p class="mconv-empty-title">No active session</p>
-        <p class="mconv-empty-hint">Open the sessions sheet to pick one, or start a new one.</p>
-      </div>
-    );
+    const recents = recentSavedSessions(state.sessions);
+    const totalCount = activeCount + savedCount;
+    if (totalCount === 0) {
+      // First run — no sessions at all (EMPTY-STATE-SPEC §2.4). New is primary.
+      body = (
+        <div class="mconv-empty mconv-empty-firstrun">
+          <p class="mconv-empty-title">No sessions yet</p>
+          <p class="mconv-empty-sub">Start one to begin working with moa.</p>
+          <button
+            type="button"
+            class="mconv-empty-new mconv-empty-new-primary"
+            onClick={onNew}
+          >
+            <Plus size={15} aria-hidden="true" /> New session
+          </button>
+        </div>
+      );
+    } else {
+      body = (
+        <div class="mconv-empty">
+          <p class="mconv-empty-title">No open sessions</p>
+          <p class="mconv-empty-sub">{savedCount} saved · pick up where you left off</p>
+          {recents.length > 0 && (
+            <>
+              <p class="mconv-empty-label">Recent</p>
+              <div class="mconv-empty-recents">
+                {recents.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    class="mconv-empty-recent"
+                    aria-label={`${r.title} — saved, ${r.when}`}
+                    onClick={() => onSelectFromDrawer(r.id)}
+                  >
+                    <span class="mconv-empty-recent-top">
+                      <span class="mconv-empty-recent-title">{r.title}</span>
+                      <span class="mconv-empty-recent-when">{r.when}</span>
+                    </span>
+                    <span class="mconv-empty-recent-path">{r.path}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <div class="mconv-empty-actions">
+            <button
+              type="button"
+              class="mconv-empty-browse"
+              onClick={() => setDrawerOpen(true)}
+            >
+              All sessions · {activeCount + savedCount}
+            </button>
+            <button type="button" class="mconv-empty-new" onClick={onNew}>
+              <Plus size={15} aria-hidden="true" /> New session
+            </button>
+          </div>
+        </div>
+      );
+    }
   } else {
     const blocks = projectStream(session);
     const blocking =
@@ -235,6 +305,7 @@ export function MobileConversationScreen() {
         notifPopover={notifOpen && <NotificationSettings soundEnabled={state.soundEnabled} />}
         onModelClick={session ? () => setModelOpen(true) : undefined}
         swipeBind={drawerSwipe.bind}
+        empty={loaded && !session}
       />
       {strip.length > 1 && (
         <SessionStrip

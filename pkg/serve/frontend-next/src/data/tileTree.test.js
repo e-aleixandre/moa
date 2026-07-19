@@ -105,6 +105,7 @@ mock.module('./api.js', () => ({ ...realApi, syncConnections: () => {} }));
 const { store, setState } = await import('./store.js');
 const {
   applyPreset, splitTile, closeTile, assignToTile,
+  releaseStaleSaved, afterVisibilityChange, __resetBootForTests,
 } = await import('./tile-actions.js');
 
 // Reset the store to a single empty tile with three loaded sessions before each
@@ -189,5 +190,64 @@ describe('assignToTile', () => {
     const tileId = store.get().focusedTile;
     assignToTile(tileId, 's2');
     expect(findTile(store.get().tileTree, tileId).sessionId).toBe('s2');
+  });
+});
+
+// --- releaseStaleSaved / bootstrap no-auto-resume (EMPTY-STATE-SPEC §1.2) ---
+// seedWith lets a test pin a session's state and the mobile activeSession.
+function seedWith(sessionSpecs, { activeSession = null, isMobile = false } = {}) {
+  const sessions = {};
+  for (const s of sessionSpecs) {
+    sessions[s.id] = { id: s.id, state: s.state || 'idle', updated: Date.now() };
+  }
+  const tile = createTile(sessionSpecs[0] ? sessionSpecs[0].id : null);
+  initIds(tile);
+  setState({ sessions, tileTree: tile, focusedTile: tile.id, isMobile, activeSession });
+  return tile;
+}
+
+describe('releaseStaleSaved', () => {
+  test('clears a saved session from the tile it was persisted into', () => {
+    seedWith([{ id: 's1', state: 'saved' }]);
+    const tileId = store.get().focusedTile;
+    expect(findTile(store.get().tileTree, tileId).sessionId).toBe('s1');
+    releaseStaleSaved();
+    expect(findTile(store.get().tileTree, tileId).sessionId).toBe(null);
+  });
+
+  test('keeps a non-saved session assigned', () => {
+    seedWith([{ id: 's1', state: 'idle' }]);
+    const tileId = store.get().focusedTile;
+    releaseStaleSaved();
+    expect(findTile(store.get().tileTree, tileId).sessionId).toBe('s1');
+  });
+
+  test('drops a saved mobile activeSession, keeps a live one', () => {
+    seedWith([{ id: 's1', state: 'saved' }], { activeSession: 's1', isMobile: true });
+    releaseStaleSaved();
+    expect(store.get().activeSession).toBe(null);
+
+    seedWith([{ id: 's2', state: 'running' }], { activeSession: 's2', isMobile: true });
+    releaseStaleSaved();
+    expect(store.get().activeSession).toBe('s2');
+  });
+
+  test('is a no-op with no sessions', () => {
+    seedWith([]);
+    const before = store.get().tileTree;
+    releaseStaleSaved();
+    expect(store.get().tileTree).toBe(before); // empty patch → no setState
+  });
+});
+
+describe('afterVisibilityChange — bootstrap pass', () => {
+  test('the first pass releases a saved tile instead of auto-resuming it', () => {
+    __resetBootForTests();
+    seedWith([{ id: 's1', state: 'saved' }]);
+    const tileId = store.get().focusedTile;
+    afterVisibilityChange(); // bootstrap pass
+    // Released from the tile, and NOT resumed (state stays 'saved').
+    expect(findTile(store.get().tileTree, tileId).sessionId).toBe(null);
+    expect(store.get().sessions.s1.state).toBe('saved');
   });
 });

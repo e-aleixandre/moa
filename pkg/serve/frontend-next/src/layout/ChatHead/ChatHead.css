@@ -29,6 +29,11 @@
   letter-spacing: 0.1px;
   color: var(--text);
   cursor: pointer;
+  /* Single-line ellipsis: a long title must not wrap and push the header taller. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-head .crumb-title:hover {

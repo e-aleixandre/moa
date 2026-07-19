@@ -12,6 +12,12 @@ import "./MobileHeader.css";
 // open and is the start of the swipe-down gesture (§4). `swipeBind` carries the
 // touch handlers from the parent's useDrawerSwipe hook; the whole header is the
 // gesture surface.
+//
+// `empty` variant (EMPTY-STATE-SPEC §2.1): when there is no focused session the
+// header must stop impersonating one — it keeps the handle (tap + swipe still
+// open the drawer) and the bell (device-wide setting), drops the state dot,
+// model pill and the whole meta row, and shows the wordmark "moa" styled as
+// chrome (subtext0), not as a session title.
 export function MobileHeader({
   state = "idle",
   title,
@@ -27,6 +33,7 @@ export function MobileHeader({
   notifAnchorRef,
   onModelClick,
   swipeBind,
+  empty = false,
 }) {
   const hasCtx = typeof ctx === "number" && ctx >= 0;
   return (
@@ -40,17 +47,23 @@ export function MobileHeader({
         <span class="mhead-handle-bar" aria-hidden="true" />
       </button>
       <div class="mhead-row">
-        <StateDot state={state} size={9} />
-        <span class="mhead-title">{title}</span>
-        {model && (
-          <ModelPill
-            model={model}
-            level={level}
-            variant="glyph"
-            accent={modelAccent(model)}
-            onClick={onModelClick}
-            aria-label="Model & thinking"
-          />
+        {empty ? (
+          <span class="mhead-title mhead-wordmark">moa</span>
+        ) : (
+          <>
+            <StateDot state={state} size={9} />
+            <span class="mhead-title">{title}</span>
+            {model && (
+              <ModelPill
+                model={model}
+                level={level}
+                variant="glyph"
+                accent={modelAccent(model)}
+                onClick={onModelClick}
+                aria-label="Model & thinking"
+              />
+            )}
+          </>
         )}
         <div class="mhead-notif" ref={notifAnchorRef}>
           <button
@@ -64,21 +77,23 @@ export function MobileHeader({
           {notifPopover}
         </div>
       </div>
-      <div class="mhead-sub">
-        <span class="mhead-meta">
-          {path}
-          {hasCtx ? ` · ctx ${ctx}%` : ""} ·{" "}
-        </span>
-        <button
-          type="button"
-          class="mhead-rewind"
-          onClick={onRewind}
-          disabled={rewindDisabled || !onRewind}
-          aria-label="Rewind"
-        >
-          <RotateCcw size={11} aria-hidden="true" /> rewind
-        </button>
-      </div>
+      {!empty && (
+        <div class="mhead-sub">
+          <span class="mhead-meta">
+            {path}
+            {hasCtx ? ` · ctx ${ctx}%` : ""} ·{" "}
+          </span>
+          <button
+            type="button"
+            class="mhead-rewind"
+            onClick={onRewind}
+            disabled={rewindDisabled || !onRewind}
+            aria-label="Rewind"
+          >
+            <RotateCcw size={11} aria-hidden="true" /> rewind
+          </button>
+        </div>
+      )}
     </header>
   );
 }

@@ -8,7 +8,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
-import { Button } from "../../primitives/index.js";
+import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
@@ -18,6 +18,8 @@ import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
+import { formatShortcut } from "../../data/util/shortcut.js";
+import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { configureSession, archiveSession, unarchiveSession, openPersistedSubagent } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
@@ -244,10 +246,17 @@ export function ConversationScreen({ version }) {
   } else if (!session) {
     body = (
       <div class="conversation-empty">
-        <p class="conversation-empty-title">No active session</p>
+        <span class="conversation-empty-glyph" aria-hidden="true">m</span>
+        <p class="conversation-empty-title">No session open</p>
         <p class="conversation-empty-hint">
-          Select a session from the sidebar, or start a new one.
+          Pick a session from the sidebar, or press{" "}
+          <Kbd>{formatShortcut("K", { mod: true })}</Kbd> to jump.
         </p>
+        <div class="conversation-empty-actions">
+          <Button variant="solid" size="md" onClick={() => openPalette("create")}>
+            <Plus size={14} aria-hidden="true" /> New session
+          </Button>
+        </div>
       </div>
     );
   } else {

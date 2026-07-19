@@ -62,6 +62,11 @@
   text-overflow: ellipsis;
 }
 
+/* Empty-state wordmark: reads as app chrome, not a live session title. */
+.mhead-title.mhead-wordmark {
+  color: var(--subtext0);
+}
+
 /* ModelPill in the mobile header: the shared pill is styled for the desktop
    ChatHead (sans, --text-base, full radius) and looks oversized on a phone.
    Scope a compact mono treatment to .mhead only (mockup .m-model) — the pill

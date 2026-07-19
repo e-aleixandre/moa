@@ -32,6 +32,19 @@
   text-align: center;
 }
 
+.conversation-screen .conversation-empty {
+  gap: var(--space-3);
+}
+
+.conversation-screen .conversation-empty-glyph {
+  font-family: var(--font);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-2xl);
+  line-height: 1;
+  color: var(--surface2);
+  margin-bottom: var(--space-1);
+}
+
 .conversation-screen .conversation-empty-title {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
@@ -43,6 +56,13 @@
   font-size: var(--text-sm);
   color: var(--overlay0);
   margin: 0;
+}
+
+.conversation-screen .conversation-empty-actions {
+  margin-top: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 /* conversation-blocking — fixed strip between the Stream and the AgentTray/

@@ -58,10 +58,8 @@
 }
 
 
-/* Loading / empty states — centered in the space between header strip and
-   composer. */
-.mconv-placeholder,
-.mconv-empty {
+/* Loading placeholder — centered in the space between header and composer. */
+.mconv-placeholder {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -71,21 +69,185 @@
   gap: var(--space-2);
   padding: var(--space-6);
   text-align: center;
-}
-
-.mconv-placeholder {
   color: var(--overlay0);
   font-size: var(--text-sm);
+}
+
+/* Empty state (EMPTY-STATE-SPEC §2.2): recents + actions, top-aligned so the
+   list is reachable without stretching to mid-screen and the layout doesn't
+   jump when the list is short. It's content, not a notice, so it reads left. */
+.mconv-empty {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-8) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+  gap: var(--space-2);
+  text-align: left;
 }
 
 .mconv-empty-title {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
-  color: var(--subtext0);
+  color: var(--text);
+  margin: 0;
 }
 
-.mconv-empty-hint {
+.mconv-empty-sub {
   font-size: var(--text-sm);
+  color: var(--overlay1);
+  margin: 0 0 var(--space-4);
+}
+
+.mconv-empty-label {
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
   color: var(--overlay0);
-  line-height: var(--leading-relaxed);
+  margin: 0 0 var(--space-2);
+}
+
+.mconv-empty-recents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mconv-empty-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px; /* px structural: tight two-row stack */
+  width: 100%;
+  min-height: 56px; /* px structural: ≥44px comfortable card target */
+  padding: var(--space-3) var(--space-4);
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+}
+.mconv-empty-recent:hover,
+.mconv-empty-recent:active {
+  background: var(--surface0);
+}
+.mconv-empty-recent:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mconv-empty-recent-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.mconv-empty-recent-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mconv-empty-recent-when {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+}
+.mconv-empty-recent-path {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mconv-empty-actions {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Shared box metrics for the two stacked action buttons. */
+.mconv-empty-browse,
+.mconv-empty-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 48px; /* px structural: comfortable full-width action */
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+.mconv-empty-browse:focus-visible,
+.mconv-empty-new:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Browse — the "resume" primary: opens the drawer (the tap the user had to
+   discover via the gesture before). */
+.mconv-empty-browse {
+  background: var(--surface0);
+  border: 0;
+  color: var(--text);
+}
+.mconv-empty-browse:hover,
+.mconv-empty-browse:active {
+  background: var(--surface1);
+}
+
+/* New — secondary, borrowing the Spine's dashed "new session" idiom. */
+.mconv-empty-new {
+  background: transparent;
+  border: 1px dashed var(--surface1);
+  color: var(--overlay1);
+}
+.mconv-empty-new:hover,
+.mconv-empty-new:active {
+  border-color: var(--mauve);
+  color: var(--mauve);
+}
+
+/* First-run (§2.4): no list — center vertically and promote New to primary. */
+.mconv-empty-firstrun {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+}
+.mconv-empty-firstrun .mconv-empty-sub {
+  margin-bottom: var(--space-4);
+}
+.mconv-empty-new-primary {
+  align-self: stretch;
+  background: var(--peach);
+  border: 0;
+  color: var(--crust);
+  font-weight: var(--weight-semibold);
+}
+.mconv-empty-new-primary:hover,
+.mconv-empty-new-primary:active {
+  box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mconv-empty-recent,
+  .mconv-empty-browse,
+  .mconv-empty-new {
+    transition: none;
+  }
 }
