@@ -162,6 +162,20 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
 // screen to list every session. Replicates Sheet's focus-trap / Escape /
 // restore-focus behaviour with hooks (Sheet is a centered modal, not a
 // bottom-sheet, so we don't reuse it). Anchors to its positioned container.
+//
+// Open/close is a small state machine so both the enter and the LEAVE animate
+// (MOBILE-POLISH-SPEC §5): `open` is the caller's intent; internally we keep the
+// sheet mounted through the close transition (`visible`) and toggle `entered`
+// one frame after mount so the CSS `.is-open` transition plays from the closed
+// rest state. Only the sheet (transform) and veil (opacity) move — the
+// conversation behind stays perfectly still.
+//
+// Swipe-to-open: when the header drag is in progress the parent passes
+// `dragging` + the `veilRef`/`sheetRef` the useDrawerSwipe hook paints
+// imperatively. While dragging we mount the sheet in its `is-drag` state (CSS
+// transitions off) and let the hook drive translate/opacity inline; on release
+// the hook animates to rest and flips `open`, and we clear the inline styles
+// once the committed CSS state has taken over.
 export function SessionDrawer({
   open,
   onClose,
@@ -173,9 +187,63 @@ export function SessionDrawer({
   onCloseSession,
   onReopenSession,
   onDeleteSession,
+  dragging = false,
+  veilRef,
+  sheetRef,
 }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
+  const closeTimerRef = useRef(null);
+  const [visible, setVisible] = useState(open);
+  const [entered, setEntered] = useState(open);
+
+  // Enter/leave state machine driven by `open`. Enter: mount, then flip
+  // `entered` on the next frame so the .is-open transition runs. Leave: drop
+  // `entered` (sheet transitions back down) and unmount after the close
+  // duration. Reduced motion snaps both ways.
+  useEffect(() => {
+    const reduce =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (open) {
+      clearTimeout(closeTimerRef.current);
+      setVisible(true);
+      if (reduce) {
+        setEntered(true);
+      } else {
+        const raf = requestAnimationFrame(() => setEntered(true));
+        return () => cancelAnimationFrame(raf);
+      }
+    } else {
+      setEntered(false);
+      if (reduce) {
+        setVisible(false);
+      } else {
+        closeTimerRef.current = setTimeout(() => setVisible(false), 220);
+      }
+    }
+    return undefined;
+  }, [open]);
+
+  useEffect(() => () => clearTimeout(closeTimerRef.current), []);
+
+  // Once the drawer is committed open AND the CSS `.is-open` rest state is in
+  // effect (entered, not mid-drag), clear any inline styles the swipe hook left
+  // on the veil/sheet so the class owns them again. Gating on `entered` (not
+  // just `open`) matters for the drag→open handoff: clearing before `.is-open`
+  // is applied would drop the sheet to its closed rest position for a frame.
+  useEffect(() => {
+    if (!open || !entered || dragging) return;
+    if (sheetRef && sheetRef.current) {
+      sheetRef.current.style.transition = "";
+      sheetRef.current.style.transform = "";
+    }
+    if (veilRef && veilRef.current) {
+      veilRef.current.style.transition = "";
+      veilRef.current.style.opacity = "";
+    }
+  }, [open, entered, dragging, sheetRef, veilRef]);
 
   // Escape closes; Tab cycles focus within the panel (wrapping at the edges).
   useEffect(() => {
@@ -228,21 +296,28 @@ export function SessionDrawer({
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!visible && !dragging) return null;
 
   const onVeilClick = (e) => {
     if (e.target === e.currentTarget) onClose?.();
   };
 
+  const isOpen = entered && !dragging;
+  const veilCls = `sdrawer-veil${isOpen ? " is-open" : ""}${dragging ? " is-drag" : ""}`;
+  const sheetCls = `sdrawer${isOpen ? " is-open" : ""}${dragging ? " is-drag" : ""}`;
+
   return (
-    <div class="sdrawer-veil" onClick={onVeilClick}>
+    <div class={veilCls} ref={veilRef} onClick={onVeilClick}>
       <div
-        class="sdrawer"
+        class={sheetCls}
         role="dialog"
         aria-modal="true"
         aria-label="Sessions"
         tabIndex={-1}
-        ref={panelRef}
+        ref={(el) => {
+          panelRef.current = el;
+          if (sheetRef) sheetRef.current = el;
+        }}
       >
         <div class="sdrawer-grab" aria-hidden="true" />
         <div class="sdrawer-head">

@@ -5,10 +5,13 @@ import { modelAccent } from "../../../data/selectors.js";
 import "./MobileHeader.css";
 
 // MobileHeader — session header for the mobile conversation screen.
-// Top row: state dot + title + ModelPill (glyph) + notifications bell. Mono
-// subrow with path · ctx · rewind. Below, a grab handle + "pull for sessions"
-// which is actually an accessible button (onOpenSessions) — the drag gesture
-// arrives in 4B; here it's just the tap shortcut.
+// A top-center handle (real <button aria-label="Open sessions">) sits above two
+// dense rows: identity (state dot + title + model pill + bell) and a mono meta
+// row (path · ctx · rewind). The dedicated grab/hint band is gone (MOBILE-
+// POLISH-SPEC §3); its "open sessions" job is now honest — the handle both taps
+// open and is the start of the swipe-down gesture (§4). `swipeBind` carries the
+// touch handlers from the parent's useDrawerSwipe hook; the whole header is the
+// gesture surface.
 export function MobileHeader({
   state = "idle",
   title,
@@ -23,10 +26,19 @@ export function MobileHeader({
   notifPopover,
   notifAnchorRef,
   onModelClick,
+  swipeBind,
 }) {
   const hasCtx = typeof ctx === "number" && ctx >= 0;
   return (
-    <header class="mhead">
+    <header class="mhead" {...swipeBind}>
+      <button
+        type="button"
+        class="mhead-handle"
+        aria-label="Open sessions"
+        onClick={onOpenSessions}
+      >
+        <span class="mhead-handle-bar" aria-hidden="true" />
+      </button>
       <div class="mhead-row">
         <StateDot state={state} size={9} />
         <span class="mhead-title">{title}</span>
@@ -67,15 +79,6 @@ export function MobileHeader({
           <RotateCcw size={11} aria-hidden="true" /> rewind
         </button>
       </div>
-      <button
-        type="button"
-        class="mhead-grab"
-        aria-label="Open sessions"
-        onClick={onOpenSessions}
-      >
-        <span class="mhead-handle" aria-hidden="true" />
-        <span class="mhead-hint">pull for sessions</span>
-      </button>
     </header>
   );
 }

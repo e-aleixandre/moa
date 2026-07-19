@@ -1,14 +1,32 @@
 /* SessionDrawer — mobile bottom-sheet listing every session. Anchors to the
    nearest positioned ancestor (the phone frame in the gallery), not the
-   window, so it stays inside the device on screen. */
+   window, so it stays inside the device on screen.
+
+   Animation (MOBILE-POLISH-SPEC §5): only the sheet (transform) and the veil
+   (opacity) move — the conversation behind stays perfectly still. The closed
+   REST state is the default (sheet translated fully down, veil transparent);
+   the `.is-open` class transitions to the open rest state, so both the enter
+   AND the leave animate (JS keeps the node mounted through the close). While a
+   swipe drag is in progress (`.is-drag`) transitions are disabled and the
+   useDrawerSwipe hook writes transform/opacity inline to follow the finger. */
 
 .sdrawer-veil {
   position: absolute;
   inset: 0;
   z-index: var(--z-sheet);
   background: color-mix(in srgb, var(--crust) 55%, transparent);
+  /* Constant blur — animating backdrop-filter forces a full-viewport recomposite
+     that reads as the page "shifting" on iOS, so only opacity transitions. */
   backdrop-filter: blur(3px);
-  animation: sdrawer-fade 160ms ease-out;
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
+  overscroll-behavior: contain;
+}
+.sdrawer-veil.is-open {
+  opacity: 1;
+}
+.sdrawer-veil.is-drag {
+  transition: none;
 }
 
 .sdrawer {
@@ -24,7 +42,20 @@
   border-radius: 28px 28px 0 0;
   border-top: 1px solid var(--surface1);
   box-shadow: 0 -24px 60px rgba(0, 0, 0, 0.5);
-  animation: sdrawer-rise 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  transform: translateY(100%);
+  will-change: transform;
+  transition: transform 260ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.sdrawer.is-open {
+  transform: translateY(0);
+}
+/* Leave uses the ease-in curve/duration; the JS state machine drops .is-open
+   for the close, so this governs the downward exit. */
+.sdrawer:not(.is-open):not(.is-drag) {
+  transition: transform 220ms cubic-bezier(0.4, 0, 1, 1);
+}
+.sdrawer.is-drag {
+  transition: none;
 }
 
 .sdrawer-grab {
@@ -60,6 +91,7 @@
 .sdrawer-list {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   min-height: 0;
   padding: 0 14px 14px;
   display: flex;
@@ -258,21 +290,9 @@
   outline-offset: var(--focus-ring-offset);
 }
 
-@keyframes sdrawer-fade {
-  from {
-    opacity: 0;
-  }
-}
-
-@keyframes sdrawer-rise {
-  from {
-    transform: translateY(100%);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .sdrawer-veil,
   .sdrawer {
-    animation: none;
+    transition: none;
   }
 }

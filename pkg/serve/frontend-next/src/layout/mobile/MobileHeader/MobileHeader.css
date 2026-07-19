@@ -1,30 +1,62 @@
 .mhead {
   flex: none;
-  /* Top padding = a small breathing gap + the device's real status-bar inset.
-     With viewport-fit=cover the page lays out edge-to-edge under the iOS status
-     bar, so env(safe-area-inset-top) returns its height and the header content
-     sits clear of the clock; in a browser/context with no inset it collapses to
-     just the gap. The mantle gradient fills the reserved zone behind the bar. */
-  padding: calc(var(--space-2) + env(safe-area-inset-top)) var(--space-4)
+  /* Top padding = the device's real status-bar inset + a hair of gap. With
+     viewport-fit=cover the page lays out edge-to-edge under the iOS status bar,
+     so env(safe-area-inset-top) returns its height and the header content sits
+     clear of the clock; in a browser/context with no inset it collapses to just
+     the gap. The mantle gradient fills the reserved zone behind the bar. The
+     handle sits at the very top center, so padding-top is tight (§3). */
+  padding: calc(var(--space-1) + env(safe-area-inset-top)) var(--space-4)
     var(--space-2);
   background: linear-gradient(
     var(--mantle),
     color-mix(in srgb, var(--mantle) 40%, var(--crust))
   );
   border-bottom: 1px solid var(--surface0);
+  /* The header is the swipe-down gesture surface (§4): keep vertical pans for the
+     drag, but let horizontal pans reach the session strip's own scroll. */
+  touch-action: pan-x;
+}
+
+/* Top-center handle — a real button (tap opens the drawer; a downward drag on
+   the header starts the swipe gesture). 32×4px bar, honest now that the gesture
+   is real (§4). Full-width hit row keeps it a comfortable target without a
+   dedicated band. */
+.mhead-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 20px;
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1) 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.mhead-handle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.mhead-handle-bar {
+  width: 32px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--surface1);
 }
 
 .mhead-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .mhead-title {
   flex: 1;
   min-width: 0;
   font-weight: var(--weight-semibold);
-  font-size: 16px; /* px structural: between --text-md 15 and --text-lg 17 (mockup .m-title) */
+  font-size: var(--text-md); /* 15px — one notch down for density (§3) */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -113,7 +145,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  margin-top: var(--space-1);
+  margin-top: 2px; /* px structural: hairline gap under the identity row (§3) */
   font-family: var(--mono);
   font-size: var(--text-micro);
   color: var(--overlay0);
@@ -151,31 +183,4 @@
 
 .mhead-rewind svg {
   flex: none;
-}
-
-.mhead-grab {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-1);
-  width: 100%;
-  min-height: 44px;
-  margin: 0;
-  padding: var(--space-2) 0 0;
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-
-.mhead-handle {
-  width: 44px;
-  height: 4px;
-  border-radius: var(--radius-full);
-  background: var(--surface1);
-}
-
-.mhead-hint {
-  font-size: var(--text-nano);
-  color: var(--overlay0);
-  letter-spacing: var(--tracking-wide);
 }

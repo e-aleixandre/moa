@@ -9,6 +9,7 @@ import { openPersistedSubagent, configureSession, archiveSession, deleteSession,
 import { api } from "../../../data/api.js";
 import { mobileModelLabel, shortPath, sessionDotState } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
+import { useDrawerSwipe } from "../../../hooks/useDrawerSwipe.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { PermissionPrompt, AskUserPrompt, McpBanner, ModelSelector, Sheet } from "../../../components/index.js";
 import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
@@ -124,6 +125,11 @@ export function MobileConversationScreen() {
   const [rewindOpen, setRewindOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifAnchorRef = useRef(null);
+  // Swipe-down on the header opens the sessions drawer (MOBILE-POLISH-SPEC §4).
+  // The hook owns the veil/sheet refs it paints during a drag and flips drawer
+  // state open on release; `bind` is spread onto the header (the gesture
+  // surface), `dragging` mounts the drawer mid-drag.
+  const drawerSwipe = useDrawerSwipe({ onOpen: () => setDrawerOpen(true) });
   // Model + thinking sheet (TELEMETRY-SETTINGS-REDESIGN §3.1): the header
   // ModelPill is tappable on mobile too, opening the shared ModelSelector inside
   // a Sheet (which brings overlay-history / back-gesture / scroll-lock). Models
@@ -228,13 +234,16 @@ export function MobileConversationScreen() {
         notifAnchorRef={notifAnchorRef}
         notifPopover={notifOpen && <NotificationSettings soundEnabled={state.soundEnabled} />}
         onModelClick={session ? () => setModelOpen(true) : undefined}
+        swipeBind={drawerSwipe.bind}
       />
-      <SessionStrip
-        sessions={strip}
-        activeId={activeId}
-        onSelect={onSelect}
-        onNew={onNew}
-      />
+      {strip.length > 1 && (
+        <SessionStrip
+          sessions={strip}
+          activeId={activeId}
+          onSelect={onSelect}
+          onNew={onNew}
+        />
+      )}
 
       {body}
 
@@ -249,6 +258,9 @@ export function MobileConversationScreen() {
         onCloseSession={(id) => archiveSession(id)}
         onReopenSession={(id) => resumeSession(id)}
         onDeleteSession={(id) => deleteSession(id)}
+        dragging={drawerSwipe.dragging}
+        veilRef={drawerSwipe.veilRef}
+        sheetRef={drawerSwipe.sheetRef}
       />
       {session && (
         <RewindTimeline

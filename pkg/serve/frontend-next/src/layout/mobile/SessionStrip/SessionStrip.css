@@ -1,7 +1,7 @@
 .mstrip {
   display: flex;
   gap: 6px;
-  padding: var(--space-2) var(--space-4);
+  padding: 6px var(--space-4); /* px structural: tighter strip band (§3) */
   overflow-x: auto;
   flex: none;
   background: color-mix(in srgb, var(--mantle) 55%, var(--crust));
@@ -27,7 +27,7 @@
   background: var(--base);
   border: 1px solid var(--surface0);
   border-radius: var(--radius-full);
-  padding: 5px 12px; /* px structural (mockup .chip) */
+  padding: 4px 10px; /* px structural (mockup .chip, tightened §3) */
   font-size: var(--text-sm);
   color: var(--subtext1);
   cursor: pointer;
