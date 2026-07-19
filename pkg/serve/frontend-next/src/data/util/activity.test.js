@@ -1,26 +1,24 @@
 import { test, expect } from 'bun:test';
 import {
-  gerundFor,
   formatElapsed,
   activityPhase,
   activityLabel,
-  WORKING_GERUNDS,
+  activityAction,
+  activityText,
+  inFlightTool,
 } from './activity.js';
 
-test('gerundFor rotates by 4s buckets and wraps', () => {
-  expect(gerundFor(0)).toBe(WORKING_GERUNDS[0]);
-  expect(gerundFor(1000)).toBe(WORKING_GERUNDS[0]);
-  expect(gerundFor(3999)).toBe(WORKING_GERUNDS[0]);
-  expect(gerundFor(4000)).toBe(WORKING_GERUNDS[1]);
-  expect(gerundFor(8000)).toBe(WORKING_GERUNDS[2]);
-  // wraps around after the full list
-  expect(gerundFor(WORKING_GERUNDS.length * 4000)).toBe(WORKING_GERUNDS[0]);
-});
-
-test('gerundFor is stable for missing/negative elapsed', () => {
-  expect(gerundFor(undefined)).toBe(WORKING_GERUNDS[0]);
-  expect(gerundFor(-500)).toBe(WORKING_GERUNDS[0]);
-});
+// A session running a single tool. running() builds the minimal shape
+// activityAction reads: the last tool_start message with status 'running'.
+function running(tool_name, args) {
+  return {
+    state: 'running',
+    messages: [
+      { _type: 'user', text: 'hi' },
+      { _type: 'tool_start', tool_name, args, status: 'running' },
+    ],
+  };
+}
 
 test('formatElapsed renders compact durations', () => {
   expect(formatElapsed(0)).toBe('0s');
@@ -51,12 +49,85 @@ test('compacting/verifying take priority over run phase', () => {
   expect(activityPhase({ state: 'running', autoVerifying: true })).toBe('verifying');
 });
 
-test('activityLabel maps phases to copy', () => {
-  expect(activityLabel('thinking', 0)).toBe('Thinking');
-  expect(activityLabel('waiting', 0)).toBe('Waiting for you');
-  expect(activityLabel('compacting', 0)).toBe('Compacting context');
-  expect(activityLabel('verifying', 0)).toBe('Running auto-verify');
-  expect(activityLabel('working', 0)).toBe(WORKING_GERUNDS[0]);
-  expect(activityLabel('working', 8000)).toBe(WORKING_GERUNDS[2]);
-  expect(activityLabel(null, 0)).toBe(null);
+test('activityLabel maps phases to fixed copy', () => {
+  expect(activityLabel('thinking')).toBe('Thinking');
+  expect(activityLabel('waiting')).toBe('Waiting for you');
+  expect(activityLabel('compacting')).toBe('Compacting context');
+  expect(activityLabel('verifying')).toBe('Running auto-verify');
+  expect(activityLabel('working')).toBe('Working');
+  expect(activityLabel(null)).toBe(null);
+});
+
+test('inFlightTool finds the last running tool_start', () => {
+  expect(inFlightTool(null)).toBe(null);
+  expect(inFlightTool({ messages: [] })).toBe(null);
+  expect(inFlightTool({ messages: [{ _type: 'tool_start', status: 'done' }] })).toBe(null);
+  const s = {
+    messages: [
+      { _type: 'tool_start', tool_name: 'read', status: 'done' },
+      { _type: 'tool_start', tool_name: 'bash', status: 'running' },
+    ],
+  };
+  expect(inFlightTool(s).tool_name).toBe('bash');
+});
+
+test('activityAction maps non-bash tools to intent phrases', () => {
+  expect(activityAction(running('read', { path: 'a.js' }))).toBe('Reading files');
+  expect(activityAction(running('ls', {}))).toBe('Reading files');
+  expect(activityAction(running('grep', { pattern: 'x' }))).toBe('Searching the code');
+  expect(activityAction(running('find', {}))).toBe('Searching the code');
+  expect(activityAction(running('write', { path: 'a' }))).toBe('Writing a file');
+  expect(activityAction(running('edit', {}))).toBe('Editing code');
+  expect(activityAction(running('multiedit', {}))).toBe('Editing code');
+  expect(activityAction(running('fetch_content', {}))).toBe('Fetching a page');
+  expect(activityAction(running('web_search', {}))).toBe('Searching the web');
+  expect(activityAction(running('send_file', {}))).toBe('Sending a file');
+  expect(activityAction(running('subagent', {}))).toBe('Running a subagent');
+});
+
+test('activityAction classifies bash commands into intents', () => {
+  expect(activityAction(running('bash', { command: 'go test ./...' }))).toBe('Running tests');
+  expect(activityAction(running('bash', { command: 'npm run test' }))).toBe('Running tests');
+  expect(activityAction(running('bash', { command: 'pytest -q' }))).toBe('Running tests');
+  expect(activityAction(running('bash', { command: 'go build ./...' }))).toBe('Building');
+  expect(activityAction(running('bash', { command: 'make all' }))).toBe('Building');
+  expect(activityAction(running('bash', { command: 'bun run build' }))).toBe('Building');
+  expect(activityAction(running('bash', { command: 'go vet ./...' }))).toBe('Linting');
+  expect(activityAction(running('bash', { command: 'eslint src' }))).toBe('Linting');
+  expect(activityAction(running('bash', { command: 'go mod tidy' }))).toBe('Installing deps');
+  expect(activityAction(running('bash', { command: 'npm install' }))).toBe('Installing deps');
+  expect(activityAction(running('bash', { command: 'git commit -m x' }))).toBe('Committing');
+  expect(activityAction(running('bash', { command: 'git push origin main' }))).toBe('Pushing');
+  expect(activityAction(running('bash', { command: 'git status' }))).toBe('Running git');
+  expect(activityAction(running('bash', { command: 'go run ./cmd' }))).toBe('Running the app');
+  expect(activityAction(running('bash', { command: 'rg foo' }))).toBe('Inspecting files');
+  expect(activityAction(running('bash', { command: 'echo hi && sleep 1' }))).toBe('Running a command');
+});
+
+test('activityAction only reads the first command line, lowercased', () => {
+  expect(activityAction(running('bash', { command: 'GO TEST ./...\nrm -rf x' }))).toBe('Running tests');
+});
+
+test('activityAction accepts args as a JSON string', () => {
+  expect(activityAction(running('bash', JSON.stringify({ command: 'go test ./...' })))).toBe('Running tests');
+});
+
+test('activityAction returns null with no in-flight tool', () => {
+  expect(activityAction({ state: 'running', messages: [] })).toBe(null);
+  expect(activityAction(null)).toBe(null);
+});
+
+test('activityText follows the resolution order', () => {
+  // idle → nothing
+  expect(activityText({ state: 'idle' })).toBe(null);
+  // working with a tool → the synthesized action
+  expect(activityText(running('edit', {}))).toBe('Editing code');
+  expect(activityText(running('bash', { command: 'go test ./...' }))).toBe('Running tests');
+  // working between tools → steady "Working"
+  expect(activityText({ state: 'running', messages: [] })).toBe('Working');
+  // special phases keep fixed copy, ignoring any tool
+  expect(activityText({ state: 'running', thinkingText: 'x' })).toBe('Thinking');
+  expect(activityText({ state: 'permission' })).toBe('Waiting for you');
+  expect(activityText({ state: 'running', compacting: true })).toBe('Compacting context');
+  expect(activityText({ state: 'running', autoVerifying: true })).toBe('Running auto-verify');
 });

@@ -17,8 +17,7 @@ import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
-import { formatElapsed } from "../../data/util/activity.js";
-import { activityPhase, activityLabel } from "../../data/util/activity.js";
+import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { api } from "../../data/api.js";
 import { configureSession, archiveSession, unarchiveSession, openPersistedSubagent } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
@@ -74,26 +73,24 @@ function spineSessions(sessions) {
   return { active, saved };
 }
 
-// currentTask derives the StatusStrip's task label: the first not-done task if
-// the session tracks tasks, else the live activity label (gerund/phase) plus an
-// elapsed timer anchored to `runStartedAtMs`, else nothing (hidden rather than
-// invented). `nowMs` is the ticking clock (see ConversationScreen's interval)
-// so the gerund rotation and the timer advance on their own — the timer origin
-// is always the server-stamped runStartedAtMs, never a client Date.now() start.
-function currentTask(session, nowMs) {
-  const tasks = session.tasks || [];
-  const pending = tasks.find((t) => t.status !== "done");
-  if (pending) return pending.title;
+// currentActivity derives the StatusStrip's activity label from the shared
+// activityText resolver: the synthesized action while the agent works (e.g.
+// "Running tests", "Editing code"), the fixed phase copy for special phases,
+// with an elapsed timer appended while running; nothing when idle. The task
+// title is deliberately NOT shown here — task progress lives in the N/M tasks
+// pill. `nowMs` is the ticking clock (see ConversationScreen's interval) so the
+// timer advances on its own — its origin is always the server-stamped
+// runStartedAtMs, never a client Date.now() start.
+function currentActivity(session, nowMs) {
+  const label = activityText(session);
+  if (!label) return undefined;
   const phase = activityPhase(session);
-  if (!phase) return undefined;
   const runStartedAtMs = session.runStartedAtMs || 0;
-  const elapsedMs = runStartedAtMs ? Math.max(0, nowMs - runStartedAtMs) : 0;
-  const label = activityLabel(phase, elapsedMs);
   // Show the timer only for the running phases, not the momentary
   // compacting/verifying/waiting states where an age counter reads oddly.
   const showTimer = runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
   if (showTimer) {
-    const elapsedText = formatElapsed(elapsedMs);
+    const elapsedText = formatElapsed(Math.max(0, nowMs - runStartedAtMs));
     return elapsedText ? `${label} · ${elapsedText}` : label;
   }
   return label;
@@ -114,9 +111,9 @@ export function ConversationScreen({ version }) {
   const loaded = state.sessionsLoaded;
 
   // Activity clock: while the focused session shows live activity, tick once a
-  // second so the StatusStrip's gerund rotation and elapsed timer advance on
-  // their own. The timer origin is the server-stamped runStartedAtMs (read in
-  // currentTask), not this clock — the clock only supplies "now".
+  // second so the StatusStrip's elapsed timer advances on its own. The timer
+  // origin is the server-stamped runStartedAtMs (read in currentActivity), not
+  // this clock — the clock only supplies "now".
   const activityActive = activityPhase(session) !== null;
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -359,7 +356,7 @@ export function ConversationScreen({ version }) {
                 ctxPercent={session.contextPercent}
                 tokensUp={session.runTokensUp}
                 tokensDown={session.runTokensDown}
-                task={currentTask(session, nowMs)}
+                task={currentActivity(session, nowMs)}
                 spend={fmtSpend(session.costUSD)}
                 session={session}
                 usage={state.usage}

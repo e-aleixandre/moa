@@ -101,7 +101,7 @@ import {
   splitPreviewTail,
   shortModel,
 } from './util/format.js';
-import { gerundFor, formatElapsed } from './util/activity.js';
+import { formatElapsed } from './util/activity.js';
 import { parseFileCardData } from './util/file-card.js';
 
 const MAX_MESSAGES_BEFORE_TRUNCATION_NOTE = 200;
@@ -487,16 +487,16 @@ export function liveSubagents(subagents, seenJobIds) {
 }
 
 // agentAction describes what a running subagent is doing right now: the last
-// in-flight tool, or a generic gerund when only text is streaming.
+// in-flight tool, or a generic "Working" when only text is streaming.
 function agentAction(sub) {
   const msgs = Array.isArray(sub.messages) ? sub.messages : [];
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i];
     if (m && m._type === 'tool_start' && (m.status === 'running' || m.status === 'generating')) {
-      return m.tool_name || gerundFor(0);
+      return m.tool_name || 'Working';
     }
   }
-  return gerundFor(0);
+  return 'Working';
 }
 
 // liveAgent builds one FanoutBlock agent descriptor for a live subagent.

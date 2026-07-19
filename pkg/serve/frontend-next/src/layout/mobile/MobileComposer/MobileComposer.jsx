@@ -1,7 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import { Composer } from "../../Composer/Composer.jsx";
 import { Sheet, UsagePanel, PermissionControl } from "../../../components/index.js";
-import { activityPhase, activityLabel, formatElapsed } from "../../../data/util/activity.js";
+import { activityPhase, activityText, formatElapsed } from "../../../data/util/activity.js";
 import { fmtCost, fmtReset } from "../../../data/util/usage-pills.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
 import { configureSession } from "../../../data/session-actions.js";
@@ -25,24 +25,22 @@ import "./MobileComposer.css";
 // --text-input (≥16px) so iOS never auto-zooms, and this wrapper keeps the
 // bottom safe-area inset.
 
-// mobileActivity derives the status line's "doing" label: the live activity
-// (gerund + elapsed while running), else the first not-done task title as a
-// fallback when there's no live phase, else nothing (hidden, not invented).
+// mobileActivity derives the status line's "doing" label from the shared
+// activityText resolver: the synthesized action while the agent works (e.g.
+// "Running tests", "Editing code"), the fixed phase copy for special phases,
+// with the live elapsed timer appended while running. When the session is idle
+// it returns nothing — the segment hides (we never show the task title here).
 function mobileActivity(session, nowMs) {
+  const label = activityText(session);
+  if (!label) return undefined;
   const phase = activityPhase(session);
-  if (phase) {
-    const runStartedAtMs = session.runStartedAtMs || 0;
-    const elapsedMs = runStartedAtMs ? Math.max(0, nowMs - runStartedAtMs) : 0;
-    const label = activityLabel(phase, elapsedMs);
-    const showTimer = runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
-    if (showTimer) {
-      const t = formatElapsed(elapsedMs);
-      return t ? `${label} · ${t}` : label;
-    }
-    return label;
+  const runStartedAtMs = session.runStartedAtMs || 0;
+  const showTimer = runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
+  if (showTimer) {
+    const t = formatElapsed(Math.max(0, nowMs - runStartedAtMs));
+    return t ? `${label} · ${t}` : label;
   }
-  const pending = (session.tasks || []).find((t) => t.status !== "done");
-  return pending ? pending.title : undefined;
+  return label;
 }
 
 function fmtSpend(costUSD) {
@@ -52,7 +50,7 @@ function fmtSpend(costUSD) {
 
 export function MobileComposer({ session, usage }) {
   // Activity clock — tick once a second while the session shows live activity
-  // so the gerund rotation and elapsed timer advance on their own (mirrors the
+  // so the elapsed timer advances on its own (mirrors the
   // desktop ConversationScreen clock).
   const active = activityPhase(session) !== null;
   const [nowMs, setNowMs] = useState(() => Date.now());

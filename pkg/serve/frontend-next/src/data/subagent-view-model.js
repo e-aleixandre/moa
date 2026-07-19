@@ -155,8 +155,9 @@ export function subagentView(session, jobId) {
     if (outcome === 'failed') view.error = lastError(sub);
     if (outcome === 'completed') view.resultChip = resultChip(sub);
   } else {
-    // Live now-line segments. The action (last in-flight tool / gerund) comes
-    // from liveAgent when this subagent is in the live set; elapsed is derived
+    // Live now-line segments. The action (last in-flight tool / "Working")
+    // comes from liveAgent when this subagent is in the live set; elapsed is
+    // derived
     // from the backend-anchored startedAtMs (started_at_ms) when present, so
     // it keeps counting across a reconnect instead of resetting. Omitted
     // (never "undefined"/"NaN") when the anchor isn't known.
