@@ -218,14 +218,29 @@ export function shortModel(model) {
  *  the model name contains one. A curated display name (has spaces, e.g.
  *  "Claude Opus 4.8") is trusted as-is. A raw technical id drops a noisy vendor
  *  prefix ("claude-"/"gpt-") and truncates ("claude-opus-4-8" → "opus-4-8"). */
-const MODEL_ALIASES = ['sol', 'fable', 'terra', 'haiku'];
+
+// MODEL_CODENAMES — the friendly one-word names moa gives its models across
+// providers. Detected as a substring of the model string (case-insensitive) and
+// rendered capitalized, so "Claude Opus 4.8" → "Opus", "Claude Fable 5" →
+// "Fable", "GPT-5.6 Sol" → "Sol". None is a substring of another, so order
+// doesn't matter. Anthropic: opus/sonnet/haiku/fable; OpenAI: sol/terra/luna.
+const MODEL_CODENAMES = ['opus', 'sonnet', 'haiku', 'fable', 'sol', 'terra', 'luna'];
+
+/** modelCodename → the friendly one-word model name (capitalized) when the model
+ *  string carries a known codename; "" when it doesn't (caller falls back). */
+export function modelCodename(model) {
+  const lower = (model || '').toLowerCase();
+  for (const c of MODEL_CODENAMES) {
+    if (lower.includes(c)) return c.charAt(0).toUpperCase() + c.slice(1);
+  }
+  return '';
+}
+
 export function mobileModelLabel(model) {
+  const code = modelCodename(model);
+  if (code) return code;
   const short = shortModel(model || '');
   if (!short) return '';
-  const lower = short.toLowerCase();
-  for (const alias of MODEL_ALIASES) {
-    if (lower.includes(alias)) return alias;
-  }
   if (short.includes(' ')) return short; // curated display name — trust it
   const trimmed = short.replace(/^(claude-|gpt-|models\/)/i, '');
   return trimmed.length > 12 ? trimmed.slice(0, 11) + '…' : trimmed;

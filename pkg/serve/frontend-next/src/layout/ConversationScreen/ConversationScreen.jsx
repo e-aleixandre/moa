@@ -15,7 +15,7 @@ import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchS
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { shortModel, shortPath } from "../../data/util/format.js";
+import { shortModel, shortPath, modelCodename } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
@@ -314,7 +314,7 @@ export function ConversationScreen({ version }) {
           title={session.title || session.id}
           state={session.state || "idle"}
           path={shortPath(session.cwd) || session.cwd || ""}
-          model={shortModel(session.model) || session.model || ""}
+          model={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
           modelAccent={modelAccent(session.model)}
           thinkingLevel={session.thinking || "off"}
           onTitleClick={() => { /* 5x: rename / session menu */ }}

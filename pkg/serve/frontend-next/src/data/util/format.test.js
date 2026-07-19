@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, fmtTokens } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens } from './format.js';
 
 test('formatDiff numbers lines from startLine', () => {
   const out = formatDiff('old line\nsecond', 'new line\nsecond', 260);
@@ -87,17 +87,32 @@ test('isRecentSession: no timestamp counts as recent (never silently hidden)', (
   expect(isRecentSession(null)).toBe(true);
 });
 
-test('mobileModelLabel: a known alias wins', () => {
-  expect(mobileModelLabel('anthropic/sol-2')).toBe('sol');
-  expect(mobileModelLabel('Fable Design')).toBe('fable');
+test('modelCodename: capitalizes a known codename anywhere in the string', () => {
+  expect(modelCodename('Claude Opus 4.8')).toBe('Opus');
+  expect(modelCodename('Claude Fable 5')).toBe('Fable');
+  expect(modelCodename('Claude Sonnet 5')).toBe('Sonnet');
+  expect(modelCodename('GPT-5.6 Sol')).toBe('Sol');
+  expect(modelCodename('gpt-5.6-terra')).toBe('Terra');
+  expect(modelCodename('anthropic/claude-opus-4-8')).toBe('Opus');
 });
 
-test('mobileModelLabel: a curated display name (has spaces) is kept as-is', () => {
-  expect(mobileModelLabel('Claude Opus 4.8')).toBe('Claude Opus 4.8');
+test('modelCodename: empty when no known codename / nullish', () => {
+  expect(modelCodename('gpt-5-turbo-preview')).toBe('');
+  expect(modelCodename('')).toBe('');
+  expect(modelCodename(null)).toBe('');
 });
 
-test('mobileModelLabel: a technical id drops the vendor prefix and truncates', () => {
-  expect(mobileModelLabel('anthropic/claude-opus-4-8')).toBe('opus-4-8');
+test('mobileModelLabel: a known codename wins, capitalized', () => {
+  expect(mobileModelLabel('anthropic/sol-2')).toBe('Sol');
+  expect(mobileModelLabel('Fable Design')).toBe('Fable');
+  expect(mobileModelLabel('Claude Opus 4.8')).toBe('Opus');
+});
+
+test('mobileModelLabel: a curated display name (no codename) is kept as-is', () => {
+  expect(mobileModelLabel('GPT-5.3 Codex')).toBe('GPT-5.3 Codex');
+});
+
+test('mobileModelLabel: a technical id (no codename) drops the vendor prefix and truncates', () => {
   expect(mobileModelLabel('openai/gpt-5-turbo-preview')).toBe('5-turbo-pre…');
 });
 
