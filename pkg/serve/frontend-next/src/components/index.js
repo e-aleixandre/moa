@@ -21,3 +21,4 @@ export { StreamingSkeleton, TypingDots } from "./StreamingSkeleton/StreamingSkel
 export { ToolTicker } from "./ToolTicker/ToolTicker.jsx";
 export { MobileLedger, LedgerIcons } from "./MobileLedger/MobileLedger.jsx";
 export { FileSuggestions } from "./FileSuggestions/FileSuggestions.jsx";
+export { CommandPalette } from "./CommandPalette/CommandPalette.jsx";

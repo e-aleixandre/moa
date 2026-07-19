@@ -6,6 +6,7 @@ import { store } from "../../data/store.js";
 import { allTileIds, allSessionIds, findTile, tileCount, treeShape, presetTree } from "../../data/tileTree.js";
 import { PRESETS } from "../../data/layoutPresets.js";
 import { applyPreset, addPane, focusTileByIndex, focusTile, openSession } from "../../data/tile-actions.js";
+import { openPalette } from "../../data/palette.js";
 import "./PaneGridScreen.css";
 
 // PaneGridScreen — root organism AND container of the desktop pane grid (5G).
@@ -120,8 +121,8 @@ export function PaneGridScreen({ version }) {
         savedSessions={saved}
         activeId={focusedSessionId}
         onSelectSession={onSelectSession}
-        onNewSession={() => { /* 5H: create session */ }}
-        onSearch={() => { /* 5x: command palette */ }}
+        onNewSession={() => openPalette("create")}
+        onSearch={() => openPalette("search")}
         onSettings={() => { /* 5x: settings */ }}
       />
       <main class="pane-grid-main">

@@ -11,6 +11,8 @@ import { store } from "../../data/store.js";
 import { projectStream } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent } from "../../data/selectors.js";
 import { openSession } from "../../data/tile-actions.js";
+import { openPalette } from "../../data/palette.js";
+import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath } from "../../data/util/format.js";
 import { formatElapsed } from "../../data/util/activity.js";
 import { activityPhase, activityLabel } from "../../data/util/activity.js";
@@ -166,6 +168,7 @@ export function ConversationScreen({ version }) {
   }, [modelOpen, models]);
   useEffect(() => {
     if (!modelOpen) return;
+    const unregister = registerOverlay("conv-model-popover");
     const onDocDown = (e) => {
       if (modelAnchorRef.current && !modelAnchorRef.current.contains(e.target)) setModelOpen(false);
     };
@@ -173,6 +176,7 @@ export function ConversationScreen({ version }) {
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      unregister();
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKeyDown);
     };
@@ -183,6 +187,7 @@ export function ConversationScreen({ version }) {
   const settingsAnchorRef = useRef(null);
   useEffect(() => {
     if (!settingsOpen) return;
+    const unregister = registerOverlay("conv-settings-popover");
     const onDocDown = (e) => {
       if (settingsAnchorRef.current && !settingsAnchorRef.current.contains(e.target)) setSettingsOpen(false);
     };
@@ -190,6 +195,7 @@ export function ConversationScreen({ version }) {
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      unregister();
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKeyDown);
     };
@@ -208,8 +214,8 @@ export function ConversationScreen({ version }) {
       savedSessions={saved}
       activeId={activeId}
       onSelectSession={onSelectSession}
-      onNewSession={() => { /* 5H: create session */ }}
-      onSearch={() => { /* 5x: command palette */ }}
+      onNewSession={() => openPalette("create")}
+      onSearch={() => openPalette("search")}
       onSettings={() => { /* 5x: settings */ }}
     />
   );

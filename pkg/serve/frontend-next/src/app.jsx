@@ -5,7 +5,10 @@ import { Catalog } from "./catalog/catalog.jsx";
 import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
 import { MobileGallery } from "./catalog/mobile-gallery.jsx";
 import { ConversationScreen, PaneGridScreen } from "./layout/index.js";
+import { CommandPalette } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
+import { togglePalette, closePalette } from "./data/palette.js";
+import { hasBlockingOverlay } from "./data/overlays.js";
 import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
@@ -214,17 +217,75 @@ function useBootstrap() {
     else autoSelectMobile();
   }, [state.isMobile, Object.keys(state.sessions).length]);
 
-  // 5x: warm-focus push (SW postMessage), command palette (⌘K), hotkeys
-  // (Ctrl+1..9), Pulse pairing and service-worker registration are all wired in
-  // later subphases.
+  // ⌘K / Ctrl+K — global command-palette toggle (5H). Active in every view.
+  // The chord always works, even inside the composer textarea (spec §6): we
+  // never gate on the focus target, so ⌘K opens/closes from anywhere. esc is
+  // handled inside the palette itself (this only owns the open chord).
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        // Defer to a higher-layer overlay (model/settings popover, etc.): don't
+        // open the palette underneath it (spec §6). The palette closing itself
+        // still works because it owns esc; ⌘K when the palette is the top layer
+        // toggles it (it never registers as a blocking overlay).
+        if (hasBlockingOverlay() && !store.get().paletteOpen) return;
+        e.preventDefault();
+        togglePalette("search");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // 5x: warm-focus push (SW postMessage), hotkeys (Ctrl+1..9), Pulse pairing
+  // and service-worker registration are wired in later subphases.
 
   return version;
+}
+
+// GlobalPalette — the ⌘K command palette (5H), mounted ONCE here so it's global
+// to conversation / grid / mobile (outside the view switch). It subscribes to
+// the store for open state + context derivation: context is the current view
+// (grid vs mobile vs conversation) and focusedPane is the grid's focused tile's
+// 1-based index (null off the grid). The palette reads the session list from
+// the store itself, so this only supplies open/close + chassis context.
+function GlobalPalette() {
+  const [state, setState] = useState(store.get());
+  useEffect(() => store.subscribe(setState), []);
+
+  const context = view === "grid" ? "grid" : state.isMobile ? "mobile" : "conversation";
+  let focusedPane = null;
+  if (context === "grid") {
+    const ids = allTileIdsSafe(state.tileTree);
+    const idx = ids.indexOf(state.focusedTile);
+    focusedPane = idx >= 0 ? idx + 1 : null;
+  }
+
+  return (
+    <CommandPalette
+      open={state.paletteOpen}
+      onClose={closePalette}
+      context={context}
+      focusedPane={focusedPane}
+      initialStep={state.paletteStep}
+    />
+  );
+}
+
+// allTileIdsSafe — DFS tile order without importing tileTree's helper twice
+// (findTile is already imported for other derivations); a tiny local walk keeps
+// the focusedPane derivation self-contained.
+function allTileIdsSafe(tree) {
+  if (!tree) return [];
+  if (tree.type === "tile") return [tree.id];
+  return tree.children.flatMap(allTileIdsSafe);
 }
 
 // App — routes to the selected screen. The conversation screen is the default
 // and the only 5C-connected one; galleries stay mock. Bootstrap runs for every
 // view so returning to "?" keeps a live store, but galleries just don't consume
-// it.
+// it. The command palette mounts over the REAL screens only (never the mock
+// galleries).
 function App() {
   const version = useBootstrap();
 
@@ -254,10 +315,20 @@ function App() {
   }
   if (view === "grid") {
     // Real, store-connected pane grid (5G) — no ViewSwitch overlay (D5).
-    return <PaneGridScreen version={version} />;
+    return (
+      <>
+        <PaneGridScreen version={version} />
+        <GlobalPalette />
+      </>
+    );
   }
   // Default: real, store-connected conversation screen (5C). No ViewSwitch (D5).
-  return <ConversationScreen version={version} />;
+  return (
+    <>
+      <ConversationScreen version={version} />
+      <GlobalPalette />
+    </>
+  );
 }
 
 render(<App />, document.getElementById("root"));

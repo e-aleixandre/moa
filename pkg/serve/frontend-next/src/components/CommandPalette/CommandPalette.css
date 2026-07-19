@@ -1,0 +1,379 @@
+/* CommandPalette.css — co-located styles for the ⌘K palette (5H).
+ *
+ * Only Catppuccin Mocha tokens from tokens.css — no new tokens (spec §10).
+ * Values (mantle/crust mix, surface1 border, shadow-lg + mauve glow, radius-lg,
+ * peach selection bar) are copied from the mockup command-palette.html. Two
+ * chassis: desktop centered overlay and a mobile bottom sheet, one component. */
+
+/* ── veil / scrim ─────────────────────────────────────────────────────────── */
+.pal-veil {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: color-mix(in srgb, var(--crust) 60%, transparent);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 64px;
+}
+.pal-veil-mobile {
+  z-index: var(--z-sheet);
+  padding-top: 0;
+  align-items: flex-end;
+}
+
+/* ── desktop palette shell ────────────────────────────────────────────────── */
+.palette {
+  width: 92%;
+  max-width: 600px;
+  max-height: 460px;
+  background: color-mix(in srgb, var(--mantle) 92%, var(--crust));
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), 0 0 0 1px color-mix(in srgb, var(--text) 4%, transparent),
+    0 0 64px color-mix(in srgb, var(--mauve) 7%, transparent);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: palette-in 0.14s var(--ease);
+}
+@keyframes palette-in {
+  from { opacity: 0; transform: scale(0.975) translateY(-10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.pal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--surface0);
+  flex: none;
+}
+.pal-input-row > svg { color: var(--overlay0); flex: none; }
+.pal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-input); /* 16px — iOS anti-zoom lock */
+  min-width: 0;
+}
+.pal-input::placeholder { color: var(--overlay0); }
+
+/* ── list ─────────────────────────────────────────────────────────────────── */
+.pal-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface1) transparent;
+}
+.pal-group {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--overlay0);
+  padding: 10px 12px 5px;
+  user-select: none;
+}
+.pal-group:first-child { padding-top: 6px; }
+
+.pal-note {
+  padding: 12px 14px;
+  color: var(--overlay0);
+  font-size: var(--text-sm);
+}
+.pal-note.err { color: var(--red); }
+
+/* ── row ──────────────────────────────────────────────────────────────────── */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  min-height: 40px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.08s;
+}
+.row:hover { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
+.row.sel { background: var(--surface0); }
+/* Selection bar — matches the spine's .sess.active::before continuity. */
+.row.sel::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--peach);
+}
+.row .name {
+  flex: 3 1 auto;
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.row .name .hl,
+.row .act-name .hl,
+.row .path .hl { color: var(--peach); font-weight: var(--weight-semibold); }
+.row .live {
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  max-width: 38%;
+  min-width: 0;
+}
+.row .live.y { color: var(--yellow); }
+.row .cwd { font-family: var(--mono); font-size: 10px; color: var(--overlay0); flex: none; }
+.row .when {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--surface2);
+  flex: none;
+  width: 30px;
+  text-align: right;
+}
+.row .enter { flex: none; color: var(--overlay0); opacity: 0; }
+.row.sel .enter { opacity: 1; }
+
+.state-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+/* action rows */
+.row .act-ic {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--peach-dim);
+  color: var(--peach);
+}
+.row .act-ic.mauve { background: var(--mauve-dim); color: var(--mauve); }
+.row .act-ic.blue { background: var(--blue-dim); color: var(--blue); }
+.row .act-ic.grey { background: color-mix(in srgb, var(--surface0) 70%, transparent); color: var(--overlay1); }
+.row .act-name {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.row .act-sub { font-size: var(--text-xs); color: var(--overlay0); flex: none; }
+.row .shortcut { display: flex; gap: 3px; flex: none; }
+
+/* directory / project rows */
+.row .dir-ic {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+.row .dir-ic.grey { background: color-mix(in srgb, var(--surface0) 70%, transparent); color: var(--overlay1); }
+.row .path {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--subtext1);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* badges */
+.badge {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: 0.06em;
+  flex: none;
+  border-radius: 5px;
+  padding: 1px 6px;
+  line-height: 15px;
+}
+.badge.pane {
+  color: var(--peach);
+  border: 1px solid color-mix(in srgb, var(--peach) 40%, transparent);
+  background: var(--peach-dim);
+}
+.badge.archived { color: var(--overlay1); background: var(--surface0); text-transform: uppercase; }
+.badge.recent { color: var(--green); background: var(--green-dim); }
+.badge.default { color: var(--teal); background: color-mix(in srgb, var(--teal) 9%, transparent); }
+
+/* ── footer ───────────────────────────────────────────────────────────────── */
+.pal-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--surface0);
+  background: color-mix(in srgb, var(--crust) 55%, transparent);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+.pal-foot .f { display: flex; align-items: center; gap: 5px; }
+.pal-foot .spring { flex: 1; }
+.pal-foot .ctxhint { font-family: var(--mono); font-size: 10px; color: var(--surface2); }
+
+/* ── create step ──────────────────────────────────────────────────────────── */
+.crumb-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--mauve);
+  background: var(--mauve-dim);
+  border-radius: 7px;
+  padding: 3px 9px;
+  cursor: pointer;
+  border: none;
+}
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--surface0);
+  border-top: 1px solid var(--surface0);
+  flex: none;
+}
+.field-row .lbl {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--overlay0);
+  width: 44px;
+  flex: none;
+}
+.model-chips { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
+.mchip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  cursor: pointer;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-full);
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+  color: var(--subtext1);
+  background: transparent;
+  font-family: var(--font);
+  transition: all 0.12s;
+}
+.mchip.on {
+  border-color: color-mix(in srgb, var(--mauve) 60%, transparent);
+  background: var(--mauve-dim);
+  color: var(--lavender);
+  font-weight: var(--weight-medium);
+}
+.create-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--surface0);
+  background: color-mix(in srgb, var(--crust) 55%, transparent);
+}
+.create-bar .cancel { font-size: 12.5px; color: var(--overlay1); display: flex; align-items: center; gap: 6px; }
+.btn-create {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  background: var(--peach);
+  color: var(--crust);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+  border: none;
+  border-radius: 9px;
+  padding: 8px 18px;
+  box-shadow: 0 0 18px var(--peach-med);
+}
+.btn-create:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+.btn-create .kbd { background: rgba(0, 0, 0, 0.18); border-color: rgba(0, 0, 0, 0.25); color: var(--crust); }
+
+/* ── mobile bottom sheet ──────────────────────────────────────────────────── */
+.m-sheet {
+  width: 100%;
+  height: 62%;
+  background: var(--mantle);
+  border-radius: 20px 20px 0 0;
+  border-top: 1px solid var(--surface1);
+  box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  animation: sheet-up 0.18s var(--ease);
+}
+@keyframes sheet-up {
+  from { transform: translateY(30px); opacity: 0.6; }
+  to { transform: none; opacity: 1; }
+}
+.m-sheet .grab {
+  width: 44px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface1);
+  margin: 9px auto 2px;
+  flex: none;
+}
+.m-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 14px 10px;
+  flex: none;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.m-input-row > svg { color: var(--overlay0); flex: none; }
+.m-list { flex: 1; overflow-y: auto; padding: 0 8px 20px; }
+.m-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px;
+  min-height: 48px; /* ≥44px touch target */
+  border-radius: var(--radius-md);
+}
+.m-row .name { flex: 1; font-size: 14.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.m-row .act-name { flex: 1; font-size: 14.5px; font-weight: var(--weight-medium); color: var(--text); }
+.m-row .cwd { font-family: var(--mono); font-size: 10px; color: var(--overlay0); flex: none; }
+.m-row .when { font-family: var(--mono); font-size: 10px; color: var(--surface2); flex: none; }
+.m-row .path { font-family: var(--mono); font-size: 12.5px; color: var(--subtext1); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* ── reduced motion — no entrance animation (spec §9) ─────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .palette, .m-sheet { animation: none; }
+}
