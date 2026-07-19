@@ -1,6 +1,7 @@
 import { Rewind, Bell, MoreHorizontal } from "lucide-preact";
 import { StateDot, Kbd, IconButton } from "../../primitives/index.js";
 import { ModelPill } from "../../components/index.js";
+import { formatShortcut } from "../../data/util/shortcut.js";
 import "./ChatHead.css";
 
 // ChatHead — main column header: session breadcrumb
@@ -53,7 +54,7 @@ export function ChatHead({
         <button type="button" class="grid-toggle" onClick={onGridToggle} title="Back to the grid — this session stays in pane 1">
           <span class="mini" aria-hidden="true"><i /><i /><i /></span>
           grid
-          <Kbd>⌘G</Kbd>
+          <Kbd>{formatShortcut("G", { mod: true })}</Kbd>
         </button>
 
         <IconButton label="Rewind" onClick={onRewind} disabled={rewindDisabled}>

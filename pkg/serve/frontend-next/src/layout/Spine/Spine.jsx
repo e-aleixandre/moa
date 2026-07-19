@@ -1,6 +1,7 @@
 import { Search, Plus, Settings } from "lucide-preact";
 import { Kbd, IconButton } from "../../primitives/index.js";
 import { SessionRow } from "../../components/index.js";
+import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Spine.css";
 
 // Spine — left sidebar of sessions. Replaces the current frontend's
@@ -46,7 +47,7 @@ export function Spine({
       <button type="button" class="spine-search" onClick={onSearch}>
         <Search size={14} aria-hidden="true" />
         <span>Jump to session…</span>
-        <Kbd>⌘K</Kbd>
+        <Kbd>{formatShortcut("K", { mod: true })}</Kbd>
       </button>
 
       <div class="spine-sessions">

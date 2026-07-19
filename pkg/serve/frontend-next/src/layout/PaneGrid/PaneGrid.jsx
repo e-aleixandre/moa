@@ -5,6 +5,7 @@ import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { McpBanner, PermissionPrompt, AskUserPrompt } from "../../components/index.js";
 import { snapToRatio } from "../../data/snap.js";
+import { formatShortcut } from "../../data/util/shortcut.js";
 import {
   resizeSplit, assignToTile, swapTiles, splitTile, closeTile, focusTile,
 } from "../../data/tile-actions.js";
@@ -209,7 +210,7 @@ function ConnectedPane({ node, state, tileIndex }) {
         <div class="pane-empty">
           <MessageSquarePlus aria-hidden="true" />
           <span class="pane-empty-title">Drag a session here</span>
-          <span class="pane-empty-hint">⌘K to pick a session</span>
+          <span class="pane-empty-hint">{formatShortcut("K", { mod: true })} to pick a session</span>
         </div>
       </Pane>
     );

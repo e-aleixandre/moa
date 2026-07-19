@@ -15,6 +15,7 @@ import {
 } from "../../data/composer-suggest.js";
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
 import { processFile } from "../../data/util/attachments.js";
+import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Composer.css";
 
 // Composer — the conversation input: send a message, steer/queue while the
@@ -786,7 +787,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   // single-line pill and reads noisy on a phone — use the short prompt.
   const idlePlaceholder = shortPlaceholder
     ? "Message moa…"
-    : "Message moa — Enter to send, ⇧Enter for a new line, ⌥Enter to queue…";
+    : `Message moa — Enter to send, ⇧Enter for a new line, ${formatShortcut("Enter", { mod: true })} to queue…`;
   // 5J steer mode overrides everything: this box talks to the subagent.
   const placeholder = steer
     ? `Steer ${steer.name || "subagent"} — it reads this before its next step…`
@@ -916,7 +917,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
 
             const title = transcribing ? "Transcribing…"
               : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
-              : micMode ? "Hold to talk · tap to send (⌘. for mic)"
+              : micMode ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
               : "Send";
 
             // Attach the push-to-talk pointer gesture only when the button is

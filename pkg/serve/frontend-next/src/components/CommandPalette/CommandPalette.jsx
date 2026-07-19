@@ -16,6 +16,7 @@ import { addToast } from "../../data/notifications.js";
 import {
   sessionDotState, isRecentSession, projectLabel,
 } from "../../data/util/format.js";
+import { modLabel } from "../../data/util/shortcut.js";
 import "./CommandPalette.css";
 
 // ── Cached capabilities (workspaceRoot / homeDir / defaultModel). Module-level
@@ -304,19 +305,19 @@ export function CommandPalette({
     const list = [];
     list.push({
       id: "__new", label: "New session…", sublabel: "pick project & model",
-      icon: <Plus size={14} />, accent: "", shortcut: ["⌘", "N"],
+      icon: <Plus size={14} />, accent: "", shortcut: [modLabel, "N"],
       run: () => setStep("create"),
     });
     if (context === "grid") {
       list.push({
         id: "__conversation", label: "Go to conversation", sublabel: "single-session view",
-        icon: <MessageSquare size={14} />, accent: "blue", shortcut: ["⌘", "G"],
+        icon: <MessageSquare size={14} />, accent: "blue", shortcut: [modLabel, "G"],
         run: () => { onClose(); window.location.href = "?"; },
       });
     } else if (context === "conversation") {
       list.push({
         id: "__grid", label: "Go to grid", sublabel: "multi-session view",
-        icon: <LayoutGrid size={14} />, accent: "blue", shortcut: ["⌘", "G"],
+        icon: <LayoutGrid size={14} />, accent: "blue", shortcut: [modLabel, "G"],
         run: () => { onClose(); window.location.href = "?view=grid"; },
       });
     }
@@ -843,7 +844,7 @@ export function CommandPalette({
                 );
               })}
             </div>
-            <kbd class="kbd">⌘M cycle</kbd>
+            <kbd class="kbd">{modLabel}M cycle</kbd>
           </div>
         )}
 
@@ -852,14 +853,14 @@ export function CommandPalette({
             <span class="cancel"><kbd class="kbd">⌫</kbd> back on empty query</span>
             <button type="button" class="btn-create" disabled={!createTarget || creating} onClick={() => doCreate()}>
               {creating ? "Creating…" : `Create in ${basename(createTarget) || "…"}`}
-              {!creating && <kbd class="kbd">⌘⏎</kbd>}
+              {!creating && <kbd class="kbd">{modLabel}⏎</kbd>}
             </button>
           </div>
         ) : (
           <div class="pal-foot">
             <span class="f"><kbd class="kbd">↑↓</kbd> navigate</span>
             <span class="f"><kbd class="kbd">⏎</kbd> {primaryHint}</span>
-            {secondaryHint && <span class="f"><kbd class="kbd">⌘⏎</kbd> {secondaryHint}</span>}
+            {secondaryHint && <span class="f"><kbd class="kbd">{modLabel}⏎</kbd> {secondaryHint}</span>}
             <span class="spring" />
             <span class="ctxhint" aria-live="polite">
               {context === "grid" && focusedPane != null ? `grid · pane ${focusedPane} focused` : `${selectable.length} result${selectable.length === 1 ? "" : "s"}`}

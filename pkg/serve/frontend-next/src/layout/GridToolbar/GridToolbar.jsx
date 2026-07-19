@@ -1,5 +1,6 @@
 import { SquareSplitHorizontal, SquareSplitVertical, Bell } from "lucide-preact";
 import { PRESETS } from "../../data/layoutPresets.js";
+import { formatShortcut } from "../../data/util/shortcut.js";
 import "./GridToolbar.css";
 
 // GridToolbar — top bar of the grid view: occupies the same slot as
@@ -57,7 +58,7 @@ export function GridToolbar({
       </button>
 
       <span class="gt-hint">
-        ⌘1–9 focus a pane · ⤢ maximizes into conversation view
+        {formatShortcut("1–9", { mod: true })} focus a pane · ⤢ maximizes into conversation view
       </span>
 
       <div class="gt-right">

@@ -1,5 +1,6 @@
 import { Rewind, Maximize2, X, GripHorizontal, Columns2, Rows2 } from "lucide-preact";
 import { StateDot, IconButton, ThinkingMeter } from "../../primitives/index.js";
+import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Pane.css";
 
 // Pane — a single grid panel. Reuses StateDot/IconButton/
@@ -114,7 +115,7 @@ export function Pane({
       <div class={draggable ? "p-head p-head-drag" : "p-head"} {...dragProps}>
         {draggable && <GripHorizontal size={13} class="p-grip" aria-hidden="true" />}
         {tileNumber != null && (
-          <span class="p-badge" title={`⌘${tileNumber}`}>{tileNumber}</span>
+          <span class="p-badge" title={formatShortcut(String(tileNumber), { mod: true })}>{tileNumber}</span>
         )}
         <StateDot state={state} size={9} label={stateText} />
         <button
