@@ -459,7 +459,7 @@ export function handleWsThinkingDelta(id, delta) {
   scheduleFlush();
 }
 
-export function handleWsMessageEnd(id, fullText, msgId = '') {
+export function handleWsMessageEnd(id, fullText, msgId = '', inputTokens = 0, outputTokens = 0) {
   const pendingText = pendingTextDeltas[id] || '';
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
@@ -469,9 +469,15 @@ export function handleWsMessageEnd(id, fullText, msgId = '') {
     return;
   }
 
+  // Tally the run's live token counts (input/output). A run may span several
+  // model messages; they accumulate here and reset when the next run begins
+  // (see handleWsStateChange). Kept even after the run ends until the next one.
+  const runTokensUp = (sess.runTokensUp || 0) + (inputTokens || 0);
+  const runTokensDown = (sess.runTokensDown || 0) + (outputTokens || 0);
+
   if (msgId && sess.messages.some(m => m._msg_id === msgId)) {
     delete materializedTextDuringMessage[id];
-    updateSession(id, { streamingText: null, thinkingText: null });
+    updateSession(id, { streamingText: null, thinkingText: null, runTokensUp, runTokensDown });
     return;
   }
 
@@ -495,6 +501,8 @@ export function handleWsMessageEnd(id, fullText, msgId = '') {
   const patch = {
     streamingText: null,
     thinkingText: null,
+    runTokensUp,
+    runTokensDown,
   };
   if (assistantText) {
     const msg = { role: 'assistant', _msg_id: msgId || undefined, content: [{ type: 'text', text: assistantText }] };
@@ -681,6 +689,11 @@ export function handleWsStateChange(id, data) {
   const nowRunning = data.state === 'running' || data.state === 'permission';
   if (nowRunning && !wasRunning && !prev?.runStartedAtMs) {
     patch.runStartedAtMs = Date.now();
+    // A fresh run starts: reset the live per-run token tally so it counts up
+    // from zero again. Counts from the previous run persist until this point
+    // (not cleared at idle), so the last run's totals stay visible in between.
+    patch.runTokensUp = 0;
+    patch.runTokensDown = 0;
   }
   updateSession(id, patch);
   if (data.state === 'idle' || data.state === 'error') {

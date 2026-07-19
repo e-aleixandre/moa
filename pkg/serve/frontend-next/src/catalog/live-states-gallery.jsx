@@ -116,7 +116,7 @@ function FanoutSection() {
         {/* Composer specimen: no session, so it shows the idle default (its
             queue/activity are driven by a real session in the app). */}
         <Composer />
-        <StatusStrip task="2 agents running · 1 result waiting" ctxPercent={44} tokensUp="58.3k" tokensDown="12.1k" />
+        <StatusStrip task="2 agents running · 1 result waiting" ctxPercent={44} tokensUp={58300} tokensDown={12100} />
       </div>
 
       <p class="lsg-caption">
@@ -173,7 +173,7 @@ function BackgroundJobSection() {
         </div>
 
         <Composer />
-        <StatusStrip task="streaming · bg job 2:18" ctxPercent={62} tokensUp="41.2k" tokensDown="8.7k" />
+        <StatusStrip task="streaming · bg job 2:18" ctxPercent={62} tokensUp={41200} tokensDown={8700} />
       </div>
 
       <p class="lsg-caption">

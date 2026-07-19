@@ -179,7 +179,7 @@ const noop = () => {};
 // MobileComposerSpecimen — a dumb stand-in for the connected MobileComposer
 // (which wraps the store-bound Composer). Mirrors the old mock's editable
 // textarea (font-size:var(--text-input) to avoid iOS zoom) + status line.
-function MobileComposerSpecimen({ status, spend }) {
+function MobileComposerSpecimen({ status, tokens, spend }) {
   return (
     <div class="mcomposer">
       <div class="mgal-composer-box">
@@ -195,6 +195,7 @@ function MobileComposerSpecimen({ status, spend }) {
       </div>
       <div class="mcomposer-status">
         <span class="work">● {status}</span>
+        {tokens && <span class="tokens">{tokens}</span>}
         <span class="spend">{spend} today</span>
       </div>
     </div>
@@ -269,7 +270,7 @@ export function MobileConversationSpecimen() {
         />
       </div>
 
-      <MobileComposerSpecimen status="running tests" spend="$1.84" />
+      <MobileComposerSpecimen status="running tests" tokens="↑41k ↓8.7k" spend="$1.84" />
     </div>
   );
 }

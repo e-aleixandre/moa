@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import { Composer } from "../../Composer/Composer.jsx";
 import { activityPhase, activityLabel, formatElapsed } from "../../../data/util/activity.js";
+import { fmtTokens } from "../../../data/util/format.js";
 import "./MobileComposer.css";
 
 // MobileComposer — CONNECTED bottom input for the mobile conversation (5I). It
@@ -8,9 +9,8 @@ import "./MobileComposer.css";
 // attachments / stop) rather than duplicating any of that logic — the only
 // mobile addition is the mono STATUS LINE below it. The line mirrors the mockup
 // (.m-status): what the agent is DOING on the left (blue dot + activity), the
-// session spend on the right. Context % is NOT repeated here — it already lives
-// in the header. Live token ↑/↓ counts (in the mockup) have no per-session data
-// source in the backend, so they're intentionally omitted rather than faked.
+// live per-run token ↑/↓ counts in the middle, and the session spend on the
+// right. Context % is NOT repeated here — it already lives in the header.
 // Visual fit is CSS-only (MobileComposer.css); the composer's own textarea uses
 // --text-input (≥16px) so iOS never auto-zooms, and this wrapper keeps the
 // bottom safe-area inset.
@@ -55,12 +55,18 @@ export function MobileComposer({ session }) {
 
   const work = mobileActivity(session, nowMs);
   const spend = fmtSpend(session.costUSD);
+  const up = session.runTokensUp || 0;
+  const down = session.runTokensDown || 0;
+  const hasTokens = up > 0 || down > 0;
 
   return (
     <div class="mcomposer">
       <Composer sessionId={session.id} session={session} shortPlaceholder />
       <div class="mcomposer-status">
         {work && <span class="work">● {work}</span>}
+        {hasTokens && (
+          <span class="tokens">↑{fmtTokens(up)} ↓{fmtTokens(down)}</span>
+        )}
         {spend && <span class="spend">{spend} today</span>}
       </div>
     </div>

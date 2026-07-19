@@ -100,3 +100,46 @@ test('openPersistedSubagent restores newest-first transcripts to chronological o
   expect(messages[0]).toMatchObject({ role: 'user', _msg_id: 'older-user' });
   expect(messages[1]).toMatchObject({ _type: 'tool_start', tool_call_id: 'newest-tool' });
 });
+
+test('loadSessions preserves the live per-run token tally across a poll', async () => {
+  // A run finished with a token tally; the poll (which changes the title, e.g.
+  // a fresh brief) must not drop the live-only counts.
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {},
+        runTokensUp: 41200, runTokensDown: 8700, runStartedAtMs: 123,
+      },
+    },
+  });
+  apiResponse = [{ id: 's1', title: 'A new title', state: 'idle', cwd: '/x' }];
+
+  await loadSessions();
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.title).toBe('A new title'); // the poll did replace the object
+  expect(s1.runTokensUp).toBe(41200);
+  expect(s1.runTokensDown).toBe(8700);
+});
+
+test('sendMessage from idle resets the token tally to start the new run at zero', async () => {
+  // The previous run's totals persist at idle; sending a new message begins a
+  // fresh run and must zero the tally optimistically (the WS state_change reset
+  // can't fire — this patch already made the session running).
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [],
+        runTokensUp: 41200, runTokensDown: 8700,
+      },
+    },
+  });
+  apiResponse = { action: 'send' };
+
+  await sendMessage('s1', 'next task', []);
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.state).toBe('running');
+  expect(s1.runTokensUp).toBe(0);
+  expect(s1.runTokensDown).toBe(0);
+});

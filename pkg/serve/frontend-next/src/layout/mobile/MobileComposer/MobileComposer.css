@@ -99,9 +99,20 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* Live per-run token tally (↑ input / ↓ output). Kept whole; the activity
+   label to its left shrinks first when the row is tight. */
+.mcomposer-status .tokens {
+  color: var(--overlay1);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .mcomposer-status .spend {
   margin-left: auto;
   white-space: nowrap;
+  flex-shrink: 0;
 }

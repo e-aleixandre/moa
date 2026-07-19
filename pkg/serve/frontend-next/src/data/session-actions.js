@@ -94,6 +94,12 @@ export async function loadSessions() {
         // poll tick.
         rlFiveHourPct: existing ? existing.rlFiveHourPct : undefined,
         rlSevenDayPct: existing ? existing.rlSevenDayPct : undefined,
+        // Live per-run state fed by WS (run start timestamp + the running token
+        // tally). The poll knows nothing about them, so carry them over or the
+        // activity timer and the ↑/↓ token counts vanish on every poll tick.
+        runStartedAtMs: existing ? existing.runStartedAtMs : null,
+        runTokensUp: existing ? existing.runTokensUp : undefined,
+        runTokensDown: existing ? existing.runTokensDown : undefined,
         tasks: existing ? existing.tasks : [],
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
@@ -278,6 +284,10 @@ export async function sendMessage(id, text, attachments = []) {
   let optimisticMsg = null;
   let optimisticSteer = null;
   let steerId = '';
+  // Remember the live per-run token tally so a rejected send can restore it
+  // (the optimistic patch below resets it to start the new run at zero).
+  const prevTokensUp = sess.runTokensUp;
+  const prevTokensDown = sess.runTokensDown;
   if (isIdle) {
     // Attachment blocks first, text last — matches the order the server sends
     // to the agent (see Manager.Send).
@@ -290,6 +300,11 @@ export async function sendMessage(id, text, attachments = []) {
       streamingText: null,
       thinkingText: null,
       runStartedAtMs: Date.now(),
+      // A fresh run begins here. Reset the live token tally now, from the same
+      // optimistic patch that sets runStartedAtMs — the WS state_change reset
+      // won't fire because this patch already made the session "running".
+      runTokensUp: 0,
+      runTokensDown: 0,
     });
   } else {
     const current = store.get().sessions[id];
@@ -343,6 +358,10 @@ export async function sendMessage(id, text, attachments = []) {
           state: 'idle',
           streamingText: null,
           thinkingText: null,
+          // Restore the token tally reset by the optimistic patch: this run
+          // never actually started.
+          runTokensUp: prevTokensUp,
+          runTokensDown: prevTokensDown,
         });
       }
     }

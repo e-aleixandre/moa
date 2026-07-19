@@ -1,4 +1,5 @@
 import "./StatusStrip.css";
+import { fmtTokens } from "../../data/util/format.js";
 
 // StatusStrip — mono strip under the composer: context ring, tokens,
 // current task and today's spend. Every segment is optional: the connected
@@ -24,7 +25,7 @@ export function StatusStrip({
           ctx {ctxPercent}%
         </span>
       )}
-      {hasTokens && <span>↑ {tokensUp} · ↓ {tokensDown} tok</span>}
+      {hasTokens && <span class="status-strip-tokens">↑ {fmtTokens(tokensUp)} · ↓ {fmtTokens(tokensDown)} tok</span>}
       {task && <span class="status-strip-task">{task}</span>}
       {spend && <span class="status-strip-spend">today <b>{spend}</b></span>}
     </div>

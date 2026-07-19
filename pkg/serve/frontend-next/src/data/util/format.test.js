@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, fmtTokens } from './format.js';
 
 test('formatDiff numbers lines from startLine', () => {
   const out = formatDiff('old line\nsecond', 'new line\nsecond', 260);
@@ -105,4 +105,29 @@ test('mobileModelLabel: empty/nullish is the empty string', () => {
   expect(mobileModelLabel('')).toBe('');
   expect(mobileModelLabel(null)).toBe('');
   expect(mobileModelLabel(undefined)).toBe('');
+});
+
+test('fmtTokens: below 1000 is a plain rounded integer', () => {
+  expect(fmtTokens(0)).toBe('0');
+  expect(fmtTokens(940)).toBe('940');
+  expect(fmtTokens(999)).toBe('999');
+});
+
+test('fmtTokens: below 10k keeps one decimal', () => {
+  expect(fmtTokens(1000)).toBe('1k');
+  expect(fmtTokens(8700)).toBe('8.7k');
+  expect(fmtTokens(1250)).toBe('1.3k');
+  expect(fmtTokens(9940)).toBe('9.9k');
+});
+
+test('fmtTokens: 10k and above rounds to whole k (no 10.0k)', () => {
+  expect(fmtTokens(9950)).toBe('10k');
+  expect(fmtTokens(41200)).toBe('41k');
+  expect(fmtTokens(999000)).toBe('999k');
+});
+
+test('fmtTokens: invalid/negative is zero', () => {
+  expect(fmtTokens(-5)).toBe('0');
+  expect(fmtTokens(NaN)).toBe('0');
+  expect(fmtTokens(undefined)).toBe('0');
 });

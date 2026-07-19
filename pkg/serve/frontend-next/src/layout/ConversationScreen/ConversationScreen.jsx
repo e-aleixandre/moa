@@ -313,6 +313,8 @@ export function ConversationScreen({ version }) {
         <Composer key={session.id} sessionId={session.id} session={session} />
         <StatusStrip
           ctxPercent={session.contextPercent}
+          tokensUp={session.runTokensUp}
+          tokensDown={session.runTokensDown}
           task={currentTask(session, nowMs)}
           spend={fmtSpend(session.costUSD)}
         />

@@ -137,7 +137,15 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.ThinkingDelta:
 		return Event{Type: "thinking_delta", Data: DeltaData{Delta: e.Delta}}, true
 	case bus.MessageEnded:
-		return Event{Type: "message_end", Data: MessageEndData{Text: truncateHistoryString(e.FullText), MsgID: e.Message.MsgID}}, true
+		var inputTok, outputTok int
+		if e.Message.Usage != nil {
+			inputTok = e.Message.Usage.Input
+			outputTok = e.Message.Usage.Output
+		}
+		return Event{Type: "message_end", Data: MessageEndData{
+			Text: truncateHistoryString(e.FullText), MsgID: e.Message.MsgID,
+			InputTokens: inputTok, OutputTokens: outputTok,
+		}}, true
 	case bus.ToolCallStreaming:
 		return Event{Type: "tool_call_start", Data: ToolCallStreamingData{
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName,

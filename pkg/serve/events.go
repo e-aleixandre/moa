@@ -106,10 +106,14 @@ type DeltaData struct {
 	Delta string `json:"delta"`
 }
 
-// MessageEndData carries the full assistant text on message completion.
+// MessageEndData carries the full assistant text on message completion, plus
+// the model usage for that message (input/output tokens) so the client can
+// tally live per-run token counts.
 type MessageEndData struct {
-	Text  string `json:"text"`
-	MsgID string `json:"msg_id,omitempty"`
+	Text         string `json:"text"`
+	MsgID        string `json:"msg_id,omitempty"`
+	InputTokens  int    `json:"input_tokens,omitempty"`
+	OutputTokens int    `json:"output_tokens,omitempty"`
 }
 
 // ToolStartData is sent when a tool execution begins.

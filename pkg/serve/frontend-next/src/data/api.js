@@ -141,7 +141,7 @@ function routeEvent(sessionId, evt) {
       handleWsMessageStart(sessionId);
       break;
     case 'message_end':
-      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id);
+      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id, evt.data.input_tokens, evt.data.output_tokens);
       break;
     case 'tool_call_start':
       handleWsToolCallStart(sessionId, evt.data);

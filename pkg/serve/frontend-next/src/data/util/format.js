@@ -231,6 +231,19 @@ export function mobileModelLabel(model) {
   return trimmed.length > 12 ? trimmed.slice(0, 11) + '…' : trimmed;
 }
 
+/** A compact token count for the status line: 41200 → "41k", 8700 → "8.7k",
+ *  940 → "940". Keeps one decimal only while the value stays below 10k; at/above
+ *  10k it rounds to a whole "k" (and a value like 9990 that would round up to
+ *  10.0k is shown as "10k", not "10.0k"). */
+export function fmtTokens(n) {
+  if (typeof n !== 'number' || !isFinite(n) || n < 0) return '0';
+  if (n < 1000) return String(Math.round(n));
+  const k = n / 1000;
+  const oneDecimal = Math.round(k * 10) / 10;
+  if (oneDecimal < 10) return oneDecimal + 'k';
+  return Math.round(k) + 'k';
+}
+
 /** A stable key identifying the project a session belongs to (its cwd). */
 export function projectKey(cwd) {
   if (!cwd) return '';
