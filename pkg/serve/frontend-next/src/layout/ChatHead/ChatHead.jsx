@@ -16,6 +16,7 @@ export function ChatHead({
   onTitleClick,
   onGridToggle,
   onRewind,
+  rewindDisabled = false,
   onNotifications,
   onSessionSettings,
   onModelClick,
@@ -53,7 +54,7 @@ export function ChatHead({
           <Kbd>⌘G</Kbd>
         </button>
 
-        <IconButton label="Rewind" onClick={onRewind}>
+        <IconButton label="Rewind" onClick={onRewind} disabled={rewindDisabled}>
           <Rewind size={16} />
         </IconButton>
         <IconButton label="Notifications" onClick={onNotifications}>

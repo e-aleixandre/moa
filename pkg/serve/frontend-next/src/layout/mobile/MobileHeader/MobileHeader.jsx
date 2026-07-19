@@ -17,6 +17,8 @@ export function MobileHeader({
   path,
   ctx,
   onOpenSessions,
+  onRewind,
+  rewindDisabled = false,
 }) {
   const hasCtx = typeof ctx === "number" && ctx >= 0;
   return (
@@ -38,9 +40,15 @@ export function MobileHeader({
           {path}
           {hasCtx ? ` · ctx ${ctx}%` : ""} ·{" "}
         </span>
-        <span class="mhead-rewind">
+        <button
+          type="button"
+          class="mhead-rewind"
+          onClick={onRewind}
+          disabled={rewindDisabled || !onRewind}
+          aria-label="Rewind"
+        >
           <RotateCcw size={11} aria-hidden="true" /> rewind
-        </span>
+        </button>
       </div>
       <button
         type="button"

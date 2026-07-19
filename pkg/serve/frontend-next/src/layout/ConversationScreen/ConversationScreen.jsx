@@ -6,6 +6,7 @@ import { AgentTray } from "../AgentTray/AgentTray.jsx";
 import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
+import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented } from "../../components/index.js";
 import { Button } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
@@ -208,6 +209,10 @@ export function ConversationScreen({ version }) {
     setSettingsOpen(false);
   }, [activeId]);
 
+  // --- Rewind timeline sheet (ChatHead/MobileHeader's Rewind button) ---
+  const [rewindOpen, setRewindOpen] = useState(false);
+  useEffect(() => { setRewindOpen(false); }, [activeId]);
+
   const spine = (
     <Spine
       version={version?.current ? `v${version.current}` : undefined}
@@ -297,7 +302,8 @@ export function ConversationScreen({ version }) {
           thinkingLevel={session.thinking || "off"}
           onTitleClick={() => { /* 5x: rename / session menu */ }}
           onGridToggle={() => { window.location.href = "?view=grid"; }}
-          onRewind={() => { /* 5x: rewind picker */ }}
+          onRewind={() => setRewindOpen(true)}
+          rewindDisabled={settingsBusy}
           onNotifications={() => { /* 5x: notifications */ }}
           onSessionSettings={() => setSettingsOpen((v) => !v)}
           onModelClick={() => setModelOpen((v) => !v)}
@@ -352,6 +358,13 @@ export function ConversationScreen({ version }) {
     <div class="conversation-screen">
       {spine}
       <main class="conversation-main">{body}</main>
+      {session && (
+        <RewindTimeline
+          open={rewindOpen}
+          onClose={() => setRewindOpen(false)}
+          sessionId={session.id}
+        />
+      )}
     </div>
   );
 }

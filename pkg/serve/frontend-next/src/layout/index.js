@@ -15,3 +15,4 @@ export { SessionStrip } from "./mobile/SessionStrip/SessionStrip.jsx";
 export { MobileComposer } from "./mobile/MobileComposer/MobileComposer.jsx";
 export { MobileConversationScreen } from "./mobile/MobileConversationScreen/MobileConversationScreen.jsx";
 export { SessionDrawer } from "./mobile/SessionDrawer/SessionDrawer.jsx";
+export { RewindTimeline } from "./RewindTimeline/RewindTimeline.jsx";

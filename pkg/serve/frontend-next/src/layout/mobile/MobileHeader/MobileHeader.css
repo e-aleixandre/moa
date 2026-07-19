@@ -83,6 +83,30 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  position: relative;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mhead-rewind::after {
+  content: "";
+  position: absolute;
+  inset: -16px -6px;
+}
+
+.mhead-rewind:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mhead-rewind:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .mhead-rewind svg {

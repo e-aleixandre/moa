@@ -14,6 +14,7 @@ import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
 import { SessionStrip } from "../SessionStrip/SessionStrip.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
+import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import "./MobileConversationScreen.css";
@@ -116,6 +117,7 @@ export function MobileConversationScreen() {
   useEffect(() => store.subscribe(setState), []);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [rewindOpen, setRewindOpen] = useState(false);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
@@ -124,6 +126,8 @@ export function MobileConversationScreen() {
   const onSelect = (id) => setActiveSession(id);
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
   const onNew = () => openPalette("create");
+
+  useEffect(() => { setRewindOpen(false); }, [activeId]);
 
   const strip = stripSessions(state.sessions);
   const { list: drawerList, activeCount, savedCount } = drawerSessions(state.sessions, activeId);
@@ -184,6 +188,8 @@ export function MobileConversationScreen() {
         path={session ? shortPath(session.cwd) || session.cwd || "" : ""}
         ctx={session ? session.contextPercent : undefined}
         onOpenSessions={() => setDrawerOpen(true)}
+        onRewind={session ? () => setRewindOpen(true) : undefined}
+        rewindDisabled={session ? session.state === "running" || session.state === "permission" : true}
       />
       <SessionStrip
         sessions={strip}
@@ -203,6 +209,13 @@ export function MobileConversationScreen() {
         onSelect={onSelectFromDrawer}
         onNew={onNew}
       />
+      {session && (
+        <RewindTimeline
+          open={rewindOpen}
+          onClose={() => setRewindOpen(false)}
+          sessionId={session.id}
+        />
+      )}
     </div>
   );
 }
