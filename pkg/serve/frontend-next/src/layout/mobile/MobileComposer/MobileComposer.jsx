@@ -2,6 +2,7 @@ import { useState, useEffect } from "preact/hooks";
 import { Composer } from "../../Composer/Composer.jsx";
 import { activityPhase, activityLabel, formatElapsed } from "../../../data/util/activity.js";
 import { fmtTokens } from "../../../data/util/format.js";
+import { usageForSession, usageLevel, fmtCost } from "../../../data/util/usage-pills.js";
 import "./MobileComposer.css";
 
 // MobileComposer — CONNECTED bottom input for the mobile conversation (5I). It
@@ -37,10 +38,10 @@ function mobileActivity(session, nowMs) {
 
 function fmtSpend(costUSD) {
   if (!costUSD || costUSD <= 0) return undefined;
-  return `$${costUSD.toFixed(2)}`;
+  return fmtCost(costUSD);
 }
 
-export function MobileComposer({ session }) {
+export function MobileComposer({ session, usage }) {
   // Activity clock — tick once a second while the session shows live activity
   // so the gerund rotation and elapsed timer advance on their own (mirrors the
   // desktop ConversationScreen clock).
@@ -59,6 +60,12 @@ export function MobileComposer({ session }) {
   const down = session.runTokensDown || 0;
   const hasTokens = up > 0 || down > 0;
 
+  // 5O: surface the two plan-usage windows (5h / weekly) compactly. Full pill
+  // parity (permission/extra/goal/tasks) collapses to a tap-to-expand row —
+  // deferred to 5P per COHERENCE-DECISIONS INC-07; here we only add the numeric
+  // meters that fit the single mono line without crowding it.
+  const u = usageForSession(session, usage);
+
   return (
     <div class="mcomposer">
       <Composer sessionId={session.id} session={session} shortPlaceholder />
@@ -66,6 +73,12 @@ export function MobileComposer({ session }) {
         {work && <span class="work">● {work}</span>}
         {hasTokens && (
           <span class="tokens">↑{fmtTokens(up)} ↓{fmtTokens(down)}</span>
+        )}
+        {u.fiveHour && (
+          <span class={`meter usage-${usageLevel(u.fiveHour.pct)}`}>5h {u.fiveHour.pct}%</span>
+        )}
+        {u.week && (
+          <span class={`meter usage-${usageLevel(u.week.pct)}`}>wk {u.week.pct}%</span>
         )}
         {spend && <span class="spend">{spend} today</span>}
       </div>

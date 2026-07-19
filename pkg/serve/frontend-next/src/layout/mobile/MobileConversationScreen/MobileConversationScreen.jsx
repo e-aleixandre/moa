@@ -194,7 +194,7 @@ export function MobileConversationScreen() {
               {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
             </div>
           )}
-          <MobileComposer key={session.id} session={session} />
+          <MobileComposer key={session.id} session={session} usage={state.usage} />
         </>
       );
     }

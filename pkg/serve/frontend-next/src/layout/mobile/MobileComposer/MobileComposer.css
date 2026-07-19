@@ -116,3 +116,17 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* Plan-usage windows (5h / weekly) — compact numeric meters, colored by
+   severity (Catppuccin Mocha tokens only). Between the tokens and spend; they
+   drop first if the row is tight. */
+.mcomposer-status .meter {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.mcomposer-status .meter.usage-low { color: var(--green); }
+.mcomposer-status .meter.usage-med { color: var(--yellow); }
+.mcomposer-status .meter.usage-high { color: var(--red); }

@@ -1,7 +1,8 @@
 .status-strip {
   display: flex;
   align-items: center;
-  gap: var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
   padding: var(--space-2) var(--space-2) 0;
   max-width: 844px;
   margin: 0 auto var(--space-4);
@@ -50,3 +51,55 @@
   color: var(--subtext0);
   font-weight: var(--weight-medium);
 }
+
+/* Ported TaskBar pills (5O): compact uppercase badges carrying the plan-usage
+   telemetry. Colors are Catppuccin Mocha tokens only. */
+.status-strip .status-strip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.status-strip .status-strip-pill svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Permission mode */
+.status-strip .status-strip-pill.perm-yolo { color: var(--green); background: var(--green-dim); }
+.status-strip .status-strip-pill.perm-ask { color: var(--yellow); background: var(--yellow-dim); }
+.status-strip .status-strip-pill.perm-auto { color: var(--blue); background: var(--blue-dim); }
+
+/* Plan mode */
+.status-strip .status-strip-pill.plan-planning { color: var(--blue); background: var(--blue-dim); }
+.status-strip .status-strip-pill.plan-ready { color: var(--green); background: var(--green-dim); }
+.status-strip .status-strip-pill.plan-reviewing { color: var(--mauve); background: var(--mauve-dim); }
+.status-strip .status-strip-pill.plan-executing { color: var(--peach); background: var(--peach-dim); }
+
+/* Goal */
+.status-strip .status-strip-pill.goal { color: var(--mauve); background: var(--mauve-dim); }
+
+/* Plan usage windows (5h / weekly) */
+.status-strip .status-strip-pill.usage-low { color: var(--green); background: var(--green-dim); }
+.status-strip .status-strip-pill.usage-med { color: var(--yellow); background: var(--yellow-dim); }
+.status-strip .status-strip-pill.usage-high { color: var(--red); background: var(--red-dim); }
+
+/* Extra usage (pay-as-you-go): muted when enabled but unused, loud once real
+   credits are being spent. */
+.status-strip .status-strip-pill.usage-extra { color: var(--subtext1); background: var(--surface0); }
+.status-strip .status-strip-pill.usage-extra.on { color: var(--red); background: var(--red-dim); }
+
+/* Per-session "on extra usage right now" flag — the loudest badge, shown only
+   while a request is actively being served from pay-as-you-go. */
+.status-strip .status-strip-pill.session-overage { color: var(--base); background: var(--red); }
+
+/* Task progress counter. */
+.status-strip .status-strip-pill.tasks { color: var(--subtext1); background: var(--surface0); }

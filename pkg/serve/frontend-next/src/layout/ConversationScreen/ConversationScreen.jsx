@@ -16,6 +16,7 @@ import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath } from "../../data/util/format.js";
+import { fmtCost } from "../../data/util/usage-pills.js";
 import { formatElapsed } from "../../data/util/activity.js";
 import { activityPhase, activityLabel } from "../../data/util/activity.js";
 import { api } from "../../data/api.js";
@@ -100,7 +101,7 @@ function currentTask(session, nowMs) {
 
 function fmtSpend(costUSD) {
   if (!costUSD || costUSD <= 0) return undefined;
-  return `$${costUSD.toFixed(2)}`;
+  return fmtCost(costUSD);
 }
 
 // deriveModelSpecs maps /api/models entries ({id, name, provider, alias?})
@@ -377,6 +378,8 @@ export function ConversationScreen({ version }) {
               tokensDown={session.runTokensDown}
               task={currentTask(session, nowMs)}
               spend={fmtSpend(session.costUSD)}
+              session={session}
+              usage={state.usage}
             />
           </>
         )}
