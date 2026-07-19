@@ -1,60 +1,17 @@
+/* MobileComposer — wraps the shared <Composer> and adds the mobile status
+   line. The composer keeps its own internal layout; here we only handle the
+   outer padding + bottom safe-area inset and tighten the composer chrome for a
+   narrow viewport. */
 .mcomposer {
   flex: none;
   padding: var(--space-2) var(--space-3)
-    calc(var(--space-3) + env(safe-area-inset-bottom));
+    calc(var(--space-2) + env(safe-area-inset-bottom));
 }
 
-.mcomposer-box {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-2);
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-lg);
-  padding: 6px 6px 6px var(--space-4);
-}
-
-.mcomposer-box:focus-within {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.mcomposer-input {
-  flex: 1;
-  min-width: 0;
-  resize: none;
-  background: none;
-  border: 0;
-  color: var(--text);
-  font-family: var(--font);
-  font-size: var(--text-input);
-  line-height: var(--leading-normal);
-  padding: var(--space-2) 0;
-}
-
-.mcomposer-input::placeholder {
-  color: var(--overlay0);
-}
-
-.mcomposer-input:focus {
-  outline: none;
-}
-
-.mcomposer-send {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  flex: none;
-  border: 0;
-  background: linear-gradient(
-    135deg,
-    var(--peach),
-    color-mix(in srgb, var(--peach) 60%, var(--mauve))
-  );
-  color: var(--crust);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
+/* The shared Composer brings its own .composer-wrap/.composer; drop its own
+   outer padding since .mcomposer already provides it. */
+.mcomposer .composer-wrap {
+  margin: 0;
 }
 
 .mcomposer-status {
@@ -65,12 +22,17 @@
   font-family: var(--mono);
   font-size: var(--text-micro);
   color: var(--overlay0);
+  min-height: 20px;
 }
 
 .mcomposer-status .work {
   color: var(--blue);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mcomposer-status .spend {
   margin-left: auto;
+  white-space: nowrap;
 }

@@ -4,7 +4,7 @@ import "./index.css";
 import { Catalog } from "./catalog/catalog.jsx";
 import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
 import { MobileGallery } from "./catalog/mobile-gallery.jsx";
-import { ConversationScreen, PaneGridScreen } from "./layout/index.js";
+import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
 import { CommandPalette } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
 import { togglePalette, closePalette } from "./data/palette.js";
@@ -288,6 +288,8 @@ function allTileIdsSafe(tree) {
 // galleries).
 function App() {
   const version = useBootstrap();
+  const [state, setState] = useState(store.get());
+  useEffect(() => store.subscribe(setState), []);
 
   if (view === "catalog") {
     return (
@@ -322,7 +324,20 @@ function App() {
       </>
     );
   }
-  // Default: real, store-connected conversation screen (5C). No ViewSwitch (D5).
+  // Default: real, store-connected conversation screen (5C). On a mobile
+  // viewport (state.isMobile, driven by the matchMedia breakpoint in
+  // useBootstrap) mount the connected mobile screen (5I) instead of the desktop
+  // ConversationScreen. Both are single-session containers over the same store;
+  // the GlobalPalette mounts over either (its context derives to 'mobile'). No
+  // ViewSwitch (D5).
+  if (state.isMobile) {
+    return (
+      <>
+        <MobileConversationScreen />
+        <GlobalPalette />
+      </>
+    );
+  }
   return (
     <>
       <ConversationScreen version={version} />

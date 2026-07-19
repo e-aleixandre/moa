@@ -1,260 +1,187 @@
-import { useState } from "preact/hooks";
-import {
-  UserWaypoint,
-  AssistantDocument,
-  CodeBlock,
-  PermissionCard,
-  MobileLedger,
-  LedgerIcons,
-} from "../../../components/index.js";
+import { useState, useEffect } from "preact/hooks";
+import { store } from "../../../data/store.js";
+import { projectStream } from "../../../data/stream-model.js";
+import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
+import { setActiveSession } from "../../../data/tile-actions.js";
+import { openPalette } from "../../../data/palette.js";
+import { shortModel, shortPath, sessionDotState } from "../../../data/util/format.js";
+import { activityPhase } from "../../../data/util/activity.js";
+import { Composer } from "../../Composer/Composer.jsx";
+import { PermissionPrompt, AskUserPrompt, McpBanner } from "../../../components/index.js";
 import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
 import { SessionStrip } from "../SessionStrip/SessionStrip.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
+import { MobileStream } from "./MobileStream.jsx";
 import "./MobileConversationScreen.css";
 
-const { FileText, Search, Pencil, Terminal } = LedgerIcons;
+// MobileConversationScreen — the CONNECTED root container of the mobile
+// conversation screen (5I). It replaces the 4A mock (hardcoded SESSIONS /
+// READ_ROWS / conversation) with the SAME store-driven wiring as the desktop
+// ConversationScreen (5C): subscribe to the store, derive the focused (active)
+// session, project its stream, and pass real props down to the presentational
+// mobile chrome (header / strip / drawer) + the SHARED content components (via
+// MobileStream) + the REAL Composer.
+//
+// Architecture (OPTION B): the mobile screen reuses the desktop's data
+// projection (projectStream) and shared components; the only divergence is the
+// mobile layout chrome and the ledger→MobileLedger remap (MobileStream). No
+// data logic is duplicated. The mock specimen used by the design gallery now
+// lives in mobile-gallery.jsx (see MobileConversationSpecimen there).
 
-const SESSIONS = [
-  { id: "ws", name: "ws race", state: "running" },
-  { id: "deploy", name: "deploy", state: "permission", needs: true, unseen: true },
-  { id: "frontend", name: "frontend", state: "idle" },
-  { id: "sqlite", name: "sqlite", state: "error" },
-];
+// relAge — coarse relative age from an `updated` epoch (mirrors the desktop
+// ConversationScreen's spineSessions helper; kept local to avoid a shared
+// import churn). "now" under a minute, then m/h/d.
+function relAge(updated) {
+  if (!updated) return "";
+  const diff = Date.now() - updated;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "now";
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
+}
 
-const READ_ICONS = (
-  <>
-    <FileText size={13} aria-hidden="true" />
-    <Search size={13} aria-hidden="true" />
-  </>
-);
+// sessionBrief derives the drawer card's "last" line from the real session
+// fields the /api/sessions poll carries: the server-owned brief (progress →
+// attempting) when present, else the live activity label, else the raw state.
+// There is NO per-session "last message" field in the poll model, so we DO NOT
+// invent a summary — we degrade to the brief, then to the activity/state.
+// // TODO(5x): a true last-message preview would need the projection or the API
+// to carry one; not added here (out of scope, would touch the backend/model).
+function sessionBrief(sess) {
+  if (sess.briefProgress) return sess.briefProgress;
+  if (sess.briefAttempting) return sess.briefAttempting;
+  if (sess.error) return sess.error;
+  const phase = activityPhase(sess);
+  if (phase === "waiting") return "Waiting for you";
+  if (sess.state === "running") return "Working…";
+  if (sess.state === "saved") return "Saved";
+  return sess.state || "idle";
+}
 
-const WORK_ICONS = (
-  <>
-    <Pencil size={12} aria-hidden="true" />
-    <Terminal size={13} aria-hidden="true" />
-  </>
-);
+// stripSessions builds the horizontal SessionStrip's chip list: active (non-
+// saved, non-archived) sessions, newest first. `needs` = a blocking prompt.
+function stripSessions(sessions) {
+  return Object.values(sessions)
+    .filter((s) => !s.archived && s.state !== "saved")
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
+    .map((s) => ({
+      id: s.id,
+      name: s.title || s.id,
+      state: sessionDotState(s),
+      unseen: !!s.unseen,
+      needs: !!(s.pendingPerm || s.pendingAsk || s.state === "permission"),
+    }));
+}
 
-const EDIT_DIFF = `@@ -262,6 +262,7 @@
- func (c *client) resume(…) error {
--  snap, last := sess.Log.Snapshot(from)
--  ch := sess.Bus.Subscribe(c.id)
-+  ch := sess.Bus.Subscribe(c.id)
-+  snap, last := sess.Log.Snapshot(from)
-+  c.forward(ch, func(e Event) bool {
-+    return e.Seq > last })
-   return c.stream(ch)`;
+// drawerSessions builds the full bottom-sheet list: active first (newest), then
+// saved. activeCount/savedCount come from the two groups.
+function drawerSessions(sessions, activeId) {
+  const all = Object.values(sessions).filter((s) => !s.archived);
+  const active = all
+    .filter((s) => s.state !== "saved")
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const saved = all
+    .filter((s) => s.state === "saved")
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const toCard = (s) => {
+    const needs = !!(s.pendingPerm || s.pendingAsk || s.state === "permission");
+    return {
+      id: s.id,
+      title: s.title || s.id,
+      state: sessionDotState(s),
+      when: relAge(s.updated),
+      last: sessionBrief(s),
+      needsLabel: needs ? "Needs you:" : undefined,
+      path: shortPath(s.cwd) || s.cwd || "",
+      unseen: !!s.unseen,
+      active: s.id === activeId,
+    };
+  };
+  return {
+    list: [...active, ...saved].map(toCard),
+    activeCount: active.length,
+    savedCount: saved.length,
+  };
+}
 
-const BASH_OUTPUT = `$ go test -race -count=50 -run TestResume ./pkg/serve/
-ok  github.com/ealeixandre/moa/pkg/serve  3.912s
-50/50 runs passed · no data races detected`;
-
-const CODE_SAMPLE = `// subscribe BEFORE snapshot
-ch := sess.Bus.Subscribe(c.id)
-snap, last := sess.Log.Snapshot(from)
-c.forward(ch, func(e Event) bool {
-  return e.Seq > last
-})`;
-
-const READ_ROWS = [
-  {
-    id: "read",
-    kind: "read",
-    name: "read",
-    action: "2 files · pkg/serve",
-    result: "ok",
-    detail: {
-      type: "files",
-      files: [
-        { id: "ws", name: "pkg/serve/ws.go", lines: "lines 210–340" },
-        { id: "ws-test", name: "pkg/serve/ws_test.go", lines: "all · 214 ln" },
-      ],
-    },
-  },
-];
-
-const WORK_ROWS = [
-  {
-    id: "read",
-    kind: "read",
-    name: "read",
-    action: "2 files · pkg/serve",
-    result: "ok",
-    detail: {
-      type: "files",
-      files: [
-        { id: "ws", name: "pkg/serve/ws.go", lines: "lines 210–340" },
-        { id: "ws-test", name: "pkg/serve/ws_test.go", lines: "all · 214 ln" },
-      ],
-    },
-  },
-  {
-    id: "edit",
-    kind: "edit",
-    name: "edit",
-    action: "pkg/serve/ws.go · resume()",
-    result: "+5 −3",
-    detail: {
-      type: "diff",
-      diffText: EDIT_DIFF,
-      filename: "pkg/serve/ws.go",
-      actions: ["open file", "copy diff"],
-    },
-  },
-  {
-    id: "bash",
-    kind: "bash",
-    name: "bash",
-    action: "go test -race -count=50 ./pkg/serve/",
-    result: "ok",
-    detail: {
-      type: "bash",
-      output: BASH_OUTPUT,
-      actions: ["full output", "re-run"],
-    },
-  },
-];
-
-// DRAWER_SESSIONS — mock data for the sessions bottom-sheet (mockup Phone 2).
-// Exported so the gallery specimen can render the drawer open without
-// duplicating the data.
-export const DRAWER_SESSIONS = [
-  {
-    id: "deploy",
-    title: "deploy pulse api",
-    state: "permission",
-    when: "now",
-    needsLabel: "Needs you:",
-    last: "allow `systemctl --user restart pulse-api`?",
-    path: "~/dev/moa/pulse-api",
-    unseen: true,
-  },
-  {
-    id: "ws",
-    title: "ws race fix",
-    state: "running",
-    when: "now",
-    last: "Running full test suite after the resume() fix…",
-    path: "~/dev/moa/main",
-    active: true,
-  },
-  {
-    id: "frontend",
-    title: "frontend polish",
-    state: "idle",
-    when: "2h",
-    last: "Done — pushed 3 commits, esbuild output rebuilt.",
-    path: "~/dev/moa/frontend-polish",
-  },
-  {
-    id: "sqlite",
-    title: "migrate sqlite",
-    state: "error",
-    when: "18m",
-    last: "provider 429 — retrying in 34s (attempt 3/5)",
-    path: "~/dev/moa/migrate",
-    unseen: true,
-  },
-  {
-    id: "verifier",
-    title: "verifier design notes",
-    state: "saved",
-    when: "3d",
-    last: "Saved · 84 messages",
-    path: "~/dev/moa/main",
-  },
-];
-
-const noop = () => {};
-
-// MobileConversationScreen — root organism of the mobile conversation
-// screen (sub-phase 4A). Combines header + session strip + scrollable stream +
-// composer with mock data faithful to the mockup. The sessions drawer (4B) is
-// opened from the header and anchored inside the conversation container.
 export function MobileConversationScreen() {
+  const [state, setState] = useState(store.get());
+  useEffect(() => store.subscribe(setState), []);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const session = focusedSession(state);
+  const activeId = focusedSessionId(state);
+  const loaded = state.sessionsLoaded;
+
+  const onSelect = (id) => setActiveSession(id);
+  const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
+  const onNew = () => openPalette("create");
+
+  const strip = stripSessions(state.sessions);
+  const { list: drawerList, activeCount, savedCount } = drawerSessions(state.sessions, activeId);
+
+  let body;
+  if (!loaded) {
+    body = <div class="mconv-placeholder">Loading sessions…</div>;
+  } else if (!session) {
+    body = (
+      <div class="mconv-empty">
+        <p class="mconv-empty-title">No active session</p>
+        <p class="mconv-empty-hint">Open the sessions sheet to pick one, or start a new one.</p>
+      </div>
+    );
+  } else {
+    const blocks = projectStream(session);
+    const blocking =
+      session.untrustedMcp || session.pendingPerm || session.pendingAsk;
+    body = (
+      <>
+        <MobileStream session={session} blocks={blocks} />
+        {blocking && (
+          <div class="mconv-blocking">
+            {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
+            {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+            {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
+          </div>
+        )}
+        <MobileComposer key={session.id} session={session} />
+      </>
+    );
+  }
+
   return (
     <div class="mconv">
       <MobileHeader
-        state="running"
-        title="ws race fix"
-        model="sol"
-        level="high"
-        path="~/dev/moa/main"
-        ctx={62}
+        state={session ? session.state || "idle" : "idle"}
+        title={session ? session.title || session.id : "moa"}
+        model={session ? shortModel(session.model) || session.model || "" : ""}
+        level={session ? session.thinking || "off" : "off"}
+        path={session ? shortPath(session.cwd) || session.cwd || "" : ""}
+        ctx={session ? session.contextPercent : undefined}
         onOpenSessions={() => setDrawerOpen(true)}
       />
       <SessionStrip
-        sessions={SESSIONS}
-        activeId="ws"
-        onSelect={noop}
-        onNew={noop}
+        sessions={strip}
+        activeId={activeId}
+        onSelect={onSelect}
+        onNew={onNew}
       />
 
-      <div class="mconv-stream">
-        <UserWaypoint time="10:41">
-          <p>
-            Fix the reconnect race in <code>ws.go</code>, with a regression
-            test.
-          </p>
-        </UserWaypoint>
-
-        <AssistantDocument>
-          <p>
-            Found it — the subscription registers <strong>after</strong> the
-            snapshot read, so events in that window are lost.
-          </p>
-
-          <MobileLedger
-            summary="read 2 files · searched pkg/bus"
-            icons={READ_ICONS}
-            rows={READ_ROWS}
-          />
-
-          <MobileLedger
-            summary="2 edits · tests ok"
-            icons={WORK_ICONS}
-            rows={WORK_ROWS}
-            defaultOpen
-            defaultOpenRowIds={["read", "edit", "bash"]}
-          />
-
-          <CodeBlock code={CODE_SAMPLE} lang="go" showHeader={false} />
-
-          <p>
-            <strong>Fixed</strong> — stress test passes 50/50 with{" "}
-            <code>-race</code>. One thing before the full suite:
-          </p>
-        </AssistantDocument>
-
-        <PermissionCard
-          title="Allow this command?"
-          command="go test -race ./... && go vet ./..."
-          timer="0:07"
-          alwaysLabel="always allow go test"
-          onAllow={noop}
-          onAlways={noop}
-          onDeny={noop}
-        />
-      </div>
-
-      <MobileComposer
-        status="running tests"
-        up="41k"
-        down="8.7k"
-        spend="$1.84"
-      />
+      {body}
 
       <SessionDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        sessions={DRAWER_SESSIONS}
-        activeCount={4}
-        savedCount={2}
-        onSelect={() => setDrawerOpen(false)}
-        onNew={noop}
-        onEdit={noop}
+        sessions={drawerList}
+        activeCount={activeCount}
+        savedCount={savedCount}
+        onSelect={onSelectFromDrawer}
+        onNew={onNew}
       />
     </div>
   );

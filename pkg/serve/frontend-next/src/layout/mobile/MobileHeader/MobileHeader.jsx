@@ -1,6 +1,7 @@
 import { RotateCcw } from "lucide-preact";
 import { StateDot } from "../../../primitives/index.js";
 import { ModelPill } from "../../../components/index.js";
+import { modelAccent } from "../../../data/selectors.js";
 import "./MobileHeader.css";
 
 // MobileHeader — session header for the mobile conversation screen.
@@ -17,21 +18,25 @@ export function MobileHeader({
   ctx,
   onOpenSessions,
 }) {
+  const hasCtx = typeof ctx === "number" && ctx >= 0;
   return (
     <header class="mhead">
       <div class="mhead-row">
         <StateDot state={state} size={9} />
         <span class="mhead-title">{title}</span>
-        <ModelPill
-          model={model}
-          level={level}
-          variant="glyph"
-          accent="lavender"
-        />
+        {model && (
+          <ModelPill
+            model={model}
+            level={level}
+            variant="glyph"
+            accent={modelAccent(model)}
+          />
+        )}
       </div>
       <div class="mhead-sub">
         <span class="mhead-meta">
-          {path} · ctx {ctx}% ·{" "}
+          {path}
+          {hasCtx ? ` · ctx ${ctx}%` : ""} ·{" "}
         </span>
         <span class="mhead-rewind">
           <RotateCcw size={11} aria-hidden="true" /> rewind

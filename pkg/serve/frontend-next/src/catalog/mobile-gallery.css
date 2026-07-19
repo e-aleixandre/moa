@@ -71,3 +71,53 @@
   margin-top: var(--space-4);
   letter-spacing: var(--tracking-tight);
 }
+
+/* Static composer stand-in for the gallery (the real MobileComposer wraps the
+   store-bound Composer). Mirrors the old mock's box + anti-zoom textarea. */
+.mgal-composer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  padding: 6px 6px 6px var(--space-4);
+}
+
+.mgal-composer-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-input);
+  line-height: var(--leading-normal);
+  padding: var(--space-2) 0;
+}
+
+.mgal-composer-input::placeholder {
+  color: var(--overlay0);
+}
+
+.mgal-composer-input:focus {
+  outline: none;
+}
+
+.mgal-composer-send {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  flex: none;
+  border: 0;
+  background: linear-gradient(
+    135deg,
+    var(--peach),
+    color-mix(in srgb, var(--peach) 60%, var(--mauve))
+  );
+  color: var(--crust);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}

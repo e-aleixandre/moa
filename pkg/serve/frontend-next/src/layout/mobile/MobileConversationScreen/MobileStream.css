@@ -1,0 +1,44 @@
+/* MobileStream — the scrollable mobile conversation area. `.mstream` is the
+   flexed, positioned frame (anchors the floating "new messages" button);
+   `.mconv-stream` (shared with MobileConversationScreen.css) is the scroller. */
+.mstream {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mstream .mconv-stream {
+  flex: 1;
+}
+
+.mstream-system {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  padding: var(--space-2) 0;
+}
+
+.mstream-new-btn {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  min-height: 44px;
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-full);
+  background: var(--surface0);
+  color: var(--text);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mstream .mconv-stream {
+    scroll-behavior: auto;
+  }
+}
