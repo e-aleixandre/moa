@@ -42,3 +42,72 @@
     scroll-behavior: auto;
   }
 }
+
+/* ── Mobile density for the shared content components ──
+   The stream reuses the desktop content components (AssistantDocument prose,
+   UserWaypoint, CodeBlock/DiffBlock), whose sizes/margins are tuned for a wide
+   column. Scope a phone rhythm to .mconv only (mockup .m-ai / .m-user / .m-code),
+   never touching the shared component CSS or the desktop .stream. */
+
+/* Assistant prose */
+.mconv .doc {
+  margin: 0 0 14px; /* px structural (mockup .m-ai) */
+}
+
+.mconv .doc p {
+  font-size: var(--text-base);
+  line-height: 1.55; /* mockup .m-ai p; no exact token */
+  margin: 0 0 10px; /* px structural (mockup) */
+  max-width: none; /* 68ch is irrelevant at 390px */
+}
+
+.mconv .doc p:last-child {
+  margin-bottom: 0;
+}
+
+.mconv .doc ul {
+  margin-bottom: 10px;
+}
+
+/* User waypoint */
+.mconv .waypoint {
+  border: 0;
+  border-left: 3px solid var(--peach);
+  border-radius: 3px 12px 12px 3px; /* px structural (mockup .m-user) */
+  padding: 10px 13px; /* px structural (mockup .m-user) */
+  margin: 0 0 var(--space-4);
+}
+
+.mconv .waypoint .body {
+  font-size: var(--text-base);
+}
+
+.mconv .waypoint .who {
+  font-size: var(--text-nano);
+}
+
+/* Code & diff blocks at mobile scale */
+.mconv .code {
+  border-radius: var(--radius-md);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.mconv .code pre {
+  padding: 10px 13px; /* px structural (mockup .m-code) */
+}
+
+.mconv .code pre code,
+.mconv .code.diff pre {
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+/* Inside the MobileLedger L3 detail, even denser + kill the inherited margin. */
+.mconv .mledger-detail .code {
+  margin: var(--space-2) 0 0;
+}
+
+.mconv .mledger-detail .code pre code,
+.mconv .mledger-detail .code.diff pre {
+  font-size: var(--text-micro);
+}

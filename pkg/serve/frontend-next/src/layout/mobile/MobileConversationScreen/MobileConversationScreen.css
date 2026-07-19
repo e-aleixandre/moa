@@ -2,7 +2,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh; /* fallback for browsers without dvh */
+  height: 100dvh; /* dynamic viewport: excludes the mobile browser toolbar */
   background: var(--crust);
   overflow: hidden;
 }
@@ -20,14 +21,42 @@
 }
 
 /* Blocking prompts (permission / ask / mcp) sit between the stream and the
-   composer, exactly like the desktop .conversation-blocking. */
+   composer, exactly like the desktop .conversation-blocking. Scoped mobile
+   tweaks (mockup .m-perm): align the padding with the stream (16px), let the
+   card span full width, tighten the command box, and hide the keyboard hint
+   (no keyboard on touch). PermissionCard is shared — everything here is scoped
+   to .mconv-blocking (a mobile-only class), never the card's own CSS. */
 .mconv-blocking {
   flex: none;
-  padding: 0 var(--space-3) var(--space-2);
+  padding: 0 var(--space-4) var(--space-2);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
+
+.mconv-blocking .perm-card {
+  max-width: none;
+  padding: 13px 14px; /* px structural (mockup .m-perm) */
+}
+
+.mconv-blocking .perm-card .perm-cmd {
+  font-size: var(--text-xs);
+  padding: 9px 11px; /* px structural (mockup .m-perm .cmd) */
+  border-radius: var(--radius-md);
+}
+
+.mconv-blocking .perm-card .perm-actions .hint {
+  display: none;
+}
+
+/* Allow/Deny (and the optional rule/feedback toggles) grow to share the row on
+   a narrow screen instead of clustering at content width, but keep a min-width
+   so with several buttons they wrap cleanly rather than squishing. */
+.mconv-blocking .perm-card .perm-actions > .button {
+  flex: 1 1 auto;
+  min-width: 96px; /* px structural: comfortable tap width before wrapping */
+}
+
 
 /* Loading / empty states — centered in the space between header strip and
    composer. */

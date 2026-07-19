@@ -6,29 +6,33 @@ import "./MobileComposer.css";
 // MobileComposer — CONNECTED bottom input for the mobile conversation (5I). It
 // wraps the REAL, shared <Composer> (5D/5E: send / queue / slash / @-mention /
 // attachments / stop) rather than duplicating any of that logic — the only
-// mobile addition is the mono STATUS LINE below it (current work · context ·
-// today's spend), the same data the desktop StatusStrip shows. Visual fit is
-// handled with mobile CSS only (see MobileComposer.css); the composer's own
-// textarea already uses --text-input (≥16px) so iOS never auto-zooms, and this
-// wrapper keeps the bottom safe-area inset.
+// mobile addition is the mono STATUS LINE below it. The line mirrors the mockup
+// (.m-status): what the agent is DOING on the left (blue dot + activity), the
+// session spend on the right. Context % is NOT repeated here — it already lives
+// in the header. Live token ↑/↓ counts (in the mockup) have no per-session data
+// source in the backend, so they're intentionally omitted rather than faked.
+// Visual fit is CSS-only (MobileComposer.css); the composer's own textarea uses
+// --text-input (≥16px) so iOS never auto-zooms, and this wrapper keeps the
+// bottom safe-area inset.
 
-// mobileWork derives the status line's "work" label: the first not-done task,
-// else the live activity label + elapsed while running, else nothing.
-function mobileWork(session, nowMs) {
-  const tasks = session.tasks || [];
-  const pending = tasks.find((t) => t.status !== "done");
-  if (pending) return pending.title;
+// mobileActivity derives the status line's "doing" label: the live activity
+// (gerund + elapsed while running), else the first not-done task title as a
+// fallback when there's no live phase, else nothing (hidden, not invented).
+function mobileActivity(session, nowMs) {
   const phase = activityPhase(session);
-  if (!phase) return undefined;
-  const runStartedAtMs = session.runStartedAtMs || 0;
-  const elapsedMs = runStartedAtMs ? Math.max(0, nowMs - runStartedAtMs) : 0;
-  const label = activityLabel(phase, elapsedMs);
-  const showTimer = runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
-  if (showTimer) {
-    const t = formatElapsed(elapsedMs);
-    return t ? `${label} · ${t}` : label;
+  if (phase) {
+    const runStartedAtMs = session.runStartedAtMs || 0;
+    const elapsedMs = runStartedAtMs ? Math.max(0, nowMs - runStartedAtMs) : 0;
+    const label = activityLabel(phase, elapsedMs);
+    const showTimer = runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
+    if (showTimer) {
+      const t = formatElapsed(elapsedMs);
+      return t ? `${label} · ${t}` : label;
+    }
+    return label;
   }
-  return label;
+  const pending = (session.tasks || []).find((t) => t.status !== "done");
+  return pending ? pending.title : undefined;
 }
 
 function fmtSpend(costUSD) {
@@ -49,17 +53,14 @@ export function MobileComposer({ session }) {
     return () => clearInterval(t);
   }, [active]);
 
-  const work = mobileWork(session, nowMs);
-  const ctx = session.contextPercent;
-  const hasCtx = typeof ctx === "number" && ctx >= 0;
+  const work = mobileActivity(session, nowMs);
   const spend = fmtSpend(session.costUSD);
 
   return (
     <div class="mcomposer">
-      <Composer sessionId={session.id} session={session} />
+      <Composer sessionId={session.id} session={session} shortPlaceholder />
       <div class="mcomposer-status">
         {work && <span class="work">● {work}</span>}
-        {hasCtx && <span class="ctx">ctx {ctx}%</span>}
         {spend && <span class="spend">{spend} today</span>}
       </div>
     </div>

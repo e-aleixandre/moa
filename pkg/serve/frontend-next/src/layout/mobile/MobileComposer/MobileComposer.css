@@ -1,17 +1,86 @@
 /* MobileComposer — wraps the shared <Composer> and adds the mobile status
-   line. The composer keeps its own internal layout; here we only handle the
-   outer padding + bottom safe-area inset and tighten the composer chrome for a
-   narrow viewport. */
+   line. On a phone the shared composer is reshaped (CSS only, scoped here) from
+   the desktop's tall boxed form into a single-row pill (mockup .m-input):
+   [+ attach] [textarea] [send], no shadow, 16px radius. The slash button is
+   hidden (typing "/" opens the same popup; ⌘K also lists commands); the
+   queue-note chip drops to a full-width second row of the pill when present.
+   Nothing above .composer (cache-warn, attach strip, popups) is touched, and
+   the desktop `.composer-wrap` CSS is never overridden. */
 .mcomposer {
   flex: none;
   padding: var(--space-2) var(--space-3)
-    calc(var(--space-2) + env(safe-area-inset-bottom));
+    calc(14px + env(safe-area-inset-bottom));
 }
 
 /* The shared Composer brings its own .composer-wrap/.composer; drop its own
    outer padding since .mcomposer already provides it. */
 .mcomposer .composer-wrap {
   margin: 0;
+  padding: 0;
+  max-width: none;
+}
+
+/* .composer → single-row pill via a 3-column grid. The .composer-bar becomes
+   display:contents so its children (+, /, queue-note, send) place directly
+   onto this grid. */
+.mcomposer .composer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: end;
+  column-gap: var(--space-2);
+  padding: 6px;
+  border-radius: 16px; /* px structural (mockup .m-input); --radius-lg=14 too small */
+  box-shadow: none;
+}
+
+.mcomposer .composer:focus-within {
+  border-color: var(--mauve);
+  box-shadow: none;
+}
+
+.mcomposer .composer-bar {
+  display: contents;
+  padding: 0;
+}
+
+.mcomposer .composer-textarea {
+  grid-row: 1;
+  grid-column: 2;
+  min-height: 36px;
+  padding: 6px 4px;
+  /* font-size stays --text-input (16px) — never lower it (iOS auto-zoom). */
+}
+
+.mcomposer .composer-btn-attach {
+  grid-row: 1;
+  grid-column: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--overlay1);
+}
+
+/* On mobile the "/" affordance is redundant (type "/" to open the popup). */
+.mcomposer .composer-btn-slash {
+  display: none;
+}
+
+.mcomposer .composer-send {
+  grid-row: 1;
+  grid-column: 3;
+  margin-left: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px; /* px structural (mockup .m-send) */
+}
+
+/* queue-note (recall chip) → full-width second row of the pill, only present
+   when there are queued steers. */
+.mcomposer .queue-note {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
 }
 
 .mcomposer-status {

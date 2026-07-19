@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel } from './format.js';
 
 test('formatDiff numbers lines from startLine', () => {
   const out = formatDiff('old line\nsecond', 'new line\nsecond', 260);
@@ -85,4 +85,24 @@ test('isRecentSession: older than the window is not recent', () => {
 test('isRecentSession: no timestamp counts as recent (never silently hidden)', () => {
   expect(isRecentSession({})).toBe(true);
   expect(isRecentSession(null)).toBe(true);
+});
+
+test('mobileModelLabel: a known alias wins', () => {
+  expect(mobileModelLabel('anthropic/sol-2')).toBe('sol');
+  expect(mobileModelLabel('Fable Design')).toBe('fable');
+});
+
+test('mobileModelLabel: a curated display name (has spaces) is kept as-is', () => {
+  expect(mobileModelLabel('Claude Opus 4.8')).toBe('Claude Opus 4.8');
+});
+
+test('mobileModelLabel: a technical id drops the vendor prefix and truncates', () => {
+  expect(mobileModelLabel('anthropic/claude-opus-4-8')).toBe('opus-4-8');
+  expect(mobileModelLabel('openai/gpt-5-turbo-preview')).toBe('5-turbo-pre…');
+});
+
+test('mobileModelLabel: empty/nullish is the empty string', () => {
+  expect(mobileModelLabel('')).toBe('');
+  expect(mobileModelLabel(null)).toBe('');
+  expect(mobileModelLabel(undefined)).toBe('');
 });

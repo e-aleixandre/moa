@@ -1,6 +1,6 @@
 .mstrip {
   display: flex;
-  gap: var(--space-2);
+  gap: 6px;
   padding: var(--space-2) var(--space-4);
   overflow-x: auto;
   flex: none;
@@ -23,14 +23,23 @@
   align-items: center;
   gap: 7px;
   flex: none;
-  min-height: 44px;
+  min-height: 0;
   background: var(--base);
   border: 1px solid var(--surface0);
   border-radius: var(--radius-full);
-  padding: 6px var(--space-3);
+  padding: 5px 12px; /* px structural (mockup .chip) */
   font-size: var(--text-sm);
   color: var(--subtext1);
   cursor: pointer;
+  position: relative;
+}
+
+/* Slim chip, but keep a ≥44px vertical touch target via an invisible hit-area
+   (horizontal inset 0 — the strip gap keeps chips from overlapping). */
+.mstrip-chip::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0;
 }
 
 .mstrip-name {

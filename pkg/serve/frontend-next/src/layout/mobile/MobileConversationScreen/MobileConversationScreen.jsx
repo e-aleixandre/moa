@@ -4,7 +4,7 @@ import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
-import { shortModel, shortPath, sessionDotState } from "../../../data/util/format.js";
+import { mobileModelLabel, shortPath, sessionDotState } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { PermissionPrompt, AskUserPrompt, McpBanner } from "../../../components/index.js";
@@ -159,7 +159,7 @@ export function MobileConversationScreen() {
       <MobileHeader
         state={session ? session.state || "idle" : "idle"}
         title={session ? session.title || session.id : "moa"}
-        model={session ? shortModel(session.model) || session.model || "" : ""}
+        model={session ? mobileModelLabel(session.model) : ""}
         level={session ? session.thinking || "off" : "off"}
         path={session ? shortPath(session.cwd) || session.cwd || "" : ""}
         ctx={session ? session.contextPercent : undefined}

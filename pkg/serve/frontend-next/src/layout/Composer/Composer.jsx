@@ -65,7 +65,7 @@ function saveDraft(id, text) {
   } catch (_) { /* ignore */ }
 }
 
-export function Composer({ sessionId, session }) {
+export function Composer({ sessionId, session, shortPlaceholder = false }) {
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
   const sessionState = session?.state;
@@ -696,7 +696,12 @@ export function Composer({ sessionId, session }) {
   const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
 
   const summary = queueSummary(pendingSteers);
-  const placeholder = busy ? "Steer the agent…" : "Message moa — Enter to send, ⇧Enter for a new line, ⌥Enter to queue…";
+  // shortPlaceholder (mobile): the multi-line keyboard hint doesn't fit the
+  // single-line pill and reads noisy on a phone — use the short prompt.
+  const idlePlaceholder = shortPlaceholder
+    ? "Message moa…"
+    : "Message moa — Enter to send, ⇧Enter for a new line, ⌥Enter to queue…";
+  const placeholder = busy ? "Steer the agent…" : idlePlaceholder;
 
   return (
     <div class="composer-wrap">
@@ -765,10 +770,10 @@ export function Composer({ sessionId, session }) {
           onPaste={handlePaste}
         />
         <div class="composer-bar">
-          <button type="button" class="composer-btn" title="Attach files" aria-label="Attach" onClick={handleAttachClick}>
+          <button type="button" class="composer-btn composer-btn-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick}>
             <Plus size={15} />
           </button>
-          <button type="button" class="composer-btn" title="Slash commands" aria-label="Slash commands" onClick={handleSlashButton}>
+          <button type="button" class="composer-btn composer-btn-slash" title="Slash commands" aria-label="Slash commands" onClick={handleSlashButton}>
             <Slash size={14} />
           </button>
           {summary && (

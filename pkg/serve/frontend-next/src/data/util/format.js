@@ -213,6 +213,24 @@ export function shortModel(model) {
   return parts.length > 1 ? parts.slice(1).join('/') : model;
 }
 
+/** A compact model label for the narrow mobile header pill. Prefers a known
+ *  short alias (sol/fable/terra/haiku — the same family as MODEL_ACCENT) when
+ *  the model name contains one. A curated display name (has spaces, e.g.
+ *  "Claude Opus 4.8") is trusted as-is. A raw technical id drops a noisy vendor
+ *  prefix ("claude-"/"gpt-") and truncates ("claude-opus-4-8" → "opus-4-8"). */
+const MODEL_ALIASES = ['sol', 'fable', 'terra', 'haiku'];
+export function mobileModelLabel(model) {
+  const short = shortModel(model || '');
+  if (!short) return '';
+  const lower = short.toLowerCase();
+  for (const alias of MODEL_ALIASES) {
+    if (lower.includes(alias)) return alias;
+  }
+  if (short.includes(' ')) return short; // curated display name — trust it
+  const trimmed = short.replace(/^(claude-|gpt-|models\/)/i, '');
+  return trimmed.length > 12 ? trimmed.slice(0, 11) + '…' : trimmed;
+}
+
 /** A stable key identifying the project a session belongs to (its cwd). */
 export function projectKey(cwd) {
   if (!cwd) return '';

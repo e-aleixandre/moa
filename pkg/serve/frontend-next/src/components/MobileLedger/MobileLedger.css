@@ -181,8 +181,16 @@
   color: var(--overlay1);
   background: none;
   border: 1px solid var(--surface0);
-  border-radius: var(--radius-sm);
-  min-height: 44px;
+  border-radius: 7px; /* px structural (mockup .m-detail-actions span) */
+  min-height: 0;
   padding: 3px var(--space-3);
   cursor: pointer;
+  position: relative;
+}
+
+/* Slim action chip, ≥44px touch target via invisible hit-area. */
+.mledger-action::after {
+  content: "";
+  position: absolute;
+  inset: -12px -4px;
 }

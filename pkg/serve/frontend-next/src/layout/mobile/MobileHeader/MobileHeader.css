@@ -1,6 +1,11 @@
 .mhead {
   flex: none;
-  padding: calc(max(var(--space-12), env(safe-area-inset-top)) + var(--space-2)) var(--space-4) var(--space-3);
+  /* Top padding = a compact base + whatever the device's safe-area (notch /
+     status bar) needs. In an installed PWA the inset fills the status-bar zone;
+     in a browser tab (no inset) it collapses to the base so there's no dead
+     space under the address bar. */
+  padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4)
+    var(--space-2);
   background: linear-gradient(
     var(--mantle),
     color-mix(in srgb, var(--mantle) 40%, var(--crust))
@@ -18,11 +23,45 @@
   flex: 1;
   min-width: 0;
   font-weight: var(--weight-semibold);
-  font-size: var(--text-lg);
+  font-size: 16px; /* px structural: between --text-md 15 and --text-lg 17 (mockup .m-title) */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ModelPill in the mobile header: the shared pill is styled for the desktop
+   ChatHead (sans, --text-base, full radius) and looks oversized on a phone.
+   Scope a compact mono treatment to .mhead only (mockup .m-model) — the pill
+   VARIANT (bars/dial/glyph) and its accent are untouched; this is proportion
+   only. */
+.mhead .model-pill {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-normal);
+  padding: 3px 8px; /* px structural (mockup .m-model) */
+  gap: var(--space-1);
+  background: var(--surface0);
+  border: 0;
+  border-radius: 7px; /* px structural (mockup .m-model) */
+  position: relative;
+}
+
+.mhead .model-pill .m-name {
+  font-family: var(--mono);
+}
+
+.mhead .model-pill .thinking-meter.variant-glyph {
+  font-size: var(--text-nano);
+  letter-spacing: 1px;
+}
+
+/* Keep the visually-small pill a ≥44px touch target. */
+.mhead .model-pill::after {
+  content: "";
+  position: absolute;
+  inset: -12px -6px;
+}
+
 
 .mhead-row .model-pill {
   margin-left: auto;
