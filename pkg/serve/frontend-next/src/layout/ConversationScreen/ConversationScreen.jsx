@@ -7,7 +7,7 @@ import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented, NotificationSettings } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Segmented, NotificationSettings, UsagePanel } from "../../components/index.js";
 import { Button } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -236,6 +236,28 @@ export function ConversationScreen({ version }) {
   const [rewindOpen, setRewindOpen] = useState(false);
   useEffect(() => { setRewindOpen(false); }, [activeId]);
 
+  // --- Usage panel popover (StatusStrip's cost segment) — level 2 telemetry
+  // (TELEMETRY-SETTINGS-REDESIGN §2). Anchored to the strip, not the head, but
+  // reuses the exact same click-outside + Escape wiring as the head popovers.
+  const [usageOpen, setUsageOpen] = useState(false);
+  const usageAnchorRef = useRef(null);
+  useEffect(() => { setUsageOpen(false); }, [activeId]);
+  useEffect(() => {
+    if (!usageOpen) return;
+    const unregister = registerOverlay("conv-usage-popover");
+    const onDocDown = (e) => {
+      if (usageAnchorRef.current && !usageAnchorRef.current.contains(e.target)) setUsageOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setUsageOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      unregister();
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [usageOpen]);
+
   const spine = (
     <Spine
       version={version?.current ? `v${version.current}` : undefined}
@@ -372,15 +394,29 @@ export function ConversationScreen({ version }) {
               onOpen={(id) => openPersistedSubagent(session.id, id)}
             />
             <Composer key={session.id} sessionId={session.id} session={session} />
-            <StatusStrip
-              ctxPercent={session.contextPercent}
-              tokensUp={session.runTokensUp}
-              tokensDown={session.runTokensDown}
-              task={currentTask(session, nowMs)}
-              spend={fmtSpend(session.costUSD)}
-              session={session}
-              usage={state.usage}
-            />
+            <div class="status-strip-anchor" ref={usageAnchorRef}>
+              <StatusStrip
+                ctxPercent={session.contextPercent}
+                tokensUp={session.runTokensUp}
+                tokensDown={session.runTokensDown}
+                task={currentTask(session, nowMs)}
+                spend={fmtSpend(session.costUSD)}
+                session={session}
+                usage={state.usage}
+                onOpenUsage={() => setUsageOpen((v) => !v)}
+                showTokens={true}
+              />
+              {usageOpen && (
+                <div class="status-strip-usage-popover">
+                  <UsagePanel
+                    session={session}
+                    usage={state.usage}
+                    ctxPercent={session.contextPercent}
+                    costUSD={session.costUSD}
+                  />
+                </div>
+              )}
+            </div>
           </>
         )}
       </>

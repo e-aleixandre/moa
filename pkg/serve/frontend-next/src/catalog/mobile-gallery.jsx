@@ -178,8 +178,11 @@ const noop = () => {};
 
 // MobileComposerSpecimen — a dumb stand-in for the connected MobileComposer
 // (which wraps the store-bound Composer). Mirrors the old mock's editable
-// textarea (font-size:var(--text-input) to avoid iOS zoom) + status line.
-function MobileComposerSpecimen({ status, tokens, spend }) {
+// textarea (font-size:var(--text-input) to avoid iOS zoom) + the redesigned
+// status line (TELEMETRY-SETTINGS-REDESIGN §2): activity · perm chip · spend,
+// where spend is the Usage panel trigger. Fixed 5h/wk meters and per-run tokens
+// are gone (they moved to the Usage panel).
+function MobileComposerSpecimen({ status, perm = "yolo", spend }) {
   return (
     <div class="mcomposer">
       <div class="mgal-composer-box">
@@ -195,8 +198,10 @@ function MobileComposerSpecimen({ status, tokens, spend }) {
       </div>
       <div class="mcomposer-status">
         <span class="work">● {status}</span>
-        {tokens && <span class="tokens">{tokens}</span>}
-        <span class="spend">{spend} today</span>
+        <span class={`mstatus-perm perm-${perm}`}>{perm.toUpperCase()}</span>
+        <button type="button" class="spend spend-btn" aria-label="Show usage">
+          {spend} today
+        </button>
       </div>
     </div>
   );
@@ -270,7 +275,7 @@ export function MobileConversationSpecimen() {
         />
       </div>
 
-      <MobileComposerSpecimen status="running tests" tokens="↑41k ↓8.7k" spend="$1.84" />
+      <MobileComposerSpecimen status="running tests" perm="yolo" spend="$1.84" />
     </div>
   );
 }

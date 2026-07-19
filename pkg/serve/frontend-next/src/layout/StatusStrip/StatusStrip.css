@@ -52,6 +52,79 @@
   font-weight: var(--weight-medium);
 }
 
+/* Cost segment as the Usage panel trigger. Compact visual, but a ≥44px hit
+   area via a pseudo-element (the P7/INC-35 technique used elsewhere). Dotted
+   underline on hover (desktop) signals it opens the panel. */
+.status-strip .status-strip-spend-btn {
+  position: relative;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin-left: auto;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.status-strip .status-strip-spend-btn::after {
+  content: "";
+  position: absolute;
+  inset: -14px -8px;
+}
+
+.status-strip .status-strip-spend-btn b {
+  border-bottom: 1px dotted transparent;
+}
+
+@media (hover: hover) {
+  .status-strip .status-strip-spend-btn:hover b {
+    border-bottom-color: var(--overlay1);
+  }
+}
+
+.status-strip .status-strip-spend-btn:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Gauge affordance — the panel is reachable even before a session has any
+   cost. Discreet, right-aligned, with a ≥44px hit area. */
+.status-strip .status-strip-gauge {
+  position: relative;
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--overlay0);
+  cursor: pointer;
+}
+
+.status-strip .status-strip-gauge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.status-strip .status-strip-gauge::after {
+  content: "";
+  position: absolute;
+  inset: -14px -10px;
+}
+
+@media (hover: hover) {
+  .status-strip .status-strip-gauge:hover {
+    color: var(--subtext0);
+  }
+}
+
+.status-strip .status-strip-gauge:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 /* Ported TaskBar pills (5O): compact uppercase badges carrying the plan-usage
    telemetry. Colors are Catppuccin Mocha tokens only. */
 .status-strip .status-strip-pill {
@@ -91,11 +164,6 @@
 .status-strip .status-strip-pill.usage-low { color: var(--green); background: var(--green-dim); }
 .status-strip .status-strip-pill.usage-med { color: var(--yellow); background: var(--yellow-dim); }
 .status-strip .status-strip-pill.usage-high { color: var(--red); background: var(--red-dim); }
-
-/* Extra usage (pay-as-you-go): muted when enabled but unused, loud once real
-   credits are being spent. */
-.status-strip .status-strip-pill.usage-extra { color: var(--subtext1); background: var(--surface0); }
-.status-strip .status-strip-pill.usage-extra.on { color: var(--red); background: var(--red-dim); }
 
 /* Per-session "on extra usage right now" flag — the loudest badge, shown only
    while a request is actively being served from pay-as-you-go. */

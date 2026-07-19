@@ -1,20 +1,28 @@
 import "./StatusStrip.css";
-import { ClipboardList, Map, Shield, Zap, Flame, Target } from "lucide-preact";
+import { ClipboardList, Map, Shield, Flame, Target, Gauge } from "lucide-preact";
 import { fmtTokens } from "../../data/util/format.js";
-import { usageForSession, usageLevel, fmtReset, money } from "../../data/util/usage-pills.js";
+import { fmtReset } from "../../data/util/usage-pills.js";
+import { statusStripModel } from "../../data/util/status-strip-model.js";
 
 // StatusStrip — mono strip under the composer: the app's bottom telemetry line,
-// mirroring the TUI statusline (5O). It shows the context ring, per-run tokens,
-// the current task and today's spend PLUS the ported TaskBar pills: permission
-// mode, extra-usage / session-overage, the plan 5h + weekly windows, plan mode,
-// goal and task progress. All plan-usage numbers live HERE, never in the header
-// (coherence decision P2/INC-07).
+// mirroring the TUI statusline. This is the TWO-LEVEL redesign (TELEMETRY-
+// SETTINGS-REDESIGN spec §2/§5): the line is glance + the door to the Usage
+// panel, NOT the whole accounting dump ported in 5O.
 //
-// The connected container (ConversationScreen) passes the full `session` and
-// the global `usage` snapshot (from /api/usage, shared across sessions); the
-// dual Anthropic/OpenAI source logic lives in the pure usageForSession
-// selector. Every segment is optional — a missing value hides its segment
-// rather than showing an invented one.
+// Level 1 (this line): the context ring, per-run tokens (desktop full only),
+// the permission chip, the current task, and the session cost — plus the modes
+// that are currently ACTIVE (plan/goal/tasks) and ALERTS/PROMOTIONS (🔥 on-extra
+// when active; 5h/wk chips only once they climb to the promotion threshold).
+// Level 2 (the full accounting: cost breakdown, tokens, detailed context, plan
+// windows, extra) lives in the UsagePanel, opened by tapping the cost segment.
+//
+// The DECISIONS about what is level 1 vs level 2 live in the pure
+// statusStripModel (data/util/status-strip-model.js); this component only
+// RENDERS the model it returns. The connected container (ConversationScreen)
+// passes the full `session` and the global `usage` snapshot (from /api/usage);
+// `onOpenUsage` (optional) turns the cost segment into the Usage panel trigger;
+// `showTokens` (default true) is set false by compact densities (pane/mobile),
+// where tokens drop to level 2.
 export function StatusStrip({
   ctxPercent,
   tokensUp,
@@ -23,37 +31,25 @@ export function StatusStrip({
   spend,
   session,
   usage,
+  onOpenUsage,
+  showTokens = true,
 }) {
-  const s = session || {};
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
   const hasTokens = tokensUp != null && tokensDown != null;
   const ringStyle = hasCtx
     ? { background: `conic-gradient(var(--teal) 0 ${ctxPercent}%, var(--surface0) ${ctxPercent}% 100%)` }
     : undefined;
 
-  const permMode = s.permissionMode || "yolo";
-  const planMode = s.planMode;
-  const hasPlan = planMode && planMode !== "off";
-  const goalActive = !!s.goalActive;
-  const tasks = s.tasks || [];
-  const hasTasks = tasks.length > 0;
-  const done = tasks.filter((t) => t.status === "done").length;
-  const total = tasks.length;
+  const model = statusStripModel(session, usage);
+  const { perm, modes, alerts } = model;
+  const promoted = alerts.promoted;
 
-  const u = usageForSession(s, usage);
-  const extra = u.extra;
-  const extraOn = extra && (extra.used ?? 0) > 0;
-  const extraTitle = extra
-    ? `Extra usage ON — ${money(extra.used, { decimal_places: extra.decimalPlaces, currency: extra.currency })} used` +
-      (extra.limit != null
-        ? ` of ${money(extra.limit, { decimal_places: extra.decimalPlaces, currency: extra.currency })}`
-        : "")
-    : "";
-
-  const meterTitle = (label, m) =>
-    m.source === "anthropic" && m.resetsAt
-      ? `${label}: ${m.pct}% · resets in ${fmtReset(m.resetsAt)}`
-      : `${label}: ${m.pct}%`;
+  const hasSpend = !!spend;
+  // The cost segment is the natural door to the Usage panel: it is the only
+  // "money" datum on the line, so tapping it to see "more money" is self-
+  // explanatory. When there is no cost yet but the panel is still reachable, a
+  // discreet gauge affordance stands in so the panel can ALWAYS be opened.
+  const costTrigger = !!onOpenUsage;
 
   return (
     <div class="status-strip">
@@ -63,14 +59,44 @@ export function StatusStrip({
           ctx {ctxPercent}%
         </span>
       )}
-      {hasTokens && <span class="status-strip-tokens">↑ {fmtTokens(tokensUp)} · ↓ {fmtTokens(tokensDown)} tok</span>}
+      {showTokens && hasTokens && (
+        <span class="status-strip-tokens">↑ {fmtTokens(tokensUp)} · ↓ {fmtTokens(tokensDown)} tok</span>
+      )}
 
-      <span class={`status-strip-pill perm-${permMode}`} title={`Permission mode: ${permMode}`}>
+      {/* Permission chip. Subphase (a) keeps it a static badge (clean markup);
+          subphase (b) will turn it into the 3-option control. */}
+      <span class={`status-strip-pill perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
         <Shield />
-        {permMode.toUpperCase()}
+        {perm.mode.toUpperCase()}
       </span>
 
-      {u.onOverage && (
+      {/* Active modes — only rendered when the model reports them (off modes
+          are omitted upstream). */}
+      {modes.planMode && (
+        <span class={`status-strip-pill plan-${modes.planMode}`}>
+          <Map />
+          {modes.planMode}
+        </span>
+      )}
+
+      {modes.goal && (
+        <span class="status-strip-pill goal" title={modes.goal.objective || "Goal active"}>
+          <Target />
+          {modes.goal.verifying ? "goal · verifying…" : `goal${modes.goal.iteration ? ` ${modes.goal.iteration}` : ""}`}
+        </span>
+      )}
+
+      {modes.tasks && (
+        <span class="status-strip-pill tasks">
+          <ClipboardList />
+          {modes.tasks.done}/{modes.tasks.total}
+          {modes.tasks.complete && " ✓"}
+        </span>
+      )}
+
+      {/* Alerts / promotions. 🔥 on-extra only while active; each promoted plan
+          window (5h/wk ≥ threshold) as a colored chip. */}
+      {alerts.onExtra && (
         <span
           class="status-strip-pill session-overage"
           title="This session is being served from extra usage (pay-as-you-go)"
@@ -80,51 +106,46 @@ export function StatusStrip({
         </span>
       )}
 
-      {extra && (
-        <span class={`status-strip-pill usage-extra ${extraOn ? "on" : ""}`} title={extraTitle}>
-          <Zap />
-          {money(extra.used, { decimal_places: extra.decimalPlaces, currency: extra.currency })}
-          {extra.limit != null &&
-            `/${money(extra.limit, { decimal_places: extra.decimalPlaces, currency: extra.currency })}`}
+      {promoted.map((m) => (
+        <span
+          key={m.kind}
+          class={`status-strip-pill usage-${m.level}`}
+          title={`${m.label}: ${m.pct}%${m.resetsAt ? ` · resets in ${fmtReset(m.resetsAt)}` : ""}`}
+        >
+          {m.kind} {m.pct}%
         </span>
-      )}
-
-      {u.fiveHour && (
-        <span class={`status-strip-pill usage-${usageLevel(u.fiveHour.pct)}`} title={meterTitle("Session (5h)", u.fiveHour)}>
-          5h {u.fiveHour.pct}%
-        </span>
-      )}
-
-      {u.week && (
-        <span class={`status-strip-pill usage-${usageLevel(u.week.pct)}`} title={meterTitle("Week", u.week)}>
-          wk {u.week.pct}%
-        </span>
-      )}
-
-      {hasPlan && (
-        <span class={`status-strip-pill plan-${planMode}`}>
-          <Map />
-          {planMode}
-        </span>
-      )}
-
-      {goalActive && (
-        <span class="status-strip-pill goal" title={s.goalObjective || "Goal active"}>
-          <Target />
-          {s.goalVerifying ? "goal · verifying…" : `goal${s.goalIteration ? ` ${s.goalIteration}` : ""}`}
-        </span>
-      )}
-
-      {hasTasks && (
-        <span class="status-strip-pill tasks">
-          <ClipboardList />
-          {done}/{total}
-          {done === total && total > 0 && " ✓"}
-        </span>
-      )}
+      ))}
 
       {task && <span class="status-strip-task">{task}</span>}
-      {spend && <span class="status-strip-spend">today <b>{spend}</b></span>}
+
+      {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
+          Falls back to plain text otherwise (galleries / other consumers). */}
+      {hasSpend ? (
+        costTrigger ? (
+          <button
+            type="button"
+            class="status-strip-spend status-strip-spend-btn"
+            onClick={onOpenUsage}
+            aria-label="Show usage"
+          >
+            today <b>{spend}</b>
+          </button>
+        ) : (
+          <span class="status-strip-spend">today <b>{spend}</b></span>
+        )
+      ) : (
+        costTrigger && (
+          <button
+            type="button"
+            class="status-strip-gauge"
+            onClick={onOpenUsage}
+            aria-label="Show usage"
+            title="Show usage"
+          >
+            <Gauge />
+          </button>
+        )
+      )}
     </div>
   );
 }

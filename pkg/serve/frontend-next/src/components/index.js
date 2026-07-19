@@ -28,3 +28,4 @@ export { ToastContainer } from "./Toast/ToastContainer.jsx";
 export { FileCard } from "./FileCard/FileCard.jsx";
 export { FileViewer } from "./FileViewer/FileViewer.jsx";
 export { HtmlResourceInfo } from "./HtmlResourceInfo/HtmlResourceInfo.jsx";
+export { UsagePanel } from "./UsagePanel/UsagePanel.jsx";
