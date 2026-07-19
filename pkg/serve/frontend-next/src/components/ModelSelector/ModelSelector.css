@@ -7,6 +7,26 @@
   overflow: hidden;
 }
 
+/* Embedded — dropped inside a Sheet (mobile model picker), which already brings
+   its own panel chrome + "Model" title. Shed the standalone popover frame and
+   fixed width so it isn't a card-in-a-card. */
+.model-selector--embedded {
+  width: 100%;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.model-selector--embedded .sel-row {
+  padding-left: 0;
+  padding-right: 0;
+}
+.model-selector--embedded .sel-think {
+  padding-left: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+}
+
 .model-selector .sel-head {
   padding: var(--space-3) var(--space-4) var(--space-1);
   font-size: var(--text-xs);

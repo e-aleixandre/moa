@@ -22,6 +22,7 @@ export function MobileHeader({
   onNotifications,
   notifPopover,
   notifAnchorRef,
+  onModelClick,
 }) {
   const hasCtx = typeof ctx === "number" && ctx >= 0;
   return (
@@ -35,6 +36,8 @@ export function MobileHeader({
             level={level}
             variant="glyph"
             accent={modelAccent(model)}
+            onClick={onModelClick}
+            aria-label="Model & thinking"
           />
         )}
         <div class="mhead-notif" ref={notifAnchorRef}>

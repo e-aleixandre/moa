@@ -21,11 +21,12 @@ export function ModelSelector({
   thinking = "off",
   onSelect,
   onThinkingChange,
+  embedded = false,
   ...rest
 }) {
   return (
-    <div class="model-selector" {...rest}>
-      <div class="sel-head">Model</div>
+    <div class={`model-selector${embedded ? " model-selector--embedded" : ""}`} {...rest}>
+      {!embedded && <div class="sel-head">Model</div>}
       {models.map((m) => {
         const on = m.id === selected;
         return (

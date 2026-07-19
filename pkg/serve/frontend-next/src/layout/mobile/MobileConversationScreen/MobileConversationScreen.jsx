@@ -2,14 +2,15 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { store } from "../../../data/store.js";
 import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
-import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
+import { focusedSession, focusedSessionId, deriveModelSpecs, matchSelectedModel } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
-import { openPersistedSubagent } from "../../../data/session-actions.js";
+import { openPersistedSubagent, configureSession } from "../../../data/session-actions.js";
+import { api } from "../../../data/api.js";
 import { mobileModelLabel, shortPath, sessionDotState } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
 import { Composer } from "../../Composer/Composer.jsx";
-import { PermissionPrompt, AskUserPrompt, McpBanner } from "../../../components/index.js";
+import { PermissionPrompt, AskUserPrompt, McpBanner, ModelSelector, Sheet } from "../../../components/index.js";
 import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
 import { SessionStrip } from "../SessionStrip/SessionStrip.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
@@ -122,6 +123,16 @@ export function MobileConversationScreen() {
   const [rewindOpen, setRewindOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifAnchorRef = useRef(null);
+  // Model + thinking sheet (TELEMETRY-SETTINGS-REDESIGN §3.1): the header
+  // ModelPill is tappable on mobile too, opening the shared ModelSelector inside
+  // a Sheet (which brings overlay-history / back-gesture / scroll-lock). Models
+  // are fetched lazily on first open, same as the desktop popover.
+  const [modelOpen, setModelOpen] = useState(false);
+  const [models, setModels] = useState(null); // null = not fetched yet
+  useEffect(() => {
+    if (!modelOpen || models) return;
+    api("GET", "/api/models").then(setModels).catch(() => setModels([]));
+  }, [modelOpen, models]);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
@@ -131,7 +142,7 @@ export function MobileConversationScreen() {
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
   const onNew = () => openPalette("create");
 
-  useEffect(() => { setRewindOpen(false); }, [activeId]);
+  useEffect(() => { setRewindOpen(false); setModelOpen(false); }, [activeId]);
 
   // Notifications popover (Bell in the header) — device-wide push + sound (5N).
   // Same click-outside + Escape wiring as the desktop head popovers.
@@ -215,6 +226,7 @@ export function MobileConversationScreen() {
         onNotifications={() => setNotifOpen((v) => !v)}
         notifAnchorRef={notifAnchorRef}
         notifPopover={notifOpen && <NotificationSettings soundEnabled={state.soundEnabled} />}
+        onModelClick={session ? () => setModelOpen(true) : undefined}
       />
       <SessionStrip
         sessions={strip}
@@ -241,6 +253,22 @@ export function MobileConversationScreen() {
           sessionId={session.id}
         />
       )}
+      {session && (() => {
+        const specs = deriveModelSpecs(models);
+        const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
+        return (
+          <Sheet open={modelOpen} onClose={() => setModelOpen(false)} title="Model">
+            <ModelSelector
+              models={specs}
+              selected={matchSelectedModel(specs, session.model)}
+              thinking={thinking}
+              embedded
+              onSelect={(spec) => configureSession(session.id, { model: spec })}
+              onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+            />
+          </Sheet>
+        );
+      })()}
     </div>
   );
 }

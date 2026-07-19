@@ -11,7 +11,7 @@ import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Notification
 import { Button } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { focusedSession, focusedSessionId, modelAccent } from "../../data/selectors.js";
+import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
@@ -102,30 +102,6 @@ function currentTask(session, nowMs) {
 function fmtSpend(costUSD) {
   if (!costUSD || costUSD <= 0) return undefined;
   return fmtCost(costUSD);
-}
-
-// deriveModelSpecs maps /api/models entries ({id, name, provider, alias?})
-// into the shape ModelSelector expects ({id, name, desc, sigil, accent}). `id`
-// here is the full "provider/id" spec configureSession sends over the wire —
-// matches the old SettingsDropdown's `m.provider + '/' + m.id`.
-function deriveModelSpecs(models) {
-  return (models || []).map((m) => ({
-    id: `${m.provider}/${m.id}`,
-    name: m.name,
-    desc: m.alias || m.provider,
-    sigil: (m.name || m.id || "?").charAt(0).toUpperCase(),
-    accent: modelAccent(m.name),
-  }));
-}
-
-// matchSelectedModel finds the spec whose display name matches the session's
-// current model string (session.model is the display name the backend
-// reports, e.g. "GPT-5.6 Sol" — not the "provider/id" spec).
-function matchSelectedModel(specs, sessionModel) {
-  if (!sessionModel) return undefined;
-  const short = shortModel(sessionModel);
-  const found = specs.find((s) => s.name === sessionModel || s.name === short);
-  return found?.id;
 }
 
 export function ConversationScreen({ version }) {
