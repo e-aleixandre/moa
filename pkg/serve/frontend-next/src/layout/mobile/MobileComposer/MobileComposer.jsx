@@ -4,6 +4,7 @@ import { Sheet, UsagePanel, PermissionControl } from "../../../components/index.
 import { activityPhase, activityText, formatElapsed } from "../../../data/util/activity.js";
 import { fmtCost, fmtReset } from "../../../data/util/usage-pills.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
+import { fmtTokens } from "../../../data/util/format.js";
 import { configureSession } from "../../../data/session-actions.js";
 import "./MobileComposer.css";
 
@@ -72,11 +73,22 @@ export function MobileComposer({ session, usage }) {
   const model = statusStripModel(session, usage);
   const promoted = model.alerts.promoted;
 
+  // Live per-run token pulse (↑ in / ↓ out): the same signal the desktop status
+  // strip shows. It's not just accounting — watching the counts climb is how you
+  // tell the agent is actually working (reading / generating) when it looks
+  // stalled. Session totals live in the Usage panel; this is the live heartbeat.
+  const hasTokens =
+    typeof session.runTokensUp === "number" && typeof session.runTokensDown === "number" &&
+    (session.runTokensUp > 0 || session.runTokensDown > 0);
+
   return (
     <div class="mcomposer">
       <Composer sessionId={session.id} session={session} shortPlaceholder />
       <div class="mcomposer-status">
         {work && <span class="work">● {work}</span>}
+        {hasTokens && (
+          <span class="tokens">↑ {fmtTokens(session.runTokensUp)} · ↓ {fmtTokens(session.runTokensDown)}</span>
+        )}
         <PermissionControl
           mode={model.perm.mode}
           sheet

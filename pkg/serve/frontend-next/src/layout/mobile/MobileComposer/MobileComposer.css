@@ -109,6 +109,16 @@
   flex-shrink: 0;
 }
 
+/* Live per-run token pulse (↑ in / ↓ out): the heartbeat that tells you the
+   agent is working. Mono + dim so it reads as telemetry, not a headline; it
+   sits right after the activity label. */
+.mcomposer-status .tokens {
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--overlay1);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The spend is the Usage panel trigger (TELEMETRY-SETTINGS-REDESIGN §2). Compact
    visual, ≥44px hit area via a pseudo-element; whole right half of the line is
    tappable. */
