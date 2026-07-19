@@ -56,6 +56,14 @@
 //             emit no diff block — just their ledger row — so DiffBlock never
 //             gets an unparseable fallback and renders empty.
 //
+//         { type:'file', file:{name,size,mime,url} }
+//             A full-width download card for a FINISHED send_file call whose
+//             result ends in a valid JSON file descriptor (see
+//             data/util/file-card.js#parseFileCardData). Emitted as a SIBLING
+//             right after the ledger that contains the send_file row (same
+//             pattern as `diff`), closing that ledger. A send_file call that
+//             errored keeps its raw ledger text instead (no file block).
+//
 //         { type:'fanout', task?, agents:[...] }
 //             2+ LIVE subagents running in parallel right now. Matches the
 //             FanoutBlock prop shape; each agent:
@@ -94,6 +102,7 @@ import {
   shortModel,
 } from './util/format.js';
 import { gerundFor, formatElapsed } from './util/activity.js';
+import { parseFileCardData } from './util/file-card.js';
 
 const MAX_MESSAGES_BEFORE_TRUNCATION_NOTE = 200;
 
@@ -181,6 +190,15 @@ export function projectStream(session) {
       if (diff) {
         diff.id = `diff-${abs}`;
         doc.blocks.push(diff);
+        closeLedger();
+      }
+
+      // A finished send_file result renders as a download card, sibling to
+      // the ledger row (like the diff above) instead of raw text.
+      const file = toFileBlock(msg);
+      if (file) {
+        file.id = `file-${abs}`;
+        doc.blocks.push(file);
         closeLedger();
       }
       continue;
@@ -428,6 +446,22 @@ function toDiffBlock(msg) {
 
 function tryParse(s) {
   try { return JSON.parse(s); } catch { return null; }
+}
+
+// toFileBlock returns a full-width file-card sibling for a finished send_file
+// tool call whose result ends in a valid JSON file descriptor (see
+// data/util/file-card.js#parseFileCardData), or null. Mirrors toDiffBlock:
+// only emitted for the DONE status (errors keep their raw ledger text so the
+// failure reason stays visible).
+function toFileBlock(msg) {
+  const name = (msg.tool_name || '').toLowerCase();
+  if (name !== 'send_file' || msg.status !== 'done') return null;
+  const data = parseFileCardData(msg.result);
+  if (!data) return null;
+  return {
+    type: 'file',
+    file: { name: data.name, size: data.size, mime: data.mime, url: data.url },
+  };
 }
 
 // liveSubagents divides session.subagents (a map keyed by job_id, or an array)

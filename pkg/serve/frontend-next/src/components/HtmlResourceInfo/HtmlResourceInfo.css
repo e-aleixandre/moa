@@ -1,0 +1,84 @@
+.html-resource-sheet {
+  width: min(680px, 96vw);
+}
+
+.html-resource-name {
+  overflow: hidden;
+  color: var(--subtext1);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0 0 var(--space-3);
+}
+
+.html-resource-notice {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) 12px;
+  border-left: 3px solid var(--yellow);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--mantle);
+  color: var(--subtext0);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.html-resource-sheet h4 {
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.html-resource-sheet h4:first-of-type { margin-top: 0; }
+
+.html-resource-domains, .html-resource-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.html-resource-domains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.html-resource-domains li {
+  padding: 4px 7px;
+  border-radius: var(--radius-full);
+  background: var(--surface0);
+  color: var(--blue);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.html-resource-group li {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--surface0);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.html-resource-group li span {
+  color: var(--blue);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.html-resource-group code {
+  overflow-wrap: anywhere;
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.html-resource-blocked h4, .html-resource-blocked p { color: var(--peach); }
+.html-resource-blocked p, .html-resource-empty { margin: 0; color: var(--subtext0); font-size: var(--text-sm); }
+.html-resource-status {
+  min-height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--subtext0);
+  text-align: center;
+}
+.html-resource-status .lucide.spin { animation: html-resource-spin 1s linear infinite; }
+@keyframes html-resource-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

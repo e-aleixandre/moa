@@ -9,6 +9,7 @@ import {
   FanoutBlock,
   BackgroundJob,
   MobileLedger,
+  FileCard,
 } from "../../../components/index.js";
 import { renderMarkdown } from "../../../data/util/markdown.js";
 import { adaptLedger } from "../../../data/mobile-ledger-adapter.js";
@@ -95,6 +96,9 @@ function mobileDocChildren(blocks, onOpenSubagent) {
         out.push(
           <DiffBlock key={b.id} diffText={b.diffText} filename={b.filename} />
         );
+        break;
+      case "file":
+        out.push(<FileCard key={b.id} file={b.file} />);
         break;
       case "fanout":
         out.push(<FanoutBlock key={b.id} agents={b.agents} onOpenAgent={onOpenSubagent} />);

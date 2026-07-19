@@ -724,8 +724,14 @@ export function CommandPalette({
   const onVeil = (e) => { if (e.target === e.currentTarget) onClose(); };
 
   // ── Mobile chassis (bottom sheet) ───────────────────────────────────────────
-  // TODO 5L: unify with the shared Sheet utility (history hook, swipe-to-dismiss)
-  // once it exists — for now the sheet chrome is CSS-local here.
+  // TODO 5L (overlay-history hook): the palette doesn't use Sheet — it has its
+  // own two chassis (mobile bottom sheet / desktop centered veil) and Escape
+  // here doesn't always close (it steps back from the "create" step first,
+  // see onKeyDown above), so wiring it to data/overlay-history.js needs a bit
+  // more care than a drop-in openOverlay() call to keep that step-back
+  // behavior correct on the back gesture too. Left out of this pass; the
+  // Sheet-based overlays (RewindTimeline, file/HTML viewers, drawers) already
+  // get the back-gesture hook via Sheet.
   if (isMobile) {
     return (
       <div class="pal-veil pal-veil-mobile" onClick={onVeil}>

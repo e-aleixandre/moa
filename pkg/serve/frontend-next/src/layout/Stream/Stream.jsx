@@ -6,6 +6,7 @@ import {
   DiffBlock,
   FanoutBlock,
   BackgroundJob,
+  FileCard,
 } from "../../components/index.js";
 import { renderMarkdown } from "../../data/util/markdown.js";
 import "./Stream.css";
@@ -49,6 +50,8 @@ function docChildren(blocks, onOpenSubagent) {
         return (
           <DiffBlock key={b.id} diffText={b.diffText} filename={b.filename} />
         );
+      case "file":
+        return <FileCard key={b.id} file={b.file} />;
       case "fanout":
         return <FanoutBlock key={b.id} agents={b.agents} onOpenAgent={onOpenSubagent} />;
       case "background":

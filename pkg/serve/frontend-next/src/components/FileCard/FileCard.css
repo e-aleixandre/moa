@@ -1,0 +1,92 @@
+/* File download card (send_file tool result) */
+
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--mantle);
+  padding: var(--space-3) 14px;
+  border-top: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent);
+}
+
+.file-card-open {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: calc(var(--space-3) * -1) 0 calc(var(--space-3) * -1) -14px;
+  padding: var(--space-3) 0 var(--space-3) 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.file-card-previewable { cursor: pointer; }
+.file-card-previewable:hover { background: var(--surface0); }
+.file-card-previewable:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(var(--focus-ring-offset) * -1);
+}
+
+.file-card-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--peach);
+  flex-shrink: 0;
+}
+
+.file-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-card-name {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-card-size {
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+}
+
+.file-card-download, .file-card-resource-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface0);
+  color: var(--text);
+  flex-shrink: 0;
+  cursor: pointer;
+  font: inherit;
+  transition: background var(--duration) var(--ease);
+}
+.file-card-download:hover, .file-card-resource-info:hover {
+  background: var(--surface1);
+}
+.file-card-download:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.file-card-download .lucide, .file-card-resource-info .lucide {
+  width: 18px;
+  height: 18px;
+}
+.file-card-download .lucide.spin {
+  animation: file-card-spin 1s linear infinite;
+}
+
+@keyframes file-card-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

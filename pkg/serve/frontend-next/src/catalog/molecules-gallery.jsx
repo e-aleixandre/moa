@@ -5,6 +5,7 @@ import {
   ModelSelector,
   PermissionCard,
   AskUserCard,
+  FileCard,
   Card,
   Sheet,
   Toast,
@@ -94,6 +95,17 @@ function ModelSelectorDemo() {
         level={thinking}
         accent={selectedModel?.accent ?? "lavender"}
       />
+    </div>
+  );
+}
+
+function FileCardDemo() {
+  return (
+    <div class="molecule-col">
+      <FileCard file={{ name: "conversation-gallery.png", size: 521084, mime: "image/png", url: "/api/sessions/demo/files/demo-png" }} />
+      <FileCard file={{ name: "COHERENCE-DECISIONS.md", size: 24310, mime: "text/markdown", url: "/api/sessions/demo/files/demo-md" }} />
+      <FileCard file={{ name: "report.html", size: 88231, mime: "text/html", url: "/api/sessions/demo/files/demo-html" }} />
+      <FileCard file={{ name: "redesign-backup.tar.gz", size: 355998, mime: "application/gzip", url: "/api/sessions/demo/files/demo-tgz" }} />
     </div>
   );
 }
@@ -222,6 +234,9 @@ export function MoleculesGallery() {
 
       <h3>PermissionCard</h3>
       <PermissionCardDemo />
+
+      <h3>FileCard</h3>
+      <FileCardDemo />
 
       <h3>AskUserCard</h3>
       <AskUserCardDemo />

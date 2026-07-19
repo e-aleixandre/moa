@@ -22,3 +22,6 @@ export { ToolTicker } from "./ToolTicker/ToolTicker.jsx";
 export { MobileLedger, LedgerIcons } from "./MobileLedger/MobileLedger.jsx";
 export { FileSuggestions } from "./FileSuggestions/FileSuggestions.jsx";
 export { CommandPalette } from "./CommandPalette/CommandPalette.jsx";
+export { FileCard } from "./FileCard/FileCard.jsx";
+export { FileViewer } from "./FileViewer/FileViewer.jsx";
+export { HtmlResourceInfo } from "./HtmlResourceInfo/HtmlResourceInfo.jsx";
