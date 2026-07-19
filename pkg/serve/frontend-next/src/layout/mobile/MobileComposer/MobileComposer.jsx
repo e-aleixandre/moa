@@ -79,6 +79,7 @@ export function MobileComposer({ session, usage }) {
         {work && <span class="work">● {work}</span>}
         <PermissionControl
           mode={model.perm.mode}
+          sheet
           disabled={session.state === "running" || session.state === "permission"}
           onChange={(mode) => configureSession(session.id, { permissionMode: mode })}
         />

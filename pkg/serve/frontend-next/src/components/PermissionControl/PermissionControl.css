@@ -45,13 +45,16 @@
 .perm-chip.perm-auto { color: var(--blue); background: var(--blue-dim); }
 .perm-chip:not(:disabled):hover { filter: brightness(1.15); }
 
-/* The menu — opens upward from the chip. */
+/* The menu — opens upward from the chip. Right-aligned to the chip and
+   width-clamped to the viewport so it can never clip off-screen on a narrow
+   desktop pane (mobile uses the Sheet variant instead, see .perm-sheet-list). */
 .perm-menu {
   position: absolute;
   bottom: calc(100% + var(--space-2));
-  left: 0;
+  right: 0;
   z-index: var(--z-overlay);
   width: 220px;
+  max-width: calc(100vw - var(--space-4));
   background: var(--mantle);
   border: 1px solid var(--surface1);
   border-radius: var(--radius-lg);
@@ -60,6 +63,19 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+/* The mobile Sheet variant reuses the same rows (.perm-menu-item) laid out
+   full-width inside the modal panel — no absolute positioning, so overflow is
+   structurally impossible. */
+.perm-sheet-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.perm-sheet-list .perm-menu-item {
+  min-height: 48px;
+  border-radius: var(--radius-md);
 }
 
 .perm-menu-item {

@@ -200,7 +200,7 @@ function MobileComposerSpecimen({ status, perm = "yolo", spend }) {
       </div>
       <div class="mcomposer-status">
         <span class="work">● {status}</span>
-        <PermissionControl mode={perm} onChange={() => {}} />
+        <PermissionControl mode={perm} sheet onChange={() => {}} />
         <button type="button" class="spend spend-btn" aria-label="Show usage">
           {spend} today
         </button>
