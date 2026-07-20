@@ -17,7 +17,7 @@ import (
 func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	startedAt := time.UnixMilli(1_700_000_000_000)
 	ev, ok := wsEventFromBus(bus.SubagentStarted{
-		SessionID: "s1", JobID: "sa-1", Task: "do thing", Model: "haiku", Thinking: "high", Async: true,
+		SessionID: "s1", JobID: "sa-1", OriginToolCallID: "toolu_1", Task: "do thing", Model: "haiku", Thinking: "high", Async: true,
 		StartedAt: startedAt,
 	})
 	if !ok {
@@ -30,7 +30,7 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	if !ok {
 		t.Fatalf("Data type = %T, want SubagentStartData", ev.Data)
 	}
-	want := SubagentStartData{JobID: "sa-1", Task: "do thing", Model: "haiku", Thinking: "high", Async: true, StartedAtMs: 1_700_000_000_000}
+	want := SubagentStartData{JobID: "sa-1", OriginToolCallID: "toolu_1", Task: "do thing", Model: "haiku", Thinking: "high", Async: true, StartedAtMs: 1_700_000_000_000}
 	if data != want {
 		t.Fatalf("Data = %+v, want %+v", data, want)
 	}
@@ -56,7 +56,7 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 	if !ok {
 		t.Fatal("subagent tool not registered")
 	}
-	if _, err := subagentTool.Execute(context.Background(), map[string]any{
+	if _, err := subagentTool.Execute(core.WithToolCallID(context.Background(), "toolu_init"), map[string]any{
 		"task": "inspect the contract", "async": true, "thinking": "medium",
 	}, nil); err != nil {
 		t.Fatal(err)
@@ -71,6 +71,9 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 	}
 	if got := data.Subagents[0].Thinking; got != "medium" {
 		t.Fatalf("Thinking = %q, want medium", got)
+	}
+	if got := data.Subagents[0].OriginToolCallID; got != "toolu_init" {
+		t.Fatalf("OriginToolCallID = %q, want toolu_init", got)
 	}
 }
 

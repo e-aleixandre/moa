@@ -200,10 +200,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				}
 			}
 		},
-		OnSubagentStart: func(jobID, task, model, thinking string, async bool, startedAt time.Time, accentIndex int) {
+		OnSubagentStart: func(jobID, task, model, thinking, originToolCallID string, async bool, startedAt time.Time, accentIndex int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentStarted{
-					SessionID: s.ID, JobID: jobID, Task: task, Model: model, Thinking: thinking, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
+					SessionID: s.ID, JobID: jobID, OriginToolCallID: originToolCallID, Task: task, Model: model, Thinking: thinking, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
 				})
 			}
 		},
@@ -356,17 +356,18 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				continue
 			}
 			out = append(out, bus.SubagentSnapshot{
-				JobID:       info.JobID,
-				Task:        info.Task,
-				Model:       info.Model,
-				Thinking:    info.Thinking,
-				Status:      info.Status,
-				Async:       info.Async,
-				Messages:    bs.Subagents.Messages(info.JobID),
-				StartedAt:   info.StartedAt,
-				Usage:       info.Usage,
-				CostUSD:     info.CostUSD,
-				AccentIndex: info.AccentIndex,
+				JobID:            info.JobID,
+				OriginToolCallID: info.OriginToolCallID,
+				Task:             info.Task,
+				Model:            info.Model,
+				Thinking:         info.Thinking,
+				Status:           info.Status,
+				Async:            info.Async,
+				Messages:         bs.Subagents.Messages(info.JobID),
+				StartedAt:        info.StartedAt,
+				Usage:            info.Usage,
+				CostUSD:          info.CostUSD,
+				AccentIndex:      info.AccentIndex,
 			})
 		}
 		return out, nil

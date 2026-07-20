@@ -146,6 +146,8 @@ export function projectStream(session) {
   // `bash-complete-<job_id>`; legacy cards may retain `subagent_<index>`, so
   // index their bare suffix too.
   const seenJobIds = seenJobIdsOf(messages);
+  const canonicalSubagentJobIds = canonicalSubagentJobIdsOf(messages);
+  const originToolCalls = originToolCallsOf(session.subagents);
 
   // currentDoc = the document object for the turn currently being built; reset
   // to null at every user message (and system line) so the next assistant
@@ -203,12 +205,25 @@ export function projectStream(session) {
       // Keyed `subagent-<jobId>` (or a legacy `subagent_<index>`), tool_name
       // 'subagent'.
       if (msg.tool_name === 'subagent') {
+        const rawToolCallID = String(msg.tool_call_id || '');
+        const origin = originToolCalls.ids.has(rawToolCallID)
+          ? originToolCalls.byID.get(rawToolCallID)
+          : null;
+        if (origin) {
+          // The live job is authoritative while it runs. Once terminal, an
+          // async job gets its own canonical completion card; sync jobs do
+          // not, so their original tool-call card becomes the one done row.
+          if (!isTerminalSubagent(origin) || canonicalSubagentJobIds.has(String(origin.jobId))) {
+            continue;
+          }
+        }
         const jobId = String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
         if (!currentDelegation) {
           currentDelegation = { type: 'delegation', id: `delegation-${abs}`, agents: [], settled: true };
           doc.blocks.push(currentDelegation);
         }
-        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex)));
+        const displayJobID = origin ? String(origin.jobId) : jobId;
+        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, displayJobID, msg.accentIndex), displayJobID));
         closeLedger();
         continue;
       }
@@ -407,6 +422,39 @@ export function seenJobIdsOf(messages) {
     }
   }
   return seenJobIds;
+}
+
+// canonicalSubagentJobIdsOf returns job IDs represented by completion cards,
+// distinct from raw model subagent tool calls whose IDs belong to the provider.
+function canonicalSubagentJobIdsOf(messages) {
+  const jobIDs = new Set();
+  for (const msg of (Array.isArray(messages) ? messages : [])) {
+    if (!msg || msg._type !== 'tool_start' || msg.tool_name !== 'subagent') continue;
+    const id = String(msg.tool_call_id || '');
+    if (id.startsWith('subagent-')) jobIDs.add(id.slice('subagent-'.length));
+    if (id.startsWith('subagent_')) jobIDs.add(id.slice('subagent_'.length));
+  }
+  return jobIDs;
+}
+
+// originToolCallsOf indexes live and terminal subagents by the exact model
+// tool-call ID that created them. Empty IDs from older servers are ignored.
+function originToolCallsOf(subagents) {
+  const ids = new Set();
+  const byID = new Map();
+  const list = Array.isArray(subagents) ? subagents : Object.values(subagents || {});
+  for (const sub of list) {
+    const id = sub && sub.originToolCallId;
+    if (!id) continue;
+    const key = String(id);
+    ids.add(key);
+    byID.set(key, sub);
+  }
+  return { ids, byID };
+}
+
+function isTerminalSubagent(subagent) {
+  return subagent.status === 'completed' || subagent.status === 'failed' || subagent.status === 'cancelled';
 }
 
 // liveTrayAgents projects a session into the LiveDock's chip descriptors: the
@@ -664,8 +712,8 @@ function delegationRunningAgent(sub, accentIdx) {
 // delegationDoneAgent builds a terminated agent row from a subagent card
 // (tool_name 'subagent', keyed `subagent-<jobId>` or legacy `subagent_<index>`)
 // comes from session.subagents (the completed entry keeps its accentIndex).
-function delegationDoneAgent(msg, accent) {
-  const jobId = String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
+function delegationDoneAgent(msg, accent, jobIDOverride) {
+  const jobId = jobIDOverride || String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
   const failed = msg.status === 'error' || msg.status === 'failed' || msg.status === 'cancelled';
   const task = msg.args && msg.args.task ? firstLine(msg.args.task) : '';
   const agent = {

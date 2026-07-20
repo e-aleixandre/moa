@@ -260,7 +260,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.SubagentStarted:
 		data := SubagentStartData{
-			JobID: e.JobID, Task: e.Task, Model: e.Model, Thinking: e.Thinking, Async: e.Async, AccentIndex: e.AccentIndex,
+			JobID: e.JobID, OriginToolCallID: e.OriginToolCallID, Task: e.Task, Model: e.Model, Thinking: e.Thinking, Async: e.Async, AccentIndex: e.AccentIndex,
 		}
 		if !e.StartedAt.IsZero() {
 			data.StartedAtMs = e.StartedAt.UnixMilli()
@@ -438,14 +438,15 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 		for i, sa := range subagents {
 			messages, _ := limitInitHistory(sa.Messages)
 			sad := SubagentInitData{
-				JobID:       sa.JobID,
-				Task:        sa.Task,
-				Model:       sa.Model,
-				Thinking:    sa.Thinking,
-				Status:      sa.Status,
-				Async:       sa.Async,
-				Messages:    messages,
-				AccentIndex: sa.AccentIndex,
+				JobID:            sa.JobID,
+				OriginToolCallID: sa.OriginToolCallID,
+				Task:             sa.Task,
+				Model:            sa.Model,
+				Thinking:         sa.Thinking,
+				Status:           sa.Status,
+				Async:            sa.Async,
+				Messages:         messages,
+				AccentIndex:      sa.AccentIndex,
 			}
 			if !sa.StartedAt.IsZero() {
 				sad.StartedAtMs = sa.StartedAt.UnixMilli()

@@ -83,7 +83,7 @@ type Config struct {
 	// time (so live UIs can compute elapsed and reconcile it after a reconnect),
 	// and its stable per-session creation ordinal (accentIndex) for a
 	// deterministic accent color that survives reconnects.
-	OnChildStart func(jobID, task, model, thinking string, async bool, startedAt time.Time, accentIndex int)
+	OnChildStart func(jobID, task, model, thinking, originToolCallID string, async bool, startedAt time.Time, accentIndex int)
 
 	// OnChildEvent is called for each typed bus event produced by translating
 	// the child's core.AgentEvent stream (via bus.TranslateAgentEvent). inner
@@ -195,6 +195,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if strings.TrimSpace(task) == "" {
 				return core.ErrorResult("task is required"), nil
 			}
+			originToolCallID := core.ToolCallIDFromContext(ctx)
 
 			childReg, errResult := buildChildRegistry(cfg.ParentTools, params)
 			if errResult != nil {
@@ -243,7 +244,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					return core.ErrorResult(fmt.Sprintf("too many concurrent async subagents (%d running, max %d); wait or cancel one with subagent_cancel", running, maxConcurrent)), nil
 				}
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
-				job := jobs.create(task, model.ID, jobCancel, thinkingLevel)
+				job := jobs.createWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
 				// Isolate the child's shell state: seed a copy from the parent
 				// (read from the spawning ctx) and tag the child ctx with its
 				// job ID. runJob drops the snapshot when it finishes.
@@ -267,7 +268,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			// propagates the parent's cancellation into the child only while
 			// it has not been promoted.
 			jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
-			job := jobs.createSync(task, model.ID, jobCancel, thinkingLevel)
+			job := jobs.createSyncWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
 			// Isolate the child's shell state (subshell semantics): seed a
 			// copy from the parent and tag the child ctx with the job's own
 			// ID (stable across a promotion, unlike the old ephemeral
@@ -477,12 +478,14 @@ func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core
 			var startedAt time.Time
 			var accentIndex int
 			var thinking string
+			var originToolCallID string
 			if snap, ok := jobs.snapshot(j.id); ok {
 				startedAt = snap.StartedAt
 				accentIndex = snap.AccentIndex
 				thinking = snap.Thinking
+				originToolCallID = snap.OriginToolCallID
 			}
-			cfg.OnChildStart(j.id, task, model.ID, thinking, true, startedAt, accentIndex)
+			cfg.OnChildStart(j.id, task, model.ID, thinking, originToolCallID, true, startedAt, accentIndex)
 		}
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())
@@ -593,12 +596,14 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		var startedAt time.Time
 		var accentIndex int
 		var thinking string
+		var originToolCallID string
 		if snap, ok := jobs.snapshot(j.id); ok {
 			startedAt = snap.StartedAt
 			accentIndex = snap.AccentIndex
 			thinking = snap.Thinking
+			originToolCallID = snap.OriginToolCallID
 		}
-		cfg.OnChildStart(j.id, task, model.ID, thinking, !j.isSync(), startedAt, accentIndex)
+		cfg.OnChildStart(j.id, task, model.ID, thinking, originToolCallID, !j.isSync(), startedAt, accentIndex)
 	}
 
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)

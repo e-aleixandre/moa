@@ -27,3 +27,14 @@ func TestAgentIDContext(t *testing.T) {
 		t.Fatalf("parent ctx mutated: got %q, want child-42", got)
 	}
 }
+
+func TestToolCallIDContext(t *testing.T) {
+	if got := ToolCallIDFromContext(context.Background()); got != "" {
+		t.Fatalf("untagged ctx: got %q, want empty", got)
+	}
+
+	ctx := WithToolCallID(context.Background(), "toolu_123")
+	if got := ToolCallIDFromContext(ctx); got != "toolu_123" {
+		t.Fatalf("round-trip: got %q, want toolu_123", got)
+	}
+}

@@ -445,6 +445,7 @@ function initSubagents(raw) {
     if (!sa || !sa.job_id) continue;
     out[sa.job_id] = {
       jobId: sa.job_id,
+      originToolCallId: sa.origin_tool_call_id || '',
       task: sa.task || '',
       model: sa.model || '',
       thinking: sa.thinking || 'off',
@@ -1098,6 +1099,7 @@ export function handleWsSubagentStart(id, data) {
     && (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled');
   subs[jobId] = {
     jobId,
+    originToolCallId: data.origin_tool_call_id || (existing && existing.originToolCallId) || '',
     task: data.task || (existing && existing.task) || '',
     model: data.model || (existing && existing.model) || '',
     thinking: data.thinking || (existing && existing.thinking) || 'off',

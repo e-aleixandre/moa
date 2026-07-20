@@ -591,3 +591,70 @@ func TestRunTool_PanicRecovery(t *testing.T) {
 		t.Errorf("expected panic message, got %q", text)
 	}
 }
+
+func TestRunToolAttachesToolCallIDToContext(t *testing.T) {
+	reg := core.NewRegistry()
+	_ = reg.Register(core.Tool{
+		Name: "inspect-context", Effect: core.EffectReadOnly,
+		Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			return core.TextResult(core.ToolCallIDFromContext(ctx)), nil
+		},
+	})
+
+	result, isError := runTool(context.Background(), makeCfg(reg), makeToolCall("toolu_origin", "inspect-context", nil))
+	if isError {
+		t.Fatal("runTool returned an error")
+	}
+	if got := result.Content[0].Text; got != "toolu_origin" {
+		t.Fatalf("ToolCallIDFromContext = %q, want toolu_origin", got)
+	}
+}
+
+func TestSchedule_ParallelToolsReceiveOwnToolCallIDContext(t *testing.T) {
+	reg := core.NewRegistry()
+	started := make(chan struct{}, 2)
+	proceed := make(chan struct{})
+	var mu sync.Mutex
+	captured := make(map[string]string)
+	register := func(name string) {
+		_ = reg.Register(core.Tool{
+			Name: name, Effect: core.EffectReadOnly,
+			Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+				mu.Lock()
+				captured[name] = core.ToolCallIDFromContext(ctx)
+				mu.Unlock()
+				started <- struct{}{}
+				<-proceed
+				return core.TextResult("ok"), nil
+			},
+		})
+	}
+	register("first")
+	register("second")
+
+	done := runExecuteTools(context.Background(), makeCfg(reg), []core.Content{
+		makeToolCall("toolu_first", "first", nil),
+		makeToolCall("toolu_second", "second", nil),
+	})
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("parallel tools did not both start")
+		}
+	}
+	close(proceed)
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got := captured["first"]; got != "toolu_first" {
+		t.Errorf("first ToolCallIDFromContext = %q, want toolu_first", got)
+	}
+	if got := captured["second"]; got != "toolu_second" {
+		t.Errorf("second ToolCallIDFromContext = %q, want toolu_second", got)
+	}
+	if captured["first"] == captured["second"] {
+		t.Errorf("parallel tools shared ToolCallIDFromContext %q", captured["first"])
+	}
+}

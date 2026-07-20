@@ -64,13 +64,14 @@ type PendingSteerData struct {
 // (WS init snapshot), so a client that connects mid-run sees the agent tray
 // and its accumulated transcript instead of starting empty.
 type SubagentInitData struct {
-	JobID    string              `json:"job_id"`
-	Task     string              `json:"task"`
-	Model    string              `json:"model"`
-	Thinking string              `json:"thinking"`
-	Status   string              `json:"status"`
-	Async    bool                `json:"async"`
-	Messages []core.AgentMessage `json:"messages"`
+	JobID            string              `json:"job_id"`
+	OriginToolCallID string              `json:"origin_tool_call_id,omitempty"`
+	Task             string              `json:"task"`
+	Model            string              `json:"model"`
+	Thinking         string              `json:"thinking"`
+	Status           string              `json:"status"`
+	Async            bool                `json:"async"`
+	Messages         []core.AgentMessage `json:"messages"`
 	// StartedAtMs is the child's start time as epoch milliseconds (same
 	// encoding as InitData.RunStartedAtMs), so a reconnecting client resumes
 	// its live elapsed timer instead of restarting it. Omitted when unknown.
@@ -293,11 +294,12 @@ type SubagentCompleteData struct {
 
 // SubagentStartData is sent when a subagent (sync or async) begins.
 type SubagentStartData struct {
-	JobID    string `json:"job_id"`
-	Task     string `json:"task"`
-	Model    string `json:"model"`
-	Thinking string `json:"thinking"`
-	Async    bool   `json:"async"`
+	JobID            string `json:"job_id"`
+	OriginToolCallID string `json:"origin_tool_call_id,omitempty"`
+	Task             string `json:"task"`
+	Model            string `json:"model"`
+	Thinking         string `json:"thinking"`
+	Async            bool   `json:"async"`
 	// StartedAtMs is the child's start time as epoch milliseconds (same
 	// encoding as InitData.RunStartedAtMs), so the client can compute live
 	// elapsed time (now - StartedAtMs). Omitted when unknown.

@@ -377,7 +377,7 @@ func TestSubagentThinkingOverrideUsesRequestedValue(t *testing.T) {
 				return textResponse("ok")(ctx, req)
 			}), nil
 		},
-		OnChildStart: func(_ string, _ string, _ string, thinking string, _ bool, _ time.Time, _ int) {
+		OnChildStart: func(_ string, _ string, _ string, thinking string, _ string, _ bool, _ time.Time, _ int) {
 			startedThinking = thinking
 		},
 	})
@@ -410,7 +410,7 @@ func TestSubagentThinkingFallsBackToCurrentValue(t *testing.T) {
 				return textResponse("ok")(ctx, req)
 			}), nil
 		},
-		OnChildStart: func(_ string, _ string, _ string, thinking string, _ bool, _ time.Time, _ int) {
+		OnChildStart: func(_ string, _ string, _ string, thinking string, _ string, _ bool, _ time.Time, _ int) {
 			startedThinking <- thinking
 		},
 	})
@@ -442,6 +442,38 @@ func TestSubagentThinkingFallsBackToCurrentValue(t *testing.T) {
 	}
 	if snap.Thinking != defaultThinking {
 		t.Fatalf("expected fallback snapshot thinking %q, got %q", defaultThinking, snap.Thinking)
+	}
+}
+
+func TestSubagentTracksOriginToolCallID(t *testing.T) {
+	started := make(chan string, 1)
+	sub, _, _, jobs := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(textResponse("ok")), nil },
+		OnChildStart: func(_ string, _ string, _ string, _ string, originToolCallID string, _ bool, _ time.Time, _ int) {
+			started <- originToolCallID
+		},
+	})
+
+	res, err := sub.Execute(core.WithToolCallID(context.Background(), "toolu_origin"), map[string]any{"task": "x", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	snap, ok := jobs.snapshot(jobID)
+	if !ok {
+		t.Fatalf("expected snapshot for job %q", jobID)
+	}
+	if snap.OriginToolCallID != "toolu_origin" {
+		t.Fatalf("OriginToolCallID = %q, want toolu_origin", snap.OriginToolCallID)
+	}
+	select {
+	case got := <-started:
+		if got != "toolu_origin" {
+			t.Fatalf("OnChildStart origin = %q, want toolu_origin", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for OnChildStart")
 	}
 }
 
@@ -1677,6 +1709,7 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 	provider := newMockProvider(gateResponse(started, release, "promoted result"))
 	type startEvent struct {
 		thinking string
+		origin   string
 		async    bool
 	}
 	startEvents := make(chan startEvent, 2)
@@ -1692,8 +1725,8 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
-		OnChildStart: func(_ string, _ string, _ string, thinking string, async bool, _ time.Time, _ int) {
-			startEvents <- startEvent{thinking: thinking, async: async}
+		OnChildStart: func(_ string, _ string, _ string, thinking, origin string, async bool, _ time.Time, _ int) {
+			startEvents <- startEvent{thinking: thinking, origin: origin, async: async}
 		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
 			mu.Lock()
@@ -1707,7 +1740,7 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 
 	resultCh := make(chan core.Result, 1)
 	go func() {
-		res, _ := sub.Execute(context.Background(), map[string]any{"task": "do it", "thinking": "high"}, nil)
+		res, _ := sub.Execute(core.WithToolCallID(context.Background(), "toolu_promoted"), map[string]any{"task": "do it", "thinking": "high"}, nil)
 		resultCh <- res
 	}()
 
@@ -1734,8 +1767,8 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 	for _, wantAsync := range []bool{false, true} {
 		select {
 		case event := <-startEvents:
-			if event.thinking != "high" || event.async != wantAsync {
-				t.Fatalf("OnChildStart = %+v, want thinking high and async=%v", event, wantAsync)
+			if event.thinking != "high" || event.origin != "toolu_promoted" || event.async != wantAsync {
+				t.Fatalf("OnChildStart = %+v, want thinking high, origin toolu_promoted, and async=%v", event, wantAsync)
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("timeout waiting for OnChildStart async=%v", wantAsync)

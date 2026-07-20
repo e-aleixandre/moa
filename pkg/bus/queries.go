@@ -169,13 +169,15 @@ type GetSubagents struct{ SessionID string }
 // SubagentSnapshot describes one live subagent job, including its transcript
 // so far. Result element type for GetSubagents.
 type SubagentSnapshot struct {
-	JobID    string
-	Task     string
-	Model    string
-	Thinking string
-	Status   string
-	Async    bool
-	Messages []core.AgentMessage
+	JobID string
+	// OriginToolCallID identifies the parent model tool call that created this job.
+	OriginToolCallID string
+	Task             string
+	Model            string
+	Thinking         string
+	Status           string
+	Async            bool
+	Messages         []core.AgentMessage
 	// StartedAt is when the child began running, so a reconnecting client can
 	// keep computing live elapsed time. Zero when unknown.
 	StartedAt time.Time

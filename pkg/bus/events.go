@@ -392,10 +392,12 @@ type SubagentCompleted struct {
 type SubagentStarted struct {
 	SessionID string
 	JobID     string
-	Task      string
-	Model     string
-	Thinking  string
-	Async     bool
+	// OriginToolCallID identifies the parent model tool call that created this job.
+	OriginToolCallID string
+	Task             string
+	Model            string
+	Thinking         string
+	Async            bool
 	// StartedAt is when the child agent began running, so live UIs can compute
 	// elapsed time (now - StartedAt) and reconcile it after a reconnect. Zero
 	// when the emitter did not record a start time.

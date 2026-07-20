@@ -965,6 +965,7 @@ func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core
 		})
 	}
 
+	ctx = core.WithToolCallID(ctx, tc.ToolCallID)
 	result, err := t.Execute(ctx, tc.Arguments, onUpdate)
 	if err != nil {
 		return core.ErrorResult(err.Error()), true

@@ -36,6 +36,7 @@ var fallbackJobCounter atomic.Uint64
 type job struct {
 	mu                    sync.Mutex
 	id                    string
+	originToolCallID      string
 	task                  string
 	model                 string
 	thinking              string
@@ -68,20 +69,21 @@ type job struct {
 }
 
 type jobSnapshot struct {
-	ID          string
-	Task        string
-	Model       string
-	Thinking    string
-	Status      string
-	Result      string
-	Error       string
-	Progress    []string
-	StartedAt   time.Time
-	FinishedAt  time.Time
-	Sync        bool
-	Usage       *core.Usage
-	CostUSD     float64
-	AccentIndex int
+	ID               string
+	OriginToolCallID string
+	Task             string
+	Model            string
+	Thinking         string
+	Status           string
+	Result           string
+	Error            string
+	Progress         []string
+	StartedAt        time.Time
+	FinishedAt       time.Time
+	Sync             bool
+	Usage            *core.Usage
+	CostUSD          float64
+	AccentIndex      int
 }
 
 type jobStore struct {
@@ -95,17 +97,25 @@ func newJobStore() *jobStore {
 }
 
 func (s *jobStore) create(task, model string, cancel context.CancelFunc, thinking ...string) *job {
-	return s.createJob(task, model, cancel, false, thinking...)
+	return s.createJob(task, model, cancel, false, "", thinking...)
+}
+
+func (s *jobStore) createWithOrigin(task, model string, cancel context.CancelFunc, originToolCallID string, thinking ...string) *job {
+	return s.createJob(task, model, cancel, false, originToolCallID, thinking...)
 }
 
 // createSync creates a job for a synchronous subagent run (sync=true), so
 // that live-agent tracking (bandeja, subagent_status, count) has a single
 // source of truth across sync and async subagents.
 func (s *jobStore) createSync(task, model string, cancel context.CancelFunc, thinking ...string) *job {
-	return s.createJob(task, model, cancel, true, thinking...)
+	return s.createJob(task, model, cancel, true, "", thinking...)
 }
 
-func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync bool, thinking ...string) *job {
+func (s *jobStore) createSyncWithOrigin(task, model string, cancel context.CancelFunc, originToolCallID string, thinking ...string) *job {
+	return s.createJob(task, model, cancel, true, originToolCallID, thinking...)
+}
+
+func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync bool, originToolCallID string, thinking ...string) *job {
 	thinkingLevel := ""
 	if len(thinking) > 0 {
 		thinkingLevel = thinking[0]
@@ -113,16 +123,17 @@ func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync
 	for {
 		id := randomJobID()
 		j := &job{
-			id:        id,
-			task:      task,
-			model:     model,
-			thinking:  thinkingLevel,
-			status:    statusRunning,
-			cancel:    cancel,
-			done:      make(chan struct{}),
-			promoted:  make(chan struct{}),
-			startedAt: time.Now(),
-			sync:      sync,
+			id:               id,
+			originToolCallID: originToolCallID,
+			task:             task,
+			model:            model,
+			thinking:         thinkingLevel,
+			status:           statusRunning,
+			cancel:           cancel,
+			done:             make(chan struct{}),
+			promoted:         make(chan struct{}),
+			startedAt:        time.Now(),
+			sync:             sync,
 		}
 
 		s.mu.Lock()
@@ -206,20 +217,21 @@ func snapshotLocked(j *job) jobSnapshot {
 		}
 	}
 	return jobSnapshot{
-		ID:          j.id,
-		Task:        j.task,
-		Model:       j.model,
-		Thinking:    j.thinking,
-		Status:      j.status,
-		Result:      j.result,
-		Error:       j.err,
-		Progress:    progress,
-		StartedAt:   j.startedAt,
-		FinishedAt:  j.finishedAt,
-		Sync:        j.sync,
-		Usage:       j.usage,
-		CostUSD:     j.costUSD,
-		AccentIndex: j.accentIndex,
+		ID:               j.id,
+		OriginToolCallID: j.originToolCallID,
+		Task:             j.task,
+		Model:            j.model,
+		Thinking:         j.thinking,
+		Status:           j.status,
+		Result:           j.result,
+		Error:            j.err,
+		Progress:         progress,
+		StartedAt:        j.startedAt,
+		FinishedAt:       j.finishedAt,
+		Sync:             j.sync,
+		Usage:            j.usage,
+		CostUSD:          j.costUSD,
+		AccentIndex:      j.accentIndex,
 	}
 }
 
@@ -525,14 +537,15 @@ func randomJobID() string {
 
 // JobInfo describes a live (or recently finished) subagent job.
 type JobInfo struct {
-	JobID      string
-	Task       string
-	Model      string
-	Thinking   string
-	Status     string
-	Async      bool
-	StartedAt  time.Time
-	FinishedAt time.Time
+	JobID            string
+	OriginToolCallID string
+	Task             string
+	Model            string
+	Thinking         string
+	Status           string
+	Async            bool
+	StartedAt        time.Time
+	FinishedAt       time.Time
 	// Usage/CostUSD carry the child's accumulated usage/cost so far (nil Usage
 	// until the child has closed at least one message), so a reconnect snapshot
 	// can restore live cost without resetting it.
@@ -569,17 +582,18 @@ func (j *Jobs) Snapshot() []JobInfo {
 			continue
 		}
 		infos = append(infos, JobInfo{
-			JobID:       snap.ID,
-			Task:        snap.Task,
-			Model:       snap.Model,
-			Thinking:    snap.Thinking,
-			Status:      snap.Status,
-			Async:       !snap.Sync,
-			StartedAt:   snap.StartedAt,
-			FinishedAt:  snap.FinishedAt,
-			Usage:       snap.Usage,
-			CostUSD:     snap.CostUSD,
-			AccentIndex: snap.AccentIndex,
+			JobID:            snap.ID,
+			OriginToolCallID: snap.OriginToolCallID,
+			Task:             snap.Task,
+			Model:            snap.Model,
+			Thinking:         snap.Thinking,
+			Status:           snap.Status,
+			Async:            !snap.Sync,
+			StartedAt:        snap.StartedAt,
+			FinishedAt:       snap.FinishedAt,
+			Usage:            snap.Usage,
+			CostUSD:          snap.CostUSD,
+			AccentIndex:      snap.AccentIndex,
 		})
 	}
 	return infos

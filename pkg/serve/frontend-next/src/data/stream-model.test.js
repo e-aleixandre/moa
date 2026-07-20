@@ -184,6 +184,96 @@ test('a single live subagent is a delegation block with one agent, no header cas
   expect(delegation.agents[0].name).toBe('Do the thing');
 });
 
+test('an originating tool call is suppressed in favor of its live synchronous subagent', () => {
+  const s = session([
+    tool('toolu_1', 'subagent', { task: 'Analyze auth' }, 'running'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', originToolCallId: 'toolu_1', task: 'Analyze auth', status: 'running', async: false, messages: [] },
+    },
+  });
+  const agents = projectStream(s).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents).toEqual([expect.objectContaining({ id: 'j1', state: 'running' })]);
+});
+
+test('a synchronous originating tool call becomes one done row after its subagent ends', () => {
+  const s = session([
+    tool('toolu_1', 'subagent', { task: 'Analyze auth' }, 'done', 'Found three issues'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', originToolCallId: 'toolu_1', task: 'Analyze auth', status: 'completed', async: false, messages: [] },
+    },
+  });
+  const agents = projectStream(s).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents).toEqual([expect.objectContaining({ id: 'j1', state: 'done', chip: 'Found three issues' })]);
+});
+
+test('an async originating tool call appears once in the dock and its canonical completion appears once inline', () => {
+  const running = session([
+    tool('call_1', 'subagent', { task: 'Review ws.go' }, 'done'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', originToolCallId: 'call_1', task: 'Review ws.go', status: 'running', async: true, messages: [] },
+    },
+  });
+  const runningAgents = projectStream(running).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(runningAgents).toHaveLength(0);
+  expect(liveTrayAgents(running)).toEqual([expect.objectContaining({ id: 'j1', kind: 'subagent' })]);
+
+  const completed = session([
+    tool('call_1', 'subagent', { task: 'Review ws.go' }, 'done'),
+    tool('subagent-j1', 'subagent', { task: 'Review ws.go' }, 'done', 'Looks good'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', originToolCallId: 'call_1', task: 'Review ws.go', status: 'completed', async: true, messages: [] },
+    },
+  });
+  const completedAgents = projectStream(completed).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(completedAgents).toEqual([expect.objectContaining({ id: 'j1', state: 'done', chip: 'Looks good' })]);
+  expect(liveTrayAgents(completed)).toHaveLength(0);
+});
+
+test('parallel subagents with identical tasks remain distinct by origin tool call ID', () => {
+  const s = session([
+    tool('toolu_1', 'subagent', { task: 'Review the same file' }, 'running'),
+    tool('toolu_2', 'subagent', { task: 'Review the same file' }, 'running'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', originToolCallId: 'toolu_1', task: 'Review the same file', status: 'running', async: false, messages: [] },
+      j2: { jobId: 'j2', originToolCallId: 'toolu_2', task: 'Review the same file', status: 'running', async: false, messages: [] },
+    },
+  });
+  const agents = projectStream(s).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents.map(agent => agent.id).sort()).toEqual(['j1', 'j2']);
+});
+
+test('an empty subagent origin ID does not suppress an unrelated empty-ID tool card', () => {
+  const s = session([
+    tool('', 'subagent', { task: 'Legacy delegation' }, 'done', 'finished'),
+    tool('', 'read', { path: 'still-visible.txt' }, 'done', 'contents'),
+  ], {
+    subagents: {
+      legacy: { jobId: 'legacy', originToolCallId: '', task: 'Legacy delegation', status: 'completed', async: false, messages: [] },
+    },
+  });
+  const blocks = projectStream(s);
+  const ledgers = blocks.flatMap(block => (block.blocks || []).filter(inner => inner.type === 'ledger'));
+
+  expect(ledgers).toHaveLength(1);
+  expect(ledgers[0].rows).toEqual([expect.objectContaining({ id: '', tool: 'read' })]);
+});
+
+test('a terminal subagent origin card remains once when its live entry is gone', () => {
+  const s = session([
+    tool('toolu_sync1', 'subagent', { task: 'Review auth' }, 'done', 'Found an issue'),
+  ]);
+  const agents = projectStream(s)
+    .flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+
+  expect(agents).toHaveLength(1);
+  expect(agents[0]).toEqual(expect.objectContaining({ id: 'toolu_sync1', state: 'done', chip: 'Found an issue' }));
+});
+
 // ── 5b. TERMINATED subagents come from messages, not session.subagents ───────
 test('a terminated subagent in messages folds into a delegation block, not a ledger', () => {
   const s = session([
