@@ -8,7 +8,7 @@ import {
   FileCard,
 } from "../../components/index.js";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
-import { renderMarkdown } from "../../data/util/markdown.js";
+import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
 import "./Stream.css";
 
 // Stream — the scrollable conversation area. In 5C it renders the REAL
@@ -40,7 +40,7 @@ function docChildren(blocks, onOpenSubagent) {
           <div
             key={b.id}
             class="doc-prose"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(b.text) }}
+            dangerouslySetInnerHTML={{ __html: b.caret ? renderMarkdownWithCaret(b.text) : renderMarkdown(b.text) }}
           />
         );
         break;
@@ -91,8 +91,9 @@ function StreamBlock({ block, onOpenSubagent }) {
       );
     case "document":
     case "streaming":
+      const proseHasCaret = block.blocks.some((b) => b.type === "prose" && b.caret);
       return (
-        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true}>
+        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
           {docChildren(block.blocks, onOpenSubagent)}
         </AssistantDocument>
       );

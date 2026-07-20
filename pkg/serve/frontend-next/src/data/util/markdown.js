@@ -131,3 +131,10 @@ export function renderMarkdown(text) {
     ADD_ATTR: ['class', 'data-lang'],
   });
 }
+
+// Append the caret to the markdown source so marked keeps it in the final
+// inline context instead of placing it after the prose block.
+export function renderMarkdownWithCaret(text) {
+  if (!text) return '<span class="doc-cursor"></span>';
+  return renderMarkdown(`${text}<span class="doc-cursor"></span>`);
+}

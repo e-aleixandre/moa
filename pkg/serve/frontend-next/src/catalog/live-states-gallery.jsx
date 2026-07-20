@@ -327,10 +327,11 @@ function BackgroundJobSection() {
             live
           />
 
-          <AssistantDocument streaming>
+          <AssistantDocument>
             <p>
               Meanwhile, drafting the changelog entry for the reconnect fix. The race was subtle: the
               resume snapshot and the live subscription didn't overlap, so any event published in that
+              <span class="doc-cursor" aria-hidden="true" />
             </p>
           </AssistantDocument>
           <StreamingSkeleton />

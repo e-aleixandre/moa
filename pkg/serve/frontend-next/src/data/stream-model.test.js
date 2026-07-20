@@ -45,6 +45,7 @@ test('prose between tool calls splits into two ledgers', () => {
   expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'prose', 'ledger']);
   expect(doc.blocks[0].rows).toHaveLength(1);
   expect(doc.blocks[1].text).toBe('Now I will edit it.');
+  expect(doc.blocks[1].caret).toBeUndefined();
   expect(doc.blocks[2].rows).toHaveLength(1);
 });
 
@@ -323,7 +324,9 @@ test('streamingText plus a running tool yields a streaming block', () => {
   const last = blocks[blocks.length - 1];
   expect(last.kind).toBe('streaming');
   // the streamed prose is appended to the live document
-  expect(last.blocks.some(b => b.type === 'prose' && b.text === 'Still working on it')).toBe(true);
+  const liveProse = last.blocks.find(b => b.type === 'prose' && b.text === 'Still working on it');
+  expect(liveProse).toBeTruthy();
+  expect(liveProse.caret).toBe(true);
   // streamingText means the model is writing → textLive true (the doc caret blinks)
   expect(last.textLive).toBe(true);
 });
@@ -419,6 +422,17 @@ test('thinkingText keeps the turn live but produces no thinking block', () => {
   expect(last.kind).toBe('streaming');
   expect(last.textLive).toBe(true);
   expect(last.blocks.find(b => b.type === 'thinking')).toBeUndefined();
+});
+
+test('a thinking-only running turn has no inline prose caret', () => {
+  const s = session([assistant('hmm')], {
+    state: 'running',
+    thinkingText: 'considering options',
+  });
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  expect(doc.kind).toBe('streaming');
+  expect(doc.blocks.some(b => b.type === 'prose' && b.caret === true)).toBe(false);
 });
 
 // ── 9. history truncation notice ─────────────────────────────────────────────

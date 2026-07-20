@@ -293,7 +293,7 @@ export function projectStream(session) {
     // vanish unrecoverably — confusing. The backend keeps sending it
     // (`session.thinkingText` still drives the live caret + auto-scroll below);
     // we just don't draw it. Revisit if thinking ever gets persisted.
-    if (hasStreamingText) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText });
+    if (hasStreamingText) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText, caret: true });
 
     // SYNC live subagents merge into this turn's delegation block (creating
     // one if the turn had none yet), joining any already-terminated agent

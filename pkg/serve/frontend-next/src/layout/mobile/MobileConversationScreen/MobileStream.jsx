@@ -7,7 +7,7 @@ import {
   DelegationBlock,
   FileCard,
 } from "../../../components/index.js";
-import { renderMarkdown } from "../../../data/util/markdown.js";
+import { renderMarkdown, renderMarkdownWithCaret } from "../../../data/util/markdown.js";
 import { fuseLedgerDetails } from "../../../data/util/ledger-details.jsx";
 import "./MobileStream.css";
 
@@ -37,7 +37,7 @@ function mobileDocChildren(blocks, onOpenSubagent) {
           <div
             key={b.id}
             class="doc-prose"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(b.text) }}
+            dangerouslySetInnerHTML={{ __html: b.caret ? renderMarkdownWithCaret(b.text) : renderMarkdown(b.text) }}
           />
         );
         break;
@@ -89,8 +89,9 @@ function MobileStreamBlock({ block, onOpenSubagent }) {
       );
     case "document":
     case "streaming":
+      const proseHasCaret = block.blocks.some((b) => b.type === "prose" && b.caret);
       return (
-        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true}>
+        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
           {mobileDocChildren(block.blocks, onOpenSubagent)}
         </AssistantDocument>
       );

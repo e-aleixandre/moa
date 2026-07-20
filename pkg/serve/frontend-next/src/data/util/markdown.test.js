@@ -4,7 +4,8 @@
 // the real marked pipeline (parseMarkdown) up to — but not including —
 // sanitization. That's the part we customize (the table-wrapping renderer).
 import { test, expect } from 'bun:test';
-import { parseMarkdown } from './markdown.js';
+import DOMPurify from 'dompurify';
+import { parseMarkdown, renderMarkdownWithCaret } from './markdown.js';
 
 test('a GFM table is wrapped in a horizontal-scroll container', () => {
   const html = parseMarkdown('| a | b |\n|---|---|\n| 1 | 2 |\n');
@@ -44,4 +45,38 @@ test('cell content and column alignment are preserved', () => {
 test('non-table markdown is untouched', () => {
   const html = parseMarkdown('# Title\n\nplain paragraph\n');
   expect(html).not.toContain('md-table-wrap');
+});
+
+test('a streaming caret stays inside the final prose paragraph', () => {
+  // Bun has no DOM for DOMPurify, so preserve the rendered HTML in its
+  // sanitizer seam while exercising the exported production helper.
+  const sanitize = DOMPurify.sanitize;
+  DOMPurify.sanitize = (html) => html;
+  try {
+    const html = renderMarkdownWithCaret('hello');
+    const caret = '<span class="doc-cursor"></span>';
+    expect(html).toContain('doc-cursor');
+    expect(html.indexOf(caret)).toBeGreaterThan(html.indexOf('hello'));
+    expect(html.indexOf(caret)).toBeLessThan(html.lastIndexOf('</p>'));
+  } finally {
+    DOMPurify.sanitize = sanitize;
+  }
+});
+
+test('a streaming caret is passed through DOMPurify sanitization', () => {
+  // Bun has no DOM for DOMPurify, so use the same sanitizer seam while also
+  // pinning that the production helper cannot bypass sanitization.
+  const sanitize = DOMPurify.sanitize;
+  const calls = [];
+  DOMPurify.sanitize = (html) => {
+    calls.push(html);
+    return html;
+  };
+  try {
+    renderMarkdownWithCaret('hello');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('doc-cursor');
+  } finally {
+    DOMPurify.sanitize = sanitize;
+  }
 });
