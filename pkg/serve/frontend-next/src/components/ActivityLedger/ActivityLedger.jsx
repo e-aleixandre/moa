@@ -128,6 +128,7 @@ function LiveRow({ row }) {
   const verb = liveVerb(row.tool);
   const { text, detail: argDetail } = argParts(row.arg);
   const tailLines = row.liveTail ? row.liveTail.split("\n") : [];
+  const tailStart = row.liveTailStart || 0;
   return (
     <>
       <div class="tg-row live" role="status" aria-live="off">
@@ -142,9 +143,9 @@ function LiveRow({ row }) {
         <span class="hair" aria-hidden="true" />
       </div>
       {tailLines.length > 0 && (
-        <div class="tg-log" role="log" aria-live="off">
+        <div class={`tg-log${tailStart > 0 ? " fade" : ""}`} role="log" aria-live="off">
           {tailLines.map((line, i) => (
-            <div key={i} class="ln">
+            <div key={tailStart + i} class="ln">
               {line}
               {i === tailLines.length - 1 && <span class="ln-cursor" aria-hidden="true" />}
             </div>
@@ -224,7 +225,7 @@ const FOLD_THRESHOLD = 3;
 // phase (TOOLCALLS-UNIFIED-IMPL-SPEC): running/collapsed/expanded/finished are
 // the same card and the same row atom, differing only by which rows show and a
 // `.live` modifier. `rows` is the projectStream ledger's rows (each
-// `{ tool, arg, out, status, id, body?, live?, startedAt?, liveTail?, detail? }`,
+// `{ tool, arg, out, status, id, body?, live?, startedAt?, liveTail?, liveTailStart?, detail? }`,
 // `detail` a fused diff/output node attached by the caller).
 //
 // FOLD: a batch of more than FOLD_THRESHOLD rows collapses its oldest done rows

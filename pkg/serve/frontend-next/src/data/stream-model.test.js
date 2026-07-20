@@ -546,17 +546,43 @@ test('a trailing running tool_start is marked live on its ledger row', () => {
   expect(ledger.rows[1].startedAt).toBe(12345);
 });
 
-test('a live tool row carries its streamingResult as liveTail (last 3 lines)', () => {
+test('a live tool row carries its streamingResult as liveTail (last 5 lines and absolute start)', () => {
   const s = session([
     tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, {
-      startedAt: 1, streamingResult: 'l1\nl2\nl3\nl4\nl5',
+      startedAt: 1, streamingResult: 'l1\nl2\nl3\nl4\nl5\nl6\nl7',
     }),
   ]);
   const blocks = projectStream(s);
   const doc = blocks[blocks.length - 1];
   const ledger = doc.blocks.find(b => b.type === 'ledger');
   expect(ledger.rows[0].live).toBe(true);
-  expect(ledger.rows[0].liveTail).toBe('l3\nl4\nl5'); // last 3 lines only
+  expect(ledger.rows[0].liveTail).toBe('l3\nl4\nl5\nl6\nl7');
+  expect(ledger.rows[0].liveTailStart).toBe(2);
+  expect(ledger.rows[0].liveTail.split('\n').map((_line, i) => ledger.rows[0].liveTailStart + i))
+    .toEqual([2, 3, 4, 5, 6]);
+});
+
+test('a live tail ignores one trailing newline and rolls real lines with stable keys', () => {
+  const projectTail = (streamingResult) => {
+    const s = session([
+      tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, { startedAt: 1, streamingResult }),
+    ]);
+    return projectStream(s)[0].blocks.find(b => b.type === 'ledger').rows[0];
+  };
+
+  const completed = projectTail('l1\nl2\nl3\nl4\nl5\n');
+  expect(completed.liveTail).toBe('l1\nl2\nl3\nl4\nl5');
+  expect(completed.liveTailStart).toBe(0);
+  expect(completed.liveTail.split('\n')).not.toContain('');
+  expect(completed.liveTail.split('\n').map((_line, i) => completed.liveTailStart + i))
+    .toEqual([0, 1, 2, 3, 4]);
+
+  const rolling = projectTail('l1\nl2\nl3\nl4\nl5\nl6');
+  expect(rolling.liveTail).toBe('l2\nl3\nl4\nl5\nl6');
+  expect(rolling.liveTailStart).toBe(1);
+  expect(rolling.liveTail.split('\n')).not.toContain('');
+  expect(rolling.liveTail.split('\n').map((_line, i) => rolling.liveTailStart + i))
+    .toEqual([1, 2, 3, 4, 5]);
 });
 
 test('a live tool row with no streamingResult has no liveTail', () => {

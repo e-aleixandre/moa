@@ -348,7 +348,7 @@
 /* DiffBlock/CodeBlock render BORDERLESS inside the detail (they pass
    className="flush"): the .tg-detail panel is the only surface. */
 
-/* logtail under a running bash — same crust panel, teal cursor */
+/* Rolling logtail under a running bash — same crust panel, teal cursor. */
 .tg .tg-log {
   background: var(--crust);
   padding: var(--space-2) var(--space-4) var(--space-2)
@@ -362,18 +362,23 @@
   border-bottom: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
 }
 
+.tg .tg-log.fade {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+}
+
 .tg .tg-log:last-child {
   border-bottom: none;
 }
 
 .tg .tg-log .ln {
-  animation: tg-log-line-in var(--duration) var(--ease);
+  animation: tg-log-line-in 280ms var(--ease);
 }
 
 @keyframes tg-log-line-in {
   from {
     opacity: 0;
-    transform: translateY(2px);
+    transform: translateY(6px);
   }
 }
 

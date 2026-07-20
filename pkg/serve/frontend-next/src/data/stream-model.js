@@ -559,10 +559,17 @@ function toLedgerRow(msg) {
     row.startedAt = msg.startedAt || null;
     // Incremental output of the tool in flight (streamingResult, fed by
     // tool_update deltas — only bash actually streams; most tools stay empty
-    // until tool_end). Carried as the last N lines so the live tail row can
+    // until tool_end). Carried as the last five lines so the live tail row can
     // show a mini-logtail, matching the async BackgroundJob's live tail.
     if (msg.streamingResult) {
-      row.liveTail = splitPreviewTail(msg.streamingResult, 3).visible;
+      const streamingResult = msg.streamingResult.endsWith('\n')
+        ? msg.streamingResult.slice(0, -1)
+        : msg.streamingResult;
+      const tail = splitPreviewTail(streamingResult, 5);
+      row.liveTail = tail.visible;
+      // This is the zero-based index of the first visible line in the full
+      // stream. The ledger uses it for stable line keys as the tail rolls.
+      row.liveTailStart = tail.hidden;
     }
   }
   return row;
