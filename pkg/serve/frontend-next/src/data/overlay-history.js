@@ -127,3 +127,27 @@ export function __resetOverlayHistoryForTests() {
   unbindPopstate();
 }
 
+// collapseForNavigation — called by the router (data/router.js) right before an
+// in-app view change (conversation ⇄ grid). Browser history is linear and the
+// overlay stack shares ONE guard entry that sits ON TOP of the current view's
+// URL; if the router pushed a new entry now, that guard would be stranded in
+// the middle of history and a later Back would land on it (closing nothing)
+// instead of returning to the previous view. So when navigating with overlays
+// open we CLOSE them all first (each onRequestClose(true) — the `true` marks it
+// as a history-driven close so it does NOT itself call history.back), clear the
+// stack and unbind. Returns true when a guard was active, so the router
+// overwrites that guard entry with replaceState instead of pushing a new one
+// (keeping history == [previous view, new view]). No-op / returns false when no
+// overlay is open.
+export function collapseForNavigation() {
+  if (stack.length === 0) return false;
+  // Snapshot then clear: closing callbacks must not see a mutating stack.
+  const entries = stack.splice(0, stack.length);
+  unbindPopstate();
+  for (const entry of entries) {
+    if (entry.closed) continue;
+    entry.closed = true;
+    entry.onRequestClose(true);
+  }
+  return true;
+}

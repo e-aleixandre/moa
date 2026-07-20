@@ -5,7 +5,7 @@
 // of each test and tear it down afterwards — that also exercises the
 // "history absent" path by simply not installing it for the last block.
 import { test, expect, beforeEach, afterEach } from 'bun:test';
-import { openOverlay, closeOverlay, __resetOverlayHistoryForTests } from './overlay-history.js';
+import { openOverlay, closeOverlay, collapseForNavigation, __resetOverlayHistoryForTests } from './overlay-history.js';
 
 function installFakeHistory() {
   const entries = [{ state: null }];
@@ -235,4 +235,22 @@ test('tolerates a missing history/window (SSR/jsdom-less tests): open/close neve
 test('closeOverlay(id) called for an id not on the stack is a no-op', () => {
   installFakeHistory();
   expect(() => closeOverlay('never-opened')).not.toThrow();
+});
+
+test('collapseForNavigation closes every open overlay and reports a guard was active', () => {
+  const { listenerCount } = installFakeHistory();
+  const calls = [];
+  openOverlay('sheet-a', (fromPop) => calls.push(['a', fromPop]));
+  openOverlay('sheet-b', (fromPop) => calls.push(['b', fromPop]));
+  const hadGuard = collapseForNavigation();
+  expect(hadGuard).toBe(true);
+  // Both closed with fromPop=true (history-driven: they must NOT call back()).
+  expect(calls).toEqual([['a', true], ['b', true]]);
+  // Stack drained + listener removed so no stranded guard survives the nav.
+  expect(listenerCount()).toBe(0);
+});
+
+test('collapseForNavigation is a no-op returning false when nothing is open', () => {
+  installFakeHistory();
+  expect(collapseForNavigation()).toBe(false);
 });

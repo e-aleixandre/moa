@@ -11,6 +11,7 @@ import {
   createSession, resumeSession, unarchiveSession,
 } from "../../data/session-actions.js";
 import { assignToTile, openSession } from "../../data/tile-actions.js";
+import { navigate } from "../../data/router.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
 import { addToast } from "../../data/notifications.js";
 import {
@@ -312,13 +313,13 @@ export function CommandPalette({
       list.push({
         id: "__conversation", label: "Go to conversation", sublabel: "single-session view",
         icon: <MessageSquare size={14} />, accent: "blue", shortcut: [modLabel, "G"],
-        run: () => { onClose(); window.location.href = "?"; },
+        run: () => { onClose(); navigate(null); },
       });
     } else if (context === "conversation") {
       list.push({
         id: "__grid", label: "Go to grid", sublabel: "multi-session view",
         icon: <LayoutGrid size={14} />, accent: "blue", shortcut: [modLabel, "G"],
-        run: () => { onClose(); window.location.href = "?view=grid"; },
+        run: () => { onClose(); navigate("grid"); },
       });
     }
     // Pair Pulse — opens the QR pairing panel (5N). Available in every context;
@@ -478,7 +479,7 @@ export function CommandPalette({
     // for the explicit conversation-open path so the reader gets immediate focus.
     try {
       if (context === "grid") {
-        if (secondary) { openSession(id); window.location.href = "?"; return; }
+        if (secondary) { openSession(id); onClose(); inFlightRef.current = false; navigate(null); return; }
         // focusedPane is a 1-based DFS index (for copy/footer); resolve it to the
         // real tileId — after presets/splits the ids don't line up with 1..N.
         const ids = allTileIds(store.get().tileTree);
@@ -486,7 +487,7 @@ export function CommandPalette({
         assignToTile(tile, id);
       } else if (context === "conversation") {
         if (item.saved) { await resumeSession(id); } else { openSession(id); }
-        if (secondary) window.location.href = "?view=grid";
+        if (secondary) navigate("grid");
       } else {
         // mobile
         if (item.saved) { await resumeSession(id); } else { openSession(id); }

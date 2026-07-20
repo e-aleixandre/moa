@@ -9,6 +9,7 @@ import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./
 import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
 import { togglePalette, closePalette } from "./data/palette.js";
+import { bindRouter } from "./data/router.js";
 import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
 import { hasBlockingOverlay } from "./data/overlays.js";
 import {
@@ -127,10 +128,10 @@ function GalleryNav({ current }) {
 
 // view — selects the screen. Absence (or an unknown value) shows the REAL,
 // store-connected conversation screen (5C). `?view=grid` opens the real pane
-// grid (still presentational until 5G). `?view=catalog|live|mobile` open the
-// mock galleries with their GalleryNav.
-const params = new URLSearchParams(location.search);
-const view = params.get("view");
+// grid. `?view=catalog|live|subagent|mobile` open the mock galleries with their
+// GalleryNav. The value lives in the store (seeded from the URL) so the
+// conversation ⇄ grid hop flips it in place via the router (data/router.js)
+// with no full-page reload; consumers read state.view reactively.
 
 // useBootstrap wires the app to the data engine: session loading, polling,
 // version, mobile breakpoint, and foreground/background lifecycle. Ported from
@@ -141,6 +142,11 @@ function useBootstrap() {
   const [state, setState] = useState(store.get());
 
   useEffect(() => store.subscribe(setState), []);
+
+  // Install the single popstate listener so the browser Back/Forward buttons
+  // keep the store's `view` in sync with the URL (in-app conversation ⇄ grid
+  // hops use pushState, no reload — see data/router.js).
+  useEffect(() => bindRouter(), []);
 
   // Mobile breakpoint → setMobile. Also lock the document to the viewport on
   // mobile (adds .mobile-locked to <html>): the mobile shell owns its own
@@ -184,7 +190,13 @@ function useBootstrap() {
       setStoreState({ sessionsLoaded: true });
       const wanted = new URLSearchParams(location.search).get("session");
       if (wanted && openSession(wanted)) {
-        history.replaceState({}, "", location.pathname); // don't re-pin on refresh
+        // Strip only ?session= (a one-shot deep-link that must not re-pin on
+        // refresh) while preserving ?view= so a `?view=grid&session=X` link
+        // keeps the URL in sync with the store's seeded view.
+        const params = new URLSearchParams(location.search);
+        params.delete("session");
+        const qs = params.toString();
+        history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
       } else if (store.get().isMobile) {
         autoSelectMobile();
       } else {
@@ -283,7 +295,7 @@ function GlobalPalette() {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
 
-  const context = view === "grid" ? "grid" : state.isMobile ? "mobile" : "conversation";
+  const context = state.view === "grid" ? "grid" : state.isMobile ? "mobile" : "conversation";
   let focusedPane = null;
   if (context === "grid") {
     const ids = allTileIdsSafe(state.tileTree);
@@ -320,6 +332,7 @@ function App() {
   const version = useBootstrap();
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
+  const view = state.view;
 
   if (view === "catalog") {
     return (

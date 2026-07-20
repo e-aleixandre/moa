@@ -9,6 +9,7 @@ import { formatShortcut } from "../../data/util/shortcut.js";
 import {
   resizeSplit, assignToTile, swapTiles, splitTile, closeTile, focusTile,
 } from "../../data/tile-actions.js";
+import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount } from "../../data/store.js";
 import { projectStream } from "../../data/stream-model.js";
@@ -171,12 +172,11 @@ function ConnectedPane({ node, state, tileIndex }) {
   // --- Maximize → back to conversation view with this session focused ---
   const handleMaximize = useCallback(() => {
     if (!node.sessionId) return;
-    // Keep the session in the focused tile, then leave the grid: the
-    // conversation screen renders the focused tile's session. A full navigation
-    // (href) is the simplest cross-view hop — the store is persisted, so the
-    // tile assignment survives the reload.
+    // Keep the session in the focused tile, then leave the grid in place: the
+    // router flips the view (pushState, no reload) and the conversation screen
+    // renders the focused tile's session. navigate({session}) focuses it first.
     assignToTile(tileId, node.sessionId);
-    window.location.href = "?session=" + encodeURIComponent(node.sessionId);
+    navigate(null, { session: node.sessionId });
   }, [tileId, node.sessionId]);
 
   const commonProps = {

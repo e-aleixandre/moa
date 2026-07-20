@@ -13,6 +13,7 @@ import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { openSession } from "../../data/tile-actions.js";
+import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath, modelCodename } from "../../data/util/format.js";
@@ -318,7 +319,7 @@ export function ConversationScreen({ version }) {
           modelAccent={modelAccent(session.model)}
           thinkingLevel={session.thinking || "off"}
           onTitleClick={() => { /* 5x: rename / session menu */ }}
-          onGridToggle={() => { window.location.href = "?view=grid"; }}
+          onGridToggle={() => navigate("grid")}
           onRewind={() => setRewindOpen(true)}
           rewindDisabled={settingsBusy}
           onNotifications={() => setNotifOpen((v) => !v)}

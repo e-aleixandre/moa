@@ -61,6 +61,18 @@ let state = {
 
   isMobile: false,
 
+  // view — which screen is showing: null = single conversation (or mobile),
+  // 'grid' = pane grid, or a gallery key ('catalog'|'live'|'subagent'|'mobile').
+  // Seeded from the URL so a deep-link / reload lands on the right screen; the
+  // router (data/router.js) flips it in place (pushState, no reload) for the
+  // conversation ⇄ grid hop.
+  view: (() => {
+    try {
+      if (typeof location === 'undefined') return null;
+      return new URLSearchParams(location.search).get('view') || null;
+    } catch (_) { return null; }
+  })(),
+
   activeSession: null,
 
   // Command palette (⌘K, 5H). Lives in the store so the global mount in
