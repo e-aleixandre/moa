@@ -6,6 +6,7 @@ import {
   activityAction,
   activityText,
   inFlightTool,
+  liveVerb,
 } from './activity.js';
 
 // A session running a single tool. running() builds the minimal shape
@@ -130,4 +131,32 @@ test('activityText follows the resolution order', () => {
   expect(activityText({ state: 'permission' })).toBe('Waiting for you');
   expect(activityText({ state: 'running', compacting: true })).toBe('Compacting context');
   expect(activityText({ state: 'running', autoVerifying: true })).toBe('Running auto-verify');
+});
+
+// ── liveVerb (B·Tail live line verb table, RUNNING-TOOL-SPEC-FABLE.md §2) ────
+test('liveVerb maps the closed tool table to present-continuous verbs', () => {
+  expect(liveVerb('read')).toBe('Reading');
+  expect(liveVerb('ls')).toBe('Reading');
+  expect(liveVerb('bash')).toBe('Running');
+  expect(liveVerb('grep')).toBe('Searching');
+  expect(liveVerb('find')).toBe('Searching');
+  expect(liveVerb('web_search')).toBe('Searching');
+  expect(liveVerb('edit')).toBe('Editing');
+  expect(liveVerb('multiedit')).toBe('Editing');
+  expect(liveVerb('apply_patch')).toBe('Editing');
+  expect(liveVerb('write')).toBe('Writing');
+  expect(liveVerb('fetch_content')).toBe('Fetching');
+  expect(liveVerb('subagent')).toBe('Delegating');
+  expect(liveVerb('send_file')).toBe('Sending');
+});
+
+test('liveVerb falls back to "Calling" for unmapped/MCP tools', () => {
+  expect(liveVerb('some_mcp_tool')).toBe('Calling');
+  expect(liveVerb('')).toBe('Calling');
+  expect(liveVerb(undefined)).toBe('Calling');
+});
+
+test('liveVerb is case-insensitive', () => {
+  expect(liveVerb('Read')).toBe('Reading');
+  expect(liveVerb('BASH')).toBe('Running');
 });

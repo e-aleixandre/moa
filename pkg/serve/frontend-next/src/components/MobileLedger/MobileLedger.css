@@ -194,3 +194,14 @@
   position: absolute;
   inset: -12px -4px;
 }
+
+/* ── B·Tail compact view (see ActivityLedger.css for the shared .tail/.tail-line
+   rules) — mobile only widens the "N earlier actions" header to the ≥44px
+   touch target (RUNNING-TOOL-SPEC-FABLE.md §5 mobile note). ── */
+.mledger-tail {
+  margin-bottom: var(--space-3);
+}
+
+.mledger-tail .tail-earlier {
+  min-height: 44px;
+}

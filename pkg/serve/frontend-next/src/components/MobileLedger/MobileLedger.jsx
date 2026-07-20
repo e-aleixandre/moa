@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import {
   ChevronDown,
   ChevronRight,
@@ -9,6 +9,9 @@ import {
   Check,
 } from "lucide-preact";
 import { CodeBlock, DiffBlock } from "../index.js";
+import { liveVerb, formatElapsed } from "../../data/util/activity.js";
+import { useTailWindow } from "../ActivityLedger/tail-dwell.js";
+import "../ActivityLedger/ActivityLedger.css";
 import "./MobileLedger.css";
 
 // MobileLedger — 3-level touch ledger for the mobile stream:
@@ -27,6 +30,54 @@ import "./MobileLedger.css";
 //       { type:"files", files:[{ id?, name, lines }], actions?:[{id?,label}]|string[] }
 //       { type:"diff",  diffText, filename?, actions?:... }
 //       { type:"bash",  output, actions?:... }
+//   liveRow  { id, tool, arg, startedAt }? — the tool call currently in
+//     flight (from mobile-ledger-adapter.js#adaptLedger). When present, the
+//     batch renders as the compact "B·Tail" view (1 terminated + live line)
+//     instead of the normal L1 summary, regardless of `defaultOpen`.
+
+// useElapsed re-renders every second while `startedAt` is set. Mirrors
+// ActivityLedger.jsx's timer so both frontends share the same 3s threshold.
+function useElapsed(startedAt) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!startedAt) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+  if (!startedAt) return 0;
+  return Math.max(0, now - startedAt);
+}
+
+// TailLiveLine — the live line of the "B·Tail" view (shares .tail-line.live
+// styling with ActivityLedger.css, imported alongside MobileLedger.css).
+function TailLiveLine({ liveRow }) {
+  const elapsed = useElapsed(liveRow.startedAt);
+  const verb = liveVerb(liveRow.tool);
+  const argText = typeof liveRow.arg === "object" && liveRow.arg !== null ? liveRow.arg.text : liveRow.arg;
+  return (
+    <div class="tail-line live" role="status" aria-live="off">
+      <span class="mk" aria-hidden="true">▸</span>
+      <span class="txt">
+        <span class="verb">{verb}</span> {argText}
+      </span>
+      <span class="caret" aria-hidden="true" />
+      {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
+    </div>
+  );
+}
+
+// TailDoneLine — the last terminated row shown above the live line.
+function TailDoneLine({ row }) {
+  const kind = row.status === "err" ? "err" : row.status === "warn" ? "warn" : "ok";
+  const glyph = kind === "err" ? "✗" : kind === "warn" ? "!" : "✓";
+  return (
+    <div class="tail-line">
+      <span class={`mk ${kind}`} aria-hidden="true">{glyph}</span>
+      <span class="txt"><b>{row.name}</b> {row.action}</span>
+      <span class="res">{row.result}</span>
+    </div>
+  );
+}
 
 function LedgerRow({ row, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -97,8 +148,68 @@ function RowDetail({ detail }) {
   );
 }
 
-export function MobileLedger({ summary, icons, rows = [], defaultOpen = false, defaultOpenRowIds = [] }) {
+// MobileTailView — the B·Tail console-tail view for mobile. Extracted so the
+// dwell hook (useTailWindow) runs unconditionally (Rules of Hooks): MobileLedger
+// mounts/unmounts this whole component when switching to/from the tail view.
+function MobileTailView({ rows, liveRow, onExpand }) {
+  // Below the >3-calls threshold, show up to 2 terminated lines with no header
+  // (nothing hidden). At/above it, compress to the single last terminated line
+  // and fold the rest into the "· N earlier actions" header — keeps the mobile
+  // batch to ~72px without ever dropping an action silently. (Spec: header only
+  // with >3 calls; mobile note: 1 terminated + live when folded.)
+  const total = rows.length + (liveRow ? 1 : 0);
+  const folded = total > 3;
+  const visibleDone = folded ? 1 : 2;
+  const target = rows.slice(-visibleDone);
+  // Hold just-superseded lines for a minimum dwell (shared with desktop) so
+  // fast tool bursts can't flash a line away before it can be read.
+  const visible = useTailWindow(target);
+  const visibleIds = new Set(visible.map((r) => r.id));
+  const earlier = rows.filter((r) => !visibleIds.has(r.id));
+  const earlierErrors = earlier.filter((r) => r.status === "err").length;
+  return (
+    <div class="tail mledger-tail">
+      {earlier.length > 0 && (
+        <button type="button" class="tail-earlier" onClick={onExpand}>
+          <ChevronDown size={11} aria-hidden="true" />
+          <span>· {earlier.length} earlier action{earlier.length === 1 ? "" : "s"}</span>
+          {earlierErrors > 0 && (
+            <span class="tail-earlier-err">
+              {" "}· {earlierErrors} error{earlierErrors === 1 ? "" : "s"}
+            </span>
+          )}
+        </button>
+      )}
+      {visible.map((row, i) => (
+        <TailDoneLine key={row.id ?? i} row={row} />
+      ))}
+      {liveRow && <TailLiveLine key={liveRow.id} liveRow={liveRow} />}
+    </div>
+  );
+}
+
+export function MobileLedger({
+  summary,
+  icons,
+  rows = [],
+  defaultOpen = false,
+  defaultOpenRowIds = [],
+  liveRow = null,
+}) {
   const [open, setOpen] = useState(defaultOpen);
+  const [expanded, setExpanded] = useState(false);
+
+  // B·Tail: while a tool is live (or the batch has more rows than the
+  // compact view shows), render the console-tail view — 1-2 terminated
+  // rows + the live row — instead of the normal L1 summary. Tapping it opens
+  // the full L1/L2 ledger below (RUNNING-TOOL-SPEC-FABLE.md §5, mobile note:
+  // "1 terminated + live (~72px)").
+  const showTail = !expanded && (liveRow != null || rows.length > 3);
+
+  if (showTail) {
+    return <MobileTailView rows={rows} liveRow={liveRow} onExpand={() => setExpanded(true)} />;
+  }
+
   return (
     <div class={`mledger${open ? " open" : ""}`}>
       <button

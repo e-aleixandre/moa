@@ -13,7 +13,7 @@ export { Sheet } from "./Sheet/Sheet.jsx";
 export { Toast, ToastTitle, ToastMessage } from "./Toast/Toast.jsx";
 export { UserWaypoint } from "./UserWaypoint/UserWaypoint.jsx";
 export { AssistantDocument } from "./AssistantDocument/AssistantDocument.jsx";
-export { ActivityLedger, LedgerRow } from "./ActivityLedger/ActivityLedger.jsx";
+export { ActivityLedger, LedgerRow, TailView } from "./ActivityLedger/ActivityLedger.jsx";
 export { CodeBlock } from "./CodeBlock/CodeBlock.jsx";
 export { DiffBlock, parseUnifiedDiff } from "./DiffBlock/DiffBlock.jsx";
 export { FanoutBlock } from "./FanoutBlock/FanoutBlock.jsx";

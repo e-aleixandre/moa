@@ -23,7 +23,12 @@
 //
 // ── OUTPUT (MobileLedger props) ─────────────────────────────────────────────
 //   { summary, iconKeys, rows:[{ id, kind, name, action, result, detail }],
-//     defaultOpen, defaultOpenRowIds }
+//     defaultOpen, defaultOpenRowIds, liveRow }
+//   liveRow (nullable): { id, tool, arg, startedAt } — the tool call currently
+//     in flight (stream-model.js's `live:true` row), pulled out of `rows` and
+//     `summarize()` so MobileLedger can render it as its own always-visible
+//     "B·Tail" live line (verb + object + caret + elapsed) instead of a normal
+//     L2 row.
 //   detail is one of:
 //     { type:'diff', diffText, filename }   — an edit with a real unified diff.
 //     { type:'bash', output }               — any row carrying a text body
@@ -118,8 +123,16 @@ export function buildDetail(row, siblingDiff) {
 // adaptLedger turns a projectStream ledger block (and its optional diff sibling)
 // into MobileLedger props. The sibling diff is attached to the ledger's LAST
 // edit row (projectStream guarantees it follows that row and closes the ledger).
+//
+// The LIVE row (last row with `live:true`, see stream-model.js#toLedgerRow) is
+// pulled OUT of `rows`/`summarize()` and returned separately as `liveRow`, so
+// MobileLedger renders it as the always-visible "B·Tail" live line instead of a
+// normal L2 row.
 export function adaptLedger(ledgerBlock, siblingDiff = null) {
-  const inRows = ledgerBlock && Array.isArray(ledgerBlock.rows) ? ledgerBlock.rows : [];
+  const allRows = ledgerBlock && Array.isArray(ledgerBlock.rows) ? ledgerBlock.rows : [];
+  const isLive = allRows.length > 0 && allRows[allRows.length - 1].live === true;
+  const liveRowRaw = isLive ? allRows[allRows.length - 1] : null;
+  const inRows = isLive ? allRows.slice(0, -1) : allRows;
 
   let diffRowIndex = -1;
   if (siblingDiff) {
@@ -136,6 +149,7 @@ export function adaptLedger(ledgerBlock, siblingDiff = null) {
       name: r.tool,
       action: argText || '',
       result: resultString(r.out, r.status),
+      status: r.status,
       detail: buildDetail(r, i === diffRowIndex ? siblingDiff : null),
     };
   });
@@ -144,11 +158,21 @@ export function adaptLedger(ledgerBlock, siblingDiff = null) {
     .filter((r) => r.detail && r.detail.type === 'diff')
     .map((r) => r.id);
 
+  const liveRow = liveRowRaw
+    ? {
+        id: liveRowRaw.id != null ? String(liveRowRaw.id) : 'live',
+        tool: liveRowRaw.tool,
+        arg: liveRowRaw.arg,
+        startedAt: liveRowRaw.startedAt || null,
+      }
+    : null;
+
   return {
     summary: summarize(inRows),
     iconKeys: deriveIconKeys(inRows),
     rows,
     defaultOpen: defaultOpenRowIds.length > 0,
     defaultOpenRowIds,
+    liveRow,
   };
 }

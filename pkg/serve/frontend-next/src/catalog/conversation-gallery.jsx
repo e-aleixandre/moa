@@ -90,6 +90,24 @@ const LEDGER_FIX_ROWS = [
   },
 ];
 
+// LEDGER_TAIL_ROWS — a live batch (>3 calls, last one still running) to
+// exercise the B·Tail console-tail view: folded "N earlier actions" header
+// (with a red error count), the last terminated lines, and the live line.
+const LEDGER_TAIL_ROWS = [
+  { id: "t1", tool: "read", arg: { text: "pkg/serve/ws.go" }, out: "130 lines", status: "ok" },
+  { id: "t2", tool: "grep", arg: '"Subscribe(" — pkg/bus/', out: "7 matches", status: "ok" },
+  { id: "t3", tool: "bash", arg: { text: "go vet ./pkg/serve/" }, out: "1 issue", status: "err" },
+  { id: "t4", tool: "edit", arg: { text: "pkg/serve/ws.go", detail: "resume()" }, out: "+5 −3", status: "ok" },
+  { id: "t5", tool: "bash", arg: { text: "chmod +x scripts/deploy.sh" }, out: "rejected", status: "warn" },
+  {
+    id: "t6",
+    tool: "bash",
+    arg: { text: "go test -race -count=50 -run TestResume ./pkg/serve/" },
+    live: true,
+    startedAt: Date.now() - 7000,
+  },
+];
+
 // ConversationGallery — reproduces the Studio mockup flow (conversation-
 // desktop.html): user waypoint, assistant document with ledgers and
 // code blocks, and the streaming cursor at the end of the last paragraph.
@@ -145,6 +163,20 @@ export function ConversationGallery() {
         </AssistantDocument>
 
         <CodeBlock code={GO_SAMPLE} lang="go" filename="pkg/serve/ws.go · resume()" />
+
+        <h3 class="conv-sub">B·Tail — live tool batch (console tail)</h3>
+        <p class="lead">
+          A batch with more than three calls whose last tool is still running:
+          a folded "N earlier actions" header (red error count when a failure
+          is folded away), the last terminated lines (✓ green / ! yellow
+          rejected / ✗ red error), and the live line with a blinking caret and
+          elapsed timer.
+        </p>
+        <div class="conv-stream">
+          <AssistantDocument streaming={false}>
+            <ActivityLedger rows={LEDGER_TAIL_ROWS} />
+          </AssistantDocument>
+        </div>
       </div>
 
       <label class="conv-stream-toggle">

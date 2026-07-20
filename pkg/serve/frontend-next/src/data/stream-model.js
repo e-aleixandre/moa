@@ -43,9 +43,15 @@
 //             A batch of CONSECUTIVE tool calls (no prose between them). Each
 //             row matches the ActivityLedger/LedgerRow prop shape:
 //               { tool, arg:{text,detail}|string, out, status:'ok'|'err'|'warn',
-//                 body?, id }
+//                 body?, id, live?, startedAt? }
 //             `id` is the tool_call_id (stable key). `status` maps
 //             done→ok, error→err, rejected→warn, running/generating→ok.
+//             `live:true` marks the tool currently in flight (status
+//             running/generating); it is always the LAST row of the LAST
+//             ledger of the streaming turn (see toLedgerRow). `startedAt` is
+//             the ms epoch the tool call started (ws-handlers.js), used for
+//             the live row's elapsed timer — the "Tail" direction (B) of
+//             TOOLCALLS-ALT-SPEC-FABLE.md.
 //
 //         { type:'diff', filename, diffText, startLine }
 //             A full-width diff for an edit that carries a REAL unified diff
@@ -395,6 +401,13 @@ function toLedgerRow(msg) {
     id: msg.tool_call_id,
   };
   if (body) row.body = body;
+  // The tool currently in flight (status running/generating) is marked `live`
+  // so ActivityLedger/MobileLedger render it as the "B·Tail" live line (verb +
+  // object + caret + elapsed) instead of a normal terminated row.
+  if (msg.status === 'running' || msg.status === 'generating') {
+    row.live = true;
+    row.startedAt = msg.startedAt || null;
+  }
   return row;
 }
 

@@ -26,6 +26,37 @@ const TOOL_ACTIONS = {
   subagent: 'Running a subagent',
 };
 
+// LIVE_VERBS maps a tool name to the present-continuous verb shown on the
+// "running tool" row (RUNNING-TOOL-SPEC-FABLE.md §2 / TOOLCALLS-ALT-SPEC-FABLE.md
+// direction B — Tail). Distinct from TOOL_ACTIONS above: that one names a mid-
+// level *intent* for the coarse activity indicator ("Editing code"), this one is
+// the verb paired with the tool's concrete object (toolPath) on the live row
+// ("Editing pkg/serve/ws.go"). Closed table — unmapped/MCP tools fall back to
+// "Calling".
+const LIVE_VERBS = {
+  read: 'Reading',
+  ls: 'Reading',
+  bash: 'Running',
+  grep: 'Searching',
+  find: 'Searching',
+  web_search: 'Searching',
+  edit: 'Editing',
+  multiedit: 'Editing',
+  apply_patch: 'Editing',
+  write: 'Writing',
+  fetch_content: 'Fetching',
+  subagent: 'Delegating',
+  send_file: 'Sending',
+};
+
+// liveVerb returns the present-continuous verb for a tool name, from
+// LIVE_VERBS, or 'Calling' for anything not in the closed table (unknown/MCP
+// tools).
+export function liveVerb(name) {
+  const n = (name || '').toLowerCase();
+  return LIVE_VERBS[n] || 'Calling';
+}
+
 // BASH_INTENTS classifies a bash command (first line, lowercased) into an
 // intent. First match wins, top to bottom, so order matters: specific verbs
 // before the broad "any git" / "inspect" / catch-all buckets.

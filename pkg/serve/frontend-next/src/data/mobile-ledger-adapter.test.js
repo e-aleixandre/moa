@@ -113,3 +113,22 @@ test('adaptLedger with no diff sibling leaves the ledger collapsed', () => {
   expect(props.defaultOpen).toBe(false);
   expect(props.defaultOpenRowIds).toEqual([]);
 });
+
+// ── adaptLedger: live row extraction (B·Tail) ───────────────────────────────
+test('adaptLedger pulls a trailing live row out of rows/summary into liveRow', () => {
+  const props = adaptLedger(ledger([
+    row('read', 'a.js', '10 lines'),
+    { tool: 'bash', arg: { text: 'go test ./...' }, out: '', status: 'ok', id: 't2', live: true, startedAt: 555 },
+  ]));
+  expect(props.rows).toHaveLength(1);
+  expect(props.rows[0].id).toBe('read-a.js');
+  expect(props.summary).toBe('1 read');
+  expect(props.liveRow).toEqual({
+    id: 't2', tool: 'bash', arg: { text: 'go test ./...' }, startedAt: 555,
+  });
+});
+
+test('adaptLedger returns liveRow null when nothing is live', () => {
+  const props = adaptLedger(ledger([row('read', 'a.js')]));
+  expect(props.liveRow).toBeNull();
+});

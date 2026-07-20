@@ -87,6 +87,7 @@ function mobileDocChildren(blocks, onOpenSubagent) {
             rows={props.rows}
             defaultOpen={props.defaultOpen}
             defaultOpenRowIds={props.defaultOpenRowIds}
+            liveRow={props.liveRow}
           />
         );
         break;

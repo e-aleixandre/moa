@@ -86,23 +86,6 @@
   color: var(--red);
 }
 
-.ledger .ledger-row .t-out.live {
-  color: var(--blue);
-  animation: ledger-row-live-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes ledger-row-live-pulse {
-  50% {
-    opacity: 0.4;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ledger .ledger-row .t-out.live {
-    animation: none;
-  }
-}
-
 .ledger .ledger-body {
   padding: var(--space-3) var(--space-4) var(--space-4) 44px;
   font-family: var(--mono);
@@ -133,4 +116,179 @@
 
 .ledger .ledger-body .y {
   color: var(--yellow);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   B·TAIL — compact console-tail view of a tool-call batch: a folded
+   "N earlier actions" header, the last 1-2 terminated lines, and the live
+   line (verb + object + blinking caret + elapsed). See
+   TOOLCALLS-ALT-SPEC-FABLE.md (direction B) and RUNNING-TOOL-SPEC-FABLE.md
+   §1-2 for the live line's anatomy/verb table. Reused verbatim by
+   MobileLedger (compressed to 1 terminated line via `visibleDone`).
+   ══════════════════════════════════════════════════════════════════ */
+.tail {
+  /* Structural, non-reusable dimensions kept exact as local semantic tokens:
+     dense console-tail rows whose heights are functional, not part of the
+     shared spacing scale. */
+  --tail-row-min-h: 24px;    /* terminated line min height */
+  --tail-live-min-h: 28px;   /* live/header line min height (denser than 44) */
+  --tail-row-pad-y: 4px;     /* terminated line vertical padding */
+  --tail-live-pad-y: 6px;    /* live/header line vertical padding */
+  --tail-mk-w: 12px;         /* ✓/✗/▸ marker column width */
+  --tail-caret-w: 7px;       /* blinking caret width */
+  --tail-caret-h: 13px;      /* blinking caret height */
+  --tail-caret-gap: 3px;     /* gap before the caret */
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--crust);
+  margin: var(--space-2) 0 var(--space-5);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+.tail .tail-earlier {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--tail-live-pad-y) var(--space-4);
+  min-height: var(--tail-live-min-h);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+  background: color-mix(in srgb, var(--mantle) 80%, transparent);
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--mono);
+}
+
+.tail .tail-earlier:hover {
+  color: var(--overlay1);
+}
+
+.tail .tail-earlier:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.tail .tail-earlier-err {
+  color: var(--red);
+}
+
+.tail .tail-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--tail-row-pad-y) var(--space-4);
+  min-height: var(--tail-row-min-h);
+  overflow: hidden;
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  animation: tail-line-enter 200ms var(--ease);
+}
+
+.tail .tail-line:last-child {
+  border-bottom: none;
+}
+
+.tail .tail-line .mk {
+  flex: none;
+  width: var(--tail-mk-w);
+  text-align: center;
+}
+
+.tail .tail-line .mk.ok {
+  color: var(--green);
+}
+
+.tail .tail-line .mk.err {
+  color: var(--red);
+}
+
+.tail .tail-line .mk.warn {
+  color: var(--yellow);
+}
+
+.tail .tail-line .txt {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--overlay1);
+}
+
+.tail .tail-line .txt b {
+  color: var(--subtext0);
+  font-weight: var(--weight-normal);
+}
+
+.tail .tail-line .res {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+/* the live line — blue, caret, timer */
+.tail .tail-line.live {
+  background: color-mix(in srgb, var(--blue) 6%, transparent);
+  min-height: var(--tail-live-min-h);
+  padding: var(--tail-live-pad-y) var(--space-4);
+}
+
+.tail .tail-line.live .mk {
+  color: var(--blue);
+}
+
+.tail .tail-line.live .txt {
+  color: var(--text);
+}
+
+.tail .tail-line.live .txt .verb {
+  color: var(--blue);
+  font-weight: var(--weight-medium);
+}
+
+.tail .tail-line.live .txt .dim {
+  color: var(--overlay1);
+}
+
+.tail .tail-line.live .caret {
+  flex: none;
+  display: inline-block;
+  width: var(--tail-caret-w);
+  height: var(--tail-caret-h);
+  align-self: center;
+  background: var(--blue);
+  margin-left: var(--tail-caret-gap);
+  animation: tail-caret-blink 1s steps(1) infinite;
+}
+
+@keyframes tail-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes tail-line-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.tail .tail-line.live .res {
+  color: var(--overlay0);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tail .tail-line {
+    animation: none;
+  }
+  .tail .tail-line.live .caret {
+    animation: none;
+    opacity: 1;
+  }
 }

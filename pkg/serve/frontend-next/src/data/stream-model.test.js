@@ -293,6 +293,44 @@ test('streamingText plus a running tool yields a streaming block', () => {
   expect(last.blocks.some(b => b.type === 'prose' && b.text === 'Still working on it')).toBe(true);
 });
 
+// ── 7b. trailing running/generating tool → its ledger row is marked `live` ───
+// (B·Tail direction, TOOLCALLS-ALT-SPEC-FABLE.md): the tool currently in
+// flight is the LAST row of the LAST ledger, carrying `live:true` and its
+// `startedAt` timestamp so ActivityLedger/MobileLedger render it as the
+// running console-tail line instead of a normal terminated row.
+test('a trailing running tool_start is marked live on its ledger row', () => {
+  const s = session([
+    tool('t1', 'read', { path: 'a.js' }, 'done', '10 lines'),
+    tool('t2', 'bash', { command: 'go test ./...' }, 'running', null, { startedAt: 12345 }),
+  ]);
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger.rows).toHaveLength(2);
+  expect(ledger.rows[0].live).toBeUndefined();
+  expect(ledger.rows[1].live).toBe(true);
+  expect(ledger.rows[1].startedAt).toBe(12345);
+});
+
+test('a generating tool_start (args still streaming) is also marked live', () => {
+  const s = session([
+    tool('t1', 'edit', {}, 'generating', null, { startedAt: 999 }),
+  ]);
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger.rows[0].live).toBe(true);
+  expect(ledger.rows[0].startedAt).toBe(999);
+});
+
+test('a terminated tool_start is never marked live', () => {
+  const s = session([tool('t1', 'bash', { command: 'ls' }, 'done', 'ok')]);
+  const blocks = projectStream(s);
+  const doc = blocks[0];
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger.rows[0].live).toBeUndefined();
+});
+
 test('a finished turn is a document, never streaming', () => {
   const s = session([assistant('All done.'), tool('t1', 'bash', { command: 'ls' }, 'done', 'ok')]);
   const blocks = projectStream(s);

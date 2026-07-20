@@ -582,6 +582,10 @@ export function handleWsToolCallStart(id, data) {
     args: buffered?.args || {},
     status: 'generating',
     result: null,
+    // Anchor for the live-row elapsed timer (B·Tail) — set once, at the
+    // earliest moment this tool call exists, and carried through the
+    // generating→running transition below.
+    startedAt: Date.now(),
   });
 
   // Clean up buffer.
@@ -635,6 +639,8 @@ export function handleWsToolStart(id, data) {
         args: data.args,
         start_line: data.start_line,
         status: 'running',
+        // Keep the 'generating' phase's startedAt if it already has one.
+        startedAt: m.startedAt || Date.now(),
       };
     });
     updateSession(id, { messages, runningTool: data.tool_name });
@@ -649,6 +655,7 @@ export function handleWsToolStart(id, data) {
     start_line: data.start_line,
     status: 'running',
     result: null,
+    startedAt: Date.now(),
   };
   updateSession(id, { messages: [...sess.messages, toolMsg], runningTool: data.tool_name });
 }

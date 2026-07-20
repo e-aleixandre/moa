@@ -85,6 +85,22 @@ const READ_ROWS = [
   },
 ];
 
+// TAIL_ROWS / TAIL_LIVE — a live batch for the mobile B·Tail console-tail view:
+// folded "N earlier actions" header (+ red error count), one terminated line,
+// and the live line.
+const TAIL_ROWS = [
+  { id: "tr1", name: "read", action: "pkg/serve/ws.go", result: "130 ln", status: "ok" },
+  { id: "tr2", name: "grep", action: '"Subscribe("', result: "7", status: "ok" },
+  { id: "tr3", name: "bash", action: "go vet ./pkg/serve/", result: "error", status: "err" },
+  { id: "tr4", name: "edit", action: "pkg/serve/ws.go", result: "+5 −3", status: "ok" },
+];
+const TAIL_LIVE = {
+  id: "tr5",
+  tool: "bash",
+  arg: { text: "go test -race -count=50 ./pkg/serve/" },
+  startedAt: Date.now() - 7000,
+};
+
 const WORK_ROWS = [
   {
     id: "read",
@@ -259,6 +275,13 @@ export function MobileConversationSpecimen() {
             rows={WORK_ROWS}
             defaultOpen
             defaultOpenRowIds={["read", "edit", "bash"]}
+          />
+
+          <MobileLedger
+            summary="B·Tail — live batch"
+            icons={READ_ICONS}
+            rows={TAIL_ROWS}
+            liveRow={TAIL_LIVE}
           />
 
           <CodeBlock code={CODE_SAMPLE} lang="go" showHeader={false} />
