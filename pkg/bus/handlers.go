@@ -324,7 +324,7 @@ func RegisterHandlers(sctx *SessionContext) {
 					_ = restoreConversation(sctx, before, epoch)
 				}
 			}()
-			if _, err = sctx.Agent.SendWithCustom(ctx, prompt, map[string]any{"source": "prepare_compact", "internal": true}); err != nil {
+			if _, err = sendPrepareCompact(ctx, sctx, prompt); err != nil {
 				return nil, err
 			}
 			if err = restoreConversation(sctx, before, epoch); err != nil {

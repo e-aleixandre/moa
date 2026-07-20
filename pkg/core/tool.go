@@ -88,6 +88,12 @@ type Registry struct {
 	tools map[string]Tool
 }
 
+// ReservedToolName reports whether name is reserved for an internal tool which
+// must never be supplied by scripts, extensions, or MCP servers.
+func ReservedToolName(name string) bool {
+	return name == "checkpoint"
+}
+
 // NewRegistry creates an empty tool registry.
 func NewRegistry() *Registry {
 	return &Registry{tools: make(map[string]Tool)}
@@ -96,6 +102,9 @@ func NewRegistry() *Registry {
 // Register adds or replaces a tool.
 // Returns error if a WritePath tool is missing its LockKey function.
 func (r *Registry) Register(t Tool) error {
+	if ReservedToolName(t.Name) {
+		return fmt.Errorf("tool %s: reserved for internal use", t.Name)
+	}
 	if t.Effect == EffectWritePath && t.LockKey == nil {
 		return fmt.Errorf("tool %s: EffectWritePath requires LockKey", t.Name)
 	}
@@ -103,6 +112,27 @@ func (r *Registry) Register(t Tool) error {
 	r.tools[t.Name] = t
 	r.mu.Unlock()
 	return nil
+}
+
+// WithInternalTools returns a new, isolated registry containing this
+// registry's current tools plus internal tools. It never mutates the receiver,
+// including when an internal tool uses a reserved name. Creating an overlay
+// only changes tool visibility; it does not grant permissions to execute any
+// tool in the overlay.
+func (r *Registry) WithInternalTools(internal ...Tool) (*Registry, error) {
+	overlay := NewRegistry()
+	r.mu.RLock()
+	for name, t := range r.tools {
+		overlay.tools[name] = t
+	}
+	r.mu.RUnlock()
+	for _, t := range internal {
+		if t.Effect == EffectWritePath && t.LockKey == nil {
+			return nil, fmt.Errorf("tool %s: EffectWritePath requires LockKey", t.Name)
+		}
+		overlay.tools[t.Name] = t
+	}
+	return overlay, nil
 }
 
 // RegisterOrLog registers a tool and logs a warning on failure.

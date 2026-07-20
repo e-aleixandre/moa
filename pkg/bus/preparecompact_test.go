@@ -171,6 +171,10 @@ func TestPrepareCompactSessionNoopAndUnsupportedCheckpoint(t *testing.T) {
 	if _, err := compactWithCheckpoint(context.Background(), unsupported, "must preserve"); err == nil {
 		t.Fatal("unsupported controller silently dropped checkpoint")
 	}
+	unsupported.SessionCheckpoint = sessioncheckpoint.New()
+	if _, err := sendPrepareCompact(context.Background(), unsupported, "prepare"); err == nil {
+		t.Fatal("incompatible controller fell back to ordinary SendWithCustom")
+	}
 }
 
 func TestPrepareCompactSessionPanicSettlesState(t *testing.T) {
