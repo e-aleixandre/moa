@@ -1,22 +1,22 @@
-import { RotateCcw, Bell, Layers } from "lucide-preact";
+import { RotateCcw, Bell, ChevronDown } from "lucide-preact";
 import { StateDot } from "../../../primitives/index.js";
 import { ModelPill } from "../../../components/index.js";
 import { modelAccent } from "../../../data/selectors.js";
 import "./MobileHeader.css";
 
 // MobileHeader — session header for the mobile conversation screen.
-// A leading Layers icon button (real <button aria-label="Open sessions">) opens
-// the sessions drawer with an honest tap; above it sits nothing — the dedicated
-// grab/hint band is gone (MOBILE-DRAWER-SPEC §1.3). Below the identity row
-// (sessions button + state dot + title + model pill + bell) a mono meta row
-// carries path · ctx · rewind. Closing the drawer is a swipe-down on the sheet
-// itself, not on the header.
+// The title itself is the sessions switcher (DRAWER-OPENER-PROPOSALS §B): the
+// identity block [state dot · title · ▾] is ONE button (aria-label "Switch
+// session") that opens the sessions drawer — the chevron is the universal
+// "tap to switch" signifier, sitting on the object you're changing, and it
+// reclaims the ~32px the old leading icon cost. Below the identity row a mono
+// meta row carries path · ctx · rewind. Closing the drawer is a swipe-down on
+// the sheet itself, not on the header.
 //
-// `empty` variant (EMPTY-STATE-SPEC §2.1): when there is no focused session the
-// header must stop impersonating one — it keeps the sessions button (the way
-// into the drawer) and the bell (device-wide setting), drops the state dot,
-// model pill and the whole meta row, and shows the wordmark "moa" styled as
-// chrome (subtext0), not as a session title.
+// `empty` variant (EMPTY-STATE-SPEC §2.1): with no focused session the header
+// stops impersonating one — the switcher becomes the wordmark "moa ▾" (still
+// the way into the drawer), the model pill and meta row drop, and only the
+// bell (device-wide setting) remains beside it.
 export function MobileHeader({
   state = "idle",
   title,
@@ -37,20 +37,28 @@ export function MobileHeader({
   return (
     <header class="mhead">
       <div class="mhead-row">
-        <button
-          type="button"
-          class="mhead-sessions"
-          aria-label="Open sessions"
-          onClick={onOpenSessions}
-        >
-          <Layers size={18} aria-hidden="true" />
-        </button>
         {empty ? (
-          <span class="mhead-title mhead-wordmark">moa</span>
+          <button
+            type="button"
+            class="mhead-switch mhead-switch-empty"
+            aria-label="Switch session"
+            onClick={onOpenSessions}
+          >
+            <span class="mhead-title mhead-wordmark">moa</span>
+            <ChevronDown size={14} class="mhead-chev" aria-hidden="true" />
+          </button>
         ) : (
           <>
-            <StateDot state={state} size={9} />
-            <span class="mhead-title">{title}</span>
+            <button
+              type="button"
+              class="mhead-switch"
+              aria-label="Switch session"
+              onClick={onOpenSessions}
+            >
+              <StateDot state={state} size={9} />
+              <span class="mhead-title">{title}</span>
+              <ChevronDown size={14} class="mhead-chev" aria-hidden="true" />
+            </button>
             {model && (
               <ModelPill
                 model={model}
