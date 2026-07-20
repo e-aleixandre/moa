@@ -142,8 +142,9 @@ export function projectStream(session) {
 
   // Collect every tool_call_id already present in messages so we can dedup
   // live subagents/bash whose terminated card was already pushed here. The
-  // completion handlers key those cards as `subagent-<job_id>` /
-  // `bash-complete-<job_id>`, so we also index the bare job_id.
+  // completion handlers key current cards as `subagent-<job_id>` /
+  // `bash-complete-<job_id>`; legacy cards may retain `subagent_<index>`, so
+  // index their bare suffix too.
   const seenJobIds = seenJobIdsOf(messages);
 
   // currentDoc = the document object for the turn currently being built; reset
@@ -199,9 +200,10 @@ export function projectStream(session) {
       // split only governs LIVE work: a RUNNING async subagent shows in the
       // dock instead of inline, but once it ENDS its card is history and lives
       // inline like any other, so the user can always find what it did.
-      // Keyed `subagent-<jobId>`, tool_name 'subagent'.
+      // Keyed `subagent-<jobId>` (or a legacy `subagent_<index>`), tool_name
+      // 'subagent'.
       if (msg.tool_name === 'subagent') {
-        const jobId = String(msg.tool_call_id || '').replace(/^subagent-/, '');
+        const jobId = String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
         if (!currentDelegation) {
           currentDelegation = { type: 'delegation', id: `delegation-${abs}`, agents: [], settled: true };
           doc.blocks.push(currentDelegation);
@@ -390,8 +392,8 @@ function hasSubagentEntry(subagents, jobId) {
 
 // seenJobIdsOf collects every tool_call_id present in a message list, indexing
 // the bare job_id for the terminated subagent/bash cards keyed as
-// `subagent-<id>` / `bash-complete-<id>` (see projectStream's dedup). Exported
-// so the AgentTray uses the exact same dedup set the stream does.
+// `subagent-<id>` / `subagent_<id>` / `bash-complete-<id>` (see projectStream's
+// dedup). Exported so the AgentTray uses the exact same dedup set the stream does.
 export function seenJobIdsOf(messages) {
   const seenJobIds = new Set();
   const list = Array.isArray(messages) ? messages : [];
@@ -400,6 +402,7 @@ export function seenJobIdsOf(messages) {
       const id = String(msg.tool_call_id);
       seenJobIds.add(id);
       if (id.startsWith('subagent-')) seenJobIds.add(id.slice('subagent-'.length));
+      if (id.startsWith('subagent_')) seenJobIds.add(id.slice('subagent_'.length));
       if (id.startsWith('bash-complete-')) seenJobIds.add(id.slice('bash-complete-'.length));
     }
   }
@@ -659,10 +662,10 @@ function delegationRunningAgent(sub, accentIdx) {
 }
 
 // delegationDoneAgent builds a terminated agent row from a subagent card
-// (tool_name 'subagent', keyed `subagent-<jobId>`) already in messages. `accent`
+// (tool_name 'subagent', keyed `subagent-<jobId>` or legacy `subagent_<index>`)
 // comes from session.subagents (the completed entry keeps its accentIndex).
 function delegationDoneAgent(msg, accent) {
-  const jobId = String(msg.tool_call_id || '').replace(/^subagent-/, '');
+  const jobId = String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
   const failed = msg.status === 'error' || msg.status === 'failed' || msg.status === 'cancelled';
   const task = msg.args && msg.args.task ? firstLine(msg.args.task) : '';
   const agent = {

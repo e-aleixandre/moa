@@ -7,9 +7,10 @@ import { truncateText } from './util/format.js';
 
 // --- Message normalization ---
 
-export function normalizeHistory(raw) {
+export function normalizeHistory(raw, liveSubagents = []) {
   const result = [];
   const resultMap = {};
+  const legacySubagentJobIds = legacySubagentJobIdsOf(raw, liveSubagents);
   for (const msg of raw) {
     if (msg.role === 'tool_result') {
       resultMap[msg.tool_call_id] = msg;
@@ -71,11 +72,13 @@ export function normalizeHistory(raw) {
       result.push({ _type: 'system', text });
     } else if (msg.role === 'user') {
       if (msg.custom?.source === 'subagent') {
-        // Key the restored card `subagent-<jobId>` so projectStream folds it
-        // into the turn's delegation block by the real job id (not a synthetic
-        // index). accentIndex, if saved, keeps the row's color stable across
-        // reloads; the projection falls back to a jobId hash otherwise.
-        const jobId = msg.custom.subagent_job_id;
+        // When a real job ID is available, key the restored card
+        // `subagent-<jobId>` so projectStream folds it into the turn's
+        // delegation block by that ID. Unmatched legacy cards retain a
+        // synthetic key. accentIndex, if saved, keeps the row's color stable
+        // across reloads; the projection falls back to a jobId hash otherwise.
+        const jobId = msg.custom.subagent_job_id ||
+          legacySubagentJobIds.get(subagentTaskIdentity(msg.custom.subagent_task));
         result.push({
           _type: 'tool_start',
           tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
@@ -103,9 +106,10 @@ export function normalizeHistory(raw) {
         const userText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
         const subagent = parseSubagentNotification(userText);
         if (subagent) {
+          const jobId = legacySubagentJobIds.get(subagentTaskIdentity(subagent.task));
           result.push({
             _type: 'tool_start',
-            tool_call_id: 'subagent_' + result.length,
+            tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
             tool_name: 'subagent',
             args: { task: subagent.task },
             status: subagentRestoreStatus(subagent.status),
@@ -133,6 +137,48 @@ export function normalizeHistory(raw) {
     }
   }
   return result;
+}
+
+// Match an old terminal card to a snapshot job only when the task identifies
+// exactly one card and one live job. This lets a legacy card use the same
+// canonical key as a current card without suppressing distinct live jobs.
+function legacySubagentJobIdsOf(raw, liveSubagents) {
+  const historyTaskCounts = new Map();
+  for (const msg of (raw || [])) {
+    const task = legacySubagentTaskOf(msg);
+    if (task) historyTaskCounts.set(task, (historyTaskCounts.get(task) || 0) + 1);
+  }
+
+  const liveJobsByTask = new Map();
+  for (const subagent of (liveSubagents || [])) {
+    if (!subagent || !subagent.job_id ||
+        (subagent.status && subagent.status !== 'running' && subagent.status !== 'cancelling')) continue;
+    const task = subagentTaskIdentity(subagent.task);
+    if (!task) continue;
+    const jobs = liveJobsByTask.get(task) || [];
+    jobs.push(subagent.job_id);
+    liveJobsByTask.set(task, jobs);
+  }
+
+  const matched = new Map();
+  for (const [task, count] of historyTaskCounts) {
+    const jobs = liveJobsByTask.get(task);
+    if (count === 1 && jobs?.length === 1) matched.set(task, jobs[0]);
+  }
+  return matched;
+}
+
+function legacySubagentTaskOf(msg) {
+  if (!msg || msg.role !== 'user') return '';
+  if (msg.custom?.source === 'subagent') {
+    return msg.custom.subagent_job_id ? '' : subagentTaskIdentity(msg.custom.subagent_task);
+  }
+  const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+  return subagentTaskIdentity(parseSubagentNotification(text)?.task);
+}
+
+function subagentTaskIdentity(task) {
+  return String(task || '').trim();
 }
 
 // normalizeConversationProjection adapts the REST transcript DTO used by
@@ -342,7 +388,7 @@ export function handleWsInit(id, data) {
   delete pendingToolCallBuffers[id];
   delete materializedTextDuringMessage[id];
   updateSession(id, {
-    messages: normalizeHistory(data.messages || []),
+    messages: normalizeHistory(data.messages || [], data.subagents),
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
     contextPercent: data.context_percent ?? -1,

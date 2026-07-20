@@ -1,6 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
+import { projectStream, liveTrayAgents } from './stream-model.js';
 import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsMessageEnd } from './ws-handlers.js';
 
 function seedSession(id) {
@@ -57,6 +58,132 @@ test('handleWsSubagentStart does not downgrade a terminal status back to running
   const sa = store.get().sessions.s1.subagents.j1;
   expect(sa.status).toBe('completed');
   expect(sa.async).toBe(true);
+});
+
+test('handleWsInit dedups restored subagent cards against a running snapshot entry', () => {
+  const cases = [
+    {
+      name: 'a card with its persisted job ID',
+      custom: {
+        source: 'subagent', subagent_job_id: 'j1', subagent_task: 'Read-only diagnosis',
+        subagent_status: 'completed', subagent_result: 'done',
+      },
+    },
+    {
+      name: 'a legacy card without a persisted job ID',
+      custom: {
+        source: 'subagent', subagent_task: 'Read-only diagnosis',
+        subagent_status: 'completed', subagent_result: 'done',
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    seedSession(scenario.name);
+    handleWsInit(scenario.name, {
+      messages: [{ role: 'user', custom: scenario.custom, content: [] }],
+      subagents: [{ job_id: 'j1', task: 'Read-only diagnosis', status: 'running' }],
+    });
+
+    const blocks = projectStream(store.get().sessions[scenario.name]);
+    const agents = blocks.flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({ id: 'j1', state: 'done' });
+  }
+});
+
+test('handleWsInit suppresses a canonicalized async legacy card in both stream and dock', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [{
+      role: 'user',
+      custom: {
+        source: 'subagent', subagent_task: 'Read-only diagnosis',
+        subagent_status: 'completed', subagent_result: 'done',
+      },
+      content: [],
+    }],
+    subagents: [{ job_id: 'j1', task: 'Read-only diagnosis', status: 'running', async: true }],
+  });
+
+  const session = store.get().sessions.s1;
+  const agents = projectStream(session)
+    .flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents).toEqual([expect.objectContaining({ id: 'j1', state: 'done' })]);
+  expect(liveTrayAgents(session)).toEqual([]);
+});
+
+test('handleWsInit only correlates legacy cards to a unique live job', () => {
+  seedSession('terminal');
+  handleWsInit('terminal', {
+    messages: [{
+      role: 'user',
+      custom: {
+        source: 'subagent', subagent_task: 'Finished review',
+        subagent_status: 'completed', subagent_result: 'done',
+      },
+      content: [],
+    }],
+    subagents: [{ job_id: 'terminal-job', task: 'Finished review', status: 'completed' }],
+  });
+  expect(store.get().sessions.terminal.messages[0].tool_call_id).toBe('subagent_0');
+
+  seedSession('persisted');
+  handleWsInit('persisted', {
+    messages: [{
+      role: 'user',
+      custom: {
+        source: 'subagent', subagent_job_id: 'persisted-job', subagent_task: 'Same task',
+        subagent_status: 'completed', subagent_result: 'done',
+      },
+      content: [],
+    }],
+    subagents: [{ job_id: 'heuristic-job', task: 'Same task', status: 'running' }],
+  });
+  expect(store.get().sessions.persisted.messages[0].tool_call_id).toBe('subagent-persisted-job');
+});
+
+test('handleWsInit does not conflate a legacy card with multiple live jobs sharing its task', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [{
+      role: 'user',
+      custom: {
+        source: 'subagent', subagent_task: 'Repeatable review',
+        subagent_status: 'completed', subagent_result: 'done',
+      },
+      content: [],
+    }],
+    subagents: [
+      { job_id: 'j1', task: 'Repeatable review', status: 'running' },
+      { job_id: 'j2', task: 'Repeatable review', status: 'running' },
+    ],
+  });
+
+  const blocks = projectStream(store.get().sessions.s1);
+  const agents = blocks.flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents).toHaveLength(3);
+  expect(agents.filter(agent => agent.state === 'running').map(agent => agent.id).sort()).toEqual(['j1', 'j2']);
+});
+
+test('handleWsInit keeps a distinct live subagent when a legacy card has another task', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [{
+      role: 'user',
+      custom: {
+        source: 'subagent', subagent_task: 'Completed review',
+        subagent_status: 'completed', subagent_result: 'done',
+      },
+      content: [],
+    }],
+    subagents: [{ job_id: 'j1', task: 'Still running analysis', status: 'running' }],
+  });
+
+  const blocks = projectStream(store.get().sessions.s1);
+  const agents = blocks.flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents).toHaveLength(2);
+  expect(agents.map(agent => agent.state).sort()).toEqual(['done', 'running']);
 });
 
 test('handleWsInit preserves the bounded-history marker', () => {
