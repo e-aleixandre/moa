@@ -1167,16 +1167,20 @@ func TestStaticAssets(t *testing.T) {
 }
 
 func TestStaticDirOverride(t *testing.T) {
+	// MOA_SERVE_STATIC_DIR overrides the source of the legacy SHARED assets the
+	// redesigned frontend references at the root (/sw.js, icons). Since the
+	// cutover the root itself serves the redesigned SPA, so the override only
+	// affects those explicit asset routes — verify one of them (/sw.js).
 	dir := t.TempDir()
-	testContent := "test-static-content"
-	_ = os.WriteFile(filepath.Join(dir, "test.txt"), []byte(testContent), 0644)
+	testContent := "test-sw-content"
+	_ = os.WriteFile(filepath.Join(dir, "sw.js"), []byte(testContent), 0644)
 
 	t.Setenv("MOA_SERVE_STATIC_DIR", dir)
 
 	srv, _, cancel := newTestServer(t)
 	defer cancel()
 
-	resp, err := http.Get(srv.URL + "/test.txt")
+	resp, err := http.Get(srv.URL + "/sw.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1222,15 +1226,105 @@ func TestStaticNextAssets(t *testing.T) {
 		}
 	}
 
-	// The new frontend must not shadow the production one at the root.
+	// The redesigned frontend is now the default at the root too (cutover).
 	resp, err := http.Get(srv.URL + "/")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 200 {
 		t.Errorf("GET /: expected 200, got %d", resp.StatusCode)
 	}
+	if !strings.Contains(string(body), "<div id=\"root\">") {
+		t.Errorf("GET /: expected the redesigned SPA (found no #root)")
+	}
+}
+
+// TestRootCutover pins the cutover contract: the redesigned SPA is served at
+// the root, and the shared PWA assets it references absolutely (service worker,
+// icons) are still served from the root by the retired legacy tree.
+func TestRootCutover(t *testing.T) {
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	// Root serves the redesigned SPA (same bundle as /next/). The old SPA also
+	// had a #root div, so identity is proved by the root and /next/ serving the
+	// byte-identical index + app bundle, not by a marker.
+	rootIndex := httpGetBody(t, srv.URL+"/")
+	nextIndex := httpGetBody(t, srv.URL+"/next/")
+	if rootIndex != nextIndex {
+		t.Errorf("GET / and GET /next/ should serve the same redesigned index; bodies differ")
+	}
+	if !strings.Contains(rootIndex, "moa · next") {
+		t.Errorf("GET /: expected the redesigned index (title 'moa · next')")
+	}
+	for _, p := range []string{"/app.js", "/app.css"} {
+		if httpGetBody(t, srv.URL+p) != httpGetBody(t, srv.URL+"/next"+p) {
+			t.Errorf("GET %s should be byte-identical to /next%s", p, p)
+		}
+	}
+
+	// The retired old SPA must not leak: its manifest.json is gone (the new one
+	// is .webmanifest).
+	resp, err := http.Get(srv.URL + "/manifest.json")
+	if err != nil {
+		t.Fatalf("GET /manifest.json: %v", err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 404 {
+		t.Errorf("GET /manifest.json: expected 404 (old SPA retired), got %d", resp.StatusCode)
+	}
+
+	// Shared root assets the redesigned frontend depends on stay reachable.
+	for _, p := range []string{"/sw.js", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png"} {
+		resp, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatalf("GET %s: %v", p, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close() //nolint:errcheck
+		if resp.StatusCode != 200 {
+			t.Errorf("GET %s: expected 200, got %d", p, resp.StatusCode)
+		}
+		if len(body) == 0 {
+			t.Errorf("GET %s: empty body", p)
+		}
+	}
+
+	// The root manifest is scoped to "/" (fresh install from the root); the
+	// /next/ manifest keeps scope "/next/" for an already-installed PWA. Both
+	// carry the canonical manifest content type.
+	rootManResp, err := http.Get(srv.URL + "/manifest.webmanifest")
+	if err != nil {
+		t.Fatalf("GET /manifest.webmanifest: %v", err)
+	}
+	rootMan, _ := io.ReadAll(rootManResp.Body)
+	rootManResp.Body.Close() //nolint:errcheck
+	if ct := rootManResp.Header.Get("Content-Type"); ct != "application/manifest+json" {
+		t.Errorf("root manifest: expected application/manifest+json, got %q", ct)
+	}
+	if !strings.Contains(string(rootMan), "\"scope\": \"/\"") {
+		t.Errorf("root manifest: expected scope \"/\", got:\n%s", rootMan)
+	}
+	nextMan := httpGetBody(t, srv.URL+"/next/manifest.webmanifest")
+	if !strings.Contains(nextMan, "\"scope\": \"/next/\"") {
+		t.Errorf("/next/ manifest: expected scope \"/next/\", got:\n%s", nextMan)
+	}
+}
+
+func httpGetBody(t *testing.T, url string) string {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET %s: expected 200, got %d", url, resp.StatusCode)
+	}
+	return string(body)
 }
 
 func TestStaticNextDirOverride(t *testing.T) {
