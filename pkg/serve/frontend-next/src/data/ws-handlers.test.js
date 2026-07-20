@@ -28,12 +28,34 @@ test('normalizeConversationProjection preserves persisted tool activity', () => 
   });
 });
 
-test('handleWsSubagentStart creates a running entry with async flag', () => {
+test('handleWsSubagentStart creates a running entry with async flag and thinking level', () => {
   seedSession('s1');
-  handleWsSubagentStart('s1', { job_id: 'j1', task: 't', model: 'm', async: false });
+  handleWsSubagentStart('s1', { job_id: 'j1', task: 't', model: 'm', thinking: 'high', async: false });
   const sa = store.get().sessions.s1.subagents.j1;
   expect(sa.status).toBe('running');
   expect(sa.async).toBe(false);
+  expect(sa.thinking).toBe('high');
+});
+
+test('handleWsInit retains a subagent thinking level', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [{ job_id: 'j1', task: 't', model: 'm', thinking: 'medium', status: 'running' }],
+  });
+  expect(store.get().sessions.s1.subagents.j1.thinking).toBe('medium');
+});
+
+test('subagents without a thinking level normalize to off', () => {
+  seedSession('s1');
+  handleWsSubagentStart('s1', { job_id: 'j1', task: 't', model: 'm', async: false });
+  expect(store.get().sessions.s1.subagents.j1.thinking).toBe('off');
+
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [{ job_id: 'j1', task: 't', model: 'm', status: 'running' }],
+  });
+  expect(store.get().sessions.s1.subagents.j1.thinking).toBe('off');
 });
 
 test('handleWsSubagentStart flips async without touching a running status', () => {

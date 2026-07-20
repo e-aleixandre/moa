@@ -394,6 +394,7 @@ type SubagentStarted struct {
 	JobID     string
 	Task      string
 	Model     string
+	Thinking  string
 	Async     bool
 	// StartedAt is when the child agent began running, so live UIs can compute
 	// elapsed time (now - StartedAt) and reconcile it after a reconnect. Zero

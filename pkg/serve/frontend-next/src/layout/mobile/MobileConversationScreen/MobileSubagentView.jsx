@@ -79,7 +79,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
             {!view.terminal && <Spinner color={accent} size={8} />}
           </div>
           {view.model && (
-            <ModelPill model={view.model} accent={modelAccent(view.model)} variant="glyph" />
+            <ModelPill model={view.model} level={view.thinking} accent={modelAccent(view.model)} variant="glyph" />
           )}
           <div class="msa-actions">
             {canPromote(view) && (

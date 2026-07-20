@@ -112,7 +112,7 @@ export function SubagentView({ session, jobId, onBack }) {
         </div>
         <div class="sa-head-actions">
           {view.model && (
-            <ModelPill model={view.model} accent={modelAccent(view.model)} variant="glyph" />
+            <ModelPill model={view.model} level={view.thinking} accent={modelAccent(view.model)} variant="glyph" />
           )}
           {!view.terminal && (
             <span class="sa-status" aria-live="polite">

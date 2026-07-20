@@ -92,7 +92,7 @@ type SessionConfig struct {
 	// own bus (see cmd/agent's preBus, pkg/serve's session_lifecycle closure)
 	// since bootstrap has no bus reference of its own. All optional (nil =
 	// no-op).
-	OnSubagentStart func(jobID, task, model string, async bool, startedAt time.Time, accentIndex int)
+	OnSubagentStart func(jobID, task, model, thinking string, async bool, startedAt time.Time, accentIndex int)
 	OnSubagentEvent func(jobID string, inner any)
 	OnSubagentUsage func(jobID string, usage *core.Usage, costUSD float64)
 	OnSubagentEnd   func(jobID, status string, usage *core.Usage, costUSD float64)

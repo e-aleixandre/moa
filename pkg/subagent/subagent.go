@@ -79,11 +79,11 @@ type Config struct {
 	OnAsyncJobChange func(count int)
 
 	// OnChildStart is called right before a child agent (sync or async) begins
-	// running, with its jobID/task/model, whether it's async, its start
+	// running, with its jobID/task/model/thinking level, whether it's async, its start
 	// time (so live UIs can compute elapsed and reconcile it after a reconnect),
 	// and its stable per-session creation ordinal (accentIndex) for a
 	// deterministic accent color that survives reconnects.
-	OnChildStart func(jobID, task, model string, async bool, startedAt time.Time, accentIndex int)
+	OnChildStart func(jobID, task, model, thinking string, async bool, startedAt time.Time, accentIndex int)
 
 	// OnChildEvent is called for each typed bus event produced by translating
 	// the child's core.AgentEvent stream (via bus.TranslateAgentEvent). inner
@@ -243,7 +243,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					return core.ErrorResult(fmt.Sprintf("too many concurrent async subagents (%d running, max %d); wait or cancel one with subagent_cancel", running, maxConcurrent)), nil
 				}
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
-				job := jobs.create(task, model.ID, jobCancel)
+				job := jobs.create(task, model.ID, jobCancel, thinkingLevel)
 				// Isolate the child's shell state: seed a copy from the parent
 				// (read from the spawning ctx) and tag the child ctx with its
 				// job ID. runJob drops the snapshot when it finishes.
@@ -267,7 +267,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			// propagates the parent's cancellation into the child only while
 			// it has not been promoted.
 			jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
-			job := jobs.createSync(task, model.ID, jobCancel)
+			job := jobs.createSync(task, model.ID, jobCancel, thinkingLevel)
 			// Isolate the child's shell state (subshell semantics): seed a
 			// copy from the parent and tag the child ctx with the job's own
 			// ID (stable across a promotion, unlike the old ephemeral
@@ -476,11 +476,13 @@ func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core
 		if cfg.OnChildStart != nil {
 			var startedAt time.Time
 			var accentIndex int
+			var thinking string
 			if snap, ok := jobs.snapshot(j.id); ok {
 				startedAt = snap.StartedAt
 				accentIndex = snap.AccentIndex
+				thinking = snap.Thinking
 			}
-			cfg.OnChildStart(j.id, task, model.ID, true, startedAt, accentIndex)
+			cfg.OnChildStart(j.id, task, model.ID, thinking, true, startedAt, accentIndex)
 		}
 		if cfg.OnAsyncJobChange != nil {
 			cfg.OnAsyncJobChange(jobs.runningCount())
@@ -590,11 +592,13 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	if cfg.OnChildStart != nil {
 		var startedAt time.Time
 		var accentIndex int
+		var thinking string
 		if snap, ok := jobs.snapshot(j.id); ok {
 			startedAt = snap.StartedAt
 			accentIndex = snap.AccentIndex
+			thinking = snap.Thinking
 		}
-		cfg.OnChildStart(j.id, task, model.ID, !j.isSync(), startedAt, accentIndex)
+		cfg.OnChildStart(j.id, task, model.ID, thinking, !j.isSync(), startedAt, accentIndex)
 	}
 
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)

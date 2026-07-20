@@ -140,6 +140,7 @@ export function subagentView(session, jobId) {
     // ModelPill (modelCodename), never the raw id ("gpt-5.6-terra"). Falls back
     // to the provider-stripped id when the model carries no known codename.
     model: modelCodename(sub.model) || shortModel(sub.model) || sub.model || '',
+    thinking: sub.thinking || 'off',
     task: sub.task || '',
     async: !!sub.async,
     status,

@@ -279,9 +279,9 @@ func main() {
 				Text:   agentText,
 			})
 		},
-		OnSubagentStart: func(jobID, task, model string, async bool, startedAt time.Time, accentIndex int) {
+		OnSubagentStart: func(jobID, task, model, thinking string, async bool, startedAt time.Time, accentIndex int) {
 			preBus.Publish(bus.SubagentStarted{
-				JobID: jobID, Task: task, Model: model, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
+				JobID: jobID, Task: task, Model: model, Thinking: thinking, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
 			})
 		},
 		OnSubagentEvent: func(jobID string, inner any) {

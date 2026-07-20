@@ -41,6 +41,11 @@ test('the model label falls back to the provider-stripped id when there is no kn
   expect(subagentView(session, 'j1').model).toBe('GPT-5.5');
 });
 
+test('the resolved thinking level is projected for the model pill', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({ thinking: 'high' }) } };
+  expect(subagentView(session, 'j1').thinking).toBe('high');
+});
+
 // ── sibling rail only for 2+ live ─────────────────────────────────────────
 test('two live subagents produce a sibling rail with the active one flagged', () => {
   const session = {

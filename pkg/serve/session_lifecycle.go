@@ -200,10 +200,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				}
 			}
 		},
-		OnSubagentStart: func(jobID, task, model string, async bool, startedAt time.Time, accentIndex int) {
+		OnSubagentStart: func(jobID, task, model, thinking string, async bool, startedAt time.Time, accentIndex int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentStarted{
-					SessionID: s.ID, JobID: jobID, Task: task, Model: model, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
+					SessionID: s.ID, JobID: jobID, Task: task, Model: model, Thinking: thinking, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
 				})
 			}
 		},
@@ -359,6 +359,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				JobID:       info.JobID,
 				Task:        info.Task,
 				Model:       info.Model,
+				Thinking:    info.Thinking,
 				Status:      info.Status,
 				Async:       info.Async,
 				Messages:    bs.Subagents.Messages(info.JobID),

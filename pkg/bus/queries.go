@@ -172,6 +172,7 @@ type SubagentSnapshot struct {
 	JobID    string
 	Task     string
 	Model    string
+	Thinking string
 	Status   string
 	Async    bool
 	Messages []core.AgentMessage

@@ -38,6 +38,7 @@ type job struct {
 	id                    string
 	task                  string
 	model                 string
+	thinking              string
 	status                string
 	result                string
 	err                   string
@@ -70,6 +71,7 @@ type jobSnapshot struct {
 	ID          string
 	Task        string
 	Model       string
+	Thinking    string
 	Status      string
 	Result      string
 	Error       string
@@ -92,24 +94,29 @@ func newJobStore() *jobStore {
 	return &jobStore{jobs: make(map[string]*job)}
 }
 
-func (s *jobStore) create(task, model string, cancel context.CancelFunc) *job {
-	return s.createJob(task, model, cancel, false)
+func (s *jobStore) create(task, model string, cancel context.CancelFunc, thinking ...string) *job {
+	return s.createJob(task, model, cancel, false, thinking...)
 }
 
 // createSync creates a job for a synchronous subagent run (sync=true), so
 // that live-agent tracking (bandeja, subagent_status, count) has a single
 // source of truth across sync and async subagents.
-func (s *jobStore) createSync(task, model string, cancel context.CancelFunc) *job {
-	return s.createJob(task, model, cancel, true)
+func (s *jobStore) createSync(task, model string, cancel context.CancelFunc, thinking ...string) *job {
+	return s.createJob(task, model, cancel, true, thinking...)
 }
 
-func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync bool) *job {
+func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync bool, thinking ...string) *job {
+	thinkingLevel := ""
+	if len(thinking) > 0 {
+		thinkingLevel = thinking[0]
+	}
 	for {
 		id := randomJobID()
 		j := &job{
 			id:        id,
 			task:      task,
 			model:     model,
+			thinking:  thinkingLevel,
 			status:    statusRunning,
 			cancel:    cancel,
 			done:      make(chan struct{}),
@@ -202,6 +209,7 @@ func snapshotLocked(j *job) jobSnapshot {
 		ID:          j.id,
 		Task:        j.task,
 		Model:       j.model,
+		Thinking:    j.thinking,
 		Status:      j.status,
 		Result:      j.result,
 		Error:       j.err,
@@ -520,6 +528,7 @@ type JobInfo struct {
 	JobID      string
 	Task       string
 	Model      string
+	Thinking   string
 	Status     string
 	Async      bool
 	StartedAt  time.Time
@@ -563,6 +572,7 @@ func (j *Jobs) Snapshot() []JobInfo {
 			JobID:       snap.ID,
 			Task:        snap.Task,
 			Model:       snap.Model,
+			Thinking:    snap.Thinking,
 			Status:      snap.Status,
 			Async:       !snap.Sync,
 			StartedAt:   snap.StartedAt,

@@ -365,6 +365,7 @@ func TestSubagentModelOverrideUsesRequestedModel(t *testing.T) {
 
 func TestSubagentThinkingOverrideUsesRequestedValue(t *testing.T) {
 	var seenThinking string
+	var startedThinking string
 	sub, _, _ := newSubagentTools(t, Config{
 		DefaultModel: core.Model{ID: "default", Provider: "mock"},
 		CurrentThinkingLevel: func() string {
@@ -376,6 +377,9 @@ func TestSubagentThinkingOverrideUsesRequestedValue(t *testing.T) {
 				return textResponse("ok")(ctx, req)
 			}), nil
 		},
+		OnChildStart: func(_ string, _ string, _ string, thinking string, _ bool, _ time.Time, _ int) {
+			startedThinking = thinking
+		},
 	})
 
 	_, err := sub.Execute(context.Background(), map[string]any{"task": "x", "thinking": "high"}, nil)
@@ -385,29 +389,59 @@ func TestSubagentThinkingOverrideUsesRequestedValue(t *testing.T) {
 	if seenThinking != "high" {
 		t.Fatalf("expected thinking override high, got %q", seenThinking)
 	}
+	if startedThinking != "high" {
+		t.Fatalf("expected start thinking high, got %q", startedThinking)
+	}
 }
 
 func TestSubagentThinkingFallsBackToCurrentValue(t *testing.T) {
-	var seenThinking string
-	sub, _, _ := newSubagentTools(t, Config{
+	const defaultThinking = "medium"
+
+	seenThinking := make(chan string, 1)
+	startedThinking := make(chan string, 1)
+	sub, _, _, jobs := newSubagentToolsWithStore(t, Config{
 		DefaultModel: core.Model{ID: "default", Provider: "mock"},
 		CurrentThinkingLevel: func() string {
-			return "minimal"
+			return defaultThinking
 		},
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
 			return newMockProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-				seenThinking = req.Options.ThinkingLevel
+				seenThinking <- req.Options.ThinkingLevel
 				return textResponse("ok")(ctx, req)
 			}), nil
 		},
+		OnChildStart: func(_ string, _ string, _ string, thinking string, _ bool, _ time.Time, _ int) {
+			startedThinking <- thinking
+		},
 	})
 
-	_, err := sub.Execute(context.Background(), map[string]any{"task": "x"}, nil)
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "x", "async": true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seenThinking != "minimal" {
-		t.Fatalf("expected fallback thinking minimal, got %q", seenThinking)
+	select {
+	case got := <-seenThinking:
+		if got != defaultThinking {
+			t.Fatalf("expected fallback provider thinking %q, got %q", defaultThinking, got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for provider thinking")
+	}
+	select {
+	case got := <-startedThinking:
+		if got != defaultThinking {
+			t.Fatalf("expected fallback start thinking %q, got %q", defaultThinking, got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for start thinking")
+	}
+	jobID := jobIDFromResult(t, res)
+	snap, ok := jobs.snapshot(jobID)
+	if !ok {
+		t.Fatalf("expected snapshot for job %q", jobID)
+	}
+	if snap.Thinking != defaultThinking {
+		t.Fatalf("expected fallback snapshot thinking %q, got %q", defaultThinking, snap.Thinking)
 	}
 }
 
@@ -1641,6 +1675,11 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	provider := newMockProvider(gateResponse(started, release, "promoted result"))
+	type startEvent struct {
+		thinking string
+		async    bool
+	}
+	startEvents := make(chan startEvent, 2)
 
 	var (
 		mu          sync.Mutex
@@ -1653,6 +1692,9 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
+		OnChildStart: func(_ string, _ string, _ string, thinking string, async bool, _ time.Time, _ int) {
+			startEvents <- startEvent{thinking: thinking, async: async}
+		},
 		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
 			mu.Lock()
 			completeID = jobID
@@ -1665,7 +1707,7 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 
 	resultCh := make(chan core.Result, 1)
 	go func() {
-		res, _ := sub.Execute(context.Background(), map[string]any{"task": "do it"}, nil)
+		res, _ := sub.Execute(context.Background(), map[string]any{"task": "do it", "thinking": "high"}, nil)
 		resultCh <- res
 	}()
 
@@ -1688,6 +1730,16 @@ func TestSyncSubagentPromotedDeliversViaAsyncLane(t *testing.T) {
 	}
 	if strings.Contains(textOf(res), "promoted result") {
 		t.Fatal("parent result must not carry the child's eventual output")
+	}
+	for _, wantAsync := range []bool{false, true} {
+		select {
+		case event := <-startEvents:
+			if event.thinking != "high" || event.async != wantAsync {
+				t.Fatalf("OnChildStart = %+v, want thinking high and async=%v", event, wantAsync)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for OnChildStart async=%v", wantAsync)
+		}
 	}
 
 	// Now let the child finish; its result must arrive via OnAsyncComplete,
