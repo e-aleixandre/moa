@@ -10,6 +10,7 @@ import {
 } from "lucide-preact";
 import { CodeBlock, DiffBlock } from "../index.js";
 import { liveVerb, formatElapsed } from "../../data/util/activity.js";
+import { StateDot } from "../../primitives/index.js";
 import { useTailWindow } from "../ActivityLedger/tail-dwell.js";
 import "../ActivityLedger/ActivityLedger.css";
 import "./MobileLedger.css";
@@ -49,19 +50,34 @@ function useElapsed(startedAt) {
 }
 
 // TailLiveLine — the live line of the "B·Tail" view (shares .tail-line.live
-// styling with ActivityLedger.css, imported alongside MobileLedger.css).
+// styling with ActivityLedger.css, imported alongside MobileLedger.css). A
+// breathing dot marks it alive; when the tool streams output (`liveTail`) a
+// mini-logtail of the last lines unfolds below.
 function TailLiveLine({ liveRow }) {
   const elapsed = useElapsed(liveRow.startedAt);
   const verb = liveVerb(liveRow.tool);
   const argText = typeof liveRow.arg === "object" && liveRow.arg !== null ? liveRow.arg.text : liveRow.arg;
+  const tailLines = liveRow.liveTail ? liveRow.liveTail.split("\n") : [];
   return (
-    <div class="tail-line live" role="status" aria-live="off">
-      <span class="mk" aria-hidden="true">▸</span>
-      <span class="txt">
-        <span class="verb">{verb}</span> {argText}
-      </span>
-      <span class="caret" aria-hidden="true" />
-      {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
+    <div class="tail-live">
+      <div class="tail-line live" role="status" aria-live="off">
+        <span class="mk" aria-hidden="true">▸</span>
+        <span class="txt">
+          <span class="verb">{verb}</span> {argText}
+        </span>
+        <StateDot state="running" size={6} />
+        {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
+      </div>
+      {tailLines.length > 0 && (
+        <div class="tail-logtail" role="log" aria-live="off">
+          {tailLines.map((line, i) => (
+            <div key={i} class="ln">
+              {line}
+              {i === tailLines.length - 1 && <span class="ln-cursor" aria-hidden="true" />}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -71,7 +87,7 @@ function TailDoneLine({ row }) {
   const kind = row.status === "err" ? "err" : row.status === "warn" ? "warn" : "ok";
   const glyph = kind === "err" ? "✗" : kind === "warn" ? "!" : "✓";
   return (
-    <div class="tail-line">
+    <div class={`tail-line${row._folding ? " folding" : ""}`}>
       <span class={`mk ${kind}`} aria-hidden="true">{glyph}</span>
       <span class="txt"><b>{row.name}</b> {row.action}</span>
       <span class="res">{row.result}</span>

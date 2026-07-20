@@ -85,7 +85,7 @@ function StreamBlock({ block, onOpenSubagent }) {
     case "document":
     case "streaming":
       return (
-        <AssistantDocument streaming={block.kind === "streaming"}>
+        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true}>
           {docChildren(block.blocks, onOpenSubagent)}
         </AssistantDocument>
       );
@@ -99,6 +99,16 @@ const AT_BOTTOM_PX = 80;
 export function Stream({ session, blocks = [], onOpenSubagent, onScrollEl }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
+  // Length of the in-flight tool's streaming output (a tool_update grows this
+  // without changing block/message count or streamingText), so it must be its
+  // own follow-content signal or a live bash tail would push content below the
+  // fold without re-anchoring — the P3 mini-logtail case, worst on mobile.
+  const msgs = session?.messages;
+  const lastMsg = msgs && msgs.length > 0 ? msgs[msgs.length - 1] : null;
+  const liveToolTailLen =
+    lastMsg && lastMsg._type === "tool_start" && lastMsg.streamingResult
+      ? lastMsg.streamingResult.length
+      : 0;
   // stickToBottom is a ref (not state) so the new-content effect reads the
   // user's intent synchronously, without a render lag that would let a delta
   // re-anchor the view mid-gesture. It starts true and flips false as soon as
@@ -144,6 +154,7 @@ export function Stream({ session, blocks = [], onOpenSubagent, onScrollEl }) {
     session?.messages?.length,
     session?.streamingText,
     session?.thinkingText,
+    liveToolTailLen,
   ]);
 
   // Switching to another session starts pinned to the latest again.

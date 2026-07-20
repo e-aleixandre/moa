@@ -135,9 +135,7 @@
   --tail-row-pad-y: 4px;     /* terminated line vertical padding */
   --tail-live-pad-y: 6px;    /* live/header line vertical padding */
   --tail-mk-w: 12px;         /* ✓/✗/▸ marker column width */
-  --tail-caret-w: 7px;       /* blinking caret width */
-  --tail-caret-h: 13px;      /* blinking caret height */
-  --tail-caret-gap: 3px;     /* gap before the caret */
+  --tail-caret-gap: 3px;     /* gap before the live dot */
   border: 1px solid var(--surface0);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -154,6 +152,7 @@
   width: 100%;
   padding: var(--tail-live-pad-y) var(--space-4);
   min-height: var(--tail-live-min-h);
+  overflow: hidden;
   font-size: var(--text-xs);
   color: var(--overlay0);
   background: color-mix(in srgb, var(--mantle) 80%, transparent);
@@ -162,6 +161,32 @@
   cursor: pointer;
   text-align: left;
   font-family: var(--mono);
+  /* Grows in the first time the batch spills past the visible window, so the
+     "N earlier actions" header doesn't pop in as the rows fold away (P2/2A).
+     min-height is animated too (it would otherwise pin the row open). */
+  animation: tail-earlier-in 200ms var(--ease);
+}
+
+@keyframes tail-earlier-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom-color: transparent;
+  }
+  to {
+    opacity: 1;
+    max-height: 40px; /* px: matches the folding upper bound */
+    min-height: var(--tail-live-min-h);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tail .tail-earlier {
+    animation: none;
+  }
 }
 
 .tail .tail-earlier:hover {
@@ -190,6 +215,26 @@
 
 .tail .tail-line:last-child {
   border-bottom: none;
+}
+
+/* Folding-out: a terminated row that has left the visible window collapses its
+   height + fades before removal (tail-dwell.js FOLD_MS, TOOL-LIVE-FIXES-SPEC
+   P2/2A) so the tail settles toward the "N earlier actions" counter instead of
+   jumping. max-height is a safe upper bound for a single dense row. */
+.tail .tail-line.folding {
+  max-height: 0;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  border-bottom-color: transparent;
+  animation: none; /* cancel the enter animation while folding out */
+  transition: max-height 180ms var(--ease), opacity 180ms var(--ease),
+    padding 180ms var(--ease);
+  pointer-events: none;
+}
+.tail .tail-line:not(.folding) {
+  max-height: 40px; /* px: upper bound so the folding transition has a start value */
 }
 
 .tail .tail-line .mk {
@@ -230,7 +275,10 @@
   color: var(--overlay0);
 }
 
-/* the live line — blue, caret, timer */
+/* the live line — blue verb, breathing dot, timer. The breathing dot (StateDot
+   state="running") lives where the blinking caret used to: it marks the row as
+   alive at a slower tempo (--breath-running) than the assistant text caret's
+   1s blink, so the two never read as duplicate cursors. */
 .tail .tail-line.live {
   background: color-mix(in srgb, var(--blue) 6%, transparent);
   min-height: var(--tail-live-min-h);
@@ -254,21 +302,10 @@
   color: var(--overlay1);
 }
 
-.tail .tail-line.live .caret {
+.tail .tail-line.live .state-dot {
   flex: none;
-  display: inline-block;
-  width: var(--tail-caret-w);
-  height: var(--tail-caret-h);
   align-self: center;
-  background: var(--blue);
   margin-left: var(--tail-caret-gap);
-  animation: tail-caret-blink 1s steps(1) infinite;
-}
-
-@keyframes tail-caret-blink {
-  50% {
-    opacity: 0;
-  }
 }
 
 @keyframes tail-line-enter {
@@ -283,12 +320,58 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Mini-logtail under the live line: the running tool's incremental output
+   (bash, in practice). Same mono/crust treatment and teal cursor as the async
+   BackgroundJob's logtail, kept tight (max 3 lines, fed by the projection). */
+.tail .tail-logtail {
+  background: var(--crust);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--overlay1);
+  padding: var(--space-2) var(--space-4);
+  margin: 2px var(--space-4) var(--space-2); /* px: hairline gap under the live line */
+  overflow-x: auto; /* long log lines scroll horizontally, not clip silently */
+  overflow-y: hidden;
+}
+
+.tail .tail-logtail .ln {
+  white-space: pre;
+  animation: tail-logtail-line-in var(--duration) var(--ease);
+}
+
+@keyframes tail-logtail-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+.tail .tail-logtail .ln .ln-cursor::after {
+  content: "▌";
+  color: var(--teal);
+  animation: tail-logtail-cursor-blink 1s steps(2) infinite;
+}
+
+@keyframes tail-logtail-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tail .tail-line {
     animation: none;
   }
-  .tail .tail-line.live .caret {
+  .tail .tail-line.folding {
+    transition: none;
+  }
+  .tail .tail-logtail .ln {
     animation: none;
-    opacity: 1;
+  }
+  .tail .tail-logtail .ln .ln-cursor::after {
+    animation: none;
+    opacity: 0.6;
   }
 }

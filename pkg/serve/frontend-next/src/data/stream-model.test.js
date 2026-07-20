@@ -300,6 +300,19 @@ test('streamingText plus a running tool yields a streaming block', () => {
   expect(last.kind).toBe('streaming');
   // the streamed prose is appended to the live document
   expect(last.blocks.some(b => b.type === 'prose' && b.text === 'Still working on it')).toBe(true);
+  // streamingText means the model is writing → textLive true (the doc caret blinks)
+  expect(last.textLive).toBe(true);
+});
+
+test('a running tool with no streaming text is not textLive (no doc caret)', () => {
+  const s = session([
+    assistant('Let me check.'),
+    tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, { startedAt: 1 }),
+  ]);
+  const blocks = projectStream(s);
+  const last = blocks[blocks.length - 1];
+  expect(last.kind).toBe('streaming'); // still a live turn (the tool runs)
+  expect(last.textLive).toBe(false); // but the model isn't writing → no doc caret
 });
 
 // ── 7b. trailing running/generating tool → its ledger row is marked `live` ───
@@ -319,6 +332,30 @@ test('a trailing running tool_start is marked live on its ledger row', () => {
   expect(ledger.rows[0].live).toBeUndefined();
   expect(ledger.rows[1].live).toBe(true);
   expect(ledger.rows[1].startedAt).toBe(12345);
+});
+
+test('a live tool row carries its streamingResult as liveTail (last 3 lines)', () => {
+  const s = session([
+    tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, {
+      startedAt: 1, streamingResult: 'l1\nl2\nl3\nl4\nl5',
+    }),
+  ]);
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger.rows[0].live).toBe(true);
+  expect(ledger.rows[0].liveTail).toBe('l3\nl4\nl5'); // last 3 lines only
+});
+
+test('a live tool row with no streamingResult has no liveTail', () => {
+  const s = session([
+    tool('t1', 'read', { path: 'a.js' }, 'running', null, { startedAt: 1 }),
+  ]);
+  const blocks = projectStream(s);
+  const doc = blocks[blocks.length - 1];
+  const ledger = doc.blocks.find(b => b.type === 'ledger');
+  expect(ledger.rows[0].live).toBe(true);
+  expect(ledger.rows[0].liveTail).toBeUndefined();
 });
 
 test('a generating tool_start (args still streaming) is also marked live', () => {

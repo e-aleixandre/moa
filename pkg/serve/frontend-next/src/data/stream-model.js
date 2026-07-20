@@ -306,6 +306,11 @@ export function projectStream(session) {
     }
 
     doc.kind = 'streaming';
+    // Whether the MODEL is actively producing text (streaming prose or
+    // thinking) — distinct from "some work is live" (a running tool/subagent).
+    // The assistant-document caret keys off this so it blinks only while the
+    // model writes, not while a tool merely runs (that has its own live row).
+    doc.textLive = hasStreamingText || hasThinking;
   }
 
   // Finalize every delegation block: attach its summary and mark settled ones
@@ -472,6 +477,13 @@ function toLedgerRow(msg) {
   if (msg.status === 'running' || msg.status === 'generating') {
     row.live = true;
     row.startedAt = msg.startedAt || null;
+    // Incremental output of the tool in flight (streamingResult, fed by
+    // tool_update deltas — only bash actually streams; most tools stay empty
+    // until tool_end). Carried as the last N lines so the live tail row can
+    // show a mini-logtail, matching the async BackgroundJob's live tail.
+    if (msg.streamingResult) {
+      row.liveTail = splitPreviewTail(msg.streamingResult, 3).visible;
+    }
   }
   return row;
 }

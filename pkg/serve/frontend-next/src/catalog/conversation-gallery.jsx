@@ -105,6 +105,7 @@ const LEDGER_TAIL_ROWS = [
     arg: { text: "go test -race -count=50 -run TestResume ./pkg/serve/" },
     live: true,
     startedAt: Date.now() - 7000,
+    liveTail: "=== RUN   TestResumeDelivery\n--- PASS: TestResumeDelivery (0.41s)\n=== RUN   TestResumeSnapshot",
   },
 ];
 

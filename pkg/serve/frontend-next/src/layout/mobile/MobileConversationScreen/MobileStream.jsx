@@ -135,7 +135,7 @@ function MobileStreamBlock({ block, onOpenSubagent }) {
     case "document":
     case "streaming":
       return (
-        <AssistantDocument streaming={block.kind === "streaming"}>
+        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true}>
           {mobileDocChildren(block.blocks, onOpenSubagent)}
         </AssistantDocument>
       );
@@ -152,6 +152,15 @@ export function MobileStream({ session, blocks = [], onOpenSubagent, onScrollEl 
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   const stickToBottom = useRef(true);
+  // In-flight tool output length: a tool_update grows the live bash tail
+  // without changing block/message count, so it needs its own follow signal
+  // (P3 mini-logtail), or new output slides below the fold without re-anchoring.
+  const msgs = session?.messages;
+  const lastMsg = msgs && msgs.length > 0 ? msgs[msgs.length - 1] : null;
+  const liveToolTailLen =
+    lastMsg && lastMsg._type === "tool_start" && lastMsg.streamingResult
+      ? lastMsg.streamingResult.length
+      : 0;
 
   const maxScrollTop = (el) => Math.max(0, el.scrollHeight - el.clientHeight);
 
@@ -189,6 +198,7 @@ export function MobileStream({ session, blocks = [], onOpenSubagent, onScrollEl 
     session?.messages?.length,
     session?.streamingText,
     session?.thinkingText,
+    liveToolTailLen,
   ]);
 
   useEffect(() => {

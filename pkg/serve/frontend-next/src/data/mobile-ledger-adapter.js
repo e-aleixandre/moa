@@ -164,6 +164,7 @@ export function adaptLedger(ledgerBlock, siblingDiff = null) {
         tool: liveRowRaw.tool,
         arg: liveRowRaw.arg,
         startedAt: liveRowRaw.startedAt || null,
+        liveTail: liveRowRaw.liveTail || '',
       }
     : null;
 

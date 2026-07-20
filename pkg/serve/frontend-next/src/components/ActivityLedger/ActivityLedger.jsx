@@ -12,6 +12,7 @@ import {
   ChevronDown,
 } from "lucide-preact";
 import { liveVerb, formatElapsed } from "../../data/util/activity.js";
+import { StateDot } from "../../primitives/index.js";
 import { useTailWindow } from "./tail-dwell.js";
 import "./ActivityLedger.css";
 
@@ -105,21 +106,38 @@ function useElapsed(startedAt) {
 }
 
 // TailLiveLine — the live line of the "B·Tail" view: ▸ + verb + object +
-// blinking caret + elapsed timer (from 3s). Never clickable, no output yet.
+// breathing dot + elapsed timer (from 3s). The dot (blue, breathing at a
+// slower tempo than the assistant caret's blink) marks the row as alive
+// without cloning the text caret. When the running tool streams output
+// (`liveTail` — bash only, in practice) a mini-logtail of the last lines
+// unfolds below, matching the async BackgroundJob's live tail.
 function TailLiveLine({ row }) {
   const elapsed = useElapsed(row.startedAt);
   const verb = liveVerb(row.tool);
   const argText = typeof row.arg === "object" && row.arg !== null ? row.arg.text : row.arg;
   const argDetail = typeof row.arg === "object" && row.arg !== null ? row.arg.detail : null;
+  const tailLines = row.liveTail ? row.liveTail.split("\n") : [];
   return (
-    <div class="tail-line live" role="status" aria-live="off">
-      <span class="mk" aria-hidden="true">▸</span>
-      <span class="txt">
-        <span class="verb">{verb}</span> {argText}
-        {argDetail && <span class="dim"> {argDetail}</span>}
-      </span>
-      <span class="caret" aria-hidden="true" />
-      {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
+    <div class="tail-live">
+      <div class="tail-line live" role="status" aria-live="off">
+        <span class="mk" aria-hidden="true">▸</span>
+        <span class="txt">
+          <span class="verb">{verb}</span> {argText}
+          {argDetail && <span class="dim"> {argDetail}</span>}
+        </span>
+        <StateDot state="running" size={6} />
+        {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
+      </div>
+      {tailLines.length > 0 && (
+        <div class="tail-logtail" role="log" aria-live="off">
+          {tailLines.map((line, i) => (
+            <div key={i} class="ln">
+              {line}
+              {i === tailLines.length - 1 && <span class="ln-cursor" aria-hidden="true" />}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -132,7 +150,7 @@ function TailDoneLine({ row }) {
   const kind = row.status === "err" ? "err" : row.status === "warn" ? "warn" : "ok";
   const glyph = kind === "err" ? "✗" : kind === "warn" ? "!" : "✓";
   return (
-    <div class="tail-line">
+    <div class={`tail-line${row._folding ? " folding" : ""}`}>
       <span class={`mk ${kind}`} aria-hidden="true">{glyph}</span>
       <span class="txt"><b>{row.tool}</b> {argText}</span>
       {row.out && <span class="res">{row.out}</span>}

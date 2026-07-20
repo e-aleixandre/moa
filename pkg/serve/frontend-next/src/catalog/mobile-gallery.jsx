@@ -99,6 +99,7 @@ const TAIL_LIVE = {
   tool: "bash",
   arg: { text: "go test -race -count=50 ./pkg/serve/" },
   startedAt: Date.now() - 7000,
+  liveTail: "=== RUN   TestResumeDelivery\n--- PASS: TestResumeDelivery (0.41s)\n=== RUN   TestResumeSnapshot",
 };
 
 const WORK_ROWS = [

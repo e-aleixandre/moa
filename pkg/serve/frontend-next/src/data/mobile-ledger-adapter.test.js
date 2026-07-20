@@ -124,7 +124,7 @@ test('adaptLedger pulls a trailing live row out of rows/summary into liveRow', (
   expect(props.rows[0].id).toBe('read-a.js');
   expect(props.summary).toBe('1 read');
   expect(props.liveRow).toEqual({
-    id: 't2', tool: 'bash', arg: { text: 'go test ./...' }, startedAt: 555,
+    id: 't2', tool: 'bash', arg: { text: 'go test ./...' }, startedAt: 555, liveTail: '',
   });
 });
 
