@@ -294,6 +294,76 @@ test('a terminated subagent in messages folds into a delegation block, not a led
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
+test('assistant prose separates completed delegation waves', () => {
+  const s = session([
+    tool('subagent-a', 'subagent', { task: 'First review' }, 'done', 'first result'),
+    assistant('I will check one more thing.'),
+    tool('subagent-b', 'subagent', { task: 'Second review' }, 'done', 'second result'),
+  ]);
+  const doc = projectStream(s)[0];
+  const delegations = doc.blocks.filter(b => b.type === 'delegation');
+
+  expect(doc.blocks.map(b => b.type)).toEqual(['delegation', 'prose', 'delegation']);
+  expect(delegations).toHaveLength(2);
+  expect(delegations.map(b => b.agents.map(a => a.id))).toEqual([['a'], ['b']]);
+});
+
+test('a normal tool separates completed delegation waves', () => {
+  const s = session([
+    tool('subagent-a', 'subagent', { task: 'First review' }, 'done', 'first result'),
+    tool('bash-1', 'bash', { command: 'git status' }, 'done', 'clean'),
+    tool('subagent-b', 'subagent', { task: 'Second review' }, 'done', 'second result'),
+  ]);
+  const doc = projectStream(s)[0];
+  const delegations = doc.blocks.filter(b => b.type === 'delegation');
+
+  expect(doc.blocks.map(b => b.type)).toEqual(['delegation', 'ledger', 'delegation']);
+  expect(delegations.map(b => b.agents.map(a => a.id))).toEqual([['a'], ['b']]);
+});
+
+test('contiguous completed subagents remain one delegation wave', () => {
+  const s = session([
+    tool('subagent-a', 'subagent', { task: 'First review' }, 'done', 'first result'),
+    tool('subagent-b', 'subagent', { task: 'Second review' }, 'done', 'second result'),
+  ]);
+  const doc = projectStream(s)[0];
+  const delegations = doc.blocks.filter(b => b.type === 'delegation');
+
+  expect(delegations).toHaveLength(1);
+  expect(delegations[0].agents.map(a => a.id)).toEqual(['a', 'b']);
+});
+
+test('live prose separates a completed delegation from a live synchronous subagent', () => {
+  const s = session([
+    tool('subagent-a', 'subagent', { task: 'First review' }, 'done', 'first result'),
+  ], {
+    streamingText: 'Checking the next result.',
+    subagents: {
+      b: { jobId: 'b', task: 'Second review', status: 'running', async: false, messages: [] },
+    },
+  });
+  const doc = projectStream(s)[0];
+  const delegations = doc.blocks.filter(b => b.type === 'delegation');
+
+  expect(doc.blocks.map(b => b.type)).toEqual(['delegation', 'prose', 'delegation']);
+  expect(delegations.map(b => b.agents.map(a => a.id))).toEqual([['a'], ['b']]);
+});
+
+test('live thinking separates a completed delegation from a live synchronous subagent', () => {
+  const s = session([
+    tool('subagent-a', 'subagent', { task: 'First review' }, 'done', 'first result'),
+  ], {
+    thinkingText: 'Considering the next check.',
+    subagents: {
+      b: { jobId: 'b', task: 'Second review', status: 'running', async: false, messages: [] },
+    },
+  });
+  const doc = projectStream(s)[0];
+  const delegations = doc.blocks.filter(b => b.type === 'delegation');
+
+  expect(delegations.map(b => b.agents.map(a => a.id))).toEqual([['a'], ['b']]);
+});
+
 test('a completed subagent lingering in session.subagents is not duplicated', () => {
   // It is already in messages as a subagent card; the map still holds it as
   // completed → must appear exactly once (from messages), never re-emitted.

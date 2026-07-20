@@ -178,6 +178,10 @@ export function projectStream(session) {
     currentLedger = null;
   }
 
+  function closeDelegation() {
+    currentDelegation = null;
+  }
+
   for (let i = 0; i < messages.length; i++, abs++) {
     const msg = messages[i];
     if (msg && msg._type === 'system') {
@@ -185,7 +189,7 @@ export function projectStream(session) {
       blocks.push({ kind: 'system', id: `sys-${abs}`, text: msg.text || '' });
       currentDoc = null;
       currentLedger = null;
-      currentDelegation = null;
+      closeDelegation();
       continue;
     }
 
@@ -228,6 +232,7 @@ export function projectStream(session) {
         continue;
       }
 
+      closeDelegation();
       if (!currentLedger) {
         currentLedger = { type: 'ledger', id: `ledger-${abs}`, rows: [] };
         doc.blocks.push(currentLedger);
@@ -259,6 +264,7 @@ export function projectStream(session) {
       if (text) {
         const doc = ensureDoc();
         closeLedger();
+        closeDelegation();
         doc.blocks.push({ type: 'prose', id: `prose-${abs}`, text });
       }
       continue;
@@ -268,7 +274,7 @@ export function projectStream(session) {
       // User turn boundary: close the previous assistant document.
       currentDoc = null;
       currentLedger = null;
-      currentDelegation = null;
+      closeDelegation();
       const attachments = attachmentsOf(msg.content);
       const wp = {
         kind: 'waypoint',
@@ -304,6 +310,7 @@ export function projectStream(session) {
   if (live) {
     const doc = ensureDoc();
     closeLedger();
+    if (hasStreamingText || hasThinking) closeDelegation();
     // Thinking is intentionally NOT projected to a rendered block: it streams
     // live and is then dropped when the turn ends (never persisted in
     // `messages`), so painting it made a block appear, be expandable, then
