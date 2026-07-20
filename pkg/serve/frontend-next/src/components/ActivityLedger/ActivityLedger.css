@@ -323,6 +323,28 @@
   color: var(--red);
 }
 
+/* Bash input is brighter than its output; the prompt is decorative so copying
+   the command text does not include it. */
+.tg .tg-detail .tg-cmd {
+  color: var(--subtext0);
+}
+
+.tg .tg-detail .tg-cmd-prompt {
+  color: var(--teal);
+  user-select: none;
+}
+
+.tg .tg-detail .tg-detail-divider {
+  height: 1px; /* px: 1px hairline divider */
+  margin-top: var(--space-2);
+  background: color-mix(in srgb, var(--surface0) 55%, transparent);
+}
+
+/* Keep result text visually secondary to the command above it. */
+.tg .tg-detail .code.flush:not(.diff) pre code {
+  color: var(--overlay1);
+}
+
 /* DiffBlock/CodeBlock render BORDERLESS inside the detail (they pass
    className="flush"): the .tg-detail panel is the only surface. */
 

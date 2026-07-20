@@ -111,6 +111,32 @@ test('tool status maps done→ok, error→err, rejected→warn', () => {
   expect(rows.map(r => r.status)).toEqual(['ok', 'err', 'warn']);
 });
 
+test('bash ledger rows retain the full command while their row summary stays shortened', () => {
+  const command = `printf '${'x'.repeat(110)}' && \\
+  printf '\nsecond line'`;
+  const s = session([tool('t1', 'bash', JSON.stringify({ command }), 'done', 'second line')]);
+  const row = projectStream(s)[0].blocks[0].rows[0];
+  expect(row.command).toBe(command);
+  expect(row.command).toContain('\n  printf');
+  expect(row.arg.text).toBe(`${command.split('\n')[0].slice(0, 100)}…`);
+});
+
+test('object-form bash args retain the full multiline command while the summary is shortened', () => {
+  const command = `printf '${'x'.repeat(110)}' && \\
+  printf '\nsecond line'`;
+  const s = session([tool('t1', 'bash', { command }, 'done', 'second line')]);
+  const row = projectStream(s)[0].blocks[0].rows[0];
+  expect(row.command).toBe(command);
+  expect(row.arg.text).toBe(`${command.split('\n')[0].slice(0, 100)}…`);
+  expect(row.arg.text).not.toBe(command);
+});
+
+test('non-bash ledger rows do not retain a command property', () => {
+  const s = session([tool('t1', 'read', { path: 'src/x.js' })]);
+  const row = projectStream(s)[0].blocks[0].rows[0];
+  expect(row.command).toBeUndefined();
+});
+
 // ── 5. LIVE subagents: merged into a delegation block ────────────────────────
 // Only subagents still running/cancelling are read from session.subagents;
 // terminated ones live in session.messages (see section 5b below). A wave of

@@ -488,6 +488,10 @@ function toLedgerRow(msg) {
     status,
     id: msg.tool_call_id,
   };
+  if (name.toLowerCase() === 'bash') {
+    const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
+    if (args && typeof args.command === 'string' && args.command) row.command = args.command;
+  }
   if (body) row.body = body;
   // The tool currently in flight (status running/generating) is marked `live`
   // so ActivityLedger renders it as the unified card's live row (verb +

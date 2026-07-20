@@ -6,7 +6,42 @@ import {
   CodeBlock,
   DiffBlock,
 } from "../components/index.js";
+import { fuseLedgerDetails } from "../data/util/ledger-details.jsx";
 import "./conversation-gallery.css";
+
+// A bash row carrying its full (multiline) command + output, fused through the
+// REAL fuseLedgerDetails so the specimen exercises the shipped command-detail
+// path (command first, divider, output below) instead of a hand-built node.
+const LEDGER_CMD_ROWS = fuseLedgerDetails(
+  [
+    {
+      id: "cd1",
+      tool: "bash",
+      arg: { text: "tail -30 /home/ealeixandre/.local/state/moa/…" },
+      out: "30 lines",
+      status: "ok",
+      command: "tail -30 /home/ealeixandre/.local/state/moa/update.log",
+      body:
+        "===================== 2026-07-20 19:33:39 UTC update OK ✔ branch=feat/serve-redesign =====================\n" +
+        "[7/7] reiniciando moa + healthcheck…\n  backup: /usr/local/bin/moa.bak.20260720-193333",
+    },
+    {
+      id: "cd2",
+      tool: "bash",
+      arg: { text: "cd /home/ealeixandre/dev/moa/serve-redesign && git…" },
+      out: "ok",
+      status: "ok",
+      command:
+        "cd /home/ealeixandre/dev/moa/serve-redesign && \\\n" +
+        "  git add pkg/serve/frontend-next/src pkg/serve/static-next && \\\n" +
+        '  git commit -m "feat(serve): playful working verbs + shimmer"',
+      body:
+        "[feat/serve-redesign 12a6c60] feat(serve): playful working verbs + shimmer\n" +
+        " 9 files changed, 204 insertions(+), 87 deletions(-)",
+    },
+  ],
+  null,
+);
 
 const GO_SAMPLE = `func (c *client) resume(sess *Session, from uint64) error {
 	ch := sess.Bus.Subscribe(c.id) // subscribe BEFORE snapshot
@@ -184,6 +219,18 @@ export function ConversationGallery() {
         <div class="conv-stream">
           <AssistantDocument streaming={false}>
             <ActivityLedger rows={LEDGER_TAIL_ROWS} />
+          </AssistantDocument>
+        </div>
+
+        <h3 class="conv-sub">Unified card — full command on expand</h3>
+        <p class="lead">
+          Open a bash row and the full command shows first (mono, wrapping,
+          multiline preserved), a thin divider, then its output below. The
+          collapsed row stays a short ellipsised summary.
+        </p>
+        <div class="conv-stream">
+          <AssistantDocument streaming={false}>
+            <ActivityLedger rows={LEDGER_CMD_ROWS} />
           </AssistantDocument>
         </div>
       </div>

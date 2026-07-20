@@ -6,7 +6,8 @@ import { mapToolToKind } from "../util/tool-kind.js";
 // rows so they open INSIDE the unified tool-group card (no nested card): the
 // edit's unified `diff` sibling (projectStream emits it right after the ledger)
 // fuses into that ledger's LAST edit row, and any other row carrying a text
-// `body` (bash output / result preview) gets an output detail. Diffs/outputs
+// `body` (bash output / result preview) gets an output detail. Bash commands
+// precede their output in the same panel. Diffs/outputs
 // render BORDERLESS (className="flush") since the .tg-detail panel is the only
 // surface. Shared by the desktop Stream and mobile MobileStream so both fuse
 // identically (parity). Returns rows, each possibly with a `detail:{node}`.
@@ -19,24 +20,34 @@ export function fuseLedgerDetails(rows, siblingDiff) {
   }
   return rows.map((row, i) => {
     if (row.live) return row; // the live row never carries a static detail
-    if (i === diffRowIndex) {
+    const output = i === diffRowIndex
+      ? <DiffBlock className="flush" diffText={siblingDiff.diffText} filename={siblingDiff.filename} />
+      : row.body
+        ? <CodeBlock className="flush" code={row.body} lang="bash" showHeader={false} />
+        : null;
+    if (row.command) {
+      // A dedicated block preserves the shell prompt and input/output contrast
+      // that a syntax-highlighted CodeBlock cannot provide.
       return {
         ...row,
         detail: {
           node: (
-            <DiffBlock
-              className="flush"
-              diffText={siblingDiff.diffText}
-              filename={siblingDiff.filename}
-            />
+            <>
+              <div className="doc-mono tg-cmd">
+                <span className="tg-cmd-prompt" aria-hidden="true">$ </span>
+                {row.command}
+              </div>
+              {output && <div className="tg-detail-divider" />}
+              {output}
+            </>
           ),
         },
       };
     }
-    if (row.body) {
+    if (output) {
       return {
         ...row,
-        detail: { node: <CodeBlock className="flush" code={row.body} lang="bash" showHeader={false} /> },
+        detail: { node: output },
       };
     }
     return row;
