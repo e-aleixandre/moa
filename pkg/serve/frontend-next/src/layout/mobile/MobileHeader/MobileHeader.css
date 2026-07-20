@@ -186,24 +186,24 @@
   gap: 3px;
   position: relative;
   flex: none;
-  margin: -4px 0 -4px auto; /* auto = pin to the right edge; -4px keeps the row slim */
-  padding: 4px 10px; /* px structural: ~26px-tall chip */
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-full);
+  margin: 0 0 0 auto; /* auto = pin to the right edge, away from the title band */
+  padding: 0;
+  border: none;
   background: none;
-  color: var(--overlay1);
+  color: var(--overlay0);
   font: inherit;
   cursor: pointer;
+  transition: color var(--duration) var(--ease);
 }
 
 /* Hit area grows sideways + DOWN only (into the header's bottom padding, where
-   nothing is tappable) — never UP into the title switcher's band. Total ≥44px
-   tall (26 visual + 18 down), ≥44px wide. This is the fix for the accidental
-   Rewind taps when reaching for the title/drawer. */
+   nothing is tappable) — never UP into the title switcher's band. This is the
+   fix for the accidental Rewind taps when reaching for the title/drawer, kept
+   even though the control renders as plain text (no pill). */
 .mhead-rewind::after {
   content: "";
   position: absolute;
-  inset: 0 -8px -18px -8px;
+  inset: -4px -8px -18px -8px;
 }
 
 .mhead-rewind:disabled {
@@ -211,8 +211,8 @@
   cursor: default;
 }
 
-.mhead-rewind:active:not(:disabled) {
-  background: var(--surface0);
+.mhead-rewind:active:not(:disabled),
+.mhead-rewind:hover:not(:disabled) {
   color: var(--subtext0);
 }
 
