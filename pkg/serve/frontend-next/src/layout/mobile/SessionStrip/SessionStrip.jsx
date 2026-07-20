@@ -18,6 +18,7 @@ export function SessionStrip({ sessions = [], activeId, onSelect, onNew }) {
             type="button"
             class={cls}
             aria-current={active ? "true" : undefined}
+            title={s.name}
             onClick={() => onSelect && onSelect(s.id)}
           >
             <StateDot state={s.state} size={6} />

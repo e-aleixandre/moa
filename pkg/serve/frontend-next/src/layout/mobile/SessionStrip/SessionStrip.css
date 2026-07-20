@@ -52,6 +52,12 @@
 
 .mstrip-name {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Cap a long title so one verbose session can't stretch the pill across the
+     whole strip; the full title stays available via the chip's title attr and
+     the drawer. ~16 chars reads as a scannable label, not a sentence. */
+  max-width: 16ch;
 }
 
 .mstrip-chip.on {
