@@ -20,19 +20,20 @@ type commandHandler func(m *Manager, sess *ManagedSession, args []string) (*Comm
 
 // commandRegistry maps command names to handlers.
 var commandRegistry = map[string]commandHandler{
-	"clear":       cmdClear,
-	"compact":     cmdCompact,
-	"model":       cmdModel,
-	"thinking":    cmdThinking,
-	"plan":        cmdPlan,
-	"goal":        cmdGoal,
-	"tasks":       cmdTasks,
-	"permissions": cmdPermissions,
-	"undo":        cmdUndo,
-	"path":        cmdPath,
-	"verify":      cmdVerify,
-	"rename":      cmdRename,
-	"schedule":    cmdSchedule,
+	"clear":           cmdClear,
+	"compact":         cmdCompact,
+	"prepare-compact": cmdPrepareCompact,
+	"model":           cmdModel,
+	"thinking":        cmdThinking,
+	"plan":            cmdPlan,
+	"goal":            cmdGoal,
+	"tasks":           cmdTasks,
+	"permissions":     cmdPermissions,
+	"undo":            cmdUndo,
+	"path":            cmdPath,
+	"verify":          cmdVerify,
+	"rename":          cmdRename,
+	"schedule":        cmdSchedule,
 }
 
 func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
@@ -169,6 +170,16 @@ func cmdCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, e
 		return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "conversation compacted"}, nil
+}
+
+func cmdPrepareCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+	if err := requireIdle(sess); err != nil {
+		return nil, err
+	}
+	if err := sess.runtime.Bus.Execute(bus.PrepareCompactSession{}); err != nil {
+		return &CommandResult{OK: false, Message: "preparation/compaction failed: " + err.Error()}, nil
+	}
+	return &CommandResult{OK: true, Message: "preparing context; compaction will follow"}, nil
 }
 
 func cmdRename(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

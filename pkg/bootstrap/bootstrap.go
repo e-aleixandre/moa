@@ -24,6 +24,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/memory"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
 	"github.com/ealeixandre/moa/pkg/skill"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tasks"
@@ -111,24 +112,25 @@ type SessionConfig struct {
 
 // Session is a fully wired session ready for agent.Run/Send.
 type Session struct {
-	Agent        *agent.Agent
-	ToolReg      *core.Registry
-	TaskStore    *tasks.Store
-	PlanMode     *planmode.PlanMode
-	Goal         *goal.Goal
-	AskBridge    *askuser.Bridge
-	Gate         *permission.Gate
-	MCPManager   *mcp.Manager
-	PathPolicy   *tool.PathPolicy
-	AgentsMD     string
-	Skills       []skill.Skill
-	SkillsIndex  string
-	SystemPrompt string
-	MemoryStore  *memory.Store
-	HasVerify    bool
-	Model        core.Model
-	MoaCfg       core.MoaConfig
-	CWD          string // workspace directory
+	Agent             *agent.Agent
+	ToolReg           *core.Registry
+	TaskStore         *tasks.Store
+	PlanMode          *planmode.PlanMode
+	Goal              *goal.Goal
+	AskBridge         *askuser.Bridge
+	Gate              *permission.Gate
+	MCPManager        *mcp.Manager
+	PathPolicy        *tool.PathPolicy
+	AgentsMD          string
+	Skills            []skill.Skill
+	SkillsIndex       string
+	SystemPrompt      string
+	MemoryStore       *memory.Store
+	SessionCheckpoint *sessioncheckpoint.Slot
+	HasVerify         bool
+	Model             core.Model
+	MoaCfg            core.MoaConfig
+	CWD               string // workspace directory
 
 	// UntrustedMCP is true when .mcp.json exists but CWD is not in TrustedMCPPaths.
 	UntrustedMCP bool
@@ -247,6 +249,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		bashState = tool.NewBashState()
 	}
 	toolReg := core.NewRegistry()
+	sessionCheckpoint := sessioncheckpoint.New()
 	if err := tool.RegisterBuiltins(toolReg, tool.ToolConfig{
 		WorkspaceRoot: cfg.CWD,
 		PathPolicy:    pathPolicy,
@@ -376,24 +379,29 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		core.RegisterOrLog(toolReg, askuser.NewTool(askBridge))
 	}
 
+	// Register last so project scripts or MCP servers cannot replace this
+	// permission-exempt internal tool with an external implementation.
+	core.RegisterOrLog(toolReg, tool.NewSessionCheckpoint(sessionCheckpoint))
+
 	// Build the session struct early so subagent closures can reference it.
 	sess := &Session{
-		ToolReg:      toolReg,
-		TaskStore:    taskStore,
-		AskBridge:    askBridge,
-		Gate:         gate,
-		MCPManager:   mcpMgr,
-		PathPolicy:   pathPolicy,
-		AgentsMD:     agentsMD,
-		Skills:       skills,
-		SkillsIndex:  skillsIndex,
-		HasVerify:    hasVerify,
-		MemoryStore:  memStore,
-		Model:        cfg.Model,
-		MoaCfg:       moaCfg,
-		CWD:          cfg.CWD,
-		UntrustedMCP: untrustedMCP,
-		Headless:     cfg.Headless,
+		ToolReg:           toolReg,
+		SessionCheckpoint: sessionCheckpoint,
+		TaskStore:         taskStore,
+		AskBridge:         askBridge,
+		Gate:              gate,
+		MCPManager:        mcpMgr,
+		PathPolicy:        pathPolicy,
+		AgentsMD:          agentsMD,
+		Skills:            skills,
+		SkillsIndex:       skillsIndex,
+		HasVerify:         hasVerify,
+		MemoryStore:       memStore,
+		Model:             cfg.Model,
+		MoaCfg:            moaCfg,
+		CWD:               cfg.CWD,
+		UntrustedMCP:      untrustedMCP,
+		Headless:          cfg.Headless,
 	}
 
 	// 10. Subagents.

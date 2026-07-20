@@ -157,6 +157,10 @@ type ClearSession struct{ SessionID string }
 // CompactSession triggers manual compaction.
 type CompactSession struct{ SessionID string }
 
+// PrepareCompactSession runs a short internal preparation turn then compacts
+// without releasing the session slot between the two phases.
+type PrepareCompactSession struct{ SessionID string }
+
 // RunManualVerify runs the project's verification checks (the /verify command)
 // as a bus command that occupies the session state (idle→running→idle), so a
 // queued /verify barrier keeps its position and can't race a concurrent run. It

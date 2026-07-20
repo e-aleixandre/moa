@@ -63,7 +63,7 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 				ts.tree.Clear()
 				ts.synced = make(map[string]struct{})
 				ts.mu.Unlock()
-			case "compact":
+			case "compact", "prepare-compact", "prepare-compact-noop":
 				// CompactionEnded records the compacted tree state.
 			default:
 				// Catch AppendToConversation and other direct mutations.
@@ -93,6 +93,9 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	out = append(out, treeMsgs...)
 	for i, msg := range agentMsgs {
 		if _, ok := ts.synced[messageSyncID(msg, i)]; !ok {
+			if isHiddenInternalPrompt(msg) {
+				continue
+			}
 			out = append(out, msg)
 		}
 	}
@@ -110,12 +113,20 @@ func (ts *TreeSyncer) syncMessages() {
 		if _, ok := ts.synced[id]; ok {
 			continue
 		}
+		if isHiddenInternalPrompt(msg) {
+			ts.synced[id] = struct{}{}
+			continue
+		}
 		ts.tree.Append(session.Entry{
 			Type:    session.EntryMessage,
 			Message: msg,
 		})
 		ts.synced[id] = struct{}{}
 	}
+}
+
+func isHiddenInternalPrompt(msg core.AgentMessage) bool {
+	return msg.Role == "user" && msg.Custom != nil && msg.Custom["source"] == "prepare_compact"
 }
 
 func messageSyncID(msg core.AgentMessage, index int) string {

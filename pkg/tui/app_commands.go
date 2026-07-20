@@ -125,6 +125,17 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			return compactResultMsg{Err: err}
 		}
 
+	case "prepare-compact":
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot prepare compact while agent is running"})
+			return m, nil
+		}
+		m.s.running = true
+		m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
+		m.status.SetText("preparing context for compaction...")
+		b := m.runtime.Bus
+		return m, func() tea.Msg { return compactResultMsg{Err: b.Execute(bus.PrepareCompactSession{})} }
+
 	case "tasks":
 		return m.handleTasksCommand("")
 

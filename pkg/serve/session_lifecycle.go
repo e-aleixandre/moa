@@ -115,8 +115,9 @@ type buildOpts struct {
 	titleSource            string // how the resumed title was set (session.TitleSource*)
 
 	// V2 session tree
-	initialEntries []session.Entry
-	initialLeafID  string
+	initialEntries  []session.Entry
+	initialLeafID   string
+	initialMetadata map[string]any
 }
 
 // buildManagedSession creates an in-memory managed session with full runtime.
@@ -322,6 +323,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return !was
 	}
 	if opts != nil {
+		rcfg.InitialMetadata = opts.initialMetadata
 		if len(opts.initialEntries) > 0 {
 			rcfg.InitialEntries = opts.initialEntries
 			rcfg.InitialLeafID = opts.initialLeafID
@@ -583,6 +585,7 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		initialThinking:        savedThinking,
 		initialEntries:         saved.Entries,
 		initialLeafID:          saved.LeafID,
+		initialMetadata:        saved.Metadata,
 		titleSource:            saved.TitleSource,
 	})
 	if err != nil {

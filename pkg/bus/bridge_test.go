@@ -26,16 +26,18 @@ import (
 type fakeAgent struct {
 	mu sync.Mutex
 
-	aborted         bool
-	steered         string
-	model           core.Model
-	thinkingLevel   string
-	messages        []core.AgentMessage
-	compactionEpoch int
-	resetCalled     bool
-	compactCalled   bool
-	compactErr      error
-	compactHook     func()
+	aborted          bool
+	steered          string
+	model            core.Model
+	thinkingLevel    string
+	messages         []core.AgentMessage
+	compactionEpoch  int
+	resetCalled      bool
+	compactCalled    bool
+	compactErr       error
+	compactPayload   *core.CompactionPayload
+	checkpointPassed string
+	compactHook      func()
 
 	setModelProvider core.Provider
 	setModelModel    core.Model
@@ -53,6 +55,7 @@ type fakeAgent struct {
 	sendResult  []core.AgentMessage
 	sendErr     error
 	sendDelay   time.Duration // simulates slow agent
+	sendHook    func()
 	sendContent []core.Content
 	sendMsgID   string
 	steerQueue  []core.SteerItem
@@ -270,10 +273,32 @@ func (f *fakeAgent) Compact(ctx context.Context) (*core.CompactionPayload, error
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return nil, f.compactErr
+	return f.compactPayload, f.compactErr
+}
+
+func (f *fakeAgent) CompactWithCheckpoint(ctx context.Context, checkpoint string) (*core.CompactionPayload, error) {
+	f.mu.Lock()
+	f.checkpointPassed = checkpoint
+	f.mu.Unlock()
+	return f.Compact(ctx)
+}
+
+func (f *fakeAgent) SnapshotConversation() ([]core.AgentMessage, int) {
+	return f.Messages(), f.CompactionEpoch()
+}
+
+func (f *fakeAgent) RestoreConversation(msgs []core.AgentMessage, epoch int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.messages = append([]core.AgentMessage(nil), msgs...)
+	f.compactionEpoch = epoch
+	return nil
 }
 
 func (f *fakeAgent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, error) {
+	if f.sendHook != nil {
+		f.sendHook()
+	}
 	if f.sendDelay > 0 {
 		select {
 		case <-time.After(f.sendDelay):

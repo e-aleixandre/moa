@@ -42,6 +42,7 @@ const (
 // excludedTools prevents recursive subagent spawning.
 // Subagents are leaf workers, not orchestrators.
 var excludedTools = map[string]bool{
+	"checkpoint":      true,
 	"subagent":        true,
 	"subagent_status": true,
 	"subagent_wait":   true,
