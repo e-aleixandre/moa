@@ -1,5 +1,6 @@
 .html-resource-sheet {
   width: min(680px, 96vw);
+  max-width: none; /* override .sheet's 600px cap so 680px can apply */
 }
 
 .html-resource-name {

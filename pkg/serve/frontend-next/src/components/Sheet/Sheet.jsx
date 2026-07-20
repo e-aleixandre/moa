@@ -15,7 +15,7 @@ let sheetIdCounter = 0;
 // (data/overlay-history.js) so the browser/PWA back gesture closes it instead
 // of navigating away — every consumer (RewindTimeline, file/HTML viewers,
 // drawers…) gets that for free just by using Sheet.
-export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabelAttr, children, ...rest }) {
+export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabelAttr, children, class: className, ...rest }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeOverlayRef = useRef(null);
@@ -106,7 +106,7 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
   return (
     <div class="sheet-overlay" onClick={onOverlayClick}>
       <div
-        class="sheet"
+        class={`sheet${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={label}
