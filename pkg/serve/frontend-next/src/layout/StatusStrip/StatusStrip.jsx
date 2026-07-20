@@ -1,9 +1,9 @@
 import "./StatusStrip.css";
 import { ClipboardList, Map, Flame, Target, Gauge } from "lucide-preact";
-import { fmtTokens } from "../../data/util/format.js";
 import { fmtReset } from "../../data/util/usage-pills.js";
 import { statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
+import { TokenFlow } from "../../components/TokenFlow/TokenFlow.jsx";
 
 // StatusStrip — mono strip under the composer: the app's bottom telemetry line,
 // mirroring the TUI statusline. This is the TWO-LEVEL redesign (TELEMETRY-
@@ -63,7 +63,7 @@ export function StatusStrip({
         </span>
       )}
       {showTokens && hasTokens && (
-        <span class="status-strip-tokens">↑ {fmtTokens(tokensUp)} · ↓ {fmtTokens(tokensDown)} tok</span>
+        <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="strip" /></span>
       )}
 
       {/* Permission chip — a control (subphase b): tap opens a 3-option menu

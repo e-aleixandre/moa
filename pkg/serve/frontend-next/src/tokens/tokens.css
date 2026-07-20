@@ -132,6 +132,10 @@
   --breath-running:   1800ms;
   --breath-attention: 1100ms;
   --shimmer:          1400ms;
+  /* Token heartbeat pulse (TokenFlow): the wash flash + its color fade-back.
+     --token-pulse must match PULSE_MS in TokenFlow.jsx. */
+  --token-pulse:      900ms;
+  --token-pulse-fade: 600ms;
 
   /* Visible focus — ring shared by interactive controls */
   --focus-ring:        var(--mauve);

@@ -31,3 +31,4 @@ export { FileCard } from "./FileCard/FileCard.jsx";
 export { FileViewer } from "./FileViewer/FileViewer.jsx";
 export { HtmlResourceInfo } from "./HtmlResourceInfo/HtmlResourceInfo.jsx";
 export { UsagePanel } from "./UsagePanel/UsagePanel.jsx";
+export { TokenFlow } from "./TokenFlow/TokenFlow.jsx";

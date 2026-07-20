@@ -6,6 +6,7 @@ import {
   PermissionControl,
   MobileLedger,
   LedgerIcons,
+  TokenFlow,
 } from "../components/index.js";
 import { MobileHeader } from "../layout/mobile/MobileHeader/MobileHeader.jsx";
 import { SessionStrip } from "../layout/mobile/SessionStrip/SessionStrip.jsx";
@@ -219,7 +220,7 @@ function MobileComposerSpecimen({ status, perm = "yolo", spend, tokensUp, tokens
       </div>
       <div class="mcomposer-status">
         <span class="work">● {status}</span>
-        {hasTokens && <span class="tokens">↑ {tokensUp} · ↓ {tokensDown}</span>}
+        {hasTokens && <span class="tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="compact" /></span>}
         <PermissionControl mode={perm} sheet onChange={() => {}} />
         <button type="button" class="spend spend-btn" aria-label="Show usage">
           {spend} today
@@ -304,7 +305,7 @@ export function MobileConversationSpecimen() {
         />
       </div>
 
-      <MobileComposerSpecimen status="running tests" perm="yolo" spend="$1.84" tokensUp="41.2k" tokensDown="8.7k" />
+      <MobileComposerSpecimen status="running tests" perm="yolo" spend="$1.84" tokensUp={41200} tokensDown={8700} />
     </div>
   );
 }

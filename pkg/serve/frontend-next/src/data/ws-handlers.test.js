@@ -1,7 +1,7 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsMessageEnd } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -478,4 +478,29 @@ test('handleWsRateLimit isolates providers in a mixed layout', () => {
   expect(store.get().usage.five_hour.utilization).toBe(30);
   expect(store.get().sessions.o.rlFiveHourPct).toBe(80);
   expect(store.get().sessions.a.rlFiveHourPct).toBe(30);
+});
+
+// --- Per-run token tally (heartbeat) ---
+// A run spans several model calls (each tool round-trip is another call). Every
+// call replays the whole accumulated context as input, so the ↑ tally must take
+// the LAST call's input (not sum, which would double-count context every step
+// and inflate ↑). ↓ output accumulates (each call generates fresh output).
+test('handleWsMessageEnd: ↑ input is the last call, ↓ output accumulates', () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
+  handleWsMessageEnd('s1', 'a', 'm1', 12000, 300);
+  expect(store.get().sessions.s1.runTokensUp).toBe(12000);
+  expect(store.get().sessions.s1.runTokensDown).toBe(300);
+  // Second model call in the same run: input grew (context replayed + tool
+  // results), output is new. ↑ = latest (18000), NOT 30000; ↓ = 300+450.
+  handleWsMessageEnd('s1', 'ab', 'm2', 18000, 450);
+  expect(store.get().sessions.s1.runTokensUp).toBe(18000);
+  expect(store.get().sessions.s1.runTokensDown).toBe(750);
+});
+
+test('handleWsMessageEnd: a zero-input message keeps the last real ↑ value', () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
+  handleWsMessageEnd('s1', 'a', 'm1', 9000, 200);
+  handleWsMessageEnd('s1', 'ab', 'm2', 0, 120); // no usage reported this message
+  expect(store.get().sessions.s1.runTokensUp).toBe(9000);
+  expect(store.get().sessions.s1.runTokensDown).toBe(320);
 });

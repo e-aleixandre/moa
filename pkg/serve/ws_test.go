@@ -85,6 +85,32 @@ func TestWsEventFromBus_SubagentUsage(t *testing.T) {
 	})
 }
 
+func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
+	// The ↑ heartbeat must reflect the input the model actually processed:
+	// fresh input PLUS the cached context replayed each step (CacheRead/Write).
+	// Usage.Input alone omits cache, which under Anthropic prompt caching is
+	// nearly the whole prompt — the count would read far too low.
+	ev, ok := wsEventFromBus(bus.MessageEnded{
+		Message: core.AgentMessage{Message: core.Message{
+			MsgID: "m1",
+			Usage: &core.Usage{Input: 500, CacheRead: 12000, CacheWrite: 1500, Output: 320},
+		}},
+	})
+	if !ok || ev.Type != "message_end" {
+		t.Fatalf("Type = %q ok=%v, want message_end", ev.Type, ok)
+	}
+	data, ok := ev.Data.(MessageEndData)
+	if !ok {
+		t.Fatalf("Data type = %T, want MessageEndData", ev.Data)
+	}
+	if data.InputTokens != 14000 { // 500 + 12000 + 1500
+		t.Fatalf("InputTokens = %d, want 14000 (input+cache_read+cache_write)", data.InputTokens)
+	}
+	if data.OutputTokens != 320 {
+		t.Fatalf("OutputTokens = %d, want 320", data.OutputTokens)
+	}
+}
+
 func TestWsEventFromBus_CommandQueued(t *testing.T) {
 	ev, ok := wsEventFromBus(bus.CommandQueued{SessionID: "s1", ID: "c1", Raw: "/compact"})
 	if !ok || ev.Type != "command_queued" {

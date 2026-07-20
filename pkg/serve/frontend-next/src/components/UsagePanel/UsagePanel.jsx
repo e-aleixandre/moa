@@ -1,5 +1,4 @@
 import "./UsagePanel.css";
-import { fmtTokens } from "../../data/util/format.js";
 import {
   usageForSession,
   usageLevel,
@@ -10,10 +9,17 @@ import {
 
 // UsagePanel — level 2 of the redesigned telemetry (TELEMETRY-SETTINGS-REDESIGN
 // spec §2). It is the read-only accounting the StatusStrip no longer keeps on
-// the line: session cost, per-run tokens, detailed context, and the plan
-// windows (5h / weekly / extra). It is pure presentation — the container mounts
-// it inside the density-appropriate chassis (popover on desktop/pane, Sheet on
-// mobile) and feeds it the same `session` + global `usage` the strip gets.
+// the line: session cost, detailed context, and the plan windows (5h / weekly /
+// extra). It is pure presentation — the container mounts it inside the
+// density-appropriate chassis (popover on desktop/pane, Sheet on mobile) and
+// feeds it the same `session` + global `usage` the strip gets.
+//
+// NO per-run token row here: the ↑/↓ tally is a live per-RUN heartbeat (it
+// resets every run), not conversation accounting, so showing it in a panel
+// titled like a conversation total was misleading (it read identical to the
+// status line). It stays on the status line only. A true conversation-wide
+// token total would need the backend to accumulate real input/output/cache per
+// run; deferred until that exists.
 //
 // House rule: every row hides itself when its datum is missing rather than
 // showing an invented/off value. Nothing here is fabricated — the absolute
@@ -42,9 +48,6 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
   const u = usageForSession(session, usage);
 
   const hasCost = typeof costUSD === "number" && costUSD > 0;
-  const hasTokensUp = typeof session?.runTokensUp === "number" && session.runTokensUp > 0;
-  const hasTokensDown = typeof session?.runTokensDown === "number" && session.runTokensDown > 0;
-  const hasTokens = hasTokensUp || hasTokensDown;
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
 
   const extra = u.extra;
@@ -55,20 +58,12 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
     <div class="usage-panel">
       <div class="usage-panel-head">Usage</div>
 
-      {(hasCost || hasTokens || hasCtx) && (
+      {(hasCost || hasCtx) && (
         <div class="usage-panel-group">
           {hasCost && (
             <div class="usage-panel-row">
               <span class="usage-panel-key">Session</span>
               <span class="usage-panel-val">{fmtCost(costUSD)}</span>
-            </div>
-          )}
-          {hasTokens && (
-            <div class="usage-panel-row">
-              <span class="usage-panel-key">Tokens</span>
-              <span class="usage-panel-val">
-                ↑ {fmtTokens(session.runTokensUp || 0)} · ↓ {fmtTokens(session.runTokensDown || 0)}
-              </span>
             </div>
           )}
           {hasCtx && (

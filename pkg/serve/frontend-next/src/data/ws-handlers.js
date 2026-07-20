@@ -488,10 +488,18 @@ export function handleWsMessageEnd(id, fullText, msgId = '', inputTokens = 0, ou
     return;
   }
 
-  // Tally the run's live token counts (input/output). A run may span several
-  // model messages; they accumulate here and reset when the next run begins
-  // (see handleWsStateChange). Kept even after the run ends until the next one.
-  const runTokensUp = (sess.runTokensUp || 0) + (inputTokens || 0);
+  // Tally the run's live token counts. A run may span several model calls
+  // (each tool round-trip is another call). The counts reset when the next run
+  // begins (see handleWsStateChange) and are kept after the run ends until the
+  // next one.
+  //   ↓ output ACCUMULATES: each call generates new output tokens.
+  //   ↑ input is the LAST call's value, NOT a sum: every call replays the whole
+  //     accumulated context (system + prior turns + tool results), so summing
+  //     would double-count the same context on every step and inflate ↑ wildly.
+  //     The latest call's input already includes all tool results fed back so
+  //     far, so it's the honest "how big is what the model is chewing on" number.
+  //     Zero-input messages (rare) don't clobber the last real value.
+  const runTokensUp = inputTokens > 0 ? inputTokens : (sess.runTokensUp || 0);
   const runTokensDown = (sess.runTokensDown || 0) + (outputTokens || 0);
 
   if (msgId && sess.messages.some(m => m._msg_id === msgId)) {

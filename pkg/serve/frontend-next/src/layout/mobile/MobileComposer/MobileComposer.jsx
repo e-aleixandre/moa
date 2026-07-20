@@ -1,10 +1,9 @@
 import { useState, useEffect } from "preact/hooks";
 import { Composer } from "../../Composer/Composer.jsx";
-import { Sheet, UsagePanel, PermissionControl } from "../../../components/index.js";
+import { Sheet, UsagePanel, PermissionControl, TokenFlow } from "../../../components/index.js";
 import { activityPhase, activityText, formatElapsed } from "../../../data/util/activity.js";
 import { fmtCost, fmtReset } from "../../../data/util/usage-pills.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
-import { fmtTokens } from "../../../data/util/format.js";
 import { configureSession } from "../../../data/session-actions.js";
 import "./MobileComposer.css";
 
@@ -77,9 +76,13 @@ export function MobileComposer({ session, usage }) {
   // strip shows. It's not just accounting — watching the counts climb is how you
   // tell the agent is actually working (reading / generating) when it looks
   // stalled. Session totals live in the Usage panel; this is the live heartbeat.
+  // Mount whenever the tally is numeric (matches the desktop StatusStrip's
+  // `!= null` gate) — NOT only when > 0. Staying mounted at (0,0) after a run
+  // resets is what lets the first model call of the next run PULSE (usePulse
+  // needs a mounted prev value to compare against); gating on > 0 unmounted it
+  // and swallowed the first pulse, breaking parity with desktop.
   const hasTokens =
-    typeof session.runTokensUp === "number" && typeof session.runTokensDown === "number" &&
-    (session.runTokensUp > 0 || session.runTokensDown > 0);
+    typeof session.runTokensUp === "number" && typeof session.runTokensDown === "number";
 
   return (
     <div class="mcomposer">
@@ -87,7 +90,7 @@ export function MobileComposer({ session, usage }) {
       <div class="mcomposer-status">
         {work && <span class="work">● {work}</span>}
         {hasTokens && (
-          <span class="tokens">↑ {fmtTokens(session.runTokensUp)} · ↓ {fmtTokens(session.runTokensDown)}</span>
+          <span class="tokens"><TokenFlow up={session.runTokensUp} down={session.runTokensDown} variant="compact" /></span>
         )}
         <PermissionControl
           mode={model.perm.mode}

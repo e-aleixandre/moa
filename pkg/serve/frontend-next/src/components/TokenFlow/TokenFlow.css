@@ -1,0 +1,54 @@
+/* TokenFlow — live per-run ↑/↓ token heartbeat with a soft color pulse when a
+   value grows. The base color is dim (telemetry, not a headline); the pulse
+   briefly lifts the arrow+number to its accent then fades back. */
+.token-flow {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-flow-in,
+.token-flow-out {
+  color: var(--overlay1);
+  border-radius: var(--radius-sm);
+  /* Fade the tint back to the resting color after a pulse. */
+  transition: color var(--token-pulse-fade) var(--ease);
+}
+
+.token-flow-sep {
+  color: var(--overlay0);
+}
+
+/* Pulse: ↑ input = blue (coming in), ↓ output = teal (coming out). A soft glow
+   via a color-mix background wash so it reads as a gentle breath, not a badge. */
+.token-flow-in.pulse {
+  color: var(--blue);
+  animation: token-flow-pulse-in var(--token-pulse) var(--ease);
+}
+
+.token-flow-out.pulse {
+  color: var(--teal);
+  animation: token-flow-pulse-out var(--token-pulse) var(--ease);
+}
+
+@keyframes token-flow-pulse-in {
+  0% { background: color-mix(in srgb, var(--blue) 24%, transparent); }
+  100% { background: transparent; }
+}
+
+@keyframes token-flow-pulse-out {
+  0% { background: color-mix(in srgb, var(--teal) 24%, transparent); }
+  100% { background: transparent; }
+}
+
+/* Reduced motion: keep the color tint (information), drop the wash animation. */
+@media (prefers-reduced-motion: reduce) {
+  .token-flow-in.pulse,
+  .token-flow-out.pulse {
+    animation: none;
+  }
+  .token-flow-in,
+  .token-flow-out {
+    transition: none;
+  }
+}

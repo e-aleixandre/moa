@@ -139,7 +139,12 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.MessageEnded:
 		var inputTok, outputTok int
 		if e.Message.Usage != nil {
-			inputTok = e.Message.Usage.Input
+			// Input the model actually processed this call = fresh input plus the
+			// cached context replayed on every step (tool results, prior turns).
+			// Usage.Input alone omits CacheRead/CacheWrite, which under Anthropic
+			// prompt caching is nearly the whole prompt — so the "↑" would read
+			// far too low and wouldn't reflect tool-result tokens at all.
+			inputTok = e.Message.Usage.Input + e.Message.Usage.CacheRead + e.Message.Usage.CacheWrite
 			outputTok = e.Message.Usage.Output
 		}
 		return Event{Type: "message_end", Data: MessageEndData{
