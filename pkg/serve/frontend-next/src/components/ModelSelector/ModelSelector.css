@@ -84,6 +84,7 @@
   display: flex;
   gap: 2px;
   align-items: flex-end;
+  justify-content: center; /* center the bars cluster under the label (the tks box spans the cell width) */
   height: 10px;
 }
 

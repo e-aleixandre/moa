@@ -4,7 +4,9 @@ import "./Segmented.css";
 function normalizeOptions(options) {
   return options.map((opt) => {
     if (typeof opt === "string") return { id: opt, label: opt };
-    return { id: opt.value, label: opt.label ?? opt.value };
+    // Preserve any extra fields (e.g. ModelSelector's `bars`) so a caller's
+    // renderOption can read them — only id/label are derived/defaulted here.
+    return { ...opt, id: opt.value, label: opt.label ?? opt.value };
   });
 }
 
