@@ -37,13 +37,6 @@ function docChildren(blocks, onOpenSubagent) {
             dangerouslySetInnerHTML={{ __html: renderMarkdown(b.text) }}
           />
         );
-      case "thinking":
-        return (
-          <details key={b.id} class="doc-thinking">
-            <summary>Thinking…</summary>
-            <div class="doc-thinking-body">{b.text}</div>
-          </details>
-        );
       case "ledger":
         return <ActivityLedger key={b.id} rows={b.rows} />;
       case "diff":

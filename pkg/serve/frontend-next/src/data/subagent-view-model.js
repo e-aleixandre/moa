@@ -7,7 +7,7 @@
 //
 // The heart of the "cero divergencia" contract: the sub-conversation body is
 // projected by the very same projectStream() the parent stream uses — so a
-// subagent transcript renders with the identical ledger/thinking/diff/prose
+// subagent transcript renders with the identical ledger/diff/prose
 // pipeline (INC-37). This module only computes the FRAME (accent, siblings,
 // task card text, terminal outcome); the body is projectStream(subSession).
 

@@ -36,8 +36,8 @@
 //         { type:'prose', text }
 //             A run of assistant markdown text (raw; markdown rendered in 5C).
 //
-//         { type:'thinking', text }
-//             A collapsible thinking block (from session.thinkingText).
+//         (thinking is intentionally NOT projected — see the live-work section
+//          below: it streams then vanishes on turn end, so we don't draw it.)
 //
 //         { type:'ledger', rows:[...] }
 //             A batch of CONSECUTIVE tool calls (no prose between them). Each
@@ -284,7 +284,12 @@ export function projectStream(session) {
   if (live) {
     const doc = ensureDoc();
     closeLedger();
-    if (hasThinking) doc.blocks.push({ type: 'thinking', id: `${doc.id}-thinking`, text: session.thinkingText });
+    // Thinking is intentionally NOT projected to a rendered block: it streams
+    // live and is then dropped when the turn ends (never persisted in
+    // `messages`), so painting it made a block appear, be expandable, then
+    // vanish unrecoverably — confusing. The backend keeps sending it
+    // (`session.thinkingText` still drives the live caret + auto-scroll below);
+    // we just don't draw it. Revisit if thinking ever gets persisted.
     if (hasStreamingText) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText });
 
     // Live subagents merge into this turn's delegation block (creating one if

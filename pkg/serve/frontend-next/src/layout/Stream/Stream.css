@@ -66,28 +66,6 @@
   margin-bottom: 0;
 }
 
-/* Collapsible thinking block inside an assistant document. */
-.stream .doc-thinking {
-  margin: 0 0 var(--space-4);
-  border-left: 2px solid var(--surface1);
-  padding-left: var(--space-3);
-}
-
-.stream .doc-thinking > summary {
-  cursor: pointer;
-  color: var(--overlay1);
-  font-size: var(--text-sm);
-  font-style: italic;
-}
-
-.stream .doc-thinking .doc-thinking-body {
-  margin-top: var(--space-2);
-  color: var(--overlay1);
-  font-size: var(--text-sm);
-  white-space: pre-wrap;
-  line-height: var(--leading-normal);
-}
-
 .stream .stream-new-btn {
   position: absolute;
   bottom: var(--space-4);

@@ -384,15 +384,18 @@ test('a finished turn is a document, never streaming', () => {
   expect(blocks[0].kind).toBe('document');
 });
 
-// ── 8. thinking text → thinking block ────────────────────────────────────────
-test('thinkingText produces a thinking sub-block on the live turn', () => {
+// ── 8. thinking text → live turn, but NOT painted ────────────────────────────
+// Thinking is deliberately not projected to a rendered block (it streams then
+// vanishes when the turn ends, which read as a block appearing and disappearing
+// unrecoverably). The turn is still "streaming" (live caret / auto-scroll key
+// off session.thinkingText), we just don't draw a thinking block.
+test('thinkingText keeps the turn live but produces no thinking block', () => {
   const s = session([assistant('hmm')], { thinkingText: 'considering options' });
   const blocks = projectStream(s);
   const last = blocks[blocks.length - 1];
   expect(last.kind).toBe('streaming');
-  const thinking = last.blocks.find(b => b.type === 'thinking');
-  expect(thinking).toBeTruthy();
-  expect(thinking.text).toBe('considering options');
+  expect(last.textLive).toBe(true);
+  expect(last.blocks.find(b => b.type === 'thinking')).toBeUndefined();
 });
 
 // ── 9. history truncation notice ─────────────────────────────────────────────

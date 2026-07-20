@@ -20,7 +20,7 @@ import "./MobileStream.css";
 // SAME shared content components, with ONE divergence: a `ledger` sub-block
 // renders as <MobileLedger> (3-level touch ledger) instead of <ActivityLedger>.
 // The adaptLedger() pure remap (mobile-ledger-adapter.js) is the only data
-// transform; everything else (markdown prose, thinking, diff, delegation,
+// transform; everything else (markdown prose, diff, delegation,
 // background, waypoints) is verbatim shared with the desktop.
 //
 // Diff-sibling handling: projectStream emits an edit's unified diff as a `diff`
@@ -63,14 +63,6 @@ function mobileDocChildren(blocks, onOpenSubagent) {
             class="doc-prose"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(b.text) }}
           />
-        );
-        break;
-      case "thinking":
-        out.push(
-          <details key={b.id} class="doc-thinking">
-            <summary>Thinking…</summary>
-            <div class="doc-thinking-body">{b.text}</div>
-          </details>
         );
         break;
       case "ledger": {
