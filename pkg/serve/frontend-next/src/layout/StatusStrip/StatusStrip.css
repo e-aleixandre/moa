@@ -87,6 +87,9 @@
   font-weight: var(--weight-medium);
 }
 
+.status-strip .status-strip-spend.spend-med b { color: var(--yellow); }
+.status-strip .status-strip-spend.spend-high b { color: var(--red); }
+
 /* Cost segment as the Usage panel trigger. Compact visual, but a ≥44px hit
    area via a pseudo-element (the P7/INC-35 technique used elsewhere). Dotted
    underline on hover (desktop) signals it opens the panel. */
@@ -160,8 +163,8 @@
   border-radius: var(--radius-sm);
 }
 
-/* Ported TaskBar pills (5O): compact uppercase badges carrying the plan-usage
-   telemetry. Colors are Catppuccin Mocha tokens only. */
+/* Ported TaskBar pills (5O): compact uppercase badges (permissions, modes,
+   on-extra). Colors are Catppuccin Mocha tokens only. */
 .status-strip .status-strip-pill {
   display: inline-flex;
   align-items: center;
@@ -194,11 +197,6 @@
 
 /* Goal */
 .status-strip .status-strip-pill.goal { color: var(--mauve); background: var(--mauve-dim); }
-
-/* Plan usage windows (5h / weekly) */
-.status-strip .status-strip-pill.usage-low { color: var(--green); background: var(--green-dim); }
-.status-strip .status-strip-pill.usage-med { color: var(--yellow); background: var(--yellow-dim); }
-.status-strip .status-strip-pill.usage-high { color: var(--red); background: var(--red-dim); }
 
 /* Per-session "on extra usage right now" flag — the loudest badge, shown only
    while a request is actively being served from pay-as-you-go. */

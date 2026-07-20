@@ -180,8 +180,8 @@ function MobileComposerSpecimen({ status, perm = "yolo", spend, tokensUp, tokens
         <span class="work">● {status}</span>
         {hasTokens && <span class="tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="compact" /></span>}
         <PermissionControl mode={perm} sheet onChange={() => {}} />
-        <button type="button" class="spend spend-btn" aria-label="Show usage">
-          {spend} today
+        <button type="button" class="spend spend-btn" aria-label="Show usage" title="Estimated session cost">
+          ~{spend}
         </button>
       </div>
     </div>

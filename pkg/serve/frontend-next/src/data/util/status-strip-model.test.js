@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { statusStripModel, PROMOTE_THRESHOLD } from "./status-strip-model.js";
+import { spendLevel, statusStripModel } from "./status-strip-model.js";
 
 // A minimal Anthropic global-usage snapshot builder.
 function snapshot({ fiveH, week, extra } = {}) {
@@ -50,63 +50,39 @@ test("onExtra alert reflects session overage", () => {
   expect(statusStripModel({ onOverage: false }, null).alerts.onExtra).toBe(false);
 });
 
-test("plan meters below threshold do NOT promote (accounting stays in panel)", () => {
-  const m = statusStripModel({}, snapshot({ fiveH: 61, week: 38 }));
-  expect(m.alerts.promoted).toEqual([]);
-  // ...but the full accounting is still available for the Usage panel.
-  expect(m.usage.fiveHour.pct).toBe(61);
-  expect(m.usage.week.pct).toBe(38);
+test("spend level is uncolored without plan windows", () => {
+  expect(spendLevel({ fiveHour: null, week: null })).toBeNull();
+  expect(statusStripModel({}, null).spendLevel).toBeNull();
 });
 
-test("a meter at/above threshold promotes to the line with its severity + reset", () => {
-  const m = statusStripModel({}, snapshot({ fiveH: 92, week: 38 }));
-  expect(m.alerts.promoted).toHaveLength(1);
-  const chip = m.alerts.promoted[0];
-  expect(chip.kind).toBe("5h");
-  expect(chip.label).toBe("Session (5h)");
-  expect(chip.pct).toBe(92);
-  expect(chip.level).toBe("high");
-  expect(chip.resetsAt).toBe("2999-01-01T00:00:00Z");
+test("spend level uses the worst available plan window", () => {
+  expect(spendLevel({ fiveHour: { pct: 61 }, week: { pct: 38 } })).toBe("med");
+  expect(spendLevel({ fiveHour: { pct: 38 }, week: { pct: 81 } })).toBe("high");
 });
 
-test("both meters can promote, 5h before week", () => {
-  const m = statusStripModel({}, snapshot({ fiveH: 88, week: 95 }));
-  expect(m.alerts.promoted.map((c) => c.kind)).toEqual(["5h", "wk"]);
+test("spend level follows usage-level boundaries", () => {
+  expect(spendLevel({ fiveHour: { pct: 49 }, week: null })).toBe("normal");
+  expect(spendLevel({ fiveHour: { pct: 50 }, week: null })).toBe("med");
+  expect(spendLevel({ fiveHour: { pct: 79 }, week: null })).toBe("med");
+  expect(spendLevel({ fiveHour: { pct: 80 }, week: null })).toBe("high");
 });
 
-test("exactly at 80 promotes (inclusive threshold)", () => {
-  const m = statusStripModel({}, snapshot({ fiveH: 80 }));
-  expect(m.alerts.promoted).toHaveLength(1);
-  expect(m.alerts.promoted[0].pct).toBe(80);
-});
-
-test("custom promoteThreshold overrides the default", () => {
-  const s = snapshot({ fiveH: 70 });
-  expect(statusStripModel({}, s).alerts.promoted).toEqual([]);
-  expect(statusStripModel({}, s, { promoteThreshold: 70 }).alerts.promoted).toHaveLength(1);
-});
-
-test("default threshold constant is 80", () => {
-  expect(PROMOTE_THRESHOLD).toBe(80);
-});
-
-test("OpenAI rate-limit meters promote from per-session percents", () => {
+test("spend level uses OpenAI per-session rate-limit windows", () => {
   const m = statusStripModel({ provider: "openai", rlFiveHourPct: 84, rlSevenDayPct: 10 }, null);
-  expect(m.alerts.promoted.map((c) => c.kind)).toEqual(["5h"]);
-  expect(m.alerts.promoted[0].resetsAt).toBeNull(); // OpenAI has no reset time
+  expect(m.spendLevel).toBe("high");
   expect(m.usage.fiveHour.source).toBe("openai");
 });
 
-test("no snapshot yields empty accounting and no promotions", () => {
+test("no snapshot yields empty accounting and an uncolored spend", () => {
   const m = statusStripModel({}, null);
   expect(m.usage.fiveHour).toBeNull();
   expect(m.usage.week).toBeNull();
-  expect(m.alerts.promoted).toEqual([]);
+  expect(m.spendLevel).toBeNull();
 });
 
 test("null session is safe", () => {
   const m = statusStripModel(null, null);
   expect(m.perm.mode).toBe("yolo");
   expect(m.modes).toEqual({});
-  expect(m.alerts.promoted).toEqual([]);
+  expect(m.spendLevel).toBeNull();
 });

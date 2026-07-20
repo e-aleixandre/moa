@@ -2,7 +2,7 @@ import { useState, useEffect } from "preact/hooks";
 import { Composer } from "../../Composer/Composer.jsx";
 import { Sheet, UsagePanel, PermissionControl, TokenFlow } from "../../../components/index.js";
 import { activityPhase, activityText, formatElapsed } from "../../../data/util/activity.js";
-import { fmtCost, fmtReset } from "../../../data/util/usage-pills.js";
+import { fmtCost } from "../../../data/util/usage-pills.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
 import { configureSession } from "../../../data/session-actions.js";
 import "./MobileComposer.css";
@@ -17,9 +17,8 @@ import "./MobileComposer.css";
 //
 // TELEMETRY-SETTINGS-REDESIGN §2: on mobile the line is glance-only. Per-run
 // tokens and the fixed 5h/wk meters that 5I put here are REMOVED — they are
-// level 2 (they drop to the Usage panel). The plan windows only come back as
-// PROMOTED chips (≥ threshold, from statusStripModel.alerts.promoted). The spend
-// is the Usage panel trigger: tapping it opens the panel inside a Sheet.
+// level 2 (they drop to the Usage panel). The spend is the Usage panel trigger:
+// tapping it opens the panel inside a Sheet.
 //
 // Visual fit is CSS-only (MobileComposer.css); the composer's own textarea uses
 // --text-input (≥16px) so iOS never auto-zooms, and this wrapper keeps the
@@ -69,10 +68,7 @@ export function MobileComposer({ session, usage }) {
   const workIsLive = phase === "working" || phase === "thinking";
   const spend = fmtSpend(session.costUSD);
 
-  // Level 1 promotions only: the plan windows surface here just when they climb
-  // to the threshold (statusStripModel decides). Fixed meters/tokens are gone.
   const model = statusStripModel(session, usage);
-  const promoted = model.alerts.promoted;
 
   // Live per-run token pulse (↑ in / ↓ out): the same signal the desktop status
   // strip shows. It's not just accounting — watching the counts climb is how you
@@ -101,25 +97,18 @@ export function MobileComposer({ session, usage }) {
           onChange={(mode) => configureSession(session.id, { permissionMode: mode })}
         />
         {model.alerts.onExtra && (
-          <span class="meter usage-high" title="Served from extra usage (pay-as-you-go)">on extra</span>
+          <span class="meter session-overage" title="Served from extra usage (pay-as-you-go)">on extra</span>
         )}
-        {promoted.map((m) => (
-          <span
-            key={m.kind}
-            class={`meter usage-${m.level}`}
-            title={`${m.label}: ${m.pct}%${m.resetsAt ? ` · resets in ${fmtReset(m.resetsAt)}` : ""}`}
-          >
-            {m.kind} {m.pct}%
-          </span>
-        ))}
         {spend ? (
           <button
             type="button"
-            class="spend spend-btn"
+            class={`spend spend-btn spend-${model.spendLevel || "normal"}`}
             onClick={() => setUsageOpen(true)}
             aria-label="Show usage"
+            title="Estimated session cost"
           >
-            {spend} today
+            {/* The tilde marks an estimated accumulated session cost. */}
+            ~{spend}
           </button>
         ) : (
           <button

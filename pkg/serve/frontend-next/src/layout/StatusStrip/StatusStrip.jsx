@@ -1,6 +1,5 @@
 import "./StatusStrip.css";
 import { ClipboardList, Map, Flame, Target, Gauge } from "lucide-preact";
-import { fmtReset } from "../../data/util/usage-pills.js";
 import { statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
 import { TokenFlow } from "../../components/TokenFlow/TokenFlow.jsx";
@@ -13,8 +12,7 @@ import { activityPhase } from "../../data/util/activity.js";
 //
 // Level 1 (this line): the context ring, per-run tokens (desktop full only),
 // the permission chip, the current task, and the session cost — plus the modes
-// that are currently ACTIVE (plan/goal/tasks) and ALERTS/PROMOTIONS (🔥 on-extra
-// when active; 5h/wk chips only once they climb to the promotion threshold).
+// that are currently ACTIVE (plan/goal/tasks) and the on-extra alert.
 // Level 2 (the full accounting: cost breakdown, tokens, detailed context, plan
 // windows, extra) lives in the UsagePanel, opened by tapping the cost segment.
 //
@@ -46,7 +44,6 @@ export function StatusStrip({
 
   const model = statusStripModel(session, usage);
   const { perm, modes, alerts } = model;
-  const promoted = alerts.promoted;
 
   const hasSpend = !!spend;
   const phase = activityPhase(session);
@@ -104,8 +101,7 @@ export function StatusStrip({
         </span>
       )}
 
-      {/* Alerts / promotions. 🔥 on-extra only while active; each promoted plan
-          window (5h/wk ≥ threshold) as a colored chip. */}
+      {/* Alerts. 🔥 on-extra only while active. */}
       {alerts.onExtra && (
         <span
           class="status-strip-pill session-overage"
@@ -116,16 +112,6 @@ export function StatusStrip({
         </span>
       )}
 
-      {promoted.map((m) => (
-        <span
-          key={m.kind}
-          class={`status-strip-pill usage-${m.level}`}
-          title={`${m.label}: ${m.pct}%${m.resetsAt ? ` · resets in ${fmtReset(m.resetsAt)}` : ""}`}
-        >
-          {m.kind} {m.pct}%
-        </span>
-      ))}
-
       {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
 
       {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
@@ -134,14 +120,18 @@ export function StatusStrip({
         costTrigger ? (
           <button
             type="button"
-            class="status-strip-spend status-strip-spend-btn"
+            class={`status-strip-spend status-strip-spend-btn spend-${model.spendLevel || "normal"}`}
             onClick={onOpenUsage}
             aria-label="Show usage"
+            title="Estimated session cost"
           >
-            today <b>{spend}</b>
+            {/* The tilde marks an estimated accumulated session cost. */}
+            <b>~{spend}</b>
           </button>
         ) : (
-          <span class="status-strip-spend">today <b>{spend}</b></span>
+          <span class={`status-strip-spend spend-${model.spendLevel || "normal"}`}>
+            <b>~{spend}</b>
+          </span>
         )
       ) : (
         costTrigger && (

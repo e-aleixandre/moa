@@ -238,8 +238,10 @@
   color: var(--overlay0);
 }
 
-/* Plan-usage windows surface here only as PROMOTED chips (≥ threshold) or the
-   on-extra flag — never as fixed meters. Colored by severity (Mocha tokens). */
+.mcomposer-status .spend.spend-med { color: var(--yellow); }
+.mcomposer-status .spend.spend-high { color: var(--red); }
+
+/* Per-session extra usage stays visible while a request uses pay-as-you-go. */
 .mcomposer-status .meter {
   font-size: var(--text-xs);
   white-space: nowrap;
@@ -247,6 +249,4 @@
   min-width: 0;
   overflow: hidden;
 }
-.mcomposer-status .meter.usage-low { color: var(--green); }
-.mcomposer-status .meter.usage-med { color: var(--yellow); }
-.mcomposer-status .meter.usage-high { color: var(--red); }
+.mcomposer-status .meter.session-overage { color: var(--red); }
