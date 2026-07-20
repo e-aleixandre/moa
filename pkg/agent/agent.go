@@ -915,6 +915,29 @@ func (a *Agent) Drain(timeout time.Duration) {
 // Returns the compaction payload on success, nil if there was nothing to compact,
 // or an error if the agent is running or compaction fails.
 func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
+	return a.CompactWithCheckpoint(ctx, "")
+}
+
+func (a *Agent) SnapshotConversation() ([]core.AgentMessage, int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]core.AgentMessage(nil), a.state.Messages...), a.state.CompactionEpoch
+}
+
+func (a *Agent) RestoreConversation(messages []core.AgentMessage, epoch int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot restore conversation while agent is running")
+	}
+	a.state.Messages = append([]core.AgentMessage(nil), messages...)
+	a.state.CompactionEpoch = epoch
+	return nil
+}
+
+// CompactWithCheckpoint is Compact with a mechanically appended ephemeral
+// checkpoint. The checkpoint bypasses the summarizer so it cannot be omitted.
+func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint string) (*core.CompactionPayload, error) {
 	a.mu.Lock()
 	if a.cancel != nil {
 		a.mu.Unlock()
@@ -965,6 +988,12 @@ func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
 	}
 	if result == nil {
 		return nil, nil
+	}
+	if checkpoint != "" {
+		result.Summary += "\n\n--- BEGIN SESSION CHECKPOINT ---\n" + checkpoint + "\n--- END SESSION CHECKPOINT ---"
+		if len(compacted) > 0 {
+			compacted[0].Content = []core.Content{core.TextContent(result.Summary)}
+		}
 	}
 	for i := range compacted {
 		compacted[i].EnsureMsgID()

@@ -43,11 +43,12 @@ func (p QueuePolicy) String() string {
 // are intentionally absent here.
 var queuePolicyByName = map[string]QueuePolicy{
 	// Rewrite/reconfigure the run — must wait for idle (barrier).
-	"compact":  PolicyQueue,
-	"clear":    PolicyQueue,
-	"model":    PolicyQueue,
-	"thinking": PolicyQueue,
-	"verify":   PolicyQueue,
+	"compact":         PolicyQueue,
+	"prepare-compact": PolicyQueue,
+	"clear":           PolicyQueue,
+	"model":           PolicyQueue,
+	"thinking":        PolicyQueue,
+	"verify":          PolicyQueue,
 
 	// Mode transitions / destructive rewind — refused while busy.
 	"undo":   PolicyReject,

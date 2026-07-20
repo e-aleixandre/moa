@@ -135,7 +135,10 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 
 	// Memory
 	if toolSet["memory"] {
-		sb.WriteString("- Save durable, non-obvious facts (user preferences, corrections, project constraints) with the memory tool. Update the existing fact instead of duplicating; delete facts that become wrong.\n")
+		sb.WriteString("- Use memory only for durable, non-obvious facts that should remain useful in future independent sessions. Never use it for temporary progress, handoffs, current task state, or pre-compaction notes; update existing facts instead of duplicating them, and delete facts that become wrong.\n")
+	}
+	if toolSet["checkpoint"] {
+		sb.WriteString("- Use the checkpoint tool as a session-local ephemeral slot for active, non-reconstructible progress when preparing to compact; it is not durable memory.\n")
 	}
 
 	// Always include these

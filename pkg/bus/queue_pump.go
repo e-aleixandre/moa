@@ -223,6 +223,8 @@ func executeBarrier(sctx *SessionContext, raw string) error {
 	switch name {
 	case "compact":
 		return sctx.Bus.Execute(CompactSession{SessionID: sctx.SessionID})
+	case "prepare-compact":
+		return sctx.Bus.Execute(PrepareCompactSession{SessionID: sctx.SessionID})
 	case "clear":
 		return sctx.Bus.Execute(ClearSession{SessionID: sctx.SessionID})
 	case "model":

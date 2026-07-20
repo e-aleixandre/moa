@@ -34,16 +34,17 @@ func (s *Session) RuntimeConfig() bus.RuntimeConfig {
 	}
 
 	return bus.RuntimeConfig{
-		Agent:            s.Agent,
-		TaskStore:        s.TaskStore,
-		PlanMode:         s.PlanMode,
-		Goal:             s.Goal,
-		Gate:             s.Gate,
-		PathPolicy:       s.PathPolicy,
-		AskBridge:        s.AskBridge,
-		BaseSystemPrompt: base,
-		CWD:              s.CWD,
-		AutoVerify:       core.IsAutoVerifyEnabled(s.MoaCfg),
-		GateConfig:       gateConfig,
+		Agent:             s.Agent,
+		TaskStore:         s.TaskStore,
+		PlanMode:          s.PlanMode,
+		Goal:              s.Goal,
+		Gate:              s.Gate,
+		PathPolicy:        s.PathPolicy,
+		AskBridge:         s.AskBridge,
+		BaseSystemPrompt:  base,
+		CWD:               s.CWD,
+		AutoVerify:        core.IsAutoVerifyEnabled(s.MoaCfg),
+		SessionCheckpoint: s.SessionCheckpoint,
+		GateConfig:        gateConfig,
 	}
 }

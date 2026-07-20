@@ -22,6 +22,15 @@ func TestBuildSystemPrompt_CustomToolDescRuneBoundary(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_MemoryAndCheckpointGuidanceWithoutIndex(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: []core.ToolSpec{{Name: "memory"}, {Name: "checkpoint"}}, CWD: "/test"})
+	for _, want := range []string{"Use memory only for durable", "Never use it for temporary progress", "checkpoint tool as a session-local ephemeral slot", "when preparing to compact"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
+	}
+}
+
 func TestLoadAgentsMD_Global(t *testing.T) {
 	globalDir := t.TempDir()
 	cwd := t.TempDir()
@@ -279,7 +288,7 @@ func TestBuildSystemPrompt_MemoryGuideline(t *testing.T) {
 		{Name: "memory", Description: "Memory tool"},
 	}
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
-	if !strings.Contains(prompt, "Save durable, non-obvious facts") {
+	if !strings.Contains(prompt, "Use memory only for durable, non-obvious facts") {
 		t.Error("expected memory guideline when memory tool is available")
 	}
 }

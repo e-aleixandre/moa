@@ -68,6 +68,11 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 			meta["allowed_paths"] = paths
 		}
 	}
+	if sctx.SessionCheckpoint != nil {
+		for k, v := range sctx.SessionCheckpoint.SaveToMetadata() {
+			meta[k] = v
+		}
+	}
 	// Persist the workspace directory so the UI can offer it as a recent
 	// project when creating new sessions. collectMetadata builds the map from
 	// scratch on every save, so omitting this drops the cwd that

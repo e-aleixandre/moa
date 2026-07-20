@@ -15,28 +15,30 @@ import (
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // RuntimeConfig holds all dependencies for creating a SessionRuntime.
 type RuntimeConfig struct {
-	SessionID        string
-	Ctx              context.Context
-	Bus              EventBus // optional pre-created bus; if nil, a new LocalBus is created
-	Agent            AgentController
-	Subscriber       AgentSubscriber // nil = use Agent if it implements AgentSubscriber
-	TaskStore        *tasks.Store
-	Checkpoints      *checkpoint.Store
-	PlanMode         *planmode.PlanMode
-	Goal             *goal.Goal
-	Gate             *permission.Gate
-	PathPolicy       *tool.PathPolicy
-	AskBridge        *askuser.Bridge
-	ProviderFactory  func(core.Model) (core.Provider, error)
-	BaseSystemPrompt string
-	Persister        SessionPersister
-	SteerFilter      func(text string) bool
+	SessionID         string
+	Ctx               context.Context
+	Bus               EventBus // optional pre-created bus; if nil, a new LocalBus is created
+	Agent             AgentController
+	Subscriber        AgentSubscriber // nil = use Agent if it implements AgentSubscriber
+	TaskStore         *tasks.Store
+	Checkpoints       *checkpoint.Store
+	SessionCheckpoint *sessioncheckpoint.Slot
+	PlanMode          *planmode.PlanMode
+	Goal              *goal.Goal
+	Gate              *permission.Gate
+	PathPolicy        *tool.PathPolicy
+	AskBridge         *askuser.Bridge
+	ProviderFactory   func(core.Model) (core.Provider, error)
+	BaseSystemPrompt  string
+	Persister         SessionPersister
+	SteerFilter       func(text string) bool
 
 	CWD        string // workspace directory
 	AutoVerify bool   // run verify after edit runs
@@ -49,6 +51,7 @@ type RuntimeConfig struct {
 	// at construction time (before any handlers fire). Used by session restore.
 	InitialMessages        []core.AgentMessage
 	InitialCompactionEpoch int
+	InitialMetadata        map[string]any
 
 	// InitialEntries/InitialLeafID load a v2 session tree.
 	// When set, the tree is reconstructed and agent state is derived from BuildContext.
@@ -185,24 +188,25 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	am := NewApprovalManager(b, sm, cfg.SessionID)
 
 	sctx := &SessionContext{
-		SessionID:        cfg.SessionID,
-		SessionCtx:       cfg.Ctx,
-		Bus:              b,
-		Agent:            cfg.Agent,
-		State:            sm,
-		Approvals:        am,
-		TaskStore:        cfg.TaskStore,
-		Checkpoints:      cfg.Checkpoints,
-		PlanMode:         cfg.PlanMode,
-		Goal:             cfg.Goal,
-		PathPolicy:       cfg.PathPolicy,
-		AskBridge:        cfg.AskBridge,
-		ProviderFactory:  cfg.ProviderFactory,
-		BaseSystemPrompt: cfg.BaseSystemPrompt,
-		CWD:              cfg.CWD,
-		AutoVerify:       cfg.AutoVerify,
-		SteerFilter:      cfg.SteerFilter,
-		GateConfig:       cfg.GateConfig,
+		SessionID:         cfg.SessionID,
+		SessionCtx:        cfg.Ctx,
+		Bus:               b,
+		Agent:             cfg.Agent,
+		State:             sm,
+		Approvals:         am,
+		TaskStore:         cfg.TaskStore,
+		Checkpoints:       cfg.Checkpoints,
+		SessionCheckpoint: cfg.SessionCheckpoint,
+		PlanMode:          cfg.PlanMode,
+		Goal:              cfg.Goal,
+		PathPolicy:        cfg.PathPolicy,
+		AskBridge:         cfg.AskBridge,
+		ProviderFactory:   cfg.ProviderFactory,
+		BaseSystemPrompt:  cfg.BaseSystemPrompt,
+		CWD:               cfg.CWD,
+		AutoVerify:        cfg.AutoVerify,
+		SteerFilter:       cfg.SteerFilter,
+		GateConfig:        cfg.GateConfig,
 	}
 	sctx.SetGate(cfg.Gate)
 	// Let the approval manager stamp pending requests with the current run
@@ -211,6 +215,9 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 
 	// Compose permission check: plan mode filter + gate check.
 	permCheck := func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+		if name == "checkpoint" {
+			return nil
+		}
 		if sctx.PlanMode != nil {
 			if allowed, reason := sctx.PlanMode.FilterToolCall(name, args); !allowed {
 				return &core.ToolCallDecision{
@@ -250,6 +257,12 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	if sctx.Tree == nil {
 		sctx.Tree = session.NewTree()
 	}
+	if sctx.SessionCheckpoint == nil {
+		sctx.SessionCheckpoint = sessioncheckpoint.New()
+	}
+	if cfg.InitialMetadata != nil {
+		sctx.SessionCheckpoint.Restore(cfg.InitialMetadata)
+	}
 
 	// Take ownership of PlanMode's onChange callback:
 	// 1. Rebuild system prompt (centralized, every transition)
@@ -283,6 +296,9 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		State: sm,
 		sctx:  sctx,
 		unsub: unsub,
+	}
+	if cfg.Persister != nil {
+		sctx.PersistNow = rt.Flush
 	}
 	rt.defaults = sessionRuntimeDefaults{
 		model:          cfg.Agent.Model(),
@@ -345,6 +361,7 @@ func (r *SessionRuntime) AttachPersister(p SessionPersister) {
 	r.persisterMu.Lock()
 	r.persister = p
 	r.persisterMu.Unlock()
+	r.sctx.PersistNow = r.Flush
 	RegisterPersistenceReactor(r.Bus, r.sctx, p)
 }
 
@@ -587,6 +604,12 @@ func (r *SessionRuntime) SwitchSession(sess *session.Session) error {
 			paths = nil
 		}
 		r.sctx.PathPolicy.Restore(paths, unrestricted)
+	}
+	if r.sctx.SessionCheckpoint != nil {
+		r.sctx.SessionCheckpoint.Clear()
+		if sess != nil {
+			r.sctx.SessionCheckpoint.Restore(sess.Metadata)
+		}
 	}
 	mode := r.defaults.permissionMode
 	if restored.HasPermissionMode {

@@ -1172,14 +1172,17 @@ export function handleWsPlanMode(id, data) {
 export function handleWsCommand(id, data) {
   if (data.command === 'clear') {
     updateSession(id, { messages: [], streamingText: null, thinkingText: null });
-  } else if (data.command === 'compact') {
+  } else if (data.command === 'compact' || data.command === 'prepare-compact') {
     // Don't replace messages — display stays intact.
     // Append a compaction marker for visual feedback.
     const sess = store.get().sessions[id];
     if (sess) {
-      const marker = { _type: 'system', text: '✂ Context compacted' };
+      const marker = { _type: 'system', text: data.command === 'prepare-compact' ? '✂ Context prepared and compacted' : '✂ Context compacted' };
       updateSession(id, { messages: [...sess.messages, marker] });
     }
+  } else if (data.command === 'prepare-compact-noop') {
+    const sess = store.get().sessions[id];
+    if (sess) updateSession(id, { messages: [...sess.messages, { _type: 'system', text: 'Context prepared; no compaction was needed' }] });
   } else if (data.command === 'branch') {
     // Branch switched — reload messages from new branch path.
     if (data.messages) {

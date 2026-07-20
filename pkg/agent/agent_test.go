@@ -1735,8 +1735,17 @@ func TestCompact_RetainedUserKeepsStableMsgID(t *testing.T) {
 		}
 	}
 
-	if _, err := ag.Compact(context.Background()); err != nil {
+	const checkpointText = "exact checkpoint body"
+	payload, err := ag.CompactWithCheckpoint(context.Background(), checkpointText)
+	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
+	}
+	checkpointBlock := "--- BEGIN SESSION CHECKPOINT ---\n" + checkpointText + "\n--- END SESSION CHECKPOINT ---"
+	if payload == nil || !strings.Contains(payload.Summary, checkpointBlock) {
+		t.Fatalf("payload did not preserve checkpoint verbatim: %#v", payload)
+	}
+	if msgs := ag.Messages(); len(msgs) == 0 || !strings.Contains(msgs[0].Content[0].Text, checkpointBlock) {
+		t.Fatalf("compaction summary message did not preserve checkpoint: %#v", msgs)
 	}
 
 	// Every retained user message must keep the exact MsgID it had before the

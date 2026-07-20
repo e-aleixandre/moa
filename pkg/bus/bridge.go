@@ -12,6 +12,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -87,12 +88,14 @@ type SessionContext struct {
 	Approvals  *ApprovalManager // manages pending permissions/asks; may be nil
 	Tree       *session.Tree    // session entry tree; may be nil during migration
 
-	PlanMode    *planmode.PlanMode // may be nil
-	Goal        *goal.Goal         // may be nil
-	TaskStore   *tasks.Store       // may be nil
-	Checkpoints *checkpoint.Store  // may be nil
-	PathPolicy  *tool.PathPolicy   // may be nil
-	AskBridge   *askuser.Bridge    // may be nil
+	PlanMode          *planmode.PlanMode      // may be nil
+	Goal              *goal.Goal              // may be nil
+	TaskStore         *tasks.Store            // may be nil
+	Checkpoints       *checkpoint.Store       // may be nil
+	SessionCheckpoint *sessioncheckpoint.Slot // ephemeral pre-compaction state
+	PathPolicy        *tool.PathPolicy        // may be nil
+	AskBridge         *askuser.Bridge         // may be nil
+	PersistNow        func() error            // synchronous checkpoint-safe save
 
 	ProviderFactory  func(core.Model) (core.Provider, error)
 	BaseSystemPrompt string

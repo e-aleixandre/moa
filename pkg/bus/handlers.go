@@ -222,6 +222,9 @@ func RegisterHandlers(sctx *SessionContext) {
 			_ = sctx.State.Transition(StateIdle)
 		}
 		sctx.resetSessionCost()
+		if sctx.SessionCheckpoint != nil {
+			sctx.SessionCheckpoint.Clear()
+		}
 		sctx.Bus.Publish(CommandExecuted{
 			SessionID: sctx.SessionID,
 			Command:   "clear",
@@ -288,6 +291,78 @@ func RegisterHandlers(sctx *SessionContext) {
 		// Messages sent while the compact held the session busy were queued as
 		// steers, but no run is coming to drain them — pump the queue now.
 		requestPump(sctx)
+		return nil
+	})
+
+	b.OnCommand(func(cmd PrepareCompactSession) error {
+		if err := reserveRunSlot(sctx); err != nil {
+			return fmt.Errorf("cannot prepare compact: %w", err)
+		}
+		// A barrier prevents both existing and newly accepted steers from being
+		// consumed by the ephemeral preparation run. If queue pump owns this
+		// command, its barrier already provides the same boundary.
+		barrierID := "prepare-compact-internal-" + core.NewSteerID()
+		head, hasHead := sctx.Agent.PeekQueueHead()
+		addedBarrier := !hasHead || !head.IsBarrier()
+		if addedBarrier {
+			sctx.Agent.PushSteersFront([]core.SteerItem{{ID: barrierID, Command: barrierID}})
+		}
+		const prompt = "Prepare this conversation for imminent compaction. Do not continue the user's task. Only update existing relevant tracking or docs; never create docs merely for compaction. Use the ephemeral checkpoint for active non-reconstructible data, never memory. You may do nothing. Briefly report what you prepared."
+		launchRun(sctx, "prepare compact", func(ctx context.Context) ([]core.AgentMessage, error) {
+			defer func() {
+				if addedBarrier {
+					sctx.Agent.PopQueueBarrier(barrierID)
+				}
+			}()
+			before, epoch, err := snapshotConversation(sctx)
+			if err != nil {
+				return nil, err
+			}
+			restored := false
+			defer func() {
+				if !restored {
+					_ = restoreConversation(sctx, before, epoch)
+				}
+			}()
+			if _, err = sctx.Agent.SendWithCustom(ctx, prompt, map[string]any{"source": "prepare_compact", "internal": true}); err != nil {
+				return nil, err
+			}
+			if err = restoreConversation(sctx, before, epoch); err != nil {
+				return nil, err
+			}
+			restored = true
+			sctx.setCompacting(true)
+			defer sctx.setCompacting(false)
+			sctx.Bus.Publish(CompactionStarted{SessionID: sctx.SessionID})
+			text, gen := "", uint64(0)
+			if sctx.SessionCheckpoint != nil {
+				text, gen = sctx.SessionCheckpoint.Read()
+			}
+			payload, err := compactWithCheckpoint(ctx, sctx, text)
+			if err != nil {
+				sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
+				return nil, err
+			}
+			if payload == nil {
+				sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID})
+				sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "prepare-compact-noop", Messages: sctx.Agent.Messages()})
+				return sctx.Agent.Messages(), nil
+			}
+			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Payload: payload})
+			sctx.Bus.Drain(2 * time.Second)
+			if sctx.PersistNow != nil {
+				if err := sctx.PersistNow(); err != nil {
+					return nil, err
+				}
+			}
+			if sctx.SessionCheckpoint != nil {
+				if err := clearPersistedCheckpoint(sctx.SessionCheckpoint, text, gen, sctx.PersistNow); err != nil {
+					return nil, err
+				}
+			}
+			sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "prepare-compact", Messages: sctx.Agent.Messages()})
+			return sctx.Agent.Messages(), nil
+		})
 		return nil
 	})
 
@@ -1845,6 +1920,21 @@ func launchRun(sctx *SessionContext, label string, runFn func(ctx context.Contex
 	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen})
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Convert panics into a settled run rather than stranding StateRunning.
+				err := fmt.Errorf("run panic: %v", r)
+				if sctx.Checkpoints != nil {
+					sctx.Checkpoints.Discard()
+				}
+				sctx.setCompacting(false)
+				sctx.clearRunCancel(gen)
+				if sctx.State != nil {
+					_ = sctx.State.TransitionWithError(StateError, err.Error())
+				}
+				sctx.Bus.Publish(RunEnded{SessionID: sctx.SessionID, RunGen: gen, Err: err})
+			}
+		}()
 		// Open checkpoint.
 		if sctx.Checkpoints != nil {
 			cpLabel := label

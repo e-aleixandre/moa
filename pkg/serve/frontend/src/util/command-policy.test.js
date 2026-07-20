@@ -5,7 +5,7 @@ import { test, expect } from 'bun:test';
 import { classifyCommand, POLICY_INSTANT, POLICY_QUEUE, POLICY_REJECT } from './command-policy.js';
 
 test('queue commands (rewrite/reconfigure the run) wait for idle', () => {
-  for (const raw of ['/compact', '/clear', '/model sonnet', '/thinking high', '/verify']) {
+  for (const raw of ['/compact', '/prepare-compact', '/clear', '/model sonnet', '/thinking high', '/verify']) {
     expect(classifyCommand(raw)).toBe(POLICY_QUEUE);
   }
 });
