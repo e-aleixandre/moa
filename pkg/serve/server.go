@@ -315,6 +315,7 @@ func handleListModels() http.HandlerFunc {
 		Name     string `json:"name"`
 		Provider string `json:"provider"`
 		Alias    string `json:"alias,omitempty"`
+		MaxInput int    `json:"max_input,omitempty"`
 	}
 	entries := core.ListModels()
 	models := make([]modelInfo, len(entries))
@@ -324,6 +325,7 @@ func handleListModels() http.HandlerFunc {
 			Name:     e.Model.Name,
 			Provider: e.Model.Provider,
 			Alias:    e.Alias,
+			MaxInput: e.Model.MaxInput,
 		}
 	}
 	return func(w http.ResponseWriter, _ *http.Request) {

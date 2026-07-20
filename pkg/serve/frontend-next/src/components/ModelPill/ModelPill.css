@@ -29,3 +29,43 @@
 .model-pill .m-name {
   color: var(--lavender);
 }
+
+/* Split variant (desktop meter-click shortcut, MODEL-SELECTOR-ALT-SPEC-FABLE
+   §2/§6.2) — same outer chrome as the plain pill, but two independent
+   <button>s share it: the name opens the popover, the meter zone cycles
+   thinking without opening anything. */
+.model-pill--split {
+  padding: 0;
+  gap: 0;
+  cursor: default;
+}
+
+.model-pill--split .m-name-btn,
+.model-pill--split .m-meter-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+}
+
+.model-pill--split .m-name-btn {
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+}
+
+.model-pill--split .m-meter-btn {
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+}
+
+.model-pill--split .m-meter-btn:hover {
+  background: color-mix(in srgb, var(--surface1) 60%, transparent);
+}
+
+.model-pill--split .m-name-btn:focus-visible,
+.model-pill--split .m-meter-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

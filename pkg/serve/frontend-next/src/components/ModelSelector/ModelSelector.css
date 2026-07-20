@@ -1,122 +1,220 @@
 .model-selector {
-  width: 320px;
+  width: 340px;
   background: var(--mantle);
   border: 1px solid var(--surface1);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
+  padding: var(--space-3) var(--space-4) var(--space-4);
   overflow: hidden;
 }
 
 /* Embedded — dropped inside a Sheet (mobile model picker), which already brings
-   its own panel chrome + "Model" title. Shed the standalone popover frame and
-   fixed width so it isn't a card-in-a-card. */
+   its own panel chrome + "Model & thinking" title. Shed the standalone popover
+   frame and fixed width so it isn't a card-in-a-card. */
 .model-selector--embedded {
   width: 100%;
   background: none;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-}
-.model-selector--embedded .sel-row {
-  padding-left: 0;
-  padding-right: 0;
-}
-.model-selector--embedded .sel-think {
-  padding-left: 0;
-  padding-right: 0;
-  padding-bottom: 0;
+  padding: 0;
 }
 
 .model-selector .sel-head {
-  padding: var(--space-3) var(--space-4) var(--space-1);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   color: var(--overlay0);
+  padding-bottom: var(--space-2);
 }
 
-.model-selector .sel-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  padding: var(--space-3) var(--space-4);
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  color: inherit;
-  transition: background var(--duration) var(--ease);
+/* ── 1a. Thinking stepper — promoted to the top of the panel ── */
+
+.model-selector .think-block {
+  margin-bottom: var(--space-4);
 }
 
-.model-selector .sel-row:hover {
-  background: color-mix(in srgb, var(--surface0) 50%, transparent);
-}
-
-.model-selector .sel-row.on {
-  background: color-mix(in srgb, var(--mauve) 9%, transparent);
-}
-
-.model-selector .sel-row:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: -2px;
-}
-
-.model-selector .sel-row .sig {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  display: grid;
-  place-items: center;
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  flex: none;
-}
-
-.model-selector .sel-row-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.model-selector .sel-row .nm {
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-base);
-  color: var(--text);
-}
-
-.model-selector .sel-row .desc {
-  font-size: var(--text-xs);
-  color: var(--overlay1);
-}
-
-.model-selector .sel-row .check {
-  margin-left: auto;
-  color: var(--mauve);
-  display: inline-flex;
-  flex: none;
-}
-
-.model-selector .sel-think {
-  border-top: 1px solid var(--surface0);
-  padding: var(--space-3) var(--space-4) var(--space-4);
-}
-
-.model-selector .sel-think .lbl {
+.model-selector .think-lbl {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   font-size: var(--text-xs);
   color: var(--overlay1);
   margin-bottom: var(--space-2);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  font-weight: var(--weight-semibold);
 }
 
-.model-selector .sel-think .lbl b {
+.model-selector .think-lbl b {
   color: var(--mauve);
   font-weight: var(--weight-semibold);
   font-family: var(--mono);
   font-size: var(--text-xs);
   letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.model-selector .think-lbl b.hot {
+  color: var(--peach);
+}
+
+.model-selector .think-steps {
+  background: var(--mantle);
+}
+
+/* Desktop popover paints on top of --mantle itself, so the stepper needs
+   --base for contrast (matches the mockup's frame.desktop override; the
+   mobile embedded panel already sits inside a Sheet on --mantle). */
+.model-selector:not(.model-selector--embedded) .think-steps {
+  background: var(--base);
+}
+
+.model-selector .think-step {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 44px;
+  padding: 0;
+}
+
+.model-selector .think-step .tks {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 10px;
+}
+
+.model-selector .think-step .tks i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--surface2);
+  display: block;
+}
+
+.model-selector .think-step .tks i:nth-child(1) { height: 4px; }
+.model-selector .think-step .tks i:nth-child(2) { height: 6px; }
+.model-selector .think-step .tks i:nth-child(3) { height: 8px; }
+.model-selector .think-step .tks i:nth-child(4) { height: 10px; }
+
+.model-selector .think-step .tks .off {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--surface2);
+  align-self: center;
+}
+
+.model-selector .think-step.on .tks i.f {
+  background: var(--mauve);
+}
+
+.model-selector .think-step.hot.on {
+  background: color-mix(in srgb, var(--peach) 18%, transparent);
+  color: var(--peach);
+}
+
+.model-selector .think-step.hot.on .tks i.f {
+  background: var(--peach);
+}
+
+/* ── 1b. Model grid — chips grouped by provider ── */
+
+.model-selector .model-block {
+  border-top: 1px solid var(--surface0);
+  padding-top: var(--space-3);
+}
+
+.model-selector--embedded .model-block {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.model-selector .prov-lbl {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  margin: 0 0 var(--space-1);
+}
+
+/* Air between provider groups (not before the first). The label sits at the top
+   of each group wrapper, so the gap goes on the wrapper — .prov-lbl:first-child
+   would wrongly match every label (each is first child of its own group). */
+.model-selector .model-block > div + div {
+  margin-top: var(--space-3);
+}
+
+.model-selector .chip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.model-selector .mchip {
+  position: relative;
+  min-height: 48px;
+  text-align: left;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--surface0) 45%, transparent);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  color: var(--text);
+  font: inherit;
+  transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+
+.model-selector .mchip:hover {
+  border-color: var(--surface2);
+}
+
+.model-selector .mchip:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.model-selector .mchip .cn {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+
+.model-selector .mchip .cv {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay1);
+  line-height: var(--leading-tight);
+}
+
+.model-selector .mchip.on {
+  background: color-mix(in srgb, var(--mauve) 12%, transparent);
+  border-color: var(--mauve);
+}
+
+.model-selector .mchip.on .cn {
+  color: var(--mauve);
+}
+
+.model-selector .mchip .check {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  font-size: var(--text-xs);
+  color: var(--mauve);
+  font-family: var(--mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-selector .mchip,
+  .model-selector .think-step {
+    transition: none;
+  }
 }

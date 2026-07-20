@@ -15,7 +15,21 @@ function normalizeOptions(options) {
 // is optional (default false) — used by the session-settings popover to lock
 // the permission-mode control while the agent is running, without changing
 // the shape any existing caller (e.g. ModelSelector's thinking row) relies on.
-export function Segmented({ options, value, onChange, disabled = false, ...rest }) {
+//
+// `className`/`itemClassName`/`renderOption` are optional escape hatches so a
+// caller can restyle the chrome/cells (e.g. ModelSelector's thinking stepper,
+// which needs a glyph-over-label cell instead of a plain text label) without
+// forking the radiogroup/roving-tabindex/arrow-key logic above.
+export function Segmented({
+  options,
+  value,
+  onChange,
+  disabled = false,
+  className,
+  itemClassName,
+  renderOption,
+  ...rest
+}) {
   const items = normalizeOptions(options);
   const rootRef = useRef(null);
 
@@ -47,7 +61,7 @@ export function Segmented({ options, value, onChange, disabled = false, ...rest 
 
   return (
     <div
-      class="segmented"
+      class={`segmented${className ? ` ${className}` : ""}`}
       role="radiogroup"
       aria-disabled={disabled || undefined}
       ref={rootRef}
@@ -62,14 +76,14 @@ export function Segmented({ options, value, onChange, disabled = false, ...rest 
             key={opt.id}
             data-id={opt.id}
             type="button"
-            class={`segmented-item${on ? " on" : ""}`}
+            class={`segmented-item${on ? " on" : ""}${itemClassName ? ` ${itemClassName(opt, on)}` : ""}`}
             role="radio"
             aria-checked={on}
             tabIndex={disabled ? -1 : (isTabbable ? 0 : -1)}
             disabled={disabled}
             onClick={() => !disabled && onChange?.(opt.id)}
           >
-            {opt.label}
+            {renderOption ? renderOption(opt, on) : opt.label}
           </button>
         );
       })}

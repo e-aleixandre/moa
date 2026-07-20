@@ -21,6 +21,7 @@ export function ChatHead({
   onNotifications,
   onSessionSettings,
   onModelClick,
+  onModelMeterClick,
   modelPopover,
   settingsPopover,
   notifPopover,
@@ -47,6 +48,7 @@ export function ChatHead({
             variant="bars"
             level={thinkingLevel}
             onClick={onModelClick}
+            onMeterClick={onModelMeterClick}
           />
           {modelPopover}
         </div>

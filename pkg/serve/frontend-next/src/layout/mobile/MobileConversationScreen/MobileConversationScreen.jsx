@@ -290,7 +290,7 @@ export function MobileConversationScreen() {
         state={session ? session.state || "idle" : "idle"}
         title={session ? session.title || session.id : "moa"}
         model={session ? mobileModelLabel(session.model) : ""}
-        level={session ? session.thinking || "off" : "off"}
+        level={session ? (session.thinking === "none" ? "off" : (session.thinking || "off")) : "off"}
         path={session ? shortPath(session.cwd) || session.cwd || "" : ""}
         ctx={session ? session.contextPercent : undefined}
         onOpenSessions={() => setDrawerOpen(true)}
@@ -336,7 +336,7 @@ export function MobileConversationScreen() {
         const specs = deriveModelSpecs(models);
         const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
         return (
-          <Sheet open={modelOpen} onClose={() => setModelOpen(false)} title="Model">
+          <Sheet open={modelOpen} onClose={() => setModelOpen(false)} title="Model & thinking">
             <ModelSelector
               models={specs}
               selected={matchSelectedModel(specs, session.model)}

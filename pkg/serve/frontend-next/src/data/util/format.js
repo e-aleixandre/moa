@@ -236,6 +236,24 @@ export function modelCodename(model) {
   return '';
 }
 
+/** Formats a model's max input context window for the compact model-chip
+ *  sublines: 1_000_000 → "1M ctx", 1_050_000 → "1M ctx" (rounds to the
+ *  nearest whole M when within 0.1M of it), 400_000 → "400K ctx". Returns ""
+ *  when the registry doesn't carry a context size (custom model, or the
+ *  endpoint hasn't populated max_input) so callers can drop it from the
+ *  "version · context" subline instead of showing a bogus "0 ctx". */
+export function contextWindowLabel(maxInput) {
+  if (typeof maxInput !== 'number' || !isFinite(maxInput) || maxInput <= 0) return '';
+  if (maxInput >= 1_000_000) {
+    const millions = maxInput / 1_000_000;
+    const roundedInt = Math.round(millions);
+    if (Math.abs(millions - roundedInt) < 0.1) return `${roundedInt}M ctx`;
+    return `${Math.round(millions * 10) / 10}M ctx`;
+  }
+  if (maxInput >= 1000) return `${Math.round(maxInput / 1000)}K ctx`;
+  return `${maxInput} ctx`;
+}
+
 export function mobileModelLabel(model) {
   const code = modelCodename(model);
   if (code) return code;

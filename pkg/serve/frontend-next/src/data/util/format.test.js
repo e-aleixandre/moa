@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel } from './format.js';
 
 test('formatDiff numbers lines from startLine', () => {
   const out = formatDiff('old line\nsecond', 'new line\nsecond', 260);
@@ -145,4 +145,21 @@ test('fmtTokens: invalid/negative is zero', () => {
   expect(fmtTokens(-5)).toBe('0');
   expect(fmtTokens(NaN)).toBe('0');
   expect(fmtTokens(undefined)).toBe('0');
+});
+
+test('contextWindowLabel: rounds near-whole millions to "NM ctx"', () => {
+  expect(contextWindowLabel(1_000_000)).toBe('1M ctx');
+  expect(contextWindowLabel(1_050_000)).toBe('1M ctx');
+});
+
+test('contextWindowLabel: sub-million uses "NK ctx"', () => {
+  expect(contextWindowLabel(400_000)).toBe('400K ctx');
+  expect(contextWindowLabel(200_000)).toBe('200K ctx');
+});
+
+test('contextWindowLabel: missing/invalid is the empty string', () => {
+  expect(contextWindowLabel(0)).toBe('');
+  expect(contextWindowLabel(undefined)).toBe('');
+  expect(contextWindowLabel(-1)).toBe('');
+  expect(contextWindowLabel(NaN)).toBe('');
 });
