@@ -164,6 +164,41 @@
   min-width: 0;
 }
 
+.mcomposer-status .work.is-live {
+  background: linear-gradient(
+    90deg,
+    var(--blue) 0%,
+    var(--blue) 35%,
+    var(--sky) 50%,
+    var(--blue) 65%,
+    var(--blue) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+  animation: work-shimmer 2.5s ease-in-out infinite;
+}
+
+@keyframes work-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcomposer-status .work.is-live {
+    animation: none;
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--blue);
+  }
+}
+
 .mcomposer-status .spend {
   margin-left: auto;
   white-space: nowrap;

@@ -7,6 +7,8 @@ import {
   activityText,
   inFlightTool,
   liveVerb,
+  WORKING_VERBS,
+  workingVerb,
 } from './activity.js';
 
 // A session running a single tool. running() builds the minimal shape
@@ -118,14 +120,25 @@ test('activityAction returns null with no in-flight tool', () => {
   expect(activityAction(null)).toBe(null);
 });
 
+test('workingVerb rotates deterministically from the run start', () => {
+  const session = { runStartedAtMs: 10000 };
+  expect(workingVerb(session, 10000)).toBe(WORKING_VERBS[0]);
+  expect(workingVerb(session, 17999)).toBe(WORKING_VERBS[1]);
+  expect(workingVerb(session, 18000)).toBe(WORKING_VERBS[2]);
+  expect(workingVerb(session, 10000 + (WORKING_VERBS.length + 2) * 4000 + 1)).toBe(WORKING_VERBS[2]);
+  expect(workingVerb(session, 9999)).toBe(WORKING_VERBS[0]);
+  expect(workingVerb({}, 10000)).toBe(WORKING_VERBS[0]);
+  expect(workingVerb({ runStartedAtMs: 0 }, 10000)).toBe(WORKING_VERBS[0]);
+});
+
 test('activityText follows the resolution order', () => {
   // idle → nothing
   expect(activityText({ state: 'idle' })).toBe(null);
   // working with a tool → the synthesized action
   expect(activityText(running('edit', {}))).toBe('Editing code');
   expect(activityText(running('bash', { command: 'go test ./...' }))).toBe('Running tests');
-  // working between tools → steady "Working"
-  expect(activityText({ state: 'running', messages: [] })).toBe('Working');
+  // working between tools → rotating verb anchored to the run start
+  expect(activityText({ state: 'running', runStartedAtMs: 10000, messages: [] }, 18000)).toBe('Noodling');
   // special phases keep fixed copy, ignoring any tool
   expect(activityText({ state: 'running', thinkingText: 'x' })).toBe('Thinking');
   expect(activityText({ state: 'permission' })).toBe('Waiting for you');

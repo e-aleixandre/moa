@@ -43,6 +43,41 @@
   flex: none;
 }
 
+.status-strip .work.is-live {
+  background: linear-gradient(
+    90deg,
+    var(--subtext0) 0%,
+    var(--subtext0) 35%,
+    var(--sky) 50%,
+    var(--subtext0) 65%,
+    var(--subtext0) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+  animation: work-shimmer 2.5s ease-in-out infinite;
+}
+
+@keyframes work-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-strip .work.is-live {
+    animation: none;
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--subtext0);
+  }
+}
+
 .status-strip .status-strip-spend {
   margin-left: auto;
 }

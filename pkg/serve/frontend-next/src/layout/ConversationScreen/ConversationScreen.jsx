@@ -85,7 +85,7 @@ function spineSessions(sessions) {
 // timer advances on its own — its origin is always the server-stamped
 // runStartedAtMs, never a client Date.now() start.
 function currentActivity(session, nowMs) {
-  const label = activityText(session);
+  const label = activityText(session, nowMs);
   if (!label) return undefined;
   const phase = activityPhase(session);
   const runStartedAtMs = session.runStartedAtMs || 0;

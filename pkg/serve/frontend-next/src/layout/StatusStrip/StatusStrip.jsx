@@ -4,6 +4,7 @@ import { fmtReset } from "../../data/util/usage-pills.js";
 import { statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
 import { TokenFlow } from "../../components/TokenFlow/TokenFlow.jsx";
+import { activityPhase } from "../../data/util/activity.js";
 
 // StatusStrip — mono strip under the composer: the app's bottom telemetry line,
 // mirroring the TUI statusline. This is the TWO-LEVEL redesign (TELEMETRY-
@@ -48,6 +49,8 @@ export function StatusStrip({
   const promoted = alerts.promoted;
 
   const hasSpend = !!spend;
+  const phase = activityPhase(session);
+  const workIsLive = phase === "working" || phase === "thinking";
   // The cost segment is the natural door to the Usage panel: it is the only
   // "money" datum on the line, so tapping it to see "more money" is self-
   // explanatory. When there is no cost yet but the panel is still reachable, a
@@ -123,7 +126,7 @@ export function StatusStrip({
         </span>
       ))}
 
-      {task && <span class="status-strip-task">{task}</span>}
+      {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
 
       {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
           Falls back to plain text otherwise (galleries / other consumers). */}

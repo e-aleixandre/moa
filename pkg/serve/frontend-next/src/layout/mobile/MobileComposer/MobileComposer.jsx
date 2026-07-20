@@ -31,7 +31,7 @@ import "./MobileComposer.css";
 // with the live elapsed timer appended while running. When the session is idle
 // it returns nothing — the segment hides (we never show the task title here).
 function mobileActivity(session, nowMs) {
-  const label = activityText(session);
+  const label = activityText(session, nowMs);
   if (!label) return undefined;
   const phase = activityPhase(session);
   const runStartedAtMs = session.runStartedAtMs || 0;
@@ -65,6 +65,8 @@ export function MobileComposer({ session, usage }) {
   useEffect(() => { setUsageOpen(false); }, [session.id]);
 
   const work = mobileActivity(session, nowMs);
+  const phase = activityPhase(session);
+  const workIsLive = phase === "working" || phase === "thinking";
   const spend = fmtSpend(session.costUSD);
 
   // Level 1 promotions only: the plan windows surface here just when they climb
@@ -88,7 +90,7 @@ export function MobileComposer({ session, usage }) {
     <div class="mcomposer">
       <Composer sessionId={session.id} session={session} shortPlaceholder />
       <div class="mcomposer-status">
-        {work && <span class="work">● {work}</span>}
+        {work && <span class={`work${workIsLive ? " is-live" : ""}`}>● {work}</span>}
         {hasTokens && (
           <span class="tokens"><TokenFlow up={session.runTokensUp} down={session.runTokensDown} variant="compact" /></span>
         )}

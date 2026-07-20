@@ -4,8 +4,37 @@
 // flight, the label synthesizes a mid-level *intent* ("Running tests", "Editing
 // code") from the running tool and its args — an honest, glanceable summary that
 // is neither the task title nor the raw tool call (both of which the redesign
-// rejects for this line). Between tools it falls back to a steady "Working";
-// the live elapsed timer is what signals progress.
+// rejects for this line). Between tools it falls back to a rotating playful
+// gerund; the live elapsed timer is what signals progress.
+
+export const WORKING_VERBS = [
+  'Pondering',
+  'Cooking',
+  'Noodling',
+  'Conjuring',
+  'Simmering',
+  'Tinkering',
+  'Percolating',
+  'Ruminating',
+  'Finessing',
+  'Whirring',
+  'Untangling',
+  'Composing',
+  'Brewing',
+  'Wrangling',
+  'Spelunking',
+  'Musing',
+];
+
+const ROTATE_MS = 4000;
+
+export function workingVerb(session, nowMs) {
+  const startedAt = session?.runStartedAtMs;
+  if (!startedAt) return WORKING_VERBS[0];
+
+  const index = Math.floor((nowMs - startedAt) / ROTATE_MS) % WORKING_VERBS.length;
+  return WORKING_VERBS[Math.max(0, index)];
+}
 
 // TOOL_ACTIONS maps a tool name to its present-continuous intent phrase. bash is
 // handled separately (its command classifies into an intent). Phrases are
@@ -159,7 +188,7 @@ export function activityPhase(session) {
 // activityLabel builds the human text for the indicator given a coarse phase. In
 // the working phase it returns a steady "Working"; callers that have the session
 // (MobileComposer, StatusStrip) prefer activityAction(session) to name the tool
-// in flight and fall back to this "Working" only between tools.
+// in flight and fall back to a rotating verb only between tools.
 export function activityLabel(phase) {
   switch (phase) {
     case 'compacting':
@@ -179,13 +208,13 @@ export function activityLabel(phase) {
 
 // activityText resolves the full activity phrase for a session, following the
 // SPEC order: special phases keep their fixed copy; the working phase names the
-// in-flight tool via activityAction and falls back to "Working" between tools;
+// in-flight tool via activityAction and falls back to a rotating verb between tools;
 // idle (null phase) returns null so the segment hides. This is the single
 // source both the mobile status line and the desktop status strip consume, so
 // they never diverge. It never returns the task title or a raw tool call.
-export function activityText(session) {
+export function activityText(session, nowMs = Date.now()) {
   const phase = activityPhase(session);
   if (phase === null) return null;
-  if (phase === 'working') return activityAction(session) || 'Working';
+  if (phase === 'working') return activityAction(session) || workingVerb(session, nowMs);
   return activityLabel(phase);
 }
