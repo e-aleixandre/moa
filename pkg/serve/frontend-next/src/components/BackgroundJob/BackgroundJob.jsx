@@ -20,14 +20,21 @@ export function BackgroundJob({
   progress,
   elapsed,
   lines = [],
+  live = false,
   defaultOpen = false,
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  // While the job is live, the tail is open by default so output streams in
+  // (ticker) without the user hunting for the peek toggle; they can still
+  // collapse it. Once terminal, it respects defaultOpen (collapsed unless a
+  // caller opts in). userToggled pins the user's explicit choice so a live→done
+  // transition doesn't yank a tail they opened (or reopen one they closed).
+  const [userOpen, setUserOpen] = useState(null);
+  const open = userOpen != null ? userOpen : (live || defaultOpen);
   const lastIdx = lines.length - 1;
 
   return (
     <div class="bg-job" data-live-surface="bash" data-live-id={jobId}>
-      <div class="bgjob">
+      <div class={`bgjob${live ? " live" : ""}`}>
         <span class="tag">{jobLabel}</span>
         <span class="cmd">
           {cmd}
@@ -38,25 +45,32 @@ export function BackgroundJob({
           type="button"
           class="peek"
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setUserOpen(!open)}
         >
-          peek <ChevronDown size={12} class={`peek-caret${open ? " up" : ""}`} aria-hidden="true" />
+          {open ? "hide" : "output"}
+          <ChevronDown size={12} class={`peek-caret${open ? " up" : ""}`} aria-hidden="true" />
         </button>
       </div>
 
-      {open && lines.length > 0 && (
+      {open && (
         <div class="logtail" role="log" aria-live="polite" aria-relevant="additions text">
-          {lines.map((line, i) => {
-            const isLast = i === lastIdx;
-            const tone = typeof line === "string" ? undefined : line.tone;
-            const text = typeof line === "string" ? line : line.text;
-            return (
-              <div key={line.id ?? i} class={`ln${tone ? ` t-${tone}` : ""}`}>
-                {text}
-                {isLast && <span class="ln-cursor" aria-hidden="true" />}
-              </div>
-            );
-          })}
+          {lines.length > 0 ? (
+            lines.map((line, i) => {
+              const isLast = i === lastIdx;
+              const tone = typeof line === "string" ? undefined : line.tone;
+              const text = typeof line === "string" ? line : line.text;
+              return (
+                <div key={line.id ?? i} class={`ln${tone ? ` t-${tone}` : ""}`}>
+                  {text}
+                  {isLast && live && <span class="ln-cursor" aria-hidden="true" />}
+                </div>
+              );
+            })
+          ) : (
+            <div class="ln ln-waiting">
+              waiting for output<span class="ln-cursor" aria-hidden="true" />
+            </div>
+          )}
         </div>
       )}
     </div>

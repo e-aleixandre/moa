@@ -677,7 +677,10 @@ function finalizeDelegation(d) {
 
 // backgroundJob builds one BackgroundJob descriptor from a live bash-kind
 // subagent. Shape (see BackgroundJob.jsx): { jobId, jobLabel, cmd, progress?,
-// elapsed?, lines }. `lines` is the output tail as an array of strings.
+// elapsed?, lines, live }. `lines` is the output tail as an array of strings.
+// `live` is always true here (only running bash reaches this path), so the
+// renderer auto-opens the tail and streams new lines in (ticker) without the
+// user having to discover the peek toggle.
 function backgroundJob(job) {
   const cmd = toolPath('bash', { command: job.task || '' }) || firstLine(job.task);
   const bg = {
@@ -685,6 +688,7 @@ function backgroundJob(job) {
     jobLabel: 'BG · JOB',
     cmd,
     lines: bashLines(job),
+    live: true,
   };
   const elapsed = job.usage && formatElapsed(job.usage.elapsedMs);
   if (elapsed) bg.elapsed = elapsed;

@@ -318,12 +318,13 @@ function BackgroundJobSection() {
           </AssistantDocument>
 
           <BackgroundJob
+            jobId="bg2"
             jobLabel="BG · JOB 2"
             cmd="go test -race ./..."
             progress="pkg 31/47"
             elapsed="2:18"
             lines={BGJOB_LINES}
-            defaultOpen
+            live
           />
 
           <AssistantDocument streaming>

@@ -8,10 +8,12 @@
      handle row is gone (§1.3), so give back one notch of breathing. */
   padding: calc(var(--space-2) + env(safe-area-inset-top)) var(--space-4)
     var(--space-2);
-  background: linear-gradient(
-    var(--mantle),
-    color-mix(in srgb, var(--mantle) 40%, var(--crust))
-  );
+  /* Solid --mantle (not a gradient): with apple-mobile-web-app-status-bar-style
+     black-translucent the page paints under the iOS status bar, so the reserved
+     safe-area zone behind the clock must be the SAME flat color as the header
+     band — a gradient there reads as a seam between the status bar and the
+     header. theme-color (#181825 = --mantle) matches this. */
+  background: var(--mantle);
   border-bottom: 1px solid var(--surface0);
 }
 

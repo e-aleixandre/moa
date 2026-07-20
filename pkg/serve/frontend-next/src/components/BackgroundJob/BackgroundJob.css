@@ -25,6 +25,36 @@
   flex: none;
 }
 
+/* Live job: the strip border breathes teal so a running bash reads as alive at
+   a glance, and its tag carries a pulsing dot. */
+.bg-job .bgjob.live {
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--surface0));
+}
+
+.bg-job .bgjob.live .tag::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--teal);
+  margin-right: var(--space-1);
+  vertical-align: middle;
+  animation: bgjob-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bgjob-live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-job .bgjob.live .tag::before {
+    animation: none;
+  }
+}
+
 .bg-job .bgjob .cmd {
   font-family: var(--mono);
   font-size: var(--text-xs);
@@ -119,6 +149,31 @@
 
 .bg-job .logtail .ln.t-dim {
   color: var(--surface2);
+}
+
+.bg-job .logtail .ln.ln-waiting {
+  color: var(--overlay0);
+  font-style: italic;
+}
+
+/* New tail lines fade+slide in as they stream (the "ticker" feel). Applied to
+   every line; only the freshly-appended one is actually animating on each
+   delta since the earlier ones already ran it. Off under reduced-motion. */
+.bg-job .logtail .ln {
+  animation: bgjob-line-in var(--duration) var(--ease);
+}
+
+@keyframes bgjob-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-job .logtail .ln {
+    animation: none;
+  }
 }
 
 .bg-job .logtail .ln .ln-cursor::after {

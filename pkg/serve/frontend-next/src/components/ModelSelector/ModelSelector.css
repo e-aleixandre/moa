@@ -104,7 +104,7 @@
   height: 2px;
   border-radius: 1px;
   background: var(--surface2);
-  align-self: center;
+  align-self: flex-end; /* sit on the same baseline as the bars, not centered */
 }
 
 .model-selector .think-step.on .tks i.f {

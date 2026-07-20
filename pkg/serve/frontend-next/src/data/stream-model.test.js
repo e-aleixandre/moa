@@ -266,6 +266,7 @@ test('a live async bash job becomes a background block matching BackgroundJob', 
   expect(Array.isArray(job.lines)).toBe(true);
   expect(job.lines).toEqual(['line1', 'line2', 'compiling…']);
   expect(job.jobId).toBe('b1'); // for the external map key
+  expect(job.live).toBe(true); // running bash auto-opens its tail (ticker)
   // no stray props the component ignores
   expect(job.tail).toBeUndefined();
   expect(job.status).toBeUndefined();
