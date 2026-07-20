@@ -128,7 +128,7 @@ function MobileStreamBlock({ block, onOpenSubagent }) {
       return <div class="mstream-system">{block.text}</div>;
     case "waypoint":
       return (
-        <UserWaypoint time={block.time}>
+        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined}>
           <p>{block.text}</p>
         </UserWaypoint>
       );

@@ -119,12 +119,54 @@
   outline-offset: var(--focus-ring-offset);
 }
 
-.composer-wrap .composer-stop {
-  background: linear-gradient(135deg, var(--red), color-mix(in srgb, var(--red) 60%, var(--maroon)));
+.composer-wrap .composer-stop-ghost {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  color: var(--red);
+  cursor: pointer;
+  margin-left: auto; /* the pair [stop][send] is pushed flush-right together */
+  transition: background var(--duration) var(--ease);
 }
 
-.composer-wrap .composer-stop:hover {
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--red) 35%, transparent);
+.composer-wrap .composer-stop-ghost:hover {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+/* ≥44px hit-area (P7/INC-35) without growing the visual button. */
+.composer-wrap .composer-stop-ghost::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+}
+
+.composer-wrap .composer-stop-ghost:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* When the ghost Stop is present it owns the auto-push, so Send sits right
+   beside it (gap from .composer-bar) instead of grabbing its own auto-margin. */
+.composer-wrap .composer-stop-ghost + .composer-send {
+  margin-left: var(--space-1);
+}
+
+/* Steer hint shown in the queue-note slot while typing during a run: names the
+   consequence of Enter (steer, not interrupt). A big-surface label — no motion. */
+.composer-wrap .steer-hint {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .composer-wrap .queue-note span {

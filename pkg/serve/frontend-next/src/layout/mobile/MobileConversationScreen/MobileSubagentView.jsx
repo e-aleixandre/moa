@@ -1,22 +1,25 @@
 import { useEffect, useState } from "preact/hooks";
-import { ChevronLeft, Rocket, X, Check, Copy } from "lucide-preact";
+import { ChevronLeft, GitFork, Rocket, X, Check, Copy } from "lucide-preact";
 import { Spinner } from "../../../primitives/index.js";
-import { UserWaypoint } from "../../../components/index.js";
+import { ModelPill, UserWaypoint } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { subagentView, canPromote } from "../../../data/subagent-view-model.js";
-import { fmtTokens, copyToClipboard } from "../../../data/util/format.js";
+import { fmtTokens, copyToClipboard, truncateText } from "../../../data/util/format.js";
+import { modelAccent } from "../../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
 import { updateSession } from "../../../data/store.js";
 import "./MobileSubagentView.css";
 
 // MobileSubagentView — full-screen push counterpart of the desktop SubagentView
-// (5J, INC-34). Same anatomy, stacked for a phone: header with ‹ back + codename
-// + state, Promote/Cancel as 44px ICON buttons (cancel with inline "sure?"),
-// sibling rail as a horizontal scroll strip, task card, MobileStream body, and a
-// steer composer (textarea ≥16px anti-zoom, inherited from the shared Composer).
-// Reuses the pure subagentView() projection; rebounds to the parent when the
-// subagent was pruned.
+// (5J, INC-34). It wears the PARENT thread's chrome (SUBAGENT-VIEW-RECONCILE):
+// the header is a variant of the shared `.mhead` and the composer sits in the
+// `.mcomposer` pill, so the fork reads as "the same house, zoomed into a
+// branch" rather than a foreign screen. What stays fork-proper: the full-screen
+// push, the 2px accent thread, the breadcrumb/codename in accent, the sibling
+// rail, the task card, the below-composer now-line, and the terminal outcome
+// banner. Reuses the pure subagentView() projection; rebounds to the parent
+// when the subagent was pruned.
 
 export function MobileSubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
@@ -65,33 +68,44 @@ export function MobileSubagentView({ session, jobId, onBack }) {
 
   return (
     <div class={`msa ${threadClass}`} style={{ "--sa-accent": `var(--${accent})` }}>
-      <header class="msa-head">
-        <button type="button" class="msa-back" aria-label="Back to parent" onClick={onBack}>
-          <ChevronLeft size={20} />
-        </button>
-        <div class="msa-crumb">
-          <span class="msa-name" style={{ color: `var(--${accent})` }}>{view.name}</span>
-          <span class="msa-state">
+      <header class="mhead msa-head">
+        <div class="mhead-row">
+          <button type="button" class="msa-back" aria-label="Back to parent" onClick={onBack}>
+            <ChevronLeft size={20} />
+          </button>
+          <div class="mhead-switch msa-ident" role="presentation">
+            <GitFork size={13} style={{ color: `var(--${accent})` }} aria-hidden="true" />
+            <span class="mhead-title" style={{ color: `var(--${accent})` }}>{view.name}</span>
             {!view.terminal && <Spinner color={accent} size={8} />}
-            {view.terminal ? view.outcome : "working"}
-          </span>
+          </div>
+          {view.model && (
+            <ModelPill model={view.model} accent={modelAccent(view.model)} variant="glyph" />
+          )}
+          <div class="msa-actions">
+            {canPromote(view) && (
+              <button type="button" class="msa-abtn" aria-label="Promote to background" onClick={onPromote}>
+                <Rocket size={18} />
+              </button>
+            )}
+            {!view.terminal && (
+              <button
+                type="button"
+                class={`msa-abtn cancel${confirmCancel ? " armed" : ""}`}
+                aria-label="Cancel subagent"
+                onClick={onCancel}
+              >
+                {confirmCancel ? <span class="msa-sure">sure?</span> : <X size={18} />}
+              </button>
+            )}
+          </div>
         </div>
-        <div class="msa-actions">
-          {canPromote(view) && (
-            <button type="button" class="msa-abtn" aria-label="Promote to background" onClick={onPromote}>
-              <Rocket size={18} />
+        <div class="mhead-sub">
+          <span class="mhead-meta msa-crumbline">
+            <button type="button" class="msa-parent" onClick={onBack}>
+              {session.title || session.id}
             </button>
-          )}
-          {!view.terminal && (
-            <button
-              type="button"
-              class={`msa-abtn cancel${confirmCancel ? " armed" : ""}`}
-              aria-label="Cancel subagent"
-              onClick={onCancel}
-            >
-              {confirmCancel ? <span class="msa-sure">sure?</span> : <X size={18} />}
-            </button>
-          )}
+            {view.task ? ` › ${truncateText(view.task, 60)}` : ""}
+          </span>
         </div>
       </header>
 
@@ -123,14 +137,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
       {view.terminal ? (
         <MobileOutcome view={view} onBack={onBack} />
       ) : (
-        <div class="msa-foot">
-          <div class="msa-nowline">
-            <Spinner color={accent} size={9} />
-            {view.action && <span class="msa-now-act">{view.action}</span>}
-            {view.elapsed && <span class="msa-now-seg">{view.elapsed}</span>}
-            {tokens && <span class="msa-now-seg">{tokens}</span>}
-            {cost && <span class="msa-now-seg">{cost}</span>}
-          </div>
+        <div class="mcomposer msa-foot">
           <Composer
             key={`steer-${jobId}`}
             sessionId={session.id}
@@ -138,6 +145,17 @@ export function MobileSubagentView({ session, jobId, onBack }) {
             shortPlaceholder
             steer={{ jobId, accent, name: view.name, onRebound: onBack }}
           />
+          {/* Now-line sits BELOW the composer, in the parent's status slot
+              (SUBAGENT-VIEW-RECONCILE §2.3): telemetry lives on the mono line
+              under the input everywhere in the app. Accent colors the activity. */}
+          <div class="mcomposer-status msa-nowline">
+            <span class="work msa-now-act" style={{ color: `var(--${accent})` }}>
+              <Spinner color={accent} size={8} /> {view.action || "working"}
+              {view.elapsed ? ` · ${view.elapsed}` : ""}
+            </span>
+            {tokens && <span class="tokens">{tokens}</span>}
+            {cost && <span class="spend">{cost}</span>}
+          </div>
         </div>
       )}
     </div>

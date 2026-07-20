@@ -1,7 +1,9 @@
 /* MobileSubagentView (5J, INC-34) — full-screen push over the mobile
-   conversation. Thin 2px accent thread down the left of the body; header with
-   ‹ back + codename + state and 44px icon actions; sibling strip; task card;
-   MobileStream body; fused now-line + steer composer, or an outcome banner on
+   conversation. It wears the parent's chrome (SUBAGENT-VIEW-RECONCILE): the
+   header is a `.mhead` variant and the composer sits in the `.mcomposer` pill.
+   Fork-proper marks stay: thin 2px accent thread down the left of the body,
+   breadcrumb/codename in accent, sibling strip, task card, and — below the
+   composer, in the parent's status slot — the now-line, or an outcome banner on
    terminal states. The accent (--sa-accent) is a discreet thread only. */
 .msa {
   position: absolute;
@@ -23,12 +25,16 @@
 }
 
 .msa-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--surface0);
+  /* Wears the shared `.mhead` chrome (solid --mantle, safe-area top inset,
+     border, row metrics). msa-head only neutralizes the identity block (not a
+     drawer switcher here) and keeps the back button at mhead density. */
   flex: none;
+}
+
+/* Identity block reuses .mhead-switch layout but isn't interactive. */
+.msa-head .msa-ident {
+  cursor: default;
+  gap: var(--space-1);
 }
 
 /* 44px hit-areas for back and action icons. */
@@ -46,7 +52,9 @@
   flex: none;
 }
 
-.msa-back { margin-left: calc(-1 * var(--space-2)); }
+/* Keep mhead's visual row density despite the 44px tap box (same negative-margin
+   technique as .mhead-switch). */
+.msa-back { margin: -12px 0 -12px calc(-1 * var(--space-2)); }
 
 .msa-abtn.cancel { color: var(--overlay1); }
 .msa-abtn.cancel.armed { color: var(--red); }
@@ -56,27 +64,24 @@
   color: var(--red);
 }
 
-.msa-crumb {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
+/* Breadcrumb line (row 2) reuses .mhead-sub/.mhead-meta; the parent link is an
+   inline unstyled button with a downward-safe ≥44px hit area. */
+.msa-parent {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  cursor: pointer;
+  position: relative;
 }
 
-.msa-name {
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-base);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.msa-state {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--text-xs);
-  color: var(--overlay1);
+.msa-parent::after {
+  content: "";
+  position: absolute;
+  inset: -14px -6px;
 }
 
 .msa-actions {
@@ -152,30 +157,23 @@
   margin-bottom: var(--space-1);
 }
 
-/* now-line + steer composer */
+/* now-line below the composer — restyled as the parent's .mcomposer-status
+   slot; only accent + ellipsis override the shared status line. */
 .msa-foot { flex: none; }
 
 .msa-nowline {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay1);
   border-top: 1px solid var(--surface0);
 }
 
 .msa-now-act {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  color: var(--subtext0);
 }
-
-.msa-now-seg { flex: none; color: var(--overlay0); margin-left: auto; }
-.msa-now-seg + .msa-now-seg { margin-left: 0; }
 
 /* outcome banner */
 .msa-outcome {

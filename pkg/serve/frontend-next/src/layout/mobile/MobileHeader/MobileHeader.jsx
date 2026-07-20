@@ -87,7 +87,7 @@ export function MobileHeader({
         <div class="mhead-sub">
           <span class="mhead-meta">
             {path}
-            {hasCtx ? ` · ctx ${ctx}%` : ""} ·{" "}
+            {hasCtx ? ` · ctx ${ctx}%` : ""}
           </span>
           <button
             type="button"

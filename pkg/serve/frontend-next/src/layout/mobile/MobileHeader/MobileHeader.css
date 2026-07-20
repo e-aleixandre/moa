@@ -133,7 +133,7 @@
   justify-content: center;
   min-width: 44px;
   min-height: 44px;
-  margin: -12px -8px -12px 0;
+  margin: -12px -8px -6px 0; /* bottom -6px (was -12px): don't over-claim the gap above the rewind chip */
   padding: 0;
   background: none;
   border: 0;
@@ -162,11 +162,22 @@
 .mhead-sub {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  margin-top: 2px; /* px structural: hairline gap under the identity row (§3) */
+  gap: var(--space-2);
+  margin-top: var(--space-1); /* 4px, was 2px — a hair more separation from row 1 */
   font-family: var(--mono);
   font-size: var(--text-micro);
   color: var(--overlay0);
+}
+
+/* Meta text flex-truncates so the rewind chip keeps a fixed right-edge slot
+   instead of being pushed to an unpredictable x by a long path (the geometry
+   that made it collide with the title's tap band). */
+.mhead-meta {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mhead-rewind {
@@ -174,24 +185,35 @@
   align-items: center;
   gap: 3px;
   position: relative;
+  flex: none;
+  margin: -4px 0 -4px auto; /* auto = pin to the right edge; -4px keeps the row slim */
+  padding: 4px 10px; /* px structural: ~26px-tall chip */
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-full);
   background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  color: inherit;
+  color: var(--overlay1);
   font: inherit;
   cursor: pointer;
 }
 
+/* Hit area grows sideways + DOWN only (into the header's bottom padding, where
+   nothing is tappable) — never UP into the title switcher's band. Total ≥44px
+   tall (26 visual + 18 down), ≥44px wide. This is the fix for the accidental
+   Rewind taps when reaching for the title/drawer. */
 .mhead-rewind::after {
   content: "";
   position: absolute;
-  inset: -16px -6px;
+  inset: 0 -8px -18px -8px;
 }
 
 .mhead-rewind:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.mhead-rewind:active:not(:disabled) {
+  background: var(--surface0);
+  color: var(--subtext0);
 }
 
 .mhead-rewind:focus-visible {

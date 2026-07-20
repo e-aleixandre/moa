@@ -79,6 +79,47 @@
   border-radius: 12px; /* px structural (mockup .m-send) */
 }
 
+/* Busy: the pill grows a 4th column so the ghost Stop sits beside Send
+   ([+][textarea][stop][send]) instead of Stop replacing Send. On mobile there
+   is no Esc, so this ghost is the ONLY stop affordance. */
+.mcomposer .composer.is-busy {
+  grid-template-columns: auto 1fr auto auto;
+}
+
+.mcomposer .composer-stop-ghost {
+  grid-row: 1;
+  grid-column: 3;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px; /* matches .composer-send mobile */
+  margin-left: 0;
+}
+
+/* Keep the two adjacent 36px buttons ≥44px tall without their hit-areas
+   overlapping horizontally (cap sideways growth). */
+.mcomposer .composer-stop-ghost::after {
+  inset: -8px -4px;
+}
+
+.mcomposer .composer.is-busy .composer-send {
+  grid-column: 4;
+  position: relative;
+}
+
+/* Match the ghost Stop's ≥44px hit-area (busy Send is 36px). Cap sideways
+   growth to -4px so it never overlaps the adjacent Stop (8px column gap). */
+.mcomposer .composer.is-busy .composer-send::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+/* The typing hint has no room in the pill; the persistent Send + placeholder
+   carry the steer meaning on mobile. */
+.mcomposer .composer.is-busy .steer-hint {
+  display: none;
+}
+
 /* queue-note (recall chip) → full-width second row of the pill, only present
    when there are queued steers. */
 .mcomposer .queue-note {

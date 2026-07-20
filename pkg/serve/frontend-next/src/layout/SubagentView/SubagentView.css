@@ -1,6 +1,7 @@
 /* SubagentView (5J) — "inside the fork". A thin 2px accent thread frames the
-   body; the header is a breadcrumb; the now-line fuses status+pulse over the
-   steer composer; the outcome banner replaces both on terminal states. The
+   body; the header is a breadcrumb; the now-line fuses status+pulse below the
+   steer composer (same slot as the parent's status line); the outcome banner
+   replaces both on terminal states. The
    accent (--sa-accent) is set inline from the subagent's fanout identity color
    and does NOT tint the background — it's a discreet thread + local details
    only. It turns green/red ONLY on terminal (thread-completed/failed/cancelled).
@@ -10,6 +11,18 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
+  /* Enters as a slide-in (spec §6): reads as zooming into a branch, not a page
+     swap. Disabled under reduced-motion. */
+  animation: sa-slide-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes sa-slide-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-view { animation: none; }
 }
 
 /* ── header ─────────────────────────────────────────────────────────────── */

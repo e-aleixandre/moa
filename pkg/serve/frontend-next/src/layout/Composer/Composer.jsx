@@ -789,9 +789,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     ? "Message moa…"
     : `Message moa — Enter to send, ⇧Enter for a new line, ${formatShortcut("Enter", { mod: true })} to queue…`;
   // 5J steer mode overrides everything: this box talks to the subagent.
+  // Busy (parent run) placeholder: state that Enter STEERS without stopping —
+  // the persistent Send button already signals "you can always talk to it", so
+  // the copy names the consequence. Mobile's pill has no room for the long form.
+  const busyPlaceholder = shortPlaceholder
+    ? "Steer — it keeps working…"
+    : "Steer the agent — ⏎ sends while it works, it won't stop it…";
   const placeholder = steer
     ? `Steer ${steer.name || "subagent"} — it reads this before its next step…`
-    : (busy ? "Steer the agent…" : idlePlaceholder);
+    : (busy ? busyPlaceholder : idlePlaceholder);
 
   return (
     <div class={`composer-wrap${steer ? " composer-steer" : ""}`}>
@@ -824,7 +830,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
           ))}
         </div>
       )}
-      <div class="composer">
+      <div class={`composer${busy ? " is-busy" : ""}`}>
         <input
           ref={attachInputRef}
           type="file"
@@ -889,10 +895,34 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
               </span>
             </button>
           )}
+          {busy && hasText && !summary && (
+            <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
+          )}
           {busy ? (
-            <button type="button" class="composer-send composer-stop" aria-label="Stop (Esc)" title="Stop (Esc)" onClick={handleStop}>
-              <Square size={14} />
-            </button>
+            <>
+              {/* Stop no longer REPLACES Send while busy — it joins it as a
+                  secondary (ghost) action. Send keeps its identity in every
+                  state so "you can always talk to it" (steer) reads at a
+                  glance; on mobile this ghost is also the only Stop (no Esc). */}
+              <button
+                type="button"
+                class="composer-stop-ghost"
+                aria-label="Stop the run (Esc)"
+                title="Stop — ends the run (Esc)"
+                onClick={handleStop}
+              >
+                <Square size={13} />
+              </button>
+              <button
+                type="button"
+                class="composer-send"
+                aria-label="Send steer"
+                title="Send — steers the agent, doesn't stop it"
+                onClick={handleSend}
+              >
+                <ArrowUp size={16} />
+              </button>
+            </>
           ) : (() => {
             // The send button doubles as push-to-talk (5M): tap = send, hold =
             // record, slide up while holding = lock hands-free. It only enters

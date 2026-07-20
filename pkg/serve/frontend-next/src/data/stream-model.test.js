@@ -412,6 +412,19 @@ test('more than 200 messages also triggers the truncation notice', () => {
 });
 
 // ── 10. multi-turn separation ────────────────────────────────────────────────
+test('a steered user message carries a steer flag on its waypoint', () => {
+  const s = session([
+    user('do the thing'),
+    assistant('working on it'),
+    user('actually, focus on tests', { _steer_id: 'st-1' }),
+    assistant('ok, tests it is'),
+  ]);
+  const blocks = projectStream(s);
+  const wps = blocks.filter((b) => b.kind === 'waypoint');
+  expect(wps[0].steer).toBeUndefined(); // a normal turn opener
+  expect(wps[1].steer).toBe(true); // the injected steer
+});
+
 test('two user turns produce two waypoints and two separate documents', () => {
   const s = session([
     user('first question'),

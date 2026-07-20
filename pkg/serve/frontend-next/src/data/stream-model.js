@@ -257,6 +257,11 @@ export function projectStream(session) {
         text: joinText(msg.content),
       };
       if (attachments.length > 0) wp.attachments = attachments;
+      // A steered user message (injected mid-run) is labeled distinctly in the
+      // transcript so it reads as a course-correction, not a fresh turn. Live
+      // steers carry _steer_id; messages replayed from the persisted REST
+      // transcript don't, so the label shows for live-session steers only.
+      if (msg._steer_id) wp.steer = true;
       blocks.push(wp);
       continue;
     }

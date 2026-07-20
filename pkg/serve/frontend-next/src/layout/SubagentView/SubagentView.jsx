@@ -174,7 +174,6 @@ export function SubagentView({ session, jobId, onBack }) {
         <OutcomeBanner view={view} onBack={onBack} />
       ) : (
         <>
-          <NowLine view={view} accent={accent} />
           <Composer
             key={`steer-${jobId}`}
             sessionId={session.id}
@@ -186,6 +185,7 @@ export function SubagentView({ session, jobId, onBack }) {
               onRebound: onBack,
             }}
           />
+          <NowLine view={view} accent={accent} />
         </>
       )}
     </div>
