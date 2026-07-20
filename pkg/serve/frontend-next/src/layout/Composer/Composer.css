@@ -316,38 +316,6 @@
   flex-shrink: 0;
 }
 
-/* --- 5J subagent steer mode: accent tag above the box + accented focus ring so
-   it's unmistakable you're writing to the subagent, not the parent run. The
-   accent is passed as an inline --steer-accent custom property. --- */
-.composer-steer .composer-steer-tag {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 0 var(--space-2);
-  font-size: var(--text-xs);
-}
-
-.composer-steer .composer-steer-label {
-  font-family: var(--mono);
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-micro);
-  letter-spacing: 0.08em;
-  color: var(--steer-accent, var(--peach));
-  border: 1px solid color-mix(in srgb, var(--steer-accent, var(--peach)) 45%, transparent);
-  border-radius: var(--radius-sm);
-  padding: 1px var(--space-2);
-}
-
-.composer-steer .composer-steer-name {
-  font-weight: var(--weight-semibold);
-}
-
-.composer-steer .composer:focus-within {
-  border-color: var(--steer-accent, var(--peach));
-  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--steer-accent, var(--peach)) 16%, transparent),
-    0 8px 32px color-mix(in srgb, var(--crust) 70%, transparent);
-}
-
 /* --- Voice / push-to-talk (5M) ------------------------------------------- */
 
 /* Wrapper so the "slide up to lock" hint can float above the send/record

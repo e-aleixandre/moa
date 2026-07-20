@@ -33,11 +33,13 @@ import "./Composer.css";
 // Deferred to later subphases (NOT wired here):
 //   5F — permission / ask_user prompts.
 //
-// 5J — subagent steering: when `steer` is set ({ jobId, accent, name }) the
-// composer becomes a STEER box for a live subagent. The STEER tag + accented
-// focus border make it unmistakable who you're writing to; Enter routes the
-// text through steerSubagent(sessionId, jobId, text) instead of sendMessage,
-// and there is no queue/slash/shell semantics (those belong to the parent run).
+// 5J — subagent steering: when `steer` is set ({ jobId, name, onRebound }) the
+// composer becomes a STEER box for a live subagent. It stays visually IDENTICAL
+// to the normal composer (same pill, no accent border) — the subagent view's
+// header + the "Steer <name> …" placeholder already say who you're writing to,
+// so the input never diverges from the normal screen. Enter routes the text
+// through steerSubagent(sessionId, jobId, text) instead of sendMessage, and
+// there is no queue/slash/shell semantics (those belong to the parent run).
 
 const MAX_ATTACHMENTS = 8;
 
@@ -800,15 +802,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     : (busy ? busyPlaceholder : idlePlaceholder);
 
   return (
-    <div class={`composer-wrap${steer ? " composer-steer" : ""}`}>
-      {steer && (
-        <div class="composer-steer-tag" style={{ "--steer-accent": `var(--${steer.accent || "peach"})` }}>
-          <span class="composer-steer-label">STEER</span>
-          <span class="composer-steer-name" style={{ color: `var(--${steer.accent || "peach"})` }}>
-            {steer.name || "subagent"}
-          </span>
-        </div>
-      )}
+    <div class="composer-wrap">
       {cacheExpired && (
         <div class="cache-warn" title="The prompt cache for this conversation has expired. Your next message will pay for a fresh cache write (more expensive).">
           <span class="cache-warn-dot" />

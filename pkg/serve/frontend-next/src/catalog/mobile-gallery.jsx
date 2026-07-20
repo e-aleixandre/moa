@@ -11,6 +11,7 @@ import {
 import { MobileHeader } from "../layout/mobile/MobileHeader/MobileHeader.jsx";
 import { SessionStrip } from "../layout/mobile/SessionStrip/SessionStrip.jsx";
 import { SessionDrawer } from "../layout/mobile/SessionDrawer/SessionDrawer.jsx";
+import { MobileSubagentView } from "../layout/mobile/MobileConversationScreen/MobileSubagentView.jsx";
 import "../layout/mobile/MobileConversationScreen/MobileConversationScreen.css";
 import "./mobile-gallery.css";
 
@@ -187,6 +188,82 @@ function MobileComposerSpecimen({ status, perm = "yolo", spend, tokensUp, tokens
   );
 }
 
+// SUBAGENT SPECIMENS — the real MobileSubagentView (5J) mounted with mock
+// store-shaped sessions, mirroring the desktop SubagentGallery so the mobile
+// fork view is reviewable at ?view=mobile too. Each is a { session, jobId }
+// pair; onBack is a no-op (no live store to clear here). The steer Composer it
+// wraps is store-bound, so it renders empty but faithful.
+const SUBAGENT_RUNNING = {
+  session: {
+    id: "sess-live",
+    title: "release 0.11",
+    messages: [],
+    subagents: {
+      changelog: {
+        jobId: "changelog",
+        task: "Collect the PRs merged since v0.10.0, group them by area (serve, tui, providers), and draft changelog entries in the house style. Skip dependabot noise.",
+        model: "terra",
+        async: false,
+        status: "running",
+        usage: { inputTokens: 14200, outputTokens: 4100, costUSD: 0.031 },
+        messages: [
+          { _type: "tool_start", tool_call_id: "t2", tool_name: "grep", args: { pattern: "Merge pull request" }, status: "ok", result: "23 matches" },
+          { _type: "tool_start", tool_call_id: "t3", tool_name: "read", args: { path: "CHANGELOG.md" }, status: "ok", result: "88 lines" },
+          { role: "assistant", content: "Grouping so far: 9 in serve (5 frontend), 6 in providers, 4 in tui. Drafting the serve section while the last PR bodies come in." },
+          { _type: "tool_start", tool_call_id: "t4", tool_name: "bash", args: { cmd: "gh pr view 412 --json title,labels,body" }, status: "running" },
+        ],
+      },
+      docs: {
+        jobId: "docs", task: "Rewrite docs/serve.md security section", model: "sonnet",
+        async: false, status: "running",
+        messages: [{ _type: "tool_start", tool_call_id: "d1", tool_name: "read", args: { path: "docs/serve.md" }, status: "running" }],
+      },
+      tests: {
+        jobId: "tests", task: "Run the full test sweep with -race", model: "sonnet",
+        async: false, status: "running",
+        messages: [{ _type: "tool_start", tool_call_id: "x1", tool_name: "bash", args: { cmd: "go test -race ./..." }, status: "running" }],
+      },
+    },
+  },
+  jobId: "changelog",
+};
+
+const SUBAGENT_COMPLETED = {
+  session: {
+    id: "sess-done",
+    title: "release 0.11",
+    messages: [],
+    subagents: {
+      tests: {
+        jobId: "tests",
+        task: "Run the full test sweep with -race across all packages. Report any failure with enough context to fix it; note skips and why.",
+        model: "sonnet",
+        async: false,
+        status: "completed",
+        usage: { inputTokens: 31200, outputTokens: 4800, costUSD: 0.041 },
+        result: "full sweep green, -race clean, 2 skips (docker)",
+        messages: [
+          { _type: "tool_start", tool_call_id: "c1", tool_name: "bash", args: { cmd: "go test -race ./..." }, status: "ok", result: "ok  full sweep\n412 tests" },
+          { _type: "tool_start", tool_call_id: "c2", tool_name: "bash", args: { cmd: "go vet ./..." }, status: "ok", result: "clean" },
+          { role: "assistant", content: "Full sweep green. 412 tests across 47 packages, -race clean, 2 skips (both docker-gated in pkg/sandbox). Nothing blocks the release." },
+        ],
+      },
+    },
+  },
+  jobId: "tests",
+};
+
+// MobileSubagentSpecimen — the fork view inside the phone frame. It's a
+// full-screen surface, so it sits alone in a .mconv container (like the real
+// screen when session.viewingSubagent is set).
+function MobileSubagentSpecimen({ spec }) {
+  return (
+    <div class="mconv">
+      <MobileSubagentView session={spec.session} jobId={spec.jobId} onBack={noop} />
+    </div>
+  );
+}
+
 // MobileConversationSpecimen — the static mock of the mobile conversation
 // screen for the gallery (decoupled from the connected container).
 export function MobileConversationSpecimen() {
@@ -313,6 +390,30 @@ export function MobileGallery() {
           </div>
           <figcaption class="mgal-caption">
             Overview drawer — swipe down to close
+          </figcaption>
+        </figure>
+
+        <figure class="mgal-figure">
+          <div class="mgal-device">
+            <span class="mgal-notch" aria-hidden="true" />
+            <div class="mgal-screen">
+              <MobileSubagentSpecimen spec={SUBAGENT_RUNNING} />
+            </div>
+          </div>
+          <figcaption class="mgal-caption">
+            Subagent — running (fork identity · sibling rail · steer)
+          </figcaption>
+        </figure>
+
+        <figure class="mgal-figure">
+          <div class="mgal-device">
+            <span class="mgal-notch" aria-hidden="true" />
+            <div class="mgal-screen">
+              <MobileSubagentSpecimen spec={SUBAGENT_COMPLETED} />
+            </div>
+          </div>
+          <figcaption class="mgal-caption">
+            Subagent — completed (outcome banner)
           </figcaption>
         </figure>
       </div>

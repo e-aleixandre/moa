@@ -126,13 +126,16 @@ export function MobileSubagentView({ session, jobId, onBack }) {
         </div>
       )}
 
-      <div class="msa-body">
-        <UserWaypoint className="msa-task" time={undefined}>
-          <div class="msa-task-label" style={{ color: `var(--${accent})` }}>TASK — from parent</div>
-          <p>{view.task || "(no task recorded)"}</p>
-        </UserWaypoint>
-        <MobileStream session={{ id: `${session.id}:${jobId}`, messages: [] }} blocks={view.blocks} />
-      </div>
+      <MobileStream
+        session={{ id: `${session.id}:${jobId}`, messages: [] }}
+        blocks={view.blocks}
+        lead={
+          <UserWaypoint className="msa-task" time={undefined}>
+            <div class="msa-task-label" style={{ color: `var(--${accent})` }}>TASK — from parent</div>
+            <p>{view.task || "(no task recorded)"}</p>
+          </UserWaypoint>
+        }
+      />
 
       {view.terminal ? (
         <MobileOutcome view={view} onBack={onBack} />
@@ -143,7 +146,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
             sessionId={session.id}
             session={session}
             shortPlaceholder
-            steer={{ jobId, accent, name: view.name, onRebound: onBack }}
+            steer={{ jobId, name: view.name, onRebound: onBack }}
           />
           {/* Now-line sits BELOW the composer, in the parent's status slot
               (SUBAGENT-VIEW-RECONCILE §2.3): telemetry lives on the mono line

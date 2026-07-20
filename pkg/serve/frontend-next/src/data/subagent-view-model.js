@@ -19,7 +19,7 @@ import {
   projectStream,
   subagentAccentIndex,
 } from './stream-model.js';
-import { shortModel } from './util/format.js';
+import { shortModel, modelCodename } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'error', 'done']);
@@ -136,7 +136,10 @@ export function subagentView(session, jobId) {
     jobId,
     name: codenameOf(sub),
     accent,
-    model: shortModel(sub.model) || sub.model || '',
+    // The model label is the SHORT ALIAS ("Terra"), same as the parent header's
+    // ModelPill (modelCodename), never the raw id ("gpt-5.6-terra"). Falls back
+    // to the provider-stripped id when the model carries no known codename.
+    model: modelCodename(sub.model) || shortModel(sub.model) || sub.model || '',
     task: sub.task || '',
     async: !!sub.async,
     status,

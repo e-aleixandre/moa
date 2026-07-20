@@ -119,17 +119,14 @@
 
 .msa-rail-chip.active { background: var(--surface0); }
 
-/* body: MobileStream + 2px thread */
-.msa-body {
+/* body: MobileStream (task card is its lead) + 2px accent thread. The stream
+   is the shared MobileStream, so it scrolls exactly like the normal screen; the
+   thread is painted on its frame to mark "you're in a fork". */
+.msa .mstream {
   position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
-.msa-body::before {
+.msa .mstream::before {
   content: "";
   position: absolute;
   top: 0;
@@ -138,17 +135,15 @@
   width: 2px;
   background: var(--sa-accent);
   z-index: 1;
+  pointer-events: none;
 }
 
-.msa.thread-completed .msa-body::before { background: var(--green); }
-.msa.thread-failed .msa-body::before { background: var(--red); }
-.msa.thread-cancelled .msa-body::before { background: var(--overlay0); }
+.msa.thread-completed .mstream::before { background: var(--green); }
+.msa.thread-failed .mstream::before { background: var(--red); }
+.msa.thread-cancelled .mstream::before { background: var(--overlay0); }
 
-.msa-task {
-  margin: var(--space-3) var(--space-4) 0;
-  flex: none;
-}
-
+/* Task card: the MobileStream's lead block — a normal .waypoint inside the
+   scroller (scrolls WITH the transcript). Only the accent label is bespoke. */
 .msa-task-label {
   font-family: var(--mono);
   font-size: var(--text-micro);

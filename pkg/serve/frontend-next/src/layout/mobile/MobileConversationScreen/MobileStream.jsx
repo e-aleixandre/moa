@@ -102,8 +102,10 @@ function MobileStreamBlock({ block, onOpenSubagent }) {
 const AT_BOTTOM_PX = 80;
 
 // MobileStream — same stick-to-bottom / "new messages" scroll intent as the
-// desktop Stream, sized for the mobile stream container.
-export function MobileStream({ session, blocks = [], onOpenSubagent, onScrollEl }) {
+// desktop Stream, sized for the mobile stream container. `lead` (optional)
+// renders inside the scroller before the blocks (the subagent view's task card,
+// so it scrolls WITH the transcript instead of pinned above a nested scroller).
+export function MobileStream({ session, blocks = [], lead = null, onOpenSubagent, onScrollEl }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   const stickToBottom = useRef(true);
@@ -175,6 +177,7 @@ export function MobileStream({ session, blocks = [], onOpenSubagent, onScrollEl 
         ref={setScrollEl}
         onScroll={checkScroll}
       >
+        {lead}
         {blocks.map((block) => (
           <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
         ))}

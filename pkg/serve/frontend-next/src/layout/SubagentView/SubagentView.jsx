@@ -161,13 +161,16 @@ export function SubagentView({ session, jobId, onBack }) {
       )}
 
       <div class={`sa-body ${threadClass}`}>
-        <div class="sa-body-col">
-          <UserWaypoint className="sa-task" time={undefined}>
-            <div class="sa-task-label" style={{ color: accentVar }}>TASK — from parent</div>
-            <p>{view.task || "(no task recorded)"}</p>
-          </UserWaypoint>
-          <Stream session={{ id: `${session.id}:${jobId}`, messages: [] }} blocks={view.blocks} />
-        </div>
+        <Stream
+          session={{ id: `${session.id}:${jobId}`, messages: [] }}
+          blocks={view.blocks}
+          lead={
+            <UserWaypoint className="sa-task" time={undefined}>
+              <div class="sa-task-label" style={{ color: accentVar }}>TASK — from parent</div>
+              <p>{view.task || "(no task recorded)"}</p>
+            </UserWaypoint>
+          }
+        />
       </div>
 
       {view.terminal ? (
@@ -180,7 +183,6 @@ export function SubagentView({ session, jobId, onBack }) {
             session={session}
             steer={{
               jobId,
-              accent,
               name: view.name,
               onRebound: onBack,
             }}

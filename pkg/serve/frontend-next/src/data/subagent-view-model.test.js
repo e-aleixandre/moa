@@ -29,6 +29,18 @@ test('a lone live subagent gets the first fanout accent and no siblings', () => 
   expect(v.terminal).toBe(false);
 });
 
+// ── model label is the short alias, not the raw id ─────────────────────────
+test('the model label is the short codename alias (never the full provider id)', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({ model: 'openai/GPT-5.6 Terra' }) } };
+  // matches the parent header (modelCodename): "Terra", not "GPT-5.6 Terra".
+  expect(subagentView(session, 'j1').model).toBe('Terra');
+});
+
+test('the model label falls back to the provider-stripped id when there is no known codename', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({ model: 'openai/GPT-5.5' }) } };
+  expect(subagentView(session, 'j1').model).toBe('GPT-5.5');
+});
+
 // ── sibling rail only for 2+ live ─────────────────────────────────────────
 test('two live subagents produce a sibling rail with the active one flagged', () => {
   const session = {

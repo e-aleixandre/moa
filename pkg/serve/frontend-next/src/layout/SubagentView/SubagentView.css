@@ -169,13 +169,12 @@
   flex: none;
 }
 
-/* ── body: accent thread + task card + reused Stream ────────────────────── */
+/* ── body: accent thread + reused Stream (task card is the Stream's lead) ── */
 .subagent-view .sa-body {
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
-  overflow: hidden;
 }
 
 /* The 2px thread — discreet, no background wash, no glow. */
@@ -194,22 +193,9 @@
 .subagent-view .sa-body.thread-failed::before { background: var(--red); }
 .subagent-view .sa-body.thread-cancelled::before { background: var(--overlay0); }
 
-.subagent-view .sa-body-col {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Task card: msg-user shape with the accent border+label. */
-.subagent-view .sa-task {
-  max-width: 844px;
-  margin: var(--space-4) auto 0;
-  width: 100%;
-  padding: 0 var(--space-6);
-  flex: none;
-}
-
+/* Task card: the Stream's lead block (scrolls WITH the transcript). It's a
+   normal .waypoint inside .stream-col, so it inherits the column's width and
+   padding — only the accent label is bespoke. */
 .subagent-view .sa-task-label {
   font-family: var(--mono);
   font-size: var(--text-micro);

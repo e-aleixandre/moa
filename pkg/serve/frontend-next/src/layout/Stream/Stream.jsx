@@ -20,6 +20,10 @@ import "./Stream.css";
 //
 // PermissionCard / AskUserCard are intentionally NOT rendered here: they are
 // wired in 5F. AgentTray/Composer live outside Stream and are wired in 5J/5D.
+//
+// `lead` (optional) renders inside the scroll column BEFORE the projected
+// blocks — the subagent view passes its task card here so it scrolls WITH the
+// transcript (same scroller), instead of being pinned above a nested one.
 
 // renderProse turns a run of assistant markdown into sanitized HTML for
 // AssistantDocument's `html` mode. markdown.js (renderMarkdown) already runs
@@ -99,7 +103,7 @@ function StreamBlock({ block, onOpenSubagent }) {
 
 const AT_BOTTOM_PX = 80;
 
-export function Stream({ session, blocks = [], onOpenSubagent, onScrollEl }) {
+export function Stream({ session, blocks = [], lead = null, onOpenSubagent, onScrollEl }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   // Length of the in-flight tool's streaming output (a tool_update grows this
@@ -181,6 +185,7 @@ export function Stream({ session, blocks = [], onOpenSubagent, onScrollEl }) {
         onScroll={checkScroll}
       >
         <div class="stream-col">
+          {lead}
           {blocks.map((block) => (
             <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
           ))}
