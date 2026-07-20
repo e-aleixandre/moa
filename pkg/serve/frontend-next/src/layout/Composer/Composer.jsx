@@ -898,36 +898,31 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
           {busy && hasText && !summary && (
             <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
           )}
-          {busy ? (
-            <>
-              {/* Stop no longer REPLACES Send while busy — it joins it as a
-                  secondary (ghost) action. Send keeps its identity in every
-                  state so "you can always talk to it" (steer) reads at a
-                  glance; on mobile this ghost is also the only Stop (no Esc). */}
-              <button
-                type="button"
-                class="composer-stop-ghost"
-                aria-label="Stop the run (Esc)"
-                title="Stop — ends the run (Esc)"
-                onClick={handleStop}
-              >
-                <Square size={13} />
-              </button>
-              <button
-                type="button"
-                class="composer-send"
-                aria-label="Send steer"
-                title="Send — steers the agent, doesn't stop it"
-                onClick={handleSend}
-              >
-                <ArrowUp size={16} />
-              </button>
-            </>
-          ) : (() => {
-            // The send button doubles as push-to-talk (5M): tap = send, hold =
-            // record, slide up while holding = lock hands-free. It only enters
-            // mic mode when voice is usable AND the textarea is empty — with
-            // text to send it stays a plain send button (parity with InputBar).
+          {busy && (
+            /* Stop no longer REPLACES Send while busy — it joins it as a
+               secondary (ghost) action. Send keeps its identity in every state
+               so "you can always talk to it" (steer) reads at a glance; on
+               mobile this ghost is also the only Stop (no Esc). */
+            <button
+              type="button"
+              class="composer-stop-ghost"
+              aria-label="Stop the run (Esc)"
+              title="Stop — ends the run (Esc)"
+              onClick={handleStop}
+            >
+              <Square size={13} />
+            </button>
+          )}
+          {(() => {
+            // The send button doubles as push-to-talk (5M): tap = send/steer,
+            // hold = record, slide up while holding = lock hands-free. The
+            // pointer GESTURE is attached whenever voice is usable — in every
+            // state, including with text to send and while the agent is busy
+            // (parity with the old InputBar, where gesture = canVoice). The
+            // input being empty only decides the ICON (mic vs arrow): a hold
+            // still records even when there's text to send, and the transcript
+            // is inserted at the caret. Steer-to-subagent mode disables voice
+            // (canVoice already excludes it) so it stays a plain send.
             const micMode = canVoice && !hasText;
 
             let icon = <ArrowUp size={16} />;
@@ -945,19 +940,18 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
               micMode ? "mic-mode" : "",
             ].filter(Boolean).join(" ");
 
+            const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
             const title = transcribing ? "Transcribing…"
               : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
               : micMode ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
-              : "Send";
+              : sendTitle;
 
-            // Attach the push-to-talk pointer gesture only when the button is
-            // actually a mic — empty + voice usable (micMode) — or while a
-            // recording/transcription is live (so a tap still stops it). With
-            // text to send and nothing recording it stays a plain send button,
-            // so a slow press on "Send" can't start a recording.
-            const gestureProps = (micMode || recording || transcribing)
-              ? voiceHandlers
-              : { onClick: handleSend };
+            // Attach the push-to-talk pointer gesture whenever voice is usable;
+            // the reducer routes a quick tap to send and a hold to record, so a
+            // plain send still works. Without voice it's a plain send button.
+            const gestureProps = canVoice ? voiceHandlers : { onClick: handleSend };
+
+            const sendLabel = micMode ? "Record" : busy ? "Send steer" : "Send";
 
             return (
               <div class="composer-send-wrap">
@@ -970,7 +964,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
                 <button
                   type="button"
                   class={cls}
-                  aria-label={micMode ? "Record" : "Send"}
+                  aria-label={sendLabel}
                   title={title}
                   disabled={transcribing}
                   {...gestureProps}

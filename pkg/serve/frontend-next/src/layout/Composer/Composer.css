@@ -151,8 +151,11 @@
 }
 
 /* When the ghost Stop is present it owns the auto-push, so Send sits right
-   beside it (gap from .composer-bar) instead of grabbing its own auto-margin. */
-.composer-wrap .composer-stop-ghost + .composer-send {
+   beside it (gap from .composer-bar) instead of grabbing its own auto-margin.
+   The send button is always wrapped in .composer-send-wrap (voice gesture +
+   slide-lock hint live in every state now), so the override targets the wrap:
+   without it the wrap's own margin-left:auto would open a gap between the pair. */
+.composer-wrap .composer-stop-ghost + .composer-send-wrap {
   margin-left: var(--space-1);
 }
 

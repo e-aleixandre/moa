@@ -72,11 +72,25 @@
 
 .mcomposer .composer-send {
   grid-row: 1;
-  grid-column: 3;
   margin-left: 0;
   width: 36px;
   height: 36px;
   border-radius: 12px; /* px structural (mockup .m-send) */
+}
+
+/* The send button is always wrapped in .composer-send-wrap now (it hosts the
+   voice pointer gesture + the absolutely-positioned "slide up to lock" hint in
+   every state). The wrap must STAY a boxed, position:relative grid item — it's
+   the containing block for that hint, which would otherwise center over the
+   whole pill. So place the WRAP on the grid (not the button) and let the button
+   fill it. Idle: column 3; busy: column 4 (the ghost Stop takes column 3). */
+.mcomposer .composer-send-wrap {
+  grid-row: 1;
+  grid-column: 3;
+}
+
+.mcomposer .composer.is-busy .composer-send-wrap {
+  grid-column: 4;
 }
 
 /* Busy: the pill grows a 4th column so the ghost Stop sits beside Send
@@ -101,8 +115,9 @@
   inset: -8px -4px;
 }
 
+/* Busy Send keeps its own ≥44px hit-area (the 36px button lives inside the
+   wrap, which the grid places in column 4). */
 .mcomposer .composer.is-busy .composer-send {
-  grid-column: 4;
   position: relative;
 }
 
