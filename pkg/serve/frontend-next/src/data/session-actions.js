@@ -57,8 +57,12 @@ export async function loadSessions() {
       // be stale relative to WS events that arrived while the request was in
       // flight, so keep the WS-tracked values rather than reverting them.
       // Hidden sessions have no WS connection, so the poll is their only source
-      // of truth and must refresh those fields.
-      const wsOwns = existing && visible.has(info.id);
+      // of truth and must refresh those fields. A *saved* session is visible
+      // (e.g. just tapped to resume) but has NO socket either — syncConnections
+      // never opens one for saved sessions — so the poll must own it too, or a
+      // just-resumed session stays stuck 'saved' (grey dot, empty stream) until
+      // the app is reopened.
+      const wsOwns = existing && visible.has(info.id) && existing.state !== 'saved';
       const next = {
         id: info.id,
         title: info.title,

@@ -52,6 +52,35 @@ test('loadSessions leaves rate-limit percents undefined for a fresh session', as
   expect(s2.rlSevenDayPct).toBeUndefined();
 });
 
+test('loadSessions adopts the server state for a visible-but-saved session (just resumed)', async () => {
+  // Regression: tapping a saved session makes it visible (activeSession) while
+  // still 'saved'. resumeSession POSTs /resume (server flips it to idle) then
+  // polls. A saved session has NO WS socket, so the poll must own its state —
+  // otherwise wsOwns kept 'saved', leaving the dot grey and the stream empty
+  // (no WS ever opens) until the app was reopened.
+  setState({
+    sessions: { s1: { id: 's1', state: 'saved', provider: 'anthropic', subagents: {}, messages: [] } },
+    activeSession: 's1',
+    isMobile: true,
+  });
+  apiResponse = [{ id: 's1', title: 'S1', state: 'idle', provider: 'anthropic', cwd: '/x' }];
+
+  // resumeSession's poll makes the (now non-saved) session connectable, so
+  // syncConnections opens a socket — stub location so openWs doesn't throw in
+  // the jsdom-less test runner.
+  const savedLocation = globalThis.location;
+  globalThis.location = { protocol: 'http:', host: 'localhost', search: '' };
+  try {
+    await loadSessions();
+  } finally {
+    if (savedLocation === undefined) delete globalThis.location;
+    else globalThis.location = savedLocation;
+    setState({ isMobile: false });
+  }
+
+  expect(store.get().sessions.s1.state).toBe('idle');
+});
+
 test('sendMessage mid-run records the image count on the optimistic steer chip', async () => {
   // A running session: the send becomes a steer, and the optimistic chip must
   // carry the number of attached images so the UI can badge it and warn on
