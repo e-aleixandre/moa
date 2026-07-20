@@ -1029,6 +1029,9 @@ func TestBridgeEvent_CompactionEnded(t *testing.T) {
 	if e.Err == nil || e.Err.Error() != "partial" {
 		t.Fatalf("Err = %v", e.Err)
 	}
+	if !e.CostIncludedInRun {
+		t.Fatal("bridge compaction cost must be included in RunEnded")
+	}
 }
 
 // Regression for bug #2: the automatic (bridge-driven) compaction path must

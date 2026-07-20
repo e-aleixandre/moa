@@ -155,10 +155,11 @@ type CompactionStarted struct {
 
 // CompactionEnded is published when context compaction finishes.
 type CompactionEnded struct {
-	SessionID string
-	RunGen    uint64
-	Payload   *core.CompactionPayload
-	Err       error
+	SessionID         string
+	RunGen            uint64
+	Payload           *core.CompactionPayload
+	Err               error
+	CostIncludedInRun bool // true when this payload's usage is already included in RunEnded.Cost
 }
 
 // ---------------------------------------------------------------------------

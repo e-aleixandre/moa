@@ -1189,6 +1189,23 @@ func RegisterHandlers(sctx *SessionContext) {
 		total := sctx.addSessionCost(e.CostUSD)
 		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.CostUSD})
 	})
+	b.Subscribe(func(e CompactionEnded) {
+		// Automatic compactions are bridged from the running agent and their
+		// usage is already folded into RunEnded.Cost.
+		if e.CostIncludedInRun || sctx.Agent == nil || e.Payload == nil || e.Payload.Usage == nil {
+			return
+		}
+		pricing := sctx.Agent.Model().Pricing
+		if pricing == nil {
+			return
+		}
+		cost := pricing.Cost(*e.Payload.Usage)
+		if cost <= 0 {
+			return
+		}
+		total := sctx.addSessionCost(cost)
+		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: cost})
+	})
 
 	// Clear approvals orphaned by an aborted run so no stale modal lingers.
 	// Pass the ended run's generation so a newer run's live approval (from an

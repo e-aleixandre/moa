@@ -716,10 +716,11 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventCompactionEnd:
 		return []any{CompactionEnded{
-			SessionID: sid,
-			RunGen:    gen,
-			Payload:   e.Compaction,
-			Err:       e.Error,
+			SessionID:         sid,
+			RunGen:            gen,
+			Payload:           e.Compaction,
+			Err:               e.Error,
+			CostIncludedInRun: true,
 		}}
 	}
 	return nil
