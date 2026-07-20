@@ -10,7 +10,7 @@ import {
   ToolTicker,
   PermissionCard,
 } from "../components/index.js";
-import { AgentTray, Composer, StatusStrip, Pane, GridToolbar } from "../layout/index.js";
+import { AgentTray, Composer, StatusStrip, Pane, GridToolbar, LiveDock } from "../layout/index.js";
 import { StateDot } from "../primitives/index.js";
 import "./live-states-gallery.css";
 
@@ -51,6 +51,13 @@ const TRAY_AGENTS = [
   { id: "changelog", kind: "subagent", name: "changelog", accent: "sky", action: "scanning PRs", time: "1m 12s" },
   { id: "docs", kind: "subagent", name: "docs", accent: "teal", action: "serve.md", time: "0m 47s" },
   { id: "tests", kind: "bash", name: "bash", action: "go test ./...", time: "0m 09s" },
+];
+
+// Live Dock specimen — same descriptor shape as liveTrayAgents(session).
+const LIVE_DOCK_AGENTS = [
+  { id: "changelog", kind: "subagent", name: "changelog", accent: "sky", action: "gh pr view 412 · reading labels", time: "1m 12s" },
+  { id: "tests", kind: "subagent", name: "tests", accent: "teal", action: "auditing flaky specs", time: "2m 04s" },
+  { id: "bench", kind: "bash", name: "bash", action: "go test -race ./...", time: "4m 18s" },
 ];
 
 // DelegationBlock specimens (replaces FanoutBlock — see DelegationSection):
@@ -261,6 +268,31 @@ function DelegationSection() {
   );
 }
 
+// --- Section 1c: Live Dock (persistent mirror above the composer) --------
+
+function LiveDockSection() {
+  return (
+    <section class="lsg-section">
+      <h2>
+        Live Dock <span class="alt">async never lost · compact bar ⇄ expanded panel · shown only when the block is off-screen</span>
+      </h2>
+
+      <div class="lsg-dock-frame">
+        <span class="lsg-dock-tag">compact (spotlight rotates every 4s)</span>
+        <LiveDock agents={LIVE_DOCK_AGENTS} onOpen={() => {}} onJump={() => {}} />
+      </div>
+
+      <p class="lsg-caption">
+        <b>Live Dock</b> is the delegation block peeking above the composer once you've scrolled its
+        inline surface out of view. Identity dots + count on the left, a rotating spotlight of what one
+        live thing is doing in the middle; tap to expand into one row per live agent/bash (same visual
+        language as the block), each with a <code>↑</code> jump back to its point in the stream. It only
+        exists while something is alive AND off-screen — scroll back to the block and it retracts.
+      </p>
+    </section>
+  );
+}
+
 // --- Section 2: background jobs -----------------------------------------
 
 function BackgroundJobSection() {
@@ -409,6 +441,7 @@ export function LiveStatesGallery() {
 
       <FanoutSection />
       <DelegationSection />
+      <LiveDockSection />
       <BackgroundJobSection />
       <GridAliveSection />
     </div>

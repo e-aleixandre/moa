@@ -14,6 +14,7 @@ import "./BackgroundJob.css";
 // instead of two loose siblings, to keep the CSS co-located under a single
 // component root.
 export function BackgroundJob({
+  jobId,
   jobLabel = "BG · JOB",
   cmd,
   progress,
@@ -25,7 +26,7 @@ export function BackgroundJob({
   const lastIdx = lines.length - 1;
 
   return (
-    <div class="bg-job">
+    <div class="bg-job" data-live-surface="bash" data-live-id={jobId}>
       <div class="bgjob">
         <span class="tag">{jobLabel}</span>
         <span class="cmd">

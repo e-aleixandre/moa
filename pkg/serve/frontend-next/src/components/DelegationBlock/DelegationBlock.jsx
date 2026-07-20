@@ -53,6 +53,7 @@ function RunningAgentRow({ agent, onOpenAgent }) {
         style={{ "--a": `var(--${accent})` }}
         onClick={clickable ? () => onOpenAgent(id) : undefined}
         type={clickable ? "button" : undefined}
+        data-live-id={id}
       >
         <span class="a-id">
           <Spinner color={accent} size={11} />
@@ -130,7 +131,10 @@ export function DelegationBlock({ agents = [], summary, settled, onOpenAgent }) 
   }, [settled, showHeader]);
 
   return (
-    <div class={`dlg${settled ? " settled" : ""}${collapsed ? " collapsed" : ""}`}>
+    <div
+      class={`dlg${settled ? " settled" : ""}${collapsed ? " collapsed" : ""}`}
+      {...(settled ? {} : { "data-live-surface": "delegation" })}
+    >
       {showHeader && (
         <button
           type="button"

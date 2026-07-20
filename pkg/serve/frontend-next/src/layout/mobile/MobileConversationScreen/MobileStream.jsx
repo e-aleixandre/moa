@@ -148,7 +148,7 @@ const AT_BOTTOM_PX = 80;
 
 // MobileStream — same stick-to-bottom / "new messages" scroll intent as the
 // desktop Stream, sized for the mobile stream container.
-export function MobileStream({ session, blocks = [], onOpenSubagent }) {
+export function MobileStream({ session, blocks = [], onOpenSubagent, onScrollEl }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   const stickToBottom = useRef(true);
@@ -170,6 +170,16 @@ export function MobileStream({ session, blocks = [], onOpenSubagent }) {
     stickToBottom.current = isAtBottom;
     setShowNewBtn(!isAtBottom);
   }, []);
+
+  // Stable callback ref (see Stream.jsx): avoid re-invoking onScrollEl on every
+  // render by pinning the ref identity.
+  const setScrollEl = useCallback(
+    (el) => {
+      containerRef.current = el;
+      if (onScrollEl) onScrollEl(el);
+    },
+    [onScrollEl]
+  );
 
   useEffect(() => {
     if (stickToBottom.current) scrollToBottomNow();
@@ -195,7 +205,11 @@ export function MobileStream({ session, blocks = [], onOpenSubagent }) {
 
   return (
     <div class="mstream">
-      <div class="mconv-stream" ref={containerRef} onScroll={checkScroll}>
+      <div
+        class="mconv-stream"
+        ref={setScrollEl}
+        onScroll={checkScroll}
+      >
         {blocks.map((block) => (
           <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
         ))}

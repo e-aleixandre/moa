@@ -96,7 +96,7 @@ function StreamBlock({ block, onOpenSubagent }) {
 
 const AT_BOTTOM_PX = 80;
 
-export function Stream({ session, blocks = [], onOpenSubagent }) {
+export function Stream({ session, blocks = [], onOpenSubagent, onScrollEl }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   // stickToBottom is a ref (not state) so the new-content effect reads the
@@ -122,6 +122,17 @@ export function Stream({ session, blocks = [], onOpenSubagent }) {
     stickToBottom.current = isAtBottom;
     setShowNewBtn(!isAtBottom);
   }, []);
+
+  // Stable callback ref: a fresh arrow each render would make Preact re-invoke
+  // it (null then el) on every render, thrashing onScrollEl. Pin it so it only
+  // fires on a real node change (mount/unmount/remount).
+  const setScrollEl = useCallback(
+    (el) => {
+      containerRef.current = el;
+      if (onScrollEl) onScrollEl(el);
+    },
+    [onScrollEl]
+  );
 
   // Follow new content only when the user hasn't scrolled up. Keyed on the
   // signals that grow the stream: message/block count and live streaming text.
@@ -150,7 +161,11 @@ export function Stream({ session, blocks = [], onOpenSubagent }) {
 
   return (
     <div class="stream">
-      <div class="stream-scroll" ref={containerRef} onScroll={checkScroll}>
+      <div
+        class="stream-scroll"
+        ref={setScrollEl}
+        onScroll={checkScroll}
+      >
         <div class="stream-col">
           {blocks.map((block) => (
             <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />

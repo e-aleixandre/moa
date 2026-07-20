@@ -21,6 +21,9 @@ import { registerOverlay } from "../../../data/overlays.js";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
+import { LiveDock } from "../../LiveDock/LiveDock.jsx";
+import { useOffscreenLiveSurface } from "../../LiveDock/use-live-dock.js";
+import { liveTrayAgents } from "../../../data/stream-model.js";
 import "./MobileConversationScreen.css";
 
 // MobileConversationScreen — the CONNECTED root container of the mobile
@@ -158,6 +161,30 @@ export function MobileConversationScreen() {
   const activeId = focusedSessionId(state);
   const loaded = state.sessionsLoaded;
 
+  // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
+  const [streamRoot, setStreamRoot] = useState(null);
+  const liveAgents = session ? liveTrayAgents(session) : [];
+  const dockOffscreen = useOffscreenLiveSurface(streamRoot, liveAgents.length > 0);
+  // Keyboard open → the dock folds to its compact bar (writing wins, §1.5). We
+  // detect the soft keyboard by a large shrink of visualViewport vs the layout
+  // viewport, the standard heuristic (no dedicated API).
+  const [kbdOpen, setKbdOpen] = useState(false);
+  useEffect(() => {
+    const vv = typeof window !== "undefined" && window.visualViewport;
+    if (!vv) return;
+    const onResize = () => setKbdOpen(window.innerHeight - vv.height > 150);
+    vv.addEventListener("resize", onResize);
+    onResize();
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
+  const jumpToLive = (jobId) => {
+    if (!streamRoot) return;
+    const el =
+      streamRoot.querySelector(`[data-live-id="${CSS.escape(String(jobId))}"]`) ||
+      streamRoot.querySelector("[data-live-surface]");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   const onSelect = (id) => setActiveSession(id);
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
   const onNew = () => openPalette("create");
@@ -269,6 +296,7 @@ export function MobileConversationScreen() {
           <MobileStream
             session={session}
             blocks={blocks}
+            onScrollEl={setStreamRoot}
             onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
           />
           {blocking && (
@@ -277,6 +305,14 @@ export function MobileConversationScreen() {
               {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
               {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
             </div>
+          )}
+          {dockOffscreen && (
+            <LiveDock
+              agents={liveAgents}
+              onOpen={(id) => openPersistedSubagent(session.id, id)}
+              onJump={jumpToLive}
+              forceCompact={kbdOpen}
+            />
           )}
           <MobileComposer key={session.id} session={session} usage={state.usage} />
         </>

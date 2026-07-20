@@ -167,3 +167,22 @@
 .sa-gallery-frame .subagent-view {
   height: 100%;
 }
+
+/* Live Dock specimen frame — a labelled surface so the dock (normally anchored
+   above the composer) reads on its own in the gallery. */
+.lsg-dock-frame {
+  position: relative;
+  padding-top: var(--space-6);
+  margin-top: var(--space-4);
+  background: var(--base);
+  border-radius: var(--radius-md);
+}
+.lsg-dock-tag {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-8);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

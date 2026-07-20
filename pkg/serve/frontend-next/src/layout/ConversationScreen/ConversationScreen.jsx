@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { Spine } from "../Spine/Spine.jsx";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
-import { AgentTray } from "../AgentTray/AgentTray.jsx";
+import { LiveDock } from "../LiveDock/LiveDock.jsx";
+import { useOffscreenLiveSurface } from "../LiveDock/use-live-dock.js";
 import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
@@ -130,6 +131,23 @@ export function ConversationScreen({ version }) {
   // openSession, which leaves the tile showing that session. // 5G: the next's
   // own pane model replaces the tile tree; until then we reuse it verbatim.
   const onSelectSession = (id) => { openSession(id); };
+
+  // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
+  // Mirror the session's live subagents/bash jobs above the composer, but only
+  // while their inline surfaces (delegation block / bash strip) are scrolled
+  // out of view. streamRoot is the Stream's scroll container element (state so a
+  // Stream remount re-binds the observer); the hook watches [data-live-surface]
+  // inside it.
+  const [streamRoot, setStreamRoot] = useState(null);
+  const liveAgents = session ? liveTrayAgents(session) : [];
+  const dockOffscreen = useOffscreenLiveSurface(streamRoot, liveAgents.length > 0);
+  const jumpToLive = (jobId) => {
+    if (!streamRoot) return;
+    const el =
+      streamRoot.querySelector(`[data-live-id="${CSS.escape(String(jobId))}"]`) ||
+      streamRoot.querySelector("[data-live-surface]");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   // --- Model selector popover (ChatHead's ModelPill) ---
   const [modelOpen, setModelOpen] = useState(false);
@@ -345,6 +363,7 @@ export function ConversationScreen({ version }) {
             <Stream
               session={session}
               blocks={blocks}
+              onScrollEl={setStreamRoot}
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
             />
             {(session.untrustedMcp || session.pendingPerm || session.pendingAsk) && (
@@ -354,13 +373,16 @@ export function ConversationScreen({ version }) {
                 {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
               </div>
             )}
-            {/* 5J: AgentTray — sticky mirror of the live fanout, connected to
-                the session's live subagents/bash jobs; a chip opens its
-                SubagentView (INC-06). */}
-            <AgentTray
-              agents={liveTrayAgents(session)}
-              onOpen={(id) => openPersistedSubagent(session.id, id)}
-            />
+            {/* Live Dock — persistent mirror of live async work, shown only
+                while its inline delegation surface is off-screen
+                (SUBAGENTS-PERSISTENT-SPEC §1.1). */}
+            {dockOffscreen && (
+              <LiveDock
+                agents={liveAgents}
+                onOpen={(id) => openPersistedSubagent(session.id, id)}
+                onJump={jumpToLive}
+              />
+            )}
             <Composer key={session.id} sessionId={session.id} session={session} />
             <div class="status-strip-anchor" ref={usageAnchorRef}>
               <StatusStrip
