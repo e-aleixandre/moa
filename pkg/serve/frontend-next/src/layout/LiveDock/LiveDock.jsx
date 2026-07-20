@@ -1,26 +1,51 @@
 import { useState } from "preact/hooks";
-import { ChevronUp, ChevronDown, ArrowUp } from "lucide-preact";
+import { ChevronUp, ChevronDown, ChevronRight } from "lucide-preact";
 import "./LiveDock.css";
 import { Spinner } from "../../primitives/index.js";
 import { useSpotlight } from "./use-live-dock.js";
 
 // LiveDock — the persistent window onto live async work
 // (SUBAGENTS-PERSISTENT-SPEC). A bar anchored between the stream and the
-// composer that mirrors the RUNNING rows of the delegation block (and the
-// parent's async bash) when their inline surface is scrolled out of view. It
-// evolves AgentTray: compact bar (identity dots + count + rotating spotlight)
-// by default, an expanded panel (one row per live thing + bash tail) on tap.
+// composer, and the PERMANENT home for async work ("async in the dock, sync
+// inline" — an async subagent or any background bash never blocks the
+// conversation, so it never needs to live inline; it shows here for as long as
+// it runs). Compact bar by default (identity dots + count + rotating
+// spotlight); an expanded panel (one row per live thing, grouped by kind) on
+// tap.
 //
 // Agents come from liveTrayAgents(session): { id, kind:'subagent'|'bash',
 // name, accent?, action?, time? }. bash carries no fanout identity accent
 // (INC-22): neutral --blue dot + mono `bash` label.
 //
-// `onOpen(id)` opens a subagent's detail view; `onJump(id)` scrolls the stream
-// to that thing's inline point; `forceCompact` collapses the panel to the bar
-// (mobile keyboard open — writing wins, §1.5).
-export function LiveDock({ agents = [], onOpen, onJump, forceCompact = false }) {
-  const [expanded, setExpanded] = useState(false);
+// `open`/`onToggle` make the expanded/collapsed state CONTROLLED, so the
+// caller can persist it per session (store.sessions[id].dockOpen) instead of
+// resetting every time the conversation is switched. When omitted, the dock
+// falls back to its own local state (used by the catalog specimen, which has
+// no session to persist against).
+//
+// `onOpen(id)` opens an async subagent's detail view (tap its row). Running
+// async bash rows are informational only (no detail view; their output lands
+// inline when they end). `forceCompact` collapses the panel to the bar
+// (mobile keyboard open — writing wins, §1.5) WITHOUT touching the stored
+// open/onToggle preference — it's a display-only override so the keyboard
+// closing restores whatever the user had chosen.
+export function LiveDock({ agents = [], onOpen, open: openProp, onToggle, forceCompact = false }) {
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const controlled = onToggle != null;
+  const expanded = controlled ? !!openProp : localExpanded;
+  const setExpanded = (next) => {
+    if (controlled) onToggle(typeof next === "function" ? next(expanded) : next);
+    else setLocalExpanded(next);
+  };
   const open = expanded && !forceCompact;
+
+  // While the keyboard forces the bar compact, tapping it must NOT flip the
+  // stored preference (you can't see the panel to intend it) — the bar just
+  // can't expand right now. Toggling is a no-op until forceCompact clears.
+  const toggle = () => {
+    if (forceCompact) return;
+    setExpanded((v) => !v);
+  };
 
   const subs = agents.filter((a) => a.kind === "subagent").length;
   const bashes = agents.length - subs;
@@ -36,7 +61,7 @@ export function LiveDock({ agents = [], onOpen, onJump, forceCompact = false }) 
       <button
         type="button"
         class="ld-bar"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={toggle}
         aria-expanded={open}
         aria-label={open ? "Collapse live agents" : "Expand live agents"}
       >
@@ -66,21 +91,31 @@ export function LiveDock({ agents = [], onOpen, onJump, forceCompact = false }) 
 
       {open && (
         <div class="ld-panel">
-          {agents.map((a) => (
-            <LiveRow key={a.id} agent={a} onOpen={onOpen} onJump={onJump} />
-          ))}
+          {subs > 0 && <div class="grp">async subagents</div>}
+          {agents
+            .filter((a) => a.kind === "subagent")
+            .map((a) => (
+              <LiveRow key={a.id} agent={a} onOpen={onOpen} />
+            ))}
+          {bashes > 0 && <div class="grp">async jobs</div>}
+          {agents
+            .filter((a) => a.kind === "bash")
+            .map((a) => (
+              <LiveRow key={a.id} agent={a} onOpen={onOpen} />
+            ))}
         </div>
       )}
     </div>
   );
 }
 
-function LiveRow({ agent, onOpen, onJump }) {
+function LiveRow({ agent, onOpen }) {
   const isBash = agent.kind === "bash";
   const accent = isBash ? "blue" : agent.accent || "blue";
-  // Only subagents have a detail view; bash rows aren't openable (their tail is
-  // read at their inline point — jump to it). So the main cell is a button only
-  // for subagents; for bash it's a static cell and the ↑ jump is the action.
+  // Only async subagents have a detail view to open (tap the row → its
+  // conversation). A running async bash has no detail view and no inline
+  // surface (its full output lands inline as a delegation/history card when it
+  // ends), so its row is informational: spinner + cmd + elapsed, not a button.
   const openable = !isBash && !!onOpen;
   const MainTag = openable ? "button" : "div";
   return (
@@ -96,17 +131,12 @@ function LiveRow({ agent, onOpen, onJump }) {
         </span>
         {agent.action && <span class="ld-row-act">▸ {agent.action}</span>}
         {agent.time && <span class="ld-row-time">{agent.time}</span>}
+        {openable && (
+          <span class="ld-open-chev" aria-hidden="true">
+            <ChevronRight size={14} />
+          </span>
+        )}
       </MainTag>
-      {onJump && (
-        <button
-          type="button"
-          class="ld-jump"
-          onClick={() => onJump(agent.id)}
-          aria-label="Jump to this in the conversation"
-        >
-          <ArrowUp size={14} />
-        </button>
-      )}
     </div>
   );
 }

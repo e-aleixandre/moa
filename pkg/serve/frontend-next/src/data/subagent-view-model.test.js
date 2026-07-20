@@ -186,11 +186,12 @@ test('subagentView tolerates session.subagents as an array', () => {
 });
 
 // ── liveTrayAgents (AgentTray) ────────────────────────────────────────────
-test('liveTrayAgents keeps subagent identity accents and strips bash accents', () => {
+test('liveTrayAgents keeps async subagent identity accents and strips bash accents', () => {
   const session = {
     id: 's1', messages: [],
     subagents: {
-      j1: sub({ jobId: 'j1' }),
+      // Only ASYNC subagents reach the dock (sync ones stay inline).
+      j1: sub({ jobId: 'j1', async: true }),
       b1: { jobId: 'b1', kind: 'bash', task: 'go test ./...', status: 'running', messages: [] },
     },
   };
@@ -202,4 +203,12 @@ test('liveTrayAgents keeps subagent identity accents and strips bash accents', (
   expect(bashChip.kind).toBe('bash');
   expect(bashChip.name).toBe('bash');
   expect(bashChip.accent).toBeUndefined(); // no identity color for bash (INC-22)
+});
+
+test('liveTrayAgents excludes SYNC subagents (they stay inline)', () => {
+  const session = {
+    id: 's1', messages: [],
+    subagents: { j1: sub({ jobId: 'j1', async: false }) },
+  };
+  expect(liveTrayAgents(session)).toHaveLength(0);
 });

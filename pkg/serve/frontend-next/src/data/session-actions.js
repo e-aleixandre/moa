@@ -89,6 +89,10 @@ export async function loadSessions() {
         // carry them over or the agent tray vanishes on every poll tick.
         subagents: existing ? existing.subagents : {},
         viewingSubagent: existing ? existing.viewingSubagent : null,
+        // dockOpen is the LiveDock's per-session open/closed preference (client
+        // UI-only, no server field): preserved across polls exactly like
+        // viewingSubagent, so switching sessions and back doesn't reset it.
+        dockOpen: existing ? existing.dockOpen : false,
         autoVerifying: existing ? existing.autoVerifying : false,
         compacting: existing ? existing.compacting : false,
         onOverage: existing ? existing.onOverage : false,

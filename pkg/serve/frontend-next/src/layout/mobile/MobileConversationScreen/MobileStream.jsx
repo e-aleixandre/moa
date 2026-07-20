@@ -7,7 +7,6 @@ import {
   AssistantDocument,
   DiffBlock,
   DelegationBlock,
-  BackgroundJob,
   MobileLedger,
   FileCard,
 } from "../../../components/index.js";
@@ -21,7 +20,7 @@ import "./MobileStream.css";
 // renders as <MobileLedger> (3-level touch ledger) instead of <ActivityLedger>.
 // The adaptLedger() pure remap (mobile-ledger-adapter.js) is the only data
 // transform; everything else (markdown prose, diff, delegation,
-// background, waypoints) is verbatim shared with the desktop.
+// waypoints) is verbatim shared with the desktop.
 //
 // Diff-sibling handling: projectStream emits an edit's unified diff as a `diff`
 // block RIGHT AFTER the ledger that owns the edit row. On mobile we FUSE that
@@ -103,9 +102,6 @@ function mobileDocChildren(blocks, onOpenSubagent) {
             onOpenAgent={onOpenSubagent}
           />
         );
-        break;
-      case "background":
-        b.jobs.forEach((job) => out.push(<BackgroundJob key={job.jobId} {...job} />));
         break;
       default:
         break;

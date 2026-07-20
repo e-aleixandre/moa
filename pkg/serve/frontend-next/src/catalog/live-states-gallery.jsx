@@ -279,7 +279,7 @@ function LiveDockSection() {
 
       <div class="lsg-dock-frame">
         <span class="lsg-dock-tag">compact (spotlight rotates every 4s)</span>
-        <LiveDock agents={LIVE_DOCK_AGENTS} onOpen={() => {}} onJump={() => {}} />
+        <LiveDock agents={LIVE_DOCK_AGENTS} onOpen={() => {}} />
       </div>
 
       <p class="lsg-caption">

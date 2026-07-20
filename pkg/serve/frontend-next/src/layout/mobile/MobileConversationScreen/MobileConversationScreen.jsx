@@ -22,7 +22,6 @@ import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
-import { useOffscreenLiveSurface } from "../../LiveDock/use-live-dock.js";
 import { liveTrayAgents } from "../../../data/stream-model.js";
 import "./MobileConversationScreen.css";
 
@@ -162,9 +161,9 @@ export function MobileConversationScreen() {
   const loaded = state.sessionsLoaded;
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
-  const [streamRoot, setStreamRoot] = useState(null);
+  // The dock is the permanent home for live ASYNC work (async subagents + bash)
+  // above the composer ("async in the dock, sync inline").
   const liveAgents = session ? liveTrayAgents(session) : [];
-  const dockOffscreen = useOffscreenLiveSurface(streamRoot, liveAgents.length > 0);
   // Keyboard open → the dock folds to its compact bar (writing wins, §1.5). We
   // detect the soft keyboard by a large shrink of visualViewport vs the layout
   // viewport, the standard heuristic (no dedicated API).
@@ -177,13 +176,6 @@ export function MobileConversationScreen() {
     onResize();
     return () => vv.removeEventListener("resize", onResize);
   }, []);
-  const jumpToLive = (jobId) => {
-    if (!streamRoot) return;
-    const el =
-      streamRoot.querySelector(`[data-live-id="${CSS.escape(String(jobId))}"]`) ||
-      streamRoot.querySelector("[data-live-surface]");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-  };
 
   const onSelect = (id) => setActiveSession(id);
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
@@ -296,7 +288,6 @@ export function MobileConversationScreen() {
           <MobileStream
             session={session}
             blocks={blocks}
-            onScrollEl={setStreamRoot}
             onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
           />
           {blocking && (
@@ -306,11 +297,12 @@ export function MobileConversationScreen() {
               {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
             </div>
           )}
-          {dockOffscreen && (
+          {liveAgents.length > 0 && (
             <LiveDock
               agents={liveAgents}
+              open={!!session.dockOpen}
+              onToggle={(next) => updateSession(session.id, { dockOpen: next })}
               onOpen={(id) => openPersistedSubagent(session.id, id)}
-              onJump={jumpToLive}
               forceCompact={kbdOpen}
             />
           )}

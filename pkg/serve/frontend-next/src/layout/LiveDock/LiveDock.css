@@ -138,6 +138,27 @@
   border-top: none;
 }
 
+/* the first row of a group (right after its .grp label) never draws its own
+   border-top — the group label's own border-top already separates it from
+   the previous group. */
+.grp + .ld-row {
+  border-top: none;
+}
+
+.ld-panel .grp {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+}
+
+.ld-panel .grp:first-child {
+  border-top: none;
+}
+
 .ld-row-main {
   display: flex;
   align-items: center;
@@ -192,28 +213,16 @@ button.ld-row-main {
   padding-right: var(--space-2);
 }
 
-.ld-jump {
+.ld-open-chev {
   flex: none;
-  display: grid;
+  display: inline-grid;
   place-items: center;
-  width: 28px; /* px: jump target (spec §1.3); widened to 44px on mobile */
-  height: 28px;
-  margin-right: var(--space-2);
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--overlay1);
-  cursor: pointer;
+  color: var(--overlay0);
+  margin-left: var(--space-1);
 }
 
-.ld-jump:hover {
+.ld-row-main:hover .ld-open-chev {
   color: var(--sky);
-  background: color-mix(in srgb, var(--sky) 10%, transparent);
-}
-
-.ld-jump:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -231,9 +240,5 @@ button.ld-row-main {
   .live-dock .ld-bar,
   .ld-row {
     min-height: 44px;
-  }
-  .ld-jump {
-    width: 44px;
-    height: 44px;
   }
 }

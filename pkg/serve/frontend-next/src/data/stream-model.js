@@ -78,12 +78,6 @@
 //             `resultDesc` only apply to done agents, which come from messages,
 //             not here — so live fanout agents are always 'running').
 //
-//         { type:'background', jobs:[...] }
-//             LIVE async bash jobs (kind:'bash' entries in session.subagents).
-//             Matches the BackgroundJob prop shape; each:
-//               { jobId, jobLabel, cmd, progress?, elapsed?, lines:[...] }
-//             `lines` is the output tail as an array of strings.
-//
 // ── GROUPING DECISIONS (documented, see report) ─────────────────────────────
 //   • Consecutive tool calls → one ledger; the first prose after them closes it.
 //   • One turn = user→next user; all assistant output in between = one document.
@@ -92,10 +86,16 @@
 //     their real chronological position, so they flow through the normal ledger
 //     pipeline — no special-casing, no fanout invented for sequential work.
 //   • Only LIVE subagents/bash (status running/cancelling) are read from
-//     session.subagents; they have no message yet, so they attach to the live
-//     turn. 1 live subagent → a ledger row (tool:'task'); 2+ → a fanout block;
-//     live bash → a background block. Anything whose job_id already appears in
-//     messages is skipped (dedup — completed entries also linger in the map).
+//     session.subagents; they have no message yet. SYNC/ASYNC split (async in
+//     the dock, sync inline — see the report): a SYNC subagent (async===false)
+//     blocks the conversation, so it joins this turn's delegation block like a
+//     terminated one; an ASYNC subagent, and ALL bash (kind:'bash' is always
+//     async background work), never appear inline — they only surface through
+//     liveTrayAgents() for the LiveDock. There is no more `background` block:
+//     async bash used to get one, but it moved to the dock permanently (the
+//     loose auto-expanding BG·JOB strip in the stream is retired). Anything
+//     whose job_id already appears in messages is skipped (dedup — completed
+//     entries also linger in the map).
 //   • Edit diff = sibling block after the ledger (full width), only for real
 //     unified diffs; never a fallback that renders empty.
 //   • No reliable per-message ts → we DO NOT emit `tick` date separators.
@@ -194,15 +194,18 @@ export function projectStream(session) {
 
       const doc = ensureDoc();
 
-      // A subagent card (live-completed or from history) is not a normal ledger
-      // row: it folds into the turn's delegation block (SUBAGENTS-REDESIGN-SPEC
-      // §1). Keyed `subagent-<jobId>`, tool_name 'subagent'.
+      // A terminated subagent card folds into the turn's delegation block
+      // (SUBAGENTS-REDESIGN-SPEC §1) — sync AND async alike. The sync/async
+      // split only governs LIVE work: a RUNNING async subagent shows in the
+      // dock instead of inline, but once it ENDS its card is history and lives
+      // inline like any other, so the user can always find what it did.
+      // Keyed `subagent-<jobId>`, tool_name 'subagent'.
       if (msg.tool_name === 'subagent') {
+        const jobId = String(msg.tool_call_id || '').replace(/^subagent-/, '');
         if (!currentDelegation) {
           currentDelegation = { type: 'delegation', id: `delegation-${abs}`, agents: [], settled: true };
           doc.blocks.push(currentDelegation);
         }
-        const jobId = String(msg.tool_call_id || '').replace(/^subagent-/, '');
         currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex)));
         closeLedger();
         continue;
@@ -292,27 +295,27 @@ export function projectStream(session) {
     // we just don't draw it. Revisit if thinking ever gets persisted.
     if (hasStreamingText) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText });
 
-    // Live subagents merge into this turn's delegation block (creating one if
-    // the turn had none yet), joining any already-terminated agent rows. The
-    // block is `settled:false` while at least one agent is still running so the
-    // renderer keeps it live (hairline sweep, breathing dots) instead of
-    // auto-collapsing (SUBAGENTS-REDESIGN-SPEC §1.3).
-    if (liveSubs.length > 0) {
+    // SYNC live subagents merge into this turn's delegation block (creating
+    // one if the turn had none yet), joining any already-terminated agent
+    // rows — the conversation is paused on them, so they belong inline
+    // ("async in the dock, sync inline"). ASYNC live subagents, and ALL live
+    // bash (kind:'bash' is always async background work), are NOT pushed
+    // inline: they only surface through liveTrayAgents() for the LiveDock.
+    // The block is `settled:false` while at least one agent is still running
+    // so the renderer keeps it live (hairline sweep, breathing dots) instead
+    // of auto-collapsing (SUBAGENTS-REDESIGN-SPEC §1.3).
+    const liveSyncSubs = liveSubs.filter((s) => s.async !== true);
+    if (liveSyncSubs.length > 0) {
       if (!currentDelegation) {
         currentDelegation = { type: 'delegation', id: `${doc.id}-delegation`, agents: [] };
         doc.blocks.push(currentDelegation);
       }
-      for (const s of liveSubs) {
+      for (const s of liveSyncSubs) {
         currentDelegation.agents.push(
           delegationRunningAgent(s, subagentAccentIndex(session.subagents, s.jobId)),
         );
       }
       currentDelegation.settled = false;
-    }
-
-    // Parent async bash (no owning subagent) stays a background block (spec §2).
-    if (liveBash.length > 0) {
-      doc.blocks.push({ type: 'background', id: `${doc.id}-bg`, jobs: liveBash.map(backgroundJob) });
     }
 
     doc.kind = 'streaming';
@@ -403,20 +406,25 @@ export function seenJobIdsOf(messages) {
   return seenJobIds;
 }
 
-// liveTrayAgents projects a session into the AgentTray's chip descriptors: the
-// LIVE subagents (each carrying its fanout identity accent) followed by the LIVE
-// async bash jobs (no identity accent — INC-22: spinner overlay1 + mono `bash`).
-// It reuses the SAME liveSubagents/liveAgent rules the stream projection uses,
-// so the tray never diverges from the fanout it mirrors. Each descriptor:
+// liveTrayAgents projects a session into the LiveDock's chip descriptors: the
+// LIVE ASYNC subagents (each carrying its fanout identity accent) followed by
+// ALL live bash jobs (no identity accent — INC-22: spinner overlay1 + mono
+// `bash`; kind:'bash' is always async background work). SYNC subagents are
+// excluded — they block the conversation, so they stay inline in the
+// delegation block instead ("async in the dock, sync inline"). It reuses the
+// SAME liveSubagents/liveAgent rules the stream projection uses, so the dock
+// never diverges from the delegation block it complements. Each descriptor:
 //   { id, kind:'subagent'|'bash', name, accent?, action?, time? }
 export function liveTrayAgents(session) {
   if (!session) return [];
   const seen = seenJobIdsOf(session.messages);
   const { subs, bash } = liveSubagents(session.subagents, seen);
-  const chips = subs.map((sub) => {
-    const a = liveAgent(sub, subagentAccentIndex(session.subagents, sub.jobId));
-    return { id: a.id, kind: 'subagent', name: a.name, accent: a.accent, action: a.action, time: a.time };
-  });
+  const chips = subs
+    .filter((sub) => sub.async === true)
+    .map((sub) => {
+      const a = liveAgent(sub, subagentAccentIndex(session.subagents, sub.jobId));
+      return { id: a.id, kind: 'subagent', name: a.name, accent: a.accent, action: a.action, time: a.time };
+    });
   for (const job of bash) {
     const chip = { id: job.jobId, kind: 'bash', name: 'bash', action: bashAction(job) };
     const time = job.usage && formatElapsed(job.usage.elapsedMs);
@@ -621,9 +629,10 @@ export function liveAgent(sub, i) {
 // A whole wave of subagents in one assistant turn is projected as a single
 // { kind:'delegation' } block: live subs mutate in place and terminated ones
 // fold to a ✓/✗ row with a short result chip — instead of the old pile of raw
-// subagent ledger rows + system line + toast + fanout. Parent async bash stays
-// a `background` block (spec §2); child bash without parent_job_id is an interim
-// gap handled in phase 2.
+// subagent ledger rows + system line + toast + fanout. Only SYNC live subs are
+// projected inline; async live subs (and all bash) live in the LiveDock, not
+// here ("async in the dock, sync inline"). Terminated cards of BOTH kinds fold
+// inline as history so nothing an agent did is ever lost.
 
 // delegationRunningAgent builds a running agent row from a live subagent.
 function delegationRunningAgent(sub, accentIdx) {
@@ -695,39 +704,4 @@ function finalizeDelegation(d) {
   d.summary = delegationSummary(d.agents);
   const anyRunning = d.agents.some((a) => a.state === 'running');
   d.settled = !anyRunning;
-}
-
-// backgroundJob builds one BackgroundJob descriptor from a live bash-kind
-// subagent. Shape (see BackgroundJob.jsx): { jobId, jobLabel, cmd, progress?,
-// elapsed?, lines, live }. `lines` is the output tail as an array of strings.
-// `live` is always true here (only running bash reaches this path), so the
-// renderer auto-opens the tail and streams new lines in (ticker) without the
-// user having to discover the peek toggle.
-function backgroundJob(job) {
-  const cmd = toolPath('bash', { command: job.task || '' }) || firstLine(job.task);
-  const bg = {
-    jobId: job.jobId,
-    jobLabel: 'BG · JOB',
-    cmd,
-    lines: bashLines(job),
-    live: true,
-  };
-  const elapsed = job.usage && formatElapsed(job.usage.elapsedMs);
-  if (elapsed) bg.elapsed = elapsed;
-  return bg;
-}
-
-// bashLines returns the last N lines of a bash job's output as a string array.
-function bashLines(job) {
-  const out = bashOutput(job);
-  if (!out) return [];
-  const { visible } = splitPreviewTail(out);
-  return visible ? visible.split('\n') : [];
-}
-
-function bashOutput(job) {
-  const msgs = Array.isArray(job.messages) ? job.messages : [];
-  const m = msgs.find(x => x && x._type === 'tool_start');
-  if (!m) return job.streamingText || '';
-  return m.result || m.streamingResult || '';
 }

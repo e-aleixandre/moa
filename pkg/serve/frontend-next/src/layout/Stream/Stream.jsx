@@ -5,7 +5,6 @@ import {
   ActivityLedger,
   DiffBlock,
   DelegationBlock,
-  BackgroundJob,
   FileCard,
 } from "../../components/index.js";
 import { renderMarkdown } from "../../data/util/markdown.js";
@@ -55,10 +54,6 @@ function docChildren(blocks, onOpenSubagent) {
             onOpenAgent={onOpenSubagent}
           />
         );
-      case "background":
-        return b.jobs.map((job) => (
-          <BackgroundJob key={job.jobId} {...job} />
-        ));
       default:
         return null;
     }

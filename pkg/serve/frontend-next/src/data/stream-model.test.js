@@ -4,7 +4,7 @@
 // judgment in phase 5, so the grouping rules (ledgers, fanout, background,
 // streaming, truncation) are pinned here with plain session fixtures.
 import { test, expect } from 'bun:test';
-import { projectStream } from './stream-model.js';
+import { projectStream, liveTrayAgents } from './stream-model.js';
 
 // ── fixture helpers ──────────────────────────────────────────────────────────
 const user = (text, extra = {}) => ({ role: 'user', content: [{ type: 'text', text }], ...extra });
@@ -244,8 +244,11 @@ test('two sequential terminated subagents form one delegation block, two agents'
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
-// ── 6. LIVE async bash job → background block ────────────────────────────────
-test('a live async bash job becomes a background block matching BackgroundJob', () => {
+// ── 6. LIVE async bash job → dock (liveTrayAgents), NOT an inline block ──────
+// Async bash used to render an inline `background` block; that block is retired
+// ("async in the dock, sync inline"). A live bash now only surfaces through
+// liveTrayAgents() for the LiveDock, and never appears in the stream projection.
+test('a live async bash job goes to the dock, not an inline background block', () => {
   const s = session([assistant('Running build.')], {
     subagents: {
       b1: {
@@ -256,37 +259,58 @@ test('a live async bash job becomes a background block matching BackgroundJob', 
   });
   const blocks = projectStream(s);
   const doc = blocks[blocks.length - 1];
-  const bg = doc.blocks.find(b => b.type === 'background');
-  expect(bg).toBeTruthy();
-  expect(bg.jobs).toHaveLength(1);
-  // BackgroundJob consumes { jobLabel, cmd, progress?, elapsed?, lines }
-  const job = bg.jobs[0];
-  expect(job.cmd).toBe('go build ./...');
-  expect(job.jobLabel).toBeTruthy();
-  expect(Array.isArray(job.lines)).toBe(true);
-  expect(job.lines).toEqual(['line1', 'line2', 'compiling…']);
-  expect(job.jobId).toBe('b1'); // for the external map key
-  expect(job.live).toBe(true); // running bash auto-opens its tail (ticker)
-  // no stray props the component ignores
-  expect(job.tail).toBeUndefined();
-  expect(job.status).toBeUndefined();
+  // No inline background block anymore.
+  expect(doc.blocks.some(b => b.type === 'background')).toBe(false);
+  // It surfaces in the dock instead.
+  const tray = liveTrayAgents(s);
+  expect(tray).toHaveLength(1);
+  expect(tray[0]).toMatchObject({ id: 'b1', kind: 'bash', name: 'bash' });
 });
 
-test('a live bash job is not counted as a subagent for delegation', () => {
+test('a live async subagent goes to the dock; a sync one stays inline', () => {
   const s = session([assistant('x')], {
     subagents: {
       b1: { jobId: 'b1', kind: 'bash', task: 'sleep 1', status: 'running', messages: [] },
-      j1: { jobId: 'j1', task: 'analyze', status: 'running', messages: [] },
+      async1: { jobId: 'async1', task: 'analyze', status: 'running', async: true, messages: [] },
+      sync1: { jobId: 'sync1', task: 'review', status: 'running', async: false, messages: [] },
     },
   });
   const blocks = projectStream(s);
   const doc = blocks[blocks.length - 1];
-  // one real subagent → delegation block (not fanout), plus a background block
+  // No fanout, no background — async work is dock-only now.
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
-  expect(doc.blocks.some(b => b.type === 'background')).toBe(true);
+  expect(doc.blocks.some(b => b.type === 'background')).toBe(false);
+  // Only the SYNC subagent appears inline in the delegation block.
   const delegation = doc.blocks.find(b => b.type === 'delegation');
   expect(delegation.agents).toHaveLength(1);
-  expect(delegation.agents[0].id).toBe('j1');
+  expect(delegation.agents[0].id).toBe('sync1');
+  // The async subagent + the bash go to the dock.
+  const tray = liveTrayAgents(s);
+  expect(tray.map(t => t.id).sort()).toEqual(['async1', 'b1']);
+});
+
+// A COMPLETED async subagent must remain reachable: while running it's in the
+// dock, but once it ends its card (in messages) folds INLINE into the delegation
+// block like any other terminated subagent — otherwise its result would vanish
+// (the dock only holds RUNNING work). Regression for the async-history drop.
+test('a completed async subagent folds inline (not dropped)', () => {
+  const s = session(
+    [
+      assistant('Delegated the review async.'),
+      // terminated async subagent card, as pushed by handleWsSubagentEnd
+      tool('subagent-async1', 'subagent', { task: 'review ws.go' }, 'done', 'looks good'),
+    ],
+    {
+      // its entry lingers in the map, still flagged async, now completed
+      subagents: { async1: { jobId: 'async1', task: 'review ws.go', status: 'completed', async: true, messages: [] } },
+    },
+  );
+  const doc = projectStream(s)[0];
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation).toBeTruthy();
+  expect(delegation.agents.map(a => a.id)).toContain('async1');
+  // and it's NOT still shown as live in the dock
+  expect(liveTrayAgents(s)).toHaveLength(0);
 });
 
 // ── 7. live turn → streaming, not document ───────────────────────────────────
