@@ -7,6 +7,7 @@ import { allTileIds, allSessionIds, findTile, tileCount, treeShape, presetTree }
 import { PRESETS } from "../../data/layoutPresets.js";
 import { applyPreset, addPane, focusTileByIndex, focusTile, openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
+import { sessionTitle } from "../../data/util/format.js";
 import "./PaneGridScreen.css";
 
 // PaneGridScreen — root organism AND container of the desktop pane grid (5G).
@@ -36,7 +37,7 @@ function spineSessions(sessions, paneOf) {
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
     .map((s) => ({
       id: s.id,
-      title: s.title || s.id,
+      title: sessionTitle(s),
       state: s.state || "idle",
       unseen: !!s.unseen,
       meta: relAge(s.updated),
@@ -45,7 +46,7 @@ function spineSessions(sessions, paneOf) {
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: s.title || s.id, meta: relAge(s.updated) }));
+    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated) }));
   return { active, saved };
 }
 

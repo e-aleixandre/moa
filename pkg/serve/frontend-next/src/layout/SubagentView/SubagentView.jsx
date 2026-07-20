@@ -5,7 +5,7 @@ import { ModelPill, UserWaypoint } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
-import { fmtTokens, copyToClipboard } from "../../data/util/format.js";
+import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format.js";
 import { modelAccent } from "../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
@@ -105,7 +105,7 @@ export function SubagentView({ session, jobId, onBack }) {
         <div class="sa-crumb">
           <GitFork size={13} aria-hidden="true" />
           <button type="button" class="sa-crumb-parent" onClick={onBack}>
-            {session.title || session.id}
+            {sessionTitle(session)}
           </button>
           <span class="sa-crumb-sep" aria-hidden="true">›</span>
           <span class="sa-crumb-name" style={{ color: accentVar }}>{view.name}</span>

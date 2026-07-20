@@ -4,6 +4,11 @@ export function truncateText(text, max = 2000) {
   return text.substring(0, max) + '\n… (truncated)';
 }
 
+export function sessionTitle(session) {
+  const t = (session?.title || "").trim();
+  return t ? session.title : "Untitled";
+}
+
 export function formatArgs(args) {
   if (!args) return '';
   try {

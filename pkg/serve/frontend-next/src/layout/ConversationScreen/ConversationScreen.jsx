@@ -16,7 +16,7 @@ import { openSession } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { shortModel, shortPath, modelCodename } from "../../data/util/format.js";
+import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
@@ -42,7 +42,7 @@ import "./ConversationScreen.css";
 
 // spineSessions splits the store's sessions into the Spine's ACTIVE and SAVED
 // lists. Active = not 'saved' and not archived, ordered by `updated` desc.
-// Saved = state 'saved'. Titles fall back to the id so a not-yet-titled session
+// Saved = state 'saved'. Titles fall back to "Untitled" for a not-yet-titled session.
 // still renders. `meta` is a coarse relative age placeholder derived from
 // `updated` (full relative-time formatting is a later polish, kept simple here).
 function relAge(updated) {
@@ -64,7 +64,7 @@ function spineSessions(sessions) {
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
     .map((s) => ({
       id: s.id,
-      title: s.title || s.id,
+      title: sessionTitle(s),
       state: s.state || "idle",
       unseen: !!s.unseen,
       meta: relAge(s.updated),
@@ -72,7 +72,7 @@ function spineSessions(sessions) {
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: s.title || s.id, meta: relAge(s.updated) }));
+    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated) }));
   return { active, saved };
 }
 
@@ -318,7 +318,7 @@ export function ConversationScreen({ version }) {
     body = (
       <>
         <ChatHead
-          title={session.title || session.id}
+          title={sessionTitle(session)}
           state={session.state || "idle"}
           path={shortPath(session.cwd) || session.cwd || ""}
           model={modelCodename(session.model) || shortModel(session.model) || session.model || ""}

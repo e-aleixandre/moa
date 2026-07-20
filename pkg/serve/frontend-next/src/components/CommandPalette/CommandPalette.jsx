@@ -15,7 +15,7 @@ import { navigate } from "../../data/router.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
 import { addToast } from "../../data/notifications.js";
 import {
-  sessionDotState, isRecentSession, projectLabel,
+  sessionTitle, sessionDotState, isRecentSession, projectLabel,
 } from "../../data/util/format.js";
 import { modLabel } from "../../data/util/shortcut.js";
 import "./CommandPalette.css";
@@ -347,7 +347,7 @@ export function CommandPalette({
     for (const sess of all) {
       const cwd = sess.cwd || "";
       const cwdLabel = projectLabel(cwd);
-      const title = sess.title || "Untitled";
+      const title = sessionTitle(sess);
       if (q) {
         const hay = `${title} ${sess.model || ""} ${cwdLabel} ${cwd}`.toLowerCase();
         if (!fuzzyMatch(q, hay)) continue;

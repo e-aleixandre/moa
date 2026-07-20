@@ -14,7 +14,7 @@ import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount } from "../../data/store.js";
 import { projectStream } from "../../data/stream-model.js";
 import { modelAccent } from "../../data/selectors.js";
-import { shortModel, shortPath, sessionDotState, modelCodename } from "../../data/util/format.js";
+import { shortModel, shortPath, sessionDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import "./PaneGrid.css";
 
@@ -230,7 +230,7 @@ function ConnectedPane({ node, state, tileIndex }) {
   return (
     <Pane
       {...commonProps}
-      title={session.title || session.id}
+      title={sessionTitle(session)}
       state={dotState}
       path={shortPath(session.cwd) || session.cwd || ""}
       model={modelCodename(session.model) || shortModel(session.model) || session.model || ""}

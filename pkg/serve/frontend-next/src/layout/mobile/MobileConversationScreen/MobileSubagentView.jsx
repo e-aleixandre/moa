@@ -5,7 +5,7 @@ import { ModelPill, UserWaypoint } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { subagentView, canPromote } from "../../../data/subagent-view-model.js";
-import { fmtTokens, copyToClipboard, truncateText } from "../../../data/util/format.js";
+import { fmtTokens, copyToClipboard, truncateText, sessionTitle } from "../../../data/util/format.js";
 import { modelAccent } from "../../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
 import { updateSession } from "../../../data/store.js";
@@ -102,7 +102,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
         <div class="mhead-sub">
           <span class="mhead-meta msa-crumbline">
             <button type="button" class="msa-parent" onClick={onBack}>
-              {session.title || session.id}
+              {sessionTitle(session)}
             </button>
             {view.task ? ` › ${truncateText(view.task, 60)}` : ""}
           </span>

@@ -8,7 +8,7 @@ import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, configureSession, archiveSession, deleteSession, resumeSession } from "../../../data/session-actions.js";
 import { api } from "../../../data/api.js";
-import { mobileModelLabel, shortPath, sessionDotState } from "../../../data/util/format.js";
+import { mobileModelLabel, shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { PermissionPrompt, AskUserPrompt, McpBanner, ModelSelector, Sheet } from "../../../components/index.js";
@@ -83,7 +83,7 @@ function stripSessions(sessions) {
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
     .map((s) => ({
       id: s.id,
-      name: s.title || s.id,
+      name: sessionTitle(s),
       state: sessionDotState(s),
       unseen: !!s.unseen,
       needs: !!(s.pendingPerm || s.pendingAsk || s.state === "permission"),
@@ -104,7 +104,7 @@ function drawerSessions(sessions, activeId) {
     const needs = !!(s.pendingPerm || s.pendingAsk || s.state === "permission");
     return {
       id: s.id,
-      title: s.title || s.id,
+      title: sessionTitle(s),
       state: sessionDotState(s),
       when: relAge(s.updated),
       last: sessionBrief(s),
@@ -132,7 +132,7 @@ function recentSavedSessions(sessions, limit = 3) {
     .slice(0, limit)
     .map((s) => ({
       id: s.id,
-      title: s.title || s.id,
+      title: sessionTitle(s),
       when: relAge(s.updated),
       path: shortPath(s.cwd) || s.cwd || "",
     }));
@@ -180,7 +180,7 @@ export function MobileConversationScreen() {
 
   const onSelect = (id) => setActiveSession(id);
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
-  const onNew = () => openPalette("create");
+  const onNew = () => { openPalette("create"); setDrawerOpen(false); };
 
   useEffect(() => { setRewindOpen(false); setModelOpen(false); }, [activeId]);
 
@@ -317,7 +317,7 @@ export function MobileConversationScreen() {
     <div class="mconv">
       <MobileHeader
         state={session ? session.state || "idle" : "idle"}
-        title={session ? session.title || session.id : "moa"}
+        title={session ? sessionTitle(session) : "moa"}
         model={session ? mobileModelLabel(session.model) : ""}
         level={session ? (session.thinking === "none" ? "off" : (session.thinking || "off")) : "off"}
         path={session ? shortPath(session.cwd) || session.cwd || "" : ""}

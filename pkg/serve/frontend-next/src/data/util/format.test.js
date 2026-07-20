@@ -1,6 +1,14 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle } from './format.js';
+
+test('sessionTitle keeps a title and falls back to Untitled', () => {
+  expect(sessionTitle({ title: 'Build dashboard' })).toBe('Build dashboard');
+  expect(sessionTitle({ title: '' })).toBe('Untitled');
+  expect(sessionTitle({ title: '   ' })).toBe('Untitled');
+  expect(sessionTitle({})).toBe('Untitled');
+  expect(sessionTitle()).toBe('Untitled');
+});
 
 test('formatDiff numbers lines from startLine', () => {
   const out = formatDiff('old line\nsecond', 'new line\nsecond', 260);
