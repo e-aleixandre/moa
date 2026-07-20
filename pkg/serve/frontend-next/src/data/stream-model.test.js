@@ -340,10 +340,9 @@ test('a running tool with no streaming text is not textLive (no doc caret)', () 
 });
 
 // ── 7b. trailing running/generating tool → its ledger row is marked `live` ───
-// (B·Tail direction, TOOLCALLS-ALT-SPEC-FABLE.md): the tool currently in
-// flight is the LAST row of the LAST ledger, carrying `live:true` and its
-// `startedAt` timestamp so ActivityLedger/MobileLedger render it as the
-// running console-tail line instead of a normal terminated row.
+// The tool currently in flight is the LAST row of the LAST ledger, carrying
+// `live:true` and its `startedAt` timestamp so the ActivityLedger card renders
+// it as the tinted running row instead of a normal terminated row.
 test('a trailing running tool_start is marked live on its ledger row', () => {
   const s = session([
     tool('t1', 'read', { path: 'a.js' }, 'done', '10 lines'),

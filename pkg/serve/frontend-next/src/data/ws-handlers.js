@@ -598,7 +598,7 @@ export function handleWsToolCallStart(id, data) {
     args: buffered?.args || {},
     status: 'generating',
     result: null,
-    // Anchor for the live-row elapsed timer (B·Tail) — set once, at the
+    // Anchor for the live-row elapsed timer — set once, at the
     // earliest moment this tool call exists, and carried through the
     // generating→running transition below.
     startedAt: Date.now(),

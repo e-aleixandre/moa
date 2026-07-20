@@ -1,173 +1,175 @@
-.ledger {
+/* ══════════════════════════════════════════════════════════════════
+   TOOL GROUP (.tg) — ONE unified card for a batch of tool calls, the same
+   shape in every phase (TOOLCALLS-UNIFIED-IMPL-SPEC, Variant B). Running,
+   collapsed, expanded and finished are the SAME card and the SAME row atom
+   (.tg-row); only which rows show and a .live modifier change. Detail (diff /
+   output) opens INSIDE the card as a recessed .tg-detail panel — never a
+   nested bordered card. Shared verbatim by BOTH streams: Stream (desktop) and
+   MobileStream (mobile, denser via a --tg-row-h override) render the SAME
+   <ActivityLedger> card.
+   ══════════════════════════════════════════════════════════════════ */
+.tg {
+  /* Structural, non-reusable dimensions as local semantic tokens: dense
+     functional row heights, not part of the shared spacing scale. */
+  --tg-row-h: 30px; /* one action line */
+  --tg-mk-w: 18px; /* icon / status column width */
   border: 1px solid var(--surface0);
   border-radius: var(--radius-md);
   overflow: hidden;
-  margin: var(--space-2) 0 var(--space-5);
   background: color-mix(in srgb, var(--mantle) 65%, transparent);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  /* THE AIR (#56): a clear gap off the prose above, generous below. */
+  margin: var(--space-4) 0 var(--space-5);
 }
 
-.ledger .ledger-row {
+/* the row ATOM — used for done rows, the fold header, and (with .live) the
+   running row. Same paddings, same columns, always. */
+.tg .tg-row {
   width: 100%;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--subtext0);
+  padding: 0 var(--space-4);
+  min-height: var(--tg-row-h);
   background: transparent;
   border: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  color: var(--overlay1);
+  text-align: left;
+  font: inherit;
   cursor: pointer;
   transition: background var(--duration) var(--ease);
-  text-align: left;
 }
 
-.ledger .ledger-row:disabled {
-  cursor: default;
-}
-
-.ledger .ledger-row:last-child {
+.tg .tg-row:last-child {
   border-bottom: none;
 }
 
-.ledger .ledger-row:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface0) 35%, transparent);
+/* A no-detail done row is a plain <div>: not interactive, default cursor. */
+.tg div.tg-row {
+  cursor: default;
 }
 
-.ledger .ledger-row:focus-visible {
+/* Only interactive rows (buttons: detail toggles, fold header) react to hover;
+   an inert <div> done row must not imply it's clickable. */
+.tg button.tg-row:hover {
+  background: color-mix(in srgb, var(--surface0) 30%, transparent);
+}
+
+.tg .tg-row:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: -2px;
 }
 
-.ledger .ledger-row.open {
-  background: color-mix(in srgb, var(--surface0) 30%, transparent);
-}
-
-.ledger .ledger-row .t-ic {
-  width: 20px;
+/* icon / status column (Variant B: tool icon; running: breathing dot) */
+.tg .tg-row .ic {
+  flex: none;
+  width: var(--tg-mk-w);
   display: inline-flex;
+  align-items: center;
   justify-content: center;
-  flex: none;
-  color: inherit;
+  color: var(--overlay0);
 }
 
-.ledger .ledger-row .t-name {
-  color: var(--text);
-  font-weight: var(--weight-medium);
-  width: 52px;
-  flex: none;
-}
-
-.ledger .ledger-row .t-arg {
+/* tool name + object share one ellipsised cell */
+.tg .tg-row .txt {
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--overlay1);
 }
 
-.ledger .ledger-row .t-arg b {
+.tg .tg-row .txt b {
   color: var(--subtext1);
   font-weight: var(--weight-medium);
 }
 
-.ledger .ledger-row .t-out {
-  color: var(--overlay0);
-  font-size: var(--text-xs);
+/* short right-aligned result (e.g. "232 lines", "+3 −1", "exit 1") */
+.tg .tg-row .res {
   flex: none;
-}
-
-.ledger .ledger-row .t-out.ok {
-  color: var(--green);
-}
-
-.ledger .ledger-row .t-out.err {
-  color: var(--red);
-}
-
-.ledger .ledger-body {
-  padding: var(--space-3) var(--space-4) var(--space-4) 44px;
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
-  color: var(--subtext0);
-  background: var(--crust);
-  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
-  white-space: pre;
-  overflow-x: auto;
-}
-
-.ledger .ledger-body:last-child {
-  border-bottom: none;
-}
-
-.ledger .ledger-body .dim {
+  font-size: var(--text-xs);
   color: var(--overlay0);
 }
 
-.ledger .ledger-body .g {
+.tg .tg-row .res.ok {
   color: var(--green);
 }
 
-.ledger .ledger-body .r {
+.tg .tg-row .res.err {
   color: var(--red);
 }
 
-.ledger .ledger-body .y {
+/* outcome mark on the right (Variant B): small ✓ / ✗ / ! */
+.tg .tg-row .mark {
+  position: relative;
+  flex: none;
+  width: 12px; /* px: single-glyph column, not a shared size */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+}
+
+.tg .tg-row .mark.ok {
+  color: var(--green);
+}
+
+.tg .tg-row .mark.err {
+  color: var(--red);
+}
+
+.tg .tg-row .mark.warn {
   color: var(--yellow);
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   B·TAIL — compact console-tail view of a tool-call batch: a folded
-   "N earlier actions" header, the last 1-2 terminated lines, and the live
-   line (verb + object + blinking caret + elapsed). See
-   TOOLCALLS-ALT-SPEC-FABLE.md (direction B) and RUNNING-TOOL-SPEC-FABLE.md
-   §1-2 for the live line's anatomy/verb table. Reused verbatim by
-   MobileLedger (compressed to 1 terminated line via `visibleDone`).
-   ══════════════════════════════════════════════════════════════════ */
-.tail {
-  /* Structural, non-reusable dimensions kept exact as local semantic tokens:
-     dense console-tail rows whose heights are functional, not part of the
-     shared spacing scale. */
-  --tail-row-min-h: 24px;    /* terminated line min height */
-  --tail-live-min-h: 28px;   /* live/header line min height (denser than 44) */
-  --tail-row-pad-y: 4px;     /* terminated line vertical padding */
-  --tail-live-pad-y: 6px;    /* live/header line vertical padding */
-  --tail-mk-w: 12px;         /* ✓/✗/▸ marker column width */
-  --tail-caret-gap: 3px;     /* gap before the live dot */
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
+/* visually-hidden SR-only label (outcome name for the ✓/✗/! mark), scoped to
+   the card since there's no global utility. */
+.tg .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  background: var(--crust);
-  margin: var(--space-2) 0 var(--space-5);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.tail .tail-earlier {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--tail-live-pad-y) var(--space-4);
-  min-height: var(--tail-live-min-h);
-  overflow: hidden;
-  font-size: var(--text-xs);
+/* chevron on rows that can open a detail */
+.tg .tg-row .chev {
+  flex: none;
   color: var(--overlay0);
-  background: color-mix(in srgb, var(--mantle) 80%, transparent);
-  border: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
-  cursor: pointer;
-  text-align: left;
-  font-family: var(--mono);
-  /* Grows in the first time the batch spills past the visible window, so the
-     "N earlier actions" header doesn't pop in as the rows fold away (P2/2A).
-     min-height is animated too (it would otherwise pin the row open). */
-  animation: tail-earlier-in 200ms var(--ease);
+  display: inline-flex;
+  transition: transform var(--duration) var(--ease);
 }
 
-@keyframes tail-earlier-in {
+.tg .tg-row.open .chev {
+  transform: rotate(90deg);
+}
+
+/* fold header — same atom, dim, with a count. Only when the group hides rows. */
+.tg .tg-fold {
+  color: var(--overlay0);
+  font-size: var(--text-xs);
+  background: color-mix(in srgb, var(--mantle) 80%, transparent);
+  /* Grows in the first time the batch spills past the visible window so the
+     header doesn't pop as rows fold away (P2/2A). */
+  animation: tg-fold-in 200ms var(--ease);
+}
+
+.tg .tg-fold .txt {
+  color: var(--overlay0);
+}
+
+.tg .tg-fold .err-n {
+  flex: none;
+  color: var(--red);
+}
+
+@keyframes tg-fold-in {
   from {
     opacity: 0;
     max-height: 0;
@@ -179,198 +181,207 @@
   to {
     opacity: 1;
     max-height: 40px; /* px: matches the folding upper bound */
-    min-height: var(--tail-live-min-h);
+    min-height: var(--tg-row-h);
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .tail .tail-earlier {
-    animation: none;
-  }
+/* done-row enter (a new terminated row settling in) */
+.tg .tg-row.enter {
+  animation: tg-row-enter 200ms var(--ease);
 }
 
-.tail .tail-earlier:hover {
-  color: var(--overlay1);
-}
-
-.tail .tail-earlier:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: -2px;
-}
-
-.tail .tail-earlier-err {
-  color: var(--red);
-}
-
-.tail .tail-line {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  padding: var(--tail-row-pad-y) var(--space-4);
-  min-height: var(--tail-row-min-h);
-  overflow: hidden;
-  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
-  animation: tail-line-enter 200ms var(--ease);
-}
-
-.tail .tail-line:last-child {
-  border-bottom: none;
-}
-
-/* Folding-out: a terminated row that has left the visible window collapses its
-   height + fades before removal (tail-dwell.js FOLD_MS, TOOL-LIVE-FIXES-SPEC
-   P2/2A) so the tail settles toward the "N earlier actions" counter instead of
-   jumping. max-height is a safe upper bound for a single dense row. */
-.tail .tail-line.folding {
-  max-height: 0;
-  min-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  opacity: 0;
-  border-bottom-color: transparent;
-  animation: none; /* cancel the enter animation while folding out */
-  transition: max-height 180ms var(--ease), opacity 180ms var(--ease),
-    padding 180ms var(--ease);
-  pointer-events: none;
-}
-.tail .tail-line:not(.folding) {
-  max-height: 40px; /* px: upper bound so the folding transition has a start value */
-}
-
-.tail .tail-line .mk {
-  flex: none;
-  width: var(--tail-mk-w);
-  text-align: center;
-}
-
-.tail .tail-line .mk.ok {
-  color: var(--green);
-}
-
-.tail .tail-line .mk.err {
-  color: var(--red);
-}
-
-.tail .tail-line .mk.warn {
-  color: var(--yellow);
-}
-
-.tail .tail-line .txt {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--overlay1);
-}
-
-.tail .tail-line .txt b {
-  color: var(--subtext0);
-  font-weight: var(--weight-normal);
-}
-
-.tail .tail-line .res {
-  flex: none;
-  font-size: var(--text-xs);
-  color: var(--overlay0);
-}
-
-/* the live line — blue verb, breathing dot, timer. The breathing dot (StateDot
-   state="running") lives where the blinking caret used to: it marks the row as
-   alive at a slower tempo (--breath-running) than the assistant text caret's
-   1s blink, so the two never read as duplicate cursors. */
-.tail .tail-line.live {
-  background: color-mix(in srgb, var(--blue) 6%, transparent);
-  min-height: var(--tail-live-min-h);
-  padding: var(--tail-live-pad-y) var(--space-4);
-}
-
-.tail .tail-line.live .mk {
-  color: var(--blue);
-}
-
-.tail .tail-line.live .txt {
-  color: var(--text);
-}
-
-.tail .tail-line.live .txt .verb {
-  color: var(--blue);
-  font-weight: var(--weight-medium);
-}
-
-.tail .tail-line.live .txt .dim {
-  color: var(--overlay1);
-}
-
-.tail .tail-line.live .state-dot {
-  flex: none;
-  align-self: center;
-  margin-left: var(--tail-caret-gap);
-}
-
-@keyframes tail-line-enter {
+@keyframes tg-row-enter {
   from {
     opacity: 0;
     transform: translateY(4px);
   }
 }
 
-.tail .tail-line.live .res {
+/* Folding-out: a terminated row that has left the visible window collapses its
+   height + fades before removal (tail-dwell.js FOLD_MS) so the card settles
+   toward the "N earlier actions" counter instead of jumping. */
+.tg .tg-row.folding {
+  max-height: 0;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  border-bottom-color: transparent;
+  animation: none;
+  transition: max-height 180ms var(--ease), opacity 180ms var(--ease),
+    padding 180ms var(--ease);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.tg .tg-row:not(.folding) {
+  max-height: 40px; /* px: upper bound so the folding transition has a start value */
+}
+
+/* the running row — the SAME atom, tinted blue. Blue left accent, breathing
+   dot in the icon column, elapsed, bottom progress hairline. Verb blue + object
+   bright so it stands out by BRIGHTNESS, not by being a different box. */
+.tg .tg-row.live {
+  position: relative;
+  background: color-mix(in srgb, var(--blue) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--blue);
+  cursor: default;
+}
+
+.tg .tg-row.live:hover {
+  background: color-mix(in srgb, var(--blue) 7%, transparent);
+}
+
+.tg .tg-row.live .txt {
+  color: var(--text);
+}
+
+.tg .tg-row.live .txt .verb {
+  color: var(--blue);
+  font-weight: var(--weight-medium);
+}
+
+.tg .tg-row.live .txt .dim {
+  color: var(--overlay1);
+}
+
+.tg .tg-row.live .res {
   color: var(--overlay0);
   font-variant-numeric: tabular-nums;
 }
 
-/* Mini-logtail under the live line: the running tool's incremental output
-   (bash, in practice). Same mono/crust treatment and teal cursor as the async
-   BackgroundJob's logtail, kept tight (max 3 lines, fed by the projection). */
-.tail .tail-logtail {
+/* the breathing dot sits in the icon column (StateDot state="running") */
+.tg .tg-row.live .ic .state-dot {
+  flex: none;
+}
+
+/* 1px progress sweep along the bottom of the live row */
+.tg .tg-row.live .hair {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tg .tg-row.live .hair::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--blue), transparent);
+  animation: tg-sweep var(--shimmer) linear infinite;
+}
+
+@keyframes tg-sweep {
+  to {
+    left: 130%;
+  }
+}
+
+/* the inline detail — opens INSIDE the same card, no nested card. A recessed
+   crust panel flush to the group's edges: one border, one background. The
+   flush DiffBlock/CodeBlock inside provide their own inner padding, so this
+   panel adds none (avoids double-indenting the diff gutter). This is the fix
+   for the "card inside a card" ugliness. */
+.tg .tg-detail {
   background: var(--crust);
-  border-radius: var(--radius-sm);
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+}
+
+.tg .tg-detail:last-child {
+  border-bottom: none;
+}
+
+/* raw-text detail node (a preformatted output that isn't a Diff/CodeBlock):
+   mono, wrapped, with the panel's own padding. Diff/CodeBlock render flush and
+   provide their own. */
+.tg .tg-detail .doc-mono {
+  display: block;
+  padding: var(--space-2) var(--space-4);
   font-family: var(--mono);
   font-size: var(--text-xs);
   line-height: var(--leading-relaxed);
   color: var(--overlay1);
-  padding: var(--space-2) var(--space-4);
-  margin: 2px var(--space-4) var(--space-2); /* px: hairline gap under the live line */
-  overflow-x: auto; /* long log lines scroll horizontally, not clip silently */
-  overflow-y: hidden;
+  white-space: pre-wrap;
+  overflow-x: auto;
 }
 
-.tail .tail-logtail .ln {
+.tg .tg-detail .doc-mono .dim {
+  color: var(--overlay0);
+}
+
+.tg .tg-detail .doc-mono .y {
+  color: var(--yellow);
+}
+
+.tg .tg-detail .doc-mono .r {
+  color: var(--red);
+}
+
+/* DiffBlock/CodeBlock render BORDERLESS inside the detail (they pass
+   className="flush"): the .tg-detail panel is the only surface. */
+
+/* logtail under a running bash — same crust panel, teal cursor */
+.tg .tg-log {
+  background: var(--crust);
+  padding: var(--space-2) var(--space-4) var(--space-2)
+    calc(var(--tg-mk-w) + var(--space-4) + var(--space-3));
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--overlay1);
   white-space: pre;
-  animation: tail-logtail-line-in var(--duration) var(--ease);
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
 }
 
-@keyframes tail-logtail-line-in {
+.tg .tg-log:last-child {
+  border-bottom: none;
+}
+
+.tg .tg-log .ln {
+  animation: tg-log-line-in var(--duration) var(--ease);
+}
+
+@keyframes tg-log-line-in {
   from {
     opacity: 0;
     transform: translateY(2px);
   }
 }
 
-.tail .tail-logtail .ln .ln-cursor::after {
+.tg .tg-log .ln .ln-cursor::after {
   content: "▌";
   color: var(--teal);
-  animation: tail-logtail-cursor-blink 1s steps(2) infinite;
+  animation: tg-log-cursor-blink 1s steps(2) infinite;
 }
 
-@keyframes tail-logtail-cursor-blink {
+@keyframes tg-log-cursor-blink {
   50% {
     opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tail .tail-line {
+  .tg .tg-fold,
+  .tg .tg-row.enter {
     animation: none;
   }
-  .tail .tail-line.folding {
+  .tg .tg-row.folding {
     transition: none;
   }
-  .tail .tail-logtail .ln {
+  .tg .tg-row.live .hair::after {
     animation: none;
   }
-  .tail .tail-logtail .ln .ln-cursor::after {
+  .tg .tg-log .ln {
+    animation: none;
+  }
+  .tg .tg-log .ln .ln-cursor::after {
     animation: none;
     opacity: 0.6;
   }

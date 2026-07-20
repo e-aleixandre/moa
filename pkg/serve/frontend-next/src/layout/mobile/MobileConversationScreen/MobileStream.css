@@ -102,12 +102,14 @@
   line-height: var(--leading-relaxed);
 }
 
-/* Inside the MobileLedger L3 detail, even denser + kill the inherited margin. */
-.mconv .mledger-detail .code {
-  margin: var(--space-2) 0 0;
+/* The unified tool-group card (.tg) at mobile scale: 44px rows so the tappable
+   header/detail rows meet the ≥44px touch target (the row has no vertical
+   padding, so its min-height IS the hit area), denser detail code. */
+.mconv .tg {
+  --tg-row-h: 44px;
 }
 
-.mconv .mledger-detail .code pre code,
-.mconv .mledger-detail .code.diff pre {
+.mconv .tg .tg-detail .code pre code,
+.mconv .tg .tg-detail .code.diff pre {
   font-size: var(--text-micro);
 }

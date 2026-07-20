@@ -35,7 +35,8 @@ import "./MobileConversationScreen.css";
 //
 // Architecture (OPTION B): the mobile screen reuses the desktop's data
 // projection (projectStream) and shared components; the only divergence is the
-// mobile layout chrome and the ledger→MobileLedger remap (MobileStream). No
+// mobile layout chrome (MobileStream renders the SAME tool-group card, just
+// denser). No
 // data logic is duplicated. The mock specimen used by the design gallery now
 // lives in mobile-gallery.jsx (see MobileConversationSpecimen there).
 

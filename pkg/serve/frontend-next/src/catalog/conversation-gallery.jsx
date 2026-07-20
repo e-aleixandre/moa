@@ -34,46 +34,55 @@ const DIFF_TEXT = `--- a/pkg/serve/ws.go
 
 const LEDGER_READ_ROWS = [
   {
+    id: "rd1",
     tool: "read",
     arg: { text: "pkg/serve/ws.go", detail: "lines 210–340" },
     out: "130 lines",
     status: "ok",
   },
   {
+    id: "rd2",
     tool: "grep",
     arg: '"Subscribe(" — pkg/bus/',
     out: "7 matches",
     status: "ok",
   },
   {
+    id: "rd3",
     tool: "bash",
     arg: { text: "go test -race -run TestResume ./pkg/serve/", detail: "×20" },
     out: "1 failure",
     status: "err",
-    defaultOpen: true,
-    body: (
-      <>
-        <span class="dim">
-          --- FAIL: TestResumeDelivery (0.31s)  <span class="y">run 14/20</span>
-        </span>
-        {"\n"}
-        {"    ws_test.go:88: missed event: seq=1042 (snapshot ended at 1041,\n"}
-        {"    subscription started at 1043)\n"}
-        <span class="r">FAIL</span>
-        {"\tgithub.com/ealeixandre/moa/pkg/serve\t0.412s"}
-      </>
-    ),
+    detail: {
+      node: (
+        <div class="doc-mono">
+          <span class="dim">
+            --- FAIL: TestResumeDelivery (0.31s)  <span class="y">run 14/20</span>
+          </span>
+          {"\n"}
+          {"    ws_test.go:88: missed event: seq=1042 (snapshot ended at 1041,\n"}
+          {"    subscription started at 1043)\n"}
+          <span class="r">FAIL</span>
+          {"\tgithub.com/ealeixandre/moa/pkg/serve\t0.412s"}
+        </div>
+      ),
+    },
   },
 ];
 
 const LEDGER_FIX_ROWS = [
   {
+    id: "fx1",
     tool: "edit",
     arg: { text: "pkg/serve/ws.go", detail: "resume()" },
     out: "+5 −3",
     status: "ok",
+    // Fused diff: opens INSIDE the card as a borderless recessed panel (the
+    // real stream fuses the edit's `diff` sibling here via fuseLedgerDetails).
+    detail: { node: <DiffBlock className="flush" diffText={DIFF_TEXT} filename="pkg/serve/ws.go" /> },
   },
   {
+    id: "fx2",
     tool: "edit",
     arg: {
       text: "pkg/serve/ws_test.go",
@@ -83,6 +92,7 @@ const LEDGER_FIX_ROWS = [
     status: "ok",
   },
   {
+    id: "fx3",
     tool: "bash",
     arg: "go test -race -count=50 -run TestResume ./pkg/serve/",
     out: "ok · 3.9s",
@@ -91,8 +101,8 @@ const LEDGER_FIX_ROWS = [
 ];
 
 // LEDGER_TAIL_ROWS — a live batch (>3 calls, last one still running) to
-// exercise the B·Tail console-tail view: folded "N earlier actions" header
-// (with a red error count), the last terminated lines, and the live line.
+// exercise the unified card's folded live phase: a folded "N earlier actions"
+// header (with a red error count), the last terminated rows, and the live row.
 const LEDGER_TAIL_ROWS = [
   { id: "t1", tool: "read", arg: { text: "pkg/serve/ws.go" }, out: "130 lines", status: "ok" },
   { id: "t2", tool: "grep", arg: '"Subscribe(" — pkg/bus/', out: "7 matches", status: "ok" },
@@ -151,8 +161,6 @@ export function ConversationGallery() {
             <code>seq ≤ N</code>:
           </p>
 
-          <DiffBlock diffText={DIFF_TEXT} filename="pkg/serve/ws.go" />
-
           <ActivityLedger rows={LEDGER_FIX_ROWS} />
 
           <p>
@@ -165,7 +173,7 @@ export function ConversationGallery() {
 
         <CodeBlock code={GO_SAMPLE} lang="go" filename="pkg/serve/ws.go · resume()" />
 
-        <h3 class="conv-sub">B·Tail — live tool batch (console tail)</h3>
+        <h3 class="conv-sub">Unified card — live tool batch</h3>
         <p class="lead">
           A batch with more than three calls whose last tool is still running:
           a folded "N earlier actions" header (red error count when a failure

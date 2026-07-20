@@ -7,6 +7,7 @@ import {
   DelegationBlock,
   FileCard,
 } from "../../components/index.js";
+import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { renderMarkdown } from "../../data/util/markdown.js";
 import "./Stream.css";
 
@@ -26,26 +27,38 @@ import "./Stream.css";
 // component's own sanitizeHtml pass is a second, allowlist-based guard. No raw
 // user/assistant text ever reaches innerHTML unsanitized.
 function docChildren(blocks, onOpenSubagent) {
-  return blocks.map((b) => {
+  const out = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
     switch (b.type) {
       case "prose":
-        return (
+        out.push(
           <div
             key={b.id}
             class="doc-prose"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(b.text) }}
           />
         );
-      case "ledger":
-        return <ActivityLedger key={b.id} rows={b.rows} />;
+        break;
+      case "ledger": {
+        // Fuse a diff sibling that immediately follows this ledger into its
+        // edit row (opens inside the card); don't render it standalone.
+        const next = blocks[i + 1];
+        const siblingDiff = next && next.type === "diff" ? next : null;
+        if (siblingDiff) i++; // consume it
+        const rows = fuseLedgerDetails(b.rows, siblingDiff);
+        out.push(<ActivityLedger key={b.id} rows={rows} />);
+        break;
+      }
       case "diff":
-        return (
-          <DiffBlock key={b.id} diffText={b.diffText} filename={b.filename} />
-        );
+        // A diff not consumed by a preceding ledger (defensive) → standalone.
+        out.push(<DiffBlock key={b.id} diffText={b.diffText} filename={b.filename} />);
+        break;
       case "file":
-        return <FileCard key={b.id} file={b.file} />;
+        out.push(<FileCard key={b.id} file={b.file} />);
+        break;
       case "delegation":
-        return (
+        out.push(
           <DelegationBlock
             key={b.id}
             agents={b.agents}
@@ -54,10 +67,12 @@ function docChildren(blocks, onOpenSubagent) {
             onOpenAgent={onOpenSubagent}
           />
         );
+        break;
       default:
-        return null;
+        break;
     }
-  });
+  }
+  return out;
 }
 
 function StreamBlock({ block, onOpenSubagent }) {

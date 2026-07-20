@@ -41,7 +41,7 @@
 //
 //         { type:'ledger', rows:[...] }
 //             A batch of CONSECUTIVE tool calls (no prose between them). Each
-//             row matches the ActivityLedger/LedgerRow prop shape:
+//             row matches the ActivityLedger row prop shape:
 //               { tool, arg:{text,detail}|string, out, status:'ok'|'err'|'warn',
 //                 body?, id, live?, startedAt? }
 //             `id` is the tool_call_id (stable key). `status` maps
@@ -464,14 +464,14 @@ function shortLabel(str, max = 40) {
   return str.length > max ? str.slice(0, max - 1) + '…' : str;
 }
 
-// mapStatus normalizes a tool_start status to the LedgerRow t-out class.
+// mapStatus normalizes a tool_start status to the ledger row status class.
 function mapStatus(status) {
   if (status === 'error') return 'err';
   if (status === 'rejected') return 'warn';
   return 'ok'; // done, running, generating
 }
 
-// toLedgerRow builds one LedgerRow prop object from a tool_start message. This
+// toLedgerRow builds one ActivityLedger row prop object from a tool_start message. This
 // is also the path terminated subagent/bash cards take (they arrive as
 // tool_start rows in messages), so a subagent/bash card produces a normal,
 // legible ledger row: arg = first line of task/command, out = summary.
@@ -490,7 +490,7 @@ function toLedgerRow(msg) {
   };
   if (body) row.body = body;
   // The tool currently in flight (status running/generating) is marked `live`
-  // so ActivityLedger/MobileLedger render it as the "B·Tail" live line (verb +
+  // so ActivityLedger renders it as the unified card's live row (verb +
   // object + caret + elapsed) instead of a normal terminated row.
   if (msg.status === 'running' || msg.status === 'generating') {
     row.live = true;
@@ -506,7 +506,7 @@ function toLedgerRow(msg) {
   return row;
 }
 
-// toolToken maps a raw tool name to the token LedgerRow uses for its icon/label
+// toolToken maps a raw tool name to the token the ledger row uses for its icon/label
 // (the keys of TOOL_ICONS). Unknown tools fall through as their lowercase name.
 function toolToken(name) {
   return (name || 'tool').toLowerCase();

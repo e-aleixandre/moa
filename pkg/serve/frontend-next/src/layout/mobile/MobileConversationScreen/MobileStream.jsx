@@ -1,55 +1,32 @@
 import { useRef, useEffect, useState, useCallback } from "preact/hooks";
 import {
-  FileText, Search, Pencil, Terminal, Wrench,
-} from "lucide-preact";
-import {
   UserWaypoint,
   AssistantDocument,
+  ActivityLedger,
   DiffBlock,
   DelegationBlock,
-  MobileLedger,
   FileCard,
 } from "../../../components/index.js";
 import { renderMarkdown } from "../../../data/util/markdown.js";
-import { adaptLedger } from "../../../data/mobile-ledger-adapter.js";
+import { fuseLedgerDetails } from "../../../data/util/ledger-details.jsx";
 import "./MobileStream.css";
 
 // MobileStream — the mobile counterpart to the desktop Stream (5C). It consumes
 // the SAME projection (projectStream, passed in as `blocks`) and renders the
-// SAME shared content components, with ONE divergence: a `ledger` sub-block
-// renders as <MobileLedger> (3-level touch ledger) instead of <ActivityLedger>.
-// The adaptLedger() pure remap (mobile-ledger-adapter.js) is the only data
-// transform; everything else (markdown prose, diff, delegation,
-// waypoints) is verbatim shared with the desktop.
+// SAME shared components — including the SAME unified tool-group card
+// (<ActivityLedger>, the .tg card), just denser and folding to 1 done row
+// (`visibleDone={1}`) instead of 2. There is no mobile-only ledger component
+// anymore: "one shape" means literally one component on both frontends
+// (TOOLCALLS-UNIFIED-IMPL-SPEC).
 //
 // Diff-sibling handling: projectStream emits an edit's unified diff as a `diff`
-// block RIGHT AFTER the ledger that owns the edit row. On mobile we FUSE that
-// diff into the ledger's edit row (detail.type:'diff') so the change shows
-// inline in the touch ledger — so mobileDocChildren SKIPS a `diff` block that
-// immediately follows a `ledger` (it was already consumed). A `diff` not
-// preceded by a ledger (shouldn't happen from the current projection, but kept
-// robust) still renders standalone via DiffBlock.
+// block RIGHT AFTER the ledger that owns the edit row. Both streams FUSE it into
+// that edit row (fuseLedgerDetails → detail opens inside the card), so a `diff`
+// immediately following a `ledger` is consumed here and not rendered standalone.
+// A `diff` not preceded by a ledger (defensive) still renders standalone.
 
-// ICON_BY_KEY maps the adapter's pure icon keys to lucide nodes for the
-// MobileLedger L1 glyph row (the adapter stays DOM-free by returning keys).
-const ICON_BY_KEY = {
-  file: FileText,
-  search: Search,
-  pencil: Pencil,
-  terminal: Terminal,
-  tool: Wrench,
-};
-
-function ledgerIcons(iconKeys) {
-  return (iconKeys || []).map((key, i) => {
-    const Icon = ICON_BY_KEY[key] || Wrench;
-    return <Icon key={key + i} size={13} aria-hidden="true" />;
-  });
-}
-
-// mobileDocChildren mirrors the desktop Stream's docChildren switch, diverging
-// only on `ledger` (→ MobileLedger with a possibly-fused diff sibling) and the
-// diff-skip bookkeeping described above.
+// mobileDocChildren mirrors the desktop Stream's docChildren, diverging only in
+// the ledger's `visibleDone={1}` density.
 function mobileDocChildren(blocks, onOpenSubagent) {
   const out = [];
   for (let i = 0; i < blocks.length; i++) {
@@ -69,18 +46,8 @@ function mobileDocChildren(blocks, onOpenSubagent) {
         const next = blocks[i + 1];
         const siblingDiff = next && next.type === "diff" ? next : null;
         if (siblingDiff) i++; // consume it — don't render standalone below
-        const props = adaptLedger(b, siblingDiff);
-        out.push(
-          <MobileLedger
-            key={b.id}
-            summary={props.summary}
-            icons={ledgerIcons(props.iconKeys)}
-            rows={props.rows}
-            defaultOpen={props.defaultOpen}
-            defaultOpenRowIds={props.defaultOpenRowIds}
-            liveRow={props.liveRow}
-          />
-        );
+        const rows = fuseLedgerDetails(b.rows, siblingDiff);
+        out.push(<ActivityLedger key={b.id} rows={rows} visibleDone={1} />);
         break;
       }
       case "diff":

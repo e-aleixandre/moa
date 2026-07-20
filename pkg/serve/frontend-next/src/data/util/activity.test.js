@@ -133,7 +133,7 @@ test('activityText follows the resolution order', () => {
   expect(activityText({ state: 'running', autoVerifying: true })).toBe('Running auto-verify');
 });
 
-// ── liveVerb (B·Tail live line verb table, RUNNING-TOOL-SPEC-FABLE.md §2) ────
+// ── liveVerb (live-row verb table, RUNNING-TOOL-SPEC-FABLE.md §2) ──────────
 test('liveVerb maps the closed tool table to present-continuous verbs', () => {
   expect(liveVerb('read')).toBe('Reading');
   expect(liveVerb('ls')).toBe('Reading');

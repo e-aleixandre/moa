@@ -9,8 +9,8 @@ import "./BackgroundJob.css";
 //
 // The "peek" expands a mono logtail with the last lines; the open/closed
 // state is local (useState) and exposed with aria-expanded on the
-// button, same pattern as LedgerRow (ActivityLedger) for collapsible
-// rows. Everything lives under a single `.bg-job` root (strip + logtail),
+// button, the same collapsible-row pattern the ActivityLedger card uses.
+// Everything lives under a single `.bg-job` root (strip + logtail),
 // instead of two loose siblings, to keep the CSS co-located under a single
 // component root.
 export function BackgroundJob({

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState } from "preact/hooks";
 import {
   FileText,
   Search,
@@ -9,17 +9,22 @@ import {
   Database,
   ListTodo,
   Wrench,
-  ChevronDown,
+  ChevronRight,
+  Check,
+  X,
+  AlertTriangle,
 } from "lucide-preact";
 import { liveVerb, formatElapsed } from "../../data/util/activity.js";
 import { StateDot } from "../../primitives/index.js";
+import { useElapsed } from "../../data/util/use-elapsed.js";
 import { useTailWindow } from "./tail-dwell.js";
 import "./ActivityLedger.css";
 
-// TOOL_ICONS — tool → lucide icon map, used by LedgerRow. `Wrench` is the
-// fallback for tools not explicitly mapped.
+// TOOL_ICONS — tool → lucide icon (Variant B: the left column is the KIND of
+// action). `Wrench` is the fallback for unmapped tools.
 const TOOL_ICONS = {
   read: FileText,
+  ls: FileText,
   grep: Search,
   find: Search,
   bash: Terminal,
@@ -34,102 +39,110 @@ const TOOL_ICONS = {
 };
 
 function toolIcon(tool) {
-  return TOOL_ICONS[tool] || Wrench;
+  return TOOL_ICONS[(tool || "").toLowerCase()] || Wrench;
 }
 
-// LedgerRow — a single activity ledger row. Clickable to expand/collapse
-// a mono `body` with the tool's output. Internal state by default
-// (`defaultOpen`); can be controlled by passing `open`/`onToggle`.
-export function LedgerRow({
-  tool,
-  arg,
-  out,
-  status = "ok",
-  body,
-  defaultOpen = false,
-  open,
-  onToggle,
-}) {
-  const [innerOpen, setInnerOpen] = useState(defaultOpen);
-  const isControlled = open !== undefined;
-  const isOpen = isControlled ? open : innerOpen;
-  const hasBody = body != null && body !== "";
+// argParts splits a row's `arg` into its display text + optional dim detail.
+function argParts(arg) {
+  if (arg && typeof arg === "object") return { text: arg.text, detail: arg.detail };
+  return { text: arg, detail: null };
+}
 
-  function toggle() {
-    if (!hasBody) return;
-    if (onToggle) onToggle(!isOpen);
-    if (!isControlled) setInnerOpen((v) => !v);
-  }
+// StatusMark — the small outcome mark on the RIGHT of a done row (Variant B):
+// ✓ ok (green) / ✗ error (red) / ! rejected (yellow). Running rows have none.
+// The glyph is decorative; the outcome is named for screen readers via an
+// SR-only label (an "232 lines"/"exit 1" result doesn't always convey it).
+function StatusMark({ status }) {
+  const kind = status === "err" ? "err" : status === "warn" ? "warn" : "ok";
+  const Icon = kind === "err" ? X : kind === "warn" ? AlertTriangle : Check;
+  const label = kind === "err" ? "failed" : kind === "warn" ? "rejected" : "completed";
+  return (
+    <span class={`mark ${kind}`}>
+      <Icon size={11} aria-hidden="true" />
+      <span class="sr-only">{label}</span>
+    </span>
+  );
+}
 
-  const Icon = toolIcon(tool);
-  const argText = typeof arg === "object" && arg !== null ? arg.text : arg;
-  const argDetail = typeof arg === "object" && arg !== null ? arg.detail : null;
+// DoneRow — a terminated tool call. The SAME atom as the live/header rows,
+// just frozen: tool icon, bold tool + object, short result, outcome mark. If it
+// carries a `detail` (diff / output body) it's a <button> that toggles a
+// recessed `.tg-detail` panel INSIDE the card (no nested card); otherwise it's
+// a plain inert <div> (nothing to open — not a disabled button, which SRs would
+// announce as an unavailable action).
+function DoneRow({ row }) {
+  const [open, setOpen] = useState(false);
+  const { text, detail: argDetail } = argParts(row.arg);
+  const Icon = toolIcon(row.tool);
+  const hasDetail = row.detail != null;
+  const Tag = hasDetail ? "button" : "div";
 
   return (
     <>
-      <button
-        type="button"
-        class={`ledger-row${isOpen ? " open" : ""}`}
-        onClick={toggle}
-        aria-expanded={hasBody ? isOpen : undefined}
-        disabled={!hasBody}
+      <Tag
+        type={hasDetail ? "button" : undefined}
+        class={`tg-row${open ? " open" : ""}${row._folding ? " folding" : ""}`}
+        onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
+        aria-expanded={hasDetail ? open : undefined}
       >
-        <span class="t-ic" aria-hidden="true">
+        <span class="ic" aria-hidden="true">
           <Icon size={14} />
         </span>
-        <span class="t-name">{tool}</span>
-        <span class="t-arg">
-          {argText}
-          {argDetail && <b> · {argDetail}</b>}
+        <span class="txt">
+          <b>{row.tool}</b> {text}
+          {argDetail && <span class="dim"> · {argDetail}</span>}
         </span>
-        {out && <span class={`t-out ${status}`}>{out}</span>}
-      </button>
-      {hasBody && isOpen && (
-        <div class="ledger-body">{body}</div>
-      )}
+        {row.out && (
+          <span class={`res ${row.status === "err" ? "err" : row.status === "ok" ? "ok" : ""}`.trim()}>
+            {row.out}
+          </span>
+        )}
+        <StatusMark status={row.status} />
+        {hasDetail && (
+          <span class="chev" aria-hidden="true">
+            <ChevronRight size={12} />
+          </span>
+        )}
+      </Tag>
+      {hasDetail && open && <RowDetail detail={row.detail} />}
     </>
   );
 }
 
-// useElapsed re-renders every second while `startedAt` is set, returning the
-// elapsed ms since then. Used by TailLiveLine's timer — the timer only
-// shows once elapsed >= 3000ms (RUNNING-TOOL-SPEC-FABLE.md §1).
-function useElapsed(startedAt) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!startedAt) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [startedAt]);
-  if (!startedAt) return 0;
-  return Math.max(0, now - startedAt);
+// RowDetail — the recessed panel a row opens INSIDE the card. Diffs/outputs
+// render BORDERLESS (className="flush") so the .tg-detail panel is the only
+// surface — the fix for the "card inside a card" ugliness.
+function RowDetail({ detail }) {
+  return (
+    <div class="tg-detail">
+      {detail.node}
+    </div>
+  );
 }
 
-// TailLiveLine — the live line of the "B·Tail" view: ▸ + verb + object +
-// breathing dot + elapsed timer (from 3s). The dot (blue, breathing at a
-// slower tempo than the assistant caret's blink) marks the row as alive
-// without cloning the text caret. When the running tool streams output
-// (`liveTail` — bash only, in practice) a mini-logtail of the last lines
-// unfolds below, matching the async BackgroundJob's live tail.
-function TailLiveLine({ row }) {
+// LiveRow — the running tool call: the SAME atom, tinted blue. Breathing dot in
+// the icon column, blue verb + bright object, elapsed (from 3s), a 1px progress
+// sweep. A running bash streams its last lines in a `.tg-log` panel below.
+function LiveRow({ row }) {
   const elapsed = useElapsed(row.startedAt);
   const verb = liveVerb(row.tool);
-  const argText = typeof row.arg === "object" && row.arg !== null ? row.arg.text : row.arg;
-  const argDetail = typeof row.arg === "object" && row.arg !== null ? row.arg.detail : null;
+  const { text, detail: argDetail } = argParts(row.arg);
   const tailLines = row.liveTail ? row.liveTail.split("\n") : [];
   return (
-    <div class="tail-live">
-      <div class="tail-line live" role="status" aria-live="off">
-        <span class="mk" aria-hidden="true">▸</span>
+    <>
+      <div class="tg-row live" role="status" aria-live="off">
+        <span class="ic" aria-hidden="true">
+          <StateDot state="running" size={6} />
+        </span>
         <span class="txt">
-          <span class="verb">{verb}</span> {argText}
+          <span class="verb">{verb}</span> {text}
           {argDetail && <span class="dim"> {argDetail}</span>}
         </span>
-        <StateDot state="running" size={6} />
         {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
+        <span class="hair" aria-hidden="true" />
       </div>
       {tailLines.length > 0 && (
-        <div class="tail-logtail" role="log" aria-live="off">
+        <div class="tg-log" role="log" aria-live="off">
           {tailLines.map((line, i) => (
             <div key={i} class="ln">
               {line}
@@ -138,119 +151,143 @@ function TailLiveLine({ row }) {
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-// TailDoneLine — one of the last terminated rows shown above the live line:
-// ✓ ok (green) / ! rejected (yellow) / ✗ error (red) + tool + object (gray) +
-// short result on the right.
-function TailDoneLine({ row }) {
-  const argText = typeof row.arg === "object" && row.arg !== null ? row.arg.text : row.arg;
-  const kind = row.status === "err" ? "err" : row.status === "warn" ? "warn" : "ok";
-  const glyph = kind === "err" ? "✗" : kind === "warn" ? "!" : "✓";
+// FoldHeader — the dim header row that appears when the card hides rows. The
+// SAME atom. Collapsed: "· N earlier actions" (+ "· K errors" red). Expanded:
+// the textual summary ("7 actions · 3 reads · 2 greps · 1 bash"). Tapping it
+// toggles the card between collapsed and expanded.
+function FoldHeader({ expanded, earlierCount, earlierErrors, summary, onToggle }) {
   return (
-    <div class={`tail-line${row._folding ? " folding" : ""}`}>
-      <span class={`mk ${kind}`} aria-hidden="true">{glyph}</span>
-      <span class="txt"><b>{row.tool}</b> {argText}</span>
-      {row.out && <span class="res">{row.out}</span>}
-    </div>
+    <button
+      type="button"
+      class={`tg-row tg-fold${expanded ? " open" : ""}`}
+      aria-expanded={expanded}
+      onClick={onToggle}
+    >
+      <span class="chev" aria-hidden="true">
+        <ChevronRight size={12} />
+      </span>
+      <span class="txt">
+        {expanded ? summary : `· ${earlierCount} earlier action${earlierCount === 1 ? "" : "s"}`}
+      </span>
+      {!expanded && earlierErrors > 0 && (
+        <span class="err-n">· {earlierErrors} error{earlierErrors === 1 ? "" : "s"}</span>
+      )}
+    </button>
   );
 }
 
-// TailView — the "B·Tail" compact rendering of a ledger batch (console tail):
-// a folded "· N earlier actions" header (only when there are more than the
-// visible slots), the last `visibleDone` terminated rows, and the live row (if
-// any). Reused by both ActivityLedger (desktop, visibleDone=2) and
-// MobileLedger (visibleDone=1). Tapping the header hands control back to the
-// caller via `onExpand`, which should render the full row list instead.
-export function TailView({ rows, visibleDone = 2, onExpand, className = "", ...rest }) {
-  const liveRow = rows.length > 0 && rows[rows.length - 1].live ? rows[rows.length - 1] : null;
-  const doneRows = liveRow ? rows.slice(0, -1) : rows;
-  const target = doneRows.slice(-visibleDone);
-  // Hold just-superseded lines for a minimum dwell so a burst of fast tools
-  // can't flash a line away before it can be read.
+// pluralizeTool renders "N <tool>" with the right plural. Most tools read fine
+// with a trailing "s" ("3 reads", "2 greps", "1 edit"), matching the mockup;
+// a few don't take one as a countable noun ("3 bash", "2 ls") or are already
+// plural ("2 tasks"), so they stay invariant.
+const INVARIANT_TOOLS = new Set(["bash", "ls", "tasks"]);
+
+function pluralizeTool(tool, n) {
+  if (n === 1 || INVARIANT_TOOLS.has(tool)) return tool;
+  return `${tool}s`;
+}
+
+// summarizeRows builds the expanded header's textual summary, grouped by tool
+// kind in first-appearance order: "7 actions · 3 reads · 2 greps · 1 bash".
+function summarizeRows(rows) {
+  const order = [];
+  const counts = {};
+  for (const r of rows) {
+    const k = (r.tool || "tool").toLowerCase();
+    if (!(k in counts)) { counts[k] = 0; order.push(k); }
+    counts[k]++;
+  }
+  const parts = order.map((k) => `${counts[k]} ${pluralizeTool(k, counts[k])}`);
+  const total = rows.length;
+  return `${total} action${total === 1 ? "" : "s"} · ${parts.join(" · ")}`;
+}
+
+// rowKey derives a stable Preact key for a row (consumer SHOULD pass row.id).
+function rowKey(row, i) {
+  if (row.id != null) return row.id;
+  const { text } = argParts(row.arg);
+  return `${row.tool ?? "row"}:${text ?? ""}:${i}`;
+}
+
+// FOLD_THRESHOLD — a batch folds (oldest rows collapse into the "N earlier
+// actions" header) only when it has MORE than this many rows total, live or
+// not (mockup: "above ~3 rows the oldest fold"). `visibleDone` is a separate
+// knob: how many terminated rows the ALREADY-collapsed tail keeps visible
+// (desktop 2 / mobile 1) — it does NOT decide when to fold.
+const FOLD_THRESHOLD = 3;
+
+// ActivityLedger — the unified tool-group card (.tg). ONE shape across every
+// phase (TOOLCALLS-UNIFIED-IMPL-SPEC): running/collapsed/expanded/finished are
+// the same card and the same row atom, differing only by which rows show and a
+// `.live` modifier. `rows` is the projectStream ledger's rows (each
+// `{ tool, arg, out, status, id, body?, live?, startedAt?, liveTail?, detail? }`,
+// `detail` a fused diff/output node attached by the caller).
+//
+// FOLD: a batch of more than FOLD_THRESHOLD rows collapses its oldest done rows
+// into a dim header ("N earlier actions"); tapping it expands to the full list.
+// A short batch (≤3 rows) renders as the plain list — no header — whether it's
+// live or finished. The card is a SINGLE component (never swapped): the dwell
+// hook (useTailWindow) is always mounted and simply gets a smaller `target`
+// when the batch crosses the fold threshold, so the row that folds away
+// animates out instead of being dropped in one frame.
+export function ActivityLedger({ rows = [], children, visibleDone = 2, className = "", ...rest }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const isLive = rows.length > 0 && rows[rows.length - 1].live === true;
+  const liveRow = isLive ? rows[rows.length - 1] : null;
+  const doneRows = isLive ? rows.slice(0, -1) : rows;
+
+  const foldable = rows.length > FOLD_THRESHOLD;
+  const folded = foldable && !expanded;
+
+  // The dwell hook is ALWAYS mounted (Rules of Hooks + no remount at the fold
+  // threshold): its `target` is the last `visibleDone` done rows when folded,
+  // or all of them otherwise. Shrinking the target on the 3→4 crossing makes
+  // the newly-hidden row fold out with animation rather than vanish.
+  const target = folded ? doneRows.slice(-visibleDone) : doneRows;
   const visible = useTailWindow(target);
-  const visibleIds = new Set(visible.map((r) => r.id));
-  const earlier = doneRows.filter((r) => !visibleIds.has(r.id));
+  // The header count reflects the LOGICAL fold (rows not in `target`), NOT the
+  // dwell-expanded `visible` set — during the fold-out animation a row still
+  // lingers in `visible`, and counting off that would keep the header at 0 and
+  // then pop it in abruptly once the animation ends. `target` is exact.
+  const targetIds = new Set(target.map((r) => r.id));
+  const earlier = folded ? doneRows.filter((r) => !targetIds.has(r.id)) : [];
   const earlierErrors = earlier.filter((r) => r.status === "err").length;
 
-  return (
-    <div class={`tail ${className}`.trim()} {...rest}>
-      {earlier.length > 0 && (
-        <button type="button" class="tail-earlier" onClick={onExpand}>
-          <ChevronDown size={11} aria-hidden="true" />
-          <span>· {earlier.length} earlier action{earlier.length === 1 ? "" : "s"}</span>
-          {earlierErrors > 0 && (
-            <span class="tail-earlier-err">
-              {" "}· {earlierErrors} error{earlierErrors === 1 ? "" : "s"}
-            </span>
-          )}
-        </button>
-      )}
-      {visible.map((row, i) => (
-        <TailDoneLine key={row.id ?? i} row={row} />
-      ))}
-      {liveRow && <TailLiveLine key={liveRow.id ?? "live"} row={liveRow} />}
-    </div>
-  );
-}
-
-// rowKey derives a stable Preact key for a ledger row. See the header note
-// below: the consumer SHOULD pass a stable `row.key`/`row.id`.
-function rowKey(row, i) {
-  if (row.key != null) return row.key;
-  if (row.id != null) return row.id;
-  const argText = typeof row.arg === "object" && row.arg !== null ? row.arg.text : row.arg;
-  return `${row.tool ?? "row"}:${argText ?? ""}:${i}`;
-}
-
-// ActivityLedger — container for collapsible tool-call rows.
-// `rows` is an array of props for LedgerRow. Each row's open/closed state
-// lives in LedgerRow (useState) and is tied to the row via `key`;
-// using the index as key would make inserting/reordering rows reassign
-// the expansion state to the wrong row. The consumer SHOULD pass a
-// stable `row.key`/`row.id` (e.g. the tool call's id). If it doesn't,
-// we derive a best-effort key from the content — not as robust as a real
-// id, but better than a plain index.
-//
-// TAIL VIEW: when the batch is still live (its last row has `live:true`) OR
-// has more than 3 rows, it renders as the compact "B·Tail" console-tail view
-// (TailView above: folded "N earlier actions" header + last 2 terminated rows
-// + the live row) instead of the full row list. Tapping the header expands to
-// the full list (this component's own `expanded` state) — the everyday
-// LedgerRow list, unchanged. A short/finished batch (≤3 rows, nothing live)
-// renders as the plain list directly: no header needed.
-export function ActivityLedger({ rows = [], children, className = "", ...rest }) {
-  const [expanded, setExpanded] = useState(false);
+  // Empty ledger: a bare card wrapping arbitrary children (used by specimens).
   if (rows.length === 0) {
     return (
-      <div class={`ledger ${className}`.trim()} {...rest}>
+      <div class={`tg ${className}`.trim()} {...rest}>
         {children}
       </div>
     );
   }
 
-  const isLive = rows[rows.length - 1].live === true;
-  const showTail = !expanded && (isLive || rows.length > 3);
-
-  if (showTail) {
-    // The tail view is its own self-contained block (border/background per
-    // mockup, `.tail` in ActivityLedger.css) — it does NOT nest inside the
-    // `.ledger` list container (which has its own border), avoiding a
-    // double-border box.
-    return <TailView rows={rows} visibleDone={2} onExpand={() => setExpanded(true)} {...rest} />;
-  }
-
   return (
-    <div class={`ledger ${className}`.trim()} {...rest}>
-      {rows.map((row, i) =>
-        row.live ? (
-          <TailLiveLine key={rowKey(row, i)} row={row} />
-        ) : (
-          <LedgerRow key={rowKey(row, i)} {...row} />
-        ),
+    <div class={`tg ${className}`.trim()} {...rest}>
+      {folded && earlier.length > 0 && (
+        <FoldHeader
+          expanded={false}
+          earlierCount={earlier.length}
+          earlierErrors={earlierErrors}
+          onToggle={() => setExpanded(true)}
+        />
       )}
+      {expanded && foldable && (
+        <FoldHeader
+          expanded
+          summary={summarizeRows(doneRows.concat(liveRow ? [liveRow] : []))}
+          onToggle={() => setExpanded(false)}
+        />
+      )}
+      {visible.map((row, i) => (
+        <DoneRow key={rowKey(row, i)} row={row} />
+      ))}
+      {liveRow && <LiveRow key={rowKey(liveRow, doneRows.length)} row={liveRow} />}
     </div>
   );
 }

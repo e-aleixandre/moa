@@ -5,6 +5,30 @@
   margin: var(--space-2) 0 var(--space-5);
 }
 
+/* flush — borderless mode for code/diff rendered INSIDE another surface (the
+   tool-group card's .tg-detail panel). No border/radius/margin and a
+   transparent, unpadded body so the host panel is the only surface (kills the
+   "card inside a card"). */
+.code.flush {
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  margin: 0;
+}
+
+.code.flush:not(.diff) pre {
+  background: transparent;
+  padding: var(--space-2) var(--space-4);
+}
+
+.code.flush.diff pre {
+  background: transparent;
+}
+
+.code.flush .code-head {
+  display: none;
+}
+
 .code .code-head {
   display: flex;
   align-items: center;

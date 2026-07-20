@@ -10,7 +10,7 @@ export const MIN_DWELL_MS = 400;
 // frame; it spends this long in a `folding` state (height + opacity animating
 // to 0) so the collapse reads as a motion toward the "N earlier actions"
 // counter instead of a jump (TOOL-LIVE-FIXES-SPEC-FABLE.md P2, option 2A).
-// Keep it in sync with the .tail-line.folding transition in ActivityLedger.css.
+// Keep it in sync with the .tg-row.folding transition in ActivityLedger.css.
 export const FOLD_MS = 180;
 
 // computeTailWindow — the pure state step behind useTailWindow (exported for

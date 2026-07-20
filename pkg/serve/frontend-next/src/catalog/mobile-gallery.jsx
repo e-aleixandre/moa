@@ -1,11 +1,11 @@
 import {
   UserWaypoint,
   AssistantDocument,
+  ActivityLedger,
   CodeBlock,
+  DiffBlock,
   PermissionCard,
   PermissionControl,
-  MobileLedger,
-  LedgerIcons,
   TokenFlow,
 } from "../components/index.js";
 import { MobileHeader } from "../layout/mobile/MobileHeader/MobileHeader.jsx";
@@ -21,11 +21,10 @@ import "./mobile-gallery.css";
 // (hardcoded sessions / ledgers / conversation) lives HERE as
 // MobileConversationSpecimen, decoupled from the connected container. It never
 // touches the store — it renders the presentational chrome (MobileHeader /
-// SessionStrip) around a hand-built AssistantDocument with mock MobileLedgers,
-// plus a static MobileComposerSpecimen (the connected MobileComposer wraps the
-// store-bound Composer, so the gallery uses a dumb stand-in for it).
-
-const { FileText, Search, Pencil, Terminal } = LedgerIcons;
+// SessionStrip) around a hand-built AssistantDocument with mock tool-group
+// cards (<ActivityLedger>), plus a static MobileComposerSpecimen (the connected
+// MobileComposer wraps the store-bound Composer, so the gallery uses a dumb
+// stand-in for it).
 
 const SESSIONS = [
   { id: "ws", name: "ws race", state: "running" },
@@ -33,20 +32,6 @@ const SESSIONS = [
   { id: "frontend", name: "frontend", state: "idle" },
   { id: "sqlite", name: "sqlite", state: "error" },
 ];
-
-const READ_ICONS = (
-  <>
-    <FileText size={13} aria-hidden="true" />
-    <Search size={13} aria-hidden="true" />
-  </>
-);
-
-const WORK_ICONS = (
-  <>
-    <Pencil size={12} aria-hidden="true" />
-    <Terminal size={13} aria-hidden="true" />
-  </>
-);
 
 const EDIT_DIFF = `@@ -262,6 +262,7 @@
  func (c *client) resume(…) error {
@@ -69,81 +54,53 @@ c.forward(ch, func(e Event) bool {
   return e.Seq > last
 })`;
 
+// Ledger rows in the projectStream shape ({ tool, arg:{text}, out, status, id,
+// body?, live?, startedAt?, liveTail?, detail? }) — the SAME shape the real
+// stream feeds <ActivityLedger>. `detail.node` is the borderless block that
+// opens inside the unified card.
 const READ_ROWS = [
-  {
-    id: "read",
-    kind: "read",
-    name: "read",
-    action: "2 files · pkg/serve",
-    result: "ok",
-    detail: {
-      type: "files",
-      files: [
-        { id: "ws", name: "pkg/serve/ws.go", lines: "lines 210–340" },
-        { id: "ws-test", name: "pkg/serve/ws_test.go", lines: "all · 214 ln" },
-      ],
-    },
-  },
+  { id: "r1", tool: "read", arg: { text: "pkg/serve/ws.go" }, out: "232 lines", status: "ok" },
+  { id: "r2", tool: "grep", arg: { text: '"Subscribe(" in pkg/bus' }, out: "7 matches", status: "ok" },
 ];
 
-// TAIL_ROWS / TAIL_LIVE — a live batch for the mobile B·Tail console-tail view:
-// folded "N earlier actions" header (+ red error count), one terminated line,
-// and the live line.
+// A live batch: some done rows + a trailing live bash streaming its tail.
 const TAIL_ROWS = [
-  { id: "tr1", name: "read", action: "pkg/serve/ws.go", result: "130 ln", status: "ok" },
-  { id: "tr2", name: "grep", action: '"Subscribe("', result: "7", status: "ok" },
-  { id: "tr3", name: "bash", action: "go vet ./pkg/serve/", result: "error", status: "err" },
-  { id: "tr4", name: "edit", action: "pkg/serve/ws.go", result: "+5 −3", status: "ok" },
+  { id: "tr1", tool: "read", arg: { text: "pkg/serve/ws.go" }, out: "130 lines", status: "ok" },
+  { id: "tr2", tool: "grep", arg: { text: '"Subscribe("' }, out: "7 matches", status: "ok" },
+  { id: "tr3", tool: "bash", arg: { text: "go vet ./pkg/serve/" }, out: "exit 1", status: "err" },
+  { id: "tr4", tool: "edit", arg: { text: "pkg/serve/ws.go" }, out: "+5 −3", status: "ok" },
+  {
+    id: "tr5",
+    tool: "bash",
+    arg: { text: "go test -race -count=50 ./pkg/serve/" },
+    live: true,
+    startedAt: Date.now() - 7000,
+    liveTail:
+      "=== RUN   TestResumeDelivery\n--- PASS: TestResumeDelivery (0.41s)\n=== RUN   TestResumeSnapshot",
+  },
 ];
-const TAIL_LIVE = {
-  id: "tr5",
-  tool: "bash",
-  arg: { text: "go test -race -count=50 ./pkg/serve/" },
-  startedAt: Date.now() - 7000,
-  liveTail: "=== RUN   TestResumeDelivery\n--- PASS: TestResumeDelivery (0.41s)\n=== RUN   TestResumeSnapshot",
-};
 
+// A finished batch with an inline diff + bash output, details fused as nodes.
 const WORK_ROWS = [
+  { id: "w1", tool: "read", arg: { text: "pkg/serve/ws.go" }, out: "340 lines", status: "ok" },
   {
-    id: "read",
-    kind: "read",
-    name: "read",
-    action: "2 files · pkg/serve",
-    result: "ok",
-    detail: {
-      type: "files",
-      files: [
-        { id: "ws", name: "pkg/serve/ws.go", lines: "lines 210–340" },
-        { id: "ws-test", name: "pkg/serve/ws_test.go", lines: "all · 214 ln" },
-      ],
-    },
+    id: "w2",
+    tool: "edit",
+    arg: { text: "pkg/serve/ws.go · resume()" },
+    out: "+5 −3",
+    status: "ok",
+    detail: { node: <DiffBlock className="flush" diffText={EDIT_DIFF} filename="pkg/serve/ws.go" /> },
   },
   {
-    id: "edit",
-    kind: "edit",
-    name: "edit",
-    action: "pkg/serve/ws.go · resume()",
-    result: "+5 −3",
-    detail: {
-      type: "diff",
-      diffText: EDIT_DIFF,
-      filename: "pkg/serve/ws.go",
-      actions: ["open file", "copy diff"],
-    },
-  },
-  {
-    id: "bash",
-    kind: "bash",
-    name: "bash",
-    action: "go test -race -count=50 ./pkg/serve/",
-    result: "ok",
-    detail: {
-      type: "bash",
-      output: BASH_OUTPUT,
-      actions: ["full output", "re-run"],
-    },
+    id: "w3",
+    tool: "bash",
+    arg: { text: "go test -race -count=50 ./pkg/serve/" },
+    out: "3 lines",
+    status: "ok",
+    detail: { node: <CodeBlock className="flush" code={BASH_OUTPUT} lang="bash" showHeader={false} /> },
   },
 ];
+
 
 // DRAWER_SESSIONS — mock data for the sessions bottom-sheet (mockup Phone 2).
 export const DRAWER_SESSIONS = [
@@ -265,26 +222,11 @@ export function MobileConversationSpecimen() {
             snapshot read, so events in that window are lost.
           </p>
 
-          <MobileLedger
-            summary="read 2 files · searched pkg/bus"
-            icons={READ_ICONS}
-            rows={READ_ROWS}
-          />
+          <ActivityLedger rows={READ_ROWS} visibleDone={1} />
 
-          <MobileLedger
-            summary="2 edits · tests ok"
-            icons={WORK_ICONS}
-            rows={WORK_ROWS}
-            defaultOpen
-            defaultOpenRowIds={["read", "edit", "bash"]}
-          />
+          <ActivityLedger rows={WORK_ROWS} visibleDone={1} />
 
-          <MobileLedger
-            summary="B·Tail — live batch"
-            icons={READ_ICONS}
-            rows={TAIL_ROWS}
-            liveRow={TAIL_LIVE}
-          />
+          <ActivityLedger rows={TAIL_ROWS} visibleDone={1} />
 
           <CodeBlock code={CODE_SAMPLE} lang="go" showHeader={false} />
 
