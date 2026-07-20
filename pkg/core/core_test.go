@@ -194,6 +194,26 @@ func TestToolSpec(t *testing.T) {
 	}
 }
 
+func TestRegistryRejectsReservedCheckpoint(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Register(Tool{Name: "checkpoint"}); err == nil {
+		t.Fatal("reserved checkpoint was registered")
+	}
+	if _, ok := r.Get("checkpoint"); ok {
+		t.Fatal("reserved checkpoint leaked into registry")
+	}
+	overlay, err := r.WithInternalTools(Tool{Name: "checkpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := overlay.Get("checkpoint"); !ok {
+		t.Fatal("internal overlay lacks checkpoint")
+	}
+	if _, ok := r.Get("checkpoint"); ok {
+		t.Fatal("overlay mutated shared registry")
+	}
+}
+
 func TestResultConstructors(t *testing.T) {
 	r := TextResult("hello")
 	if len(r.Content) != 1 || r.Content[0].Type != "text" || r.Content[0].Text != "hello" {

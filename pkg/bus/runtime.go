@@ -215,9 +215,6 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 
 	// Compose permission check: plan mode filter + gate check.
 	permCheck := func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-		if name == "checkpoint" {
-			return nil
-		}
 		if sctx.PlanMode != nil {
 			if allowed, reason := sctx.PlanMode.FilterToolCall(name, args); !allowed {
 				return &core.ToolCallDecision{

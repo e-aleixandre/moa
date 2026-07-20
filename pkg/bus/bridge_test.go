@@ -14,6 +14,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
 	"github.com/ealeixandre/moa/pkg/tasks"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -318,6 +319,10 @@ func (f *fakeAgent) Send(ctx context.Context, prompt string) ([]core.AgentMessag
 }
 
 func (f *fakeAgent) SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return f.Send(ctx, prompt)
+}
+
+func (f *fakeAgent) SendPrepareCompact(ctx context.Context, prompt string, _ *sessioncheckpoint.Slot, _ string) ([]core.AgentMessage, error) {
 	return f.Send(ctx, prompt)
 }
 

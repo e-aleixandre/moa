@@ -12,6 +12,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/extension"
+	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
 )
 
 // --- MockProvider ---
@@ -308,6 +309,98 @@ func TestIngress_AllUserMessagesGetMsgID(t *testing.T) {
 		}
 		assertAllHaveMsgID(t, ag.Messages())
 	})
+}
+
+func TestSendPrepareCompactIsRunScoped(t *testing.T) {
+	seenPrepare, seenNormal := false, false
+	provider := NewMockProvider(
+		func(req core.Request) (<-chan core.AssistantEvent, error) {
+			seenPrepare = hasToolSpec(req.Tools, "checkpoint") && strings.Contains(req.System, "internal checkpoint guidance")
+			return toolCallResponse("cp", "checkpoint", map[string]any{})(req)
+		},
+		simpleTextResponse("prepared"),
+		func(req core.Request) (<-chan core.AssistantEvent, error) {
+			seenNormal = !hasToolSpec(req.Tools, "checkpoint") && !strings.Contains(req.System, "internal checkpoint guidance")
+			return simpleTextResponse("normal")(req)
+		},
+	)
+	ag := newTestAgent(provider)
+	if _, err := ag.SendPrepareCompact(context.Background(), "prepare", sessioncheckpoint.New(), "\ninternal checkpoint guidance"); err != nil {
+		t.Fatal(err)
+	}
+	if !seenPrepare {
+		t.Fatal("temporary checkpoint was not available")
+	}
+	if _, err := ag.Send(context.Background(), "normal"); err != nil {
+		t.Fatal(err)
+	}
+	if !seenNormal {
+		t.Fatal("temporary checkpoint or prompt leaked to normal run")
+	}
+}
+
+func TestSendPrepareCompactNeverLeaksAfterFailureCancelOrPanic(t *testing.T) {
+	panicProvider := NewMockProvider(func(core.Request) (<-chan core.AssistantEvent, error) {
+		panic("provider panic")
+	})
+	for _, tc := range []struct {
+		name     string
+		provider core.Provider
+		ctx      func() (context.Context, context.CancelFunc)
+		panicRun bool
+	}{
+		{
+			name: "error",
+			provider: NewMockProvider(func(core.Request) (<-chan core.AssistantEvent, error) {
+				return nil, errors.New("prepare failed")
+			}),
+			ctx: func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+		},
+		{
+			name:     "cancel",
+			provider: &ctxBlockingProvider{},
+			ctx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+		},
+		{
+			name:     "panic",
+			provider: panicProvider,
+			ctx:      func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+			panicRun: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := newTestAgent(tc.provider)
+			ctx, cancel := tc.ctx()
+			defer cancel()
+			panicked := false
+			func() {
+				defer func() { panicked = recover() != nil }()
+				_, _ = ag.SendPrepareCompact(ctx, "prepare", sessioncheckpoint.New(), "")
+			}()
+			if panicked != tc.panicRun {
+				t.Fatalf("panicked=%v, want %v", panicked, tc.panicRun)
+			}
+			if _, ok := ag.tools.Get("checkpoint"); ok {
+				t.Fatal("checkpoint leaked into shared registry")
+			}
+			if ag.IsRunning() {
+				t.Fatal("agent remained running after temporary-tool run")
+			}
+		})
+	}
+}
+
+func hasToolSpec(specs []core.ToolSpec, name string) bool {
+	for _, spec := range specs {
+		if spec.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLoop_ToolCallAndResult(t *testing.T) {

@@ -53,6 +53,17 @@ func TestBuildSession_Minimal(t *testing.T) {
 			t.Errorf("expected tool %q to be registered", name)
 		}
 	}
+	if _, ok := sess.ToolReg.Get("checkpoint"); ok {
+		t.Fatal("normal registry must not contain the internal checkpoint tool")
+	}
+	for _, spec := range sess.ToolReg.Specs() {
+		if spec.Name == "checkpoint" {
+			t.Fatal("normal tool specs must not expose checkpoint")
+		}
+	}
+	if strings.Contains(sess.SystemPrompt, "checkpoint") {
+		t.Fatal("normal system prompt must not mention checkpoint availability")
+	}
 }
 
 func TestBuildSession_RequiredFields(t *testing.T) {

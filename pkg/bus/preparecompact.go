@@ -15,6 +15,23 @@ type checkpointCompacter interface {
 	CompactWithCheckpoint(context.Context, string) (*core.CompactionPayload, error)
 }
 
+// prepareCompactSender is intentionally specific: callers cannot provide an
+// arbitrary tool to gain the checkpoint permission bypass.
+type prepareCompactSender interface {
+	SendPrepareCompact(context.Context, string, *sessioncheckpoint.Slot, string) ([]core.AgentMessage, error)
+}
+
+const prepareCheckpointPrompt = `
+
+This is an internal pre-compaction run. The checkpoint tool is available only in this run. It can read the currently saved checkpoint, write a complete replacement, or clear it. Use it only for active non-reconstructible handoff data; memory is not a handoff or pre-compaction mechanism. If a checkpoint may remain from a failed earlier preparation, read and review it before deciding to preserve, replace, or clear it.`
+
+func sendPrepareCompact(ctx context.Context, sctx *SessionContext, prompt string) ([]core.AgentMessage, error) {
+	if a, ok := sctx.Agent.(prepareCompactSender); ok && sctx.SessionCheckpoint != nil {
+		return a.SendPrepareCompact(ctx, prompt, sctx.SessionCheckpoint, prepareCheckpointPrompt)
+	}
+	return nil, fmt.Errorf("agent does not support internal prepare compact")
+}
+
 func compactWithCheckpoint(ctx context.Context, sctx *SessionContext, checkpoint string) (*core.CompactionPayload, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

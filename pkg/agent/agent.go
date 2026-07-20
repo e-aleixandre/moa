@@ -12,6 +12,8 @@ import (
 	"github.com/ealeixandre/moa/pkg/compaction"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/extension"
+	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // BudgetExceededError is returned when a run's accumulated cost exceeds MaxBudget.
@@ -447,6 +449,27 @@ func (a *Agent) SendWithCustom(ctx context.Context, prompt string, custom map[st
 		msg.Custom = custom
 		a.state.Messages = append(a.state.Messages, msg)
 	})
+}
+
+// SendPrepareCompact runs the internal pre-compaction turn. It is the only
+// entry point that grants the checkpoint permission bypass, and it always
+// constructs that tool from slot rather than accepting a caller-provided tool.
+func (a *Agent) SendPrepareCompact(ctx context.Context, prompt string, slot *sessioncheckpoint.Slot, extraPrompt string) ([]core.AgentMessage, error) {
+	if slot == nil {
+		return nil, errors.New("prepare compact requires checkpoint slot")
+	}
+	overlay, err := a.tools.WithInternalTools(tool.NewSessionCheckpoint(slot))
+	if err != nil {
+		return nil, err
+	}
+	return a.executeWithOptions(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		msg.Custom = map[string]any{"source": "prepare_compact", "internal": true}
+		a.state.Messages = append(a.state.Messages, msg)
+	}, overlay, extraPrompt, true)
 }
 
 // SendWithContent appends a user message with mixed content blocks (text + images)
@@ -1150,6 +1173,10 @@ func ensureMsgIDs(msgs []core.AgentMessage) {
 // atomically with the "not running" check. This prevents races where concurrent
 // callers could mutate state before getting the "already running" error.
 func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessage, error) {
+	return a.executeWithOptions(ctx, prepare, a.tools, "", false)
+}
+
+func (a *Agent) executeWithOptions(ctx context.Context, prepare func(), tools *core.Registry, extraPrompt string, allowCheckpoint bool) ([]core.AgentMessage, error) {
 	a.mu.Lock()
 	if a.cancel != nil {
 		a.mu.Unlock()
@@ -1198,21 +1225,34 @@ func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessag
 		streamOpts.MaxTokens = &mt
 	}
 
+	permissionCheck := a.config.PermissionCheck
+	if allowCheckpoint {
+		baseCheck := permissionCheck
+		permissionCheck = func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+			if name == "checkpoint" {
+				return nil
+			}
+			if baseCheck != nil {
+				return baseCheck(ctx, name, args)
+			}
+			return nil
+		}
+	}
 	cfg := &loopConfig{
 		provider:            a.config.Provider,
-		tools:               a.tools,
+		tools:               tools,
 		hooks:               a.hooks,
 		emitter:             a.emitter,
 		state:               &a.state,
 		stateMu:             &a.mu,
 		model:               a.config.Model,
-		systemPrompt:        a.config.SystemPrompt,
+		systemPrompt:        a.config.SystemPrompt + extraPrompt,
 		streamOpts:          streamOpts,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		maxBudget:           a.config.MaxBudget,
 		convertToLLM:        a.config.ConvertToLLM,
-		permissionCheck:     a.config.PermissionCheck,
+		permissionCheck:     permissionCheck,
 		compaction:          a.config.Compaction,
 		drainSteers:         a.steers.drainUntilBarrier,
 		settleSteers:        a.steers.settle,

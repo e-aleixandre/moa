@@ -377,10 +377,6 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		core.RegisterOrLog(toolReg, askuser.NewTool(askBridge))
 	}
 
-	// Register last so project scripts or MCP servers cannot replace this
-	// permission-exempt internal tool with an external implementation.
-	core.RegisterOrLog(toolReg, tool.NewSessionCheckpoint(sessionCheckpoint))
-
 	// Build the session struct early so subagent closures can reference it.
 	sess := &Session{
 		ToolReg:           toolReg,
