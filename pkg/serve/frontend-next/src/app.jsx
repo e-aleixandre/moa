@@ -185,24 +185,28 @@ function useBootstrap() {
   // Initial session load + selection, polling.
   useEffect(() => {
     let mounted = true;
-    loadSessions().then(() => {
-      if (!mounted) return; // unmounted mid-flight: don't touch the store/view
-      setStoreState({ sessionsLoaded: true });
-      const wanted = new URLSearchParams(location.search).get("session");
-      if (wanted && openSession(wanted)) {
-        // Strip only ?session= (a one-shot deep-link that must not re-pin on
-        // refresh) while preserving ?view= so a `?view=grid&session=X` link
-        // keeps the URL in sync with the store's seeded view.
-        const params = new URLSearchParams(location.search);
-        params.delete("session");
-        const qs = params.toString();
-        history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
-      } else if (store.get().isMobile) {
-        autoSelectMobile();
-      } else {
-        autoFillTiles();
-      }
-    });
+    loadSessions()
+      .then(() => {
+        if (!mounted) return; // unmounted mid-flight: don't touch the store/view
+        const wanted = new URLSearchParams(location.search).get("session");
+        if (wanted && openSession(wanted)) {
+          // Strip only ?session= (a one-shot deep-link that must not re-pin on
+          // refresh) while preserving ?view= so a `?view=grid&session=X` link
+          // keeps the URL in sync with the store's seeded view.
+          const params = new URLSearchParams(location.search);
+          params.delete("session");
+          const qs = params.toString();
+          history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
+        } else if (store.get().isMobile) {
+          autoSelectMobile();
+        } else {
+          autoFillTiles();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setStoreState({ sessionsLoaded: true });
+      });
     startPolling();
     startUsagePolling();
     // Reconcile the browser's actual push state on load (D4: /next relies on the

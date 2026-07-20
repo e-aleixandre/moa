@@ -205,7 +205,7 @@ export function stopUsagePolling() {
 }
 
 export async function createSession(opts) {
-  const sess = await api('POST', '/api/sessions', opts);
+  const sess = await api('POST', '/api/sessions', opts, { timeoutMs: 0 });
   await loadSessions();
   const state = store.get();
   const id = sess.id;
@@ -334,7 +334,7 @@ export async function sendMessage(id, text, attachments = []) {
       text,
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
       steer_id: steerId || undefined,
-    });
+    }, { timeoutMs: 0 });
     // Mark the chip confirmed now that the server accepted it: from here on it
     // is part of the authoritative queue, so a reconnect snapshot that omits it
     // means "delivered/cancelled" (drop it) rather than "in flight" (keep it).
@@ -482,7 +482,7 @@ export async function resolveAskUser(sessionId, askId, answers) {
 }
 
 export async function resumeSession(id) {
-  const sess = await api('POST', `/api/sessions/${id}/resume`);
+  const sess = await api('POST', `/api/sessions/${id}/resume`, undefined, { timeoutMs: 0 });
   await loadSessions();
   const state = store.get();
   if (state.isMobile) {
@@ -510,12 +510,12 @@ export async function configureSession(id, { model, thinking, permissionMode }) 
 }
 
 export async function trustMcp(id) {
-  await api('POST', `/api/sessions/${id}/trust-mcp`);
+  await api('POST', `/api/sessions/${id}/trust-mcp`, undefined, { timeoutMs: 0 });
   updateSession(id, { untrustedMcp: false });
 }
 
 export async function execCommand(id, command, steerId = '') {
-  const res = await api('POST', `/api/sessions/${id}/command`, { command, id: steerId || undefined });
+  const res = await api('POST', `/api/sessions/${id}/command`, { command, id: steerId || undefined }, { timeoutMs: 0 });
   if (res && res.newSessionId) {
     await loadSessions();
     const state = store.get();
@@ -542,7 +542,8 @@ export async function branchTo(id, entryId) {
 }
 
 export async function execShell(id, command, silent) {
-  const result = await api('POST', `/api/sessions/${id}/shell`, { command, silent });
+  // The server permits user shell commands to run for up to five minutes.
+  const result = await api('POST', `/api/sessions/${id}/shell`, { command, silent }, { timeoutMs: 0 });
   const output = (result.output || '').replace(/\n$/, '');
   const isError = result.exit_code !== 0 || result.timed_out;
 

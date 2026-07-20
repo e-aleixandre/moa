@@ -21,16 +21,41 @@ import {
 } from './ws-handlers.js';
 
 export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
+export const DEFAULT_API_TIMEOUT_MS = 15000;
 
-export async function api(method, path, body) {
+export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS } = {}) {
+  const controller = timeoutMs > 0 ? new AbortController() : null;
   const opts = { method, headers: REQUEST_HEADERS };
   if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-  if (r.status === 204) return null;
-  const text = await r.text();
-  if (!text) return null;
-  return JSON.parse(text);
+  if (controller) opts.signal = controller.signal;
+
+  let timedOut = false;
+  let timer = null;
+  if (controller) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+
+  try {
+    const r = await fetch(path, opts);
+    if (timedOut) throw new Error('request aborted');
+    if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    if (r.status === 204) return null;
+    const text = await r.text();
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch (e) {
+    if (timedOut) {
+      const error = new Error(`Request timed out after ${timeoutMs}ms: ${method} ${path}`);
+      error.name = 'TimeoutError';
+      throw error;
+    }
+    throw e;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
 }
 
 export function getVersion() {
