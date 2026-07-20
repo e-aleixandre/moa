@@ -4,7 +4,7 @@ import {
   AssistantDocument,
   ActivityLedger,
   DiffBlock,
-  FanoutBlock,
+  DelegationBlock,
   BackgroundJob,
   FileCard,
 } from "../../components/index.js";
@@ -52,8 +52,16 @@ function docChildren(blocks, onOpenSubagent) {
         );
       case "file":
         return <FileCard key={b.id} file={b.file} />;
-      case "fanout":
-        return <FanoutBlock key={b.id} agents={b.agents} onOpenAgent={onOpenSubagent} />;
+      case "delegation":
+        return (
+          <DelegationBlock
+            key={b.id}
+            agents={b.agents}
+            summary={b.summary}
+            settled={b.settled}
+            onOpenAgent={onOpenSubagent}
+          />
+        );
       case "background":
         return b.jobs.map((job) => (
           <BackgroundJob key={job.jobId} {...job} />

@@ -152,6 +152,9 @@ export function projectStream(session) {
   // currentDoc, or null when the last thing pushed was prose/diff.
   let currentDoc = null;
   let currentLedger = null;
+  // currentDelegation = the open delegation block for this turn (SUBAGENTS-
+  // REDESIGN-SPEC §1), or null. Reset at every turn boundary like currentDoc.
+  let currentDelegation = null;
 
   // abs = absolute index of the message being processed (stable across polls
   // as long as older messages aren't dropped), used to derive block ids that
@@ -179,11 +182,32 @@ export function projectStream(session) {
       blocks.push({ kind: 'system', id: `sys-${abs}`, text: msg.text || '' });
       currentDoc = null;
       currentLedger = null;
+      currentDelegation = null;
       continue;
     }
 
     if (msg && msg._type === 'tool_start') {
+      // subagent_wait is pure mechanism (launch + wait are two tool calls); it
+      // only feeds the "parent is blocked waiting" state, never a row
+      // (SUBAGENTS-REDESIGN-SPEC §4). Drop it from the projection entirely.
+      if (msg.tool_name === 'subagent_wait') continue;
+
       const doc = ensureDoc();
+
+      // A subagent card (live-completed or from history) is not a normal ledger
+      // row: it folds into the turn's delegation block (SUBAGENTS-REDESIGN-SPEC
+      // §1). Keyed `subagent-<jobId>`, tool_name 'subagent'.
+      if (msg.tool_name === 'subagent') {
+        if (!currentDelegation) {
+          currentDelegation = { type: 'delegation', id: `delegation-${abs}`, agents: [], settled: true };
+          doc.blocks.push(currentDelegation);
+        }
+        const jobId = String(msg.tool_call_id || '').replace(/^subagent-/, '');
+        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex)));
+        closeLedger();
+        continue;
+      }
+
       if (!currentLedger) {
         currentLedger = { type: 'ledger', id: `ledger-${abs}`, rows: [] };
         doc.blocks.push(currentLedger);
@@ -224,6 +248,7 @@ export function projectStream(session) {
       // User turn boundary: close the previous assistant document.
       currentDoc = null;
       currentLedger = null;
+      currentDelegation = null;
       const attachments = attachmentsOf(msg.content);
       const wp = {
         kind: 'waypoint',
@@ -257,23 +282,36 @@ export function projectStream(session) {
     if (hasThinking) doc.blocks.push({ type: 'thinking', id: `${doc.id}-thinking`, text: session.thinkingText });
     if (hasStreamingText) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText });
 
-    // Live subagents: a lone one is a ledger row, 2+ overlapping → a fanout.
-    if (liveSubs.length === 1) {
-      doc.blocks.push({ type: 'ledger', id: `${doc.id}-livesub`, rows: [liveSubRow(liveSubs[0])] });
-    } else if (liveSubs.length >= 2) {
-      doc.blocks.push({
-        type: 'fanout',
-        id: `${doc.id}-fanout`,
-        agents: liveSubs.map((s) => liveAgent(s, subagentAccentIndex(session.subagents, s.jobId))),
-      });
+    // Live subagents merge into this turn's delegation block (creating one if
+    // the turn had none yet), joining any already-terminated agent rows. The
+    // block is `settled:false` while at least one agent is still running so the
+    // renderer keeps it live (hairline sweep, breathing dots) instead of
+    // auto-collapsing (SUBAGENTS-REDESIGN-SPEC §1.3).
+    if (liveSubs.length > 0) {
+      if (!currentDelegation) {
+        currentDelegation = { type: 'delegation', id: `${doc.id}-delegation`, agents: [] };
+        doc.blocks.push(currentDelegation);
+      }
+      for (const s of liveSubs) {
+        currentDelegation.agents.push(
+          delegationRunningAgent(s, subagentAccentIndex(session.subagents, s.jobId)),
+        );
+      }
+      currentDelegation.settled = false;
     }
 
+    // Parent async bash (no owning subagent) stays a background block (spec §2).
     if (liveBash.length > 0) {
       doc.blocks.push({ type: 'background', id: `${doc.id}-bg`, jobs: liveBash.map(backgroundJob) });
     }
 
     doc.kind = 'streaming';
   }
+
+  // Finalize every delegation block: attach its summary and mark settled ones
+  // (all agents terminated) so the renderer auto-collapses them to the header
+  // line (SUBAGENTS-REDESIGN-SPEC §1.3).
+  finalizeDelegations(blocks);
 
   return blocks;
 }
@@ -303,6 +341,33 @@ export function subagentAccentIndex(subagents, jobId) {
   if (sub && Number.isInteger(sub.accentIndex)) return sub.accentIndex;
   const i = Object.keys(subagents).indexOf(jobId);
   return i >= 0 ? i : 0;
+}
+
+// jobIdAccentIndex deterministically derives a palette slot from a job id, so a
+// terminated card whose live entry is gone (e.g. after reconnect) keeps a stable
+// color instead of collapsing to slot 0.
+function jobIdAccentIndex(jobId) {
+  const s = String(jobId || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % FANOUT_ACCENTS.length;
+}
+
+// subagentAccent resolves a terminated card's accent token, preferring an
+// explicit accentIndex saved on the card, then the live session entry, then a
+// deterministic hash of the job id (never a blind slot 0).
+function subagentAccent(subagents, jobId, cardAccentIndex) {
+  let idx;
+  if (Number.isInteger(cardAccentIndex)) idx = cardAccentIndex;
+  else if (hasSubagentEntry(subagents, jobId)) idx = subagentAccentIndex(subagents, jobId);
+  else idx = jobIdAccentIndex(jobId);
+  return FANOUT_ACCENTS[idx % FANOUT_ACCENTS.length];
+}
+
+function hasSubagentEntry(subagents, jobId) {
+  if (!subagents) return false;
+  if (Array.isArray(subagents)) return subagents.some((s) => s && String(s.jobId) === String(jobId));
+  return Object.prototype.hasOwnProperty.call(subagents, jobId);
 }
 
 // seenJobIdsOf collects every tool_call_id present in a message list, indexing
@@ -530,15 +595,84 @@ export function liveAgent(sub, i) {
   return agent;
 }
 
-// liveSubRow represents a lone live subagent as a ledger row (tool:'task').
-function liveSubRow(sub) {
-  return {
-    tool: 'task',
-    arg: { text: firstLine(sub.task) || sub.jobId || 'subagent' },
-    out: '',
-    status: 'ok',
+// ── Delegation block (SUBAGENTS-REDESIGN-SPEC §1) ──────────────────────────
+// A whole wave of subagents in one assistant turn is projected as a single
+// { kind:'delegation' } block: live subs mutate in place and terminated ones
+// fold to a ✓/✗ row with a short result chip — instead of the old pile of raw
+// subagent ledger rows + system line + toast + fanout. Parent async bash stays
+// a `background` block (spec §2); child bash without parent_job_id is an interim
+// gap handled in phase 2.
+
+// delegationRunningAgent builds a running agent row from a live subagent.
+function delegationRunningAgent(sub, accentIdx) {
+  const agent = {
     id: sub.jobId,
+    name: shortLabel(firstLine(sub.task)) || shortModel(sub.model) || sub.jobId || 'subagent',
+    accent: FANOUT_ACCENTS[accentIdx % FANOUT_ACCENTS.length],
+    state: 'running',
+    bashJobs: [],
   };
+  const action = agentAction(sub);
+  if (action) agent.action = action;
+  // Prefer the backend's cumulative elapsed; fall back to wall-clock since the
+  // job started (usage.elapsedMs isn't populated on live subagent entries).
+  const elapsedMs = (sub.usage && sub.usage.elapsedMs) ||
+    (sub.startedAtMs ? Date.now() - sub.startedAtMs : 0);
+  const time = formatElapsed(elapsedMs);
+  if (time) agent.time = time;
+  return agent;
+}
+
+// delegationDoneAgent builds a terminated agent row from a subagent card
+// (tool_name 'subagent', keyed `subagent-<jobId>`) already in messages. `accent`
+// comes from session.subagents (the completed entry keeps its accentIndex).
+function delegationDoneAgent(msg, accent) {
+  const jobId = String(msg.tool_call_id || '').replace(/^subagent-/, '');
+  const failed = msg.status === 'error' || msg.status === 'failed' || msg.status === 'cancelled';
+  const task = msg.args && msg.args.task ? firstLine(msg.args.task) : '';
+  const agent = {
+    id: jobId,
+    name: shortLabel(task) || jobId || 'subagent',
+    accent: accent || FANOUT_ACCENTS[0],
+    state: failed ? (msg.status === 'cancelled' ? 'cancelled' : 'failed') : 'done',
+    bashJobs: [],
+  };
+  const chip = msg.result ? shortLabel(firstLine(msg.result), 48) : '';
+  if (chip) agent.chip = chip;
+  return agent;
+}
+
+// delegationSummary counts states for the block header (·N done ·N failed).
+function delegationSummary(agents) {
+  let done = 0, failed = 0;
+  for (const a of agents) {
+    if (a.state === 'done') done++;
+    else if (a.state === 'failed' || a.state === 'cancelled') failed++;
+  }
+  return { total: agents.length, done, failed };
+}
+
+// finalizeDelegations walks the projected tree, attaches a summary to every
+// delegation block, and settles a block (settled:true) only when no agent is
+// still running — a settled block auto-collapses to its header line, a live one
+// stays expanded (SUBAGENTS-REDESIGN-SPEC §1.3). Delegation blocks are nested
+// inside document blocks.
+function finalizeDelegations(blocks) {
+  for (const b of blocks) {
+    // A live turn's document has kind 'streaming' instead of 'document'; both
+    // carry inner blocks, so match on the presence of a blocks array.
+    if (b && Array.isArray(b.blocks)) {
+      for (const inner of b.blocks) {
+        if (inner && inner.type === 'delegation') finalizeDelegation(inner);
+      }
+    }
+  }
+}
+
+function finalizeDelegation(d) {
+  d.summary = delegationSummary(d.agents);
+  const anyRunning = d.agents.some((a) => a.state === 'running');
+  d.settled = !anyRunning;
 }
 
 // backgroundJob builds one BackgroundJob descriptor from a live bash-kind

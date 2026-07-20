@@ -71,12 +71,20 @@ export function normalizeHistory(raw) {
       result.push({ _type: 'system', text });
     } else if (msg.role === 'user') {
       if (msg.custom?.source === 'subagent') {
+        // Key the restored card `subagent-<jobId>` so projectStream folds it
+        // into the turn's delegation block by the real job id (not a synthetic
+        // index). accentIndex, if saved, keeps the row's color stable across
+        // reloads; the projection falls back to a jobId hash otherwise.
+        const jobId = msg.custom.subagent_job_id;
         result.push({
           _type: 'tool_start',
-          tool_call_id: 'subagent_' + result.length,
+          tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
           tool_name: 'subagent',
           args: { task: msg.custom.subagent_task || '' },
-          status: (msg.custom.subagent_status || '') === 'completed' ? 'done' : 'error',
+          status: subagentRestoreStatus(msg.custom.subagent_status),
+          accentIndex: Number.isInteger(msg.custom.subagent_accent_index)
+            ? msg.custom.subagent_accent_index
+            : undefined,
           result: msg.custom.subagent_result || '',
         });
       } else if (msg.custom?.source === 'bash_job') {
@@ -100,7 +108,7 @@ export function normalizeHistory(raw) {
             tool_call_id: 'subagent_' + result.length,
             tool_name: 'subagent',
             args: { task: subagent.task },
-            status: subagent.status === 'completed' ? 'done' : 'error',
+            status: subagentRestoreStatus(subagent.status),
             result: subagent.result,
           });
         } else {
@@ -813,6 +821,16 @@ function markUnseen(id) {
   if (sess && !sess.unseen) updateSession(id, { unseen: true });
 }
 
+// isSessionAway is true when the user isn't looking at a session (tab hidden or
+// the session not on screen) — the same condition markUnseen uses. Toasts for
+// in-chat activity (subagent/bash completion) only fire when away, since a
+// visible delegation/background block already reports the outcome.
+function isSessionAway(id) {
+  const state = store.get();
+  const hidden = typeof document !== 'undefined' && document.hidden;
+  return hidden || !visibleSessionIds(state).includes(id);
+}
+
 export function handleWsConfigChange(id, data) {
   const sess = store.get().sessions[id];
   const patch = {
@@ -887,24 +905,33 @@ export function handleWsSubagentComplete(id, data) {
   // Keep the toast short: `task` is the full delegated prompt (often long,
   // multi-paragraph), and the full output is already available below as an
   // expandable subagent card in the chat, so the toast is just a heads-up.
+  // Only surface a toast when the session isn't already on screen — a visible
+  // delegation block already reports the outcome (SUBAGENTS-REDESIGN-SPEC §4).
   const taskLine = (data.task || data.job_id || '').split('\n')[0];
-  addToast({
-    sessionId: id,
-    title: `Subagent ${statusIcon} ${data.status}`,
-    detail: truncateText(taskLine, 140),
-    type: data.status === 'completed' ? 'done' : 'attention',
-  });
+  if (isSessionAway(id)) {
+    addToast({
+      sessionId: id,
+      title: `Subagent ${statusIcon} ${data.status}`,
+      detail: truncateText(taskLine, 140),
+      type: data.status === 'completed' ? 'done' : 'attention',
+    });
+  }
 
   // Add a subagent card to the chat (mirrors TUI's subagent block).
   const sess = store.get().sessions[id];
   if (!sess) return;
   const messages = [...(sess.messages || [])];
+  const priorAccent = sess.subagents && sess.subagents[data.job_id]
+    ? sess.subagents[data.job_id].accentIndex
+    : undefined;
   messages.push({
     _type: 'tool_start',
     tool_call_id: `subagent-${data.job_id}`,
     tool_name: 'subagent',
     args: { task: data.task || '' },
-    status: data.status === 'completed' ? 'done' : 'error',
+    // Preserve cancelled distinctly (⊘) from a real failure (✗).
+    status: data.status === 'completed' ? 'done' : data.status === 'cancelled' ? 'cancelled' : 'error',
+    accentIndex: Number.isInteger(priorAccent) ? priorAccent : undefined,
     result: data.text || '',
   });
   updateSession(id, { messages });
@@ -914,12 +941,16 @@ export function handleWsSubagentComplete(id, data) {
 export function handleWsBashComplete(id, data) {
   const statusIcon = data.status === 'completed' ? '✓' : data.status === 'failed' ? '✗' : '⊘';
   const cmdLine = (data.command || data.job_id || '').split('\n')[0];
-  addToast({
-    sessionId: id,
-    title: `Bash ${statusIcon} ${data.status}`,
-    detail: truncateText(cmdLine, 140),
-    type: data.status === 'completed' ? 'done' : 'attention',
-  });
+  // Only toast when the session isn't on screen — a visible background block
+  // already reports the outcome (SUBAGENTS-REDESIGN-SPEC §4).
+  if (isSessionAway(id)) {
+    addToast({
+      sessionId: id,
+      title: `Bash ${statusIcon} ${data.status}`,
+      detail: truncateText(cmdLine, 140),
+      type: data.status === 'completed' ? 'done' : 'attention',
+    });
+  }
 
   // Add a bash card to the chat (mirrors TUI's bash notification block).
   const sess = store.get().sessions[id];
@@ -1248,6 +1279,16 @@ export function handleWsCommand(id, data) {
 }
 
 /** Parse a subagent notification from a user message text (mirrors TUI's parseSubagentNotification). */
+function subagentRestoreStatus(raw) {
+  // Backend persists completed | failed | cancelled. Map to the projection's
+  // tool_start status vocabulary, keeping `cancelled` distinct from `error`
+  // so DelegationBlock can render ⊘ instead of ✗.
+  const s = String(raw || '');
+  if (s === 'completed') return 'done';
+  if (s === 'cancelled') return 'cancelled';
+  return 'error';
+}
+
 function parseSubagentNotification(text) {
   const prefixes = {
     '[subagent completed] ': 'completed',

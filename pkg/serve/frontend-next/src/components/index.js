@@ -17,6 +17,7 @@ export { ActivityLedger, LedgerRow, TailView } from "./ActivityLedger/ActivityLe
 export { CodeBlock } from "./CodeBlock/CodeBlock.jsx";
 export { DiffBlock, parseUnifiedDiff } from "./DiffBlock/DiffBlock.jsx";
 export { FanoutBlock } from "./FanoutBlock/FanoutBlock.jsx";
+export { DelegationBlock } from "./DelegationBlock/DelegationBlock.jsx";
 export { BackgroundJob } from "./BackgroundJob/BackgroundJob.jsx";
 export { StreamingSkeleton, TypingDots } from "./StreamingSkeleton/StreamingSkeleton.jsx";
 export { ToolTicker } from "./ToolTicker/ToolTicker.jsx";

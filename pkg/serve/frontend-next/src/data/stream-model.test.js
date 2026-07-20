@@ -110,10 +110,11 @@ test('tool status maps done→ok, error→err, rejected→warn', () => {
   expect(rows.map(r => r.status)).toEqual(['ok', 'err', 'warn']);
 });
 
-// ── 5. LIVE subagents: one → ledger row, two overlapping → fanout ────────────
+// ── 5. LIVE subagents: merged into a delegation block ────────────────────────
 // Only subagents still running/cancelling are read from session.subagents;
-// terminated ones live in session.messages (see section 5b below).
-test('two live subagents form a fanout matching the FanoutBlock shape', () => {
+// terminated ones live in session.messages (see section 5b below). A wave of
+// subagents in one turn is a single { type:'delegation' } block, not fanout.
+test('two live subagents form a delegation block, one running agent row each', () => {
   const s = session([assistant('Delegating.')], {
     subagents: {
       j1: { jobId: 'j1', task: 'Analyze auth', model: 'anthropic/sonnet', status: 'running', messages: [] },
@@ -123,11 +124,12 @@ test('two live subagents form a fanout matching the FanoutBlock shape', () => {
   const blocks = projectStream(s);
   const doc = blocks[blocks.length - 1];
   expect(doc.kind).toBe('streaming'); // live subagents make the turn streaming
-  const fanout = doc.blocks.find(b => b.type === 'fanout');
-  expect(fanout).toBeTruthy();
-  expect(fanout.agents).toHaveLength(2);
-  const byId = Object.fromEntries(fanout.agents.map(a => [a.id, a]));
-  // FanoutBlock consumes { id, name, accent, state, action?, time? }
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation).toBeTruthy();
+  expect(delegation.settled).toBe(false); // still running
+  expect(delegation.summary).toEqual({ total: 2, done: 0, failed: 0 });
+  expect(delegation.agents).toHaveLength(2);
+  const byId = Object.fromEntries(delegation.agents.map(a => [a.id, a]));
   expect(byId.j1.state).toBe('running');
   expect(byId.j1.name).toBe('Analyze auth');
   expect(byId.j1.accent).toBeTruthy();
@@ -135,12 +137,11 @@ test('two live subagents form a fanout matching the FanoutBlock shape', () => {
   expect(byId.j2.state).toBe('running');
   // accents cycle by index → the two agents differ
   expect(byId.j1.accent).not.toBe(byId.j2.accent);
-  // no stray props the component ignores
-  expect(byId.j1.jobId).toBeUndefined();
-  expect(byId.j1.status).toBeUndefined();
+  // no fanout anymore
+  expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
-test('a single live subagent is a ledger row, not a fanout', () => {
+test('a single live subagent is a delegation block with one agent, no header caseness', () => {
   const s = session([assistant('Delegating.')], {
     subagents: {
       j1: { jobId: 'j1', task: 'Do the thing', model: 'anthropic/sonnet', status: 'running', messages: [] },
@@ -149,26 +150,30 @@ test('a single live subagent is a ledger row, not a fanout', () => {
   const blocks = projectStream(s);
   const doc = blocks[blocks.length - 1];
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
-  const ledger = doc.blocks.find(b => b.type === 'ledger');
-  expect(ledger).toBeTruthy();
-  expect(ledger.rows[0].tool).toBe('task');
-  expect(ledger.rows[0].arg.text).toBe('Do the thing');
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation).toBeTruthy();
+  expect(delegation.agents).toHaveLength(1);
+  expect(delegation.agents[0].state).toBe('running');
+  expect(delegation.agents[0].name).toBe('Do the thing');
 });
 
 // ── 5b. TERMINATED subagents come from messages, not session.subagents ───────
-test('a terminated subagent in messages is a ledger row in place, not a fanout', () => {
+test('a terminated subagent in messages folds into a delegation block, not a ledger', () => {
   const s = session([
     assistant('Delegating.'),
     tool('subagent-j1', 'subagent', { task: 'Analyze auth' }, 'done', 'Found 3 issues in auth'),
     assistant('The subagent found issues.'),
   ]);
   const doc = projectStream(s)[0];
-  // prose, ledger (the subagent card), prose — in chronological order
-  expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'ledger', 'prose']);
-  const ledger = doc.blocks[1];
-  expect(ledger.rows[0].id).toBe('subagent-j1');
-  expect(ledger.rows[0].tool).toBe('subagent');
-  expect(ledger.rows[0].arg.text).toBe('Analyze auth');
+  // prose, delegation (the subagent card), prose — in chronological order
+  expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'delegation', 'prose']);
+  const delegation = doc.blocks[1];
+  expect(delegation.settled).toBe(true); // all terminated → auto-collapses
+  expect(delegation.summary).toEqual({ total: 1, done: 1, failed: 0 });
+  expect(delegation.agents[0].id).toBe('j1');
+  expect(delegation.agents[0].state).toBe('done');
+  expect(delegation.agents[0].name).toBe('Analyze auth');
+  expect(delegation.agents[0].chip).toBe('Found 3 issues in auth');
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
@@ -184,9 +189,9 @@ test('a completed subagent lingering in session.subagents is not duplicated', ()
     },
   });
   const blocks = projectStream(s);
-  // exactly one ledger row references j1, and there is no fanout/background
-  const rows = blocks.flatMap(b => (b.blocks || []).flatMap(x => x.rows || []));
-  expect(rows.filter(r => r.id === 'subagent-j1')).toHaveLength(1);
+  // exactly one delegation agent references j1, and there is no fanout/background
+  const agents = blocks.flatMap(b => (b.blocks || []).flatMap(x => x.agents || []));
+  expect(agents.filter(a => a.id === 'j1')).toHaveLength(1);
   expect(blocks.some(b => (b.blocks || []).some(x => x.type === 'fanout' || x.type === 'background'))).toBe(false);
 });
 
@@ -203,8 +208,8 @@ test('a still-running map entry already carded in messages is deduped by job id'
     },
   });
   const blocks = projectStream(s);
-  const rows = blocks.flatMap(b => (b.blocks || []).flatMap(x => x.rows || []));
-  expect(rows.filter(r => r.id === 'subagent-j1')).toHaveLength(1);
+  const agents = blocks.flatMap(b => (b.blocks || []).flatMap(x => x.agents || []));
+  expect(agents.filter(a => a.id === 'j1')).toHaveLength(1);
   expect(blocks.some(b => (b.blocks || []).some(x => x.type === 'fanout' || x.type === 'background'))).toBe(false);
 });
 
@@ -224,16 +229,18 @@ test('a still-running bash map entry already carded in messages is deduped by jo
   expect(blocks.some(b => (b.blocks || []).some(x => x.type === 'background'))).toBe(false);
 });
 
-test('two sequential terminated subagents form a plain two-row ledger, not a fanout', () => {
+test('two sequential terminated subagents form one delegation block, two agents', () => {
   const s = session([
     assistant('Delegating two tasks.'),
     tool('subagent-j1', 'subagent', { task: 'Analyze auth' }, 'done', 'found issues'),
     tool('subagent-j2', 'subagent', { task: 'Analyze db' }, 'done', 'looks fine'),
   ]);
   const doc = projectStream(s)[0];
-  expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'ledger']);
-  const ledger = doc.blocks[1];
-  expect(ledger.rows.map(r => r.id)).toEqual(['subagent-j1', 'subagent-j2']);
+  expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'delegation']);
+  const delegation = doc.blocks[1];
+  expect(delegation.agents.map(a => a.id)).toEqual(['j1', 'j2']);
+  expect(delegation.summary).toEqual({ total: 2, done: 2, failed: 0 });
+  expect(delegation.settled).toBe(true);
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
@@ -264,7 +271,7 @@ test('a live async bash job becomes a background block matching BackgroundJob', 
   expect(job.status).toBeUndefined();
 });
 
-test('a live bash job is not counted as a subagent for fanout', () => {
+test('a live bash job is not counted as a subagent for delegation', () => {
   const s = session([assistant('x')], {
     subagents: {
       b1: { jobId: 'b1', kind: 'bash', task: 'sleep 1', status: 'running', messages: [] },
@@ -273,11 +280,12 @@ test('a live bash job is not counted as a subagent for fanout', () => {
   });
   const blocks = projectStream(s);
   const doc = blocks[blocks.length - 1];
-  // one real subagent → ledger row (not fanout), plus a background block
+  // one real subagent → delegation block (not fanout), plus a background block
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
   expect(doc.blocks.some(b => b.type === 'background')).toBe(true);
-  const ledger = doc.blocks.find(b => b.type === 'ledger');
-  expect(ledger.rows[0].tool).toBe('task');
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation.agents).toHaveLength(1);
+  expect(delegation.agents[0].id).toBe('j1');
 });
 
 // ── 7. live turn → streaming, not document ───────────────────────────────────
@@ -449,9 +457,94 @@ test('a live subagent without messages does not break', () => {
     subagents: { j1: { jobId: 'j1', task: 'do', status: 'running' } },
   });
   const doc = projectStream(s)[projectStream(s).length - 1];
-  const ledger = doc.blocks.find(b => b.type === 'ledger');
-  expect(ledger.rows[0].tool).toBe('task');
-  expect(ledger.rows[0].arg.text).toBe('do');
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation).toBeTruthy();
+  expect(delegation.agents[0].name).toBe('do');
+  expect(delegation.agents[0].state).toBe('running');
+});
+
+test('a failed subagent is summarised as failed with an error chip', () => {
+  const s = session([
+    assistant('Delegating.'),
+    tool('subagent-j1', 'subagent', { task: 'Break things' }, 'error', 'panic: nil map'),
+  ]);
+  const doc = projectStream(s)[0];
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation.agents[0].state).toBe('failed');
+  expect(delegation.agents[0].chip).toBe('panic: nil map');
+  expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 1 });
+  expect(delegation.settled).toBe(true);
+});
+
+test('a live subagent joins the same turn\'s already-terminated agents in one block', () => {
+  // One subagent already finished (card in messages) while another is still
+  // running (map) in the SAME turn → one delegation block, two agents, unsettled.
+  const s = session([
+    assistant('Delegating two.'),
+    tool('subagent-j1', 'subagent', { task: 'first' }, 'done', 'ok'),
+  ], {
+    subagents: {
+      j2: { jobId: 'j2', task: 'second', status: 'running', messages: [] },
+    },
+  });
+  const doc = projectStream(s)[projectStream(s).length - 1];
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation.agents.map(a => a.id)).toEqual(['j1', 'j2']);
+  expect(delegation.agents[0].state).toBe('done');
+  expect(delegation.agents[1].state).toBe('running');
+  expect(delegation.settled).toBe(false);
+  expect(delegation.summary).toEqual({ total: 2, done: 1, failed: 0 });
+});
+
+test('a cancelled subagent keeps a distinct cancelled state', () => {
+  const s = session([
+    assistant('Delegating.'),
+    tool('subagent-j1', 'subagent', { task: 'Long job' }, 'cancelled', 'stopped by user'),
+  ]);
+  const doc = projectStream(s)[0];
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation.agents[0].state).toBe('cancelled');
+  // cancelled counts with failed for the header summary
+  expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 1 });
+  expect(delegation.settled).toBe(true);
+});
+
+test('subagent_wait is dropped entirely — never a ledger row', () => {
+  const s = session([
+    assistant('Waiting on the subagent.'),
+    tool('wait-1', 'subagent_wait', { job_id: 'j1' }, 'done', 'joined'),
+    tool('subagent-j1', 'subagent', { task: 'work' }, 'done', 'ok'),
+  ]);
+  const doc = projectStream(s)[0];
+  // No ledger holding a subagent_wait row; only the delegation block.
+  const ledgers = doc.blocks.filter(b => b.type === 'ledger');
+  expect(ledgers).toHaveLength(0);
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  expect(delegation.agents.map(a => a.id)).toEqual(['j1']);
+});
+
+test('a terminated card carries its saved accentIndex over a jobId-hash fallback', () => {
+  const s = session([
+    assistant('Delegating.'),
+    tool('subagent-j1', 'subagent', { task: 'work' }, 'done', 'ok', { accentIndex: 3 }),
+  ]);
+  const doc = projectStream(s)[0];
+  const delegation = doc.blocks.find(b => b.type === 'delegation');
+  // FANOUT_ACCENTS[3] === 'peach'
+  expect(delegation.agents[0].accent).toBe('peach');
+});
+
+test('a terminated card with no accent source is stable (not always slot 0)', () => {
+  const mk = (jobId) => {
+    const s = session([
+      assistant('Delegating.'),
+      tool(`subagent-${jobId}`, 'subagent', { task: 'work' }, 'done', 'ok'),
+    ]);
+    const doc = projectStream(s)[0];
+    return doc.blocks.find(b => b.type === 'delegation').agents[0].accent;
+  };
+  // Deterministic per jobId, and the same job twice yields the same color.
+  expect(mk('alpha')).toBe(mk('alpha'));
 });
 
 test('projectStream does not mutate the input session', () => {

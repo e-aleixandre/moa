@@ -1,0 +1,373 @@
+/* DelegationBlock — one wave of subagents in the stream. Structural sizing
+   (38/44px row heights, header/agent grid gaps) mostly follows the visual
+   mockup's px values (SUBAGENTS-REDESIGN-SPEC-FABLE.md §1.2 + mockup); token
+   colors/spacing/radii/text-scale everywhere else. */
+
+.dlg {
+  border: 1px solid color-mix(in srgb, var(--sky) 22%, var(--surface0));
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: var(--space-2) 0;
+  max-width: var(--content-block);
+  background: color-mix(in srgb, var(--mantle) 65%, transparent);
+  transition: border-color var(--duration) var(--ease);
+}
+
+.dlg.settled {
+  border-color: var(--surface0);
+}
+
+/* header: single summary line, clickable to collapse/expand */
+.dlg-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  min-height: 38px; /* px: mockup row height, not a reusable token */
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font);
+}
+
+.dlg-head .fork {
+  color: var(--sky);
+  flex: none;
+  display: inline-flex;
+}
+
+.dlg.settled .dlg-head .fork {
+  color: var(--overlay1);
+}
+
+.dlg-head b {
+  color: var(--sky);
+  font-weight: var(--weight-semibold);
+}
+
+.dlg.settled .dlg-head b {
+  color: var(--subtext1);
+}
+
+.dlg-head .sum {
+  color: var(--overlay1);
+}
+
+.dlg-head .chev {
+  margin-left: auto;
+  color: var(--overlay0);
+  transition: transform var(--duration) var(--ease);
+  flex: none;
+  display: inline-flex;
+}
+
+.dlg.collapsed .dlg-head .chev {
+  transform: rotate(-90deg);
+}
+
+/* agent row: one per subagent, live or terminal */
+.dlg-agent {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  min-height: 38px; /* px: mockup row height */
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  font-size: var(--text-sm);
+  background: transparent;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  text-align: left;
+  font-family: var(--font);
+  color: inherit;
+}
+
+.dlg-agent.clickable {
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+}
+
+.dlg-agent.clickable:hover {
+  background: color-mix(in srgb, var(--surface0) 30%, transparent);
+}
+
+.dlg-agent .a-id {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.dlg-agent .a-name {
+  color: var(--a);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dlg-agent .a-result {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.dlg-agent .a-act {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dlg-agent .a-act .cur {
+  color: var(--subtext0);
+}
+
+.dlg-agent .a-act .cur::after {
+  content: "▌";
+  color: var(--a);
+  animation: dlg-caret-blink 1s steps(2) infinite;
+  font-size: var(--text-micro);
+  margin-left: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlg-agent .a-act .cur::after {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+.dlg-agent .a-time {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* indeterminate progress bar under a running agent's action line, in its
+   accent color — same pattern as the old .fanout .ibar */
+.dlg-ibar {
+  height: 3px;
+  margin: 0 var(--space-4) var(--space-1);
+  border-radius: 2px;
+  background: var(--surface0);
+  overflow: hidden;
+  position: relative;
+}
+
+.dlg-ibar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--sky), transparent);
+  animation: dlg-ibar-slide 1.6s ease-in-out infinite;
+}
+
+.dlg-ibar.c-sky i {
+  background: linear-gradient(90deg, transparent, var(--sky), transparent);
+}
+.dlg-ibar.c-teal i {
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+}
+.dlg-ibar.c-mauve i {
+  background: linear-gradient(90deg, transparent, var(--mauve), transparent);
+}
+.dlg-ibar.c-peach i {
+  background: linear-gradient(90deg, transparent, var(--peach), transparent);
+}
+.dlg-ibar.c-blue i {
+  background: linear-gradient(90deg, transparent, var(--blue), transparent);
+}
+.dlg-ibar.c-lavender i {
+  background: linear-gradient(90deg, transparent, var(--lavender), transparent);
+}
+
+@keyframes dlg-ibar-slide {
+  0% {
+    left: -36%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlg-ibar i {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.35;
+  }
+}
+
+/* terminal agent row (done/failed/cancelled): stops breathing, folds to a
+   check/x + short result chip */
+.dlg-agent.done .a-name {
+  color: var(--green);
+  font-weight: var(--weight-medium);
+}
+
+.dlg-agent.failed .a-name {
+  color: var(--red);
+}
+
+.dlg-agent .a-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.dlg-agent .fail-x {
+  width: 14px;
+  height: 14px;
+  color: var(--red);
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-xs);
+}
+
+.dlg-agent .a-chip {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  border-radius: var(--radius-full);
+  padding: 1px var(--space-2);
+  flex: none;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dlg-agent .a-chip.err {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+
+/* nested bash row: micro-line indented under its owning agent, with a guide
+   in the owner's accent (spec §2). bashJobs is always [] for now — kept
+   ready for when the backend carries parent_job_id. */
+.dlg-nest {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4) var(--space-1) 34px; /* px: indent to align under agent name column */
+  min-height: 28px; /* px: mockup nested-row height */
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  position: relative;
+  background: transparent;
+}
+
+.dlg-nest::before {
+  content: "";
+  position: absolute;
+  left: 22px; /* px: aligns the guide under the agent dot */
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--a) 40%, transparent);
+}
+
+.dlg-nest .n-sig {
+  color: var(--a);
+  flex: none;
+}
+
+.dlg-nest .n-cmd {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--subtext0);
+  min-width: 0;
+}
+
+.dlg-nest .n-prog,
+.dlg-nest .n-time {
+  color: var(--overlay0);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* live hairline: sky sweep on the bottom edge while the wave is unsettled */
+.dlg-life {
+  position: relative;
+  height: 1px;
+  overflow: hidden;
+}
+
+.dlg-life::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30%;
+  width: 30%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--sky) 70%, transparent),
+    transparent
+  );
+  animation: dlg-sweep var(--shimmer) linear infinite;
+}
+
+@keyframes dlg-sweep {
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlg-life::after {
+    animation: none;
+    left: 0;
+    width: 100%;
+    background: color-mix(in srgb, var(--sky) 30%, transparent);
+  }
+}
+
+@keyframes dlg-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* mobile density: 44px targets, action line truncates before elapsed */
+@media (max-width: 720px) {
+  .dlg-head,
+  .dlg-agent {
+    min-height: 44px;
+  }
+
+  .dlg-nest {
+    min-height: 32px;
+  }
+
+  .dlg-agent {
+    grid-template-columns: 110px 1fr 54px;
+  }
+}

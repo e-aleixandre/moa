@@ -3,6 +3,7 @@ import {
   UserWaypoint,
   AssistantDocument,
   FanoutBlock,
+  DelegationBlock,
   BackgroundJob,
   StreamingSkeleton,
   TypingDots,
@@ -51,6 +52,70 @@ const TRAY_AGENTS = [
   { id: "docs", kind: "subagent", name: "docs", accent: "teal", action: "serve.md", time: "0m 47s" },
   { id: "tests", kind: "bash", name: "bash", action: "go test ./...", time: "0m 09s" },
 ];
+
+// DelegationBlock specimens (replaces FanoutBlock — see DelegationSection):
+// one live wave (2 running + 1 done, unsettled) and one fully terminal wave
+// that starts collapsed (settled, 2 done + 1 failed).
+const DELEGATION_LIVE_AGENTS = [
+  {
+    id: "changelog",
+    name: "changelog",
+    accent: "sky",
+    state: "running",
+    action: "gh pr view 412 · reading labels",
+    time: "1m12s",
+    bashJobs: [],
+  },
+  {
+    id: "tests",
+    name: "tests",
+    accent: "teal",
+    state: "running",
+    action: "waiting on bash job",
+    time: "2m04s",
+    bashJobs: [],
+  },
+  {
+    id: "docs",
+    name: "docs",
+    accent: "mauve",
+    state: "done",
+    chip: "security section rewritten · 3 files",
+    time: "1m41s",
+    bashJobs: [],
+  },
+];
+
+const DELEGATION_SETTLED_AGENTS = [
+  {
+    id: "changelog",
+    name: "changelog",
+    accent: "sky",
+    state: "done",
+    chip: "23 PRs grouped · draft ready",
+    time: "3m58s",
+    bashJobs: [],
+  },
+  {
+    id: "docs",
+    name: "docs",
+    accent: "mauve",
+    state: "done",
+    chip: "security section rewritten",
+    time: "1m41s",
+    bashJobs: [],
+  },
+  {
+    id: "tests",
+    name: "tests",
+    accent: "teal",
+    state: "failed",
+    chip: "SQLITE_BUSY · db locked",
+    time: "4m02s",
+    bashJobs: [],
+  },
+];
+
 
 const BGJOB_LINES = [
   { text: "ok  pkg/bus      0.31s", tone: "dim" },
@@ -125,6 +190,72 @@ function FanoutSection() {
         compress into a result chip, and offer "view report →". The tray mirrors the same jobs when you
         scroll away; a finished-but-unread result gets the peach unseen pulse. While all this runs, the
         composer stays yours — typing is never blocked.
+      </p>
+    </section>
+  );
+}
+
+// --- Section 1b: delegation block (replaces the fan-out block above) -----
+
+function DelegationSection() {
+  return (
+    <section class="lsg-section">
+      <h2>
+        Delegation block <span class="alt">one block per wave · live rows mutate in place · auto-collapse when settled</span>
+      </h2>
+
+      <div class="lsg-convo">
+        <div class="lsg-convo-head">
+          <StateDot state="running" size={9} />
+          <span class="title">release 0.11</span>
+          <span class="path">~/dev/moa/main</span>
+          <span class="mp">sol ▰▰▰▱</span>
+        </div>
+        <div class="lsg-convo-body">
+          <UserWaypoint time="10:41">
+            <p>Prep the 0.11 release: changelog, docs pass, full test sweep. Parallelize it.</p>
+          </UserWaypoint>
+
+          <AssistantDocument>
+            <p>Fanning out — three subagents, one per track.</p>
+          </AssistantDocument>
+
+          <DelegationBlock
+            agents={DELEGATION_LIVE_AGENTS}
+            summary={{ total: 3, done: 1, failed: 0 }}
+            settled={false}
+          />
+        </div>
+      </div>
+
+      <p class="lsg-caption">
+        <b>Live wave</b> (unsettled): header + one row per agent, running rows breathe with the
+        indeterminate bar under their action, done rows fold to a green check + result chip, and the
+        sky hairline along the bottom edge signals the whole block still has life.
+      </p>
+
+      <div class="lsg-convo">
+        <div class="lsg-convo-head">
+          <StateDot state="idle" size={9} />
+          <span class="title">release 0.11</span>
+          <span class="path">~/dev/moa/main</span>
+        </div>
+        <div class="lsg-convo-body">
+          <AssistantDocument>
+            <p>All three tracks reported back — tests failed on a locked db, the rest is ready.</p>
+          </AssistantDocument>
+
+          <DelegationBlock
+            agents={DELEGATION_SETTLED_AGENTS}
+            summary={{ total: 3, done: 2, failed: 1 }}
+            settled
+          />
+        </div>
+      </div>
+
+      <p class="lsg-caption">
+        <b>Settled wave</b>: starts collapsed to the header line (<code>⑂ 3 agents · 2 ✓ · 1 ✗</code>) —
+        a tap re-expands the rows for a post-mortem look. No sweep, gray border: it's history now.
       </p>
     </section>
   );
@@ -277,6 +408,7 @@ export function LiveStatesGallery() {
       </header>
 
       <FanoutSection />
+      <DelegationSection />
       <BackgroundJobSection />
       <GridAliveSection />
     </div>

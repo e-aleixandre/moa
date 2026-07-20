@@ -6,7 +6,7 @@ import {
   UserWaypoint,
   AssistantDocument,
   DiffBlock,
-  FanoutBlock,
+  DelegationBlock,
   BackgroundJob,
   MobileLedger,
   FileCard,
@@ -20,7 +20,7 @@ import "./MobileStream.css";
 // SAME shared content components, with ONE divergence: a `ledger` sub-block
 // renders as <MobileLedger> (3-level touch ledger) instead of <ActivityLedger>.
 // The adaptLedger() pure remap (mobile-ledger-adapter.js) is the only data
-// transform; everything else (markdown prose, thinking, diff, fanout,
+// transform; everything else (markdown prose, thinking, diff, delegation,
 // background, waypoints) is verbatim shared with the desktop.
 //
 // Diff-sibling handling: projectStream emits an edit's unified diff as a `diff`
@@ -101,8 +101,16 @@ function mobileDocChildren(blocks, onOpenSubagent) {
       case "file":
         out.push(<FileCard key={b.id} file={b.file} />);
         break;
-      case "fanout":
-        out.push(<FanoutBlock key={b.id} agents={b.agents} onOpenAgent={onOpenSubagent} />);
+      case "delegation":
+        out.push(
+          <DelegationBlock
+            key={b.id}
+            agents={b.agents}
+            summary={b.summary}
+            settled={b.settled}
+            onOpenAgent={onOpenSubagent}
+          />
+        );
         break;
       case "background":
         b.jobs.forEach((job) => out.push(<BackgroundJob key={job.jobId} {...job} />));
