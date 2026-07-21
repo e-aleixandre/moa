@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import {
   FileText,
   Search,
@@ -120,25 +120,51 @@ function RowDetail({ detail }) {
   );
 }
 
-// LiveWindow renders every running tool's rolling five-line content window.
+// LiveWindow renders a running tool's skim or bounded full content window.
 // Diff rows retain their parsed type so the shared log can color them.
-function LiveWindow({ lines, start = 0, diff = false }) {
+function LiveWindow({ lines, start = 0, diff = false, expanded, onToggle }) {
+  const logRef = useRef(null);
+  const stickToBottom = useRef(true);
+
+  useEffect(() => {
+    if (!expanded) {
+      stickToBottom.current = true;
+      return;
+    }
+    const log = logRef.current;
+    if (log && stickToBottom.current) log.scrollTop = log.scrollHeight;
+  }, [expanded, lines]);
+
   if (!lines || lines.length === 0) return null;
   return (
-    <div class={`tg-log${start > 0 ? " fade" : ""}`} role="log" aria-live="off">
+    <button
+      ref={logRef}
+      type="button"
+      class={`tg-log${start > 0 && !expanded ? " fade" : ""}${expanded ? " expanded" : ""}`}
+      aria-expanded={expanded}
+      aria-label={expanded ? "Collapse live output" : "Show all live output"}
+      onClick={onToggle}
+      onScroll={(event) => {
+        const log = event.currentTarget;
+        stickToBottom.current = log.scrollHeight - log.scrollTop - log.clientHeight <= 40;
+      }}
+    >
       {lines.map((line, i) => {
         const type = diff ? line.type : "";
         const text = diff
           ? `${type === "add" ? "+" : type === "del" ? "-" : ""}${line.text}`
           : line;
         return (
-          <div key={start + i} class={`ln${type ? ` ${type}` : ""}`}>
+          <span key={start + i} class={`ln${type ? ` ${type}` : ""}`}>
             {text}
             {i === lines.length - 1 && <span class="ln-cursor" aria-hidden="true" />}
-          </div>
+          </span>
         );
       })}
-    </div>
+      <span class="live-log-affordance" aria-hidden="true">
+        <ChevronRight size={12} />
+      </span>
+    </button>
   );
 }
 
@@ -146,6 +172,7 @@ function LiveWindow({ lines, start = 0, diff = false }) {
 // the icon column, blue verb + bright object, elapsed (from 3s), a 1px progress
 // sweep. Every tool streams through the same rolling `.tg-log` panel below.
 function LiveRow({ row }) {
+  const [expanded, setExpanded] = useState(false);
   const elapsed = useElapsed(row.startedAt);
   const verb = liveVerb(row.tool);
   const { text, detail: argDetail } = argParts(row.arg);
@@ -155,6 +182,10 @@ function LiveRow({ row }) {
     : row.liveTail
       ? { lines: row.liveTail.split("\n"), start: row.liveTailStart || 0 }
       : null;
+  const fullWindow = row.liveFull
+    ? { lines: row.liveFull.lines, start: row.liveFull.start || 0, diff: row.liveFull.kind === "diff" }
+    : null;
+  const displayedWindow = expanded && fullWindow ? fullWindow : liveWindow;
   return (
     <>
       <div class="tg-row live" role="status" aria-live="off">
@@ -168,7 +199,13 @@ function LiveRow({ row }) {
         {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
         <span class="hair" aria-hidden="true" />
       </div>
-      {liveWindow && <LiveWindow {...liveWindow} />}
+      {displayedWindow && (
+        <LiveWindow
+          {...displayedWindow}
+          expanded={expanded && !!fullWindow}
+          onToggle={() => setExpanded((value) => !value)}
+        />
+      )}
     </>
   );
 }
@@ -242,7 +279,7 @@ const FOLD_THRESHOLD = 3;
 // phase (TOOLCALLS-UNIFIED-IMPL-SPEC): running/collapsed/expanded/finished are
 // the same card and the same row atom, differing only by which rows show and a
 // `.live` modifier. `rows` is the projectStream ledger's rows (each
-// `{ tool, arg, out, status, id, body?, live?, startedAt?, livePreview?, liveTail?, liveTailStart?, detail? }`,
+// `{ tool, arg, out, status, id, body?, live?, startedAt?, livePreview?, liveTail?, liveTailStart?, liveFull?, detail? }`,
 // `detail` a fused diff/output node attached by the caller).
 //
 // FOLD: a batch of more than FOLD_THRESHOLD rows collapses its oldest done rows

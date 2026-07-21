@@ -4,7 +4,7 @@
 // judgment in phase 5, so the grouping rules (ledgers, fanout, background,
 // streaming, truncation) are pinned here with plain session fixtures.
 import { test, expect } from 'bun:test';
-import { projectStream, liveTrayAgents } from './stream-model.js';
+import { LIVE_FULL_MAX_CHARS, LIVE_FULL_MAX_LINES, projectStream, liveTrayAgents } from './stream-model.js';
 
 // ── fixture helpers ──────────────────────────────────────────────────────────
 const user = (text, extra = {}) => ({ role: 'user', content: [{ type: 'text', text }], ...extra });
@@ -574,7 +574,7 @@ test('a trailing running tool_start is marked live on its ledger row', () => {
   expect(ledger.rows[1].startedAt).toBe(12345);
 });
 
-test('a live tool row carries its streamingResult as liveTail (last 5 lines and absolute start)', () => {
+test('a live tool row carries its streamingResult as a five-line tail and bounded full output', () => {
   const s = session([
     tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, {
       startedAt: 1, streamingResult: 'l1\nl2\nl3\nl4\nl5\nl6\nl7',
@@ -589,6 +589,63 @@ test('a live tool row carries its streamingResult as liveTail (last 5 lines and 
   expect(ledger.rows[0].liveTailStart).toBe(2);
   expect(ledger.rows[0].liveTail.split('\n').map((_line, i) => ledger.rows[0].liveTailStart + i))
     .toEqual([2, 3, 4, 5, 6]);
+  expect(ledger.rows[0].liveFull).toEqual({
+    kind: 'text', lines: ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7'], start: 0,
+  });
+  expect(ledger.rows[0].liveFull.lines.length).toBeGreaterThan(ledger.rows[0].liveTail.split('\n').length);
+});
+
+test('live bash output bounds full lines and keeps absolute tail keys', () => {
+  const rowFor = (lineCount) => projectStream(session([
+    tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, {
+      streamingResult: Array.from({ length: lineCount }, (_, i) => `line ${i + 1}`).join('\n'),
+    }),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+  const row = rowFor(LIVE_FULL_MAX_LINES + 20);
+
+  expect(row.liveFull).toEqual(expect.objectContaining({ kind: 'text' }));
+  expect(row.liveFull.lines).toHaveLength(LIVE_FULL_MAX_LINES);
+  expect(row.liveFull.lines[0]).toBe('line 21');
+  expect(row.liveFull.lines.at(-1)).toBe(`line ${LIVE_FULL_MAX_LINES + 20}`);
+  expect(row.liveFull.start).toBe(20);
+  expect(row.liveTail).toBe('line 416\nline 417\nline 418\nline 419\nline 420');
+  expect(row.liveTailStart).toBe(415);
+  expect(row.liveTail.split('\n')).toEqual(row.liveFull.lines.slice(-5));
+
+  const next = rowFor(LIVE_FULL_MAX_LINES + 21);
+  const fullKey = (live, line) => live.lines.indexOf(line) + live.start;
+  const tailKey = (tail, start, line) => tail.split('\n').indexOf(line) + start;
+  expect(fullKey(row.liveFull, 'line 22')).toBe(fullKey(next.liveFull, 'line 22'));
+  expect(tailKey(row.liveTail, row.liveTailStart, 'line 417'))
+    .toBe(tailKey(next.liveTail, next.liveTailStart, 'line 417'));
+});
+
+test('live bash output applies the character cap before splitting', () => {
+  const streamingResult = `${'x'.repeat(LIVE_FULL_MAX_CHARS + 100)}\nlast line`;
+  const row = projectStream(session([
+    tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, { streamingResult }),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+
+  expect(row.liveFull.lines).toHaveLength(2);
+  expect(row.liveFull.lines.join('\n').length).toBeLessThanOrEqual(LIVE_FULL_MAX_CHARS);
+  expect(row.liveTail.split('\n')).toEqual(row.liveFull.lines.slice(-5));
+});
+
+test('live bash character truncation keeps the full-stream line offset and stable keys', () => {
+  const line = (number) => `line ${number} ${'x'.repeat(5000)}`;
+  const rowFor = (lineCount) => projectStream(session([
+    tool('t1', 'bash', { command: 'go test ./...' }, 'running', null, {
+      streamingResult: Array.from({ length: lineCount }, (_, i) => line(i + 1)).join('\n'),
+    }),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+  const row = rowFor(5);
+  const next = rowFor(6);
+  const keyFor = (live, number) => live.start + live.lines.findIndex(text => text.startsWith(`line ${number} `));
+
+  expect(row.liveFull.start).toBe(1);
+  expect(row.liveTailStart).toBe(1);
+  expect(next.liveFull.start).toBe(2);
+  expect(keyFor(row.liveFull, 4)).toBe(keyFor(next.liveFull, 4));
 });
 
 test('a live tail ignores one trailing newline and rolls real lines with stable keys', () => {
@@ -654,6 +711,10 @@ test('a generating write exposes its growing content in a five-line live window'
   expect(long.livePreview).toEqual({
     kind: 'text', lines: ['line 10', 'line 11', 'line 12', 'line 13', 'line 14'], start: 9,
   });
+  expect(long.liveFull).toEqual({
+    kind: 'text', lines: Array.from({ length: 14 }, (_, i) => `line ${i + 1}`), start: 0,
+  });
+  expect(long.liveFull.lines.length).toBeGreaterThan(long.livePreview.lines.length);
 });
 
 test('a generating edit exposes a parsed five-line diff tail with its types intact', () => {
@@ -683,6 +744,12 @@ test('a generating edit exposes a parsed five-line diff tail with its types inta
     expect.objectContaining({ type: 'del', text: 'six' }),
     expect.objectContaining({ type: 'add', text: 'six!' }),
   ]);
+  expect(row.liveFull.kind).toBe('diff');
+  expect(row.liveFull.lines).toHaveLength(9);
+  expect(row.liveFull.lines.length).toBeGreaterThan(row.livePreview.lines.length);
+  expect(row.liveFull.lines.map(line => line.type)).toEqual([
+    'ctx', 'del', 'add', 'ctx', 'del', 'add', 'ctx', 'del', 'add',
+  ]);
 });
 
 test('live argument previews suppress concurrent output tails', () => {
@@ -694,16 +761,19 @@ test('live argument previews suppress concurrent output tails', () => {
 
   const write = rowFor('write', { path: 'notes.txt', content: 'growing content' });
   expect(write.livePreview).toEqual({ kind: 'text', lines: ['growing content'], start: 0 });
+  expect(write.liveFull).toEqual({ kind: 'text', lines: ['growing content'], start: 0 });
   expect(write.liveTail).toBeUndefined();
 
   const edit = rowFor('edit', { path: 'a.js', oldText: 'before', newText: 'after' });
   expect(edit.livePreview.kind).toBe('diff');
+  expect(edit.liveFull.kind).toBe('diff');
   expect(edit.liveTail).toBeUndefined();
 
   const multiedit = rowFor('multiedit', {
     path: 'a.js', edits: [{ oldText: 'before', newText: 'after' }],
   });
   expect(multiedit.livePreview.kind).toBe('diff');
+  expect(multiedit.liveFull.kind).toBe('diff');
   expect(multiedit.liveTail).toBeUndefined();
 
   const bash = rowFor('bash', { command: 'printf done' });
@@ -721,6 +791,46 @@ test('a large live edit keeps only its last five parsed diff rows', () => {
   expect(row.livePreview.lines).toHaveLength(5);
   expect(row.livePreview.start).toBeGreaterThan(0);
   expect(row.livePreview.lines).toContainEqual(expect.objectContaining({ type: 'add', text: 'new 4999' }));
+  expect(row.liveFull).toEqual(expect.objectContaining({ kind: 'diff' }));
+  expect(row.liveFull.lines.length).toBeLessThanOrEqual(LIVE_FULL_MAX_LINES);
+  expect(row.liveFull.lines.length).toBeGreaterThan(row.livePreview.lines.length);
+  expect(row.liveFull.lines).toContainEqual(expect.objectContaining({ type: 'add', text: 'new 4999' }));
+});
+
+test('a long live server diff is bounded while a done diff remains whole', () => {
+  const diffResult = [
+    '@@ -1,450 +1,450 @@',
+    ...Array.from({ length: 450 }, (_, i) => `+new ${i + 1}`),
+  ].join('\n');
+  const live = projectStream(session([
+    tool('e1', 'edit', { path: 'a.js' }, 'generating', diffResult),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+  const done = projectStream(session([
+    tool('e1', 'edit', { path: 'a.js' }, 'done', diffResult),
+  ]))[0].blocks.find(b => b.type === 'diff');
+
+  expect(live.liveFull).toEqual(expect.objectContaining({ kind: 'diff', start: 50 }));
+  expect(live.liveFull.lines).toHaveLength(LIVE_FULL_MAX_LINES);
+  expect(live.liveFull.lines[0]).toEqual(expect.objectContaining({ type: 'add', text: 'new 51' }));
+  expect(live.livePreview.start).toBe(445);
+  expect(done.diffText).toBe(diffResult);
+});
+
+test('a char-bounded live server diff keeps its first retained change prefix', () => {
+  const firstRetained = '+first retained';
+  const secondRetained = '-second retained';
+  const base = `${firstRetained}\n${secondRetained}`;
+  const tail = `${base}\n+${'x'.repeat(LIVE_FULL_MAX_CHARS - base.length - 2)}`;
+  const diffResult = `@@ -1,4 +1,4 @@\n+hidden above the window\n${tail}`;
+  const row = projectStream(session([
+    tool('e1', 'edit', { path: 'a.js' }, 'generating', diffResult),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+
+  expect(tail).toHaveLength(LIVE_FULL_MAX_CHARS);
+  expect(row.liveFull.start).toBe(1);
+  expect(row.liveFull.lines.map(line => line.type)).toEqual(['add', 'del', 'add']);
+  expect(row.liveFull.lines[0]).toEqual(expect.objectContaining({ type: 'add', text: 'first retained' }));
+  expect(row.liveFull.lines).not.toContainEqual(expect.objectContaining({ text: expect.stringContaining('@@') }));
 });
 
 test('a live bash keeps its command in the header instead of duplicating it as a preview', () => {

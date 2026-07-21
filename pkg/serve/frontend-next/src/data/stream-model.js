@@ -105,7 +105,6 @@ import {
   toolInputLine,
   toolPath,
   toolPreview,
-  splitPreviewTail,
   shortModel,
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
@@ -113,6 +112,8 @@ import { parseFileCardData } from './util/file-card.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
 
 const MAX_MESSAGES_BEFORE_TRUNCATION_NOTE = 200;
+export const LIVE_FULL_MAX_LINES = 400;
+export const LIVE_FULL_MAX_CHARS = 20000;
 
 // Fanout accent palette, cycled by agent index (see FanoutBlock.css). Exported
 // so the SubagentView (5J) assigns the SAME accent a subagent had in the fanout
@@ -566,18 +567,28 @@ function toLedgerRow(msg) {
     // the live signal for output-oriented tools such as bash.
     if (preview && (preview.kind === 'input' || preview.kind === 'diff')) {
       if (preview.kind === 'input') {
-        const tail = splitPreviewTail(preview.text, 5);
-        if (tail.visible) row.livePreview = {
-          kind: 'text', lines: tail.visible.split('\n'), start: tail.hidden,
-        };
+        const full = liveFullTextLines(preview.text);
+        if (full.lines.length) {
+          const previewLines = full.lines.slice(-5);
+          row.livePreview = {
+            kind: 'text', lines: previewLines, start: full.start + full.lines.length - previewLines.length,
+          };
+          row.liveFull = { kind: 'text', ...full };
+        }
       } else {
-        // formatLiveDiff already bounds argument input before this parser runs.
-        // Parse before taking the tail so unified-diff line types survive even
-        // when the hunk header itself scrolls out of the visible window.
-        const lines = parseUnifiedDiff(preview.text);
-        if (lines.length) row.livePreview = {
-          kind: 'diff', lines: lines.slice(-5), start: Math.max(0, lines.length - 5),
-        };
+        // toolPreview bounds live diff input before this parser runs. Parse
+        // once, then derive both the full bounded view and five-line tail so
+        // unified-diff line types survive in either mode.
+        const parsedLines = parseUnifiedDiff(preview.text);
+        const lines = parsedLines.slice(-LIVE_FULL_MAX_LINES);
+        if (lines.length) {
+          const previewLines = lines.slice(-5);
+          const start = (preview.totalLines ?? parsedLines.length) - lines.length;
+          row.livePreview = {
+            kind: 'diff', lines: previewLines, start: start + lines.length - previewLines.length,
+          };
+          row.liveFull = { kind: 'diff', lines, start };
+        }
       }
     }
     // Incremental output of tools without an argument preview (for example,
@@ -586,14 +597,46 @@ function toLedgerRow(msg) {
       const streamingResult = msg.streamingResult.endsWith('\n')
         ? msg.streamingResult.slice(0, -1)
         : msg.streamingResult;
-      const tail = splitPreviewTail(streamingResult, 5);
-      row.liveTail = tail.visible;
-      // This is the zero-based index of the first visible line in the full
-      // stream. The ledger uses it for stable line keys as the tail rolls.
-      row.liveTailStart = tail.hidden;
+      const full = liveFullTextLines(streamingResult);
+      if (full.lines.length) {
+        const tailLines = full.lines.slice(-5);
+        row.liveTail = tailLines.join('\n');
+        // This is the zero-based index of the first visible line in the
+        // bounded stream. The ledger uses it for stable line keys as the tail
+        // rolls without splitting the unbounded output again.
+        row.liveTailStart = full.start + full.lines.length - tailLines.length;
+        row.liveFull = { kind: 'text', ...full };
+      }
     }
   }
   return row;
+}
+
+// liveFullTextLines retains the newest streaming content within a fixed DOM
+// budget. Streaming appends, so dropping from the front preserves the useful
+// current output while avoiding an unbounded projection or scroll surface.
+function liveFullTextLines(text) {
+  if (!text) return { lines: [], start: 0 };
+  let normalized = String(text);
+  if (normalized.endsWith('\n')) normalized = normalized.slice(0, -1);
+  if (!normalized) return { lines: [], start: 0 };
+  // Count without allocating a full lines array. This remains linear in time
+  // but avoids the per-delta split allocation that the bounded tail prevents.
+  const totalLines = countLines(normalized);
+  const charTail = normalized.length > LIVE_FULL_MAX_CHARS
+    ? normalized.slice(-LIVE_FULL_MAX_CHARS)
+    : normalized;
+  const boundedLines = charTail.split('\n');
+  const lines = boundedLines.slice(-LIVE_FULL_MAX_LINES);
+  return { lines, start: totalLines - lines.length };
+}
+
+function countLines(text) {
+  let count = 1;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) count++;
+  }
+  return count;
 }
 
 // toolToken maps a raw tool name to the token the ledger row uses for its icon/label

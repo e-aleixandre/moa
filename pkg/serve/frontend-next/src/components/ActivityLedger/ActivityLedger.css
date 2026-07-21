@@ -356,6 +356,7 @@
 
 /* Rolling live content under every running tool — same crust panel and cursor. */
 .tg .tg-log {
+  position: relative;
   background: var(--crust);
   padding: var(--space-2) var(--space-4) var(--space-2)
     calc(var(--tg-mk-w) + var(--space-4) + var(--space-3));
@@ -368,9 +369,35 @@
   border-bottom: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
 }
 
+.tg button.tg-log {
+  width: 100%;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tg button.tg-log:hover {
+  background: color-mix(in srgb, var(--surface0) 24%, var(--crust));
+}
+
+.tg button.tg-log:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .tg .tg-log.fade {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+}
+
+/* The expanded live view is bounded by the projection and scrolls within the
+   card, keeping the running row and its newest cursor visible in the stream. */
+.tg .tg-log.expanded {
+  max-height: min(60vh, 32rem);
+  overflow-y: auto;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
 .tg .tg-log:last-child {
@@ -378,6 +405,7 @@
 }
 
 .tg .tg-log .ln {
+  display: block;
   animation: tg-log-line-in 280ms var(--ease);
 }
 
@@ -408,6 +436,28 @@
   animation: tg-log-cursor-blink 1s steps(2) infinite;
 }
 
+/* A small in-content affordance keeps the live header informational while
+   making the output window's expand/collapse action discoverable. */
+.tg .tg-log .live-log-affordance {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  display: inline-flex;
+  color: var(--overlay0);
+  transition: transform var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.tg .tg-log.expanded .live-log-affordance {
+  transform: rotate(90deg);
+  color: var(--teal);
+}
+
+@media (max-width: 767px) {
+  .tg button.tg-log {
+    min-height: 44px;
+  }
+}
+
 @keyframes tg-log-cursor-blink {
   50% {
     opacity: 0;
@@ -431,5 +481,8 @@
   .tg .tg-log .ln .ln-cursor::after {
     animation: none;
     opacity: 0.6;
+  }
+  .tg .tg-log .live-log-affordance {
+    transition: none;
   }
 }

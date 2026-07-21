@@ -1,3 +1,5 @@
+import { countUnifiedDiffRows } from './unified-diff.js';
+
 export function truncateText(text, max = 2000) {
   if (!text) return '';
   if (text.length <= max) return text;
@@ -124,7 +126,12 @@ export function toolPreview(name, args, result, status, startLine) {
     return { text: a.content, kind: 'input' };
   if (n === 'edit') {
     // Use server-computed diff (has real file line numbers).
-    if (result && result.includes('@@')) return { text: result, kind: 'diff' };
+    const liveResult = live && result ? liveUnifiedDiffPreview(result) : null;
+    if (live ? liveResult : result && result.includes('@@')) {
+      return live
+        ? { text: liveResult.text, kind: 'diff', totalLines: liveResult.totalLines }
+        : { text: result, kind: 'diff' };
+    }
     // Fallback for old results without diff.
     const oldText = a.oldText || a.old_text || '';
     const newText = a.newText || a.new_text || '';
@@ -136,7 +143,12 @@ export function toolPreview(name, args, result, status, startLine) {
     }
   }
   if (n === 'multiedit') {
-    if (result && result.includes('@@')) return { text: result, kind: 'diff' };
+    const liveResult = live && result ? liveUnifiedDiffPreview(result) : null;
+    if (live ? liveResult : result && result.includes('@@')) {
+      return live
+        ? { text: liveResult.text, kind: 'diff', totalLines: liveResult.totalLines }
+        : { text: result, kind: 'diff' };
+    }
     if (Array.isArray(a.edits)) {
       // A streaming multiedit only needs its newest argument fragments. Bound
       // the number before formatting so a large call cannot build every diff.
@@ -151,7 +163,9 @@ export function toolPreview(name, args, result, status, startLine) {
             : '';
         })
         .filter(Boolean);
-      if (diffs.length > 0) return { text: diffs.join('\n'), kind: 'diff' };
+      if (diffs.length > 0) {
+        return { text: live ? tailLiveDiffInput(diffs.join('\n')) : diffs.join('\n'), kind: 'diff' };
+      }
     }
   }
 
@@ -169,7 +183,8 @@ export function toolPreview(name, args, result, status, startLine) {
 }
 
 const PREVIEW_LINES = 12;
-const LIVE_DIFF_MAX_CHARS = 2000;
+const LIVE_DIFF_MAX_LINES = 400;
+const LIVE_DIFF_MAX_CHARS = 20000;
 
 /** Split preview text showing the first N lines, hiding the rest. */
 export function splitPreview(text, maxLines = PREVIEW_LINES) {
@@ -249,16 +264,37 @@ export function formatDiff(oldText, newText, startLine = 1) {
 // formatLiveDiff bounds streamed edit arguments before formatting so each
 // projection stays small while a large edit call is still arriving.
 function formatLiveDiff(oldText, newText, startLine) {
-  return formatDiff(
+  return tailLiveDiffInput(formatDiff(
     tailLiveDiffInput(oldText),
     tailLiveDiffInput(newText),
     startLine,
-  );
+  ));
 }
 
 function tailLiveDiffInput(text) {
-  const charTail = text.length > LIVE_DIFF_MAX_CHARS ? text.slice(-LIVE_DIFF_MAX_CHARS) : text;
-  return splitPreviewTail(charTail).visible;
+  const charTail = tailLiveDiffChars(text);
+  return splitPreviewTail(charTail, LIVE_DIFF_MAX_LINES).visible;
+}
+
+function tailLiveDiffChars(text) {
+  return text.length > LIVE_DIFF_MAX_CHARS ? text.slice(-LIVE_DIFF_MAX_CHARS) : text;
+}
+
+// Bounds a growing server diff before checking or parsing it. Detection and
+// parsed text share one identical tail, avoiding a second truncation.
+function liveUnifiedDiffPreview(text) {
+  const charTail = tailLiveDiffChars(text);
+  if (!charTail.includes('@@') && !/(^|\n)[+-](?!\+\+\+ |-- )/.test(charTail)) return null;
+  return { text: tailLiveUnifiedDiff(charTail), totalLines: countUnifiedDiffRows(text) };
+}
+
+// Keep a hunk marker when a long unified diff's tail no longer contains one.
+// The parser needs it to retain +/- line types; line numbers are not rendered
+// by the live window, so a synthetic marker is sufficient for the bounded tail.
+function tailLiveUnifiedDiff(text) {
+  if (!text || /(^|\n)@@ /.test(text)) return text;
+  const marker = '@@ -1 +1 @@\n';
+  return `${marker}${text}`;
 }
 
 function shortenCmd(cmd) {

@@ -55,6 +55,18 @@ test('toolPreview edit prefers server diff over fallback', () => {
   expect(p.text).toBe(result);
 });
 
+test('toolPreview bounds live server diffs before checking for hunks', () => {
+  const result = [
+    '@@ -1,3000 +1,3000 @@',
+    ...Array.from({ length: 3000 }, (_, i) => `+line ${i + 1}`),
+  ].join('\n');
+  const p = toolPreview('edit', {}, result, 'running');
+
+  expect(p.kind).toBe('diff');
+  expect(p.text.length).toBeLessThanOrEqual(20000 + '@@ -1 +1 @@\n'.length);
+  expect(p.text).toContain('+line 3000');
+});
+
 test('sessionDotState: idle main with live subagents shows running', () => {
   expect(sessionDotState({ state: 'idle', subagentCount: 2 })).toBe('running');
   expect(sessionDotState({ state: 'idle', subagents: { j1: { status: 'running' } } })).toBe('running');
