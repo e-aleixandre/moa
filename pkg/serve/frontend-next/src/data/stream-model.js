@@ -102,6 +102,7 @@
 
 import {
   truncateText,
+  toolInputLine,
   toolPath,
   toolPreview,
   splitPreviewTail,
@@ -547,6 +548,8 @@ function toLedgerRow(msg) {
     status,
     id: msg.tool_call_id,
   };
+  const inputLine = toolInputLine(name, msg.args);
+  if (inputLine) row.inputLine = inputLine;
   if (name.toLowerCase() === 'bash') {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
     if (args && typeof args.command === 'string' && args.command) row.command = args.command;

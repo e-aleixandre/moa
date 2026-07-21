@@ -56,6 +56,31 @@ test('a command-only bash row gets a command detail without a divider', () => {
   expect(detailClasses(out[0].detail.node)).not.toContain('tg-detail-divider');
 });
 
+test('an input-first row shows its full input before output with a divider', () => {
+  const path = '/workspace/a/very/long/path/that/the/header/will/ellipsis/configuration.json';
+  const out = fuseLedgerDetails([row('read', { inputLine: path, body: 'contents' })], null);
+  const node = out[0].detail.node;
+  expect(detailText(node)).toBe(`${path}contents`);
+  expect(detailText(node).indexOf(path)).toBeLessThan(detailText(node).indexOf('contents'));
+  expect(detailClasses(node)).toContain('doc-mono tg-input');
+  expect(detailClasses(node)).toContain('tg-detail-divider');
+});
+
+test('an input-first row without output remains expandable without a divider', () => {
+  const path = '/workspace/configuration.json';
+  const out = fuseLedgerDetails([row('read', { inputLine: path })], null);
+  expect(out[0].detail).toBeTruthy();
+  expect(detailText(out[0].detail.node)).toBe(path);
+  expect(detailClasses(out[0].detail.node)).not.toContain('tg-detail-divider');
+});
+
+test('a grep input line appears before its output', () => {
+  const inputLine = 'TODO · pkg/serve · include:*.go · literal';
+  const out = fuseLedgerDetails([row('grep', { inputLine, body: 'pkg/serve/server.go: TODO' })], null);
+  expect(detailText(out[0].detail.node)).toBe(`${inputLine}pkg/serve/server.go: TODO`);
+  expect(detailClasses(out[0].detail.node)).toContain('doc-mono tg-input');
+});
+
 test('a non-bash output-only row remains an output detail', () => {
   const out = fuseLedgerDetails([row('read', { body: 'contents' })], null);
   expect(detailClasses(out[0].detail.node)).toContain('flush');

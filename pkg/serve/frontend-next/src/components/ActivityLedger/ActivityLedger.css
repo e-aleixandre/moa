@@ -323,10 +323,16 @@
   color: var(--red);
 }
 
-/* Bash input is brighter than its output; the prompt is decorative so copying
+/* Inputs are brighter than output; the bash prompt is decorative so copying
    the command text does not include it. */
-.tg .tg-detail .tg-cmd {
+.tg .tg-detail .tg-cmd,
+.tg .tg-detail .tg-input {
   color: var(--subtext0);
+}
+
+.tg .tg-detail .tg-input {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tg .tg-detail .tg-cmd-prompt {

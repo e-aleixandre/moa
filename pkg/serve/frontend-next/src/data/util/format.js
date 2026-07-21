@@ -86,6 +86,32 @@ export function toolPath(name, args) {
   return '';
 }
 
+/** Extract the complete tool input shown above a finished tool's output. */
+export function toolInputLine(name, args) {
+  if (!args) return '';
+  const a = typeof args === 'string' ? tryParse(args) : args;
+  if (!a) return '';
+  const n = (name || '').toLowerCase();
+
+  if (n === 'read' || n === 'write') return a.path || '';
+  if (n === 'ls') return a.path || '.';
+  if (n === 'fetch_content') return a.url || '';
+  if (n === 'web_search') return a.query || '';
+  if (n === 'grep' || n === 'find') {
+    const pattern = a.pattern || a.glob || '';
+    if (!pattern) return '';
+    let input = `${pattern} · ${a.path || '.'}`;
+    if (n === 'grep') {
+      if (a.include) input += ` · include:${a.include}`;
+      if (a.fixed_strings) input += ' · literal';
+    } else if (a.type) {
+      input += ` · type:${a.type}`;
+    }
+    return input;
+  }
+  return '';
+}
+
 /** Extract the most relevant content for the tool preview.
  * startLine: real 1-based file line for edit previews (0/undefined → number from 1). */
 export function toolPreview(name, args, result, status, startLine) {

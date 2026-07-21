@@ -137,6 +137,34 @@ test('non-bash ledger rows do not retain a command property', () => {
   expect(row.command).toBeUndefined();
 });
 
+test('finished read rows retain their full path as an input line', () => {
+  const path = '/workspace/a/very/long/path/that/the/header/will/ellipsis/configuration.json';
+  const s = session([tool('t1', 'read', { path }, 'done', 'contents')]);
+  const row = projectStream(s)[0].blocks[0].rows[0];
+  expect(row.inputLine).toBe(path);
+  expect(row.body).toBe('contents');
+});
+
+test('grep input lines include path and options, defaulting the path to the current directory', () => {
+  const rows = projectStream(session([
+    tool('t1', 'grep', { pattern: 'TODO', path: 'pkg/serve', include: '*.go', fixed_strings: true }),
+    tool('t2', 'grep', { pattern: 'FIXME' }),
+  ]))[0].blocks[0].rows;
+  expect(rows[0].inputLine).toBe('TODO · pkg/serve · include:*.go · literal');
+  expect(rows[1].inputLine).toBe('FIXME · .');
+});
+
+test('edit and multiedit rows do not project input lines', () => {
+  const blocks = projectStream(session([
+    tool('e1', 'edit', { path: 'src/x.js' }, 'done', '@@ -1 +1 @@\n-old\n+new'),
+    tool('e2', 'multiedit', { path: 'src/y.js', edits: [] }),
+  ]))[0].blocks;
+  const rows = blocks.filter(block => block.type === 'ledger').flatMap(block => block.rows);
+  expect(rows[0].inputLine).toBeUndefined();
+  expect(rows[1].inputLine).toBeUndefined();
+  expect(blocks.find(block => block.type === 'diff').filename).toBe('src/x.js');
+});
+
 // ── 5. LIVE subagents: merged into a delegation block ────────────────────────
 // Only subagents still running/cancelling are read from session.subagents;
 // terminated ones live in session.messages (see section 5b below). A wave of
