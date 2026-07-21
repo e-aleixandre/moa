@@ -10,11 +10,10 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/attachment"
 	"github.com/ealeixandre/moa/pkg/bus"
@@ -34,19 +33,15 @@ type Attachment struct {
 var ErrBadAttachment = errors.New("bad attachment")
 
 const (
-	maxAttachments        = 8
-	maxImageBytes         = 5 << 20   // 5 MB decoded, per-image API limit
-	maxImageDimension     = 100_000   // metadata guard; DecodeConfig never allocates pixels
-	maxAttachmentTextSize = 256 << 10 // 256 KiB decoded, inline-eligible per-file cap
-
-	maxAttachmentFileBytes = 32 << 20  // per-file to-disk cap
+	maxAttachments         = 8
+	maxImageBytes          = 5 << 20   // 5 MB decoded, per-image API limit
+	maxImageDimension      = 100_000   // metadata guard; DecodeConfig never allocates pixels
+	maxAttachmentFileBytes = 32 << 20  // per-file durable-file cap
 	maxRequestBytes        = 64 << 20  // aggregate decoded bytes per request
-	maxSessionDiskBytes    = 200 << 20 // aggregate on-disk bytes per session
-	maxInlineTextAggregate = 512 << 10 // aggregate inline text per message
-	// maxSessionNativeDocBytes bounds all native binary content retained in
-	// history. Images (and documents persisted by older sessions) are base64
-	// content that can be re-sent across turns, so a per-file image cap alone
-	// would still permit unbounded session memory and request growth.
+	maxSessionDiskBytes    = 200 << 20 // aggregate on-disk bytes per session in degraded mode
+	// maxSessionNativeDocBytes bounds native image content retained in history.
+	// A per-file image cap alone would still permit unbounded session memory and
+	// request growth across turns.
 	maxSessionNativeDocBytes = 48 << 20 // 48 MB across the whole session
 )
 
@@ -57,21 +52,8 @@ var allowedImageMimes = map[string]bool{
 	"image/webp": true,
 }
 
-// pdfStoredOnDiskNote explains the disk-first policy. PDFs can be large and
-// native blocks are retained in history and sent to the provider across turns,
-// so embedding them by default makes context, latency, and cost unpredictable.
-const pdfStoredOnDiskNote = "Nota: los PDF se guardan en disco por defecto y no se envían íntegros al\n" +
-	"modelo, para evitar inflar el contexto. Usa la ruta de arriba para extraer\n" + "texto, consultar metadatos o procesarlo con las herramientas disponibles."
-
 const nativeContentFallbackNote = "Nota: este adjunto supera el límite acumulado de contenido binario nativo de la sesión, así que se\n" +
 	"guardó en disco para evitar que el historial y las solicitudes al modelo crezcan sin límite."
-
-// mimeMismatchNote is appended when an attachment's declared MIME (image/PDF)
-// does not match its actual bytes, so it is saved to disk instead of being
-// forwarded natively to the provider (which would reject it).
-const mimeMismatchNote = "Nota: el tipo declarado del archivo no coincide con su contenido real,\n" +
-	"así que no se envió como imagen/PDF nativo — está guardado en disco para\n" +
-	"que lo inspecciones."
 
 // bytesLookLikeImage reports whether data's magic bytes match the declared
 // image MIME. Uses net/http content sniffing plus explicit checks so a binary
@@ -118,13 +100,10 @@ func bytesLookLikePDF(data []byte) bool {
 }
 
 // buildAttachmentContent validates and converts uploaded attachments into
-// core.Content blocks: images become "image" blocks (using durable references
-// when a store is available, otherwise legacy inline base64). Small UTF-8 text
-// is inlined in a <attachment> sentinel;
-// everything else that doesn't fit inline is written to the session's
-// attachment directory on disk and referenced by path instead. PDFs are
-// deliberately disk-first, even for capable providers: a large native PDF
-// would otherwise live in and be re-sent from conversation history every turn.
+// core.Content blocks. Images use durable references when a store is available
+// (otherwise legacy inline base64); every non-image is a byte-free durable
+// document descriptor. Without a store, non-images retain the legacy temporary
+// disk-path behavior so a degraded server remains usable.
 func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, priorNativeDocBytes int64, store *attachment.Store) (result []core.Content, writtenFiles []string, descriptors []attachment.Descriptor, retErr error) {
 	if len(atts) > maxAttachments {
 		return nil, nil, nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
@@ -132,7 +111,6 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 
 	var (
 		requestBytes      int64
-		inlineTextBytes   int
 		nativeBinaryBytes int64 // all native binary blocks this message
 
 		sessionDir         string
@@ -201,6 +179,30 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		return core.TextContent(advisory), nil
 	}
 
+	storeDurable := func(a Attachment, decoded []byte, meta attachment.PutMeta) (core.Content, error) {
+		d, err := store.PutRef(sessionID, decoded, meta)
+		if err != nil {
+			return core.Content{}, fmt.Errorf("%w: attachment %q: could not store attachment: %v", ErrBadAttachment, a.Name, err)
+		}
+		blockType := "document"
+		if meta.Kind == "image" {
+			blockType = "image"
+		}
+		createdDescriptors = append(createdDescriptors, d)
+		descriptors = append(descriptors, d)
+		return core.Content{Type: blockType, AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name}, nil
+	}
+
+	storeDocument := func(a Attachment, decoded []byte, mediaType string) (core.Content, error) {
+		if len(decoded) > maxAttachmentFileBytes {
+			return core.Content{}, fmt.Errorf("%w: attachment %q exceeds %d MB", ErrBadAttachment, a.Name, maxAttachmentFileBytes>>20)
+		}
+		if store == nil {
+			return toDisk(a, decoded, "")
+		}
+		return storeDurable(a, decoded, attachment.PutMeta{Name: a.Name, Mime: mediaType, Kind: "file"})
+	}
+
 	content := make([]core.Content, 0, len(atts))
 	for _, a := range atts {
 		decoded, err := base64.StdEncoding.DecodeString(a.Data)
@@ -217,7 +219,7 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			// Trust the bytes, not the client-declared MIME: a mislabeled
 			// binary must not be forwarded to the provider as an image.
 			if !bytesLookLikeImage(decoded, a.Mime) {
-				block, derr := toDisk(a, decoded, mimeMismatchNote)
+				block, derr := storeDocument(a, decoded, safeAttachmentMime(http.DetectContentType(decoded)))
 				if derr != nil {
 					return nil, nil, nil, derr
 				}
@@ -239,26 +241,20 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 				content = append(content, core.ImageContent(a.Data, a.Mime))
 			} else {
 				w, h := imageDimensions(decoded)
-				d, err := store.PutRef(sessionID, decoded, attachment.PutMeta{
+				block, err := storeDurable(a, decoded, attachment.PutMeta{
 					Name: a.Name, Mime: a.Mime, Kind: "image", Width: w, Height: h,
 				})
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("%w: attachment %q: could not store image: %v", ErrBadAttachment, a.Name, err)
+					return nil, nil, nil, err
 				}
-				content = append(content, core.Content{Type: "image", AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name})
-				descriptors = append(descriptors, d)
-				createdDescriptors = append(createdDescriptors, d)
+				content = append(content, block)
 			}
 			nativeBinaryBytes += int64(len(decoded))
 			continue
 		}
 
 		if a.Mime == "application/pdf" {
-			note := pdfStoredOnDiskNote
-			if !bytesLookLikePDF(decoded) {
-				note = mimeMismatchNote
-			}
-			block, err := toDisk(a, decoded, note)
+			block, err := storeDocument(a, decoded, "application/pdf")
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -266,27 +262,21 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			continue
 		}
 
-		inlineEligible := utf8.Valid(decoded) &&
-			bytes.IndexByte(decoded, 0) == -1 &&
-			len(decoded) <= maxAttachmentTextSize &&
-			inlineTextBytes+len(decoded) <= maxInlineTextAggregate
-
-		if inlineEligible {
-			name := strings.ReplaceAll(a.Name, `"`, `\"`)
-			text := fmt.Sprintf("<attachment name=\"%s\">\n%s\n</attachment>", name, decoded)
-			content = append(content, core.TextContent(text))
-			inlineTextBytes += len(decoded)
-			continue
-		}
-
-		// To disk.
-		block, err := toDisk(a, decoded, "")
+		block, err := storeDocument(a, decoded, safeAttachmentMime(a.Mime))
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		content = append(content, block)
 	}
 	return content, writtenPaths, descriptors, nil
+}
+
+func safeAttachmentMime(declared string) string {
+	mediaType, _, err := mime.ParseMediaType(declared)
+	if err != nil || mediaType == "" {
+		return "application/octet-stream"
+	}
+	return mediaType
 }
 
 func imageDimensions(data []byte) (width, height int) {
@@ -302,8 +292,8 @@ func imageDimensions(data []byte) (width, height int) {
 	return config.Width, config.Height
 }
 
-// priorNativeDocBytes returns the native document/image bytes already
-// committed to (or in flight to) the session, for the per-session budget check.
+// priorNativeDocBytes returns the native image bytes already committed to (or
+// in flight to) the session, for the per-session budget check.
 // It reads the undelivered total (queued + inflight steers) BEFORE history: a
 // steer only leaves the undelivered count once it is visible in history, so
 // reading queue-side first then history can never miss bytes in the delivery
@@ -318,13 +308,13 @@ func priorNativeDocBytes(sess *ManagedSession) int64 {
 
 // countNativeDocBytes returns the total decoded byte size of native binary
 // content blocks already present in history. Used to enforce the cumulative
-// session cap for PDFs and images (which are re-sent every turn).
+// session cap for images, which are re-sent every turn.
 // The Data field holds standard base64; its decoded length is ~len*3/4.
 func countNativeDocBytes(msgs []core.AgentMessage) int64 {
 	var total int64
 	for _, m := range msgs {
 		for _, c := range m.Content {
-			if c.Type == "document" || c.Type == "image" {
+			if c.Type == "image" {
 				if c.AttachmentSize > 0 {
 					total += c.AttachmentSize
 				} else {

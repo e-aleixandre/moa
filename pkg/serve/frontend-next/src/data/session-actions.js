@@ -261,25 +261,13 @@ export async function cancelBashJob(sessionId, jobId) {
   return api('POST', `/api/sessions/${sessionId}/bash-jobs/${jobId}/cancel`);
 }
 
-// attachmentToContent builds the local inline content needed for the immediate
-// optimistic echo. A successful send replaces image blocks with descriptors.
+// attachmentToContent builds the local content needed for the immediate
+// optimistic echo. Files remain file descriptors even before the send resolves.
 function attachmentToContent(a) {
   if (a.isImage) {
     return { type: 'image', data: a.data, mime_type: a.mime };
   }
-  const name = a.name.replaceAll('"', '\\"');
-  const text = base64ToUtf8(a.data);
-  return { type: 'text', text: `<attachment name="${name}">\n${text}\n</attachment>` };
-}
-
-function base64ToUtf8(b64) {
-  try {
-    const binary = atob(b64);
-    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-    return new TextDecoder('utf-8').decode(bytes);
-  } catch (_) {
-    return '';
-  }
+  return { type: 'document', mime_type: a.mime, filename: a.name };
 }
 
 export async function sendMessage(id, text, attachments = []) {
@@ -336,21 +324,20 @@ export async function sendMessage(id, text, attachments = []) {
     }, { timeoutMs: 0 });
     if (optimisticMsg && Array.isArray(res?.attachments) && res.attachments.length > 0) {
       const cur = store.get().sessions[id];
-      // Swap the inline-data image echoes for durable descriptors, but only
-      // when the server returned exactly one descriptor per inline image. The
-      // client marks every image/* as an image, while the server only mints a
-      // descriptor for images it stored durably (a magic-byte mismatch or a
-      // capacity spill converts one to text/disk with no descriptor). Pairing
-      // by position would then misalign, so fall back to leaving the optimistic
-      // echo as-is (a reload reconciles it) unless the counts match exactly.
-      const inlineImages = optimisticMsg.content.filter((b) => b.type === 'image' && b.data).length;
-      if (cur?.messages?.includes(optimisticMsg) && res.attachments.length === inlineImages) {
-        let imageIndex = 0;
+      // Swap optimistic attachment blocks for durable descriptors only when
+      // the server returned one descriptor for every attachment in order.
+      // Pairing a partial response by position could assign a later descriptor
+      // to the wrong chip, so leave the optimistic view intact until reload.
+      const optimisticAttachments = optimisticMsg.content.filter((b) => (
+        (b.type === 'image' && b.data) || b.type === 'document'
+      ));
+      if (cur?.messages?.includes(optimisticMsg) && res.attachments.length === optimisticAttachments.length) {
+        let attachmentIndex = 0;
         const content = optimisticMsg.content.map((block) => {
-          if (block.type !== 'image' || !block.data) return block;
-          const attachment = res.attachments[imageIndex++];
+          if (!((block.type === 'image' && block.data) || block.type === 'document')) return block;
+          const attachment = res.attachments[attachmentIndex++];
           return {
-            type: 'image',
+            type: attachment.kind === 'file' ? 'document' : 'image',
             attachment_id: attachment.id,
             attachment_size: attachment.size,
             mime_type: attachment.mime,

@@ -196,6 +196,55 @@ test('sendMessage replaces an accepted optimistic image with its durable descrip
   expect(content[1]).toEqual({ type: 'text', text: 'look at this' });
 });
 
+test('sendMessage replaces an optimistic file chip with its durable document descriptor', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = {
+    action: 'send',
+    attachments: [{ id: 'att_file', kind: 'file', mime: 'text/csv', size: 12, name: 'report.csv', url: '/api/sessions/s1/attachments/att_file' }],
+  };
+
+  await sendMessage('s1', 'review this', [
+    { name: 'report.csv', mime: 'text/csv', data: 'YSxiCjEsMgo=', isImage: false },
+  ]);
+
+  expect(store.get().sessions.s1.messages[0].content[0]).toEqual({
+    type: 'document', attachment_id: 'att_file', attachment_size: 12, mime_type: 'text/csv', filename: 'report.csv',
+  });
+});
+
+test('sendMessage swaps mixed image and document attachments in their original order', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = {
+    action: 'send',
+    attachments: [
+      { id: 'att_image', kind: 'image', mime: 'image/png', size: 123, name: 'screen.png', url: '/api/sessions/s1/attachments/att_image' },
+      { id: 'att_file', kind: 'file', mime: 'application/pdf', size: 456, name: 'report.pdf', url: '/api/sessions/s1/attachments/att_file' },
+    ],
+  };
+
+  await sendMessage('s1', 'review both', [
+    { name: 'screen.png', mime: 'image/png', data: 'AAAA', isImage: true },
+    { name: 'report.pdf', mime: 'application/pdf', data: 'BBBB', isImage: false },
+  ]);
+
+  const content = store.get().sessions.s1.messages[0].content;
+  expect(content).toEqual([
+    { type: 'image', attachment_id: 'att_image', attachment_size: 123, mime_type: 'image/png', filename: 'screen.png' },
+    { type: 'document', attachment_id: 'att_file', attachment_size: 456, mime_type: 'application/pdf', filename: 'report.pdf' },
+    { type: 'text', text: 'review both' },
+  ]);
+  expect(content[0].data).toBeUndefined();
+  expect(content[1].data).toBeUndefined();
+});
+
 test('sendMessage keeps an optimistic image inline when the response has no attachments', async () => {
   setState({
     sessions: {
@@ -210,6 +259,23 @@ test('sendMessage keeps an optimistic image inline when the response has no atta
 
   expect(store.get().sessions.s1.messages[0].content[0]).toEqual({
     type: 'image', data: 'AAAA', mime_type: 'image/png',
+  });
+});
+
+test('sendMessage keeps a non-image optimistic echo as a file chip, never inline text', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = { action: 'send' };
+
+  await sendMessage('s1', 'look at this', [
+    { name: 'notes.txt', mime: 'text/plain', data: 'aGVsbG8=', isImage: false },
+  ]);
+
+  expect(store.get().sessions.s1.messages[0].content[0]).toEqual({
+    type: 'document', mime_type: 'text/plain', filename: 'notes.txt',
   });
 });
 
@@ -236,4 +302,27 @@ test('sendMessage keeps optimistic images inline when the descriptor count does 
   const content = store.get().sessions.s1.messages[0].content;
   expect(content[0]).toEqual({ type: 'image', data: 'AAAA', mime_type: 'image/svg+xml' });
   expect(content[1]).toEqual({ type: 'image', data: 'BBBB', mime_type: 'image/png' });
+});
+
+test('sendMessage keeps mixed optimistic attachments intact when the descriptor count is partial', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = {
+    action: 'send',
+    attachments: [{ id: 'att_image', kind: 'image', mime: 'image/png', size: 123, name: 'screen.png', url: '/api/sessions/s1/attachments/att_image' }],
+  };
+
+  await sendMessage('s1', 'review both', [
+    { name: 'screen.png', mime: 'image/png', data: 'AAAA', isImage: true },
+    { name: 'report.pdf', mime: 'application/pdf', data: 'BBBB', isImage: false },
+  ]);
+
+  const content = store.get().sessions.s1.messages[0].content;
+  expect(content[0]).toEqual({ type: 'image', data: 'AAAA', mime_type: 'image/png' });
+  expect(content[1]).toEqual({ type: 'document', mime_type: 'application/pdf', filename: 'report.pdf' });
+  expect(content[1].attachment_id).toBeUndefined();
+  expect(content[2]).toEqual({ type: 'text', text: 'review both' });
 });

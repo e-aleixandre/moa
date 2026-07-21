@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -96,6 +97,63 @@ func TestMaterializeMessagesMissingOrForeignAttachmentFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMaterializeMessagesDocumentBecomesDurableViewAdvisory(t *testing.T) {
+	store := newTestStore(t)
+	descriptor, err := store.PutRef(sessionOne, []byte("a,b\n1,2\n"), PutMeta{
+		Name: "report.csv", Mime: "text/csv", Kind: "file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := []core.Message{{Role: "user", Content: []core.Content{{
+		Type: "document", AttachmentID: descriptor.ID, AttachmentSize: descriptor.Size,
+		MimeType: descriptor.Mime, Filename: descriptor.Name,
+	}}}}
+
+	got, err := store.MaterializeMessages(sessionOne, msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := store.EnsureView(sessionOne, descriptor.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Content[0].Type != "text" || !containsAll(got[0].Content[0].Text, "The user attached the file", view, "untrusted user-provided") {
+		t.Fatalf("document advisory = %+v, want durable English advisory with %q", got[0].Content[0], view)
+	}
+	if msgs[0].Content[0].Type != "document" || msgs[0].Content[0].AttachmentID != descriptor.ID {
+		t.Fatalf("stored history was mutated: %+v", msgs[0].Content[0])
+	}
+}
+
+func TestMaterializeMessagesUnavailableDocumentFallsBackToAdvisory(t *testing.T) {
+	store := newTestStore(t)
+	descriptor, err := store.PutRef(sessionOne, []byte("gone"), PutMeta{Name: "gone.txt", Mime: "text/plain", Kind: "file"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveRef(sessionOne, descriptor.ID); err != nil {
+		t.Fatal(err)
+	}
+	msgs := []core.Message{{Role: "user", Content: []core.Content{{Type: "document", AttachmentID: descriptor.ID, Filename: "gone.txt"}}}}
+	got, err := store.MaterializeMessages(sessionOne, msgs)
+	if err != nil {
+		t.Fatalf("unavailable document should not fail materialization: %v", err)
+	}
+	if got[0].Content[0].Type != "text" || !containsAll(got[0].Content[0].Text, "gone.txt", "no longer available") {
+		t.Fatalf("unavailable document advisory = %+v", got[0].Content[0])
+	}
+}
+
+func containsAll(text string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(text, part) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestMaterializeMessagesWithoutAttachmentReturnsInput(t *testing.T) {

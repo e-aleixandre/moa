@@ -312,6 +312,17 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		sessionCancel()
 		return nil, err
 	}
+	if m.attachStore != nil {
+		viewDir, err := m.attachStore.EnsureSessionViewDir(id)
+		if err != nil {
+			sessionCancel()
+			return nil, fmt.Errorf("prepare attachment views: %w", err)
+		}
+		if err := bs.PathPolicy.AddPath(viewDir); err != nil {
+			sessionCancel()
+			return nil, fmt.Errorf("grant attachment view access: %w", err)
+		}
+	}
 
 	shared := newSharedFiles()
 	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, shared, m.attachStore))

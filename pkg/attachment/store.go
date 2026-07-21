@@ -87,6 +87,7 @@ func New(baseDir string) (*Store, error) {
 		baseDir,
 		filepath.Join(baseDir, "blobs", "sha256"),
 		filepath.Join(baseDir, "sessions"),
+		filepath.Join(baseDir, "views"),
 		filepath.Join(baseDir, "staging"),
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -359,6 +360,83 @@ func (s *Store) Lookup(sessionID, attID string) (Descriptor, bool) {
 	return d, err == nil && d.ID != ""
 }
 
+// EnsureView returns a durable, session-scoped path for a session-owned
+// attachment. Tool views are session-local read-only copies (0400), never
+// hardlinks: the view is exposed to agent tools, and a hardlink would let a
+// tool corrupt the shared immutable blob across sessions. A view duplicates
+// its bytes on disk for integrity and is released with its session. An empty
+// legacy descriptor name uses "file" plus a MIME-derived extension when
+// available.
+func (s *Store) EnsureView(sessionID, attID string) (string, error) {
+	if err := validateSessionID(sessionID); err != nil {
+		return "", err
+	}
+	if err := validateAttachmentID(attID); err != nil {
+		return "", err
+	}
+
+	var viewPath string
+	err := s.withLock(func() error {
+		index, err := s.readSessionIndex(sessionID)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return notFound(attID)
+			}
+			return err
+		}
+		d, ok := index[attID]
+		if !ok || validateDescriptor(d) != nil {
+			return notFound(attID)
+		}
+		if err := s.verifyBlob(d); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return notFound(attID)
+			}
+			return err
+		}
+
+		viewPath, err = filepath.Abs(s.viewPath(sessionID, attID, viewFileName(d)))
+		if err != nil {
+			return fmt.Errorf("attachment: resolve view path: %w", err)
+		}
+		if err := s.createViewDirs(sessionID, attID); err != nil {
+			return err
+		}
+		ready, err := viewMatchesDescriptor(viewPath, d)
+		if err != nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+
+		return s.copyView(s.blobPath(d.SHA256), viewPath, d)
+	})
+	if err != nil {
+		return "", err
+	}
+	return viewPath, nil
+}
+
+// EnsureSessionViewDir creates and returns the durable, session-scoped parent
+// directory for attachment views. Callers may grant this directory to a tool
+// path policy; it never exposes blobs or another session's views.
+func (s *Store) EnsureSessionViewDir(sessionID string) (string, error) {
+	if err := validateSessionID(sessionID); err != nil {
+		return "", err
+	}
+	path, err := filepath.Abs(s.sessionViewsDir(sessionID))
+	if err != nil {
+		return "", fmt.Errorf("attachment: resolve session view directory: %w", err)
+	}
+	if err := s.withLock(func() error {
+		return s.createSessionViewDir(sessionID)
+	}); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // ReleaseSession removes every occurrence owned by a session and unlinks blobs
 // which are no longer referenced by any remaining session index.
 func (s *Store) ReleaseSession(sessionID string) error {
@@ -425,6 +503,7 @@ func (s *Store) releaseSessionLocked(sessionID string) error {
 	index, err := s.readSessionIndex(sessionID)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
+			s.removeSessionViews(sessionID)
 			return nil
 		}
 		return err
@@ -436,6 +515,9 @@ func (s *Store) releaseSessionLocked(sessionID string) error {
 	if err := syncDir(s.sessionsDir()); err != nil {
 		return fmt.Errorf("attachment: sync session directory: %w", err)
 	}
+	// Views are derived session-local entries. Their removal is best-effort so
+	// a filesystem cleanup failure cannot retain the session's blob references.
+	s.removeSessionViews(sessionID)
 	refs, err := s.catalogFromIndexes()
 	if err != nil {
 		return err
@@ -524,6 +606,7 @@ func (s *Store) Reconcile(live map[string][]Descriptor) error {
 				return fmt.Errorf("attachment: sync session directory: %w", err)
 			}
 		}
+		s.removeOrphanViews()
 
 		return s.reconcileIndexesLocked()
 	})
@@ -556,6 +639,7 @@ func (s *Store) ReconcileExisting(liveSessionIDs map[string]bool) error {
 				return err
 			}
 		}
+		s.removeOrphanViews()
 		return s.reconcileIndexesLocked()
 	})
 }
@@ -773,6 +857,7 @@ func (s *Store) basePath(parts ...string) string {
 func (s *Store) blobsDir() string    { return s.basePath("blobs", "sha256") }
 func (s *Store) sessionsDir() string { return s.basePath("sessions") }
 func (s *Store) stagingDir() string  { return s.basePath("staging") }
+func (s *Store) viewsDir() string    { return s.basePath("views") }
 func (s *Store) catalogPath() string { return s.basePath("catalog.json") }
 func (s *Store) lockPath() string    { return s.basePath("catalog.lock") }
 
@@ -782,6 +867,164 @@ func (s *Store) blobPath(sha string) string {
 
 func (s *Store) sessionPath(sessionID string) string {
 	return s.basePath("sessions", sessionID+".json")
+}
+
+func (s *Store) sessionViewsDir(sessionID string) string {
+	return s.basePath("views", sessionID)
+}
+
+func (s *Store) viewPath(sessionID, attID, name string) string {
+	return s.basePath("views", sessionID, attID, name)
+}
+
+func (s *Store) createViewDirs(sessionID, attID string) error {
+	if err := s.createSessionViewDir(sessionID); err != nil {
+		return err
+	}
+	for _, dir := range []string{filepath.Dir(s.viewPath(sessionID, attID, "file"))} {
+		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("attachment: create view directory: %w", err)
+		}
+		info, err := os.Lstat(dir)
+		if err != nil {
+			return fmt.Errorf("attachment: stat view directory: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("attachment: unsafe view directory")
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("attachment: secure view directory: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) createSessionViewDir(sessionID string) error {
+	for _, dir := range []string{s.viewsDir(), s.sessionViewsDir(sessionID)} {
+		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("attachment: create view directory: %w", err)
+		}
+		info, err := os.Lstat(dir)
+		if err != nil {
+			return fmt.Errorf("attachment: stat view directory: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("attachment: unsafe view directory")
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("attachment: secure view directory: %w", err)
+		}
+	}
+	return nil
+}
+
+// removeSessionViews deliberately ignores cleanup errors: views contain no
+// ownership metadata and must not prevent durable reference release.
+func (s *Store) removeSessionViews(sessionID string) {
+	if err := os.RemoveAll(s.sessionViewsDir(sessionID)); err == nil {
+		_ = syncDir(s.viewsDir())
+	}
+}
+
+// removeOrphanViews examines only one level of the views tree, avoiding a
+// walk of view files while collecting views whose session indexes are gone.
+func (s *Store) removeOrphanViews() {
+	entries, err := os.ReadDir(s.viewsDir())
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || validateSessionID(entry.Name()) != nil {
+			continue
+		}
+		if _, err := os.Lstat(s.sessionPath(entry.Name())); errors.Is(err, fs.ErrNotExist) {
+			s.removeSessionViews(entry.Name())
+		}
+	}
+}
+
+func viewFileName(d Descriptor) string {
+	if strings.TrimSpace(d.Name) != "" {
+		return sanitizeName(d.Name)
+	}
+	mediaType, _, _ := mime.ParseMediaType(d.Mime)
+	if extensions, _ := mime.ExtensionsByType(mediaType); len(extensions) > 0 {
+		return "file" + extensions[0]
+	}
+	return "file"
+}
+
+func viewMatchesDescriptor(path string, d Descriptor) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("attachment: stat view: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() != d.Size {
+		return false, nil
+	}
+	return true, nil
+}
+
+func ensureExistingView(path string, d Descriptor) error {
+	ready, err := viewMatchesDescriptor(path, d)
+	if err != nil {
+		return err
+	}
+	if !ready {
+		return errors.New("attachment: existing view does not match descriptor")
+	}
+	return nil
+}
+
+func (s *Store) copyView(blobPath, viewPath string, d Descriptor) error {
+	source, err := openBlobReadOnly(blobPath)
+	if err != nil {
+		return fmt.Errorf("attachment: open blob for view copy: %w", err)
+	}
+	defer source.Close() //nolint:errcheck
+
+	tmp, err := os.CreateTemp(filepath.Dir(viewPath), ".view-*.tmp")
+	if err != nil {
+		return fmt.Errorf("attachment: create view staging file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("attachment: secure view staging file: %w", err)
+	}
+	if _, err := io.Copy(tmp, source); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("attachment: copy blob to view: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("attachment: sync view staging file: %w", err)
+	}
+	if err := tmp.Chmod(0o400); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("attachment: make view read-only: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("attachment: sync read-only view staging file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("attachment: close view staging file: %w", err)
+	}
+	if err := os.Rename(tmpName, viewPath); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return ensureExistingView(viewPath, d)
+		}
+		return fmt.Errorf("attachment: publish copied view: %w", err)
+	}
+	if err := syncDir(filepath.Dir(viewPath)); err != nil {
+		return fmt.Errorf("attachment: sync view directory: %w", err)
+	}
+	return nil
 }
 
 func atomicWrite(dir, path string, data []byte) error {

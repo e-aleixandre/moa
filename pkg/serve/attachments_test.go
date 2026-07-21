@@ -167,21 +167,59 @@ func TestBuildAttachmentContentStoreRollbackAfterPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := pngBytes(64)
+	first := []byte("one,two\n1,2\n")
 	_, _, _, err = buildAttachmentContent([]Attachment{
-		{Name: "first.png", Mime: "image/png", Data: b64(first)},
-		{Name: "too-big.png", Mime: "image/png", Data: b64(pngBytes(maxImageBytes + 1))},
+		{Name: "first.csv", Mime: "text/csv", Data: b64(first)},
+		{Name: "too-big.bin", Mime: "application/octet-stream", Data: b64(make([]byte, maxAttachmentFileBytes+1))},
 	}, sessionID, nil, 0, store)
 	if !errors.Is(err, ErrBadAttachment) {
 		t.Fatalf("buildAttachmentContent error = %v, want ErrBadAttachment", err)
 	}
 
-	// PutRef creates the first occurrence before the second image is rejected;
+	// PutRef creates the first document occurrence before the second file is rejected;
 	// the failed build must remove that occurrence and its now-unreferenced blob.
 	hash := fmt.Sprintf("%x", sha256.Sum256(first))
 	blobPath := filepath.Join(root, "blobs", "sha256", hash[:2], hash[2:4], hash)
 	if _, err := os.Stat(blobPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("partial-build blob still exists or stat failed: %v", err)
+	}
+}
+
+func TestSessionPathPolicyAllowsOnlyItsAttachmentViews(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(simpleResponseHandler("done")), t.TempDir(), core.MoaConfig{PathScope: "workspace"})
+	store, err := attachment.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.attachStore = store
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := store.PutRef(sess.ID, []byte("private"), attachment.PutMeta{Name: "private.txt", Mime: "text/plain", Kind: "file"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := store.EnsureView(sess.ID, d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tool.SafePath(tool.ToolConfig{WorkspaceRoot: sess.CWD, PathPolicy: sess.pathPolicy}, view); err != nil {
+		t.Fatalf("session path policy rejected its attachment view %q: %v", view, err)
+	}
+	otherID := "other-session-123"
+	other, err := store.PutRef(otherID, []byte("other"), attachment.PutMeta{Name: "other.txt", Mime: "text/plain", Kind: "file"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherView, err := store.EnsureView(otherID, other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tool.SafePath(tool.ToolConfig{WorkspaceRoot: sess.CWD, PathPolicy: sess.pathPolicy}, otherView); err == nil {
+		t.Fatalf("session path policy allowed another session's attachment view %q", otherView)
 	}
 }
 
@@ -261,9 +299,9 @@ func TestSendRollsBackStoredAttachmentWhenSteerEnqueueRejected(t *testing.T) {
 	}
 }
 
-func TestCountNativeDocBytesUsesAttachmentSize(t *testing.T) {
+func TestCountNativeDocBytesOnlyCountsImages(t *testing.T) {
 	msgs := []core.AgentMessage{{Message: core.Message{Content: []core.Content{{Type: "image", AttachmentSize: 123}, {Type: "document", Data: b64([]byte("abcd"))}}}}}
-	if got, want := countNativeDocBytes(msgs), int64(129); got != want {
+	if got, want := countNativeDocBytes(msgs), int64(123); got != want {
 		t.Fatalf("countNativeDocBytes = %d, want %d", got, want)
 	}
 }
@@ -330,10 +368,7 @@ func TestSend_AttachmentOnlyNoText(t *testing.T) {
 	})
 }
 
-// TestSend_BinaryGoesToDisk covers the case of a non-text, non-image, non-PDF
-// attachment: it no longer errors, it's routed to disk under the session's
-// attachment dir and the agent gets a text advisory pointing at the path.
-func TestSend_BinaryGoesToDisk(t *testing.T) {
+func TestSend_BinaryBecomesDurableDocument(t *testing.T) {
 	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 
 	srv, mgr, cancel := newTestServer(t)
@@ -351,6 +386,15 @@ func TestSend_BinaryGoesToDisk(t *testing.T) {
 	if resp.StatusCode != 202 {
 		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
+	var response struct {
+		Attachments []AttachmentDTO `json:"attachments"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Attachments) != 1 || response.Attachments[0].Kind != "file" || response.Attachments[0].ID == "" {
+		t.Fatalf("expected durable document DTO from /send, got %+v", response.Attachments)
+	}
 
 	pollUntil(t, 5*time.Second, "session idle after send", func() bool {
 		sess.mu.Lock()
@@ -358,32 +402,24 @@ func TestSend_BinaryGoesToDisk(t *testing.T) {
 		return sessState(sess) == StateIdle
 	})
 
-	dir, err := sessionAttachDir(sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("expected attach dir to exist: %v", err)
-	}
-	if len(entries) < 1 {
-		t.Fatalf("expected at least 1 file in %q, got %d", dir, len(entries))
-	}
-
 	msgs := sess.History()
-	var found bool
+	var document core.Content
 	for _, m := range msgs {
 		if m.Role != "user" {
 			continue
 		}
 		for _, c := range m.Content {
-			if c.Type == "text" && strings.Contains(c.Text, "guardado en:") {
-				found = true
+			if c.Type == "document" {
+				document = c
 			}
 		}
 	}
-	if !found {
-		t.Fatal("expected user message to contain a text block mentioning the saved path")
+	if document.AttachmentID == "" || document.Data != "" || document.MimeType != "application/x-msdownload" {
+		t.Fatalf("expected byte-free file descriptor, got %+v", document)
+	}
+	d, ok := mgr.attachStore.Lookup(sess.ID, document.AttachmentID)
+	if !ok || d.Kind != "file" || d.Size != int64(len(badBytes)) {
+		t.Fatalf("expected stored file descriptor, got %+v (ok=%v)", d, ok)
 	}
 }
 
@@ -412,9 +448,7 @@ func TestSend_AttachmentTooLarge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A >256KiB text file no longer errors — it overflows the inline
-		// per-file cap and is routed to disk instead.
-		big := bytes.Repeat([]byte("a"), maxAttachmentTextSize+1)
+		big := bytes.Repeat([]byte("a"), 256<<10)
 		atts := []Attachment{{Name: "huge.txt", Mime: "text/plain", Data: b64(big)}}
 		resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/send", sendBody(t, "hi", atts))
 		defer resp.Body.Close() //nolint:errcheck
@@ -639,26 +673,48 @@ func TestRunErrorReleasesQueuedImageAttachment(t *testing.T) {
 	}
 }
 
-func TestBuildAttachmentContent_TextHeader(t *testing.T) {
-	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
-	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+func TestBuildAttachmentContent_TextBecomesDurableDocument(t *testing.T) {
+	store, err := attachment.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	atts := []Attachment{
 		{Name: `report "final".csv`, Mime: "text/csv", Data: b64([]byte("a,b\n1,2"))},
 	}
-	content, _, _, err := buildAttachmentContent(atts, "abcdef0123456789", pp, 0, nil)
+	content, _, descriptors, err := buildAttachmentContent(atts, "abcdef0123456789", nil, 0, store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(content) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(content))
 	}
-	if content[0].Type != "text" {
-		t.Fatalf("expected text block, got %q", content[0].Type)
+	if content[0].Type != "document" || content[0].AttachmentID == "" || content[0].Data != "" {
+		t.Fatalf("expected byte-free document block, got %+v", content[0])
 	}
-	want := "<attachment name=\"report \\\"final\\\".csv\">\na,b\n1,2\n</attachment>"
-	if content[0].Text != want {
-		t.Fatalf("unexpected sentinel:\n got: %q\nwant: %q", content[0].Text, want)
+	if len(descriptors) != 1 || descriptors[0].Kind != "file" || descriptors[0].Name != `report "final".csv` {
+		t.Fatalf("expected stored file descriptor, got %+v", descriptors)
+	}
+}
+
+func TestBuildAttachmentContent_OLE2BecomesDurableDocument(t *testing.T) {
+	store, err := attachment.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ole2 := []byte{0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00, 0x01}
+	content, written, descriptors, err := buildAttachmentContent([]Attachment{{
+		Name: "informe.xls", Mime: "application/vnd.ms-excel", Data: b64(ole2),
+	}}, "abcdef0123456789", nil, 0, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 || content[0].Type != "document" || content[0].AttachmentID == "" || content[0].Data != "" {
+		t.Fatalf("expected byte-free OLE2 document descriptor, got %+v", content)
+	}
+	if len(written) != 0 || len(descriptors) != 1 || descriptors[0].Kind != "file" || descriptors[0].Mime != "application/vnd.ms-excel" {
+		t.Fatalf("expected durable OLE2 file descriptor without disk advisory, written=%v descriptors=%+v", written, descriptors)
 	}
 }
 
@@ -748,7 +804,7 @@ func TestBuildAttachmentContent_Collision(t *testing.T) {
 	}
 }
 
-func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
+func TestBuildAttachmentContent_DegradedTextFilesGoToDisk(t *testing.T) {
 	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
 
@@ -767,16 +823,10 @@ func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
 	if len(content) != 3 {
 		t.Fatalf("expected 3 blocks, got %d", len(content))
 	}
-	// First two fit within the 512 KiB inline aggregate; the third overflows
-	// to disk.
-	if !strings.Contains(content[0].Text, "<attachment") {
-		t.Fatalf("expected block 0 to be inline, got %.40q", content[0].Text)
-	}
-	if !strings.Contains(content[1].Text, "<attachment") {
-		t.Fatalf("expected block 1 to be inline, got %.40q", content[1].Text)
-	}
-	if !strings.Contains(content[2].Text, "guardado en:") {
-		t.Fatalf("expected block 2 to be the disk advisory, got %.40q", content[2].Text)
+	for i, block := range content {
+		if block.Type != "text" || !strings.Contains(block.Text, "guardado en:") {
+			t.Fatalf("expected degraded disk advisory at block %d, got %+v", i, block)
+		}
 	}
 
 	dir, err := sessionAttachDir(sessionID)
@@ -787,8 +837,8 @@ func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 file on disk, got %d", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 files on disk, got %d", len(entries))
 	}
 }
 
@@ -827,7 +877,7 @@ func TestReapStaleAttachments(t *testing.T) {
 	}
 }
 
-func TestDelete_RemovesAttachments(t *testing.T) {
+func TestDelete_ReleasesDurableAttachments(t *testing.T) {
 	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 
 	srv, mgr, cancel := newTestServer(t)
@@ -852,112 +902,101 @@ func TestDelete_RemovesAttachments(t *testing.T) {
 		return sessState(sess) == StateIdle
 	})
 
-	dir, err := sessionAttachDir(sess.ID)
-	if err != nil {
-		t.Fatal(err)
+	var attachmentID string
+	for _, msg := range sess.History() {
+		for _, block := range msg.Content {
+			if block.Type == "document" {
+				attachmentID = block.AttachmentID
+			}
+		}
 	}
-	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("expected attach dir to exist before delete: %v", err)
+	if attachmentID == "" {
+		t.Fatal("expected durable document in history")
+	}
+	if _, ok := mgr.attachStore.Lookup(sess.ID, attachmentID); !ok {
+		t.Fatal("expected attachment reference before delete")
 	}
 
 	if err := mgr.Delete(sess.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("expected attach dir to be removed after Delete, err=%v", err)
+	if _, ok := mgr.attachStore.Lookup(sess.ID, attachmentID); ok {
+		t.Error("expected attachment reference to be released after Delete")
 	}
 }
 
-func TestPDF_AlwaysStoredOnDisk(t *testing.T) {
-	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
-	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+func TestPDF_BecomesDurableDocument(t *testing.T) {
+	store, err := attachment.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	pdfData := b64([]byte("%PDF-1.4 fake pdf bytes"))
 	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
 
 	sessionID := "fedcba9876543210"
-	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
+	content, _, descriptors, err := buildAttachmentContent(atts, sessionID, nil, 0, store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(content) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(content))
 	}
-	if content[0].Type != "text" {
-		t.Fatalf("expected disk advisory text, got %q", content[0].Type)
+	if content[0].Type != "document" || content[0].AttachmentID == "" || content[0].Data != "" {
+		t.Fatalf("expected byte-free PDF descriptor, got %+v", content[0])
 	}
-	if !strings.Contains(content[0].Text, "guardado en:") || !strings.Contains(content[0].Text, "se guardan en disco por defecto") {
-		t.Fatalf("expected disk-first PDF advisory, got %q", content[0].Text)
-	}
-
-	dir, err := sessionAttachDir(sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("expected session dir to exist: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 file on disk, got %d", len(entries))
-	}
-	stored, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(stored) != "%PDF-1.4 fake pdf bytes" {
-		t.Fatalf("stored PDF differs from upload: %q", stored)
+	if len(descriptors) != 1 || descriptors[0].Kind != "file" || descriptors[0].Mime != "application/pdf" {
+		t.Fatalf("expected PDF file descriptor, got %+v", descriptors)
 	}
 }
 
-// TestMimeMismatch_ImageGoesToDisk verifies a binary mislabeled as image/png
-// is NOT forwarded to the provider as an image (which would be rejected) but
-// saved to disk with a mismatch note.
-func TestMimeMismatch_ImageGoesToDisk(t *testing.T) {
-	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
-	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+func TestMimeMismatch_ImageBecomesDurableDocument(t *testing.T) {
+	store, err := attachment.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Not a real image — random binary claiming to be a PNG.
 	atts := []Attachment{{Name: "fake.png", Mime: "image/png", Data: b64([]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d})}}
 
 	sessionID := "aabbccdd11223344"
-	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
+	content, _, descriptors, err := buildAttachmentContent(atts, sessionID, nil, 0, store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(content) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(content))
 	}
-	if content[0].Type != "text" {
-		t.Fatalf("expected mislabeled image to go to disk (text block), got %q", content[0].Type)
+	if content[0].Type != "document" || content[0].AttachmentID == "" {
+		t.Fatalf("expected mislabeled image document descriptor, got %+v", content[0])
 	}
-	if !strings.Contains(content[0].Text, "no coincide con su contenido real") {
-		t.Fatalf("expected MIME-mismatch note, got %q", content[0].Text)
+	if len(descriptors) != 1 || descriptors[0].Kind != "file" || descriptors[0].Mime == "image/png" {
+		t.Fatalf("expected a safely typed file descriptor, got %+v", descriptors)
 	}
 }
 
-// TestMimeMismatch_PDFGoesToDisk verifies a binary mislabeled as
-// application/pdf is not sent as a native document but saved to disk.
-func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
-	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
-	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
+func TestMimeMismatch_PDFBecomesDurableDocument(t *testing.T) {
+	store, err := attachment.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	atts := []Attachment{{Name: "notreally.pdf", Mime: "application/pdf", Data: b64([]byte("this is not a pdf at all"))}}
 
 	sessionID := "ddccbbaa44332211"
-	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
+	content, _, descriptors, err := buildAttachmentContent(atts, sessionID, nil, 0, store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(content) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(content))
 	}
-	if content[0].Type != "text" {
-		t.Fatalf("expected mislabeled PDF to go to disk (text block), got %q", content[0].Type)
+	if content[0].Type != "document" || content[0].AttachmentID == "" {
+		t.Fatalf("expected PDF document descriptor, got %+v", content[0])
 	}
-	if !strings.Contains(content[0].Text, "no coincide con su contenido real") {
-		t.Fatalf("expected MIME-mismatch note, got %q", content[0].Text)
+	if len(descriptors) != 1 || descriptors[0].Kind != "file" {
+		t.Fatalf("expected a file descriptor, got %+v", descriptors)
 	}
 }
 

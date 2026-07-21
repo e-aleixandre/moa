@@ -17,6 +17,11 @@ export function attachmentImageSrc(attachment, sessionId) {
   return `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachment.attachment_id)}`;
 }
 
+function attachmentDownloadURL(attachment, sessionId) {
+  if (!attachment?.attachment_id || !sessionId) return null;
+  return `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachment.attachment_id)}`;
+}
+
 export function attachmentLabel(attachment, fallback) {
   return attachment?.filename || attachment?.mime_type || fallback;
 }
@@ -77,8 +82,18 @@ export function WaypointAttachments({ attachments, sessionId, onOpenImage }) {
           return unavailableImageChip(label, index);
         }
 
+        const downloadURL = attachmentDownloadURL(attachment, sessionId);
+        if (downloadURL) {
+          return (
+            <a key={index} class="wp-attachment-chip" href={downloadURL} download title={`Download ${label}`}>
+              <FileText aria-hidden="true" />
+              {label}
+            </a>
+          );
+        }
+
         return (
-          <span key={index} class="wp-attachment-chip">
+          <span key={index} class="wp-attachment-chip" title="Not available on this device">
             <FileText aria-hidden="true" />
             {label}
           </span>

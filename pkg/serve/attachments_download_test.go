@@ -333,6 +333,23 @@ func TestSanitizeHistoryMessagePreservesAttachmentDescriptor(t *testing.T) {
 	}
 }
 
+func TestLimitInitHistoryPreservesDocumentDescriptor(t *testing.T) {
+	input := core.AgentMessage{Message: core.Message{Role: "user", Content: []core.Content{{
+		Type: "document", AttachmentID: "att_0123456789abcdef01234567", AttachmentSize: 42,
+		MimeType: "application/pdf", Filename: "report.pdf",
+	}}}}
+	got, _ := limitInitHistory([]core.AgentMessage{input})
+	if len(got) != 1 || len(got[0].Content) != 1 {
+		t.Fatalf("sanitized history = %#v, want one document message", got)
+	}
+	block := got[0].Content[0]
+	if block.Type != "document" || block.AttachmentID != input.Content[0].AttachmentID ||
+		block.AttachmentSize != input.Content[0].AttachmentSize || block.MimeType != input.Content[0].MimeType ||
+		block.Filename != input.Content[0].Filename || block.Data != "" {
+		t.Fatalf("sanitized document descriptor = %+v, want preserved byte-free descriptor", block)
+	}
+}
+
 func TestConversationMessagesProjectsAttachmentDescriptors(t *testing.T) {
 	mgr := newTestManager(t, context.Background(), newMockProvider())
 	sess, err := mgr.CreateSession(CreateOpts{})
@@ -377,6 +394,50 @@ func TestConversationMessagesProjectsAttachmentDescriptors(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "iVBOR") {
 		t.Fatalf("attachment bytes leaked in response: %s", rec.Body.String())
+	}
+}
+
+func TestConversationMessagesProjectsDocumentDescriptor(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := mgr.attachStore.PutRef(sess.ID, []byte("%PDF-1.4"), attachment.PutMeta{
+		Name: "report.pdf", Mime: "application/pdf", Kind: "file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendConversationTestMessage(sess, "document", "user", "review", nil, core.Content{
+		Type: "document", AttachmentID: descriptor.ID, AttachmentSize: descriptor.Size,
+		MimeType: descriptor.Mime, Filename: descriptor.Name,
+	})
+
+	handler := NewServer(mgr)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages = %d: %s", rec.Code, rec.Body.String())
+	}
+	var response conversationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Messages) != 1 {
+		t.Fatalf("messages = %#v", response.Messages)
+	}
+	message := response.Messages[0]
+	if message.OmittedBlocks != 0 || len(message.Attachments) != 1 {
+		t.Fatalf("message projection = %#v", message)
+	}
+	got := message.Attachments[0]
+	if got.ID != descriptor.ID || got.Name != descriptor.Name || got.Mime != descriptor.Mime ||
+		got.Size != descriptor.Size || got.Kind != "file" ||
+		got.URL != "/api/sessions/"+sess.ID+"/attachments/"+descriptor.ID {
+		t.Fatalf("document projection = %#v", got)
 	}
 }
 

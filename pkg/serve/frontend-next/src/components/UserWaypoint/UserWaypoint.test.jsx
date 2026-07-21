@@ -103,6 +103,29 @@ test("a document attachment renders a file chip", () => {
   expect(textContent(attachments)).toContain("notes.pdf");
 });
 
+test("an optimistic document is an unavailable chip rather than a download link", () => {
+  const attachments = WaypointAttachments({
+    attachments: [{ type: "document", mime_type: "application/vnd.ms-excel", filename: "informe.xls" }],
+    sessionId: "s1",
+  });
+
+  expect(byClass(attachments, "wp-attachment-chip").type).toBe("span");
+  expect(descendants(attachments).find((node) => node.type === "a")).toBeUndefined();
+  expect(textContent(attachments)).toContain("informe.xls");
+});
+
+test("a persisted document file chip downloads from its attachment endpoint", () => {
+  const attachments = WaypointAttachments({
+    attachments: [{ type: "document", attachment_id: "att_file", mime_type: "text/csv", filename: "report.csv" }],
+    sessionId: "session/1",
+  });
+  const link = descendants(attachments).find((node) => node.type === "a");
+
+  expect(link).toBeDefined();
+  expect(link.props.href).toBe("/api/sessions/session%2F1/attachments/att_file");
+  expect(link.props.download).toBe(true);
+});
+
 test("a text-only waypoint has no attachments strip", () => {
   expect(WaypointAttachments({ attachments: [] })).toBeNull();
 });
