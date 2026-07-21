@@ -251,6 +251,15 @@ type ContextUpdated struct {
 	Percent   int
 }
 
+// RunTokensUpdated carries the current run's estimated logical input and
+// output traffic, excluding resent context and provider cache usage.
+type RunTokensUpdated struct {
+	SessionID string
+	RunGen    uint64
+	Up        int
+	Down      int
+}
+
 // SessionCostUpdated is published when the accumulated session cost changes:
 // after each run (RunEnded) and after each subagent finishes (SubagentEnded),
 // or when the running total is reset (clear / clean-context plan execution /

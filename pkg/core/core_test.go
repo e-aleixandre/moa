@@ -254,6 +254,22 @@ func TestEstimateTokens_ToolCall(t *testing.T) {
 	}
 }
 
+func TestEstimateOutputTokens_ExcludesThinking(t *testing.T) {
+	m := Message{
+		Role: "assistant",
+		Content: []Content{
+			TextContent("done"),
+			ThinkingContent("this must not count"),
+			ToolCallContent("call-1", "bash", map[string]any{"command": "pwd"}),
+			ImageContent("base64...", "image/png"),
+		},
+	}
+	want := (len("done") + len("bash") + len(`{"command":"pwd"}`) + 3) / 4
+	if got := EstimateOutputTokens(m); got != want {
+		t.Fatalf("EstimateOutputTokens = %d, want %d", got, want)
+	}
+}
+
 func TestEstimateTokens_Image(t *testing.T) {
 	m := Message{
 		Role:    "user",

@@ -37,6 +37,16 @@ type GetContextUsage struct{ SessionID string }
 // Handler returns: float64
 type GetSessionCost struct{ SessionID string }
 
+// GetRunTokens returns the current run's estimated logical input/output traffic.
+// Handler returns: RunTokens
+type GetRunTokens struct{ SessionID string }
+
+// RunTokens is the result of GetRunTokens.
+type RunTokens struct {
+	Up   int
+	Down int
+}
+
 // GetTasks returns the current task list.
 // Handler returns: []tasks.Task
 type GetTasks struct{ SessionID string }

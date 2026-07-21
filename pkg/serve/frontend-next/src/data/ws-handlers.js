@@ -418,6 +418,10 @@ export function handleWsInit(id, data) {
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,
     costUSD: data.cost_usd || 0,
+    // Logical per-run traffic is authoritative in every init snapshot, so a
+    // reconnect replaces stale local totals even when the run is already idle.
+    runTokensUp: data.run_tokens_up || 0,
+    runTokensDown: data.run_tokens_down || 0,
     subagents: initBashJobs(data.bash_jobs, initSubagents(data.subagents)),
     // subagentCount is otherwise live-only (WS subagent_count events). If an
     // async job finished while this pane had no WS (backgrounded on mobile),
@@ -578,7 +582,7 @@ export function handleWsThinkingDelta(id, delta) {
   scheduleFlush();
 }
 
-export function handleWsMessageEnd(id, fullText, msgId = '', inputTokens = 0, outputTokens = 0) {
+export function handleWsMessageEnd(id, fullText, msgId = '') {
   const pendingText = pendingTextDeltas[id] || '';
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
@@ -588,23 +592,9 @@ export function handleWsMessageEnd(id, fullText, msgId = '', inputTokens = 0, ou
     return;
   }
 
-  // Tally the run's live token counts. A run may span several model calls
-  // (each tool round-trip is another call). The counts reset when the next run
-  // begins (see handleWsStateChange) and are kept after the run ends until the
-  // next one.
-  //   ↓ output ACCUMULATES: each call generates new output tokens.
-  //   ↑ input is the LAST call's value, NOT a sum: every call replays the whole
-  //     accumulated context (system + prior turns + tool results), so summing
-  //     would double-count the same context on every step and inflate ↑ wildly.
-  //     The latest call's input already includes all tool results fed back so
-  //     far, so it's the honest "how big is what the model is chewing on" number.
-  //     Zero-input messages (rare) don't clobber the last real value.
-  const runTokensUp = inputTokens > 0 ? inputTokens : (sess.runTokensUp || 0);
-  const runTokensDown = (sess.runTokensDown || 0) + (outputTokens || 0);
-
   if (msgId && sess.messages.some(m => m._msg_id === msgId)) {
     delete materializedTextDuringMessage[id];
-    updateSession(id, { streamingText: null, thinkingText: null, runTokensUp, runTokensDown });
+    updateSession(id, { streamingText: null, thinkingText: null });
     return;
   }
 
@@ -628,8 +618,6 @@ export function handleWsMessageEnd(id, fullText, msgId = '', inputTokens = 0, ou
   const patch = {
     streamingText: null,
     thinkingText: null,
-    runTokensUp,
-    runTokensDown,
   };
   if (assistantText) {
     const msg = { role: 'assistant', _msg_id: msgId || undefined, content: [{ type: 'text', text: assistantText }] };
@@ -638,6 +626,10 @@ export function handleWsMessageEnd(id, fullText, msgId = '', inputTokens = 0, ou
 
   delete materializedTextDuringMessage[id];
   updateSession(id, patch);
+}
+
+export function handleWsRunTokens(id, data) {
+  updateSession(id, { runTokensUp: data.up || 0, runTokensDown: data.down || 0 });
 }
 
 export function handleWsToolCallStart(id, data) {

@@ -440,6 +440,12 @@ func RegisterHandlers(sctx *SessionContext) {
 		return sctx.sessionCostTotal(), nil
 	})
 
+	b.OnQuery(func(q GetRunTokens) (RunTokens, error) {
+		sctx.runTokenMu.Lock()
+		defer sctx.runTokenMu.Unlock()
+		return RunTokens{Up: sctx.runTokensUp, Down: sctx.runTokensDown}, nil
+	})
+
 	b.OnQuery(func(q GetPlanMode) (PlanModeInfo, error) {
 		if sctx.PlanMode == nil {
 			return PlanModeInfo{Mode: "off"}, nil
@@ -1128,6 +1134,57 @@ func RegisterHandlers(sctx *SessionContext) {
 					PlanFile:  sctx.PlanMode.PlanFilePath(),
 				})
 			}
+		}
+	})
+
+	// Run-token reactor — derive authoritative logical traffic from the main
+	// agent's own history, scoped by the run-start baseline. This avoids
+	// provider usage, resent context, and subagent traffic.
+	recomputeRunTokens := func(runGen uint64) {
+		sctx.runTokenMu.Lock()
+		baseline := sctx.runTokenBaseline
+		if runGen != sctx.runTokensGen {
+			sctx.runTokenMu.Unlock()
+			return
+		}
+		sctx.runTokenMu.Unlock()
+
+		msgs := sctx.Agent.Messages()
+		if baseline > len(msgs) {
+			baseline = len(msgs)
+		}
+		up, down := 0, 0
+		for _, m := range msgs[baseline:] {
+			switch m.Role {
+			case "user", "tool_result":
+				up += core.EstimateTokens(m.Message)
+			case "assistant":
+				down += core.EstimateOutputTokens(m.Message)
+			}
+		}
+
+		sctx.runTokenMu.Lock()
+		if runGen != sctx.runTokensGen {
+			sctx.runTokenMu.Unlock()
+			return
+		}
+		sctx.runTokenBaseline = baseline
+		sctx.runTokensUp = up
+		sctx.runTokensDown = down
+		sctx.runTokenMu.Unlock()
+		sctx.Bus.Publish(RunTokensUpdated{SessionID: sctx.SessionID, RunGen: runGen, Up: up, Down: down})
+	}
+	// One all-event subscriber preserves publication order across RunStarted,
+	// MessageEnded, and ToolExecEnded. Separate typed subscribers could race a
+	// fast message completion ahead of its run baseline.
+	b.SubscribeAll(func(event any) {
+		switch e := event.(type) {
+		case RunStarted:
+			resetRunTokens(sctx, e.RunGen)
+		case MessageEnded:
+			recomputeRunTokens(e.RunGen)
+		case ToolExecEnded:
+			recomputeRunTokens(e.RunGen)
 		}
 	})
 
@@ -1924,6 +1981,26 @@ func reserveRunSlot(sctx *SessionContext) error {
 	return nil
 }
 
+func resetRunTokens(sctx *SessionContext, runGen uint64) {
+	sctx.runTokenMu.Lock()
+	if runGen <= sctx.runTokensGen {
+		sctx.runTokenMu.Unlock()
+		return
+	}
+	sctx.runTokenMu.Unlock()
+
+	baseline := len(sctx.Agent.Messages())
+	sctx.runTokenMu.Lock()
+	defer sctx.runTokenMu.Unlock()
+	if runGen <= sctx.runTokensGen {
+		return
+	}
+	sctx.runTokenBaseline = baseline
+	sctx.runTokensUp = 0
+	sctx.runTokensDown = 0
+	sctx.runTokensGen = runGen
+}
+
 // launchRun starts the agent goroutine for a slot already reserved by
 // reserveRunSlot. It creates the per-run context, publishes RunStarted, and runs
 // runFn in a goroutine, settling the state and publishing RunEnded when it ends.
@@ -1932,6 +2009,10 @@ func launchRun(sctx *SessionContext, label string, runFn func(ctx context.Contex
 	sctx.runMu.Lock()
 	runCtx, gen := sctx.newRunContext()
 	sctx.runMu.Unlock()
+	// Establish the baseline before the agent goroutine can append the run's
+	// first user message. The RunStarted reactor observes this same generation
+	// and is a no-op, while direct RunStarted publishers still reset it there.
+	resetRunTokens(sctx, gen)
 
 	// Notify subscribers of the run generation (single source of truth for runGen).
 	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen})

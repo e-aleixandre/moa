@@ -16,6 +16,7 @@ import {
   handleWsAskUser, handleWsContextUpdate, handleWsSteer, handleWsSteersCanceled,
   handleWsCommandQueued, handleWsCommandDequeued,
   handleWsSessionCost,
+  handleWsRunTokens,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd,
 } from './ws-handlers.js';
@@ -166,7 +167,10 @@ function routeEvent(sessionId, evt) {
       handleWsMessageStart(sessionId);
       break;
     case 'message_end':
-      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id, evt.data.input_tokens, evt.data.output_tokens);
+      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id);
+      break;
+    case 'run_tokens':
+      handleWsRunTokens(sessionId, evt.data);
       break;
     case 'tool_call_start':
       handleWsToolCallStart(sessionId, evt.data);

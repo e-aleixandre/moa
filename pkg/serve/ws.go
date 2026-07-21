@@ -139,11 +139,8 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.MessageEnded:
 		var inputTok, outputTok int
 		if e.Message.Usage != nil {
-			// Input the model actually processed this call = fresh input plus the
-			// cached context replayed on every step (tool results, prior turns).
-			// Usage.Input alone omits CacheRead/CacheWrite, which under Anthropic
-			// prompt caching is nearly the whole prompt — so the "↑" would read
-			// far too low and wouldn't reflect tool-result tokens at all.
+			// Input the model processed in this provider call includes cached
+			// context replayed on every step.
 			inputTok = e.Message.Usage.Input + e.Message.Usage.CacheRead + e.Message.Usage.CacheWrite
 			outputTok = e.Message.Usage.Output
 		}
@@ -178,6 +175,8 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
+	case bus.RunTokensUpdated:
+		return Event{Type: "run_tokens", Data: RunTokensData{Up: e.Up, Down: e.Down}}, true
 	case bus.SessionCostUpdated:
 		return Event{Type: "session_cost", Data: SessionCostData{CostUSD: e.TotalUSD}}, true
 	case bus.RateLimitUpdated:
@@ -396,6 +395,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
 	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
+	runTokens, _ := bus.QueryTyped[bus.GetRunTokens, bus.RunTokens](b, bus.GetRunTokens{})
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
@@ -409,6 +409,8 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 		Tasks:             taskList,
 		PathScope:         pathInfo.Scope,
 		CostUSD:           cost,
+		RunTokensUp:       runTokens.Up,
+		RunTokensDown:     runTokens.Down,
 		Compacting:        compacting,
 		StreamingText:     truncateHistoryString(streaming.Text),
 		StreamingThinking: truncateHistoryString(streaming.Thinking),

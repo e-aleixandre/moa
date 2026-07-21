@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,6 +143,42 @@ func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
 	}
 	if data.OutputTokens != 320 {
 		t.Fatalf("OutputTokens = %d, want 320", data.OutputTokens)
+	}
+}
+
+func TestWsEventFromBus_RunTokensUpdated(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.RunTokensUpdated{SessionID: "s1", RunGen: 4, Up: 125, Down: 75})
+	if !ok || ev.Type != "run_tokens" {
+		t.Fatalf("Type = %q ok=%v, want run_tokens", ev.Type, ok)
+	}
+	data, ok := ev.Data.(RunTokensData)
+	if !ok {
+		t.Fatalf("Data type = %T, want RunTokensData", ev.Data)
+	}
+	if data != (RunTokensData{Up: 125, Down: 75}) {
+		t.Fatalf("Data = %+v, want up=125 down=75", data)
+	}
+}
+
+func TestBuildInitData_IncludesRunTokens(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := buildInitData(sess, bus.StreamingAggregate{})
+	if data.RunTokensUp != 0 || data.RunTokensDown != 0 {
+		t.Fatalf("initial run tokens = up=%d down=%d, want zero", data.RunTokensUp, data.RunTokensDown)
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"run_tokens_up":0`) || !strings.Contains(string(payload), `"run_tokens_down":0`) {
+		t.Fatalf("init JSON missing zero run tokens: %s", payload)
 	}
 }
 

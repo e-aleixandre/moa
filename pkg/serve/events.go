@@ -37,6 +37,8 @@ type InitData struct {
 	Compacting        bool                `json:"compacting,omitempty"`
 	StreamingText     string              `json:"streaming_text,omitempty"`
 	StreamingThinking string              `json:"streaming_thinking,omitempty"`
+	RunTokensUp       int                 `json:"run_tokens_up"`
+	RunTokensDown     int                 `json:"run_tokens_down"`
 	RunStartedAtMs    int64               `json:"run_started_at_ms,omitempty"`
 	PendingSteers     []PendingSteerData  `json:"pending_steers,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
@@ -123,9 +125,8 @@ type DeltaData struct {
 	Delta string `json:"delta"`
 }
 
-// MessageEndData carries the full assistant text on message completion, plus
-// the model usage for that message (input/output tokens) so the client can
-// tally live per-run token counts.
+// MessageEndData carries the full assistant text on message completion and the
+// provider-reported usage for that message.
 type MessageEndData struct {
 	Text         string `json:"text"`
 	MsgID        string `json:"msg_id,omitempty"`
@@ -184,6 +185,12 @@ type RunEndData struct {
 // ContextUpdateData carries the current context usage percentage.
 type ContextUpdateData struct {
 	ContextPercent int `json:"context_percent"`
+}
+
+// RunTokensData carries the current run's estimated logical input/output traffic.
+type RunTokensData struct {
+	Up   int `json:"up"`
+	Down int `json:"down"`
 }
 
 // SessionCostData carries the accumulated session spend (main run + subagents).

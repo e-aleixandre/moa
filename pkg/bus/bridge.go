@@ -178,6 +178,15 @@ type SessionContext struct {
 	costMu      sync.Mutex
 	sessionCost float64
 
+	// runTokens tracks the current run's logical traffic. runTokenBaseline is
+	// the first message belonging to that run in Agent.Messages; the totals
+	// exclude resent context and provider cache usage. Guarded by runTokenMu.
+	runTokenMu       sync.Mutex
+	runTokenBaseline int
+	runTokensUp      int
+	runTokensDown    int
+	runTokensGen     uint64
+
 	// Run context management — used by SendPrompt handler.
 	// Protected by runMu.
 	runMu      sync.Mutex
