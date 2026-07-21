@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -190,7 +191,7 @@ func (s *Store) stage(data []byte, meta PutMeta) (string, Descriptor, error) {
 		_ = os.Remove(stageName)
 		return "", Descriptor{}, err
 	}
-	return stageName, Descriptor{
+	descriptor := Descriptor{
 		ID:        id,
 		SHA256:    sha,
 		Name:      sanitizeName(meta.Name),
@@ -200,7 +201,12 @@ func (s *Store) stage(data []byte, meta PutMeta) (string, Descriptor, error) {
 		Width:     meta.Width,
 		Height:    meta.Height,
 		CreatedAt: s.now(),
-	}, nil
+	}
+	if err := validateDescriptor(descriptor); err != nil {
+		_ = os.Remove(stageName)
+		return "", Descriptor{}, err
+	}
+	return stageName, descriptor, nil
 }
 
 // publishLocked publishes a fully synced staging file. The caller must hold
@@ -856,6 +862,9 @@ func validateDescriptor(d Descriptor) error {
 	}
 	if d.Size < 0 || d.Width < 0 || d.Height < 0 {
 		return errors.New("attachment: invalid descriptor dimensions or size")
+	}
+	if _, _, err := mime.ParseMediaType(d.Mime); err != nil {
+		return fmt.Errorf("attachment: invalid MIME type: %w", err)
 	}
 	return nil
 }

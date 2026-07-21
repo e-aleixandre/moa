@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ func TestAddRefCountsOccurrencesAndIsIdempotent(t *testing.T) {
 
 func TestPutRefStoresAndReferencesImmediately(t *testing.T) {
 	s := newTestStore(t)
-	d, err := s.PutRef(sessionOne, []byte("owned immediately"), PutMeta{Name: "example.txt", Kind: "file"})
+	d, err := s.PutRef(sessionOne, []byte("owned immediately"), PutMeta{Name: "example.txt", Mime: "text/plain", Kind: "file"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +111,16 @@ func TestPutRefStoresAndReferencesImmediately(t *testing.T) {
 	}
 	if got := readCatalog(t, s)[d.SHA256].RefCount; got != 1 {
 		t.Fatalf("refcount = %d, want 1", got)
+	}
+}
+
+func TestPutRefRejectsInvalidMIME(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.PutRef(sessionOne, []byte("owned bytes"), PutMeta{
+		Name: "image.png", Mime: "notamime\r\ninjected: header", Kind: "image",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid MIME type") {
+		t.Fatalf("PutRef invalid MIME error = %v, want invalid MIME type", err)
 	}
 }
 
@@ -428,7 +439,7 @@ func TestConcurrentPutsDeduplicate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d, err := s.Put(data, PutMeta{Name: "x", Kind: "file"})
+			d, err := s.Put(data, PutMeta{Name: "x", Mime: "application/octet-stream", Kind: "file"})
 			if err != nil {
 				errs <- err
 				return
@@ -488,7 +499,7 @@ func TestConcurrentPutRefSurvivesSharedSessionRelease(t *testing.T) {
 		go func(sessionID string) {
 			defer wg.Done()
 			<-start
-			d, err := s.PutRef(sessionID, data, PutMeta{Name: "shared.bin", Kind: "file"})
+			d, err := s.PutRef(sessionID, data, PutMeta{Name: "shared.bin", Mime: "application/octet-stream", Kind: "file"})
 			if err != nil {
 				errs <- err
 				return

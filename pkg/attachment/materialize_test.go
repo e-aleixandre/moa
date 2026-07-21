@@ -69,7 +69,7 @@ func TestMaterializeMessages(t *testing.T) {
 
 func TestMaterializeMessagesMissingOrForeignAttachmentFails(t *testing.T) {
 	store := newTestStore(t)
-	descriptor, err := store.PutRef(sessionOne, []byte("owned bytes"), PutMeta{Kind: "image"})
+	descriptor, err := store.PutRef(sessionOne, []byte("owned bytes"), PutMeta{Mime: "image/png", Kind: "image"})
 	if err != nil {
 		t.Fatal(err)
 	}

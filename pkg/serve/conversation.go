@@ -31,17 +31,18 @@ const (
 // projected into role=tool items; tool result output remains available only
 // through the explicit detail query.
 type ConversationMessage struct {
-	ID            string    `json:"id"`
-	Role          string    `json:"role"`
-	Timestamp     time.Time `json:"timestamp,omitempty"`
-	Text          string    `json:"text,omitempty"`
-	Truncated     bool      `json:"truncated,omitempty"`
-	Omitted       bool      `json:"omitted,omitempty"`
-	OmittedBlocks int       `json:"omitted_blocks,omitempty"`
-	Tool          string    `json:"tool,omitempty"`
-	Action        string    `json:"action,omitempty"`
-	Target        string    `json:"target,omitempty"`
-	Status        string    `json:"status,omitempty"`
+	ID            string          `json:"id"`
+	Role          string          `json:"role"`
+	Timestamp     time.Time       `json:"timestamp,omitempty"`
+	Text          string          `json:"text,omitempty"`
+	Truncated     bool            `json:"truncated,omitempty"`
+	Omitted       bool            `json:"omitted,omitempty"`
+	OmittedBlocks int             `json:"omitted_blocks,omitempty"`
+	Tool          string          `json:"tool,omitempty"`
+	Action        string          `json:"action,omitempty"`
+	Target        string          `json:"target,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	Attachments   []AttachmentDTO `json:"attachments,omitempty"`
 }
 
 type conversationBranch struct {
@@ -198,7 +199,7 @@ func (m *Manager) conversationSnapshot(id string) (conversationSnapshot, error) 
 		if err != nil {
 			return conversationSnapshot{}, err
 		}
-		projection := safeConversationMessages(msgs)
+		projection := m.safeConversationMessages(sess.ID, msgs)
 		return conversationSnapshot{id: sess.ID, title: sess.title(), leafID: sess.runtime.Context().Tree.LeafID(), source: "active", messages: projection.messages, toolDetails: projection.toolDetails}, nil
 	}
 
@@ -208,25 +209,25 @@ func (m *Manager) conversationSnapshot(id string) (conversationSnapshot, error) 
 	if err != nil {
 		return conversationSnapshot{}, err
 	}
-	projection, leaf, err := savedConversationMessages(saved)
+	projection, leaf, err := m.savedConversationMessages(saved)
 	if err != nil {
 		return conversationSnapshot{}, err
 	}
 	return conversationSnapshot{id: saved.ID, title: saved.Title, leafID: leaf, source: "saved", messages: projection.messages, toolDetails: projection.toolDetails}, nil
 }
 
-func savedConversationMessages(saved *session.Session) (conversationProjection, string, error) {
+func (m *Manager) savedConversationMessages(saved *session.Session) (conversationProjection, string, error) {
 	if len(saved.Entries) == 0 {
-		return safeConversationMessages(saved.Messages), "", nil
+		return m.safeConversationMessages(saved.ID, saved.Messages), "", nil
 	}
 	tree, err := session.NewTreeFromEntries(saved.Entries, saved.LeafID)
 	if err != nil {
 		return conversationProjection{}, "", err
 	}
-	return safeConversationMessages(tree.AllMessages()), tree.LeafID(), nil
+	return m.safeConversationMessages(saved.ID, tree.AllMessages()), tree.LeafID(), nil
 }
 
-func safeConversationMessages(messages []core.AgentMessage) conversationProjection {
+func (m *Manager) safeConversationMessages(sessionID string, messages []core.AgentMessage) conversationProjection {
 	out := make([]ConversationMessage, 0, len(messages))
 	details := make(map[string]conversationToolDetail)
 	results := make(map[string]core.AgentMessage)
@@ -266,7 +267,9 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 				item.Timestamp = time.Unix(msg.Timestamp, 0).UTC()
 			}
 			for _, block := range msg.Content {
-				if block.Type != "text" && block.Type != "tool_call" {
+				if (block.Type == "image" || block.Type == "document") && block.AttachmentID != "" {
+					item.Attachments = append(item.Attachments, m.attachmentDTOFromContent(sessionID, block))
+				} else if block.Type != "text" && block.Type != "tool_call" {
 					item.OmittedBlocks++
 				}
 			}
@@ -305,6 +308,23 @@ func safeConversationMessages(messages []core.AgentMessage) conversationProjecti
 	return conversationProjection{messages: out, toolDetails: details}
 }
 
+func (m *Manager) attachmentDTOFromContent(sessionID string, content core.Content) AttachmentDTO {
+	if m.attachStore != nil {
+		if descriptor, ok := m.attachStore.Lookup(sessionID, content.AttachmentID); ok {
+			return attachmentDTO(sessionID, descriptor)
+		}
+	}
+	kind := "file"
+	if content.Type == "image" {
+		kind = "image"
+	}
+	return AttachmentDTO{
+		ID: content.AttachmentID, Name: content.Filename, Mime: content.MimeType,
+		Size: content.AttachmentSize, Kind: kind,
+		URL: fmt.Sprintf("/api/sessions/%s/attachments/%s", sessionID, content.AttachmentID),
+	}
+}
+
 // isExtensionMessage reports whether a user/assistant message is an injected
 // extension (subagent/goal/shell/schedule/model-switch and other internal
 // notifications) that must stay out of the owner-facing transcript, as opposed
@@ -332,6 +352,9 @@ func isExtensionMessage(custom map[string]any) bool {
 func shouldShowConversationMessage(role, text string, omitted bool, content []core.Content) bool {
 	trimmedText := strings.TrimSpace(text)
 	if trimmedText == "" && !omitted {
+		if hasAttachmentDescriptors(content) {
+			return true
+		}
 		// An assistant turn made entirely of tool calls is represented by the
 		// individual tool items below, not by an empty assistant item.
 		if role != "assistant" || !hasToolCalls(content) {
@@ -341,7 +364,16 @@ func shouldShowConversationMessage(role, text string, omitted bool, content []co
 	if role == "assistant" && trimmedText == "" && onlyThinkingAndToolCalls(content) {
 		return false
 	}
-	return trimmedText != "" || omitted
+	return trimmedText != "" || omitted || hasAttachmentDescriptors(content)
+}
+
+func hasAttachmentDescriptors(content []core.Content) bool {
+	for _, block := range content {
+		if (block.Type == "image" || block.Type == "document") && block.AttachmentID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasToolCalls(content []core.Content) bool {
