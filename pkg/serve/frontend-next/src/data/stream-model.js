@@ -109,6 +109,7 @@ import {
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
 import { parseFileCardData } from './util/file-card.js';
+import { parseUnifiedDiff } from './util/unified-diff.js';
 
 const MAX_MESSAGES_BEFORE_TRUNCATION_NOTE = 200;
 
@@ -561,8 +562,20 @@ function toLedgerRow(msg) {
     // They take precedence over a concurrent tool_update tail, which remains
     // the live signal for output-oriented tools such as bash.
     if (preview && (preview.kind === 'input' || preview.kind === 'diff')) {
-      const bounded = tailPreviewText(preview.text);
-      if (bounded.visible) row.livePreview = { text: bounded.visible, kind: preview.kind };
+      if (preview.kind === 'input') {
+        const tail = splitPreviewTail(preview.text, 5);
+        if (tail.visible) row.livePreview = {
+          kind: 'text', lines: tail.visible.split('\n'), start: tail.hidden,
+        };
+      } else {
+        // formatLiveDiff already bounds argument input before this parser runs.
+        // Parse before taking the tail so unified-diff line types survive even
+        // when the hunk header itself scrolls out of the visible window.
+        const lines = parseUnifiedDiff(preview.text);
+        if (lines.length) row.livePreview = {
+          kind: 'diff', lines: lines.slice(-5), start: Math.max(0, lines.length - 5),
+        };
+      }
     }
     // Incremental output of tools without an argument preview (for example,
     // bash) is carried as the last five lines for the mini-logtail.
@@ -578,17 +591,6 @@ function toLedgerRow(msg) {
     }
   }
   return row;
-}
-
-// tailPreviewText keeps a live argument preview bounded like the static body,
-// while retaining the newest content rather than the beginning of a large file.
-function tailPreviewText(text) {
-  const maxChars = 2000; // matches truncateText's default static preview limit
-  const marker = '… (truncated)\n';
-  const tailText = text.length > maxChars
-    ? marker + text.slice(-(maxChars - marker.length))
-    : text;
-  return splitPreviewTail(tailText, 12);
 }
 
 // toolToken maps a raw tool name to the token the ledger row uses for its icon/label

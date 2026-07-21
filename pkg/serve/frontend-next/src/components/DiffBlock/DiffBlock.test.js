@@ -22,3 +22,11 @@ test("a numbered fallback without a unified hunk remains supported", () => {
     { newNo: 43, type: "add", text: "after" },
   ]);
 });
+
+test("slicing parsed unified rows retains add and delete types after the hunk header", () => {
+  const rows = parseUnifiedDiff(
+    "@@ -1,5 +1,5 @@\n one\n-two\n+two!\n three\n-four\n+four!\n five",
+  );
+
+  expect(rows.slice(-5).map((row) => row.type)).toEqual(["add", "ctx", "del", "add", "ctx"]);
+});

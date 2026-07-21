@@ -73,7 +73,7 @@ test('the live row never carries a static detail', () => {
     arg: { text: 'notes.txt' },
     live: true,
     body: 'ignored',
-    livePreview: { text: 'partial content', kind: 'input' },
+    livePreview: { kind: 'text', lines: ['partial content'], start: 0 },
   };
   const rows = [row('read', { id: 'r1', body: 'x' }), live];
   const out = fuseLedgerDetails(rows, null);

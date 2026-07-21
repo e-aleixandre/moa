@@ -16,7 +16,6 @@ import {
 } from "lucide-preact";
 import { liveVerb, formatElapsed } from "../../data/util/activity.js";
 import { StateDot } from "../../primitives/index.js";
-import { DiffBlock } from "../DiffBlock/DiffBlock.jsx";
 import { useElapsed } from "../../data/util/use-elapsed.js";
 import { useTailWindow } from "./tail-dwell.js";
 import "./ActivityLedger.css";
@@ -121,16 +120,41 @@ function RowDetail({ detail }) {
   );
 }
 
+// LiveWindow renders every running tool's rolling five-line content window.
+// Diff rows retain their parsed type so the shared log can color them.
+function LiveWindow({ lines, start = 0, diff = false }) {
+  if (!lines || lines.length === 0) return null;
+  return (
+    <div class={`tg-log${start > 0 ? " fade" : ""}`} role="log" aria-live="off">
+      {lines.map((line, i) => {
+        const type = diff ? line.type : "";
+        const text = diff
+          ? `${type === "add" ? "+" : type === "del" ? "-" : ""}${line.text}`
+          : line;
+        return (
+          <div key={start + i} class={`ln${type ? ` ${type}` : ""}`}>
+            {text}
+            {i === lines.length - 1 && <span class="ln-cursor" aria-hidden="true" />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // LiveRow — the running tool call: the SAME atom, tinted blue. Breathing dot in
 // the icon column, blue verb + bright object, elapsed (from 3s), a 1px progress
-// sweep. A running bash streams its last lines in a `.tg-log` panel below.
+// sweep. Every tool streams through the same rolling `.tg-log` panel below.
 function LiveRow({ row }) {
   const elapsed = useElapsed(row.startedAt);
   const verb = liveVerb(row.tool);
   const { text, detail: argDetail } = argParts(row.arg);
-  const tailLines = row.liveTail ? row.liveTail.split("\n") : [];
-  const tailStart = row.liveTailStart || 0;
   const livePreview = row.livePreview;
+  const liveWindow = livePreview
+    ? { lines: livePreview.lines, start: livePreview.start, diff: livePreview.kind === "diff" }
+    : row.liveTail
+      ? { lines: row.liveTail.split("\n"), start: row.liveTailStart || 0 }
+      : null;
   return (
     <>
       <div class="tg-row live" role="status" aria-live="off">
@@ -144,26 +168,7 @@ function LiveRow({ row }) {
         {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
         <span class="hair" aria-hidden="true" />
       </div>
-      {livePreview && (
-        <div class={`tg-live-preview ${livePreview.kind === "diff" ? "diff" : "input"}`}>
-          {livePreview.kind === "diff" ? (
-            <DiffBlock className="flush" diffText={livePreview.text} filename={text} />
-          ) : (
-            <pre>{livePreview.text}</pre>
-          )}
-          <span class="tg-live-cursor" aria-hidden="true" />
-        </div>
-      )}
-      {tailLines.length > 0 && (
-        <div class={`tg-log${tailStart > 0 ? " fade" : ""}`} role="log" aria-live="off">
-          {tailLines.map((line, i) => (
-            <div key={tailStart + i} class="ln">
-              {line}
-              {i === tailLines.length - 1 && <span class="ln-cursor" aria-hidden="true" />}
-            </div>
-          ))}
-        </div>
-      )}
+      {liveWindow && <LiveWindow {...liveWindow} />}
     </>
   );
 }

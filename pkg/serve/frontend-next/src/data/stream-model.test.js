@@ -608,35 +608,53 @@ test('a generating tool_start (args still streaming) is also marked live', () =>
   expect(ledger.rows[0].startedAt).toBe(999);
 });
 
-test('a generating write exposes its growing content as a bounded live preview', () => {
+test('a generating write exposes its growing content in a five-line live window', () => {
   const rowFor = (content) => projectStream(session([
     tool('t1', 'write', { path: 'notes.txt', content }, 'generating', null, { startedAt: 1 }),
   ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
 
   const partial = rowFor('first line\nsecond line');
   expect(partial.live).toBe(true);
-  expect(partial.livePreview).toEqual({ text: 'first line\nsecond line', kind: 'input' });
+  expect(partial.livePreview).toEqual({
+    kind: 'text', lines: ['first line', 'second line'], start: 0,
+  });
 
   const growing = rowFor('first line\nsecond line\nthird line');
-  expect(growing.livePreview.text).toBe('first line\nsecond line\nthird line');
+  expect(growing.livePreview.lines).toEqual(['first line', 'second line', 'third line']);
 
   const long = rowFor(Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join('\n'));
-  expect(long.livePreview.text.split('\n')).toHaveLength(12);
-  expect(long.livePreview.text).toStartWith('line 3');
-
-  const charBounded = rowFor('x'.repeat(2500));
-  expect(charBounded.livePreview.text).toHaveLength(2000);
-  expect(charBounded.livePreview.text).toStartWith('… (truncated)\n');
+  expect(long.livePreview).toEqual({
+    kind: 'text', lines: ['line 10', 'line 11', 'line 12', 'line 13', 'line 14'], start: 9,
+  });
 });
 
-test('a generating edit exposes an argument diff as its live preview', () => {
+test('a generating edit exposes a parsed five-line diff tail with its types intact', () => {
+  const streamedDiff = [
+    '@@ -1,7 +1,7 @@',
+    ' one',
+    '-two',
+    '+two!',
+    ' three',
+    '-four',
+    '+four!',
+    ' five',
+    '-six',
+    '+six!',
+  ].join('\n');
   const s = session([
-    tool('t1', 'edit', { path: 'a.js', oldText: 'before', newText: 'after' }, 'generating', null),
+    tool('t1', 'edit', { path: 'a.js' }, 'generating', streamedDiff),
   ]);
   const row = projectStream(s)[0].blocks.find(b => b.type === 'ledger').rows[0];
   expect(row.livePreview.kind).toBe('diff');
-  expect(row.livePreview.text).toContain('- before');
-  expect(row.livePreview.text).toContain('+ after');
+  expect(row.livePreview.start).toBe(4);
+  expect(row.livePreview.lines.map(line => line.type)).toEqual(['del', 'add', 'ctx', 'del', 'add']);
+  expect(row.livePreview.lines).toEqual([
+    expect.objectContaining({ type: 'del', text: 'four' }),
+    expect.objectContaining({ type: 'add', text: 'four!' }),
+    expect.objectContaining({ type: 'ctx', text: 'five' }),
+    expect.objectContaining({ type: 'del', text: 'six' }),
+    expect.objectContaining({ type: 'add', text: 'six!' }),
+  ]);
 });
 
 test('live argument previews suppress concurrent output tails', () => {
@@ -647,7 +665,7 @@ test('live argument previews suppress concurrent output tails', () => {
   ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
 
   const write = rowFor('write', { path: 'notes.txt', content: 'growing content' });
-  expect(write.livePreview).toEqual({ text: 'growing content', kind: 'input' });
+  expect(write.livePreview).toEqual({ kind: 'text', lines: ['growing content'], start: 0 });
   expect(write.liveTail).toBeUndefined();
 
   const edit = rowFor('edit', { path: 'a.js', oldText: 'before', newText: 'after' });
@@ -665,16 +683,16 @@ test('live argument previews suppress concurrent output tails', () => {
   expect(bash.liveTail).toBe('@@ -1 +1 @@\n-before\n+after');
 });
 
-test('a large live edit formats a bounded diff preview', () => {
+test('a large live edit keeps only its last five parsed diff rows', () => {
   const oldText = Array.from({ length: 5000 }, (_, i) => `old ${i}`).join('\n');
   const newText = Array.from({ length: 5000 }, (_, i) => `new ${i}`).join('\n');
   const row = projectStream(session([
     tool('t1', 'edit', { path: 'a.js', oldText, newText }, 'generating', null),
   ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
 
-  expect(row.livePreview.text.split('\n')).toHaveLength(12);
-  expect(row.livePreview.text.length).toBeLessThanOrEqual(2000);
-  expect(row.livePreview.text).toContain('+ new 4999');
+  expect(row.livePreview.lines).toHaveLength(5);
+  expect(row.livePreview.start).toBeGreaterThan(0);
+  expect(row.livePreview.lines).toContainEqual(expect.objectContaining({ type: 'add', text: 'new 4999' }));
 });
 
 test('a live bash keeps its command in the header instead of duplicating it as a preview', () => {
