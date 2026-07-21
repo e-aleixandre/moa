@@ -3,9 +3,13 @@ package serve
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/attachment"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -67,10 +73,16 @@ func TestSend_WithImageAttachment(t *testing.T) {
 	if resp.StatusCode != 202 {
 		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
-	var out map[string]string
+	var out struct {
+		Action      string          `json:"action"`
+		Attachments []AttachmentDTO `json:"attachments"`
+	}
 	_ = json.NewDecoder(resp.Body).Decode(&out)
-	if out["action"] != "send" {
-		t.Fatalf("expected action=send, got %q", out["action"])
+	if out.Action != "send" {
+		t.Fatalf("expected action=send, got %q", out.Action)
+	}
+	if len(out.Attachments) != 1 || out.Attachments[0].URL == "" {
+		t.Fatalf("expected descriptor response, got %+v", out.Attachments)
 	}
 
 	pollUntil(t, 5*time.Second, "session idle after send", func() bool {
@@ -98,8 +110,188 @@ func TestSend_WithImageAttachment(t *testing.T) {
 	if userContent[0].Type != "image" {
 		t.Fatalf("expected first block to be image, got %q", userContent[0].Type)
 	}
+	if userContent[0].AttachmentID == "" || userContent[0].AttachmentSize <= 0 || userContent[0].Data != "" {
+		t.Fatalf("expected byte-free image descriptor, got %+v", userContent[0])
+	}
+	f, d, err := mgr.attachStore.Open(sess.ID, userContent[0].AttachmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close() //nolint:errcheck
+	got, err := io.ReadAll(f)
+	if err != nil || d.Size != int64(len(got)) || !bytes.Equal(got, pngBytes(64)) {
+		t.Fatalf("stored bytes or descriptor mismatch: bytes=%d descriptor=%+v error=%v", len(got), d, err)
+	}
 	if userContent[1].Type != "text" || userContent[1].Text != "mira esta captura" {
 		t.Fatalf("expected second block to be the user text, got %+v", userContent[1])
+	}
+}
+
+func TestBuildAttachmentContentImageStoreAndDegradedFallback(t *testing.T) {
+	sessionID := "0123456789abcdef"
+	store, err := attachment.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := pngBytes(64)
+	atts := []Attachment{{Name: "image.png", Mime: "image/png", Data: b64(image)}}
+	content, _, descriptors, err := buildAttachmentContent(atts, sessionID, nil, 0, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 1 || len(descriptors) != 1 || content[0].AttachmentID == "" || content[0].Data != "" || content[0].AttachmentSize <= 0 {
+		t.Fatalf("expected stored descriptor block, got content=%+v descriptors=%+v", content, descriptors)
+	}
+	f, _, err := store.Open(sessionID, content[0].AttachmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(f)
+	_ = f.Close()
+	if err != nil || !bytes.Equal(got, image) {
+		t.Fatalf("stored image mismatch: %v", err)
+	}
+	content, _, descriptors, err = buildAttachmentContent(atts, sessionID, nil, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descriptors) != 0 || content[0].AttachmentID != "" || content[0].Data != atts[0].Data {
+		t.Fatalf("expected inline fallback, got content=%+v descriptors=%+v", content, descriptors)
+	}
+}
+
+func TestBuildAttachmentContentStoreRollbackAfterPartialFailure(t *testing.T) {
+	sessionID := "0123456789abcdef"
+	root := t.TempDir()
+	store, err := attachment.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := pngBytes(64)
+	_, _, _, err = buildAttachmentContent([]Attachment{
+		{Name: "first.png", Mime: "image/png", Data: b64(first)},
+		{Name: "too-big.png", Mime: "image/png", Data: b64(pngBytes(maxImageBytes + 1))},
+	}, sessionID, nil, 0, store)
+	if !errors.Is(err, ErrBadAttachment) {
+		t.Fatalf("buildAttachmentContent error = %v, want ErrBadAttachment", err)
+	}
+
+	// PutRef creates the first occurrence before the second image is rejected;
+	// the failed build must remove that occurrence and its now-unreferenced blob.
+	hash := fmt.Sprintf("%x", sha256.Sum256(first))
+	blobPath := filepath.Join(root, "blobs", "sha256", hash[:2], hash[2:4], hash)
+	if _, err := os.Stat(blobPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial-build blob still exists or stat failed: %v", err)
+	}
+}
+
+func TestSendRollsBackStoredAttachmentWhenIdleEnqueueRejected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("done")))
+	root := t.TempDir()
+	store, err := attachment.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.attachStore = store
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A closed bus makes SendPromptWithContent reject after attachment ingestion.
+	sess.runtime.Close()
+	image := pngBytes(64)
+	_, _, _, err = mgr.Send(sess.ID, "image", []Attachment{{Name: "image.png", Mime: "image/png", Data: b64(image)}}, "")
+	if !errors.Is(err, bus.ErrClosed) {
+		t.Fatalf("Send error = %v, want bus.ErrClosed", err)
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256(image))
+	blobPath := filepath.Join(root, "blobs", "sha256", hash[:2], hash[2:4], hash)
+	if _, err := os.Stat(blobPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected idle-send blob still exists or stat failed: %v", err)
+	}
+}
+
+func TestSendRollsBackStoredAttachmentWhenSteerEnqueueRejected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(3*time.Second, "slow")))
+	root := t.TempDir()
+	store, err := attachment.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.attachStore = store
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "first", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 2*time.Second, "running", func() bool {
+		return sessState(sess) == StateRunning
+	})
+	queueFull := false
+	for i := 0; i < 64; i++ {
+		_, _, _, err := mgr.Send(sess.ID, "queued", nil, "")
+		if errors.Is(err, bus.ErrSteerQueueFull) {
+			queueFull = true
+			break
+		}
+		if err != nil {
+			t.Fatalf("fill steer queue at %d: %v", i, err)
+		}
+	}
+	if !queueFull {
+		t.Fatal("steer queue did not fill")
+	}
+
+	image := pngBytes(64)
+	_, _, _, err = mgr.Send(sess.ID, "image", []Attachment{{Name: "image.png", Mime: "image/png", Data: b64(image)}}, "")
+	if !errors.Is(err, bus.ErrSteerQueueFull) {
+		t.Fatalf("Send error = %v, want bus.ErrSteerQueueFull", err)
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256(image))
+	blobPath := filepath.Join(root, "blobs", "sha256", hash[:2], hash[2:4], hash)
+	if _, err := os.Stat(blobPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected steer blob still exists or stat failed: %v", err)
+	}
+}
+
+func TestCountNativeDocBytesUsesAttachmentSize(t *testing.T) {
+	msgs := []core.AgentMessage{{Message: core.Message{Content: []core.Content{{Type: "image", AttachmentSize: 123}, {Type: "document", Data: b64([]byte("abcd"))}}}}}
+	if got, want := countNativeDocBytes(msgs), int64(129); got != want {
+		t.Fatalf("countNativeDocBytes = %d, want %d", got, want)
+	}
+}
+
+func TestDeleteReleasesAttachmentReferences(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("done")))
+	root := t.TempDir()
+	store, err := attachment.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.attachStore = store
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := store.PutRef(sess.ID, pngBytes(64), attachment.PutMeta{Name: "image.png", Mime: "image/png", Kind: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Delete(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "blobs", "sha256", d.SHA256[:2], d.SHA256[2:4], d.SHA256)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("deleted session blob still exists or unexpected stat error: %v", err)
 	}
 }
 
@@ -307,12 +499,15 @@ func TestSend_AttachmentsSteerWhileRunning(t *testing.T) {
 	if resp2.StatusCode != 202 {
 		t.Fatalf("expected 202 for attachments while running, got %d", resp2.StatusCode)
 	}
-	var out2 map[string]string
-	_ = json.NewDecoder(resp2.Body).Decode(&out2)
-	if out2["action"] != "steer" {
-		t.Fatalf("expected action=steer for attachment mid-run, got %q", out2["action"])
+	var out2 struct {
+		Action  string `json:"action"`
+		SteerID string `json:"steer_id"`
 	}
-	if out2["steer_id"] == "" {
+	_ = json.NewDecoder(resp2.Body).Decode(&out2)
+	if out2.Action != "steer" {
+		t.Fatalf("expected action=steer for attachment mid-run, got %q", out2.Action)
+	}
+	if out2.SteerID == "" {
 		t.Fatalf("expected a steer_id for the queued attachment chip")
 	}
 
@@ -335,6 +530,115 @@ func TestSend_AttachmentsSteerWhileRunning(t *testing.T) {
 	})
 }
 
+func TestCancelSteersReleasesQueuedImageAttachment(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(delayedResponseHandler(3*time.Second, "slow"))
+	mgr := newTestManager(t, ctx, prov)
+	httpSrv := httptest.NewServer(NewServer(mgr))
+	defer httpSrv.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := apiReq(t, httpSrv, http.MethodPost, "/api/sessions/"+sess.ID+"/send", sendBody(t, "first", nil))
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("first send status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	pollUntil(t, 2*time.Second, "running", func() bool {
+		return sessState(sess) == StateRunning
+	})
+
+	resp = apiReq(t, httpSrv, http.MethodPost, "/api/sessions/"+sess.ID+"/send", sendBody(t, "image steer", []Attachment{{
+		Name: "queued.png", Mime: "image/png", Data: b64(pngBytes(64)),
+	}}))
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("image steer status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	var queued struct {
+		Action      string          `json:"action"`
+		Attachments []AttachmentDTO `json:"attachments"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued.Action != "steer" || len(queued.Attachments) != 1 {
+		t.Fatalf("queued response = %+v, want one image steer", queued)
+	}
+	attachmentID := queued.Attachments[0].ID
+	if _, ok := mgr.attachStore.Lookup(sess.ID, attachmentID); !ok {
+		t.Fatal("queued attachment was not stored")
+	}
+
+	resp = apiReq(t, httpSrv, http.MethodPost, "/api/sessions/"+sess.ID+"/steers/cancel", "")
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("cancel steers status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	pollUntil(t, 2*time.Second, "queued attachment release", func() bool {
+		_, ok := mgr.attachStore.Lookup(sess.ID, attachmentID)
+		return !ok
+	})
+	if _, _, err := mgr.attachStore.Open(sess.ID, attachmentID); err == nil {
+		t.Fatal("canceled steer attachment is still openable")
+	}
+}
+
+func TestRunErrorReleasesQueuedImageAttachment(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	providerErr := make(chan struct{})
+	prov := newMockProvider(func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 1)
+		go func() {
+			defer close(ch)
+			<-providerErr
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: errors.New("provider failed")}
+		}()
+		return ch, nil
+	})
+	mgr := newTestManager(t, ctx, prov)
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action, _, _, err := mgr.Send(sess.ID, "first", nil, ""); err != nil || action != "send" {
+		t.Fatalf("first send = (%q, %v), want (send, nil)", action, err)
+	}
+	pollUntil(t, 2*time.Second, "running", func() bool {
+		return sessState(sess) == StateRunning
+	})
+
+	action, _, descriptors, err := mgr.Send(sess.ID, "image steer", []Attachment{{
+		Name: "queued.png", Mime: "image/png", Data: b64(pngBytes(64)),
+	}}, "")
+	if err != nil || action != "steer" || len(descriptors) != 1 {
+		t.Fatalf("image steer = (%q, %+v, %v), want one queued image", action, descriptors, err)
+	}
+	attachmentID := descriptors[0].ID
+	if _, ok := mgr.attachStore.Lookup(sess.ID, attachmentID); !ok {
+		t.Fatal("queued attachment was not stored")
+	}
+
+	close(providerErr)
+	pollUntil(t, 2*time.Second, "run error", func() bool {
+		return sessState(sess) == StateError
+	})
+	pollUntil(t, 2*time.Second, "queued attachment release", func() bool {
+		_, ok := mgr.attachStore.Lookup(sess.ID, attachmentID)
+		return !ok
+	})
+	if _, _, err := mgr.attachStore.Open(sess.ID, attachmentID); err == nil {
+		t.Fatal("run-error discarded steer attachment is still openable")
+	}
+}
+
 func TestBuildAttachmentContent_TextHeader(t *testing.T) {
 	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
@@ -342,7 +646,7 @@ func TestBuildAttachmentContent_TextHeader(t *testing.T) {
 	atts := []Attachment{
 		{Name: `report "final".csv`, Mime: "text/csv", Data: b64([]byte("a,b\n1,2"))},
 	}
-	content, _, err := buildAttachmentContent(atts, "abcdef0123456789", pp, 0)
+	content, _, _, err := buildAttachmentContent(atts, "abcdef0123456789", pp, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +670,7 @@ func TestBuildAttachmentContent_LargeTextToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "big.txt", Mime: "text/plain", Data: b64(big)}}
 
 	sessionID := "0123456789abcdef"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
+	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +718,7 @@ func TestBuildAttachmentContent_Collision(t *testing.T) {
 	}
 
 	sessionID := "fedcba9876543210"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
+	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +760,7 @@ func TestBuildAttachmentContent_InlineAggregate(t *testing.T) {
 	}
 
 	sessionID := "aaaaaaaaaaaaaaaa"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
+	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,7 +877,7 @@ func TestPDF_AlwaysStoredOnDisk(t *testing.T) {
 	atts := []Attachment{{Name: "report.pdf", Mime: "application/pdf", Data: pdfData}}
 
 	sessionID := "fedcba9876543210"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
+	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +922,7 @@ func TestMimeMismatch_ImageGoesToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "fake.png", Mime: "image/png", Data: b64([]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d})}}
 
 	sessionID := "aabbccdd11223344"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
+	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +946,7 @@ func TestMimeMismatch_PDFGoesToDisk(t *testing.T) {
 	atts := []Attachment{{Name: "notreally.pdf", Mime: "application/pdf", Data: b64([]byte("this is not a pdf at all"))}}
 
 	sessionID := "ddccbbaa44332211"
-	content, _, err := buildAttachmentContent(atts, sessionID, pp, 0)
+	content, _, _, err := buildAttachmentContent(atts, sessionID, pp, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +965,7 @@ func TestImage_SessionNativeBudgetFallsBackToDisk(t *testing.T) {
 	t.Setenv("MOA_ATTACHMENTS_DIR", t.TempDir())
 	pp := tool.NewPathPolicy(t.TempDir(), nil, false)
 	image := pngBytes(1024)
-	content, _, err := buildAttachmentContent([]Attachment{{Name: "x.png", Mime: "image/png", Data: b64(image)}}, "cafecafecafe0000", pp, maxSessionNativeDocBytes)
+	content, _, _, err := buildAttachmentContent([]Attachment{{Name: "x.png", Mime: "image/png", Data: b64(image)}}, "cafecafecafe0000", pp, maxSessionNativeDocBytes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -708,7 +1012,7 @@ func TestBuildAttachmentContent_RollbackOnError(t *testing.T) {
 	// first was written.
 	tooBig := Attachment{Name: "big.bin", Mime: "application/octet-stream", Data: b64(make([]byte, maxAttachmentFileBytes+1))}
 
-	_, _, err := buildAttachmentContent([]Attachment{good, tooBig}, sessionID, pp, 0)
+	_, _, _, err := buildAttachmentContent([]Attachment{good, tooBig}, sessionID, pp, 0, nil)
 	if err == nil {
 		t.Fatal("expected error for oversized attachment")
 	}

@@ -178,11 +178,13 @@ func (q *steerQueue) snapshot() []core.SteerItem {
 	return items
 }
 
-// clear drops all queued items without returning them.
-func (q *steerQueue) clear() {
+// clear drops and returns all queued items.
+func (q *steerQueue) clear() []core.SteerItem {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	items := q.items
 	q.items = nil
+	return items
 }
 
 // len returns the number of queued items (steers and barriers).
@@ -1060,12 +1062,12 @@ func (a *Agent) Steer(it core.SteerItem) bool {
 	return a.steers.push(ownItem(it))
 }
 
-// CancelSteer drops all steer messages still queued for inter-step delivery.
+// CancelSteer drops and returns all steer messages still queued for inter-step delivery.
 // Used when the user pulls queued steers back into the input to edit them, so
 // the agent doesn't also deliver the originals (double-delivery). Safe to call
 // while running; already-delivered steers cannot be recalled.
-func (a *Agent) CancelSteer() {
-	a.steers.clear()
+func (a *Agent) CancelSteer() []core.SteerItem {
+	return a.steers.clear()
 }
 
 // DrainSteers removes and returns all steer messages still queued for
@@ -1323,7 +1325,11 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare func(), tools *c
 	// queued chips back into the input; the agent's buffer is cleared here
 	// regardless.
 	if err != nil {
-		a.steers.clear()
+		discarded := a.steers.clear()
+		emitLifecycle(cfg, core.AgentEvent{
+			Type:          core.AgentEventSteersCanceled,
+			AttachmentIDs: steerAttachmentIDs(discarded),
+		})
 	}
 
 	// If the run ended before the model replied (last message is still the
@@ -1369,6 +1375,18 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare func(), tools *c
 	a.mu.Unlock()
 
 	return msgs, err
+}
+
+func steerAttachmentIDs(items []core.SteerItem) []string {
+	var ids []string
+	for _, item := range items {
+		for _, content := range item.Content {
+			if content.AttachmentID != "" {
+				ids = append(ids, content.AttachmentID)
+			}
+		}
+	}
+	return ids
 }
 
 // TimedOut reports whether the most recent Run/Send ended because the run's own

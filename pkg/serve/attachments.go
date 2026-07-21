@@ -5,6 +5,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io/fs"
 	"net/http"
 	"os"
@@ -12,6 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/ealeixandre/moa/pkg/attachment"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tool"
@@ -31,6 +36,7 @@ var ErrBadAttachment = errors.New("bad attachment")
 const (
 	maxAttachments        = 8
 	maxImageBytes         = 5 << 20   // 5 MB decoded, per-image API limit
+	maxImageDimension     = 100_000   // metadata guard; DecodeConfig never allocates pixels
 	maxAttachmentTextSize = 256 << 10 // 256 KiB decoded, inline-eligible per-file cap
 
 	maxAttachmentFileBytes = 32 << 20  // per-file to-disk cap
@@ -112,15 +118,16 @@ func bytesLookLikePDF(data []byte) bool {
 }
 
 // buildAttachmentContent validates and converts uploaded attachments into
-// core.Content blocks: images become "image" blocks (reusing the original
-// base64 string). Small UTF-8 text is inlined in a <attachment> sentinel;
+// core.Content blocks: images become "image" blocks (using durable references
+// when a store is available, otherwise legacy inline base64). Small UTF-8 text
+// is inlined in a <attachment> sentinel;
 // everything else that doesn't fit inline is written to the session's
 // attachment directory on disk and referenced by path instead. PDFs are
 // deliberately disk-first, even for capable providers: a large native PDF
 // would otherwise live in and be re-sent from conversation history every turn.
-func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, priorNativeDocBytes int64) (result []core.Content, writtenFiles []string, retErr error) {
+func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPolicy, priorNativeDocBytes int64, store *attachment.Store) (result []core.Content, writtenFiles []string, descriptors []attachment.Descriptor, retErr error) {
 	if len(atts) > maxAttachments {
-		return nil, nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
+		return nil, nil, nil, fmt.Errorf("%w: too many attachments (max %d)", ErrBadAttachment, maxAttachments)
 	}
 
 	var (
@@ -128,10 +135,11 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		inlineTextBytes   int
 		nativeBinaryBytes int64 // all native binary blocks this message
 
-		sessionDir       string
-		pathAdded        bool
-		runningDiskBytes int64
-		writtenPaths     []string // files written during THIS call (for rollback)
+		sessionDir         string
+		pathAdded          bool
+		runningDiskBytes   int64
+		writtenPaths       []string // files written during THIS call (for rollback)
+		createdDescriptors []attachment.Descriptor
 	)
 
 	// On any error return after partial success, remove the files written
@@ -142,6 +150,11 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		if retErr != nil {
 			for _, p := range writtenPaths {
 				_ = os.Remove(p)
+			}
+			if store != nil {
+				for _, d := range createdDescriptors {
+					_ = store.RemoveRef(sessionID, d.ID)
+				}
 			}
 		}
 	}()
@@ -192,12 +205,12 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 	for _, a := range atts {
 		decoded, err := base64.StdEncoding.DecodeString(a.Data)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: attachment %q: invalid base64", ErrBadAttachment, a.Name)
+			return nil, nil, nil, fmt.Errorf("%w: attachment %q: invalid base64", ErrBadAttachment, a.Name)
 		}
 
 		requestBytes += int64(len(decoded))
 		if requestBytes > maxRequestBytes {
-			return nil, nil, fmt.Errorf("%w: attachments exceed %d MB total", ErrBadAttachment, maxRequestBytes>>20)
+			return nil, nil, nil, fmt.Errorf("%w: attachments exceed %d MB total", ErrBadAttachment, maxRequestBytes>>20)
 		}
 
 		if allowedImageMimes[a.Mime] {
@@ -206,23 +219,36 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			if !bytesLookLikeImage(decoded, a.Mime) {
 				block, derr := toDisk(a, decoded, mimeMismatchNote)
 				if derr != nil {
-					return nil, nil, derr
+					return nil, nil, nil, derr
 				}
 				content = append(content, block)
 				continue
 			}
 			if len(decoded) > maxImageBytes {
-				return nil, nil, fmt.Errorf("%w: attachment %q: image exceeds %d MB", ErrBadAttachment, a.Name, maxImageBytes>>20)
+				return nil, nil, nil, fmt.Errorf("%w: attachment %q: image exceeds %d MB", ErrBadAttachment, a.Name, maxImageBytes>>20)
 			}
 			if priorNativeDocBytes+nativeBinaryBytes+int64(len(decoded)) > maxSessionNativeDocBytes {
 				block, derr := toDisk(a, decoded, nativeContentFallbackNote)
 				if derr != nil {
-					return nil, nil, derr
+					return nil, nil, nil, derr
 				}
 				content = append(content, block)
 				continue
 			}
-			content = append(content, core.ImageContent(a.Data, a.Mime))
+			if store == nil {
+				content = append(content, core.ImageContent(a.Data, a.Mime))
+			} else {
+				w, h := imageDimensions(decoded)
+				d, err := store.PutRef(sessionID, decoded, attachment.PutMeta{
+					Name: a.Name, Mime: a.Mime, Kind: "image", Width: w, Height: h,
+				})
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("%w: attachment %q: could not store image: %v", ErrBadAttachment, a.Name, err)
+				}
+				content = append(content, core.Content{Type: "image", AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name})
+				descriptors = append(descriptors, d)
+				createdDescriptors = append(createdDescriptors, d)
+			}
 			nativeBinaryBytes += int64(len(decoded))
 			continue
 		}
@@ -234,7 +260,7 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			}
 			block, err := toDisk(a, decoded, note)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			content = append(content, block)
 			continue
@@ -256,11 +282,24 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		// To disk.
 		block, err := toDisk(a, decoded, "")
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		content = append(content, block)
 	}
-	return content, writtenPaths, nil
+	return content, writtenPaths, descriptors, nil
+}
+
+func imageDimensions(data []byte) (width, height int) {
+	defer func() {
+		if recover() != nil {
+			width, height = 0, 0
+		}
+	}()
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || config.Width < 0 || config.Height < 0 || config.Width > maxImageDimension || config.Height > maxImageDimension {
+		return 0, 0
+	}
+	return config.Width, config.Height
 }
 
 // priorNativeDocBytes returns the native document/image bytes already
@@ -286,7 +325,11 @@ func countNativeDocBytes(msgs []core.AgentMessage) int64 {
 	for _, m := range msgs {
 		for _, c := range m.Content {
 			if c.Type == "document" || c.Type == "image" {
-				total += int64(base64.StdEncoding.DecodedLen(len(c.Data)))
+				if c.AttachmentSize > 0 {
+					total += c.AttachmentSize
+				} else {
+					total += int64(base64.StdEncoding.DecodedLen(len(c.Data)))
+				}
 			}
 		}
 	}

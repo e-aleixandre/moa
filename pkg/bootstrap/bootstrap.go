@@ -82,6 +82,10 @@ type SessionConfig struct {
 	// Used by the checkpoint system to capture pre-edit state.
 	BeforeWrite func(path string) error
 
+	// MaterializeContent rehydrates byte-free attachment references before a
+	// provider request. Nil preserves legacy inline content unchanged.
+	MaterializeContent func(context.Context, []core.Message) ([]core.Message, error)
+
 	// Subagent callbacks. All optional (nil = no-op).
 	OnAsyncJobChange func(count int)
 	OnAsyncComplete  func(jobID, task, status, resultTail string, truncated bool)
@@ -513,6 +517,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MaxToolCallsPerTurn: maxToolCallsPerTurn,
 		MaxRunDuration:      maxRunDuration,
 		MaxBudget:           maxBudget,
+		MaterializeContent:  cfg.MaterializeContent,
 	}
 	if gate != nil {
 		agentCfg.PermissionCheck = gate.Check

@@ -178,7 +178,8 @@ type Steered struct {
 // SteersCanceled is published when all queued (not yet delivered) steers are
 // dropped, so every client of the shared session queue clears its chips.
 type SteersCanceled struct {
-	SessionID string
+	SessionID     string
+	AttachmentIDs []string
 }
 
 // CommandQueued is published when a slash command is enqueued as a barrier in

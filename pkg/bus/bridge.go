@@ -32,7 +32,7 @@ type AgentController interface {
 	// Commands
 	Abort()
 	Steer(it core.SteerItem) bool
-	CancelSteer()
+	CancelSteer() []core.SteerItem
 	DrainSteers() []core.SteerItem
 	DrainUntilBarrier() []core.SteerItem
 	PushSteersFront(items []core.SteerItem)
@@ -491,11 +491,17 @@ func Bridge(sctx *SessionContext, subscriber AgentSubscriber) func() {
 }
 
 // bridgeEvent translates a single core.AgentEvent into typed bus event(s) and
-// publishes them on sctx.Bus. Special-cases the steer filter (which needs
-// sctx.SteerFilter, not just data) — everything else defers to
-// TranslateAgentEvent.
+// publishes them on sctx.Bus. Special-cases session-only queued-steer
+// cancellations and the steer filter (which needs sctx.SteerFilter, not just
+// data) — everything else defers to TranslateAgentEvent.
 func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	if e.Type == core.AgentEventSteer && sctx.SteerFilter != nil && !sctx.SteerFilter(e.Text) {
+		return
+	}
+	// SteersCanceled applies to this session's queue. It must not go through
+	// TranslateAgentEvent, which is also used to forward child-agent events.
+	if e.Type == core.AgentEventSteersCanceled {
+		sctx.Bus.Publish(SteersCanceled{SessionID: sctx.SessionID, AttachmentIDs: e.AttachmentIDs})
 		return
 	}
 	sid := sctx.SessionID

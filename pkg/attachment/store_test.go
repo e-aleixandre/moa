@@ -113,6 +113,62 @@ func TestPutRefStoresAndReferencesImmediately(t *testing.T) {
 	}
 }
 
+func TestRemoveRefRemovesOccurrenceAndGarbageCollects(t *testing.T) {
+	s := newTestStore(t)
+	d, err := s.PutRef(sessionOne, []byte("remove me"), PutMeta{Name: "image.png", Mime: "image/png", Kind: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveRef(sessionOne, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Lookup(sessionOne, d.ID); ok {
+		t.Fatal("removed occurrence is still indexed")
+	}
+	if _, err := os.Stat(s.blobPath(d.SHA256)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("blob still exists or unexpected stat error: %v", err)
+	}
+	if err := s.RemoveRef(sessionOne, d.ID); err != nil {
+		t.Fatalf("idempotent removal failed: %v", err)
+	}
+}
+
+func TestReconcileExistingReleasesDeadIndexes(t *testing.T) {
+	s := newTestStore(t)
+	shared := []byte("shared")
+	liveOnly, err := s.PutRef(sessionOne, []byte("live"), PutMeta{Name: "live.png", Mime: "image/png", Kind: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadOnly, err := s.PutRef(sessionTwo, []byte("dead"), PutMeta{Name: "dead.png", Mime: "image/png", Kind: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedLive, err := s.PutRef(sessionOne, shared, PutMeta{Name: "shared.png", Mime: "image/png", Kind: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutRef(sessionTwo, shared, PutMeta{Name: "shared.png", Mime: "image/png", Kind: "image"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ReconcileExisting(map[string]bool{sessionOne: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Lookup(sessionOne, liveOnly.ID); !ok {
+		t.Fatal("live index was removed")
+	}
+	if _, ok := s.Lookup(sessionOne, sharedLive.ID); !ok {
+		t.Fatal("live shared reference was removed")
+	}
+	if _, err := os.Stat(s.blobPath(deadOnly.SHA256)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("dead-only blob still exists or unexpected stat error: %v", err)
+	}
+	if _, err := os.Stat(s.blobPath(sharedLive.SHA256)); err != nil {
+		t.Fatalf("shared blob was removed: %v", err)
+	}
+}
+
 func TestAddRefRebuildsMissingOrCorruptCatalog(t *testing.T) {
 	s := newTestStore(t)
 	first := put(t, s, []byte("same"))

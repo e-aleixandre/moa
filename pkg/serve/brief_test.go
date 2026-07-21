@@ -92,7 +92,7 @@ func newBriefTestSession(t *testing.T, p *briefTestProvider, model string) (*Man
 
 func sendAndWaitForBrief(t *testing.T, mgr *Manager, sess *ManagedSession, p *briefTestProvider) {
 	t.Helper()
-	if _, _, err := mgr.Send(sess.ID, "repair the session brief", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "repair the session brief", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, time.Second, "main run completion", func() bool { return sessState(sess) == StateIdle })
@@ -103,7 +103,7 @@ func TestSessionBrief_DebouncesEventsAndAppliesWholeBrief(t *testing.T) {
 	p := &briefTestProvider{}
 	mgr, sess := newBriefTestSession(t, p, "gpt-5.3-codex")
 
-	if _, _, err := mgr.Send(sess.ID, "repair the session brief", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "repair the session brief", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	// These arrive in the same debounce window as RunEnded. They must become
@@ -267,7 +267,7 @@ func TestResumeSession_SchedulesMissingBrief(t *testing.T) {
 func TestSessionBrief_UnknownProviderDoesNotGenerate(t *testing.T) {
 	p := &briefTestProvider{}
 	mgr, sess := newBriefTestSession(t, p, "google/gemini-test")
-	if _, _, err := mgr.Send(sess.ID, "repair the session brief", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "repair the session brief", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, time.Second, "main run completion", func() bool { return sessState(sess) == StateIdle })

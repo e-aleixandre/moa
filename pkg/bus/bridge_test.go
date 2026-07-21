@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -86,7 +87,13 @@ func (f *fakeAgent) Steer(it core.SteerItem) bool {
 	return true
 }
 
-func (f *fakeAgent) CancelSteer() {}
+func (f *fakeAgent) CancelSteer() []core.SteerItem {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items := f.steerQueue
+	f.steerQueue = nil
+	return items
+}
 
 func (f *fakeAgent) DrainSteers() []core.SteerItem {
 	f.mu.Lock()
@@ -1241,7 +1248,12 @@ func TestHandler_SteerAgent_InternalExcludedFromSnapshot(t *testing.T) {
 func TestHandler_CancelSteer_PublishesEvent(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
-	fa := &fakeAgent{}
+	fa := &fakeAgent{steerQueue: []core.SteerItem{{
+		ID: "image-steer",
+		Content: []core.Content{{
+			Type: "image", AttachmentID: "att_0123456789abcdef01234567",
+		}},
+	}}}
 	sctx := newTestSessionContext(b, fa)
 	RegisterHandlers(sctx)
 
@@ -1251,7 +1263,10 @@ func TestHandler_CancelSteer_PublishesEvent(t *testing.T) {
 	if err := b.Execute(CancelSteer{}); err != nil {
 		t.Fatal(err)
 	}
-	drainChan(got, b, t)
+	e := drainChan(got, b, t)
+	if got, want := e.AttachmentIDs, []string{"att_0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("AttachmentIDs = %v, want %v", got, want)
+	}
 }
 
 func TestHandler_SetThinking(t *testing.T) {

@@ -168,10 +168,13 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd CancelSteer) error {
-		sctx.Agent.CancelSteer()
+		discarded := sctx.Agent.CancelSteer()
 		// Broadcast the invalidation so every client of this session clears its
 		// queued chips (the queue is shared/authoritative).
-		sctx.Bus.Publish(SteersCanceled{SessionID: sctx.SessionID})
+		sctx.Bus.Publish(SteersCanceled{
+			SessionID:     sctx.SessionID,
+			AttachmentIDs: steerAttachmentIDs(discarded),
+		})
 		return nil
 	})
 
@@ -798,7 +801,11 @@ func RegisterHandlers(sctx *SessionContext) {
 			// Reset no longer drops the queue (it preserves it for the queued
 			// /clear reset-in-place case); a clean-context plan execution is a
 			// genuine clean slate, so drop any queued steers explicitly.
-			sctx.Agent.CancelSteer()
+			discarded := sctx.Agent.CancelSteer()
+			sctx.Bus.Publish(SteersCanceled{
+				SessionID:     sctx.SessionID,
+				AttachmentIDs: steerAttachmentIDs(discarded),
+			})
 			// Agent.Reset alone leaves the persisted tree and the syncer's old
 			// baseline behind. Replace both in the same transition so the next
 			// execution turn cannot revive or splice into the planning history.
@@ -1610,6 +1617,18 @@ func RegisterHandlers(sctx *SessionContext) {
 			goalRelaunch(sctx, "Not done yet.\n\n"+feedback+"\n\nContinue.")
 		}()
 	})
+}
+
+func steerAttachmentIDs(items []core.SteerItem) []string {
+	var ids []string
+	for _, item := range items {
+		for _, content := range item.Content {
+			if content.AttachmentID != "" {
+				ids = append(ids, content.AttachmentID)
+			}
+		}
+	}
+	return ids
 }
 
 // goalIterationMarkerText formats an iteration verdict for the persistent goal

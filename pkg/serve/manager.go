@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ealeixandre/moa/pkg/attachment"
 	"github.com/ealeixandre/moa/pkg/attention"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -333,6 +334,7 @@ type Manager struct {
 	moaCfg          core.MoaConfig
 	configLoader    func(cwd string) core.MoaConfig
 	sessionBaseDir  string // root for session stores; empty = default (~/.config/moa/sessions/)
+	attachStore     *attachment.Store
 
 	// savedCache caches the result of session.ListAll to avoid
 	// re-scanning disk on every poll (frontend polls every 3s).
@@ -403,6 +405,22 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
 		}
 	}
+	attachBaseDir := ""
+	var attachErr error
+	if cfg.SessionBaseDir != "" {
+		attachBaseDir = filepath.Join(filepath.Dir(cfg.SessionBaseDir), "attachments", "v1")
+	} else {
+		attachBaseDir, attachErr = attachment.DefaultBaseDir()
+	}
+	var attachStore *attachment.Store
+	if attachErr != nil {
+		slog.Warn("attachment storage disabled: cannot resolve base directory", "error", attachErr)
+	} else if attachBaseDir != "" {
+		attachStore, attachErr = attachment.New(attachBaseDir)
+		if attachErr != nil {
+			slog.Warn("attachment storage disabled", "path", attachBaseDir, "error", attachErr)
+		}
+	}
 	conversationKey, err := newConversationKey()
 	if err != nil {
 		// A nil key only makes cursors unusable; reads without a cursor remain
@@ -423,6 +441,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		moaCfg:          cfg.MoaCfg,
 		configLoader:    configLoader,
 		sessionBaseDir:  cfg.SessionBaseDir,
+		attachStore:     attachStore,
 		savedCacheTTL:   30 * time.Second,
 		fileScanner:     files.NewScanner(),
 		scheduler:       scheduler,
@@ -456,6 +475,19 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		m.scheduler.Start(m)
 	}
 	reapStaleAttachments()
+	if m.attachStore != nil {
+		live := make(map[string]bool)
+		if summaries, err := session.ListAll(m.sessionBaseDir); err != nil {
+			slog.Warn("attachment startup reconcile: list sessions", "error", err)
+		} else {
+			for _, summary := range summaries {
+				live[summary.ID] = true
+			}
+			if err := m.attachStore.ReconcileExisting(live); err != nil {
+				slog.Warn("attachment startup reconcile", "error", err)
+			}
+		}
+	}
 	return m
 }
 
@@ -485,10 +517,10 @@ func (m *Manager) loadConfig(cwd string) core.MoaConfig {
 // double-send and cancel-vs-in-flight races). When empty (e.g. CLI), the
 // handler mints one. Returns the action taken ("send" or "steer") and the ID
 // the message was queued under so the caller can reconcile by ID.
-func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string) (action, id string, err error) {
+func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string) (action, id string, descriptors []attachment.Descriptor, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
-		return "", "", ErrNotFound
+		return "", "", nil, ErrNotFound
 	}
 
 	sess.mu.Lock()
@@ -524,18 +556,18 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 		}
 		if len(atts) == 0 {
 			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text}); err != nil {
-				return "", "", err
+				return "", "", nil, err
 			}
-			return "steer", steerID, nil
+			return "steer", steerID, nil, nil
 		}
 		// Serialize attachment processing per session so the on-disk quota check
 		// is atomic against concurrent /send requests (see the idle path below).
 		sess.attachMu.Lock()
 		defer sess.attachMu.Unlock()
 		priorNativeDoc := priorNativeDocBytes(sess)
-		content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc)
+		content, writtenFiles, descriptors, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc, m.attachStore)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 		if text != "" {
 			content = append(content, core.TextContent(text))
@@ -546,9 +578,10 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 			for _, p := range writtenFiles {
 				_ = os.Remove(p)
 			}
-			return "", "", err
+			m.releaseAttachmentRefs(sessionID, descriptors)
+			return "", "", nil, err
 		}
-		return "steer", steerID, nil
+		return "steer", steerID, descriptors, nil
 	}
 
 	// Set title on first message: from the text, or from the first
@@ -568,9 +601,9 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	sess.mu.Unlock()
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
-		return "send", "", nil
+		return "send", "", nil, nil
 	}
 
 	// Serialize attachment processing per session so the per-session on-disk
@@ -581,9 +614,9 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	sess.attachMu.Lock()
 	defer sess.attachMu.Unlock()
 	priorNativeDoc := priorNativeDocBytes(sess)
-	content, writtenFiles, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc)
+	content, writtenFiles, descriptors, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc, m.attachStore)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	if text != "" {
 		content = append(content, core.TextContent(text))
@@ -594,9 +627,32 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 		for _, p := range writtenFiles {
 			_ = os.Remove(p)
 		}
-		return "", "", err
+		m.releaseAttachmentRefs(sessionID, descriptors)
+		return "", "", nil, err
 	}
-	return "send", "", nil
+	return "send", "", descriptors, nil
+}
+
+func (m *Manager) releaseAttachmentRefs(sessionID string, descriptors []attachment.Descriptor) {
+	if m.attachStore == nil {
+		return
+	}
+	for _, d := range descriptors {
+		if err := m.attachStore.RemoveRef(sessionID, d.ID); err != nil {
+			slog.Warn("rollback attachment reference", "session", sessionID, "attachment", d.ID, "error", err)
+		}
+	}
+}
+
+func (m *Manager) releaseAttachmentIDs(sessionID string, attachmentIDs []string) {
+	if m.attachStore == nil {
+		return
+	}
+	for _, attachmentID := range attachmentIDs {
+		if err := m.attachStore.RemoveRef(sessionID, attachmentID); err != nil {
+			slog.Warn("release attachment reference", "session", sessionID, "attachment", attachmentID, "error", err)
+		}
+	}
 }
 
 // List returns info for all sessions, sorted by updated time descending.

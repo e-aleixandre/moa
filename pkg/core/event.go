@@ -10,6 +10,7 @@ type AgentEvent struct {
 	Text           string             // steer
 	SteerID        string             // steer
 	MsgID          string             // steer (MsgID of the injected user message, for client dedup)
+	AttachmentIDs  []string           // steers_canceled
 	ToolCallID     string             // tool_execution_*
 	ToolName       string             // tool_execution_*
 	Args           map[string]any     // tool_execution_start
@@ -36,6 +37,8 @@ const (
 	AgentEventToolExecEnd    = "tool_execution_end"
 
 	AgentEventSteer = "steer" // a steering message was injected mid-run
+	// AgentEventSteersCanceled reports queued steers dropped after a failed run.
+	AgentEventSteersCanceled = "steers_canceled"
 
 	AgentEventCompactionStart = "compaction_start"
 	AgentEventCompactionEnd   = "compaction_end"

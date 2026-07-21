@@ -151,19 +151,24 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	cpStore := checkpoint.New(20)
 	subagentTexts := &sync.Map{}
+	var materializeContent func(context.Context, []core.Message) ([]core.Message, error)
+	if m.attachStore != nil {
+		materializeContent = m.attachStore.MaterializerFor(id)
+	}
 
 	// Forward-declare for closures.
 	var sess *ManagedSession
 
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
-		CWD:             cwd,
-		Model:           model,
-		Provider:        prov,
-		ProviderFactory: m.providerFactory,
-		MoaCfg:          &moaCfg,
-		Ctx:             sessionCtx,
-		EnableAskUser:   true,
-		BeforeWrite:     cpStore.Capture,
+		CWD:                cwd,
+		Model:              model,
+		Provider:           prov,
+		ProviderFactory:    m.providerFactory,
+		MoaCfg:             &moaCfg,
+		Ctx:                sessionCtx,
+		EnableAskUser:      true,
+		BeforeWrite:        cpStore.Capture,
+		MaterializeContent: materializeContent,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentCountChanged{SessionID: s.ID, Count: count})
@@ -416,6 +421,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	// Wire Web Push and auto-titling before the session can run (no-ops if the
 	// respective feature is unavailable).
+	m.subscribeAttachmentReleases(sess)
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
 	m.subscribeSessionBrief(sess)
@@ -430,6 +436,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribeAttention(sess)
 
 	return sess, nil
+}
+
+func (m *Manager) subscribeAttachmentReleases(sess *ManagedSession) {
+	if m.attachStore == nil {
+		return
+	}
+	sess.runtime.Bus.Subscribe(func(e bus.SteersCanceled) {
+		m.releaseAttachmentIDs(e.SessionID, e.AttachmentIDs)
+	})
 }
 
 // initSubagentSnapshots retains a terminal child while a reconnect snapshot
@@ -496,6 +511,11 @@ func (m *Manager) Delete(id string) error {
 		}
 		m.invalidateSavedCache()
 		_ = removeSessionAttachDir(id)
+		if m.attachStore != nil {
+			if err := m.attachStore.ReleaseSession(id); err != nil {
+				slog.Warn("release session attachments", "session", id, "error", err)
+			}
+		}
 		return nil
 	}
 	delete(m.sessions, id)
@@ -540,6 +560,11 @@ func (m *Manager) Delete(id string) error {
 	}
 	m.invalidateSavedCache()
 	_ = removeSessionAttachDir(id)
+	if m.attachStore != nil {
+		if err := m.attachStore.ReleaseSession(id); err != nil {
+			slog.Warn("release session attachments", "session", id, "error", err)
+		}
+	}
 	return nil
 }
 

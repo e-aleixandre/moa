@@ -19,6 +19,7 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
+	"github.com/ealeixandre/moa/pkg/attachment"
 	"github.com/ealeixandre/moa/pkg/bootstrap"
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
@@ -451,7 +452,8 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "text required", http.StatusBadRequest)
 			return
 		}
-		action, steerID, err := mgr.Send(r.PathValue("id"), body.Text, body.Attachments, body.SteerID)
+		sessionID := r.PathValue("id")
+		action, steerID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -462,12 +464,37 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
-			resp := map[string]string{"action": action}
-			if steerID != "" {
-				resp["steer_id"] = steerID
+			resp := struct {
+				Action      string          `json:"action"`
+				SteerID     string          `json:"steer_id,omitempty"`
+				Attachments []AttachmentDTO `json:"attachments"`
+			}{Action: action, SteerID: steerID, Attachments: make([]AttachmentDTO, 0, len(descriptors))}
+			for _, d := range descriptors {
+				resp.Attachments = append(resp.Attachments, attachmentDTO(sessionID, d))
 			}
 			writeJSON(w, http.StatusAccepted, resp)
 		}
+	}
+}
+
+// AttachmentDTO is the public metadata returned for attachments created by a
+// send. The URL is served by the attachment endpoint.
+type AttachmentDTO struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Mime   string `json:"mime"`
+	Size   int64  `json:"size"`
+	Kind   string `json:"kind"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	URL    string `json:"url"`
+}
+
+func attachmentDTO(sessionID string, d attachment.Descriptor) AttachmentDTO {
+	return AttachmentDTO{
+		ID: d.ID, Name: d.Name, Mime: d.Mime, Size: d.Size, Kind: d.Kind,
+		Width: d.Width, Height: d.Height,
+		URL: fmt.Sprintf("/api/sessions/%s/attachments/%s", sessionID, d.ID),
 	}
 }
 

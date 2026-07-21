@@ -360,17 +360,36 @@ func (s *Store) ReleaseSession(sessionID string) error {
 		return err
 	}
 	return s.withLock(func() error {
+		return s.releaseSessionLocked(sessionID)
+	})
+}
+
+// RemoveRef removes one occurrence reference from a session. It is idempotent
+// when the occurrence is not owned by the session.
+func (s *Store) RemoveRef(sessionID, attID string) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
+	if err := validateAttachmentID(attID); err != nil {
+		return err
+	}
+	return s.withLock(func() error {
 		index, err := s.readSessionIndex(sessionID)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
 			return err
 		}
-		if err := os.Remove(s.sessionPath(sessionID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("attachment: remove session index: %w", err)
+		d, ok := index[attID]
+		if !ok {
+			return nil
 		}
-		// Persist index removal before unlinking blobs so a surviving index never points at a deleted blob after power loss.
+		delete(index, attID)
+		if err := s.writeSessionIndex(sessionID, index); err != nil {
+			return err
+		}
+		// Persist the rewritten index before removing an unreferenced blob.
 		if err := syncDir(s.sessionsDir()); err != nil {
 			return fmt.Errorf("attachment: sync session directory: %w", err)
 		}
@@ -378,32 +397,68 @@ func (s *Store) ReleaseSession(sessionID string) error {
 		if err != nil {
 			return err
 		}
-		var first error
 		if err := s.writeCatalog(refs); err != nil {
-			first = err
+			return err
 		}
-		removedDirs := make(map[string]struct{})
-		for _, d := range index {
-			if _, referenced := refs[d.SHA256]; referenced {
-				continue
-			}
-			path := s.blobPath(d.SHA256)
-			if err := os.Remove(path); err != nil {
-				if !errors.Is(err, fs.ErrNotExist) && first == nil {
-					first = fmt.Errorf("attachment: remove unreferenced blob: %w", err)
-				}
-				continue
-			}
-			removedDirs[filepath.Dir(path)] = struct{}{}
+		if _, referenced := refs[d.SHA256]; referenced {
+			return nil
 		}
-		// Persist blob unlinks only after the session index removal is durable.
-		for dir := range removedDirs {
-			if err := syncDir(dir); err != nil && first == nil {
-				first = fmt.Errorf("attachment: sync blob directory: %w", err)
-			}
+		if err := os.Remove(s.blobPath(d.SHA256)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("attachment: remove unreferenced blob: %w", err)
 		}
-		return first
+		if err := syncDir(filepath.Dir(s.blobPath(d.SHA256))); err != nil {
+			return fmt.Errorf("attachment: sync blob directory: %w", err)
+		}
+		return nil
 	})
+}
+
+// releaseSessionLocked removes a session index and any blobs no longer
+// referenced by remaining indexes. The caller must hold the store lock.
+func (s *Store) releaseSessionLocked(sessionID string) error {
+	index, err := s.readSessionIndex(sessionID)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := os.Remove(s.sessionPath(sessionID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("attachment: remove session index: %w", err)
+	}
+	// Persist index removal before unlinking blobs so a surviving index never points at a deleted blob after power loss.
+	if err := syncDir(s.sessionsDir()); err != nil {
+		return fmt.Errorf("attachment: sync session directory: %w", err)
+	}
+	refs, err := s.catalogFromIndexes()
+	if err != nil {
+		return err
+	}
+	var first error
+	if err := s.writeCatalog(refs); err != nil {
+		first = err
+	}
+	removedDirs := make(map[string]struct{})
+	for _, d := range index {
+		if _, referenced := refs[d.SHA256]; referenced {
+			continue
+		}
+		path := s.blobPath(d.SHA256)
+		if err := os.Remove(path); err != nil {
+			if !errors.Is(err, fs.ErrNotExist) && first == nil {
+				first = fmt.Errorf("attachment: remove unreferenced blob: %w", err)
+			}
+			continue
+		}
+		removedDirs[filepath.Dir(path)] = struct{}{}
+	}
+	// Persist blob unlinks only after the session index removal is durable.
+	for dir := range removedDirs {
+		if err := syncDir(dir); err != nil && first == nil {
+			first = fmt.Errorf("attachment: sync blob directory: %w", err)
+		}
+	}
+	return first
 }
 
 // Reconcile rewrites the session ownership indexes and catalog from live
@@ -464,18 +519,55 @@ func (s *Store) Reconcile(live map[string][]Descriptor) error {
 			}
 		}
 
-		refs, err := s.catalogFromIndexes()
-		if err != nil {
-			return err
-		}
-		if err := s.writeCatalog(refs); err != nil {
-			return err
-		}
-		if err := s.removeOrphanBlobs(refs); err != nil {
-			return err
-		}
-		return s.removeStaleStaging()
+		return s.reconcileIndexesLocked()
 	})
+}
+
+// ReconcileExisting is the lightweight startup reconcile path. It trusts the
+// store's per-session indexes and is O(sessions-with-attachments), rather than
+// walking conversation transcripts. Indexes for sessions absent from live are
+// released, then the catalog, orphan blobs, and stale staging are reconciled.
+func (s *Store) ReconcileExisting(liveSessionIDs map[string]bool) error {
+	for sessionID := range liveSessionIDs {
+		if err := validateSessionID(sessionID); err != nil {
+			return err
+		}
+	}
+	return s.withLock(func() error {
+		entries, err := os.ReadDir(s.sessionsDir())
+		if err != nil {
+			return fmt.Errorf("attachment: list session indexes: %w", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			sessionID := strings.TrimSuffix(entry.Name(), ".json")
+			if validateSessionID(sessionID) != nil || liveSessionIDs[sessionID] {
+				continue
+			}
+			if err := s.releaseSessionLocked(sessionID); err != nil {
+				return err
+			}
+		}
+		return s.reconcileIndexesLocked()
+	})
+}
+
+// reconcileIndexesLocked rebuilds metadata and removes unowned on-disk state.
+// The caller must hold the store lock.
+func (s *Store) reconcileIndexesLocked() error {
+	refs, err := s.catalogFromIndexes()
+	if err != nil {
+		return err
+	}
+	if err := s.writeCatalog(refs); err != nil {
+		return err
+	}
+	if err := s.removeOrphanBlobs(refs); err != nil {
+		return err
+	}
+	return s.removeStaleStaging()
 }
 
 func (s *Store) withLock(fn func() error) error {

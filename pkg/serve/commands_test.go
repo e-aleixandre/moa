@@ -267,7 +267,7 @@ func TestExecCommand_PolicyGateWhileRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := mgr.Send(sess.ID, "go", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "go", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 2*time.Second, "running", func() bool {
