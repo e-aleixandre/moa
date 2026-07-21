@@ -35,10 +35,16 @@ type Content struct {
 	ThinkingSignature string `json:"thinking_signature,omitempty"`
 	Redacted          bool   `json:"redacted,omitempty"`
 
-	// image
+	// image/document
 	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
 	Filename string `json:"filename,omitempty"`
+	// attachment reference (image/document stored out-of-line in the blob store).
+	// When AttachmentID is set, Data is empty in persisted/in-memory history and is
+	// rehydrated only at request time by the materializer. Size is the decoded byte
+	// size, kept so budgeting/sizing works without reading the blob.
+	AttachmentID   string `json:"attachment_id,omitempty"`
+	AttachmentSize int64  `json:"attachment_size,omitempty"`
 
 	// tool_call
 	ToolCallID string         `json:"tool_call_id,omitempty"`
@@ -73,7 +79,11 @@ func NativeDocBytes(content []Content) int64 {
 	var total int64
 	for _, c := range content {
 		if c.Type == "image" || c.Type == "document" {
-			total += int64(base64.StdEncoding.DecodedLen(len(c.Data)))
+			if c.AttachmentSize > 0 {
+				total += c.AttachmentSize
+			} else {
+				total += int64(base64.StdEncoding.DecodedLen(len(c.Data)))
+			}
 		}
 	}
 	return total

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -140,6 +141,159 @@ func newTestAgent(provider core.Provider, tools ...core.Tool) *Agent {
 		panic("newTestAgent: " + err.Error())
 	}
 	return ag
+}
+
+func TestMaterializeContentExpandsProviderRequestWithoutMutatingState(t *testing.T) {
+	provider := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
+		if got := req.Messages[0].Content[0].Data; got != "expanded-data" {
+			t.Errorf("provider image data = %q, want materialized data", got)
+		}
+		return simpleTextResponse("done")(req)
+	})
+	materialized := false
+	ag, err := New(AgentConfig{
+		Provider: provider,
+		Model:    core.Model{ID: "test-model", Provider: "mock"},
+		MaterializeContent: func(_ context.Context, msgs []core.Message) ([]core.Message, error) {
+			materialized = true
+			out := append([]core.Message(nil), msgs...)
+			out[0].Content = core.CloneContent(msgs[0].Content)
+			out[0].Content[0].Data = "expanded-data"
+			return out, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ag.SendWithContent(context.Background(), []core.Content{{
+		Type:           "image",
+		AttachmentID:   "att_aaaaaaaaaaaaaaaaaaaaaaaa",
+		AttachmentSize: 12,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !materialized {
+		t.Fatal("MaterializeContent was not called")
+	}
+	if got := ag.Messages()[0].Content[0].Data; got != "" {
+		t.Fatalf("state image data = %q, want descriptor to remain unmaterialized", got)
+	}
+}
+
+func TestMaterializeContentErrorAbortsBeforeProviderCall(t *testing.T) {
+	materializeErr := errors.New("attachment unavailable")
+	provider := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
+		t.Fatal("provider must not be called after materialization failure")
+		return nil, nil
+	})
+	ag, err := New(AgentConfig{
+		Provider: provider,
+		Model:    core.Model{ID: "test-model", Provider: "mock"},
+		MaterializeContent: func(_ context.Context, _ []core.Message) ([]core.Message, error) {
+			return nil, materializeErr
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectEvents(ag)
+
+	_, err = ag.Run(context.Background(), "hello")
+	if !errors.Is(err, materializeErr) {
+		t.Fatalf("Run error = %v, want materialization error", err)
+	}
+	if !waitForEvent(events, core.AgentEventError, 500*time.Millisecond) {
+		t.Fatal("missing agent_error event")
+	}
+	provider.mu.Lock()
+	calls := provider.calls
+	provider.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", calls)
+	}
+}
+
+func TestMaterializeContentRunsForEveryProviderRound(t *testing.T) {
+	echoTool := core.Tool{
+		Name:       "echo",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
+			return core.TextResult("ok"), nil
+		},
+	}
+	var materializeCalls atomic.Int32
+	provider := NewMockProvider(
+		toolCallResponse("tc-1", "echo", nil),
+		func(req core.Request) (<-chan core.AssistantEvent, error) {
+			if got := req.Messages[0].Content[0].Data; got != "expanded-data" {
+				t.Errorf("second-round image data = %q, want materialized data", got)
+			}
+			return simpleTextResponse("done")(req)
+		},
+	)
+	reg := core.NewRegistry()
+	if err := reg.Register(echoTool); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := New(AgentConfig{
+		Provider: provider,
+		Model:    core.Model{ID: "test-model", Provider: "mock"},
+		Tools:    reg,
+		MaterializeContent: func(_ context.Context, msgs []core.Message) ([]core.Message, error) {
+			materializeCalls.Add(1)
+			out := append([]core.Message(nil), msgs...)
+			for i := range out {
+				out[i].Content = core.CloneContent(msgs[i].Content)
+				for j := range out[i].Content {
+					if out[i].Content[j].AttachmentID != "" {
+						out[i].Content[j].Data = "expanded-data"
+					}
+				}
+			}
+			return out, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ag.SendWithContent(context.Background(), []core.Content{{
+		Type:         "image",
+		AttachmentID: "att_aaaaaaaaaaaaaaaaaaaaaaaa",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := materializeCalls.Load(); got != 2 {
+		t.Fatalf("MaterializeContent calls = %d, want 2", got)
+	}
+}
+
+func TestMaterializeContentNilPassesAttachmentDescriptorsThrough(t *testing.T) {
+	provider := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
+		if got := req.Messages[0].Content[0].Data; got != "" {
+			t.Errorf("provider image data = %q, want unmaterialized descriptor", got)
+		}
+		return simpleTextResponse("done")(req)
+	})
+	ag, err := New(AgentConfig{
+		Provider:           provider,
+		Model:              core.Model{ID: "test-model", Provider: "mock"},
+		MaterializeContent: nil,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ag.SendWithContent(context.Background(), []core.Content{{
+		Type:         "image",
+		AttachmentID: "att_aaaaaaaaaaaaaaaaaaaaaaaa",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 type eventCollector struct {

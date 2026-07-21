@@ -323,6 +323,14 @@ type AgentConfig struct {
 	// Custom message conversion (nil = default: filter non-LLM messages)
 	ConvertToLLM func([]core.AgentMessage) []core.Message
 
+	// MaterializeContent, if set, is called with the LLM-ready messages just before
+	// the provider request is built, to expand attachment descriptors into
+	// provider-ready inline bytes on a COPY. It must not mutate its input. A
+	// non-nil error aborts the turn (the referenced attachment could not be
+	// resolved). pkg/agent stays decoupled from the blob store: the closure is
+	// injected by the caller via the store's MaterializerFor.
+	MaterializeContent func(context.Context, []core.Message) ([]core.Message, error)
+
 	// Compaction settings. nil = use DefaultCompactionSettings.
 	// Set Enabled:false to disable.
 	Compaction *core.CompactionSettings
@@ -1252,6 +1260,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare func(), tools *c
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		maxBudget:           a.config.MaxBudget,
 		convertToLLM:        a.config.ConvertToLLM,
+		materializeContent:  a.config.MaterializeContent,
 		permissionCheck:     permissionCheck,
 		compaction:          a.config.Compaction,
 		drainSteers:         a.steers.drainUntilBarrier,

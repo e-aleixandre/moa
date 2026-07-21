@@ -102,6 +102,8 @@ type loopConfig struct {
 
 	// Custom conversion (nil = default)
 	convertToLLM func([]core.AgentMessage) []core.Message
+	// Materialize attachment descriptors for a provider request (nil = no-op).
+	materializeContent func(context.Context, []core.Message) ([]core.Message, error)
 
 	// Permission check (nil = all approved)
 	permissionCheck func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
@@ -280,6 +282,14 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		inTurn = true
 		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnStart})
+		if cfg.materializeContent != nil {
+			materialized, err := cfg.materializeContent(ctx, llmMessages)
+			if err != nil {
+				loopErr = fmt.Errorf("materialize content: %w", err)
+				return loopErr
+			}
+			llmMessages = materialized
+		}
 
 		// Build request
 		req := core.Request{
