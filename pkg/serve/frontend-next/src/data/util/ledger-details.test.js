@@ -68,10 +68,18 @@ test('a body-less non-edit row gets no detail', () => {
 });
 
 test('the live row never carries a static detail', () => {
-  const rows = [row('read', { id: 'r1', body: 'x' }), { tool: 'bash', arg: { text: 'go test' }, live: true, command: 'go test', body: 'ignored' }];
+  const live = {
+    tool: 'write',
+    arg: { text: 'notes.txt' },
+    live: true,
+    body: 'ignored',
+    livePreview: { text: 'partial content', kind: 'input' },
+  };
+  const rows = [row('read', { id: 'r1', body: 'x' }), live];
   const out = fuseLedgerDetails(rows, null);
   expect(out[0].detail).toBeTruthy(); // done row with body → detail
   expect(out[1].detail).toBeUndefined(); // live row → none, even with a body
+  expect(out[1]).toBe(live); // livePreview stays on the projection-owned row
 });
 
 test('an edit row prefers its diff sibling over a body', () => {

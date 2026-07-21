@@ -348,6 +348,38 @@
 /* DiffBlock/CodeBlock render BORDERLESS inside the detail (they pass
    className="flush"): the .tg-detail panel is the only surface. */
 
+/* Streaming call arguments stay visibly separate from a tool's live output.
+   The projection has already reduced them to a tail window; this cap protects
+   the card when one of those lines is unusually long. */
+.tg .tg-live-preview {
+  position: relative;
+  max-height: 17rem;
+  overflow: auto;
+  background: var(--crust);
+  border-bottom: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
+  color: var(--overlay1);
+}
+
+.tg .tg-live-preview pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tg .tg-live-preview .code.flush.diff pre {
+  padding: var(--space-2) 0;
+}
+
+.tg .tg-live-cursor::after {
+  content: "▌";
+  color: var(--teal);
+  animation: tg-log-cursor-blink 1s steps(2) infinite;
+}
+
 /* Rolling logtail under a running bash — same crust panel, teal cursor. */
 .tg .tg-log {
   background: var(--crust);
@@ -409,6 +441,10 @@
     animation: none;
   }
   .tg .tg-log .ln .ln-cursor::after {
+    animation: none;
+    opacity: 0.6;
+  }
+  .tg .tg-live-cursor::after {
     animation: none;
     opacity: 0.6;
   }

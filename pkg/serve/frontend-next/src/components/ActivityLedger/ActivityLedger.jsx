@@ -16,6 +16,7 @@ import {
 } from "lucide-preact";
 import { liveVerb, formatElapsed } from "../../data/util/activity.js";
 import { StateDot } from "../../primitives/index.js";
+import { DiffBlock } from "../DiffBlock/DiffBlock.jsx";
 import { useElapsed } from "../../data/util/use-elapsed.js";
 import { useTailWindow } from "./tail-dwell.js";
 import "./ActivityLedger.css";
@@ -129,6 +130,7 @@ function LiveRow({ row }) {
   const { text, detail: argDetail } = argParts(row.arg);
   const tailLines = row.liveTail ? row.liveTail.split("\n") : [];
   const tailStart = row.liveTailStart || 0;
+  const livePreview = row.livePreview;
   return (
     <>
       <div class="tg-row live" role="status" aria-live="off">
@@ -142,6 +144,16 @@ function LiveRow({ row }) {
         {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
         <span class="hair" aria-hidden="true" />
       </div>
+      {livePreview && (
+        <div class={`tg-live-preview ${livePreview.kind === "diff" ? "diff" : "input"}`}>
+          {livePreview.kind === "diff" ? (
+            <DiffBlock className="flush" diffText={livePreview.text} filename={text} />
+          ) : (
+            <pre>{livePreview.text}</pre>
+          )}
+          <span class="tg-live-cursor" aria-hidden="true" />
+        </div>
+      )}
       {tailLines.length > 0 && (
         <div class={`tg-log${tailStart > 0 ? " fade" : ""}`} role="log" aria-live="off">
           {tailLines.map((line, i) => (
@@ -225,7 +237,7 @@ const FOLD_THRESHOLD = 3;
 // phase (TOOLCALLS-UNIFIED-IMPL-SPEC): running/collapsed/expanded/finished are
 // the same card and the same row atom, differing only by which rows show and a
 // `.live` modifier. `rows` is the projectStream ledger's rows (each
-// `{ tool, arg, out, status, id, body?, live?, startedAt?, liveTail?, liveTailStart?, detail? }`,
+// `{ tool, arg, out, status, id, body?, live?, startedAt?, livePreview?, liveTail?, liveTailStart?, detail? }`,
 // `detail` a fused diff/output node attached by the caller).
 //
 // FOLD: a batch of more than FOLD_THRESHOLD rows collapses its oldest done rows

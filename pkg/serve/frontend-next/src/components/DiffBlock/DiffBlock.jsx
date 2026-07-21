@@ -8,7 +8,8 @@ import "./DiffBlock.css";
 // `--- `/`+++ `) and the `\ No newline at end of file` marker — none of them
 // is numbered or shown as a context line. Content lines
 // are only processed after seeing a `@@` hunk header; anything
-// before that (or unrecognized metadata) is discarded.
+// before that (or unrecognized metadata) is discarded. It also understands
+// formatDiff's independently numbered fallback lines for live edit previews.
 // Returns an array of {oldNo, newNo, type, text} ready for <DiffBlock>.
 export function parseUnifiedDiff(diffText) {
   const lines = diffText.split("\n");
@@ -28,7 +29,29 @@ export function parseUnifiedDiff(diffText) {
       inHunk = true;
       continue;
     }
-    if (!inHunk) continue;
+    // formatDiff is the argument-time fallback for edit calls. Unlike a
+    // unified diff it has one independently numbered line at a time, so it
+    // can render while the model is still streaming the edit arguments. Once
+    // a unified hunk starts, every content line belongs to that hunk instead.
+    if (!inHunk) {
+      const fallbackChange = raw.match(/^\s*(\d+)\s+([+-])\s(.*)$/);
+      if (fallbackChange) {
+        const no = parseInt(fallbackChange[1], 10);
+        out.push({
+          oldNo: fallbackChange[2] === "-" ? no : undefined,
+          newNo: fallbackChange[2] === "+" ? no : undefined,
+          type: fallbackChange[2] === "+" ? "add" : "del",
+          text: fallbackChange[3],
+        });
+        continue;
+      }
+      const fallbackContext = raw.match(/^\s*(\d+)\s{3}(.*)$/);
+      if (fallbackContext) {
+        const no = parseInt(fallbackContext[1], 10);
+        out.push({ oldNo: no, newNo: no, type: "ctx", text: fallbackContext[2] });
+      }
+      continue;
+    }
     if (raw.startsWith("+")) {
       out.push({ newNo: newNo, type: "add", text: raw.slice(1) });
       newNo++;

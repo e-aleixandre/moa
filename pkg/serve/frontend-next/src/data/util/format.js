@@ -44,7 +44,7 @@ export function toolPath(name, args) {
   if (!a) return '';
   const n = (name || '').toLowerCase();
 
-  if (n === 'read' || n === 'write' || n === 'edit' || n === 'ls')
+  if (n === 'read' || n === 'write' || n === 'edit' || n === 'multiedit' || n === 'ls')
     return a.path || '';
   if (n === 'send_file') {
     const p = a.path || '';
@@ -91,8 +91,9 @@ export function toolPath(name, args) {
 export function toolPreview(name, args, result, status, startLine) {
   const n = (name || '').toLowerCase();
   const a = typeof args === 'string' ? tryParse(args) : (args || {});
+  const live = status === 'running' || status === 'generating';
 
-  // For write/edit, show the content being written
+  // For write/edit tools, show the content being written.
   if (n === 'write' && a.content)
     return { text: a.content, kind: 'input' };
   if (n === 'edit') {
@@ -101,7 +102,31 @@ export function toolPreview(name, args, result, status, startLine) {
     // Fallback for old results without diff.
     const oldText = a.oldText || a.old_text || '';
     const newText = a.newText || a.new_text || '';
-    if (oldText || newText) return { text: formatDiff(oldText, newText, startLine), kind: 'diff' };
+    if (oldText || newText) {
+      return {
+        text: live ? formatLiveDiff(oldText, newText, startLine) : formatDiff(oldText, newText, startLine),
+        kind: 'diff',
+      };
+    }
+  }
+  if (n === 'multiedit') {
+    if (result && result.includes('@@')) return { text: result, kind: 'diff' };
+    if (Array.isArray(a.edits)) {
+      // A streaming multiedit only needs its newest argument fragments. Bound
+      // the number before formatting so a large call cannot build every diff.
+      const edits = live ? a.edits.slice(-PREVIEW_LINES) : a.edits;
+      const diffs = edits
+        .map((edit) => {
+          if (!edit || typeof edit !== 'object') return '';
+          const oldText = edit.oldText || edit.old_text || '';
+          const newText = edit.newText || edit.new_text || '';
+          return oldText || newText
+            ? (live ? formatLiveDiff(oldText, newText, startLine) : formatDiff(oldText, newText, startLine))
+            : '';
+        })
+        .filter(Boolean);
+      if (diffs.length > 0) return { text: diffs.join('\n'), kind: 'diff' };
+    }
   }
 
   // ask_user is rendered by AskUserPreview component — skip here.
@@ -118,6 +143,7 @@ export function toolPreview(name, args, result, status, startLine) {
 }
 
 const PREVIEW_LINES = 12;
+const LIVE_DIFF_MAX_CHARS = 2000;
 
 /** Split preview text showing the first N lines, hiding the rest. */
 export function splitPreview(text, maxLines = PREVIEW_LINES) {
@@ -192,6 +218,21 @@ export function formatDiff(oldText, newText, startLine = 1) {
   }
 
   return lines.join('\n');
+}
+
+// formatLiveDiff bounds streamed edit arguments before formatting so each
+// projection stays small while a large edit call is still arriving.
+function formatLiveDiff(oldText, newText, startLine) {
+  return formatDiff(
+    tailLiveDiffInput(oldText),
+    tailLiveDiffInput(newText),
+    startLine,
+  );
+}
+
+function tailLiveDiffInput(text) {
+  const charTail = text.length > LIVE_DIFF_MAX_CHARS ? text.slice(-LIVE_DIFF_MAX_CHARS) : text;
+  return splitPreviewTail(charTail).visible;
 }
 
 function shortenCmd(cmd) {

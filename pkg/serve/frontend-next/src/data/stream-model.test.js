@@ -556,6 +556,7 @@ test('a live tool row carries its streamingResult as liveTail (last 5 lines and 
   const doc = blocks[blocks.length - 1];
   const ledger = doc.blocks.find(b => b.type === 'ledger');
   expect(ledger.rows[0].live).toBe(true);
+  expect(ledger.rows[0].livePreview).toBeUndefined();
   expect(ledger.rows[0].liveTail).toBe('l3\nl4\nl5\nl6\nl7');
   expect(ledger.rows[0].liveTailStart).toBe(2);
   expect(ledger.rows[0].liveTail.split('\n').map((_line, i) => ledger.rows[0].liveTailStart + i))
@@ -605,6 +606,94 @@ test('a generating tool_start (args still streaming) is also marked live', () =>
   const ledger = doc.blocks.find(b => b.type === 'ledger');
   expect(ledger.rows[0].live).toBe(true);
   expect(ledger.rows[0].startedAt).toBe(999);
+});
+
+test('a generating write exposes its growing content as a bounded live preview', () => {
+  const rowFor = (content) => projectStream(session([
+    tool('t1', 'write', { path: 'notes.txt', content }, 'generating', null, { startedAt: 1 }),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+
+  const partial = rowFor('first line\nsecond line');
+  expect(partial.live).toBe(true);
+  expect(partial.livePreview).toEqual({ text: 'first line\nsecond line', kind: 'input' });
+
+  const growing = rowFor('first line\nsecond line\nthird line');
+  expect(growing.livePreview.text).toBe('first line\nsecond line\nthird line');
+
+  const long = rowFor(Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join('\n'));
+  expect(long.livePreview.text.split('\n')).toHaveLength(12);
+  expect(long.livePreview.text).toStartWith('line 3');
+
+  const charBounded = rowFor('x'.repeat(2500));
+  expect(charBounded.livePreview.text).toHaveLength(2000);
+  expect(charBounded.livePreview.text).toStartWith('… (truncated)\n');
+});
+
+test('a generating edit exposes an argument diff as its live preview', () => {
+  const s = session([
+    tool('t1', 'edit', { path: 'a.js', oldText: 'before', newText: 'after' }, 'generating', null),
+  ]);
+  const row = projectStream(s)[0].blocks.find(b => b.type === 'ledger').rows[0];
+  expect(row.livePreview.kind).toBe('diff');
+  expect(row.livePreview.text).toContain('- before');
+  expect(row.livePreview.text).toContain('+ after');
+});
+
+test('live argument previews suppress concurrent output tails', () => {
+  const rowFor = (name, args) => projectStream(session([
+    tool('t1', name, args, 'running', null, {
+      streamingResult: '@@ -1 +1 @@\n-before\n+after',
+    }),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+
+  const write = rowFor('write', { path: 'notes.txt', content: 'growing content' });
+  expect(write.livePreview).toEqual({ text: 'growing content', kind: 'input' });
+  expect(write.liveTail).toBeUndefined();
+
+  const edit = rowFor('edit', { path: 'a.js', oldText: 'before', newText: 'after' });
+  expect(edit.livePreview.kind).toBe('diff');
+  expect(edit.liveTail).toBeUndefined();
+
+  const multiedit = rowFor('multiedit', {
+    path: 'a.js', edits: [{ oldText: 'before', newText: 'after' }],
+  });
+  expect(multiedit.livePreview.kind).toBe('diff');
+  expect(multiedit.liveTail).toBeUndefined();
+
+  const bash = rowFor('bash', { command: 'printf done' });
+  expect(bash.livePreview).toBeUndefined();
+  expect(bash.liveTail).toBe('@@ -1 +1 @@\n-before\n+after');
+});
+
+test('a large live edit formats a bounded diff preview', () => {
+  const oldText = Array.from({ length: 5000 }, (_, i) => `old ${i}`).join('\n');
+  const newText = Array.from({ length: 5000 }, (_, i) => `new ${i}`).join('\n');
+  const row = projectStream(session([
+    tool('t1', 'edit', { path: 'a.js', oldText, newText }, 'generating', null),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows[0];
+
+  expect(row.livePreview.text.split('\n')).toHaveLength(12);
+  expect(row.livePreview.text.length).toBeLessThanOrEqual(2000);
+  expect(row.livePreview.text).toContain('+ new 4999');
+});
+
+test('a live bash keeps its command in the header instead of duplicating it as a preview', () => {
+  const s = session([
+    tool('t1', 'bash', { command: 'go test ./...' }, 'generating', null),
+  ]);
+  const row = projectStream(s)[0].blocks.find(b => b.type === 'ledger').rows[0];
+  expect(row.arg.text).toBe('go test ./...');
+  expect(row.livePreview).toBeUndefined();
+});
+
+test('a completed write retains its normal static body, not a live preview', () => {
+  const s = session([
+    tool('t1', 'write', { path: 'notes.txt', content: 'finished content' }, 'done', 'wrote file'),
+  ]);
+  const row = projectStream(s)[0].blocks.find(b => b.type === 'ledger').rows[0];
+  expect(row.live).toBeUndefined();
+  expect(row.body).toBe('finished content');
+  expect(row.livePreview).toBeUndefined();
 });
 
 test('a terminated tool_start is never marked live', () => {

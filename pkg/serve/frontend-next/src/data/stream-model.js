@@ -557,11 +557,16 @@ function toLedgerRow(msg) {
   if (msg.status === 'running' || msg.status === 'generating') {
     row.live = true;
     row.startedAt = msg.startedAt || null;
-    // Incremental output of the tool in flight (streamingResult, fed by
-    // tool_update deltas — only bash actually streams; most tools stay empty
-    // until tool_end). Carried as the last five lines so the live tail row can
-    // show a mini-logtail, matching the async BackgroundJob's live tail.
-    if (msg.streamingResult) {
+    // Argument-derived previews are the live signal for write/edit tools.
+    // They take precedence over a concurrent tool_update tail, which remains
+    // the live signal for output-oriented tools such as bash.
+    if (preview && (preview.kind === 'input' || preview.kind === 'diff')) {
+      const bounded = tailPreviewText(preview.text);
+      if (bounded.visible) row.livePreview = { text: bounded.visible, kind: preview.kind };
+    }
+    // Incremental output of tools without an argument preview (for example,
+    // bash) is carried as the last five lines for the mini-logtail.
+    if (!row.livePreview && msg.streamingResult) {
       const streamingResult = msg.streamingResult.endsWith('\n')
         ? msg.streamingResult.slice(0, -1)
         : msg.streamingResult;
@@ -573,6 +578,17 @@ function toLedgerRow(msg) {
     }
   }
   return row;
+}
+
+// tailPreviewText keeps a live argument preview bounded like the static body,
+// while retaining the newest content rather than the beginning of a large file.
+function tailPreviewText(text) {
+  const maxChars = 2000; // matches truncateText's default static preview limit
+  const marker = '… (truncated)\n';
+  const tailText = text.length > maxChars
+    ? marker + text.slice(-(maxChars - marker.length))
+    : text;
+  return splitPreviewTail(tailText, 12);
 }
 
 // toolToken maps a raw tool name to the token the ledger row uses for its icon/label
@@ -594,9 +610,9 @@ function deriveOut(msg) {
 }
 
 // isUnifiedDiff decides whether a diff string is a REAL unified diff that
-// DiffBlock.parseUnifiedDiff can render — i.e. it has a `@@` hunk header or the
-// `--- ` file header. The formatDiff fallback (line-numbered ` - `/` + `) is
-// NOT unified and would parse to an empty diff, so we reject it here.
+// belongs in a completed diff sibling — i.e. it has a `@@` hunk header or the
+// `--- ` file header. The line-numbered formatDiff fallback is only shown in
+// the live argument preview, never promoted to a completed sibling.
 function isUnifiedDiff(text) {
   if (!text) return false;
   if (text.startsWith('--- ')) return true;
@@ -605,8 +621,8 @@ function isUnifiedDiff(text) {
 
 // toDiffBlock returns a full-width diff sibling for an edit that carries a real
 // server unified diff, or null. It reuses toolPreview to detect a diff preview,
-// but only emits a block when the text is an actual unified diff (guarding
-// against the non-parseable formatDiff fallback).
+// but only emits a block when the text is an actual unified diff; formatDiff's
+// argument-time fallback stays inline on a live row.
 function toDiffBlock(msg) {
   const name = msg.tool_name || '';
   const preview = toolPreview(name, msg.args, msg.result, msg.status, msg.start_line);
