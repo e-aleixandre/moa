@@ -36,8 +36,8 @@ import "./Composer.css";
 // 5J — subagent steering: when `steer` is set ({ jobId, name, onRebound }) the
 // composer becomes a STEER box for a live subagent. It stays visually IDENTICAL
 // to the normal composer (same pill, no accent border) — the subagent view's
-// header + the "Steer <name> …" placeholder already say who you're writing to,
-// so the input never diverges from the normal screen. Enter routes the text
+// header identifies who you're writing to, so the input uses the standard
+// running placeholder. Enter routes the text
 // through steerSubagent(sessionId, jobId, text) instead of sendMessage, and
 // there is no queue/slash/shell semantics (those belong to the parent run).
 
@@ -790,16 +790,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const idlePlaceholder = shortPlaceholder
     ? "Message moa…"
     : `Message moa — Enter to send, ⇧Enter for a new line, ${formatShortcut("Enter", { mod: true })} to queue…`;
-  // 5J steer mode overrides everything: this box talks to the subagent.
-  // Busy (parent run) placeholder: state that Enter STEERS without stopping —
+  // Steer mode uses the standard busy placeholder because its header identifies
+  // the subagent. Busy (parent run) copy states that Enter STEERS without stopping —
   // the persistent Send button already signals "you can always talk to it", so
   // the copy names the consequence. Mobile's pill has no room for the long form.
   const busyPlaceholder = shortPlaceholder
     ? "Steer — it keeps working…"
     : "Steer the agent — ⏎ sends while it works, it won't stop it…";
-  const placeholder = steer
-    ? `Steer ${steer.name || "subagent"} — it reads this before its next step…`
-    : (busy ? busyPlaceholder : idlePlaceholder);
+  const placeholder = (steer || busy) ? busyPlaceholder : idlePlaceholder;
 
   return (
     <div class="composer-wrap">

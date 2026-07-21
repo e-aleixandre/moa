@@ -172,9 +172,27 @@
   height: 15px;
   margin-left: 3px;
   vertical-align: -2px;
-  background: var(--mauve);
+  background: var(--teal);
   border-radius: 2px;
   animation: doc-cursor-blink 1s steps(2) infinite;
+}
+
+/* The live markdown subtree is replaced for every websocket delta. A mask
+   pinned to its bottom edge softens only the newest line, so text firms up as
+   it moves above the write head without restarting an animation. */
+.doc .doc-prose--live {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 1.1em),
+    color-mix(in srgb, #000 55%, transparent) 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 1.1em),
+    color-mix(in srgb, #000 55%, transparent) 100%
+  );
 }
 
 @keyframes doc-cursor-blink {
@@ -184,9 +202,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .doc .doc-prose--live {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
   .doc .doc-cursor {
     animation: none;
     opacity: 0.6;
   }
 }
-

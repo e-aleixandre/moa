@@ -36,7 +36,7 @@ function mobileDocChildren(blocks, onOpenSubagent) {
         out.push(
           <div
             key={b.id}
-            class="doc-prose"
+            class={`doc-prose${b.caret ? " doc-prose--live" : ""}`}
             dangerouslySetInnerHTML={{ __html: b.caret ? renderMarkdownWithCaret(b.text) : renderMarkdown(b.text) }}
           />
         );

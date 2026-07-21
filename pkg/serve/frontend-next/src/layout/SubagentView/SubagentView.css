@@ -1,10 +1,7 @@
-/* SubagentView (5J) — "inside the fork". A thin 2px accent thread frames the
-   body; the header is a breadcrumb; the now-line fuses status+pulse below the
+/* SubagentView (5J) — "inside the fork". The header is a breadcrumb; the
+   now-line fuses status+pulse below the
    steer composer (same slot as the parent's status line); the outcome banner
-   replaces both on terminal states. The
-   accent (--sa-accent) is set inline from the subagent's fanout identity color
-   and does NOT tint the background — it's a discreet thread + local details
-   only. It turns green/red ONLY on terminal (thread-completed/failed/cancelled).
+   replaces both on terminal states.
 */
 .subagent-view {
   display: flex;
@@ -44,11 +41,6 @@
   font-size: var(--text-sm);
 }
 
-.subagent-view .sa-crumb > svg {
-  color: var(--sa-accent);
-  flex: none;
-}
-
 .subagent-view .sa-crumb-parent {
   background: none;
   border: none;
@@ -85,14 +77,6 @@
   gap: var(--space-2);
   margin-left: auto;
   flex: none;
-}
-
-.subagent-view .sa-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--subtext0);
 }
 
 /* Cancel button: 32px visual, ≥44px hit-area via pseudo-element (INC-35). */
@@ -169,29 +153,13 @@
   flex: none;
 }
 
-/* ── body: accent thread + reused Stream (task card is the Stream's lead) ── */
+/* ── body: reused Stream (task card is the Stream's lead) ───────────────── */
 .subagent-view .sa-body {
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
 }
-
-/* The 2px thread — discreet, no background wash, no glow. */
-.subagent-view .sa-body::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 2px;
-  background: var(--sa-accent);
-  z-index: 1;
-}
-
-.subagent-view .sa-body.thread-completed::before { background: var(--green); }
-.subagent-view .sa-body.thread-failed::before { background: var(--red); }
-.subagent-view .sa-body.thread-cancelled::before { background: var(--overlay0); }
 
 /* Task card: the Stream's lead block (scrolls WITH the transcript). It's a
    normal .waypoint inside .stream-col, so it inherits the column's width and

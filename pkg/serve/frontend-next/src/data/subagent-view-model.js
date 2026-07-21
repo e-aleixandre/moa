@@ -20,7 +20,7 @@ import {
   subagentAccentIndex,
 } from './stream-model.js';
 import { shortModel, modelCodename } from './util/format.js';
-import { formatElapsed } from './util/activity.js';
+import { activityText, formatElapsed } from './util/activity.js';
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'error', 'done']);
 
@@ -168,6 +168,16 @@ export function subagentView(session, jobId) {
     if (liveIdx >= 0) {
       const a = liveAgent(live[liveIdx], stableIdx);
       if (a.action) view.action = a.action;
+      // Reuse the shared activity mapping so this reads like the main agent,
+      // rather than exposing a raw tool token.
+      const label = activityText({
+        messages: sub.messages,
+        streamingText: sub.streamingText,
+        thinkingText: sub.thinkingText,
+        state: 'running',
+        runStartedAtMs: sub.startedAtMs,
+      }, Date.now());
+      if (label) view.action = label;
     }
     if (sub.startedAtMs) {
       const elapsed = formatElapsed(Date.now() - sub.startedAtMs);

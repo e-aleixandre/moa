@@ -102,13 +102,13 @@ test('a cancelled subagent maps to the cancelled outcome', () => {
 });
 
 // ── live now-line ─────────────────────────────────────────────────────────
-test('a running subagent surfaces its in-flight tool as the now-line action', () => {
+test('a running subagent surfaces a gerund for its in-flight tool as the now-line action', () => {
   const messages = [
-    { _type: 'tool_start', tool_call_id: 't1', tool_name: 'grep', status: 'running' },
+    { _type: 'tool_start', tool_call_id: 't1', tool_name: 'read', status: 'running' },
   ];
   const session = { id: 's1', messages: [], subagents: { j1: sub({ messages }) } };
   const v = subagentView(session, 'j1');
-  expect(v.action).toBe('grep');
+  expect(v.action).toBe('Reading files');
   expect(v.elapsed).toBeUndefined(); // no startedAtMs → segment omitted
 });
 

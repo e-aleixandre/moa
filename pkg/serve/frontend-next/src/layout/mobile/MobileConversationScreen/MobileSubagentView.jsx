@@ -16,10 +16,10 @@ import "./MobileSubagentView.css";
 // the header is a variant of the shared `.mhead` and the composer sits in the
 // `.mcomposer` pill, so the fork reads as "the same house, zoomed into a
 // branch" rather than a foreign screen. What stays fork-proper: the full-screen
-// push, the 2px accent thread, the breadcrumb/codename in accent, the sibling
-// rail, the task card, the below-composer now-line, and the terminal outcome
-// banner. Reuses the pure subagentView() projection; rebounds to the parent
-// when the subagent was pruned.
+// push, the breadcrumb/codename in accent, the sibling rail, the task card, the
+// below-composer now-line, and the terminal outcome banner. Reuses the pure
+// subagentView() projection; rebounds to the parent when the subagent was
+// pruned.
 
 export function MobileSubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
@@ -62,10 +62,8 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   const hasTokens = usage && (usage.inputTokens != null || usage.outputTokens != null);
   const cost = usage && usage.costUSD > 0 ? `~$${usage.costUSD.toFixed(3)}` : null;
 
-  const threadClass = view.terminal ? `thread-${view.outcome}` : "";
-
   return (
-    <div class={`msa ${threadClass}`} style={{ "--sa-accent": `var(--${accent})` }}>
+    <div class="msa">
       <header class="mhead msa-head">
         <div class="mhead-row">
           <button type="button" class="msa-back" aria-label="Back to parent" onClick={onBack}>
@@ -74,7 +72,6 @@ export function MobileSubagentView({ session, jobId, onBack }) {
           <div class="mhead-switch msa-ident" role="presentation">
             <GitFork size={13} style={{ color: `var(--${accent})` }} aria-hidden="true" />
             <span class="mhead-title" style={{ color: `var(--${accent})` }}>{view.name}</span>
-            {!view.terminal && <Spinner color={accent} size={8} />}
           </div>
           {view.model && (
             <ModelPill model={view.model} level={view.thinking} accent={modelAccent(view.model)} variant="glyph" />

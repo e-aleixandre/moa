@@ -1,10 +1,10 @@
 /* MobileSubagentView (5J, INC-34) — full-screen push over the mobile
    conversation. It wears the parent's chrome (SUBAGENT-VIEW-RECONCILE): the
    header is a `.mhead` variant and the composer sits in the `.mcomposer` pill.
-   Fork-proper marks stay: thin 2px accent thread down the left of the body,
-   breadcrumb/codename in accent, sibling strip, task card, and — below the
+   Fork-proper marks stay: breadcrumb/codename in accent, sibling strip, task
+   card, and — below the
    composer, in the parent's status slot — the now-line, or an outcome banner on
-   terminal states. The accent (--sa-accent) is a discreet thread only. */
+   terminal states. */
 .msa {
   position: absolute;
   inset: 0;
@@ -119,28 +119,11 @@
 
 .msa-rail-chip.active { background: var(--surface0); }
 
-/* body: MobileStream (task card is its lead) + 2px accent thread. The stream
-   is the shared MobileStream, so it scrolls exactly like the normal screen; the
-   thread is painted on its frame to mark "you're in a fork". */
+/* body: MobileStream (task card is its lead). The stream is shared, so it
+   scrolls exactly like the normal screen. */
 .msa .mstream {
   position: relative;
 }
-
-.msa .mstream::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 2px;
-  background: var(--sa-accent);
-  z-index: 1;
-  pointer-events: none;
-}
-
-.msa.thread-completed .mstream::before { background: var(--green); }
-.msa.thread-failed .mstream::before { background: var(--red); }
-.msa.thread-cancelled .mstream::before { background: var(--overlay0); }
 
 /* Task card: the MobileStream's lead block — a normal .waypoint inside the
    scroller (scrolls WITH the transcript). Only the accent label is bespoke. */

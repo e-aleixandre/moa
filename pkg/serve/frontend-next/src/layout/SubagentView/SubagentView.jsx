@@ -13,8 +13,8 @@ import "./SubagentView.css";
 
 // SubagentView — "inside the fork" (5J). Zoom into ONE subagent: its
 // transcript rendered by the SAME Stream as the parent (cero divergencia,
-// INC-37), framed by a thin 2px accent thread, a breadcrumb header, a sibling
-// rail, a task card, a fused now-line, and — on terminal — an outcome banner.
+// INC-37), framed by a breadcrumb header, a sibling rail, a task card, a fused
+// now-line, and — on terminal — an outcome banner.
 //
 // It reuses the pure projection subagentView(session, jobId) for everything
 // data-shaped (accent, siblings, blocks, terminal outcome); this component only
@@ -88,22 +88,18 @@ export function SubagentView({ session, jobId, onBack }) {
   const onPromote = () => { promoteSubagent(session.id, jobId).catch(() => {}); };
   const onSibling = (id) => { updateSession(session.id, { viewingSubagent: id }); };
 
-  const threadClass = view.terminal ? `thread-${view.outcome}` : "";
-
-
   return (
     <div
       class="subagent-view"
       role="region"
       aria-label={`Subagent ${view.name}, ${view.status}`}
-      style={{ "--sa-accent": accentVar }}
     >
       <header class="sa-head">
         <IconButton label="Back to parent" onClick={onBack}>
           <ArrowLeft size={15} />
         </IconButton>
         <div class="sa-crumb">
-          <GitFork size={13} aria-hidden="true" />
+          <GitFork size={13} style={{ color: accentVar }} aria-hidden="true" />
           <button type="button" class="sa-crumb-parent" onClick={onBack}>
             {sessionTitle(session)}
           </button>
@@ -113,12 +109,6 @@ export function SubagentView({ session, jobId, onBack }) {
         <div class="sa-head-actions">
           {view.model && (
             <ModelPill model={view.model} level={view.thinking} accent={modelAccent(view.model)} variant="glyph" />
-          )}
-          {!view.terminal && (
-            <span class="sa-status" aria-live="polite">
-              <Spinner color={accent} size={9} />
-              working
-            </span>
           )}
           {canPromote(view) && (
             <IconButton label="Promote — run in background, unblocks parent" onClick={onPromote}>
@@ -160,7 +150,7 @@ export function SubagentView({ session, jobId, onBack }) {
         </div>
       )}
 
-      <div class={`sa-body ${threadClass}`}>
+      <div class="sa-body">
         <Stream
           session={{ id: `${session.id}:${jobId}`, messages: [] }}
           blocks={view.blocks}
