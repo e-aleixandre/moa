@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { WaypointAttachments } from "./WaypointAttachments.jsx";
+import { WaypointAttachments, attachmentImageSrc } from "./WaypointAttachments.jsx";
 
 function descendants(node, nodes = []) {
   if (node == null || typeof node === "string") return nodes;
@@ -20,6 +20,13 @@ function textContent(node) {
   return (Array.isArray(children) ? children : [children]).map(textContent).join("");
 }
 
+// The thumbnail vnode is an AttachmentThumbnail component (holds its own
+// broken-image fallback state); assert on its resolved props rather than the
+// nested <img>, which a static vnode walk doesn't expand.
+function thumbnailNode(node) {
+  return descendants(node).find((child) => child.props?.imageSrc != null);
+}
+
 test("an image attachment with data renders a data URL thumbnail", () => {
   let opened = null;
   const attachments = WaypointAttachments({
@@ -28,14 +35,53 @@ test("an image attachment with data renders a data URL thumbnail", () => {
       opened = attachment;
     },
   });
-  const thumbnail = byClass(attachments, "wp-attachment-thumbnail");
-  const image = descendants(attachments).find((node) => node.type === "img");
+  const thumbnail = thumbnailNode(attachments);
 
   expect(thumbnail).toBeDefined();
-  expect(image.props.src).toBe("data:image/png;base64,aGVsbG8=");
-  expect(image.props.alt).toBe("proof.png");
-  thumbnail.props.onClick();
+  expect(thumbnail.props.imageSrc).toBe("data:image/png;base64,aGVsbG8=");
+  expect(thumbnail.props.label).toBe("proof.png");
+  thumbnail.props.onOpen();
   expect(opened).toEqual({ type: "image", data: "aGVsbG8=", mime_type: "image/png", filename: "proof.png" });
+});
+
+test("a persisted image attachment renders an endpoint thumbnail", () => {
+  const attachments = WaypointAttachments({
+    attachments: [{ type: "image", attachment_id: "att_1", mime_type: "image/png", filename: "proof.png" }],
+    sessionId: "session/1",
+  });
+  const thumbnail = thumbnailNode(attachments);
+
+  expect(thumbnail.props.imageSrc).toBe("/api/sessions/session%2F1/attachments/att_1");
+});
+
+test("a persisted image without a session renders an unavailable chip", () => {
+  const attachments = WaypointAttachments({
+    attachments: [{ type: "image", attachment_id: "att_1", mime_type: "image/png", filename: "proof.png" }],
+  });
+
+  expect(byClass(attachments, "wp-attachment-chip")).toBeDefined();
+  expect(descendants(attachments).find((node) => node.type === "img")).toBeUndefined();
+});
+
+test("a persisted image with a non-inline MIME renders an unavailable chip", () => {
+  const attachments = WaypointAttachments({
+    attachments: [{ type: "image", attachment_id: "att_1", mime_type: "image/svg+xml", filename: "proof.svg" }],
+    sessionId: "s1",
+  });
+
+  expect(byClass(attachments, "wp-attachment-chip")).toBeDefined();
+  expect(descendants(attachments).find((node) => node.type === "img")).toBeUndefined();
+});
+
+test("attachmentImageSrc prefers inline data and otherwise requires a session-backed raster attachment", () => {
+  expect(attachmentImageSrc({ type: "image", data: "aGVsbG8=", mime_type: "image/png" }, "s1"))
+    .toBe("data:image/png;base64,aGVsbG8=");
+  expect(attachmentImageSrc({ type: "image", attachment_id: "att_1", mime_type: "image/jpeg" }, "s1"))
+    .toBe("/api/sessions/s1/attachments/att_1");
+  expect(attachmentImageSrc({ type: "image", attachment_id: "att_1", mime_type: "image/png" }))
+    .toBeNull();
+  expect(attachmentImageSrc({ type: "image", attachment_id: "att_1", mime_type: "image/svg+xml" }, "s1"))
+    .toBeNull();
 });
 
 test("a stripped image attachment renders an image chip, not an image", () => {

@@ -261,9 +261,8 @@ export async function cancelBashJob(sessionId, jobId) {
   return api('POST', `/api/sessions/${sessionId}/bash-jobs/${jobId}/cancel`);
 }
 
-// attachmentToContent converts a client-side attachment into the same content
-// block shape the server builds (see pkg/serve/attachments.go), so the
-// optimistic echo below renders identically to what comes back after a reload.
+// attachmentToContent builds the local inline content needed for the immediate
+// optimistic echo. A successful send replaces image blocks with descriptors.
 function attachmentToContent(a) {
   if (a.isImage) {
     return { type: 'image', data: a.data, mime_type: a.mime };
@@ -335,6 +334,36 @@ export async function sendMessage(id, text, attachments = []) {
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
       steer_id: steerId || undefined,
     }, { timeoutMs: 0 });
+    if (optimisticMsg && Array.isArray(res?.attachments) && res.attachments.length > 0) {
+      const cur = store.get().sessions[id];
+      // Swap the inline-data image echoes for durable descriptors, but only
+      // when the server returned exactly one descriptor per inline image. The
+      // client marks every image/* as an image, while the server only mints a
+      // descriptor for images it stored durably (a magic-byte mismatch or a
+      // capacity spill converts one to text/disk with no descriptor). Pairing
+      // by position would then misalign, so fall back to leaving the optimistic
+      // echo as-is (a reload reconciles it) unless the counts match exactly.
+      const inlineImages = optimisticMsg.content.filter((b) => b.type === 'image' && b.data).length;
+      if (cur?.messages?.includes(optimisticMsg) && res.attachments.length === inlineImages) {
+        let imageIndex = 0;
+        const content = optimisticMsg.content.map((block) => {
+          if (block.type !== 'image' || !block.data) return block;
+          const attachment = res.attachments[imageIndex++];
+          return {
+            type: 'image',
+            attachment_id: attachment.id,
+            attachment_size: attachment.size,
+            mime_type: attachment.mime,
+            filename: attachment.name,
+          };
+        });
+        updateSession(id, {
+          messages: cur.messages.map((message) => (
+            message === optimisticMsg ? { ...optimisticMsg, content } : message
+          )),
+        });
+      }
+    }
     // Mark the chip confirmed now that the server accepted it: from here on it
     // is part of the authoritative queue, so a reconnect snapshot that omits it
     // means "delivered/cancelled" (drop it) rather than "in flight" (keep it).

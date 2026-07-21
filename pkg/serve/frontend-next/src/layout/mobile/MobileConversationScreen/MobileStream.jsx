@@ -77,13 +77,13 @@ function mobileDocChildren(blocks, onOpenSubagent) {
   return out;
 }
 
-function MobileStreamBlock({ block, onOpenSubagent }) {
+function MobileStreamBlock({ block, onOpenSubagent, sessionId }) {
   switch (block.kind) {
     case "system":
       return <div class="mstream-system">{block.text}</div>;
     case "waypoint":
       return (
-        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined} attachments={block.attachments}>
+        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined} attachments={block.attachments} sessionId={sessionId}>
           <p>{block.text}</p>
         </UserWaypoint>
       );
@@ -189,7 +189,7 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
       >
         {lead}
         {blocks.map((block) => (
-          <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
+          <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} />
         ))}
         {tail}
       </div>

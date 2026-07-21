@@ -79,13 +79,13 @@ function docChildren(blocks, onOpenSubagent) {
   return out;
 }
 
-function StreamBlock({ block, onOpenSubagent }) {
+function StreamBlock({ block, onOpenSubagent, sessionId }) {
   switch (block.kind) {
     case "system":
       return <div class="stream-system">{block.text}</div>;
     case "waypoint":
       return (
-        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined} attachments={block.attachments}>
+        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined} attachments={block.attachments} sessionId={sessionId}>
           <p>{block.text}</p>
         </UserWaypoint>
       );
@@ -198,7 +198,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
         <div class="stream-col">
           {lead}
           {blocks.map((block) => (
-            <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
+            <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} />
           ))}
           {tail}
         </div>

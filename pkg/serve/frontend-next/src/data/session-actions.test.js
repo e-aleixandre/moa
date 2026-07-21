@@ -172,3 +172,68 @@ test('sendMessage from idle resets the token tally to start the new run at zero'
   expect(s1.runTokensUp).toBe(0);
   expect(s1.runTokensDown).toBe(0);
 });
+
+test('sendMessage replaces an accepted optimistic image with its durable descriptor', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = {
+    action: 'send',
+    attachments: [{ id: 'att_x', mime: 'image/png', size: 123, name: 'a.png', url: '/api/sessions/s1/attachments/att_x' }],
+  };
+
+  await sendMessage('s1', 'look at this', [
+    { name: 'a.png', mime: 'image/png', data: 'AAAA', isImage: true },
+  ]);
+
+  const content = store.get().sessions.s1.messages[0].content;
+  expect(content[0]).toEqual({
+    type: 'image', attachment_id: 'att_x', attachment_size: 123, mime_type: 'image/png', filename: 'a.png',
+  });
+  expect(content[0].data).toBeUndefined();
+  expect(content[1]).toEqual({ type: 'text', text: 'look at this' });
+});
+
+test('sendMessage keeps an optimistic image inline when the response has no attachments', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = { action: 'send' };
+
+  await sendMessage('s1', 'look at this', [
+    { name: 'a.png', mime: 'image/png', data: 'AAAA', isImage: true },
+  ]);
+
+  expect(store.get().sessions.s1.messages[0].content[0]).toEqual({
+    type: 'image', data: 'AAAA', mime_type: 'image/png',
+  });
+});
+
+test('sendMessage keeps optimistic images inline when the descriptor count does not match', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  // Two images sent (both classified as image client-side) but the server only
+  // stored one durably (e.g. the first failed magic-byte validation and became
+  // text/disk). Positional pairing would mis-assign the descriptor, so the swap
+  // must not run — the optimistic echo stays inline until a reload reconciles.
+  apiResponse = {
+    action: 'send',
+    attachments: [{ id: 'att_y', mime: 'image/png', size: 9, name: 'b.png', url: '/api/sessions/s1/attachments/att_y' }],
+  };
+
+  await sendMessage('s1', 'two', [
+    { name: 'a.svg', mime: 'image/svg+xml', data: 'AAAA', isImage: true },
+    { name: 'b.png', mime: 'image/png', data: 'BBBB', isImage: true },
+  ]);
+
+  const content = store.get().sessions.s1.messages[0].content;
+  expect(content[0]).toEqual({ type: 'image', data: 'AAAA', mime_type: 'image/svg+xml' });
+  expect(content[1]).toEqual({ type: 'image', data: 'BBBB', mime_type: 'image/png' });
+});

@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import { sanitizeHtml } from "../../util/sanitize.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
-import { WaypointAttachments, attachmentDataUrl, attachmentLabel } from "./WaypointAttachments.jsx";
+import { WaypointAttachments, attachmentImageSrc, attachmentLabel } from "./WaypointAttachments.jsx";
 import "./UserWaypoint.css";
 
 // UserWaypoint — the user's prompt as a waypoint card inside
@@ -10,8 +10,8 @@ import "./UserWaypoint.css";
 // given, `children` is used as-is (usually a <p>). `label` overrides the "You"
 // header text (e.g. "You — steer" for a mid-run course-correction); the peach
 // treatment stays (peach = user), only the header word differs.
-function ImageLightbox({ attachment, onClose }) {
-  const src = attachmentDataUrl(attachment);
+function ImageLightbox({ attachment, sessionId, onClose }) {
+  const src = attachmentImageSrc(attachment, sessionId);
   if (!src) return null;
   const label = attachmentLabel(attachment, "Image");
 
@@ -24,7 +24,7 @@ function ImageLightbox({ attachment, onClose }) {
   );
 }
 
-export function UserWaypoint({ time, children, html, label = "You", className = "", attachments, ...rest }) {
+export function UserWaypoint({ time, children, html, label = "You", className = "", attachments, sessionId, ...rest }) {
   const [openAttachment, setOpenAttachment] = useState(null);
 
   return (
@@ -39,10 +39,10 @@ export function UserWaypoint({ time, children, html, label = "You", className = 
         ) : (
           <div class="body">{children}</div>
         )}
-        <WaypointAttachments attachments={attachments} onOpenImage={setOpenAttachment} />
+        <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
       </div>
       {openAttachment && (
-        <ImageLightbox attachment={openAttachment} onClose={() => setOpenAttachment(null)} />
+        <ImageLightbox attachment={openAttachment} sessionId={sessionId} onClose={() => setOpenAttachment(null)} />
       )}
     </>
   );
