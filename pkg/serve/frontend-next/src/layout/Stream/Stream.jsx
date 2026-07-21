@@ -18,12 +18,12 @@ import "./Stream.css";
 // from the old SPA's MessageList.jsx — the block list replaces the raw message
 // list, but the scroll intent logic is identical.
 //
-// PermissionCard / AskUserCard are intentionally NOT rendered here: they are
-// wired in 5F. AgentTray/Composer live outside Stream and are wired in 5J/5D.
+// PermissionCard is intentionally NOT rendered here; AskUserPrompt is passed
+// through the optional tail slot. AgentTray/Composer live outside Stream.
 //
-// `lead` (optional) renders inside the scroll column BEFORE the projected
-// blocks — the subagent view passes its task card here so it scrolls WITH the
-// transcript (same scroller), instead of being pinned above a nested one.
+// `lead` and `tail` (optional) render inside the scroll column before and
+// after the projected blocks, respectively, so they scroll WITH the transcript
+// instead of being pinned outside it.
 
 // renderProse turns a run of assistant markdown into sanitized HTML for
 // AssistantDocument's `html` mode. markdown.js (renderMarkdown) already runs
@@ -104,7 +104,7 @@ function StreamBlock({ block, onOpenSubagent }) {
 
 const AT_BOTTOM_PX = 80;
 
-export function Stream({ session, blocks = [], lead = null, onOpenSubagent, onScrollEl }) {
+export function Stream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   // Length of the in-flight tool's streaming output (a tool_update grows this
@@ -172,6 +172,16 @@ export function Stream({ session, blocks = [], lead = null, onOpenSubagent, onSc
     scrollToBottomNow();
   }, [session?.id, scrollToBottomNow]);
 
+  // A new ask_user prompt blocks the turn, so reveal it once even when the
+  // user had scrolled away. Future scroll events immediately restore their
+  // usual position-following intent.
+  useEffect(() => {
+    if (!session?.pendingAsk?.id) return;
+    stickToBottom.current = true;
+    setShowNewBtn(false);
+    scrollToBottomNow();
+  }, [session?.pendingAsk?.id, scrollToBottomNow]);
+
   const scrollToBottom = () => {
     stickToBottom.current = true;
     scrollToBottomNow();
@@ -190,6 +200,7 @@ export function Stream({ session, blocks = [], lead = null, onOpenSubagent, onSc
           {blocks.map((block) => (
             <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
           ))}
+          {tail}
         </div>
       </div>
 

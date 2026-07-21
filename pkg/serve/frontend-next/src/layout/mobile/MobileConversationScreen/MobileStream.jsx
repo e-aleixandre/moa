@@ -103,10 +103,9 @@ function MobileStreamBlock({ block, onOpenSubagent }) {
 const AT_BOTTOM_PX = 80;
 
 // MobileStream — same stick-to-bottom / "new messages" scroll intent as the
-// desktop Stream, sized for the mobile stream container. `lead` (optional)
-// renders inside the scroller before the blocks (the subagent view's task card,
-// so it scrolls WITH the transcript instead of pinned above a nested scroller).
-export function MobileStream({ session, blocks = [], lead = null, onOpenSubagent, onScrollEl }) {
+// desktop Stream, sized for the mobile stream container. `lead` and `tail`
+// render inside the scroller before and after the blocks, respectively.
+export function MobileStream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   const stickToBottom = useRef(true);
@@ -165,6 +164,16 @@ export function MobileStream({ session, blocks = [], lead = null, onOpenSubagent
     scrollToBottomNow();
   }, [session?.id, scrollToBottomNow]);
 
+  // A new ask_user prompt blocks the turn, so reveal it once even when the
+  // user had scrolled away. Future scroll events immediately restore their
+  // usual position-following intent.
+  useEffect(() => {
+    if (!session?.pendingAsk?.id) return;
+    stickToBottom.current = true;
+    setShowNewBtn(false);
+    scrollToBottomNow();
+  }, [session?.pendingAsk?.id, scrollToBottomNow]);
+
   const scrollToBottom = () => {
     stickToBottom.current = true;
     scrollToBottomNow();
@@ -182,6 +191,7 @@ export function MobileStream({ session, blocks = [], lead = null, onOpenSubagent
         {blocks.map((block) => (
           <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} />
         ))}
+        {tail}
       </div>
       {showNewBtn && (
         <button class="mstream-new-btn" onClick={scrollToBottom} title="Scroll to latest">

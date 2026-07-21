@@ -160,6 +160,18 @@ test('finished read rows retain their full path as an input line', () => {
   expect(row.body).toBe('contents');
 });
 
+test('an answered ask_user row retains its raw Q&A data without a generic body', () => {
+  const questions = [{ question: 'Use TypeScript?', options: ['Yes', 'No'] }];
+  const row = projectStream(session([
+    tool('ask-1', 'ask_user', { questions }, 'done', 'Yes'),
+  ]))[0].blocks[0].rows[0];
+
+  expect(row.askUser).toEqual({ questions, result: 'Yes' });
+  expect(row.arg.text).toBe('Use TypeScript?');
+  expect(row.out).toBe('Yes');
+  expect(row.body).toBeUndefined();
+});
+
 test('grep input lines include path and options, defaulting the path to the current directory', () => {
   const rows = projectStream(session([
     tool('t1', 'grep', { pattern: 'TODO', path: 'pkg/serve', include: '*.go', fixed_strings: true }),

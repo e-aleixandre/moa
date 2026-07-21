@@ -540,8 +540,11 @@ function toLedgerRow(msg) {
   const name = msg.tool_name || 'tool';
   const status = mapStatus(msg.status);
   const preview = toolPreview(name, msg.args, msg.result, msg.status, msg.start_line);
-  // A diff preview is rendered as its own sibling block, so it is not the row body.
-  const body = preview && preview.kind !== 'diff' ? truncateText(preview.text) : undefined;
+  // Diffs and answered questions have dedicated detail renderers, so neither
+  // becomes a generic code-block row body.
+  const body = preview && preview.kind !== 'diff' && preview.kind !== 'ask-user'
+    ? truncateText(preview.text)
+    : undefined;
   const row = {
     tool: toolToken(name),
     arg: { text: toolPath(name, msg.args) },
@@ -551,6 +554,10 @@ function toLedgerRow(msg) {
   };
   const inputLine = toolInputLine(name, msg.args);
   if (inputLine) row.inputLine = inputLine;
+  if (name.toLowerCase() === 'ask_user') {
+    const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
+    row.askUser = { questions: args?.questions, result: msg.result };
+  }
   if (name.toLowerCase() === 'bash') {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
     if (args && typeof args.command === 'string' && args.command) row.command = args.command;

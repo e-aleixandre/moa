@@ -169,8 +169,10 @@ export function toolPreview(name, args, result, status, startLine) {
     }
   }
 
-  // ask_user is rendered by AskUserPreview component — skip here.
-  if (n === 'ask_user') return null;
+  // Answered questions get a dedicated detail panel in the activity ledger.
+  if (n === 'ask_user') {
+    return { text: result ? truncateText(String(result), 40) : '', kind: 'ask-user' };
+  }
 
   // send_file is rendered by FileCard component — skip only on success so
   // errors (e.g. file not found) still show the raw message.

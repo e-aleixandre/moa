@@ -1,5 +1,6 @@
 import { DiffBlock } from "../../components/DiffBlock/DiffBlock.jsx";
 import { CodeBlock } from "../../components/CodeBlock/CodeBlock.jsx";
+import { AskUserDetail } from "../../components/AskUserCard/AskUserDetail.jsx";
 import { mapToolToKind } from "../util/tool-kind.js";
 
 function inputDetailNode(inputText, output, prompt = null) {
@@ -38,6 +39,12 @@ export function fuseLedgerDetails(rows, siblingDiff) {
       : row.body
         ? <CodeBlock className="flush" code={row.body} lang="bash" showHeader={false} />
         : null;
+    if (row.askUser) {
+      return {
+        ...row,
+        detail: { node: <AskUserDetail questions={row.askUser.questions} result={row.askUser.result} /> },
+      };
+    }
     if (row.command) {
       return {
         ...row,

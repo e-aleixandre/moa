@@ -352,12 +352,12 @@ export function ConversationScreen({ version }) {
               session={session}
               blocks={blocks}
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
+              tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
             />
-            {(session.untrustedMcp || session.pendingPerm || session.pendingAsk) && (
+            {(session.untrustedMcp || session.pendingPerm) && (
               <div class="conversation-blocking">
                 {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
                 {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
-                {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
               </div>
             )}
             {/* Live Dock — the permanent home for live async work ("async in

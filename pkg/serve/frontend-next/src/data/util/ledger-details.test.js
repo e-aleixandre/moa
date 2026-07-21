@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import { fuseLedgerDetails } from './ledger-details.jsx';
+import { AskUserDetail } from '../../components/AskUserCard/AskUserDetail.jsx';
 
 // fuseLedgerDetails is the shared (desktop + mobile) step that attaches inline
 // `detail:{node}` panels to a ledger's rows: an edit's unified diff sibling
@@ -90,6 +91,14 @@ test('a non-bash output-only row remains an output detail', () => {
 test('a body-less non-edit row gets no detail', () => {
   const out = fuseLedgerDetails([row('read', { id: 'r1' })], null);
   expect(out[0].detail).toBeUndefined();
+});
+
+test('an answered ask_user row gets a dedicated Q&A detail', () => {
+  const askUser = { questions: [{ question: 'Ship it?', options: ['Yes', 'No'] }], result: 'Yes' };
+  const out = fuseLedgerDetails([row('ask_user', { askUser })], null);
+  expect(out[0].detail).toBeTruthy();
+  expect(out[0].detail.node.type).toBe(AskUserDetail);
+  expect(out[0].detail.node.props).toEqual(askUser);
 });
 
 test('the live row never carries a static detail', () => {

@@ -270,8 +270,7 @@ export function MobileConversationScreen() {
     }
   } else {
     const blocks = projectStream(session);
-    const blocking =
-      session.untrustedMcp || session.pendingPerm || session.pendingAsk;
+    const blocking = session.untrustedMcp || session.pendingPerm;
     if (session.viewingSubagent) {
       // 5J: the subagent view takes over the whole conversation surface (below
       // the header/strip), pushed full-screen. onBack clears viewingSubagent.
@@ -290,12 +289,12 @@ export function MobileConversationScreen() {
             session={session}
             blocks={blocks}
             onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
+            tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
           />
           {blocking && (
             <div class="mconv-blocking">
               {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
               {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
-              {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
             </div>
           )}
           {liveAgents.length > 0 && (
