@@ -18,13 +18,14 @@ const (
 
 // BashJobInfo is the UI/status-safe snapshot of a background bash command.
 type BashJobInfo struct {
-	JobID      string
-	Command    string
-	CWD        string
-	Status     string
-	Output     string
-	StartedAt  time.Time
-	FinishedAt time.Time
+	JobID        string
+	OwnerAgentID string
+	Command      string
+	CWD          string
+	Status       string
+	Output       string
+	StartedAt    time.Time
+	FinishedAt   time.Time
 	// Awaited is set on the snapshot delivered to onEnd when a bash_wait call
 	// owns the completion result. It signals the completion handler to suppress
 	// result reinjection (the waiter already consumed it).
@@ -47,12 +48,12 @@ type BashJobs struct {
 	ctx      context.Context
 	jobs     map[string]*bashJob
 	onStart  func(BashJobInfo)
-	onOutput func(string, string)
+	onOutput func(BashJobInfo, string)
 	onEnd    func(BashJobInfo)
 }
 
 // NewBashJobs creates a session-scoped background job manager.
-func NewBashJobs(ctx context.Context, onStart func(BashJobInfo), onOutput func(string, string), onEnd func(BashJobInfo)) *BashJobs {
+func NewBashJobs(ctx context.Context, onStart func(BashJobInfo), onOutput func(BashJobInfo, string), onEnd func(BashJobInfo)) *BashJobs {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -61,7 +62,7 @@ func NewBashJobs(ctx context.Context, onStart func(BashJobInfo), onOutput func(s
 
 // Start launches run in the session context. run must return the same final
 // result a synchronous bash invocation would return.
-func (j *BashJobs) Start(command, cwd string, run func(context.Context, func(core.Result)) (core.Result, error)) (BashJobInfo, error) {
+func (j *BashJobs) Start(command, cwd, ownerAgentID string, run func(context.Context, func(core.Result)) (core.Result, error)) (BashJobInfo, error) {
 	j.mu.Lock()
 	j.cleanupLocked()
 	if j.runningLocked() >= bashJobMaxRunning {
@@ -69,7 +70,7 @@ func (j *BashJobs) Start(command, cwd string, run func(context.Context, func(cor
 		return BashJobInfo{}, ErrTooManyBashJobs
 	}
 	ctx, cancel := context.WithCancel(j.ctx)
-	job := &bashJob{BashJobInfo: BashJobInfo{JobID: newBashJobID(), Command: command, CWD: cwd, Status: "running", StartedAt: time.Now()}, cancel: cancel, done: make(chan struct{})}
+	job := &bashJob{BashJobInfo: BashJobInfo{JobID: newBashJobID(), OwnerAgentID: ownerAgentID, Command: command, CWD: cwd, Status: "running", StartedAt: time.Now()}, cancel: cancel, done: make(chan struct{})}
 	j.jobs[job.JobID] = job
 	info := job.BashJobInfo
 	j.mu.Unlock()
@@ -84,12 +85,14 @@ func (j *BashJobs) Start(command, cwd string, run func(context.Context, func(cor
 				return
 			}
 			j.mu.Lock()
+			info := job.BashJobInfo
 			if live := j.jobs[job.JobID]; live != nil {
 				live.Output = appendBashJobOutput(live.Output, text)
+				info = live.BashJobInfo
 			}
 			j.mu.Unlock()
 			if j.onOutput != nil {
-				j.onOutput(job.JobID, text)
+				j.onOutput(info, text)
 			}
 		})
 

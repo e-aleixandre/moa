@@ -100,7 +100,7 @@ type SessionConfig struct {
 	// Background bash callbacks feed the shared session bus/UI. Output is a
 	// lossy live delta; end carries the authoritative bounded log.
 	OnBashJobStart  func(job tool.BashJobInfo)
-	OnBashJobOutput func(jobID, delta string)
+	OnBashJobOutput func(job tool.BashJobInfo, delta string)
 	OnBashJobEnd    func(job tool.BashJobInfo)
 
 	// SubagentTranscriptLoader loads a finished subagent's persisted messages

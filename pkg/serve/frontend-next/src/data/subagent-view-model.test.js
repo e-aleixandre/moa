@@ -229,3 +229,31 @@ test('liveTrayAgents excludes SYNC subagents (they stay inline)', () => {
   };
   expect(liveTrayAgents(session)).toHaveLength(0);
 });
+
+test('liveTrayAgents excludes an owned bash job from the root dock', () => {
+  const session = {
+    id: 's1', messages: [],
+    subagents: {
+      b1: { jobId: 'b1', kind: 'bash', ownerAgentId: 'child', task: 'go test ./...', status: 'running', messages: [] },
+    },
+  };
+  expect(liveTrayAgents(session)).toEqual([]);
+});
+
+test('owned async bash is projected in the launching subagent activity', () => {
+  const session = {
+    id: 's1', messages: [],
+    subagents: {
+      child: sub({
+        jobId: 'child', async: true,
+        messages: [{
+          _type: 'tool_start', tool_call_id: 'bash-1', tool_name: 'bash',
+          args: { command: 'go test ./...' }, status: 'done', result: 'ok',
+        }],
+      }),
+    },
+  };
+  const view = subagentView(session, 'child');
+  const rows = view.blocks.flatMap(block => (block.blocks || []).flatMap(inner => inner.rows || []));
+  expect(rows).toContainEqual(expect.objectContaining({ id: 'bash-1', tool: 'bash' }));
+});

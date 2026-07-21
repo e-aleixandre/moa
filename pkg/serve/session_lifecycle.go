@@ -19,6 +19,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
 
@@ -231,12 +232,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		},
 		OnBashJobStart: func(job tool.BashJobInfo) {
 			if s := sess; s != nil {
-				s.runtime.Bus.Publish(bus.BashJobStarted{SessionID: s.ID, JobID: job.JobID, Command: job.Command, CWD: job.CWD})
+				s.runtime.Bus.Publish(bus.BashJobStarted{SessionID: s.ID, JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Command: job.Command, CWD: job.CWD})
 			}
 		},
-		OnBashJobOutput: func(jobID, delta string) {
+		OnBashJobOutput: func(job tool.BashJobInfo, delta string) {
 			if s := sess; s != nil {
-				s.runtime.Bus.Publish(bus.BashJobOutput{SessionID: s.ID, JobID: jobID, Delta: delta})
+				s.runtime.Bus.Publish(bus.BashJobOutput{SessionID: s.ID, JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Delta: delta})
 			}
 		},
 		OnBashJobEnd: func(job tool.BashJobInfo) {
@@ -248,7 +249,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			// The tray must see completion before its follow-up. Keep this bash
 			// active for quiescence until the deferred settled event, after the
 			// reinjection has been scheduled.
-			b.Publish(bus.BashJobEnded{SessionID: s.ID, JobID: job.JobID, Status: job.Status, Output: job.Output})
+			b.Publish(bus.BashJobEnded{SessionID: s.ID, JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Status: job.Status, Output: job.Output})
 			defer b.Publish(bus.BashJobSettled{SessionID: s.ID, JobID: job.JobID})
 			// A bash_wait already consumed this job's result — don't deliver
 			// it twice (single delivery lane).
@@ -259,7 +260,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			if agentText == "" {
 				return
 			}
-			b.Publish(bus.BashCompleted{SessionID: s.ID, JobID: job.JobID, Command: job.Command, Status: job.Status, Text: agentText})
+			b.Publish(bus.BashCompleted{SessionID: s.ID, JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Command: job.Command, Status: job.Status, Text: agentText})
+			// An owned job belongs to the child transcript. Its completion is
+			// still published for UI routing, but never reinjected into the
+			// parent agent/session as a root notification.
+			if job.OwnerAgentID != "" {
+				return
+			}
 
 			if s.runtime.State.Current() == bus.StateRunning {
 				subagentTexts.Store(agentText, struct{}{})
@@ -343,34 +350,19 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 
 	// GetSubagents answers the WS init snapshot query (reconnect): live
-	// (running/cancelling) subagent jobs plus their transcript so far. bus
-	// itself doesn't know about pkg/subagent, so this handler is registered
-	// here, from the frontend that owns the *subagent.Jobs handle.
+	// (running/cancelling) subagent jobs plus terminal owners of retained bash
+	// jobs, with their transcript. bus itself doesn't know about pkg/subagent,
+	// so this handler is registered here, from the frontend that owns the
+	// *subagent.Jobs handle.
 	rt.Bus.OnQuery(func(q bus.GetSubagents) ([]bus.SubagentSnapshot, error) {
 		if bs.Subagents == nil {
 			return nil, nil
 		}
-		var out []bus.SubagentSnapshot
-		for _, info := range bs.Subagents.Snapshot() {
-			if info.Status != "running" && info.Status != "cancelling" {
-				continue
-			}
-			out = append(out, bus.SubagentSnapshot{
-				JobID:            info.JobID,
-				OriginToolCallID: info.OriginToolCallID,
-				Task:             info.Task,
-				Model:            info.Model,
-				Thinking:         info.Thinking,
-				Status:           info.Status,
-				Async:            info.Async,
-				Messages:         bs.Subagents.Messages(info.JobID),
-				StartedAt:        info.StartedAt,
-				Usage:            info.Usage,
-				CostUSD:          info.CostUSD,
-				AccentIndex:      info.AccentIndex,
-			})
+		var bashInfos []tool.BashJobInfo
+		if bs.BashJobs != nil {
+			bashInfos = bs.BashJobs.Snapshot()
 		}
-		return out, nil
+		return initSubagentSnapshots(bs.Subagents.Snapshot(), bashInfos, bs.Subagents.Messages), nil
 	})
 	rt.Bus.OnQuery(func(q bus.GetBashJobs) ([]bus.BashJobSnapshot, error) {
 		if bs.BashJobs == nil {
@@ -379,7 +371,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		infos := bs.BashJobs.Snapshot()
 		out := make([]bus.BashJobSnapshot, 0, len(infos))
 		for _, info := range infos {
-			out = append(out, bus.BashJobSnapshot{JobID: info.JobID, Command: info.Command, CWD: info.CWD, Status: info.Status, Output: info.Output})
+			out = append(out, bus.BashJobSnapshot{JobID: info.JobID, OwnerAgentID: info.OwnerAgentID, Command: info.Command, CWD: info.CWD, Status: info.Status, Output: info.Output})
 		}
 		return out, nil
 	})
@@ -438,6 +430,44 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribeAttention(sess)
 
 	return sess, nil
+}
+
+// initSubagentSnapshots retains a terminal child while a reconnect snapshot
+// still contains a bash job it owns. Without its real owner, clients can only
+// manufacture a running placeholder and incorrectly surface the owned job as
+// root activity.
+func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInfo, messages func(string) []core.AgentMessage) []bus.SubagentSnapshot {
+	owners := make(map[string]struct{})
+	for _, bash := range bashInfos {
+		if bash.OwnerAgentID != "" {
+			owners[bash.OwnerAgentID] = struct{}{}
+		}
+	}
+
+	var out []bus.SubagentSnapshot
+	for _, info := range infos {
+		live := info.Status == "running" || info.Status == "cancelling"
+		if !live {
+			if _, ownsBash := owners[info.JobID]; !ownsBash {
+				continue
+			}
+		}
+		out = append(out, bus.SubagentSnapshot{
+			JobID:            info.JobID,
+			OriginToolCallID: info.OriginToolCallID,
+			Task:             info.Task,
+			Model:            info.Model,
+			Thinking:         info.Thinking,
+			Status:           info.Status,
+			Async:            info.Async,
+			Messages:         messages(info.JobID),
+			StartedAt:        info.StartedAt,
+			Usage:            info.Usage,
+			CostUSD:          info.CostUSD,
+			AccentIndex:      info.AccentIndex,
+		})
+	}
+	return out
 }
 
 var (

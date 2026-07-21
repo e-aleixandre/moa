@@ -14,7 +14,7 @@ import (
 func TestBashJobsStartStreamsAndCompletes(t *testing.T) {
 	ended := make(chan BashJobInfo, 1)
 	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) { ended <- info })
-	job, err := jobs.Start("echo hello", "/tmp", func(_ context.Context, update func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("echo hello", "/tmp", "", func(_ context.Context, update func(core.Result)) (core.Result, error) {
 		update(core.TextResult("hello\n"))
 		return core.TextResult("hello\nworld\n"), nil
 	})
@@ -31,10 +31,42 @@ func TestBashJobsStartStreamsAndCompletes(t *testing.T) {
 	}
 }
 
+func TestBashJobsOwnerFlowsThroughCallbacksAndSnapshot(t *testing.T) {
+	started := make(chan BashJobInfo, 1)
+	output := make(chan BashJobInfo, 1)
+	ended := make(chan BashJobInfo, 1)
+	release := make(chan struct{})
+	jobs := NewBashJobs(context.Background(), func(info BashJobInfo) { started <- info }, func(info BashJobInfo, _ string) { output <- info }, func(info BashJobInfo) { ended <- info })
+	job, err := jobs.Start("echo child", "/tmp", "subagent-1", func(_ context.Context, update func(core.Result)) (core.Result, error) {
+		update(core.TextResult("live\n"))
+		<-release
+		return core.TextResult("done\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.OwnerAgentID != "subagent-1" {
+		t.Fatalf("start owner = %q", job.OwnerAgentID)
+	}
+	if got := <-started; got.OwnerAgentID != "subagent-1" {
+		t.Fatalf("callback start owner = %q", got.OwnerAgentID)
+	}
+	if got := <-output; got.OwnerAgentID != "subagent-1" {
+		t.Fatalf("callback output owner = %q", got.OwnerAgentID)
+	}
+	if snapshot := jobs.Snapshot(); len(snapshot) != 1 || snapshot[0].OwnerAgentID != "subagent-1" {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	close(release)
+	if got := <-ended; got.OwnerAgentID != "subagent-1" {
+		t.Fatalf("callback end owner = %q", got.OwnerAgentID)
+	}
+}
+
 func TestBashJobsCancel(t *testing.T) {
 	ended := make(chan BashJobInfo, 1)
 	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) { ended <- info })
-	job, err := jobs.Start("sleep", "/tmp", func(ctx context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("sleep", "/tmp", "", func(ctx context.Context, _ func(core.Result)) (core.Result, error) {
 		<-ctx.Done()
 		return core.ErrorResult("command cancelled"), nil
 	})
@@ -159,7 +191,7 @@ func TestBashJobsWaitReturnsResult(t *testing.T) {
 		}
 		ended <- info
 	})
-	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("sleep", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		<-release
 		return core.TextResult("finished\n"), nil
 	})
@@ -207,7 +239,7 @@ func TestBashJobsWaitReturnsResult(t *testing.T) {
 func TestBashJobsWaitAlreadyFinished(t *testing.T) {
 	ended := make(chan BashJobInfo, 1)
 	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) { ended <- info })
-	job, err := jobs.Start("echo", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("echo", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		return core.TextResult("done\n"), nil
 	})
 	if err != nil {
@@ -235,7 +267,7 @@ func TestBashJobsWaitMultipleWaitersSingleDelivery(t *testing.T) {
 			notifications.Add(1)
 		}
 	})
-	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("sleep", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		<-release
 		return core.TextResult("finished\n"), nil
 	})
@@ -289,7 +321,7 @@ func TestBashJobsWaitFastPathDoesNotRedeliver(t *testing.T) {
 		}
 		ended <- info
 	})
-	job, err := jobs.Start("echo", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("echo", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		return core.TextResult("done\n"), nil
 	})
 	if err != nil {
@@ -319,7 +351,7 @@ func TestBashJobsWaitTimeout(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	jobs := NewBashJobs(context.Background(), nil, nil, nil)
-	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("sleep", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		<-release
 		return core.TextResult("late\n"), nil
 	})
@@ -339,7 +371,7 @@ func TestBashJobsWaitCtxCancel(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	jobs := NewBashJobs(context.Background(), nil, nil, nil)
-	job, err := jobs.Start("sleep", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("sleep", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		<-release
 		return core.TextResult("late\n"), nil
 	})
@@ -371,7 +403,7 @@ func TestBashJobsWaitUnknownJob(t *testing.T) {
 func TestBashJobsWaitRaceFinishVsTimeout(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		jobs := NewBashJobs(context.Background(), nil, nil, nil)
-		job, err := jobs.Start("x", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		job, err := jobs.Start("x", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 			time.Sleep(time.Millisecond)
 			return core.TextResult("r\n"), nil
 		})
@@ -411,7 +443,7 @@ func TestNewBashWaitUnknownJob(t *testing.T) {
 func TestNewBashWaitFastPathReturnsAck(t *testing.T) {
 	ended := make(chan BashJobInfo, 1)
 	jobs := NewBashJobs(context.Background(), nil, nil, func(info BashJobInfo) { ended <- info })
-	job, err := jobs.Start("echo hi", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("echo hi", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		return core.TextResult("hi\n"), nil
 	})
 	if err != nil {
@@ -432,7 +464,7 @@ func TestNewBashWaitFastPathReturnsAck(t *testing.T) {
 func TestNewBashWaitBlockedWaiterReturnsStatus(t *testing.T) {
 	release := make(chan struct{})
 	jobs := NewBashJobs(context.Background(), nil, nil, nil)
-	job, err := jobs.Start("echo hi", "/tmp", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+	job, err := jobs.Start("echo hi", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
 		<-release
 		return core.TextResult("hi\n"), nil
 	})

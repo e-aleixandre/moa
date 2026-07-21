@@ -225,20 +225,24 @@ func TestLimitInitHistoryDropsOversizedToolArguments(t *testing.T) {
 }
 
 func TestWsEventFromBus_BashJobLifecycle(t *testing.T) {
-	start, ok := wsEventFromBus(bus.BashJobStarted{SessionID: "s1", JobID: "bash-1", Command: "go test ./...", CWD: "/work"})
+	start, ok := wsEventFromBus(bus.BashJobStarted{SessionID: "s1", JobID: "bash-1", OwnerAgentID: "subagent-1", Command: "go test ./...", CWD: "/work"})
 	if !ok || start.Type != "bash_job_start" {
 		t.Fatalf("start = %+v, ok=%v", start, ok)
 	}
-	if got := start.Data.(BashJobStartData); got.JobID != "bash-1" || got.Command != "go test ./..." {
+	if got := start.Data.(BashJobStartData); got.JobID != "bash-1" || got.OwnerAgentID != "subagent-1" || got.Command != "go test ./..." {
 		t.Fatalf("start data = %+v", got)
 	}
-	output, ok := wsEventFromBus(bus.BashJobOutput{SessionID: "s1", JobID: "bash-1", Delta: "ok\n"})
+	output, ok := wsEventFromBus(bus.BashJobOutput{SessionID: "s1", JobID: "bash-1", OwnerAgentID: "subagent-1", Delta: "ok\n"})
 	if !ok || output.Type != "bash_job_output" || !isLossyWsEvent(output) {
 		t.Fatalf("output = %+v, ok=%v", output, ok)
 	}
-	end, ok := wsEventFromBus(bus.BashJobEnded{SessionID: "s1", JobID: "bash-1", Status: "completed", Output: "ok\n"})
+	end, ok := wsEventFromBus(bus.BashJobEnded{SessionID: "s1", JobID: "bash-1", OwnerAgentID: "subagent-1", Status: "completed", Output: "ok\n"})
 	if !ok || end.Type != "bash_job_end" || isLossyWsEvent(end) {
 		t.Fatalf("end = %+v, ok=%v", end, ok)
+	}
+	complete, ok := wsEventFromBus(bus.BashCompleted{SessionID: "s1", JobID: "bash-1", OwnerAgentID: "subagent-1", Status: "completed", Text: "done"})
+	if !ok || complete.Type != "bash_complete" || complete.Data.(BashCompleteData).OwnerAgentID != "subagent-1" {
+		t.Fatalf("complete = %+v, ok=%v", complete, ok)
 	}
 }
 

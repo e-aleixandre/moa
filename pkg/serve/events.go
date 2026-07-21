@@ -90,11 +90,12 @@ type SubagentInitData struct {
 
 // BashJobInitData restores a live/recent background command after reconnect.
 type BashJobInitData struct {
-	JobID   string `json:"job_id"`
-	Command string `json:"command"`
-	CWD     string `json:"cwd"`
-	Status  string `json:"status"`
-	Output  string `json:"output"`
+	JobID        string `json:"job_id"`
+	OwnerAgentID string `json:"owner_agent_id,omitempty"`
+	Command      string `json:"command"`
+	CWD          string `json:"cwd"`
+	Status       string `json:"status"`
+	Output       string `json:"output"`
 }
 
 // PermissionData is a pending permission request.
@@ -341,27 +342,31 @@ type SubagentEventData struct {
 }
 
 type BashJobStartData struct {
-	JobID   string `json:"job_id"`
-	Command string `json:"command"`
-	CWD     string `json:"cwd"`
+	JobID        string `json:"job_id"`
+	OwnerAgentID string `json:"owner_agent_id,omitempty"`
+	Command      string `json:"command"`
+	CWD          string `json:"cwd"`
 }
 
 type BashJobOutputData struct {
-	JobID string `json:"job_id"`
-	Delta string `json:"delta"`
+	JobID        string `json:"job_id"`
+	OwnerAgentID string `json:"owner_agent_id,omitempty"`
+	Delta        string `json:"delta"`
 }
 
 type BashJobEndData struct {
-	JobID  string `json:"job_id"`
-	Status string `json:"status"`
-	Output string `json:"output"`
+	JobID        string `json:"job_id"`
+	OwnerAgentID string `json:"owner_agent_id,omitempty"`
+	Status       string `json:"status"`
+	Output       string `json:"output"`
 }
 
 // BashCompleteData is sent when an async background bash job finishes and its
 // formatted result is reinjected into the conversation.
 type BashCompleteData struct {
-	JobID   string `json:"job_id"`
-	Command string `json:"command"`
-	Status  string `json:"status"`
-	Text    string `json:"text"`
+	JobID        string `json:"job_id"`
+	OwnerAgentID string `json:"owner_agent_id,omitempty"`
+	Command      string `json:"command"`
+	Status       string `json:"status"`
+	Text         string `json:"text"`
 }

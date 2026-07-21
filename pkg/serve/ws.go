@@ -294,14 +294,14 @@ func wsEventFromBus(event any) (Event, bool) {
 			JobID: e.JobID, Event: &inner,
 		}}, true
 	case bus.BashJobStarted:
-		return Event{Type: "bash_job_start", Data: BashJobStartData{JobID: e.JobID, Command: e.Command, CWD: e.CWD}}, true
+		return Event{Type: "bash_job_start", Data: BashJobStartData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Command: e.Command, CWD: e.CWD}}, true
 	case bus.BashJobOutput:
-		return Event{Type: "bash_job_output", Data: BashJobOutputData{JobID: e.JobID, Delta: e.Delta}}, true
+		return Event{Type: "bash_job_output", Data: BashJobOutputData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Delta: e.Delta}}, true
 	case bus.BashJobEnded:
-		return Event{Type: "bash_job_end", Data: BashJobEndData{JobID: e.JobID, Status: e.Status, Output: e.Output}}, true
+		return Event{Type: "bash_job_end", Data: BashJobEndData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Status: e.Status, Output: e.Output}}, true
 	case bus.BashCompleted:
 		return Event{Type: "bash_complete", Data: BashCompleteData{
-			JobID: e.JobID, Command: e.Command, Status: e.Status, Text: e.Text,
+			JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Command: e.Command, Status: e.Status, Text: e.Text,
 		}}, true
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
@@ -389,9 +389,12 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
 	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
+	// Read bash jobs before subagents. GetSubagents retains terminal owners of
+	// its current bash snapshot, so this ordering keeps every bash included in
+	// this init payload routable to a real owner.
+	bashJobs, _ := bus.QueryTyped[bus.GetBashJobs, []bus.BashJobSnapshot](b, bus.GetBashJobs{})
 	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
 	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
-	bashJobs, _ := bus.QueryTyped[bus.GetBashJobs, []bus.BashJobSnapshot](b, bus.GetBashJobs{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
@@ -462,7 +465,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 	if len(bashJobs) > 0 {
 		data.BashJobs = make([]BashJobInitData, len(bashJobs))
 		for i, job := range bashJobs {
-			data.BashJobs[i] = BashJobInitData{JobID: job.JobID, Command: job.Command, CWD: job.CWD, Status: job.Status, Output: job.Output}
+			data.BashJobs[i] = BashJobInitData{JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Command: job.Command, CWD: job.CWD, Status: job.Status, Output: job.Output}
 		}
 	}
 

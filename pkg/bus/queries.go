@@ -159,15 +159,16 @@ type GetDisplayMessages struct{ SessionID string }
 type GetBranchPoints struct{ SessionID string }
 
 // GetSubagents returns a snapshot of currently live subagent jobs (running or
-// cancelling), including their accumulated transcript. Used to populate the
+// cancelling), plus terminal children that still own a retained background
+// bash job, including their accumulated transcript. Used to populate the
 // agent tray and reconnect clients mid-run. Bus itself does not know about
 // pkg/subagent — the handler is registered by the frontend (serve/TUI) that
 // owns the *subagent.Jobs handle.
 // Handler returns: []SubagentSnapshot
 type GetSubagents struct{ SessionID string }
 
-// SubagentSnapshot describes one live subagent job, including its transcript
-// so far. Result element type for GetSubagents.
+// SubagentSnapshot describes one reconnect-visible subagent job, including its
+// transcript so far. Result element type for GetSubagents.
 type SubagentSnapshot struct {
 	JobID string
 	// OriginToolCallID identifies the parent model tool call that created this job.
@@ -197,11 +198,12 @@ type GetBashJobs struct{ SessionID string }
 
 // BashJobSnapshot is the transport-safe snapshot of one background bash job.
 type BashJobSnapshot struct {
-	JobID   string
-	Command string
-	CWD     string
-	Status  string
-	Output  string
+	JobID        string
+	OwnerAgentID string
+	Command      string
+	CWD          string
+	Status       string
+	Output       string
 }
 
 // BranchPoint describes a possible branch target in the conversation.

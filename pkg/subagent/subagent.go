@@ -246,11 +246,12 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 				job := jobs.createWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
 				// Isolate the child's shell state: seed a copy from the parent
-				// (read from the spawning ctx) and tag the child ctx with its
-				// job ID. runJob drops the snapshot when it finishes.
+				// (read from the spawning ctx). Always tag the child context with
+				// its job ID so every child tool execution, including async bash,
+				// carries its owner. runJob drops the snapshot when it finishes.
+				jobCtx = core.WithAgentID(jobCtx, job.id)
 				if cfg.BashState != nil {
 					cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
-					jobCtx = core.WithAgentID(jobCtx, job.id)
 				}
 				if cfg.OnAsyncJobChange != nil {
 					cfg.OnAsyncJobChange(jobs.runningCount())
@@ -270,12 +271,13 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 			job := jobs.createSyncWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
 			// Isolate the child's shell state (subshell semantics): seed a
-			// copy from the parent and tag the child ctx with the job's own
-			// ID (stable across a promotion, unlike the old ephemeral
-			// childID). runJob drops the snapshot when it finishes.
+			// copy from the parent. Always tag the child ctx with the job's own
+			// ID (stable across a promotion, unlike the old ephemeral childID)
+			// so all child tool executions retain their owner. runJob drops the
+			// snapshot when it finishes.
+			jobCtx = core.WithAgentID(jobCtx, job.id)
 			if cfg.BashState != nil {
 				cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
-				jobCtx = core.WithAgentID(jobCtx, job.id)
 			}
 			go linker(ctx, jobCancel, job)
 			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate)

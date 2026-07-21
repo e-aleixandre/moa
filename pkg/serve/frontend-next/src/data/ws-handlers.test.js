@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsMessageEnd } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsMessageEnd } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -538,6 +538,103 @@ test('handleWsBashComplete adds a bash card to the chat', () => {
   expect(card.tool_name).toBe('bash');
   expect(card.status).toBe('done');
   expect(card.args.command).toBe('sleep 5; echo done');
+});
+
+test('owned async bash stays in its subagent transcript, not the root dock or ledger', () => {
+  seedSession('s1');
+  handleWsSubagentStart('s1', { job_id: 'child-1', task: 'Inspect', model: 'm', async: true });
+  handleWsBashJobStart('s1', {
+    job_id: 'bash-1', owner_agent_id: 'child-1', command: 'go test ./...', cwd: '/work', status: 'running',
+  });
+  handleWsBashJobEnd('s1', {
+    job_id: 'bash-1', owner_agent_id: 'child-1', status: 'completed', output: 'ok\n',
+  });
+  handleWsBashComplete('s1', {
+    job_id: 'bash-1', owner_agent_id: 'child-1', command: 'go test ./...', status: 'completed', text: 'Bash completed',
+  });
+
+  const session = store.get().sessions.s1;
+  expect(session.subagents['bash-1']).toBeUndefined();
+  expect(session.subagents['child-1'].messages).toContainEqual(expect.objectContaining({
+    tool_call_id: 'bash-1', tool_name: 'bash', status: 'done', result: 'ok\n',
+  }));
+  expect(session.messages || []).toEqual([]);
+  expect(liveTrayAgents(session).filter(chip => chip.kind === 'bash')).toEqual([]);
+});
+
+test('root async bash remains a root dock job and completion ledger card', () => {
+  seedSession('s1');
+  handleWsBashJobStart('s1', { job_id: 'bash-1', command: 'go test ./...', cwd: '/work', status: 'running' });
+  let session = store.get().sessions.s1;
+  expect(liveTrayAgents(session)).toContainEqual(expect.objectContaining({ id: 'bash-1', kind: 'bash' }));
+
+  handleWsBashJobEnd('s1', { job_id: 'bash-1', status: 'completed', output: 'ok\n' });
+  handleWsBashComplete('s1', { job_id: 'bash-1', command: 'go test ./...', status: 'completed', text: 'Bash completed' });
+  session = store.get().sessions.s1;
+  expect(session.messages).toContainEqual(expect.objectContaining({ tool_call_id: 'bash-complete-bash-1', tool_name: 'bash' }));
+});
+
+test('init routes an owned bash snapshot into its subagent transcript', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [{ job_id: 'child-1', task: 'Inspect', model: 'm', status: 'running', async: true }],
+    bash_jobs: [{ job_id: 'bash-1', owner_agent_id: 'child-1', command: 'go test ./...', cwd: '/work', status: 'running', output: 'live\n' }],
+  });
+  const session = store.get().sessions.s1;
+  expect(session.subagents['bash-1']).toBeUndefined();
+  expect(session.subagents['child-1'].messages).toContainEqual(expect.objectContaining({
+    tool_call_id: 'bash-1', tool_name: 'bash', streamingResult: 'live\n',
+  }));
+  expect(liveTrayAgents(session).filter(chip => chip.kind === 'bash')).toEqual([]);
+});
+
+test('init retains a terminal bash owner so its result stays under that child', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [{
+      job_id: 'child-1', task: 'Inspect', model: 'm', status: 'completed', async: true,
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Inspection complete.' }] }],
+    }],
+    bash_jobs: [{ job_id: 'bash-1', owner_agent_id: 'child-1', command: 'go test ./...', cwd: '/work', status: 'running', output: 'live\n' }],
+  });
+
+  let session = store.get().sessions.s1;
+  expect(session.subagents['child-1']).toMatchObject({ task: 'Inspect', model: 'm', status: 'completed' });
+  expect(session.subagents['child-1'].messages).toContainEqual(expect.objectContaining({
+    tool_call_id: 'bash-1', tool_name: 'bash', streamingResult: 'live\n',
+  }));
+  expect(session.messages).toEqual([]);
+  expect(liveTrayAgents(session)).toEqual([]);
+
+  handleWsBashJobEnd('s1', {
+    job_id: 'bash-1', owner_agent_id: 'child-1', status: 'completed', output: 'ok\n',
+  });
+  session = store.get().sessions.s1;
+  expect(session.subagents['child-1'].status).toBe('completed');
+  expect(session.subagents['child-1'].messages).toContainEqual(expect.objectContaining({
+    tool_call_id: 'bash-1', status: 'done', result: 'ok\n',
+  }));
+  expect(liveTrayAgents(session)).toEqual([]);
+});
+
+test('a start-before-subagent placeholder becomes terminal when its bash ends', () => {
+  seedSession('s1');
+  handleWsBashJobStart('s1', {
+    job_id: 'bash-1', owner_agent_id: 'child-1', command: 'go test ./...', status: 'running',
+  });
+  expect(store.get().sessions.s1.subagents['child-1']).toMatchObject({
+    status: 'running', syntheticOwnedBashOwner: true,
+  });
+
+  handleWsBashJobEnd('s1', {
+    job_id: 'bash-1', owner_agent_id: 'child-1', status: 'completed', output: 'ok\n',
+  });
+  const owner = store.get().sessions.s1.subagents['child-1'];
+  expect(owner.status).toBe('completed');
+  expect(owner.messages).toContainEqual(expect.objectContaining({ tool_call_id: 'bash-1', status: 'done', result: 'ok\n' }));
+  expect(liveTrayAgents(store.get().sessions.s1)).toEqual([]);
 });
 
 test('normalizeHistory reloads a bash_job custom notification as a bash card', () => {

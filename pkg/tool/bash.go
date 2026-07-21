@@ -132,7 +132,7 @@ func NewBash(cfg ToolConfig) core.Tool {
 				if t := getInt(params, "timeout", 0); t <= 0 {
 					jobTimeout = 0
 				}
-				job, err := cfg.BashJobs.Start(command, cwd, func(jobCtx context.Context, update func(core.Result)) (core.Result, error) {
+				job, err := cfg.BashJobs.Start(command, cwd, core.AgentIDFromContext(ctx), func(jobCtx context.Context, update func(core.Result)) (core.Result, error) {
 					return executeBash(jobCtx, cfg, command, cwd, persistedEnv, agentID, jobTimeout, false, update)
 				})
 				if err != nil {

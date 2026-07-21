@@ -264,7 +264,7 @@ function extractToolNote(result, rejected) {
 const pendingTextDeltas = {};
 const pendingThinkingDeltas = {};
 const pendingToolDeltas = {};
-const pendingBashDeltas = {}; // sessionId → { jobId → output }
+const pendingBashDeltas = {}; // sessionId → { jobId → { delta, ownerAgentId } }
 const pendingToolCallBuffers = {}; // sessionId → { toolCallId → { args } }
 const materializedTextDuringMessage = {};
 let flushScheduled = false;
@@ -326,14 +326,15 @@ function flushDeltas() {
 
     if (pendingBashDeltas[id]) {
       const subagents = { ...(patch.subagents || sess.subagents || {}) };
-      for (const [jobId, delta] of Object.entries(pendingBashDeltas[id])) {
-        const existing = subagents[jobId];
+      for (const [jobId, pending] of Object.entries(pendingBashDeltas[id])) {
+        const existing = subagents[pending.ownerAgentId || jobId];
         if (!existing) continue;
-        subagents[jobId] = {
+        const messages = existing.messages.map(m => m._type === 'tool_start' && m.tool_call_id === jobId
+          ? { ...m, streamingResult: (m.streamingResult || '') + pending.delta }
+          : m);
+        subagents[pending.ownerAgentId || jobId] = {
           ...existing,
-          messages: existing.messages.map(m => m._type === 'tool_start' && m.tool_call_id === jobId
-            ? { ...m, streamingResult: (m.streamingResult || '') + delta }
-            : m),
+          messages,
         };
       }
       patch.subagents = subagents;
@@ -417,7 +418,7 @@ export function handleWsInit(id, data) {
     planMode: data.plan_mode || 'off',
     planFile: data.plan_file || null,
     costUSD: data.cost_usd || 0,
-    subagents: { ...initSubagents(data.subagents), ...initBashJobs(data.bash_jobs) },
+    subagents: initBashJobs(data.bash_jobs, initSubagents(data.subagents)),
     // subagentCount is otherwise live-only (WS subagent_count events). If an
     // async job finished while this pane had no WS (backgrounded on mobile),
     // that terminal count=0 event was missed and the badge/dot would stay
@@ -471,11 +472,11 @@ function initSubagents(raw) {
   return out;
 }
 
-function initBashJobs(raw) {
-  const out = {};
+function initBashJobs(raw, existing = {}) {
+  let out = { ...existing };
   for (const job of (raw || [])) {
     if (!job || !job.job_id) continue;
-    out[job.job_id] = bashJobState(job);
+    out = attachBashJob(out, job);
   }
   return out;
 }
@@ -485,6 +486,7 @@ function bashJobState(job, existing = null) {
   const output = job.output || '';
   return {
     jobId: job.job_id,
+    ownerAgentId: job.owner_agent_id || '',
     task: command,
     model: 'bash',
     kind: 'bash',
@@ -500,6 +502,56 @@ function bashJobState(job, existing = null) {
     }],
     streamingText: null, thinkingText: null, usage: null,
   };
+}
+
+function bashToolMessage(job, existing = null) {
+  const command = job.command || existing?.args?.command || '';
+  const status = job.status || existing?.status || 'running';
+  const output = job.output || existing?.result || null;
+  return {
+    _type: 'tool_start', tool_call_id: job.job_id, tool_name: 'bash',
+    args: { command, cwd: job.cwd || existing?.args?.cwd || '' },
+    status: status === 'completed' ? 'done' : (status !== 'running' && status !== 'cancelling') ? 'error' : 'running',
+    result: output,
+    streamingResult: (status === 'running' || status === 'cancelling') ? (existing?.streamingResult || output) : null,
+  };
+}
+
+function emptyOwnedSubagent(jobId, bashStatus = 'running') {
+  return {
+    jobId, task: '', model: '',
+    status: bashStatus === 'running' || bashStatus === 'cancelling' ? 'running' : bashStatus,
+    async: true, syntheticOwnedBashOwner: true,
+    messages: [], streamingText: null, thinkingText: null, usage: null,
+  };
+}
+
+// attachBashJob keeps root jobs as their own live entries, but puts an owned
+// job's tool row directly in its launching subagent's transcript.
+function attachBashJob(subagents, job) {
+  const out = { ...subagents };
+  const ownerJobId = job.owner_agent_id || '';
+  if (!ownerJobId) {
+    out[job.job_id] = bashJobState(job, out[job.job_id]);
+    return out;
+  }
+  const owner = out[ownerJobId] || emptyOwnedSubagent(ownerJobId, job.status);
+  const messages = [...(owner.messages || [])];
+  const idx = messages.findIndex(m => m._type === 'tool_start' && m.tool_call_id === job.job_id);
+  const message = bashToolMessage(job, idx >= 0 ? messages[idx] : null);
+  if (idx >= 0) messages[idx] = message;
+  else messages.push(message);
+  out[ownerJobId] = {
+    ...owner,
+    // A real owner retains its own lifecycle. A placeholder only exists for
+    // the start-before-subagent race, so its terminal bash is its last known
+    // activity and must not leave a permanent live chip behind.
+    status: owner.syntheticOwnedBashOwner && job.status && job.status !== 'running' && job.status !== 'cancelling'
+      ? job.status
+      : owner.status,
+    messages,
+  };
+  return out;
 }
 
 
@@ -995,6 +1047,24 @@ export function handleWsSubagentComplete(id, data) {
 }
 
 export function handleWsBashComplete(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  if (data.owner_agent_id) {
+    // bash_job_end normally finalized this exact row first. This fallback
+    // also finalizes a start-before-subagent placeholder when its end event
+    // was missed, preserving the child transcript without a root card.
+    const owner = sess.subagents?.[data.owner_agent_id];
+    const row = owner?.messages?.find(m => m._type === 'tool_start' && m.tool_call_id === data.job_id);
+    if (!row || row.status === 'running' || row.status === 'generating') {
+      updateSession(id, {
+        subagents: attachBashJob(sess.subagents || {}, {
+          ...data,
+          output: data.text || '',
+        }),
+      });
+    }
+    return;
+  }
   const statusIcon = data.status === 'completed' ? '✓' : data.status === 'failed' ? '✗' : '⊘';
   const cmdLine = (data.command || data.job_id || '').split('\n')[0];
   // Only toast when the session isn't on screen — a visible background block
@@ -1009,8 +1079,6 @@ export function handleWsBashComplete(id, data) {
   }
 
   // Add a bash card to the chat (mirrors TUI's bash notification block).
-  const sess = store.get().sessions[id];
-  if (!sess) return;
   const messages = [...(sess.messages || [])];
   messages.push({
     _type: 'tool_start',
@@ -1182,27 +1250,43 @@ export function handleWsSubagentEnd(id, data) {
 export function handleWsBashJobStart(id, data) {
   const sess = store.get().sessions[id];
   if (!sess || !data.job_id) return;
-  const subs = { ...(sess.subagents || {}) };
-  subs[data.job_id] = bashJobState(data, subs[data.job_id]);
-  updateSession(id, { subagents: subs });
+  updateSession(id, { subagents: attachBashJob(sess.subagents || {}, data) });
 }
 
 export function handleWsBashJobOutput(id, data) {
   if (!store.get().sessions[id] || !data.job_id || !data.delta) return;
   pendingBashDeltas[id] = pendingBashDeltas[id] || {};
-  pendingBashDeltas[id][data.job_id] = (pendingBashDeltas[id][data.job_id] || '') + data.delta;
+  const existing = pendingBashDeltas[id][data.job_id];
+  pendingBashDeltas[id][data.job_id] = {
+    delta: (existing?.delta || '') + data.delta,
+    ownerAgentId: data.owner_agent_id || existing?.ownerAgentId || '',
+  };
   scheduleFlush();
 }
 
 export function handleWsBashJobEnd(id, data) {
   const sess = store.get().sessions[id];
   if (!sess || !data.job_id) return;
-  const existing = sess.subagents?.[data.job_id];
+  const targetJobId = data.owner_agent_id || data.job_id;
+  const existing = sess.subagents?.[targetJobId];
   if (!existing) return;
   const status = data.status || 'completed';
   const messages = existing.messages.map(m => m._type === 'tool_start' && m.tool_call_id === data.job_id
     ? { ...m, status: status === 'completed' ? 'done' : 'error', result: data.output || '', streamingResult: null } : m);
-  updateSession(id, { subagents: { ...sess.subagents, [data.job_id]: { ...existing, status, messages } } });
+  if (!data.owner_agent_id) {
+    updateSession(id, { subagents: { ...sess.subagents, [targetJobId]: { ...existing, status, messages } } });
+    return;
+  }
+  updateSession(id, {
+    subagents: {
+      ...sess.subagents,
+      [targetJobId]: {
+        ...existing,
+        status: existing.syntheticOwnedBashOwner ? status : existing.status,
+        messages,
+      },
+    },
+  });
 }
 
 export function handleWsRunEnd(id) {

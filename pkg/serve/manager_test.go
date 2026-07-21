@@ -17,6 +17,8 @@ import (
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/permission"
 	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/ealeixandre/moa/pkg/subagent"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 // --- Mock provider ---
@@ -189,6 +191,98 @@ func TestCreateSession(t *testing.T) {
 	list := mgr.List()
 	if len(list) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(list))
+	}
+}
+
+func TestOwnedBashCompletionDoesNotStartRootNotificationRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("notification handled")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	completed := make(chan bus.BashCompleted, 2)
+	runs := make(chan bus.RunStarted, 2)
+	sess.runtime.Bus.Subscribe(func(e bus.BashCompleted) { completed <- e })
+	sess.runtime.Bus.Subscribe(func(e bus.RunStarted) { runs <- e })
+
+	release := make(chan struct{})
+	_, err = sess.bashJobs.Start("echo child", sess.CWD, "child-1", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		<-release
+		return core.TextResult("child done"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	init := buildInitData(sess, bus.StreamingAggregate{})
+	if len(init.BashJobs) != 1 || init.BashJobs[0].OwnerAgentID != "child-1" {
+		t.Fatalf("bash init snapshot = %+v", init.BashJobs)
+	}
+	close(release)
+	select {
+	case event := <-completed:
+		if event.OwnerAgentID != "child-1" {
+			t.Fatalf("completion owner = %q", event.OwnerAgentID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("owned bash completion was not published")
+	}
+	select {
+	case <-runs:
+		t.Fatal("owned bash started a root notification run")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_, err = sess.bashJobs.Start("echo root", sess.CWD, "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		return core.TextResult("root done"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-completed:
+		if event.OwnerAgentID != "" {
+			t.Fatalf("root completion owner = %q", event.OwnerAgentID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("root bash completion was not published")
+	}
+	select {
+	case <-runs:
+	case <-time.After(time.Second):
+		t.Fatal("root bash did not start its notification run")
+	}
+}
+
+func TestInitSubagentSnapshotsRetainsTerminalBashOwner(t *testing.T) {
+	transcript := []core.AgentMessage{core.WrapMessage(core.Message{
+		Role:    "assistant",
+		Content: []core.Content{core.TextContent("Child finished its analysis.")},
+	})}
+	snapshots := initSubagentSnapshots(
+		[]subagent.JobInfo{
+			{JobID: "child-terminal", Task: "Inspect the service", Model: "test-model", Status: "completed", Async: true},
+			{JobID: "unrelated-terminal", Status: "completed", Async: true},
+		},
+		[]tool.BashJobInfo{{JobID: "bash-1", OwnerAgentID: "child-terminal", Status: "running"}},
+		func(jobID string) []core.AgentMessage {
+			if jobID == "child-terminal" {
+				return transcript
+			}
+			return nil
+		},
+	)
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshot count = %d, want 1: %+v", len(snapshots), snapshots)
+	}
+	got := snapshots[0]
+	if got.JobID != "child-terminal" || got.Status != "completed" || got.Task != "Inspect the service" || got.Model != "test-model" {
+		t.Fatalf("terminal bash owner = %+v", got)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Content[0].Text != "Child finished its analysis." {
+		t.Fatalf("terminal owner transcript = %+v", got.Messages)
 	}
 }
 

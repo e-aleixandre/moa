@@ -126,6 +126,36 @@ func TestBashJobTranscript(t *testing.T) {
 	}
 }
 
+func TestOwnedBashJobStaysInSubagentTranscript(t *testing.T) {
+	m := &appModel{s: &state{}}
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "child-1", Task: "inspect", Model: "gpt", Async: true})
+	m.handleBashJobStarted(bus.BashJobStarted{JobID: "bash-1", OwnerAgentID: "child-1", Command: "go test", CWD: "/work"})
+	m.handleBashJobOutput(bus.BashJobOutput{JobID: "bash-1", OwnerAgentID: "child-1", Delta: "running\n"})
+	m.handleBashJobEnded(bus.BashJobEnded{JobID: "bash-1", OwnerAgentID: "child-1", Status: "completed", Output: "done\n"})
+	if _, found := m.s.subagents["bash-1"]; found {
+		t.Fatal("owned bash created a standalone root transcript")
+	}
+	child := m.s.subagents["child-1"]
+	if child == nil || len(child.blocks) != 1 || !child.blocks[0].ToolDone || child.blocks[0].ToolResult != "done\n" {
+		t.Fatalf("child transcript = %+v", child)
+	}
+}
+
+func TestOwnedRunningBashKeepsCompletedChildAccessible(t *testing.T) {
+	m := &appModel{s: &state{}}
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "child-1", Task: "inspect", Model: "gpt", Async: true})
+	m.handleSubagentEnded(bus.SubagentEnded{JobID: "child-1", Status: "completed"})
+	m.handleBashJobStarted(bus.BashJobStarted{JobID: "bash-1", OwnerAgentID: "child-1", Command: "go test"})
+	if !m.hasLiveSubagents() {
+		t.Fatal("owned running bash did not keep its child accessible")
+	}
+	var picker subagentPicker
+	picker.Open(m.s.subagents)
+	if len(picker.entries) != 1 || picker.entries[0].jobID != "child-1" || picker.entries[0].status != "running" {
+		t.Fatalf("picker entries = %+v", picker.entries)
+	}
+}
+
 // TestHandleSubagentStarted_DoesNotResurrectTerminal covers the promote/finish
 // race: a promotion's SubagentStarted(Async:true) can arrive AFTER the
 // SubagentEnded that already marked the job terminal. It must not flip the job

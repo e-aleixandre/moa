@@ -657,7 +657,7 @@ export function liveSubagents(subagents, seenJobIds) {
     if (!s) continue;
     if (s.status !== 'running' && s.status !== 'cancelling') continue;
     if (s.jobId && seenJobIds && seenJobIds.has(String(s.jobId))) continue;
-    if (s.kind === 'bash') bash.push(s);
+    if (s.kind === 'bash' && !s.ownerAgentId) bash.push(s);
     else subs.push(s);
   }
   return { subs, bash };

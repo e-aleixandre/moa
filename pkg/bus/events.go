@@ -451,26 +451,29 @@ type SubagentEnded struct {
 
 // BashJobStarted announces a session-scoped background bash command.
 type BashJobStarted struct {
-	SessionID string
-	JobID     string
-	Command   string
-	CWD       string
+	SessionID    string
+	JobID        string
+	OwnerAgentID string
+	Command      string
+	CWD          string
 }
 
 // BashJobOutput carries streamed background command output. It is lossy; the
 // final BashJobEnded Output is authoritative.
 type BashJobOutput struct {
-	SessionID string
-	JobID     string
-	Delta     string
+	SessionID    string
+	JobID        string
+	OwnerAgentID string
+	Delta        string
 }
 
 // BashJobEnded finalizes a background bash command with full bounded output.
 type BashJobEnded struct {
-	SessionID string
-	JobID     string
-	Status    string
-	Output    string
+	SessionID    string
+	JobID        string
+	OwnerAgentID string
+	Status       string
+	Output       string
 }
 
 // BashCompleted is published when an async background bash job finishes and its
@@ -478,11 +481,12 @@ type BashJobEnded struct {
 // BashJobEnded (which drives the tray): BashCompleted carries the formatted
 // notification text the agent (and chat UI) sees.
 type BashCompleted struct {
-	SessionID string
-	JobID     string
-	Command   string
-	Status    string
-	Text      string
+	SessionID    string
+	JobID        string
+	OwnerAgentID string
+	Command      string
+	Status       string
+	Text         string
 }
 
 // BashJobSettled is published after an async bash completion has either been

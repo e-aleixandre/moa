@@ -1820,6 +1820,11 @@ func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.C
 // steer while the agent is running, or as a notification run when idle. Mirrors
 // handleSubagentCompleted.
 func (m *appModel) handleBashCompleted(e bus.BashCompleted) []tea.Cmd {
+	// Child-owned bash output is already represented by its bash job events in
+	// the child transcript. Never turn it into a root notification run.
+	if e.OwnerAgentID != "" {
+		return nil
+	}
 	if m.s.running {
 		_ = m.runtime.Bus.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: e.Text, Internal: true})
 		return nil

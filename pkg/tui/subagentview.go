@@ -52,6 +52,8 @@ func (m *appModel) acceptSessionScopedAsyncEvent(seq uint64, event any) bool {
 		return owner(e.JobID)
 	case bus.SubagentCompleted:
 		return owner(e.JobID)
+	case bus.BashCompleted:
+		return owner(e.JobID)
 	case bus.BashJobStarted:
 		if seq <= m.s.sessionEventFloor {
 			return false
@@ -78,6 +80,14 @@ func (m *appModel) refreshAsyncSubagentCount() {
 }
 
 func (m *appModel) handleBashJobStarted(e bus.BashJobStarted) {
+	if e.OwnerAgentID != "" {
+		t := m.ensureSubagent(e.OwnerAgentID)
+		t.blocks = append(t.blocks, messageBlock{Type: "tool", ToolCallID: e.JobID, ToolName: "bash", ToolArgs: map[string]any{"command": e.Command, "cwd": e.CWD}})
+		if m.s.viewingSubagent == e.OwnerAgentID {
+			m.s.viewportDirty = true
+		}
+		return
+	}
 	t := m.ensureSubagent(e.JobID)
 	t.task = e.Command
 	t.model = "bash"
@@ -88,8 +98,14 @@ func (m *appModel) handleBashJobStarted(e bus.BashJobStarted) {
 }
 
 func (m *appModel) handleBashJobOutput(e bus.BashJobOutput) {
-	t := m.ensureSubagent(e.JobID)
-	t.kind = "bash"
+	targetJobID := e.OwnerAgentID
+	if targetJobID == "" {
+		targetJobID = e.JobID
+	}
+	t := m.ensureSubagent(targetJobID)
+	if e.OwnerAgentID == "" {
+		t.kind = "bash"
+	}
 	for i := len(t.blocks) - 1; i >= 0; i-- {
 		if t.blocks[i].Type == "tool" && t.blocks[i].ToolCallID == e.JobID {
 			t.blocks[i].ToolResult += e.Delta
@@ -97,15 +113,21 @@ func (m *appModel) handleBashJobOutput(e bus.BashJobOutput) {
 			break
 		}
 	}
-	if m.s.viewingSubagent == e.JobID {
+	if m.s.viewingSubagent == targetJobID {
 		m.s.viewportDirty = true
 	}
 }
 
 func (m *appModel) handleBashJobEnded(e bus.BashJobEnded) {
-	t := m.ensureSubagent(e.JobID)
-	t.kind = "bash"
-	t.status = e.Status
+	targetJobID := e.OwnerAgentID
+	if targetJobID == "" {
+		targetJobID = e.JobID
+	}
+	t := m.ensureSubagent(targetJobID)
+	if e.OwnerAgentID == "" {
+		t.kind = "bash"
+		t.status = e.Status
+	}
 	for i := len(t.blocks) - 1; i >= 0; i-- {
 		if t.blocks[i].Type == "tool" && t.blocks[i].ToolCallID == e.JobID {
 			t.blocks[i].ToolDone = true
@@ -115,7 +137,7 @@ func (m *appModel) handleBashJobEnded(e bus.BashJobEnded) {
 			break
 		}
 	}
-	if m.s.viewingSubagent == e.JobID {
+	if m.s.viewingSubagent == targetJobID {
 		m.s.viewportDirty = true
 	}
 }
@@ -253,19 +275,24 @@ type subagentPicker struct {
 	cursor  int
 }
 
-// Open populates the picker from the given transcripts, keeping only the
-// ones that are still live ("running" or "cancelling").
+// Open populates the picker from live subagents and from completed children
+// that still own a running async bash command.
 func (p *subagentPicker) Open(subagents map[string]*subagentTranscript) {
 	p.entries = p.entries[:0]
 	for jobID, t := range subagents {
-		if t.status != "running" && t.status != "cancelling" {
+		liveBash := transcriptHasLiveBash(t)
+		if t.status != "running" && t.status != "cancelling" && !liveBash {
 			continue
+		}
+		status := t.status
+		if liveBash {
+			status = "running"
 		}
 		p.entries = append(p.entries, subagentPickerEntry{
 			jobID:  jobID,
 			task:   t.task,
 			model:  t.model,
-			status: t.status,
+			status: status,
 			async:  t.async,
 		})
 	}
@@ -373,10 +400,22 @@ func (m appModel) handleSubagentPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// hasLiveSubagents reports whether at least one subagent is currently running.
+func transcriptHasLiveBash(t *subagentTranscript) bool {
+	if t == nil {
+		return false
+	}
+	for _, block := range t.blocks {
+		if block.Type == "tool" && block.ToolName == "bash" && !block.ToolDone {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLiveSubagents reports whether a subagent or an owned bash is still live.
 func (m *appModel) hasLiveSubagents() bool {
 	for _, t := range m.s.subagents {
-		if t.status == "running" || t.status == "cancelling" {
+		if t.status == "running" || t.status == "cancelling" || transcriptHasLiveBash(t) {
 			return true
 		}
 	}

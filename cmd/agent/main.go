@@ -300,13 +300,13 @@ func main() {
 			})
 		},
 		OnBashJobStart: func(job tool.BashJobInfo) {
-			preBus.Publish(bus.BashJobStarted{JobID: job.JobID, Command: job.Command, CWD: job.CWD})
+			preBus.Publish(bus.BashJobStarted{JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Command: job.Command, CWD: job.CWD})
 		},
-		OnBashJobOutput: func(jobID, delta string) {
-			preBus.Publish(bus.BashJobOutput{JobID: jobID, Delta: delta})
+		OnBashJobOutput: func(job tool.BashJobInfo, delta string) {
+			preBus.Publish(bus.BashJobOutput{JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Delta: delta})
 		},
 		OnBashJobEnd: func(job tool.BashJobInfo) {
-			preBus.Publish(bus.BashJobEnded{JobID: job.JobID, Status: job.Status, Output: job.Output})
+			preBus.Publish(bus.BashJobEnded{JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Status: job.Status, Output: job.Output})
 			if job.Awaited {
 				preBus.Publish(bus.BashJobSettled{JobID: job.JobID})
 				return
@@ -317,10 +317,11 @@ func main() {
 				return
 			}
 			preBus.Publish(bus.BashCompleted{
-				JobID:   job.JobID,
-				Command: job.Command,
-				Status:  job.Status,
-				Text:    agentText,
+				JobID:        job.JobID,
+				OwnerAgentID: job.OwnerAgentID,
+				Command:      job.Command,
+				Status:       job.Status,
+				Text:         agentText,
 			})
 		},
 	})
@@ -534,6 +535,9 @@ func main() {
 	// Same delivery discipline for async background bash jobs.
 	rt.Bus.Subscribe(func(e bus.BashCompleted) {
 		defer rt.Bus.Publish(bus.BashJobSettled{JobID: e.JobID})
+		if e.OwnerAgentID != "" {
+			return
+		}
 		if rt.State.Current() == bus.StateRunning {
 			_ = rt.Bus.Execute(bus.SteerAgent{Text: e.Text, Internal: true})
 			return

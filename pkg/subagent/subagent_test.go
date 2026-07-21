@@ -12,6 +12,7 @@ import (
 
 	"github.com/ealeixandre/moa/pkg/agent"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/tool"
 )
 
 type mockProvider struct {
@@ -221,6 +222,49 @@ func TestSubagentSyncBasic(t *testing.T) {
 	}
 	if got := textOf(res); got != "child done" {
 		t.Fatalf("expected final child text, got %q", got)
+	}
+}
+
+func TestAsyncBashUsesChildJobIDAsOwner(t *testing.T) {
+	started := make(chan tool.BashJobInfo, 2)
+	bashJobs := tool.NewBashJobs(context.Background(), func(info tool.BashJobInfo) { started <- info }, nil, nil)
+	bash := tool.NewBash(tool.ToolConfig{WorkspaceRoot: t.TempDir(), BashJobs: bashJobs})
+	provider := newMockProvider(
+		toolCallResponse("bash-call", "bash", map[string]any{"command": "echo child", "async": true}),
+		textResponse("child complete"),
+	)
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+	}, bash)
+
+	result, err := sub.Execute(context.Background(), map[string]any{
+		"task": "launch child bash", "async": true, "tools": []any{"bash"},
+	}, nil)
+	if err != nil || result.IsError {
+		t.Fatalf("start child = %+v, %v", result, err)
+	}
+	childID := jobIDFromResult(t, result)
+	select {
+	case job := <-started:
+		if job.OwnerAgentID != childID {
+			t.Fatalf("child bash owner = %q, want child job %q", job.OwnerAgentID, childID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("child bash did not start")
+	}
+
+	rootResult, err := bash.Execute(context.Background(), map[string]any{"command": "echo root", "async": true}, nil)
+	if err != nil || rootResult.IsError {
+		t.Fatalf("start root = %+v, %v", rootResult, err)
+	}
+	select {
+	case job := <-started:
+		if job.OwnerAgentID != "" {
+			t.Fatalf("root bash owner = %q, want empty", job.OwnerAgentID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("root bash did not start")
 	}
 }
 
