@@ -85,7 +85,7 @@ function StreamBlock({ block, onOpenSubagent }) {
       return <div class="stream-system">{block.text}</div>;
     case "waypoint":
       return (
-        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined}>
+        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined} attachments={block.attachments}>
           <p>{block.text}</p>
         </UserWaypoint>
       );
