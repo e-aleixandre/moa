@@ -220,63 +220,55 @@
 }
 
 .subagent-view .sa-nowline-act {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-}
-
-.subagent-view .sa-nowline-act .cur {
   color: var(--subtext0);
 }
 
-.subagent-view .sa-nowline-act .cur::after {
-  content: "▌";
-  color: var(--cur-accent, var(--sky));
-  animation: sa-cursor-blink 1s steps(2) infinite;
-  font-size: var(--text-micro);
-}
-
-.subagent-view .sa-ibar {
-  flex: 1;
-  min-width: 40px;
-  height: 3px;
+.subagent-view .sa-nowline-act::before {
+  content: "";
+  width: 6px;
+  height: 6px;
   border-radius: 2px;
-  background: var(--surface0);
-  overflow: hidden;
-  position: relative;
+  background: var(--blue);
+  flex: none;
 }
 
-.subagent-view .sa-ibar i {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 36%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, transparent, var(--blue), transparent);
-  animation: sa-ibar-slide 1.6s ease-in-out infinite;
+.subagent-view .sa-nowline-act.is-live {
+  background: linear-gradient(
+    90deg,
+    var(--subtext0) 0%,
+    var(--subtext0) 35%,
+    var(--sky) 50%,
+    var(--subtext0) 65%,
+    var(--subtext0) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+  animation: work-shimmer 2.5s ease-in-out infinite;
 }
 
-.subagent-view .sa-ibar.c-sky i { background: linear-gradient(90deg, transparent, var(--sky), transparent); }
-.subagent-view .sa-ibar.c-teal i { background: linear-gradient(90deg, transparent, var(--teal), transparent); }
-.subagent-view .sa-ibar.c-mauve i { background: linear-gradient(90deg, transparent, var(--mauve), transparent); }
-.subagent-view .sa-ibar.c-peach i { background: linear-gradient(90deg, transparent, var(--peach), transparent); }
-.subagent-view .sa-ibar.c-blue i { background: linear-gradient(90deg, transparent, var(--blue), transparent); }
-.subagent-view .sa-ibar.c-lavender i { background: linear-gradient(90deg, transparent, var(--lavender), transparent); }
-
-.subagent-view .sa-nowline-time,
 .subagent-view .sa-nowline-tok,
 .subagent-view .sa-nowline-cost {
   flex: none;
   color: var(--overlay0);
 }
 
-@keyframes sa-cursor-blink { 50% { opacity: 0; } }
-@keyframes sa-ibar-slide { 0% { left: -36%; } 100% { left: 100%; } }
-
 @media (prefers-reduced-motion: reduce) {
-  .subagent-view .sa-ibar i { animation: none; left: 0; width: 100%; opacity: 0.35; }
-  .subagent-view .sa-nowline-act .cur::after { animation: none; opacity: 0.6; }
+  .subagent-view .sa-nowline-act.is-live {
+    animation: none;
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--subtext0);
+  }
 }
 
 /* ── outcome banner ─────────────────────────────────────────────────────── */

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { ArrowLeft, GitFork, Rocket, X, Check, Copy } from "lucide-preact";
 import { Spinner, Kbd, IconButton } from "../../primitives/index.js";
-import { ModelPill, UserWaypoint } from "../../components/index.js";
+import { ModelPill, TokenFlow, UserWaypoint } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
@@ -187,33 +187,29 @@ export function SubagentView({ session, jobId, onBack }) {
               onRebound: onBack,
             }}
           />
-          <NowLine view={view} accent={accent} />
+          <NowLine view={view} />
         </>
       )}
     </div>
   );
 }
 
-// NowLine — fused sticky status over the composer (INC-13): spinner · action
-// (mono, caret) · ibar · elapsed · tokens/coste. Segments missing a backend
-// datum (elapsed/usage) are omitted rather than shown as undefined/NaN.
-function NowLine({ view, accent }) {
+// NowLine — fused status below the composer. Segments missing a backend datum
+// are omitted rather than shown as undefined/NaN.
+function NowLine({ view }) {
   const usage = view.usage;
-  const tokens = usage && (usage.inputTokens != null || usage.outputTokens != null)
-    ? `↑${fmtTokens(usage.inputTokens || 0)} ↓${fmtTokens(usage.outputTokens || 0)}`
-    : null;
-  const cost = usage && usage.costUSD > 0 ? `$${usage.costUSD.toFixed(3)}` : null;
+  const hasTokens = usage && (usage.inputTokens != null || usage.outputTokens != null);
+  const cost = usage && usage.costUSD > 0 ? `~$${usage.costUSD.toFixed(3)}` : null;
   return (
     <div class="sa-nowline" aria-hidden="true">
-      <Spinner color={accent} size={11} />
-      {view.action && (
-        <span class="sa-nowline-act">
-          ▸ <span class="cur" style={{ "--cur-accent": `var(--${accent})` }}>{view.action}</span>
+      <span class="sa-nowline-act is-live">
+        {view.action || "working"}{view.elapsed ? ` · ${view.elapsed}` : ""}
+      </span>
+      {hasTokens && (
+        <span class="sa-nowline-tok">
+          <TokenFlow up={usage.inputTokens || 0} down={usage.outputTokens || 0} variant="strip" />
         </span>
       )}
-      <div class={`sa-ibar c-${accent}`}><i /></div>
-      {view.elapsed && <span class="sa-nowline-time">{view.elapsed}</span>}
-      {tokens && <span class="sa-nowline-tok">{tokens}</span>}
       {cost && <span class="sa-nowline-cost">{cost}</span>}
     </div>
   );

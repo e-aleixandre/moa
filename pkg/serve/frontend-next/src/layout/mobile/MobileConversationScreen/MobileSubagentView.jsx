@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { ChevronLeft, GitFork, Rocket, X, Check, Copy } from "lucide-preact";
 import { Spinner } from "../../../primitives/index.js";
-import { ModelPill, UserWaypoint } from "../../../components/index.js";
+import { ModelPill, TokenFlow, UserWaypoint } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { subagentView, canPromote } from "../../../data/subagent-view-model.js";
@@ -59,10 +59,8 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   const onSibling = (id) => { updateSession(session.id, { viewingSubagent: id }); };
 
   const usage = view.usage;
-  const tokens = usage && (usage.inputTokens || usage.outputTokens)
-    ? `↑${fmtTokens(usage.inputTokens || 0)} ↓${fmtTokens(usage.outputTokens || 0)}`
-    : null;
-  const cost = usage && usage.costUSD > 0 ? `$${usage.costUSD.toFixed(3)}` : null;
+  const hasTokens = usage && (usage.inputTokens != null || usage.outputTokens != null);
+  const cost = usage && usage.costUSD > 0 ? `~$${usage.costUSD.toFixed(3)}` : null;
 
   const threadClass = view.terminal ? `thread-${view.outcome}` : "";
 
@@ -148,15 +146,17 @@ export function MobileSubagentView({ session, jobId, onBack }) {
             shortPlaceholder
             steer={{ jobId, name: view.name, onRebound: onBack }}
           />
-          {/* Now-line sits BELOW the composer, in the parent's status slot
-              (SUBAGENT-VIEW-RECONCILE §2.3): telemetry lives on the mono line
-              under the input everywhere in the app. Accent colors the activity. */}
+          {/* Now-line sits below the composer in the parent's status slot. */}
           <div class="mcomposer-status msa-nowline">
-            <span class="work msa-now-act" style={{ color: `var(--${accent})` }}>
-              <Spinner color={accent} size={8} /> {view.action || "working"}
+            <span class="work is-live msa-now-act">
+              ● {view.action || "working"}
               {view.elapsed ? ` · ${view.elapsed}` : ""}
             </span>
-            {tokens && <span class="tokens">{tokens}</span>}
+            {hasTokens && (
+              <span class="tokens">
+                <TokenFlow up={usage.inputTokens || 0} down={usage.outputTokens || 0} variant="compact" />
+              </span>
+            )}
             {cost && <span class="spend">{cost}</span>}
           </div>
         </div>

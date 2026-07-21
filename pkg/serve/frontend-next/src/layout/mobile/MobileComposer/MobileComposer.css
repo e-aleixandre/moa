@@ -180,15 +180,6 @@
   animation: work-shimmer 2.5s ease-in-out infinite;
 }
 
-@keyframes work-shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .mcomposer-status .work.is-live {
     animation: none;
