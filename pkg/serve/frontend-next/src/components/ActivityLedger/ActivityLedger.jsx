@@ -140,7 +140,7 @@ function LiveWindow({ lines, start = 0, diff = false, expanded, onToggle }) {
     <button
       ref={logRef}
       type="button"
-      class={`tg-log${start > 0 && !expanded ? " fade" : ""}${expanded ? " expanded" : ""}`}
+      class={`tg-log${diff ? " diff" : ""}${start > 0 && !expanded ? " fade" : ""}${expanded ? " expanded" : ""}`}
       aria-expanded={expanded}
       aria-label={expanded ? "Collapse live output" : "Show all live output"}
       onClick={onToggle}

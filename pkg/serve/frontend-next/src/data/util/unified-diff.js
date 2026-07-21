@@ -37,6 +37,26 @@ export function parseUnifiedDiff(diffText) {
       }
       continue;
     }
+    // The backend's completed edit diff has a %4d line-number field before
+    // its marker: "%4d -%s", "%4d +%s", or "%4d  %s". Recognize it before
+    // standard unified rows so the display gutter uses the real file number.
+    const numbered = raw.match(/^ *(\d+) ([+\- ])(.*)$/);
+    if (numbered) {
+      const no = parseInt(numbered[1], 10);
+      const marker = numbered[2];
+      if (marker === "-") {
+        out.push({ oldNo: no, type: "del", text: numbered[3] });
+        oldNo = no + 1;
+      } else if (marker === "+") {
+        out.push({ newNo: no, type: "add", text: numbered[3] });
+        newNo = no + 1;
+      } else {
+        out.push({ oldNo: no, newNo, type: "ctx", text: numbered[3] });
+        oldNo = no + 1;
+        newNo++;
+      }
+      continue;
+    }
     if (raw.startsWith("+")) {
       out.push({ newNo, type: "add", text: raw.slice(1) });
       newNo++;

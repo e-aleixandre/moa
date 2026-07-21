@@ -5,6 +5,7 @@
 // streaming, truncation) are pinned here with plain session fixtures.
 import { test, expect } from 'bun:test';
 import { LIVE_FULL_MAX_CHARS, LIVE_FULL_MAX_LINES, projectStream, liveTrayAgents } from './stream-model.js';
+import { parseUnifiedDiff } from './util/unified-diff.js';
 
 // ── fixture helpers ──────────────────────────────────────────────────────────
 const user = (text, extra = {}) => ({ role: 'user', content: [{ type: 'text', text }], ...extra });
@@ -62,6 +63,20 @@ test('edit with a server diff emits a full-width diff sibling', () => {
   expect(diff.filename).toBe('src/x.js');
   expect(diff.startLine).toBe(10);
   expect(diff.diffText).toBe(diffResult);
+});
+
+test('a done edit keeps backend-numbered sibling rows clean for DiffBlock', () => {
+  const diffResult = '@@ -7 +7 @@\n   7  context line\n   8 -old line\n   8 +new line';
+  const s = session([
+    tool('e1', 'edit', { path: 'src/x.js' }, 'done', diffResult, { start_line: 7 }),
+  ]);
+  const diff = projectStream(s)[0].blocks.find((block) => block.type === 'diff');
+
+  expect(parseUnifiedDiff(diff.diffText)).toEqual([
+    { oldNo: 7, newNo: 7, type: 'ctx', text: 'context line' },
+    { oldNo: 8, type: 'del', text: 'old line' },
+    { newNo: 8, type: 'add', text: 'new line' },
+  ]);
 });
 
 test('a diff closes its ledger so later tools open a new one', () => {

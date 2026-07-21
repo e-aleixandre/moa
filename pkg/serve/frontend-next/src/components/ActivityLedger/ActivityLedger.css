@@ -369,6 +369,11 @@
   border-bottom: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
 }
 
+/* Diff markers belong at the edge, so their colored rows span the log width. */
+.tg .tg-log.diff {
+  padding: var(--space-2) 0;
+}
+
 .tg button.tg-log {
   width: 100%;
   border: none;
@@ -407,6 +412,10 @@
 .tg .tg-log .ln {
   display: block;
   animation: tg-log-line-in 280ms var(--ease);
+}
+
+.tg .tg-log.diff .ln {
+  padding: 0 var(--space-3);
 }
 
 .tg .tg-log .ln.add {
