@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-21
+
+### Added
+
+- Redesigned the entire web UI. The conversation is now a "studio" work log:
+  the user's prompt is a waypoint, the agent's work flows as a document, and
+  tool calls fold into a collapsible activity ledger with a single live cursor.
+- Tool calls stream live: the model's arguments (a write's content, an edit's
+  diff) render as they arrive, and a running tool shows a fade-top rolling
+  5-line window of its output. Tap the content to expand it to the full output
+  in real time; tap again to collapse.
+- Expanding a finished tool row shows its full input first (the whole command,
+  path, or search pattern), a divider, then the output — so an ellipsised path
+  is always recoverable.
+- Live Dock: async work (background bash, async subagents) lives in a docked
+  tray so it is never lost off-screen, while sync subagents stay inline. A wave
+  of subagents folds into one delegation block with its own view.
+- Rebuilt the model selector (thinking first, models as codename chips), a
+  command palette (⌘K), a real pane grid with resize and drag & drop, and a
+  non-destructive rewind timeline.
+- Mobile: a phone-first layout with a swipe-to-open sessions drawer, a tappable
+  model/thinking sheet, push-to-talk voice on the composer, PWA install and
+  Pulse pairing, and iOS safe-area handling.
+- Two-level telemetry: an at-a-glance status strip plus a Usage panel, with a
+  live per-run token pulse and the session cost colored by plan usage.
+
+### Changed
+
+- The redesigned frontend is now the default at the root.
+
 ## [0.10.2] - 2026-07-18
 
 ### Fixed
