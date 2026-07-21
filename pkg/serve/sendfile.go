@@ -1,15 +1,18 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/ealeixandre/moa/pkg/attachment"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/tool"
 )
@@ -20,6 +23,10 @@ type sharedFile struct {
 	Name string // download filename (basename or override)
 	Mime string
 	Size int64
+	// AttachmentID identifies the durable session-owned copy when the
+	// attachment store was available at send time. The allowlist remains
+	// in-memory, so file IDs still do not survive a server restart.
+	AttachmentID string
 	// identity pins the exact file that was authorized. The path may be
 	// replaced between send_file and download, so it must be checked again on
 	// the already-open descriptor before serving.
@@ -57,8 +64,9 @@ func (s *sharedFiles) get(id string) (sharedFile, bool) {
 
 // newSendFileTool creates the send_file tool for a session. cfg resolves
 // paths against the same workspace/PathPolicy as the built-in file tools;
-// sessionID and reg build the download URL and allowlist entry.
-func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles) core.Tool {
+// sessionID and reg build the download URL and allowlist entry. store may be
+// nil when durable attachment storage is unavailable.
+func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles, store *attachment.Store) core.Tool {
 	return core.Tool{
 		Name:  "send_file",
 		Label: "Send file",
@@ -106,8 +114,47 @@ func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles) co
 			}
 
 			mimeType := detectMime(resolved, name)
+			size := info.Size()
+			attachmentID := ""
 
-			id := reg.add(sharedFile{Path: resolved, Name: name, Mime: mimeType, Size: info.Size(), identity: info})
+			// A durable copy lets the user download a file after the agent has
+			// cleaned up its source path. Storage failures deliberately retain the
+			// legacy path-backed behavior rather than failing send_file.
+			if store != nil {
+				file, openErr := os.Open(resolved)
+				if openErr == nil {
+					fileInfo, statErr := file.Stat()
+					data, readErr := func() ([]byte, error) {
+						defer file.Close() //nolint:errcheck
+						if statErr != nil || !fileInfo.Mode().IsRegular() || !os.SameFile(info, fileInfo) {
+							return nil, os.ErrNotExist
+						}
+						return io.ReadAll(file)
+					}()
+					if readErr == nil {
+						mediaType, _, parseErr := mime.ParseMediaType(mimeType)
+						if parseErr != nil {
+							mediaType = "application/octet-stream"
+							mimeType = mediaType
+						}
+						kind := "file"
+						width, height := 0, 0
+						if bytesLookLikeImage(data, mediaType) {
+							kind = "image"
+							width, height = imageDimensions(data)
+						}
+						if descriptor, putErr := store.PutRef(sessionID, data, attachment.PutMeta{
+							Name: name, Mime: mimeType, Kind: kind, Width: width, Height: height,
+						}); putErr == nil {
+							attachmentID = descriptor.ID
+							size = descriptor.Size
+							mimeType = descriptor.Mime
+						}
+					}
+				}
+			}
+
+			id := reg.add(sharedFile{Path: resolved, Name: name, Mime: mimeType, Size: size, AttachmentID: attachmentID, identity: info})
 			url := fmt.Sprintf("/api/sessions/%s/files/%s", sessionID, id)
 
 			// Result = one human-readable line for the model, then a JSON line the
@@ -115,11 +162,11 @@ func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles) co
 			card, _ := json.Marshal(map[string]any{
 				"file_id": id,
 				"name":    name,
-				"size":    info.Size(),
+				"size":    size,
 				"mime":    mimeType,
 				"url":     url,
 			})
-			text := fmt.Sprintf("Sent %q (%s) to the user.\n%s", name, humanSize(info.Size()), card)
+			text := fmt.Sprintf("Sent %q (%s) to the user.\n%s", name, humanSize(size), card)
 			return core.TextResult(text), nil
 		},
 	}
@@ -173,6 +220,45 @@ func handleDownloadFile(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "file not shared (or the session was restarted) — ask the agent to send it again", http.StatusNotFound)
 			return
 		}
+		if f.AttachmentID != "" {
+			if mgr.attachStore == nil {
+				http.Error(w, "file unavailable", http.StatusNotFound)
+				return
+			}
+			reader, descriptor, err := mgr.attachStore.Open(sess.ID, f.AttachmentID)
+			if err != nil {
+				http.Error(w, "file unavailable", http.StatusNotFound)
+				return
+			}
+			defer reader.Close() //nolint:errcheck
+
+			name := safeBase(descriptor.Name)
+			if name == "" {
+				name = "attachment"
+			}
+			disposition := "attachment"
+			if descriptor.Kind == "image" && inlineAttachmentMIMEs[descriptor.Mime] {
+				disposition = "inline"
+			}
+			w.Header().Set("Content-Type", descriptor.Mime)
+			w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			w.Header().Set("Content-Security-Policy", "sandbox")
+			w.Header().Set("ETag", `"sha256-`+descriptor.SHA256+`"`)
+			w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
+			if seeker, ok := reader.(io.ReadSeeker); ok {
+				http.ServeContent(w, r, name, descriptor.CreatedAt, seeker)
+				return
+			}
+			data, err := io.ReadAll(reader)
+			if err != nil {
+				http.Error(w, "file unavailable", http.StatusInternalServerError)
+				return
+			}
+			http.ServeContent(w, r, name, descriptor.CreatedAt, bytes.NewReader(data))
+			return
+		}
 
 		file, err := os.Open(f.Path)
 		if err != nil {
@@ -190,6 +276,7 @@ func handleDownloadFile(mgr *Manager) http.HandlerFunc {
 		w.Header().Set("Content-Type", f.Mime)
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": f.Name}))
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "sandbox")
 		w.Header().Set("Cache-Control", "private, no-store")
 		http.ServeContent(w, r, f.Name, info.ModTime(), file)

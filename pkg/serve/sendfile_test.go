@@ -1,11 +1,16 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,6 +65,15 @@ func lastLineJSON(t *testing.T, text string) map[string]any {
 		t.Fatalf("parse json line %q: %v", lines[len(lines)-1], err)
 	}
 	return m
+}
+
+func sendFilePNG(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 3))); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 // --- tool tests ---
@@ -221,7 +235,7 @@ func TestSendFileTool_RespectsPathPolicy(t *testing.T) {
 		WorkspaceRoot: workspace,
 		PathPolicy:    tool.NewPathPolicy(workspace, nil, false),
 	}
-	res := execSendFile(t, newSendFileTool(restricted, "sess", newSharedFiles()), map[string]any{"path": outsideFile})
+	res := execSendFile(t, newSendFileTool(restricted, "sess", newSharedFiles(), nil), map[string]any{"path": outsideFile})
 	if !res.IsError {
 		t.Fatal("expected error for path outside workspace under restricted PathPolicy")
 	}
@@ -230,7 +244,7 @@ func TestSendFileTool_RespectsPathPolicy(t *testing.T) {
 		WorkspaceRoot: workspace,
 		PathPolicy:    tool.NewPathPolicy(workspace, nil, true),
 	}
-	res = execSendFile(t, newSendFileTool(unrestricted, "sess", newSharedFiles()), map[string]any{"path": outsideFile})
+	res = execSendFile(t, newSendFileTool(unrestricted, "sess", newSharedFiles(), nil), map[string]any{"path": outsideFile})
 	if res.IsError {
 		t.Fatalf("unexpected error in unrestricted mode: %s", resultText(res))
 	}
@@ -280,8 +294,11 @@ func TestDownloadFile_OK(t *testing.T) {
 	if csp := resp.Header.Get("Content-Security-Policy"); csp != "sandbox" {
 		t.Errorf("Content-Security-Policy = %q, want sandbox", csp)
 	}
-	if cache := resp.Header.Get("Cache-Control"); cache != "private, no-store" {
-		t.Errorf("Cache-Control = %q, want private, no-store", cache)
+	if cache := resp.Header.Get("Cache-Control"); cache != "private, max-age=0, must-revalidate" {
+		t.Errorf("Cache-Control = %q, want private, max-age=0, must-revalidate", cache)
+	}
+	if corp := resp.Header.Get("Cross-Origin-Resource-Policy"); corp != "same-origin" {
+		t.Errorf("Cross-Origin-Resource-Policy = %q, want same-origin", corp)
 	}
 }
 
@@ -342,12 +359,13 @@ func TestDownloadFile_UnknownSession_404(t *testing.T) {
 	}
 }
 
-func TestDownloadFile_DeletedFromDisk_404(t *testing.T) {
+func TestDownloadFile_DeletedFromDisk_ServedFromStore(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()
 	tmp := t.TempDir()
+	content := []byte("durable bytes")
 	filePath := filepath.Join(tmp, "ephemeral.txt")
-	if err := os.WriteFile(filePath, []byte("bye"), 0o644); err != nil {
+	if err := os.WriteFile(filePath, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -366,8 +384,240 @@ func TestDownloadFile_DeletedFromDisk_404(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != string(content) {
+		t.Fatalf("GET after source deletion = %d, %q; want 200, %q", resp.StatusCode, body, content)
+	}
+	if got, want := resp.Header.Get("Content-Length"), strconv.FormatInt(int64(len(content)), 10); got != want {
+		t.Errorf("Content-Length = %q, want %q", got, want)
+	}
+}
+
+func TestDownloadFile_DeletedFromDisk_404WithoutStore(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	mgr.attachStore = nil
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "ephemeral.txt")
+	if err := os.WriteFile(filePath, []byte("bye"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := newSendFileTestSession(t, mgr, tmp)
+	res := execSendFile(t, sendFileTool(t, sess), map[string]any{"path": filePath})
+	data := lastLineJSON(t, resultText(res))
+	if f, ok := sess.sharedFiles.get(data["file_id"].(string)); !ok || f.AttachmentID != "" {
+		t.Fatal("send_file unexpectedly stored a durable attachment without a store")
+	}
+	if err := os.Remove(filePath); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(srv.URL + data["url"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 after file deleted from disk, got %d", resp.StatusCode)
+		t.Fatalf("GET after source deletion without store = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestSendFileTool_PutRefFailureFallsBackToLegacyPath(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "ephemeral.txt")
+	if err := os.WriteFile(filePath, []byte("legacy bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := newSendFileTestSession(t, mgr, tmp)
+	// A dot is rejected by attachment.Store's session ID validation, while
+	// remaining safe as a single URL path segment for the download handler.
+	invalidSessionID := "invalid.session"
+	mgr.mu.Lock()
+	delete(mgr.sessions, sess.ID)
+	sess.ID = invalidSessionID
+	mgr.sessions[invalidSessionID] = sess
+	mgr.mu.Unlock()
+
+	cfg := tool.ToolConfig{
+		WorkspaceRoot: tmp,
+		PathPolicy:    tool.NewPathPolicy(tmp, nil, true),
+	}
+	res := execSendFile(t, newSendFileTool(cfg, sess.ID, sess.sharedFiles, mgr.attachStore), map[string]any{"path": filePath})
+	if res.IsError {
+		t.Fatalf("PutRef failure unexpectedly failed send_file: %s", resultText(res))
+	}
+	data := lastLineJSON(t, resultText(res))
+	url, ok := data["url"].(string)
+	if !ok || url == "" {
+		t.Fatalf("result URL = %#v, want non-empty string", data["url"])
+	}
+	shared, ok := sess.sharedFiles.get(data["file_id"].(string))
+	if !ok || shared.AttachmentID != "" {
+		t.Fatalf("shared file = %#v, want legacy entry without AttachmentID", shared)
+	}
+
+	resp, err := http.Get(srv.URL + url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET with source present = %d, want 200", resp.StatusCode)
+	}
+	if err := os.Remove(filePath); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.Get(srv.URL + url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET after source deletion = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestDownloadFile_ReleasedDurableAttachmentDoesNotFallBackToPath(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "report.txt")
+	if err := os.WriteFile(filePath, []byte("original bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := newSendFileTestSession(t, mgr, tmp)
+	data := lastLineJSON(t, resultText(execSendFile(t, sendFileTool(t, sess), map[string]any{"path": filePath})))
+	shared, ok := sess.sharedFiles.get(data["file_id"].(string))
+	if !ok || shared.AttachmentID == "" {
+		t.Fatal("send_file did not store a durable attachment")
+	}
+	if err := mgr.attachStore.RemoveRef(sess.ID, shared.AttachmentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, []byte("replacement bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(srv.URL + data["url"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET after releasing durable attachment = %d, %q; want 404 file unavailable", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "file unavailable") {
+		t.Errorf("404 body = %q, want file unavailable", body)
+	}
+}
+
+func TestSendFileTool_SpoofedImageExtensionStoredAsFile(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "not-a-png.png")
+	if err := os.WriteFile(filePath, []byte("this is not image data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := newSendFileTestSession(t, mgr, tmp)
+	data := lastLineJSON(t, resultText(execSendFile(t, sendFileTool(t, sess), map[string]any{"path": filePath})))
+	shared, ok := sess.sharedFiles.get(data["file_id"].(string))
+	if !ok || shared.AttachmentID == "" {
+		t.Fatal("spoofed image was not stored durably")
+	}
+	descriptor, ok := mgr.attachStore.Lookup(sess.ID, shared.AttachmentID)
+	if !ok || descriptor.Kind != "file" {
+		t.Fatalf("spoofed image descriptor = %#v, want kind file", descriptor)
+	}
+
+	resp, err := http.Get(srv.URL + data["url"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET spoofed image = %d, want 200", resp.StatusCode)
+	}
+	if !strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("spoofed image Content-Disposition = %q, want attachment", resp.Header.Get("Content-Disposition"))
+	}
+	if strings.HasPrefix(resp.Header.Get("Content-Disposition"), "inline;") {
+		t.Fatalf("spoofed image Content-Disposition = %q, must not be inline", resp.Header.Get("Content-Disposition"))
+	}
+}
+
+func TestSendFileStoreKindAndSessionDeleteRelease(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	tmp := t.TempDir()
+	imagePath := filepath.Join(tmp, "preview.png")
+	if err := os.WriteFile(imagePath, sendFilePNG(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(tmp, "archive.bin")
+	if err := os.WriteFile(filePath, []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := newSendFileTestSession(t, mgr, tmp)
+	imageResult := lastLineJSON(t, resultText(execSendFile(t, sendFileTool(t, sess), map[string]any{"path": imagePath})))
+	imageFile, ok := sess.sharedFiles.get(imageResult["file_id"].(string))
+	if !ok || imageFile.AttachmentID == "" {
+		t.Fatal("image was not stored durably")
+	}
+	imageDescriptor, ok := mgr.attachStore.Lookup(sess.ID, imageFile.AttachmentID)
+	if !ok || imageDescriptor.Kind != "image" || imageDescriptor.Width == 0 || imageDescriptor.Height == 0 {
+		t.Fatalf("image descriptor = %#v, want raster image with dimensions", imageDescriptor)
+	}
+	imageResp, err := http.Get(srv.URL + imageResult["url"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageResp.Body.Close() //nolint:errcheck
+	if imageResp.Header.Get("Content-Type") != "image/png" || !strings.HasPrefix(imageResp.Header.Get("Content-Disposition"), "inline;") {
+		t.Fatalf("image headers: Content-Type=%q Content-Disposition=%q", imageResp.Header.Get("Content-Type"), imageResp.Header.Get("Content-Disposition"))
+	}
+
+	fileResult := lastLineJSON(t, resultText(execSendFile(t, sendFileTool(t, sess), map[string]any{"path": filePath})))
+	shared, ok := sess.sharedFiles.get(fileResult["file_id"].(string))
+	if !ok || shared.AttachmentID == "" {
+		t.Fatal("file was not stored durably")
+	}
+	fileDescriptor, ok := mgr.attachStore.Lookup(sess.ID, shared.AttachmentID)
+	if !ok || fileDescriptor.Kind != "file" {
+		t.Fatalf("file descriptor = %#v, want kind file", fileDescriptor)
+	}
+	fileResp, err := http.Get(srv.URL + fileResult["url"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileResp.Body.Close() //nolint:errcheck
+	if !strings.HasPrefix(fileResp.Header.Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("file Content-Disposition = %q, want attachment", fileResp.Header.Get("Content-Disposition"))
+	}
+
+	store := mgr.attachStore
+	if err := mgr.Delete(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Lookup(sess.ID, imageFile.AttachmentID); ok {
+		t.Fatal("session delete did not release send_file image")
+	}
+	if _, _, err := store.Open(sess.ID, shared.AttachmentID); err == nil {
+		t.Fatal("session delete left send_file file readable")
 	}
 }
 
