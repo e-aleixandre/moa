@@ -854,7 +854,6 @@ func (s *Store) basePath(parts ...string) string {
 	return filepath.Join(append([]string{s.baseDir}, parts...)...)
 }
 
-func (s *Store) blobsDir() string    { return s.basePath("blobs", "sha256") }
 func (s *Store) sessionsDir() string { return s.basePath("sessions") }
 func (s *Store) stagingDir() string  { return s.basePath("staging") }
 func (s *Store) viewsDir() string    { return s.basePath("views") }
