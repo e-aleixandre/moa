@@ -78,8 +78,19 @@
   }
 }
 
-.status-strip .status-strip-spend {
+/* Right-anchored telemetry group: tokens + context ring + cost. margin-left
+   lives here (not on an individual segment) so the group hugs the right edge
+   regardless of which segments are present, while the activity + mode pills
+   stay left. */
+.status-strip .status-strip-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.status-strip .status-strip-spend {
+  flex: none;
 }
 
 .status-strip .status-strip-spend b {
@@ -98,7 +109,6 @@
   border: 0;
   background: none;
   padding: 0;
-  margin-left: auto;
   font: inherit;
   color: inherit;
   cursor: pointer;
@@ -130,7 +140,6 @@
    cost. Discreet, right-aligned, with a ≥44px hit area. */
 .status-strip .status-strip-gauge {
   position: relative;
-  margin-left: auto;
   border: 0;
   background: none;
   padding: 0;

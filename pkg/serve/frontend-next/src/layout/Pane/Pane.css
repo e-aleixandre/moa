@@ -205,6 +205,26 @@
   line-height: var(--leading-relaxed);
 }
 
+.pane .p-status {
+  flex: none;
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
+}
+
+.pane .p-dock {
+  flex: none;
+}
+
+.pane .p-dock .live-dock {
+  max-width: none;
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.pane .p-status .status-strip {
+  max-width: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+}
+
 .pane .p-input {
   flex: none;
   margin: var(--space-2) var(--space-3) var(--space-3);

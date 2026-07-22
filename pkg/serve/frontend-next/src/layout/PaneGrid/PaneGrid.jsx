@@ -3,6 +3,8 @@ import { MessageSquarePlus } from "lucide-preact";
 import { Pane } from "../Pane/Pane.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
+import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
+import { LiveDock } from "../LiveDock/LiveDock.jsx";
 import { McpBanner, PermissionPrompt, AskUserPrompt } from "../../components/index.js";
 import { snapToRatio } from "../../data/snap.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
@@ -11,10 +13,13 @@ import {
 } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
-import { getTileCount } from "../../data/store.js";
-import { projectStream } from "../../data/stream-model.js";
+import { getTileCount, updateSession } from "../../data/store.js";
+import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
+import { openPersistedSubagent } from "../../data/session-actions.js";
 import { modelAccent } from "../../data/selectors.js";
 import { shortModel, shortPath, sessionDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
+import { fmtCost } from "../../data/util/usage-pills.js";
+import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import "./PaneGrid.css";
 
@@ -91,11 +96,21 @@ function ResizeHandle({ path, direction }) {
 function ConnectedPane({ node, state, tileIndex }) {
   const tileId = node.id;
   const session = node.sessionId ? state.sessions[node.sessionId] : null;
+  const [nowMs, setNowMs] = useState(Date.now());
   const focused = state.focusedTile === tileId;
   const [dragOver, setDragOver] = useState(false);
   const paneRef = useRef(null);
   const canClose = getTileCount() > 1;
   const attention = session && (session.state === "permission" || session.state === "error");
+  const phase = session ? activityPhase(session) : null;
+  const workIsLive = phase === "thinking" || phase === "working";
+
+  useEffect(() => {
+    if (!workIsLive) return undefined;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [workIsLive]);
 
   // --- HTML5 drag source (desktop) ---
   const handleDragStart = useCallback((e) => {
@@ -216,7 +231,13 @@ function ConnectedPane({ node, state, tileIndex }) {
     );
   }
 
+  const activity = activityText(session, nowMs);
+  const task = workIsLive && session.runStartedAtMs
+    ? `${activity} · ${formatElapsed(Math.max(0, nowMs - session.runStartedAtMs))}`
+    : activity;
+
   const blocks = projectStream(session);
+  const liveAgents = liveTrayAgents(session);
   const dotState = sessionDotState(session);
   const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
   const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk) ? (
@@ -241,6 +262,28 @@ function ConnectedPane({ node, state, tileIndex }) {
       blocking={blocking}
       bodyLive
       composer={<Composer key={session.id} sessionId={session.id} session={session} />}
+      dock={liveAgents.length > 0 && (
+        <LiveDock
+          agents={liveAgents}
+          open={!!session.dockOpen}
+          onToggle={(next) => updateSession(session.id, { dockOpen: next })}
+          onOpen={async (jobId) => {
+            await openPersistedSubagent(session.id, jobId);
+            navigate(null, { session: session.id });
+          }}
+        />
+      )}
+      status={(
+        <StatusStrip
+          ctxPercent={session.contextPercent}
+          tokensUp={session.runTokensUp}
+          tokensDown={session.runTokensDown}
+          task={task}
+          spend={fmtCost(session.costUSD)}
+          session={session}
+          usage={state.usage}
+        />
+      )}
     >
       <Stream session={session} blocks={blocks} />
     </Pane>

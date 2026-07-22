@@ -56,15 +56,10 @@ export function StatusStrip({
 
   return (
     <div class="status-strip">
-      {hasCtx && (
-        <span class="status-strip-ctx">
-          <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
-          ctx {ctxPercent}%
-        </span>
-      )}
-      {showTokens && hasTokens && (
-        <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="strip" /></span>
-      )}
+      {/* LEFT: the activity leads the line (a status "Working…" reads best at
+          the start, not floating mid-row), then the permission chip + the
+          currently-active modes. */}
+      {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
 
       {/* Permission chip — a control (subphase b): tap opens a 3-option menu
           (never cycles). onPermChange is optional so gallery/other consumers can
@@ -112,40 +107,54 @@ export function StatusStrip({
         </span>
       )}
 
-      {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
-
-      {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
-          Falls back to plain text otherwise (galleries / other consumers). */}
-      {hasSpend ? (
-        costTrigger ? (
-          <button
-            type="button"
-            class={`status-strip-spend status-strip-spend-btn spend-${model.spendLevel || "normal"}`}
-            onClick={onOpenUsage}
-            aria-label="Show usage"
-            title="Estimated session cost"
-          >
-            {/* The tilde marks an estimated accumulated session cost. */}
-            <b>~{spend}</b>
-          </button>
-        ) : (
-          <span class={`status-strip-spend spend-${model.spendLevel || "normal"}`}>
-            <b>~{spend}</b>
+      {/* RIGHT: the run's telemetry grouped and anchored to the right edge —
+          per-run tokens, the context ring, and the session cost. margin-left
+          lives on the group (not one segment) so it stays right-aligned no
+          matter which segments are present. */}
+      <span class="status-strip-right">
+        {showTokens && hasTokens && (
+          <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="strip" /></span>
+        )}
+        {hasCtx && (
+          <span class="status-strip-ctx">
+            <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
+            ctx {ctxPercent}%
           </span>
-        )
-      ) : (
-        costTrigger && (
-          <button
-            type="button"
-            class="status-strip-gauge"
-            onClick={onOpenUsage}
-            aria-label="Show usage"
-            title="Show usage"
-          >
-            <Gauge />
-          </button>
-        )
-      )}
+        )}
+
+        {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
+            Falls back to plain text otherwise (galleries / other consumers). */}
+        {hasSpend ? (
+          costTrigger ? (
+            <button
+              type="button"
+              class={`status-strip-spend status-strip-spend-btn spend-${model.spendLevel || "normal"}`}
+              onClick={onOpenUsage}
+              aria-label="Show usage"
+              title="Estimated session cost"
+            >
+              {/* The tilde marks an estimated accumulated session cost. */}
+              <b>~{spend}</b>
+            </button>
+          ) : (
+            <span class={`status-strip-spend spend-${model.spendLevel || "normal"}`}>
+              <b>~{spend}</b>
+            </span>
+          )
+        ) : (
+          costTrigger && (
+            <button
+              type="button"
+              class="status-strip-gauge"
+              onClick={onOpenUsage}
+              aria-label="Show usage"
+              title="Show usage"
+            >
+              <Gauge />
+            </button>
+          )
+        )}
+      </span>
     </div>
   );
 }

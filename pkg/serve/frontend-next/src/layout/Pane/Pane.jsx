@@ -68,6 +68,8 @@ export function Pane({
   attention = false,
   empty = false,
   composer,
+  status,
+  dock,
   blocking,
   paneRef,
   dataTileId,
@@ -167,6 +169,8 @@ export function Pane({
 
       {blocking && <div class="p-blocking">{blocking}</div>}
 
+      {dock && <div class="p-dock">{dock}</div>}
+
       {/* Connected pane: the REAL Composer replaces the mock input. The mock
           `p-input` survives only for the galleries (no `composer` prop). */}
       {composer
@@ -175,8 +179,10 @@ export function Pane({
             <div class="p-input">
               <span class="p-input-text">Message moa…</span>
               <span class="send" aria-hidden="true">↑</span>
-            </div>
-          )}
+          </div>
+        )}
+
+      {status && <div class="p-status">{status}</div>}
     </section>
   );
 }

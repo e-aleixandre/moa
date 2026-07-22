@@ -5,128 +5,218 @@
 <h1 align="center">Moa</h1>
 
 <p align="center">
-  <strong>A coding agent that runs on your own server — and follows you everywhere.</strong>
+  <strong>A self-hosted coding agent for the machine where your code lives — usable from desktop or phone.</strong>
 </p>
 
 <p align="center">
-  Spin up a server, run one command, and drive your agent from the browser on any device.<br/>
-  Desktop, laptop, or phone — same sessions, same power, wherever you are.
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#security">Security</a> ·
+  <a href="#documentation">Documentation</a>
 </p>
 
----
+> **“I did not build Moa to replace my computer. I built it because I could not always be at one.”**
 
-Moa is a coding agent you **host yourself**. Point it at a machine you own, start `moa serve`,
-and you get a full agent workspace in the browser — multiple sessions side by side, running in
-parallel, each on its own model. Reach it from your desk or from your phone on the couch through
-your private network. No lock-in, no cloud middleman, your keys and your code stay yours.
+For a while, the amount of work I could do was limited by the time I could physically spend at a computer. I wanted to keep building, keep contributing, and still show up for the people who needed me.
 
-**Sign in with the subscription you already have.** Log in with your **Claude (Pro/Max)** or
-**ChatGPT (Plus/Pro)** account via OAuth — no separate API billing required. Prefer pay-as-you-go?
-Plain Anthropic or OpenAI API keys work too.
+Moa changed that. The agent works on the machine where my code, repositories, and tools already live; I can follow it from my phone, make decisions, redirect a task, or return to the full desktop workspace whenever I need to.
 
-> It started as a personal itch: I wanted something like a coding agent that lived on a server and
-> that I could actually use comfortably from my phone. I ended up barely opening my laptop to work.
+In my own workflow, that can mean sending an agent into a separate Git worktree, bringing up the Docker environment a project needs, running builds and tests, executing end-to-end tests with Playwright, and getting screenshots back as evidence of what it saw. I do not need to be sitting in front of the terminal for that work to keep moving.
+
+The point is not to turn a phone into a tiny laptop. It is to stay in the loop while real development work happens on the machine built for it.
+
+Coding agents are good at work that takes longer than a prompt: exploring a repository, editing files, running builds, waiting on tests, delegating tasks, and asking for the occasional decision. But most agent interfaces still expect you to stay in front of the terminal while that work unfolds.
+
+Moa separates **where the agent works** from **where you steer it**. Run it on a workstation or development server that already has your repositories and toolchain, then open the same workspace in a browser. Start a task at your desk, check its progress from your phone, answer a permission request, or redirect the session without moving the project to another machine.
 
 <p align="center">
-  <img src="docs/assets/serve-desktop-overview.png" alt="Moa web UI — multiple sessions in a tiled layout" width="900" />
+  <img
+    src="docs/assets/readme-desktop-session.png"
+    alt="Moa desktop UI showing an active coding session with streamed tool activity and output"
+    width="1050"
+  />
   <br/>
-  <em>Multiple sessions, tiled and running in parallel — each on its own model.</em>
+  <em>An active coding session on desktop: conversation, tool work, and results stay together.</em>
 </p>
 
+## The development machine stays put. You do not have to.
+
+A phone is not the best place to edit a codebase line by line. It is a very good place to
+stay in the loop.
+
+Moa's mobile interface lets you return to the same server-side sessions, see what the agent
+is doing, answer questions or permission prompts, send new direction, and stop or resume work.
+The repository, dependencies, credentials, and running processes remain on the development
+machine.
+
 <p align="center">
-  <img src="docs/assets/serve-mobile-session.png" alt="Moa web UI on mobile" width="300" />
+  <img
+    src="docs/assets/readme-mobile-session.png"
+    alt="Moa showing a running coding-agent session on an iPhone"
+    width="320"
+  />
   <br/>
-  <em>The same session, the full agent, in your pocket.</em>
+  <em>The same running session on an iPhone — progress and decisions without reopening the laptop.</em>
 </p>
 
-## What it feels like to use
+## See the work, not just a chat transcript
 
-Real things people do with Moa, from a browser — including a phone:
+Agent work quickly becomes more than one stream of messages. Moa can keep several sessions
+open in a pane grid, use a different model for each one, and show tool activity, delegated
+agents, usage, and attention state alongside the conversation.
 
-- **Send it a document, get an answer you can actually read.** Drop a PDF, a spec, a CSV, a
-  screenshot into the chat. The agent reads it — and can hand you back a file (a report, a chart,
-  an HTML page) that opens as a **live preview** right in the conversation, not a wall of text.
-- **Have it prove its work.** Wire up a Playwright MCP server and ask for end-to-end tests. The
-  agent drives a real browser, runs the flow, and **sends you back screenshots** showing what it saw.
-- **Give it a real dev loop.** "Add this feature": it spins up its own git **worktree**, brings up
-  **Docker**, builds, runs the tests, and comes back with the result — while you watch from the couch.
-- **Run a whole workbench at once.** Tile several sessions into panes, each on its own model, all
-  working in parallel. Fire something off, switch to another, come back when it's done.
-
-The agent shares files back to you (`send_file`), you attach files to it, it previews HTML and
-renders rich markdown — the browser is a real workspace, not a toy chat box.
-
-## Under the hood
-
-Everything above rides on a solid agent core:
-
-- **Multi-provider** — Anthropic and OpenAI, with model aliases to switch on the fly
-- **MCP** — connect external tool servers (Playwright, and whatever else you run), hot-reloadable
-- **Permissions** — `yolo`, `ask`, or AI-evaluated `auto` modes, with filesystem sandboxing
-- **Plan mode** — plan-then-execute with task tracking
-- **Goal mode** — autonomous maker→verifier loop that works until a read-only verifier judges it done
-- **Subagents** — spawn child agents, sync or async
-- **Sessions** — persist, resume and browse past conversations
-- **Checkpoint / undo** — revert file changes per agent turn
-- **Memory** — cross-session persistent project notes
-- **Context compaction** — automatic summarization as context grows
-- **Budget & limits** — per-run USD caps, turn and duration limits
-- **Voice input** — talk to your agent from the browser
-- **AGENTS.md** — project instructions discovered automatically
-
-Private by default behind [Tailscale](https://tailscale.com/) or localhost; opt-in token auth when
-you want more. Your keys, your code, your machine — nothing leaves your server but the model calls
-you make.
-
-Prefer the terminal? There's a full **TUI** too, sharing the exact same core.
+The goal is not to make you watch more logs. It is to make it obvious what is running, what
+finished, and what needs you.
 
 <p align="center">
-  <img src="docs/assets/tui-main.png" alt="Moa terminal UI" width="820" />
+  <img
+    src="docs/assets/readme-grid-live-dock.png"
+    alt="Moa multi-session grid with telemetry and the Live Dock showing delegated agents"
+    width="1050"
+  />
+  <br/>
+  <em>Parallel sessions with live telemetry and delegated work visible in the Live Dock.</em>
 </p>
+
+## Why self-host the agent?
+
+Moa runs on infrastructure you control rather than uploading your repository to a
+Moa-operated service.
+
+- **Use the environment you already have.** The agent works with the repository, shell,
+  compilers, containers, and project tools installed on the host.
+- **Choose your own access boundary.** Keep it on localhost, reach it through a private
+  network such as Tailscale, or place it behind your own authenticated reverse proxy.
+- **Keep operational state on your machine.** Session history, configuration, credentials,
+  and project memory are stored by your Moa installation.
+- **Use the provider you choose.** Moa talks to Anthropic or OpenAI from your machine and
+  does not add a separate hosted agent service in between.
+
+Self-hosted does **not** mean offline: prompts, selected code or file content, and tool results
+needed by the model are sent to the provider you configure. Review that provider's data
+policies and use Moa's permission and path controls for the level of access you want.
+
+## Built for a real development loop
+
+- **Work with the whole project.** Moa can inspect and edit files, run shell commands,
+  execute tests, search the repository, and use the development tools available on the host.
+- **Stay in control.** Choose `ask`, AI-evaluated `auto`, or permissive `yolo` permissions,
+  combine them with path scoping, and use checkpoints, budgets, and run limits.
+- **Delegate and parallelize.** Run multiple sessions or let an agent spawn synchronous or
+  asynchronous subagents whose activity can be inspected live.
+- **Exchange real artifacts.** Attach images, PDFs, source files, and other inputs; the agent
+  can return downloadable files, rich Markdown, images, and sandboxed HTML previews.
+- **Bring your own workflow.** Add MCP servers, custom script tools, verification commands,
+  reusable skills, and project instructions through `AGENTS.md`.
+
+For the complete capability reference, see the
+[Overview](docs/overview.md), [Tools](docs/tools.md), and
+[Configuration](docs/configuration.md) documentation.
+
+## Use the provider you already have
+
+Moa supports Anthropic and OpenAI.
+
+You can authenticate with a **Claude Pro or Max** or **ChatGPT Plus/Pro** subscription through
+OAuth, without configuring a separate API key for the main agent. Anthropic and OpenAI API keys
+are supported as well. Model availability and usage limits remain those of the provider account
+you use.
 
 ## Quick start
 
-```bash
-make build                       # → ./bin/moa
-
-# Sign in with your existing subscription (opens a browser)…
-moa -login anthropic             # Claude Pro/Max
-moa -login openai                # ChatGPT Plus/Pro  (or pick "API key")
-# …or just use an API key instead:
-export ANTHROPIC_API_KEY="..."   # or OPENAI_API_KEY
-
-moa serve                        # web UI at http://127.0.0.1:8080
-```
-
-Then open the printed URL. To reach it from your phone, put the server on your
-[Tailscale](https://tailscale.com/) network and browse to it from anywhere.
-
-Rather stay in the terminal?
+Prebuilt binaries are available from
+[GitHub Releases](https://github.com/ealeixandre/moa/releases/latest). To build from source,
+you need Go 1.25+ and Node.js/npm for the embedded web frontends:
 
 ```bash
-moa                     # interactive TUI
-moa -p "fix the tests"  # one-shot, headless
+git clone https://github.com/ealeixandre/moa.git
+cd moa
+
+make fe-install fe-next-install
+make build
+# → ./bin/moa
 ```
 
-See the [Quickstart](docs/quickstart.md) for install, authentication and first run.
+Authenticate with an existing subscription:
+
+```bash
+./bin/moa --login anthropic   # Claude Pro/Max OAuth
+./bin/moa --login openai      # ChatGPT Plus/Pro OAuth, or choose an API key
+```
+
+Or provide an API key directly:
+
+```bash
+export ANTHROPIC_API_KEY="..."
+# or:
+export OPENAI_API_KEY="..."
+```
+
+Start the web UI:
+
+```bash
+./bin/moa serve
+# → http://127.0.0.1:8080
+```
+
+To reach Moa from a phone, put the server and phone on the same private network. For example,
+with Tailscale:
+
+```bash
+export MOA_SERVE_TOKEN="<a-long-random-secret>"
+./bin/moa serve --host 0.0.0.0
+```
+
+Open the server's Tailscale IP from the phone. See the
+[Web UI security guide](docs/serve.md#security) for the token URL, MagicDNS
+`--allowed-hosts`, TLS, and reverse-proxy guidance.
+
+For complete installation, authentication, and first-run instructions, see the
+[Quickstart](docs/quickstart.md).
+
+## Security
+
+`moa serve` binds to `127.0.0.1` by default, but it does **not** enable authentication by
+default. Anyone who can reach an unauthenticated Serve port can control its agents.
+
+For remote access:
+
+1. Prefer localhost, Tailscale, or another private network boundary.
+2. Set `--token` or `MOA_SERVE_TOKEN` in addition to that boundary.
+3. Configure `--allowed-hosts` when accessing Moa through a hostname.
+4. Use TLS when the deployment or paired-device flow requires it.
+5. Do not expose an unauthenticated Moa port to a network.
+
+The token is defense in depth, not a replacement for an appropriate network boundary. Read
+[the full security documentation](docs/serve.md#security) before exposing Serve beyond localhost.
+
+## Prefer the terminal?
+
+The browser, TUI, and headless CLI share the same agent core and session model.
+
+```bash
+./bin/moa                       # interactive TUI
+./bin/moa -p "fix the tests"    # one-shot, headless
+```
+
+See [TUI Usage](docs/tui.md) and the [CLI Reference](docs/cli.md).
 
 ## Documentation
 
-| Doc | What it covers |
-|-----|---------------|
-| [Overview](docs/overview.md) | What Moa is, capabilities, how it works |
-| [Quickstart](docs/quickstart.md) | Install, authenticate, first run |
-| [Web UI](docs/serve.md) | `moa serve`, panes, mobile, voice, security |
-| [CLI Reference](docs/cli.md) | Flags, model aliases, examples |
-| [TUI Usage](docs/tui.md) | Slash commands, keybindings, plan mode |
-| [Configuration](docs/configuration.md) | Config files, fields, permissions, MCP |
-| [Tools](docs/tools.md) | Built-in tools, custom script tools, subagents |
-| [Architecture](docs/architecture.md) | Package map, event bus, runtime model |
+For installation details, configuration, tool behavior, limits, and security guidance, see the
+full documentation in `docs/`:
 
-## Build & test
+| Document | Reference |
+|---|---|
+| [Overview](docs/overview.md) | Capabilities, interfaces, runtime flow, and storage |
+| [Quickstart](docs/quickstart.md) | Requirements, build, authentication, and first run |
+| [Web UI](docs/serve.md) | Serve, panes, mobile use, attachments, voice, and security |
+| [CLI Reference](docs/cli.md) | Commands, flags, model aliases, and examples |
+| [TUI Usage](docs/tui.md) | Slash commands, keybindings, and interactive workflows |
+| [Configuration](docs/configuration.md) | Config files, permissions, sandboxing, models, and MCP |
+| [Tools](docs/tools.md) | Built-in tools, custom tools, subagents, and verification |
+| [Architecture](docs/architecture.md) | Package map, event bus, and runtime design |
+| [Releases](docs/releases.md) | Versioning, release process, and update checks |
 
-```bash
-make build        # compile binary
-make test         # run all tests
-make serve        # build + start web UI
-```
+## License
+
+Moa is available under the [MIT License](LICENSE).
