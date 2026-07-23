@@ -16,15 +16,13 @@
 
 > **“I did not build Moa to replace my computer. I built it because I could not always be at one.”**
 
-For a while, the amount of work I could do was limited by the time I could physically spend at a computer. I wanted to keep building, keep contributing, and still show up for the people who needed me.
+At some point my life stopped giving me long stretches at a desk. Some days I had two hours at the computer; some days, one. I tried the existing answers — remote-control apps for coding agents got me halfway, but sooner or later something always forced me back to the physical machine: a stuck process, an environment to bring up, a result I could not see from my phone.
 
-Moa changed that. The agent works on the machine where my code, repositories, and tools already live; I can follow it from my phone, make decisions, redirect a task, or return to the full desktop workspace whenever I need to.
+So I built Moa. The agent lives on the machine where my code, repositories, and tools already are, and I steer it from wherever I am. In a normal day it works in a Git worktree, brings up the project's Docker environment, runs the builds and tests, drives the app with Playwright and sends me screenshots as evidence, or exposes a port so I can try the result myself. When a 500 shows up in production, it investigates and we fix it together — from my phone.
 
-In my own workflow, that can mean sending an agent into a separate Git worktree, bringing up the Docker environment a project needs, running builds and tests, executing end-to-end tests with Playwright, and getting screenshots back as evidence of what it saw. I do not need to be sitting in front of the terminal for that work to keep moving.
+As I write this, I have not opened my laptop in three weeks, and I am putting in full days of real development work.
 
 The point is not to turn a phone into a tiny laptop. It is to stay in the loop while real development work happens on the machine built for it.
-
-Coding agents are good at work that takes longer than a prompt: exploring a repository, editing files, running builds, waiting on tests, delegating tasks, and asking for the occasional decision. But most agent interfaces still expect you to stay in front of the terminal while that work unfolds.
 
 Moa separates **where the agent works** from **where you steer it**. Run it on a workstation or development server that already has your repositories and toolchain, then open the same workspace in a browser. Start a task at your desk, check its progress from your phone, answer a permission request, or redirect the session without moving the project to another machine.
 
