@@ -13,6 +13,26 @@
   flex: 1;
 }
 
+/* The transcript enters a headerless viewport. Cover its hard top edge with
+   the same surface that extends through the iOS safe area, then dissolve into
+   the scrollable content. It is visual only: gestures and controls remain
+   available beneath it. */
+.mstream::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: var(--z-sticky);
+  height: calc(env(safe-area-inset-top) + var(--space-6));
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    var(--crust) 0,
+    var(--crust) env(safe-area-inset-top),
+    color-mix(in srgb, var(--crust) 72%, transparent) calc(env(safe-area-inset-top) + var(--space-2)),
+    transparent 100%
+  );
+}
+
 .mstream-system {
   text-align: center;
   font-family: var(--mono);

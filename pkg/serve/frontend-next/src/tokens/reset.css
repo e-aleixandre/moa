@@ -71,6 +71,9 @@ html.mobile-locked #root {
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
+  /* The installed-PWA safe area and any iOS overscroll must continue the
+     headerless conversation surface instead of revealing the document base. */
+  background: var(--crust);
   /* iOS: stop rubber-band / overscroll chaining to the document. */
   overscroll-behavior: none;
 }
