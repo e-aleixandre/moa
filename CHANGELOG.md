@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-23
+
+### Added
+
+- Mobile conversations now use a headerless, four-door status line for context and usage, model and thinking, permissions, and sessions.
+- A live activity line appears above the mobile composer while the agent is working, thinking, or waiting.
+- The mobile session drawer includes a global Settings handoff for notification preferences.
+
+### Changed
+
+- Mobile session controls now use composer-safe bottom sheets, including dedicated context, current-session, and permission flows.
+- The mobile model selector keeps the current model visible and scales to larger catalogs with filtering and collapsible provider groups.
+
 ## [0.11.0] - 2026-07-21
 
 ### Added
