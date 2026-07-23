@@ -13,7 +13,10 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden; /* wide blocks (code/table) scroll inside their own box */
-  padding: var(--space-4) var(--space-4) var(--space-2);
+  /* The persistent header is gone (STATUSLINE-EXPLICIT-SESSIONS): the stream now
+     owns the top safe-area inset so the first message clears the iOS status bar
+     in an installed PWA. */
+  padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-4) var(--space-2);
 }
 
 /* The user's waypoint opens the stream: no extra top margin. */
@@ -68,7 +71,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: var(--space-6);
+  padding: calc(var(--space-6) + env(safe-area-inset-top)) var(--space-6) var(--space-6);
   text-align: center;
   color: var(--overlay0);
   font-size: var(--text-sm);
@@ -83,7 +86,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: var(--space-8) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+  padding: calc(var(--space-8) + env(safe-area-inset-top)) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
   gap: var(--space-2);
   text-align: left;
 }

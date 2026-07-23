@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Plus, MoreHorizontal } from "lucide-preact";
+import { Plus, MoreHorizontal, Settings } from "lucide-preact";
 import { StateDot } from "../../../primitives/index.js";
+import { Sheet, NotificationSettings } from "../../../components/index.js";
 import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
 import "./SessionDrawer.css";
 
@@ -190,6 +191,7 @@ export function SessionDrawer({
   onCloseSession,
   onReopenSession,
   onDeleteSession,
+  soundEnabled = false,
 }) {
   const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
@@ -197,6 +199,14 @@ export function SessionDrawer({
   const closeTimerRef = useRef(null);
   const [visible, setVisible] = useState(open);
   const [entered, setEntered] = useState(open);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // The global Settings sheet is a secondary destination reached from the
+  // drawer footer; close it whenever the drawer itself closes so it never
+  // lingers over a dismissed drawer.
+  useEffect(() => {
+    if (!open) setSettingsOpen(false);
+  }, [open]);
 
   // Enter/leave state machine driven by `open`. Enter: mount, then flip
   // `entered` on the next frame so the .is-open transition runs. Leave: drop
@@ -347,10 +357,27 @@ export function SessionDrawer({
             />
           ))}
         </div>
-        <button type="button" class="sdrawer-new" onClick={() => onNew?.()}>
-          <Plus size={15} aria-hidden="true" /> New session
-        </button>
+        <div class="sdrawer-foot">
+          <button type="button" class="sdrawer-new" onClick={() => onNew?.()}>
+            <Plus size={15} aria-hidden="true" /> New session
+          </button>
+          <button
+            type="button"
+            class="sdrawer-settings"
+            onClick={() => setSettingsOpen(true)}
+            aria-haspopup="dialog"
+          >
+            <Settings size={14} aria-hidden="true" /> Settings
+          </button>
+        </div>
       </div>
+
+      <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings">
+        <div class="sdrawer-settings-body">
+          <div class="sdrawer-settings-lbl">Notifications</div>
+          <NotificationSettings soundEnabled={soundEnabled} />
+        </div>
+      </Sheet>
     </div>
   );
 }

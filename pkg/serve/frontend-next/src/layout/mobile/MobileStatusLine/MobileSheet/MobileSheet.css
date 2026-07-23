@@ -1,0 +1,120 @@
+/* MobileSheet — the approved Four Doors bottom-sheet (future-control-ia/a.html →
+   fx.css .fx-scrim / .fx-sheet). It slides UP from the bottom and OCCUPIES the
+   bottom of the mobile container exactly like the SessionDrawer: the scrim dims
+   the WHOLE surface (transcript AND composer) and the sheet's lower edge sits
+   flush at the container bottom (bottom: 0), so the composer/input is never left
+   exposed under it and there is no arbitrary gap. Device feedback overrode the
+   mock's "stop above the composer" (--m-sheet-bottom) behaviour. Canonical
+   tokens only; radius = --radius-lg, the same shadow/blur grammar as SessionDrawer. */
+
+.msheet-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-sheet);
+  background: rgba(17, 17, 27, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration) var(--ease);
+}
+.msheet-scrim.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msheet-scrim.is-drag {
+  transition: none;
+}
+
+.msheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: calc(100% - env(safe-area-inset-top) - 24px);
+  z-index: var(--z-sheet);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--mantle);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  border-top: 1px solid var(--surface1);
+  box-shadow: 0 -24px 60px rgba(0, 0, 0, 0.5);
+  transform: translateY(130%);
+  will-change: transform;
+  transition: transform 0.26s var(--ease);
+}
+.msheet.is-open {
+  transform: translateY(0);
+}
+.msheet.is-drag {
+  transition: none;
+}
+
+.msheet-grab {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 10px 0 2px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+.msheet-grab::after {
+  content: "";
+  position: absolute;
+  inset: -12px 0;
+}
+.msheet-grab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.msheet-grab-bar {
+  width: 44px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--surface2);
+}
+
+.msheet-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 4px 18px 0;
+  touch-action: none;
+}
+.msheet-title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+.msheet-scope {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--overlay0);
+  white-space: nowrap;
+}
+
+.msheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 10px 18px calc(20px + env(safe-area-inset-bottom));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msheet-scrim,
+  .msheet {
+    transition: none;
+  }
+}

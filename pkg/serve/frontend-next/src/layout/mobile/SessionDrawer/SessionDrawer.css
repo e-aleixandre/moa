@@ -285,15 +285,25 @@
 }
 .sdcard-action-danger { color: var(--red); }
 
-.sdrawer-new {
+/* Footer — the primary + secondary actions below the list (the desktop Spine
+   pattern). New session leads; Settings is a quiet secondary that opens the
+   global settings sheet. Two quiet footer actions max — nothing per-session. */
+.sdrawer-foot {
   flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  margin: 0 14px calc(16px + env(safe-area-inset-bottom));
+}
+
+.sdrawer-new {
+  flex: 1;
   cursor: pointer;
   border: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  margin: 0 14px calc(16px + env(safe-area-inset-bottom));
   padding: 14px;
   color: var(--crust);
   font-weight: var(--weight-bold);
@@ -310,6 +320,55 @@
 .sdrawer-new:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* Settings — quiet secondary; opens the global settings sheet (notifications). */
+.sdrawer-settings {
+  flex: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 14px var(--space-4);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  background: none;
+  color: var(--overlay1);
+  font-family: var(--font);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-md);
+}
+.sdrawer-settings:hover,
+.sdrawer-settings:active {
+  background: var(--surface0);
+  color: var(--text);
+}
+.sdrawer-settings:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Global settings sheet body — a labelled section wrapping NotificationSettings
+   (which ships as a bordered dropdown; inside the sheet it drops its own chrome
+   and fills the width). Global scope only — no per-session rows. */
+.sdrawer-settings-lbl {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--overlay0);
+  margin-bottom: var(--space-3);
+}
+.sdrawer-settings-body .notif-dropdown {
+  width: 100%;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  padding: 0;
+}
+.sdrawer-settings-body .notif-dropdown .notif-title {
+  display: none; /* the section label already says "Notifications" */
 }
 
 @media (prefers-reduced-motion: reduce) {

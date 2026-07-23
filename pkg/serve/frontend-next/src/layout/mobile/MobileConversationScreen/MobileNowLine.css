@@ -1,0 +1,110 @@
+/* MobileNowLine — the ephemeral activity now-line, a flex sibling (flex:none)
+   between .mstream (flex:1) and .mcomposer. Because the stream is the flexible
+   child, the now-line's mere presence REDUCES the stream's height: it pushes the
+   transcript up rather than overlaying it, and never covers or tap-blocks the
+   composer below. Absent when idle (the component returns null → removed from
+   flow).
+
+   Deliberately NOT a header or a rail: no fill, no box, no full-width border. It
+   shares the stream's background and reads as the last, living line of the
+   conversation. Reuses the product's live-activity grammar verbatim (the
+   SubagentView NowLine: running dot + work-shimmer text + elapsed). */
+.mnowline {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* aligns with the stream's horizontal padding (--space-4) so the dot sits
+     under the transcript's left edge, not indented like chrome */
+  padding: 5px var(--space-4) 7px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  overflow: hidden;
+  animation: mnowline-in 0.2s var(--ease);
+}
+
+@keyframes mnowline-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.mnowline-act {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--subtext0);
+}
+
+.mnowline-act::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--blue);
+  flex: none;
+}
+
+/* the activity phrase — overflow-safe, with the exact work-shimmer sweep the
+   StatusStrip / SubagentView use. Long actions truncate with an ellipsis rather
+   than clipping mid-glyph or reflowing the composer. */
+.mnowline-act .txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mnowline-act .txt.is-live {
+  background: linear-gradient(
+    90deg,
+    var(--subtext0) 0%,
+    var(--subtext0) 35%,
+    var(--sky) 50%,
+    var(--subtext0) 65%,
+    var(--subtext0) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+  animation: work-shimmer 2.5s ease-in-out infinite;
+}
+
+/* elapsed timer — the honest progress signal (formatElapsed: "12s", "1m03s").
+   flex:none, tabular, quiet; never truncates. */
+.mnowline-elapsed {
+  flex: none;
+  color: var(--overlay0);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* waiting / permission — the run is parked on you, so nothing is progressing:
+   the shimmer stops (motion would imply work), the dot goes amber (the same
+   attention hue as state-dot.permission / the Sessions attn badge), and there
+   is no elapsed counter. A quiet echo of the loud inline PermissionPrompt. */
+.mnowline.is-waiting .mnowline-act {
+  color: var(--yellow);
+}
+.mnowline.is-waiting .mnowline-act::before {
+  background: var(--yellow);
+}
+
+/* reduced motion — kill the shimmer AND the reveal slide; the now-line still
+   appears/disappears, just statically (parity with the app's handling of
+   .work.is-live). */
+@media (prefers-reduced-motion: reduce) {
+  .mnowline {
+    animation: none;
+  }
+  .mnowline-act .txt.is-live {
+    animation: none;
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--subtext0);
+  }
+}

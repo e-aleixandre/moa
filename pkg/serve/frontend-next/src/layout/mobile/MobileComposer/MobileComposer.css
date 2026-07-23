@@ -8,11 +8,12 @@
    the desktop `.composer-wrap` CSS is never overridden. */
 .mcomposer {
   flex: none;
-  /* Bottom = a small fixed gap PLUS the home-indicator safe area. In an
-     installed PWA env(safe-area-inset-bottom) already reserves ~34px for the
-     home indicator, so keep the fixed part tight (6px) — a larger cushion here
-     stacks on top of the inset and wastes a visible strip below the composer.
-     In a browser (no inset) 6px is still an acceptable gap above the edge. */
+  /* Bottom = a small fixed gap PLUS the home-indicator safe area. This inset
+     sits below whatever the composer stacks on top of it — the persistent
+     status line (main conversation) or the subagent now-line — so neither needs
+     to re-add it. In an installed PWA env(safe-area-inset-bottom) reserves ~34px
+     for the home indicator; keep the fixed part tight so it doesn't stack into a
+     wasted strip. */
   padding: var(--space-2) var(--space-3)
     calc(var(--space-1) + 2px + env(safe-area-inset-bottom));
 }

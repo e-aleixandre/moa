@@ -1,44 +1,46 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import { Plus } from "lucide-preact";
 import { store } from "../../../data/store.js";
 import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
-import { focusedSession, focusedSessionId, deriveModelSpecs, matchSelectedModel } from "../../../data/selectors.js";
+import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
-import { openPersistedSubagent, configureSession, archiveSession, deleteSession, resumeSession } from "../../../data/session-actions.js";
-import { api } from "../../../data/api.js";
-import { mobileModelLabel, shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
+import { openPersistedSubagent, archiveSession, deleteSession, resumeSession } from "../../../data/session-actions.js";
+import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
-import { Composer } from "../../Composer/Composer.jsx";
-import { PermissionPrompt, AskUserPrompt, McpBanner, ModelSelector, Sheet } from "../../../components/index.js";
-import { MobileHeader } from "../MobileHeader/MobileHeader.jsx";
-import { SessionStrip } from "../SessionStrip/SessionStrip.jsx";
+import { PermissionPrompt, AskUserPrompt, McpBanner } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
-import { NotificationSettings } from "../../../components/index.js";
-import { registerOverlay } from "../../../data/overlays.js";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
+import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { liveTrayAgents } from "../../../data/stream-model.js";
 import "./MobileConversationScreen.css";
 
 // MobileConversationScreen — the CONNECTED root container of the mobile
-// conversation screen (5I). It replaces the 4A mock (hardcoded SESSIONS /
-// READ_ROWS / conversation) with the SAME store-driven wiring as the desktop
-// ConversationScreen (5C): subscribe to the store, derive the focused (active)
-// session, project its stream, and pass real props down to the presentational
-// mobile chrome (header / strip / drawer) + the SHARED content components (via
-// MobileStream) + the REAL Composer.
+// conversation screen. It subscribes to the store, derives the focused (active)
+// session, projects its stream, and passes real props down to the SHARED
+// content components (via MobileStream) + the REAL Composer + the persistent
+// mobile chrome (MobileStatusLine, hosted inside MobileComposer).
+//
+// STATUSLINE-EXPLICIT-SESSIONS / FOUR DOORS: the old MobileHeader + horizontal
+// SessionStrip are gone. The persistent chrome is the status line under the
+// composer (four single-scope doors); the ephemeral activity now-line
+// (MobileNowLine) sits directly above the composer while the agent works. The
+// screen owns only the OVERLAYS it opens (the SessionDrawer and the
+// RewindTimeline) and the store→props wiring. Model/thinking, permissions, path,
+// usage all live behind the status line's doors (MobileStatusLine); global
+// settings (notifications) live behind the SessionDrawer footer. All reuse the
+// real shared components — so the screen no longer manages those overlays itself.
 //
 // Architecture (OPTION B): the mobile screen reuses the desktop's data
 // projection (projectStream) and shared components; the only divergence is the
 // mobile layout chrome (MobileStream renders the SAME tool-group card, just
-// denser). No
-// data logic is duplicated. The mock specimen used by the design gallery now
-// lives in mobile-gallery.jsx (see MobileConversationSpecimen there).
+// denser). No data logic is duplicated. The mock specimen used by the design
+// gallery now lives in mobile-gallery.jsx (see MobileConversationSpecimen).
 
 // relAge — coarse relative age from an `updated` epoch (mirrors the desktop
 // ConversationScreen's spineSessions helper; kept local to avoid a shared
@@ -75,19 +77,18 @@ function sessionBrief(sess) {
   return sess.state || "idle";
 }
 
-// stripSessions builds the horizontal SessionStrip's chip list: active (non-
-// saved, non-archived) sessions, newest first. `needs` = a blocking prompt.
-function stripSessions(sessions) {
-  return Object.values(sessions)
-    .filter((s) => !s.archived && s.state !== "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({
-      id: s.id,
-      name: sessionTitle(s),
-      state: sessionDotState(s),
-      unseen: !!s.unseen,
-      needs: !!(s.pendingPerm || s.pendingAsk || s.state === "permission"),
-    }));
+// aggregateAttention counts OTHER sessions (excluding the active one) that are
+// blocked on the user — the exact "needs you" datum the desktop GridToolbar's
+// attn-lamp consumes (permission ∪ error), so the mobile Sessions badge and the
+// desktop lamp never disagree. It reuses the same per-session "needs" predicate
+// the drawer cards use (pendingPerm / pendingAsk / permission), plus error.
+function aggregateAttention(sessions, activeId) {
+  return Object.values(sessions).filter(
+    (s) =>
+      !s.archived &&
+      s.id !== activeId &&
+      (s.pendingPerm || s.pendingAsk || s.state === "permission" || s.state === "error")
+  ).length;
 }
 
 // drawerSessions builds the full bottom-sheet list: active first (newest), then
@@ -144,18 +145,6 @@ export function MobileConversationScreen() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [rewindOpen, setRewindOpen] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
-  const notifAnchorRef = useRef(null);
-  // Model + thinking sheet (TELEMETRY-SETTINGS-REDESIGN §3.1): the header
-  // ModelPill is tappable on mobile too, opening the shared ModelSelector inside
-  // a Sheet (which brings overlay-history / back-gesture / scroll-lock). Models
-  // are fetched lazily on first open, same as the desktop popover.
-  const [modelOpen, setModelOpen] = useState(false);
-  const [models, setModels] = useState(null); // null = not fetched yet
-  useEffect(() => {
-    if (!modelOpen || models) return;
-    api("GET", "/api/models").then(setModels).catch(() => setModels([]));
-  }, [modelOpen, models]);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
@@ -178,31 +167,15 @@ export function MobileConversationScreen() {
     return () => vv.removeEventListener("resize", onResize);
   }, []);
 
-  const onSelect = (id) => setActiveSession(id);
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
   const onNew = () => { openPalette("create"); setDrawerOpen(false); };
 
-  useEffect(() => { setRewindOpen(false); setModelOpen(false); }, [activeId]);
+  useEffect(() => { setRewindOpen(false); }, [activeId]);
 
-  // Notifications popover (Bell in the header) — device-wide push + sound (5N).
-  // Same click-outside + Escape wiring as the desktop head popovers.
-  useEffect(() => {
-    if (!notifOpen) return;
-    const unregister = registerOverlay("mconv-notif-popover");
-    const onDocDown = (e) => {
-      if (notifAnchorRef.current && !notifAnchorRef.current.contains(e.target)) setNotifOpen(false);
-    };
-    const onKeyDown = (e) => { if (e.key === "Escape") setNotifOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      unregister();
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [notifOpen]);
-
-  const strip = stripSessions(state.sessions);
+  // Aggregate cross-session attention for the status line's Sessions control:
+  // OTHER sessions blocked on the user (excludes the active one, whose block is
+  // the inline PermissionPrompt in the conversation).
+  const attnCount = aggregateAttention(state.sessions, activeId);
   const { list: drawerList, activeCount, savedCount } = drawerSessions(state.sessions, activeId);
 
   let body;
@@ -306,7 +279,16 @@ export function MobileConversationScreen() {
               forceCompact={kbdOpen}
             />
           )}
-          <MobileComposer key={session.id} session={session} usage={state.usage} />
+          <MobileNowLine session={session} />
+          <MobileComposer
+            key={session.id}
+            session={session}
+            usage={state.usage}
+            attnCount={attnCount}
+            onOpenSessions={() => setDrawerOpen(true)}
+            onRewind={() => setRewindOpen(true)}
+            rewindDisabled={session.state === "running" || session.state === "permission"}
+          />
         </>
       );
     }
@@ -314,31 +296,6 @@ export function MobileConversationScreen() {
 
   return (
     <div class="mconv">
-      <MobileHeader
-        state={session ? session.state || "idle" : "idle"}
-        title={session ? sessionTitle(session) : "moa"}
-        model={session ? mobileModelLabel(session.model) : ""}
-        level={session ? (session.thinking === "none" ? "off" : (session.thinking || "off")) : "off"}
-        path={session ? shortPath(session.cwd) || session.cwd || "" : ""}
-        ctx={session ? session.contextPercent : undefined}
-        onOpenSessions={() => setDrawerOpen(true)}
-        onRewind={session ? () => setRewindOpen(true) : undefined}
-        rewindDisabled={session ? session.state === "running" || session.state === "permission" : true}
-        onNotifications={() => setNotifOpen((v) => !v)}
-        notifAnchorRef={notifAnchorRef}
-        notifPopover={notifOpen && <NotificationSettings soundEnabled={state.soundEnabled} />}
-        onModelClick={session ? () => setModelOpen(true) : undefined}
-        empty={loaded && !session}
-      />
-      {strip.length > 1 && (
-        <SessionStrip
-          sessions={strip}
-          activeId={activeId}
-          onSelect={onSelect}
-          onNew={onNew}
-        />
-      )}
-
       {body}
 
       <SessionDrawer
@@ -352,6 +309,7 @@ export function MobileConversationScreen() {
         onCloseSession={(id) => archiveSession(id)}
         onReopenSession={(id) => resumeSession(id)}
         onDeleteSession={(id) => deleteSession(id)}
+        soundEnabled={state.soundEnabled}
       />
       {session && (
         <RewindTimeline
@@ -360,22 +318,6 @@ export function MobileConversationScreen() {
           sessionId={session.id}
         />
       )}
-      {session && (() => {
-        const specs = deriveModelSpecs(models);
-        const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
-        return (
-          <Sheet open={modelOpen} onClose={() => setModelOpen(false)} title="Model & thinking">
-            <ModelSelector
-              models={specs}
-              selected={matchSelectedModel(specs, session.model)}
-              thinking={thinking}
-              embedded
-              onSelect={(spec) => configureSession(session.id, { model: spec })}
-              onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
-            />
-          </Sheet>
-        );
-      })()}
     </div>
   );
 }
