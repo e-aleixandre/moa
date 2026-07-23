@@ -122,6 +122,90 @@
   background: var(--peach);
 }
 
+/* ── Pinned CURRENT row — the session's model, visible without scrolling
+   (mobile sheet only: renders when the caller passes sessionModel). Also the
+   home of the custom/unlisted model fallback ("custom · not in catalog"). ── */
+
+.model-selector .cur-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  background: color-mix(in srgb, var(--surface0) 45%, transparent);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+}
+
+.model-selector .cur-row .cur-lbl {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.model-selector .cur-row .cur-name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-selector .cur-row .cur-sub {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay1);
+}
+
+/* ── Filter field — appears only above the large-catalog threshold. 16px font
+   is deliberate: iOS auto-zooms focused inputs below 16px (PWA rule). ── */
+
+.model-selector .model-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  color: var(--overlay0);
+}
+
+.model-selector .model-filter:focus-within {
+  border-color: var(--surface2);
+}
+
+.model-selector .model-filter input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: var(--leading-tight);
+}
+
+.model-selector .model-filter input::placeholder {
+  color: var(--overlay0);
+}
+
+.model-selector .model-empty {
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  text-align: center;
+}
+
 /* ── 1b. Model grid — chips grouped by provider ── */
 
 .model-selector .model-block {
@@ -141,6 +225,44 @@
   text-transform: uppercase;
   color: var(--overlay0);
   margin: 0 0 var(--space-1);
+}
+
+/* Collapsed provider group (large catalogs) — the whole header is the expand
+   target; ≥44px hit height without visual bulk. */
+.model-selector .prov-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--space-1) var(--space-2);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--overlay0);
+  font: inherit;
+  text-align: left;
+}
+
+.model-selector .prov-toggle:hover {
+  background: color-mix(in srgb, var(--surface0) 45%, transparent);
+}
+
+.model-selector .prov-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.model-selector .prov-toggle .prov-lbl {
+  margin: 0;
+}
+
+.model-selector .prov-toggle .prov-count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay1);
 }
 
 /* Air between provider groups (not before the first). The label sits at the top

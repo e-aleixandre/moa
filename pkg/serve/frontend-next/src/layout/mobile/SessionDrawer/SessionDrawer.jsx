@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings } from "lucide-preact";
 import { StateDot } from "../../../primitives/index.js";
-import { Sheet, NotificationSettings } from "../../../components/index.js";
 import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
+import { openOverlay } from "../../../data/overlay-history.js";
 import "./SessionDrawer.css";
 
 const FOCUSABLE_SELECTOR =
@@ -180,32 +180,53 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
 // release the hook animates to rest and, when it settles closed, calls
 // `onClose` (spring-back to open calls nothing), and we clear the inline styles
 // once the committed CSS state has taken over.
+//
+// Global Settings is NOT rendered here: the footer's ⚙ button only signals
+// `onSettings` and the parent screen performs a sheet HANDOFF — the drawer
+// fully exits, then the global Settings bottom-sheet slides up in its place
+// (one overlay at a time, the approved mock's closeAll→open grammar). The
+// `onClosed` callback fires once the leave animation has settled (mirroring
+// MobileSheet.onClosed) so the parent can sequence that handoff without
+// stacking overlays or racing the shared overlay-history back()/popstate.
 export function SessionDrawer({
   open,
   onClose,
+  onClosed,
   sessions = [],
   activeCount = 0,
   savedCount = 0,
   onSelect,
   onNew,
+  onSettings,
   onCloseSession,
   onReopenSession,
   onDeleteSession,
-  soundEnabled = false,
 }) {
   const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeTimerRef = useRef(null);
+  const closeOverlayRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
+  const wasOpenRef = useRef(open);
   const [visible, setVisible] = useState(open);
   const [entered, setEntered] = useState(open);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // The global Settings sheet is a secondary destination reached from the
-  // drawer footer; close it whenever the drawer itself closes so it never
-  // lingers over a dismissed drawer.
+  // Register with the shared overlay-history stack whenever open toggles, so
+  // the browser/PWA back gesture closes the drawer instead of navigating away
+  // (same contract as Sheet/MobileSheet). The effect cleanup consumes the
+  // history entry on every close path — including swipe-dismiss, which calls
+  // onClose directly from the hook — and the returned close() is idempotent.
   useEffect(() => {
-    if (!open) setSettingsOpen(false);
+    if (!open) return undefined;
+    closeOverlayRef.current = openOverlay("session-drawer", () => onCloseRef.current?.());
+    return () => {
+      closeOverlayRef.current?.();
+      closeOverlayRef.current = null;
+    };
   }, [open]);
 
   // Enter/leave state machine driven by `open`. Enter: mount, then flip
@@ -218,6 +239,7 @@ export function SessionDrawer({
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (open) {
+      wasOpenRef.current = true;
       clearTimeout(closeTimerRef.current);
       setVisible(true);
       if (reduce) {
@@ -228,10 +250,22 @@ export function SessionDrawer({
       }
     } else {
       setEntered(false);
+      // Fire onClosed only on a real open→close transition, once the drawer
+      // has fully dismissed — so the parent can hand off to the global
+      // Settings sheet without stacking it above the outgoing drawer.
+      const fireClosed = () => {
+        if (!wasOpenRef.current) return;
+        wasOpenRef.current = false;
+        onClosedRef.current?.();
+      };
       if (reduce) {
         setVisible(false);
+        fireClosed();
       } else {
-        closeTimerRef.current = setTimeout(() => setVisible(false), 220);
+        closeTimerRef.current = setTimeout(() => {
+          setVisible(false);
+          fireClosed();
+        }, 220);
       }
     }
     return undefined;
@@ -261,6 +295,7 @@ export function SessionDrawer({
     if (!open) return;
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
+        closeOverlayRef.current?.();
         onClose?.();
         return;
       }
@@ -310,7 +345,10 @@ export function SessionDrawer({
   if (!visible && !dragging) return null;
 
   const onVeilClick = (e) => {
-    if (e.target === e.currentTarget) onClose?.();
+    if (e.target === e.currentTarget) {
+      closeOverlayRef.current?.();
+      onClose?.();
+    }
   };
 
   const isOpen = entered && !dragging;
@@ -334,7 +372,10 @@ export function SessionDrawer({
           type="button"
           class="sdrawer-grab"
           aria-label="Close sessions"
-          onClick={() => onClose?.()}
+          onClick={() => {
+            closeOverlayRef.current?.();
+            onClose?.();
+          }}
           {...grabBind}
         >
           <span class="sdrawer-grab-bar" aria-hidden="true" />
@@ -364,20 +405,13 @@ export function SessionDrawer({
           <button
             type="button"
             class="sdrawer-settings"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => onSettings?.()}
             aria-haspopup="dialog"
           >
             <Settings size={14} aria-hidden="true" /> Settings
           </button>
         </div>
       </div>
-
-      <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings">
-        <div class="sdrawer-settings-body">
-          <div class="sdrawer-settings-lbl">Notifications</div>
-          <NotificationSettings soundEnabled={soundEnabled} />
-        </div>
-      </Sheet>
     </div>
   );
 }

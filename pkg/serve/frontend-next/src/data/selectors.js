@@ -42,7 +42,7 @@ export function modelAccent(model) {
 
 // deriveModelSpecs maps /api/models entries ({id, name, provider, alias?,
 // max_input?}) into the shape the model grid expects: {id, name, provider,
-// codename, sub, accent}. `id` here is the full "provider/id" spec
+// codename, sub, accent, alias}. `id` here is the full "provider/id" spec
 // configureSession sends over the wire (matches the old SettingsDropdown's
 // `m.provider + '/' + m.id`). `codename` is the one-word vocabulary the rest
 // of the UI already uses (modelCodename — Opus/Sonnet/Sol/Terra…); models
@@ -51,8 +51,9 @@ export function modelAccent(model) {
 // codename" case from MODEL-SELECTOR-ALT-SPEC-FABLE §1b). `sub` is the rest of
 // the name (vendor word + codename stripped) plus the context window, e.g.
 // "4.8 · 1M ctx" for "Claude Opus 4.8", or just the context when the codename
-// swallowed the whole name. Shared by the desktop ChatHead popover and the
-// mobile model sheet.
+// swallowed the whole name. `alias` is the backend's shortest CLI alias
+// ("sol", "codex"…), kept so the selector's filter matches it. Shared by the
+// desktop ChatHead popover and the mobile model sheet.
 export function deriveModelSpecs(models) {
   return (models || []).map((m) => {
     const codename = modelCodename(m.name) || m.name || m.id;
@@ -67,6 +68,7 @@ export function deriveModelSpecs(models) {
       codename,
       sub,
       accent: modelAccent(m.name),
+      alias: m.alias || '',
     };
   });
 }

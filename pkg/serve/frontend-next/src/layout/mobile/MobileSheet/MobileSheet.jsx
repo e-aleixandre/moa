@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { useSheetDismiss } from "../../../../hooks/useSheetDismiss.js";
-import { openOverlay } from "../../../../data/overlay-history.js";
+import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
+import { openOverlay } from "../../../data/overlay-history.js";
 import "./MobileSheet.css";
 
 const FOCUSABLE_SELECTOR =

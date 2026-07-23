@@ -36,6 +36,15 @@ test('deriveModelSpecs: missing max_input drops the context segment (no bogus "0
   expect(specs[0].sub).not.toContain('ctx');
 });
 
+test('deriveModelSpecs: keeps the backend alias (empty string when absent) for the filter', () => {
+  const specs = deriveModelSpecs([
+    { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'openai', alias: 'sol', max_input: 1_050_000 },
+    { id: 'custom-model', name: 'Custom Model', provider: 'openai' },
+  ]);
+  expect(specs[0].alias).toBe('sol');
+  expect(specs[1].alias).toBe('');
+});
+
 test('matchSelectedModel: matches by exact or short display name', () => {
   const specs = deriveModelSpecs([
     { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'openai', max_input: 1_050_000 },

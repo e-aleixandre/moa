@@ -248,6 +248,29 @@
   box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
 }
 
+/* Global Settings sheet body (drawer footer → sheet handoff) — a labelled
+   section wrapping NotificationSettings, which ships as a bordered dropdown;
+   inside the sheet it sheds its own chrome and fills the width. Global scope
+   only — no per-session rows. */
+.mconv-settings-lbl {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--overlay0);
+  margin-bottom: var(--space-3);
+}
+.mconv-settings-body .notif-dropdown {
+  width: 100%;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  padding: 0;
+}
+.mconv-settings-body .notif-dropdown .notif-title {
+  display: none; /* the section label already says "Notifications" */
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mconv-empty-recent,
   .mconv-empty-browse,

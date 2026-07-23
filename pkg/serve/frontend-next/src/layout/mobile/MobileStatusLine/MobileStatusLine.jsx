@@ -13,7 +13,7 @@ import {
 import { deriveModelSpecs, matchSelectedModel, modelAccent } from "../../../data/selectors.js";
 import { configureSession } from "../../../data/session-actions.js";
 import { shortPath, modelCodename, shortModel } from "../../../data/util/format.js";
-import { MobileSheet } from "./MobileSheet/MobileSheet.jsx";
+import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import "./MobileStatusLine.css";
 
 // MobileStatusLine — the persistent mobile chrome (FOUR DOORS), literal parity
@@ -296,6 +296,7 @@ export function MobileStatusLine({
             selected={matchSelectedModel(specs, session.model)}
             thinking={thinking}
             embedded
+            sessionModel={session.model || ""}
             onSelect={(spec) => configureSession(session.id, { model: spec })}
             onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
           />

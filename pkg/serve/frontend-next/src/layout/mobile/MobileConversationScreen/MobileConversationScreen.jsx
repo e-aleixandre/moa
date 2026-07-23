@@ -1,4 +1,4 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { Plus } from "lucide-preact";
 import { store } from "../../../data/store.js";
 import { updateSession } from "../../../data/store.js";
@@ -9,9 +9,10 @@ import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, archiveSession, deleteSession, resumeSession } from "../../../data/session-actions.js";
 import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
-import { PermissionPrompt, AskUserPrompt, McpBanner } from "../../../components/index.js";
+import { PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
+import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileNowLine } from "./MobileNowLine.jsx";
@@ -145,6 +146,14 @@ export function MobileConversationScreen() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [rewindOpen, setRewindOpen] = useState(false);
+  // Global Settings bottom-sheet, reached from the drawer footer via a sheet
+  // HANDOFF: tapping ⚙ closes the drawer, and only once the drawer's leave
+  // animation has settled (onClosed) does the Settings sheet slide up — one
+  // overlay at a time, never stacked (same pattern as the status line's Rewind
+  // handoff). A plain drawer close leaves the pending flag false and hands
+  // nothing off. Closing Settings returns to the conversation, not the drawer.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsPendingRef = useRef(false);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
@@ -169,6 +178,15 @@ export function MobileConversationScreen() {
 
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
   const onNew = () => { openPalette("create"); setDrawerOpen(false); };
+  const onSettingsFromDrawer = () => {
+    settingsPendingRef.current = true;
+    setDrawerOpen(false);
+  };
+  const onDrawerClosed = () => {
+    if (!settingsPendingRef.current) return;
+    settingsPendingRef.current = false;
+    setSettingsOpen(true);
+  };
 
   useEffect(() => { setRewindOpen(false); }, [activeId]);
 
@@ -301,16 +319,28 @@ export function MobileConversationScreen() {
       <SessionDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
+        onClosed={onDrawerClosed}
         sessions={drawerList}
         activeCount={activeCount}
         savedCount={savedCount}
         onSelect={onSelectFromDrawer}
         onNew={onNew}
+        onSettings={onSettingsFromDrawer}
         onCloseSession={(id) => archiveSession(id)}
         onReopenSession={(id) => resumeSession(id)}
         onDeleteSession={(id) => deleteSession(id)}
-        soundEnabled={state.soundEnabled}
       />
+      <MobileSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Settings"
+        scope="everywhere"
+      >
+        <div class="mconv-settings-body">
+          <div class="mconv-settings-lbl">Notifications</div>
+          <NotificationSettings soundEnabled={state.soundEnabled} />
+        </div>
+      </MobileSheet>
       {session && (
         <RewindTimeline
           open={rewindOpen}
