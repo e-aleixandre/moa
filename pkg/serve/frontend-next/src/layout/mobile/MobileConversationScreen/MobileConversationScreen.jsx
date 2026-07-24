@@ -6,11 +6,13 @@ import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
-import { openPersistedSubagent, archiveSession, deleteSession, resumeSession } from "../../../data/session-actions.js";
+import { openPersistedSubagent, archiveSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
+import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
+import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
@@ -27,13 +29,16 @@ import "./MobileConversationScreen.css";
 // content components (via MobileStream) + the REAL Composer + the persistent
 // mobile chrome (MobileStatusLine, hosted inside MobileComposer).
 //
-// STATUSLINE-EXPLICIT-SESSIONS / FOUR DOORS: the old MobileHeader + horizontal
-// SessionStrip are gone. The persistent chrome is the status line under the
-// composer (four single-scope doors); the ephemeral activity now-line
-// (MobileNowLine) sits directly above the composer while the agent works. The
-// screen owns only the OVERLAYS it opens (the SessionDrawer and the
-// RewindTimeline) and the store→props wiring. Model/thinking, permissions, path,
-// usage all live behind the status line's doors (MobileStatusLine); global
+// There is no header and no session tab bar. The screen is a column: the
+// transcript takes the space, then the ephemeral activity now-line
+// (MobileNowLine) while the agent works, then the composer with the status line
+// under it. Two things float over that column: the title chip at the top
+// (MobileTitleChip — the session's name, and the door to the session list) and
+// whatever overlay is open.
+//
+// The screen owns only the OVERLAYS it opens (the SessionDrawer and the
+// RewindTimeline) and the store→props wiring. Model/thinking, permissions, path
+// and usage live behind the status line's doors (MobileStatusLine); global
 // settings (notifications) live behind the SessionDrawer footer. All reuse the
 // real shared components — so the screen no longer manages those overlays itself.
 //
@@ -92,8 +97,9 @@ function aggregateAttention(sessions, activeId) {
   ).length;
 }
 
-// drawerSessions builds the full bottom-sheet list: active first (newest), then
-// saved. activeCount/savedCount come from the two groups.
+// drawerSessions builds the drawer's two groups — active (newest first) and
+// saved — kept apart rather than concatenated because the drawer labels them
+// separately, exactly as the desktop Spine does.
 function drawerSessions(sessions, activeId) {
   const all = Object.values(sessions).filter((s) => !s.archived);
   const active = all
@@ -118,10 +124,26 @@ function drawerSessions(sessions, activeId) {
     };
   };
   return {
-    list: [...active, ...saved].map(toCard),
+    active: active.map(toCard),
+    saved: saved.map(toCard),
     activeCount: active.length,
     savedCount: saved.length,
   };
+}
+
+// drawerProjects — the folders you already have sessions in, most recent first.
+// That list IS the mobile "pick a project" surface: no directory explorer here
+// (see NewSessionView), so the only thing that matters is that a folder you have
+// worked in is one tap away.
+function drawerProjects(sessions) {
+  const byCwd = {};
+  for (const s of Object.values(sessions)) {
+    const cwd = s.cwd || "";
+    if (!cwd) continue;
+    const updated = s.updated || 0;
+    if (!byCwd[cwd] || updated > byCwd[cwd].updated) byCwd[cwd] = { cwd, updated };
+  }
+  return Object.values(byCwd).sort((a, b) => b.updated - a.updated);
 }
 
 // recentSavedSessions builds the 3 most-recent saved sessions for the empty
@@ -177,7 +199,17 @@ export function MobileConversationScreen() {
   }, []);
 
   const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
+  // The empty state has no drawer to host the "new session" screen, so there it
+  // still opens the palette straight on its create step.
   const onNew = () => { openPalette("create"); setDrawerOpen(false); };
+  // From inside the drawer, creating is done in place (NewSessionView) — this
+  // just performs it and closes.
+  const onCreate = (cwd) => {
+    setDrawerOpen(false);
+    createSession({ cwd }).catch((e) =>
+      addToast({ title: "Could not create session", detail: String(e.message || e), type: "error" })
+    );
+  };
   const onSettingsFromDrawer = () => {
     settingsPendingRef.current = true;
     setDrawerOpen(false);
@@ -190,11 +222,16 @@ export function MobileConversationScreen() {
 
   useEffect(() => { setRewindOpen(false); }, [activeId]);
 
-  // Aggregate cross-session attention for the status line's Sessions control:
-  // OTHER sessions blocked on the user (excludes the active one, whose block is
-  // the inline PermissionPrompt in the conversation).
+  // Aggregate cross-session attention for the title chip's dot: OTHER sessions
+  // blocked on the user (excludes the active one, whose block is the inline
+  // PermissionPrompt in the conversation).
   const attnCount = aggregateAttention(state.sessions, activeId);
-  const { list: drawerList, activeCount, savedCount } = drawerSessions(state.sessions, activeId);
+  const {
+    active: drawerActive,
+    saved: drawerSaved,
+    activeCount,
+    savedCount,
+  } = drawerSessions(state.sessions, activeId);
 
   let body;
   if (!loaded) {
@@ -279,6 +316,16 @@ export function MobileConversationScreen() {
           <MobileStream
             session={session}
             blocks={blocks}
+            // Rewind lives on the waypoints themselves now, not behind a door in
+            // the status line: the mark is ON the message you want to go back to,
+            // so "rewind to where" is answered by the tap. The full timeline
+            // (assistant turns too, and existing branches) is still one link away
+            // inside the confirmation — this is its only door on mobile.
+            rewind={{
+              to: (msgId) => rewindToMessage(session.id, msgId),
+              openTimeline: () => setRewindOpen(true),
+              disabled: session.state === "running" || session.state === "permission",
+            }}
             onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
             tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
           />
@@ -298,15 +345,7 @@ export function MobileConversationScreen() {
             />
           )}
           <MobileNowLine session={session} />
-          <MobileComposer
-            key={session.id}
-            session={session}
-            usage={state.usage}
-            attnCount={attnCount}
-            onOpenSessions={() => setDrawerOpen(true)}
-            onRewind={() => setRewindOpen(true)}
-            rewindDisabled={session.state === "running" || session.state === "permission"}
-          />
+          <MobileComposer key={session.id} session={session} usage={state.usage} />
         </>
       );
     }
@@ -316,15 +355,29 @@ export function MobileConversationScreen() {
     <div class="mconv">
       {body}
 
+      {/* The title chip floats over the transcript and is the door to the
+          session list. It is hidden inside a subagent, which is a full-screen
+          push carrying its own header and its own way back. */}
+      {session && !session.viewingSubagent && (
+        <MobileTitleChip
+          title={sessionTitle(session)}
+          attnCount={attnCount}
+          open={drawerOpen}
+          onToggle={setDrawerOpen}
+        />
+      )}
+
       <SessionDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onClosed={onDrawerClosed}
-        sessions={drawerList}
+        active={drawerActive}
+        saved={drawerSaved}
         activeCount={activeCount}
         savedCount={savedCount}
+        projects={drawerProjects(state.sessions)}
         onSelect={onSelectFromDrawer}
-        onNew={onNew}
+        onCreate={onCreate}
         onSettings={onSettingsFromDrawer}
         onCloseSession={(id) => archiveSession(id)}
         onReopenSession={(id) => resumeSession(id)}

@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Plus, MoreHorizontal, Settings } from "lucide-preact";
-import { StateDot } from "../../../primitives/index.js";
-import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
+import { Plus, MoreHorizontal, Settings, Search } from "lucide-preact";
+import { SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
+import { fuzzyMatch } from "../../../data/fuzzy.js";
+import { NewSessionView } from "./NewSessionView.jsx";
 import "./SessionDrawer.css";
 
 const FOCUSABLE_SELECTOR =
@@ -120,38 +121,32 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
   );
 }
 
-// SessionDrawerCard — one session tile inside the drawer. Richer than the
-// SessionStrip chip: three rows (title + state + time / last message / path).
-// The card body is a tap target (select); the ⋯ overflow handles lifecycle.
+// SessionDrawerCard — one session in the list. The card itself is the SHARED
+// SessionRow in its `card` variant — the very same component the desktop Spine
+// lists sessions with, so the two surfaces can't drift apart. The mobile-only
+// part is the ⋯ overflow laid over its top-right corner; SessionRow's own
+// `onClose` X is deliberately not used, because lifecycle here is a menu
+// (close/reopen/delete), not a single dismiss.
 function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession, onDeleteSession }) {
   const { id, title, state, when, last, needsLabel, path, unseen } = session;
-  const needs = state === "permission" || state === "error";
-  const cls = ["sdcard", session.active ? "sdcard-active" : "", needs ? "sdcard-needs" : ""]
-    .filter(Boolean)
-    .join(" ");
-  const ariaLabel = `${title} — ${state}`;
+  const brief = last
+    ? needsLabel
+      ? <><b class="sdcard-needs-label">{needsLabel} </b>{last}</>
+      : last
+    : null;
   return (
-    <div class={cls}>
-      <button
-        type="button"
-        class="sdcard-body"
-        aria-label={ariaLabel}
+    <div class="sdcard-slot">
+      <SessionRow
+        variant="card"
+        title={title}
+        state={state}
+        active={session.active}
+        unseen={unseen}
+        when={when}
+        brief={brief}
+        path={path}
         onClick={() => onSelect?.(id)}
-      >
-        {unseen && <span class="sdcard-unseen" aria-hidden="true" />}
-        <span class="sdcard-top">
-          <StateDot state={state} size={9} />
-          <span class="sdcard-title">{title}</span>
-          <span class="sdcard-when">{when}</span>
-        </span>
-        {(needsLabel || last) && (
-          <span class="sdcard-last">
-            {needsLabel && <b class="sdcard-needs-label">{needsLabel} </b>}
-            {last}
-          </span>
-        )}
-        <span class="sdcard-path">{path}</span>
-      </button>
+      />
       <SessionCardMenu
         session={session}
         onClose={onCloseSession}
@@ -162,24 +157,22 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
   );
 }
 
-// SessionDrawer — mobile bottom-sheet that slides up over the conversation
-// screen to list every session. Replicates Sheet's focus-trap / Escape /
-// restore-focus behaviour with hooks (Sheet is a centered modal, not a
-// bottom-sheet, so we don't reuse it). Anchors to its positioned container.
+// SessionDrawer — the mobile session list, unfurled from the title chip it is
+// anchored under (MobileTitleChip). It is a DROPDOWN, not a bottom sheet: the
+// title is the door, so the list has to visibly hang from it, and the composer
+// stays put underneath the veil where the eye left it.
+//
+// Its structure deliberately mirrors the desktop Spine — search, then active
+// sessions, then saved — so the same job looks like the same job on both
+// frontends. What differs is only what the form factor forces: the desktop
+// keeps the list permanently in a column, mobile borrows the screen for it.
 //
 // Open/close is a small state machine so both the enter and the LEAVE animate
 // (MOBILE-POLISH-SPEC §5): `open` is the caller's intent; internally we keep the
-// sheet mounted through the close transition (`visible`) and toggle `entered`
+// panel mounted through the close transition (`visible`) and toggle `entered`
 // one frame after mount so the CSS `.is-open` transition plays from the closed
-// rest state. Only the sheet (transform) and veil (opacity) move — the
+// rest state. Only the panel (transform/opacity) and veil (opacity) move — the
 // conversation behind stays perfectly still.
-//
-// Swipe-to-close: the drawer owns the dismiss gesture end-to-end via
-// useSheetDismiss. While dragging we render the sheet in its `is-drag` state
-// (CSS transitions off) and let the hook drive translate/opacity inline; on
-// release the hook animates to rest and, when it settles closed, calls
-// `onClose` (spring-back to open calls nothing), and we clear the inline styles
-// once the committed CSS state has taken over.
 //
 // Global Settings is NOT rendered here: the footer's ⚙ button only signals
 // `onSettings` and the parent screen performs a sheet HANDOFF — the drawer
@@ -192,17 +185,18 @@ export function SessionDrawer({
   open,
   onClose,
   onClosed,
-  sessions = [],
+  active = [],
+  saved = [],
   activeCount = 0,
   savedCount = 0,
+  projects = [],
   onSelect,
-  onNew,
+  onCreate,
   onSettings,
   onCloseSession,
   onReopenSession,
   onDeleteSession,
 }) {
-  const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeTimerRef = useRef(null);
@@ -214,12 +208,17 @@ export function SessionDrawer({
   const wasOpenRef = useRef(open);
   const [visible, setVisible] = useState(open);
   const [entered, setEntered] = useState(open);
+  // The drawer has two screens: the list, and "new session". They swap in place
+  // instead of handing off to another overlay — the whole point of the dropdown
+  // is that everything about sessions happens inside the thing hanging from the
+  // title. Both reset on every open, so the drawer never reopens mid-task.
+  const [view, setView] = useState("list");
+  const [query, setQuery] = useState("");
 
   // Register with the shared overlay-history stack whenever open toggles, so
   // the browser/PWA back gesture closes the drawer instead of navigating away
   // (same contract as Sheet/MobileSheet). The effect cleanup consumes the
-  // history entry on every close path — including swipe-dismiss, which calls
-  // onClose directly from the hook — and the returned close() is idempotent.
+  // history entry on every close path, and the returned close() is idempotent.
   useEffect(() => {
     if (!open) return undefined;
     closeOverlayRef.current = openOverlay("session-drawer", () => onCloseRef.current?.());
@@ -231,7 +230,7 @@ export function SessionDrawer({
 
   // Enter/leave state machine driven by `open`. Enter: mount, then flip
   // `entered` on the next frame so the .is-open transition runs. Leave: drop
-  // `entered` (sheet transitions back down) and unmount after the close
+  // `entered` (panel folds back up into the chip) and unmount after the close
   // duration. Reduced motion snaps both ways.
   useEffect(() => {
     const reduce =
@@ -242,6 +241,8 @@ export function SessionDrawer({
       wasOpenRef.current = true;
       clearTimeout(closeTimerRef.current);
       setVisible(true);
+      setView("list");
+      setQuery("");
       if (reduce) {
         setEntered(true);
       } else {
@@ -265,30 +266,13 @@ export function SessionDrawer({
         closeTimerRef.current = setTimeout(() => {
           setVisible(false);
           fireClosed();
-        }, 220);
+        }, 180);
       }
     }
     return undefined;
   }, [open]);
 
   useEffect(() => () => clearTimeout(closeTimerRef.current), []);
-
-  // Once the drawer is committed open AND the CSS `.is-open` rest state is in
-  // effect (entered, not mid-drag), clear any inline styles the swipe hook left
-  // on the veil/sheet so the class owns them again. Gating on `entered` (not
-  // just `open`) matters for the drag→open handoff: clearing before `.is-open`
-  // is applied would drop the sheet to its closed rest position for a frame.
-  useEffect(() => {
-    if (!open || !entered || dragging) return;
-    if (sheetRef.current) {
-      sheetRef.current.style.transition = "";
-      sheetRef.current.style.transform = "";
-    }
-    if (veilRef.current) {
-      veilRef.current.style.transition = "";
-      veilRef.current.style.opacity = "";
-    }
-  }, [open, entered, dragging, sheetRef, veilRef]);
 
   // Escape closes; Tab cycles focus within the panel (wrapping at the edges).
   useEffect(() => {
@@ -325,15 +309,14 @@ export function SessionDrawer({
   }, [open, onClose]);
 
   // On open: remember the trigger and focus the panel's first focusable.
-  // On close: restore focus to the remembered element.
+  // On close: restore focus to the remembered element (the title chip).
   useEffect(() => {
     if (!open) return;
     previousFocusRef.current = document.activeElement;
-    const panel = panelRef.current;
-    if (panel) {
-      const firstFocusable = panel.querySelector(FOCUSABLE_SELECTOR);
-      (firstFocusable || panel).focus();
-    }
+    // Focus the dialog itself, NOT its first focusable: that is the search
+    // input, and focusing it would throw the soft keyboard up over the list the
+    // user just asked to see. Tab from here still enters the trap in order.
+    panelRef.current?.focus();
     return () => {
       const toRestore = previousFocusRef.current;
       if (toRestore && typeof toRestore.focus === "function") {
@@ -342,7 +325,7 @@ export function SessionDrawer({
     };
   }, [open]);
 
-  if (!visible && !dragging) return null;
+  if (!visible) return null;
 
   const onVeilClick = (e) => {
     if (e.target === e.currentTarget) {
@@ -351,66 +334,95 @@ export function SessionDrawer({
     }
   };
 
-  const isOpen = entered && !dragging;
-  const veilCls = `sdrawer-veil${isOpen ? " is-open" : ""}${dragging ? " is-drag" : ""}`;
-  const sheetCls = `sdrawer${isOpen ? " is-open" : ""}${dragging ? " is-drag" : ""}`;
+  // Search filters the list in place — no second surface, no second list. Fuzzy
+  // over title and path, the same two fields the palette matches on.
+  const q = query.trim().toLowerCase();
+  const hit = (s) => !q || fuzzyMatch(q, `${s.title || ""} ${s.path || ""}`.toLowerCase());
+  const shownActive = active.filter(hit);
+  const shownSaved = saved.filter(hit);
+  const hitCount = shownActive.length + shownSaved.length;
+
+  const card = (s) => (
+    <SessionDrawerCard
+      key={s.id}
+      session={s}
+      onSelect={onSelect}
+      onCloseSession={onCloseSession}
+      onReopenSession={onReopenSession}
+      onDeleteSession={onDeleteSession}
+    />
+  );
 
   return (
-    <div class={veilCls} ref={veilRef} onClick={onVeilClick}>
+    <div class={`sdrawer-veil${entered ? " is-open" : ""}`} onClick={onVeilClick}>
       <div
-        class={sheetCls}
+        class={`sdrawer${entered ? " is-open" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label="Sessions"
         tabIndex={-1}
-        ref={(el) => {
-          panelRef.current = el;
-          sheetRef.current = el;
-        }}
+        ref={panelRef}
       >
-        <button
-          type="button"
-          class="sdrawer-grab"
-          aria-label="Close sessions"
-          onClick={() => {
-            closeOverlayRef.current?.();
-            onClose?.();
-          }}
-          {...grabBind}
-        >
-          <span class="sdrawer-grab-bar" aria-hidden="true" />
-        </button>
-        <div class="sdrawer-head" {...grabBind}>
-          <h2>Sessions</h2>
-          <span class="sdrawer-count">
-            {activeCount} active · {savedCount} saved
-          </span>
-        </div>
-        <div class="sdrawer-list">
-          {sessions.map((s) => (
-            <SessionDrawerCard
-              key={s.id}
-              session={s}
-              onSelect={onSelect}
-              onCloseSession={onCloseSession}
-              onReopenSession={onReopenSession}
-              onDeleteSession={onDeleteSession}
-            />
-          ))}
-        </div>
-        <div class="sdrawer-foot">
-          <button type="button" class="sdrawer-new" onClick={() => onNew?.()}>
-            <Plus size={15} aria-hidden="true" /> New session
-          </button>
-          <button
-            type="button"
-            class="sdrawer-settings"
-            onClick={() => onSettings?.()}
-            aria-haspopup="dialog"
-          >
-            <Settings size={14} aria-hidden="true" /> Settings
-          </button>
-        </div>
+        {view === "new" ? (
+          <NewSessionView
+            projects={projects}
+            onBack={() => setView("list")}
+            onCreate={(cwd) => onCreate?.(cwd)}
+          />
+        ) : (
+          <>
+            <div class="sdrawer-head">
+              <h2>Sessions</h2>
+              <span class="sdrawer-count">
+                {q
+                  ? `${hitCount} ${hitCount === 1 ? "match" : "matches"}`
+                  : `${activeCount} active · ${savedCount} saved`}
+              </span>
+              <button
+                type="button"
+                class="sdrawer-new"
+                aria-label="New session"
+                onClick={() => setView("new")}
+              >
+                <Plus size={15} aria-hidden="true" />
+              </button>
+            </div>
+
+            <div class="sdrawer-search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                type="text"
+                aria-label="Search sessions"
+                placeholder="Search sessions…"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck={false}
+                value={query}
+                onInput={(e) => setQuery(e.target.value)}
+              />
+            </div>
+
+            <div class="sdrawer-list">
+              {shownActive.map(card)}
+              {shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}
+              {shownSaved.map(card)}
+              {q && hitCount === 0 && (
+                <span class="sdrawer-note">No session matches “{query}”</span>
+              )}
+            </div>
+
+            <div class="sdrawer-foot">
+              <button
+                type="button"
+                class="sdrawer-settings"
+                onClick={() => onSettings?.()}
+                aria-haspopup="dialog"
+              >
+                <Settings size={14} aria-hidden="true" /> Settings
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

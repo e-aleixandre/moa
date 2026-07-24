@@ -6,8 +6,14 @@
    queue-note chip drops to a full-width second row of the pill when present.
    Nothing above .composer (cache-warn, attach strip, popups) is touched, and
    the desktop `.composer-wrap` CSS is never overridden. */
+/* NO `position: relative` here. The status line's bottom sheets are
+   `position: absolute; inset: 0`, so they resolve against the nearest positioned
+   ancestor: making this box one shrinks every sheet down to the composer's own
+   ~110px. The fade into the chrome lives on the stream's mask instead
+   (MobileConversationScreen.css), which needs no containing block at all. */
 .mcomposer {
   flex: none;
+  background: var(--base);
   /* Bottom = a small fixed gap PLUS the home-indicator safe area. This inset
      sits below whatever the composer stacks on top of it — the persistent
      status line (main conversation) or the subagent now-line — so neither needs

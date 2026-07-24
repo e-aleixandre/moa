@@ -60,6 +60,7 @@ type AgentController interface {
 	SystemPrompt() string
 	ThinkingLevel() string
 	CompactAt() int
+	CompactAtFloor() int
 	MaxBudget() float64
 	CompactionEpoch() int
 	IsRunning() bool

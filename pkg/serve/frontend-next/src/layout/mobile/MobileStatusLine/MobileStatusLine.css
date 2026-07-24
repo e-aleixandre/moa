@@ -89,26 +89,45 @@
   color: var(--text);
 }
 
-/* spacer pushes doors 2–4 to the right edge, so the tight line breathes */
+/* spacer pins the token heartbeat to the right edge, leaving the three doors
+   grouped together on the left where the thumb reaches them */
 .mstatusline .msl-spacer {
   flex: 1 1 auto;
   min-width: 4px;
 }
 
+/* hairline between doors — the line is tight, so the separation has to come
+   from a rule rather than from space we don't have */
+.mstatusline .msl-div {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  background: var(--surface1);
+}
+
 /* ── Door 2: ModelPill (model + thinking) → "This session".
-   The desktop ChatHead affordance, compacted for the line. ── */
+   Same shared component the desktop ChatHead carries, stripped of its chrome
+   here: on a line this dense a filled pill shouts, so the model reads as plain
+   mono text and the bars carry the thinking. The accent color and the meter are
+   untouched — the model still LOOKS like the same fact on both screens, it just
+   doesn't wear a badge on the phone. Scoped to .mstatusline; desktop keeps the
+   pill. ── */
 .mstatusline .model-pill {
   flex: none;
-  padding: 2px 8px;
-  font-size: var(--text-xs);
-  gap: 5px;
+  padding: 2px 0;
+  gap: 6px;
+  background: none;
+  border: 0;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
 }
-.mstatusline .model-pill .thinking-meter {
-  font-size: 8px;
-  letter-spacing: 1px;
+.mstatusline .model-pill .m-name {
+  text-transform: lowercase;
 }
+/* The accent is an inline style on .m-name, so a tap can't be acknowledged by
+   recoloring it — dim the whole control instead. */
 .mstatusline .model-pill:active {
-  border-color: var(--overlay0);
+  opacity: 0.6;
 }
 
 /* ── Door 3: permission chip → Permissions ONLY.
@@ -124,89 +143,29 @@
   position: absolute;
   inset: -8px -4px;
 }
+/* Stripped like the ModelPill above, and for the same reason. The mode KEEPS its
+   canonical color (green/yellow/blue — the same traffic light the desktop
+   StatusStrip uses), because the color IS the safety signal; only the filled
+   background goes. */
 .mstatusline .msl-perm .perm-chip {
   pointer-events: none;
   flex: none;
+  padding: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-normal);
+  text-transform: lowercase;
 }
 
-/* ── Door 4: the Sessions control — ALWAYS visible, explicitly labelled.
-   Icon (panels) + "Sessions" + chevron. Pinned to the right edge. ── */
-.mstatusline .msl-sessions {
+/* ── the per-run token heartbeat (RIGHT) — read-only, not a door. Same shared
+   TokenFlow the desktop StatusStrip carries in the same corner, in its compact
+   variant (no " tok" unit) because the mobile line has no room for it. ── */
+.mstatusline .msl-tokens {
   flex: none;
-  gap: 5px;
-  position: relative;
-  padding: 4px var(--space-2);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--surface1);
-  background: color-mix(in srgb, var(--surface0) 55%, transparent);
-  color: var(--subtext1);
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  line-height: 1;
-}
-.mstatusline .msl-sessions::after {
-  content: "";
-  position: absolute;
-  inset: -10px -6px;
-}
-.mstatusline .msl-sessions:active {
-  background: var(--surface0);
-  color: var(--text);
-}
-.mstatusline .msl-sessions-icon {
-  display: inline-flex;
-  flex: none;
-  color: var(--overlay1);
-}
-.mstatusline .msl-sessions-label {
-  white-space: nowrap;
-}
-.mstatusline .msl-sessions-chev {
-  flex: none;
-  color: var(--overlay0);
-  margin-left: -1px;
-}
-
-/* ── aggregate attention badge — the desktop GridToolbar `attn-lamp` grammar:
-   Bell + count, in --yellow, breathing at --breath-attention. ── */
-.mstatusline .msl-attn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  flex: none;
-  margin: 0 1px 0 2px;
-  padding: 1px 6px 1px 5px;
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--yellow) 12%, transparent);
-  color: var(--yellow);
-  line-height: 1;
-  animation: msl-attn-glow var(--breath-attention) ease-in-out infinite;
-}
-.mstatusline.has-attn .msl-sessions {
-  border-color: color-mix(in srgb, var(--yellow) 40%, transparent);
-  background: color-mix(in srgb, var(--yellow) 8%, transparent);
-  color: var(--yellow);
-}
-.mstatusline.has-attn .msl-sessions-icon,
-.mstatusline.has-attn .msl-sessions-chev {
-  color: color-mix(in srgb, var(--yellow) 80%, var(--overlay1));
-}
-.mstatusline .msl-attn-n {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  font-variant-numeric: tabular-nums;
-}
-@keyframes msl-attn-glow {
-  50% {
-    box-shadow: 0 0 10px color-mix(in srgb, var(--yellow) 30%, transparent);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mstatusline .msl-attn {
-    animation: none;
-  }
+  font-size: var(--text-micro);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -275,105 +234,97 @@
   background: var(--red);
 }
 
-/* ── "This session" (Door 2) — section labels + planned rows + Rewind, mirroring
-   fx.css .fx-lbl / .fx-row / .fx-acts. The path is the sheet's scope (header),
-   not a row here. ── */
-.msl-lbl {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--overlay0);
-  margin: 16px 0 6px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.msl-lbl:first-child {
-  margin-top: 2px;
-}
-.msl-future {
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--overlay0);
-  border: 1px dashed var(--surface2);
-  border-radius: var(--radius-full);
-  padding: 1px 7px;
-}
-.msl-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 0;
-  color: var(--subtext0);
-  font-size: var(--text-sm);
-  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
-}
-.msl-row:last-of-type {
+/* the context limit — a usage row whose value is a choice rather than a number.
+   It sits in the usage sheet because it is measured on that sheet's own ring. */
+.msl-urow.msl-limit {
   border-bottom: 0;
+  padding-bottom: 2px;
 }
-.msl-row.is-planned {
-  opacity: 0.55;
-}
-.msl-row .lead {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  color: var(--overlay1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.msl-row .k {
-  flex: none;
-  color: var(--overlay1);
-  font-size: var(--text-sm);
-}
-.msl-row .v {
+/* the live value, reading as the row's number: teal because it names a mark on
+   the teal ring, mono+tabular so it doesn't jitter while the thumb moves. */
+.msl-limit-val {
   margin-left: auto;
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--subtext1);
-}
-
-/* action buttons (Rewind) — fx.css .fx-acts / .fx-act */
-.msl-acts {
   display: flex;
+  align-items: baseline;
   gap: 6px;
-  margin-top: 16px;
-}
-.msl-act {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 44px;
-  border: 0;
-  background: var(--surface0);
-  color: var(--subtext0);
+  color: var(--teal);
   font-family: var(--mono);
   font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+/* the same threshold in tokens — the precision a percentage hides, kept quiet
+   so it informs without competing with the number you are actually setting. */
+.msl-limit-tok {
+  color: var(--overlay0);
+  font-size: var(--text-micro);
+}
+
+/* The slider owns its own line: a full-width track is what makes 5% steps
+   reachable with a thumb, which is the whole reason this replaced a chip row. */
+.msl-limit-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 2px 0 0;
+  background: none;
   cursor: pointer;
-  padding: 10px 8px;
-  border-radius: var(--radius-md);
-  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+  -webkit-tap-highlight-color: transparent;
 }
-.msl-act:hover:not(:disabled),
-.msl-act:active:not(:disabled) {
-  background: var(--surface1);
-  color: var(--text);
-}
-.msl-act:disabled {
-  opacity: 0.5;
+.msl-limit-slider:disabled {
+  opacity: 0.45;
   cursor: default;
 }
-.msl-act:focus-visible {
+/* Track filled to --fill (set inline from the value): teal to the left of the
+   thumb, track to the right, so the bar reads as "summarize by here" rather
+   than as a neutral scale. */
+.msl-limit-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    to right,
+    var(--teal) 0 var(--fill),
+    var(--surface1) var(--fill) 100%
+  );
+}
+.msl-limit-slider::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    to right,
+    var(--teal) 0 var(--fill),
+    var(--surface1) var(--fill) 100%
+  );
+}
+/* 18px of visible thumb, but the input's own 28px height is the touch target —
+   the pointer only has to land on the track, not on the dot. */
+.msl-limit-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--teal);
+}
+.msl-limit-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--teal);
+}
+.msl-limit-slider:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: 2px;
+  border-radius: var(--radius-full);
+}
+.msl-limit-note {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--overlay0);
+  padding-top: 2px;
 }
 
 /* ── "Permissions" (Door 3) — the 3 MODES laid out directly (fx-shared

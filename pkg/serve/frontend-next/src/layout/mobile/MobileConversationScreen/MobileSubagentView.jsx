@@ -9,6 +9,11 @@ import { fmtTokens, copyToClipboard, truncateText, sessionTitle } from "../../..
 import { modelAccent } from "../../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
 import { updateSession } from "../../../data/store.js";
+// The fork's header wears the shared `.mhead` (see SUBAGENT-VIEW-RECONCILE
+// below), whose rules live in MobileHeader.css. MobileHeader itself is no
+// longer part of the mobile screen, so this import is what keeps those rules
+// in the graph rather than relying on some other consumer to pull them in.
+import "../MobileHeader/MobileHeader.css";
 import "./MobileSubagentView.css";
 
 // MobileSubagentView — full-screen push counterpart of the desktop SubagentView

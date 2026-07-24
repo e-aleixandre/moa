@@ -40,7 +40,9 @@
   cursor: default;
   opacity: 0.6;
 }
-.perm-chip.perm-yolo { color: var(--green); background: var(--green-dim); }
+/* YOLO is maroon, not green: it is the mode that never asks, so the badge should
+   read as "you took the brakes off", not as "all good". */
+.perm-chip.perm-yolo { color: var(--maroon); background: var(--maroon-dim); }
 .perm-chip.perm-ask { color: var(--yellow); background: var(--yellow-dim); }
 .perm-chip.perm-auto { color: var(--blue); background: var(--blue-dim); }
 .perm-chip:not(:disabled):hover { filter: brightness(1.15); }
@@ -123,7 +125,7 @@
   font-size: var(--text-xs);
   letter-spacing: 0.3px;
 }
-.perm-menu-label.perm-yolo { color: var(--green); }
+.perm-menu-label.perm-yolo { color: var(--maroon); }
 .perm-menu-label.perm-ask { color: var(--yellow); }
 .perm-menu-label.perm-auto { color: var(--blue); }
 .perm-menu-desc {

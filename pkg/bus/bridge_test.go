@@ -381,6 +381,10 @@ func (f *fakeAgent) CompactAt() int {
 	return f.compactAt
 }
 
+func (f *fakeAgent) CompactAtFloor() int {
+	return core.DefaultCompactionSettings.MinCompactAt()
+}
+
 func (f *fakeAgent) SetMaxBudget(v float64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

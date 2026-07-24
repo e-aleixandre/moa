@@ -47,6 +47,13 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 	if lvl := sctx.Agent.ThinkingLevel(); lvl != "" {
 		meta["thinking"] = lvl
 	}
+	// The context limit is a per-session choice like model and thinking, so it
+	// has to outlive closing the session — otherwise it silently reverts to
+	// "auto" on the next resume, which is exactly the unattended case it exists
+	// for. Omitted when 0 so untouched sessions carry no key.
+	if at := sctx.Agent.CompactAt(); at > 0 {
+		meta[session.MetaCompactAt] = at
+	}
 	if g := sctx.GetGate(); g != nil {
 		meta["permission_mode"] = string(g.Mode())
 	} else {

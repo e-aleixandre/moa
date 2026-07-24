@@ -77,6 +77,9 @@ export async function loadSessions() {
         untrustedMcp: info.untrusted_mcp || false,
         messages: existing ? existing.messages : [],
         contextPercent: wsOwns ? existing.contextPercent : (info.context_percent ?? (existing ? existing.contextPercent : -1)),
+        contextWindow: wsOwns ? existing.contextWindow : (info.context_window || (existing ? existing.contextWindow : 0)),
+        compactAt: wsOwns ? existing.compactAt : (info.compact_at || (existing ? existing.compactAt : 0)),
+        compactAtMin: wsOwns ? existing.compactAtMin : (info.compact_at_min || (existing ? existing.compactAtMin : 0)),
         permissionMode: wsOwns ? existing.permissionMode : (info.permission_mode || (existing ? existing.permissionMode : 'yolo')),
         pendingPerm: existing ? existing.pendingPerm : null,
         pendingAsk: existing ? existing.pendingAsk : null,
@@ -509,17 +512,21 @@ export async function resumeSession(id) {
   return sess;
 }
 
-export async function configureSession(id, { model, thinking, permissionMode }) {
+export async function configureSession(id, { model, thinking, permissionMode, compactAt }) {
   const body = {};
   if (model) body.model = model;
   if (thinking) body.thinking = thinking;
   if (permissionMode) body.permission_mode = permissionMode;
+  // 0 means "compact at the model window", so this one is sent whenever it is
+  // present at all — a falsy check would make "back to auto" unsendable.
+  if (compactAt != null) body.compact_at = compactAt;
   const res = await api('PATCH', `/api/sessions/${id}/config`, body);
   if (res) {
     const patch = {};
     if (res.model) patch.model = res.model;
     if (res.thinking) patch.thinking = res.thinking;
     if (res.permission_mode) patch.permissionMode = res.permission_mode;
+    if (res.compact_at != null) patch.compactAt = res.compact_at;
     updateSession(id, patch);
   }
   return res;
@@ -555,6 +562,21 @@ export async function fetchBranchPoints(id) {
 // list over the WebSocket, so callers don't need to apply the result manually.
 export async function branchTo(id, entryId) {
   return api('POST', `/api/sessions/${id}/branch`, { entry_id: entryId });
+}
+
+// rewindToMessage — branch to one message straight from the transcript, the
+// action behind a waypoint's rewind mark. Same call the RewindTimeline makes;
+// it exists here so both screens share one failure story instead of writing
+// their own. The message list refreshes itself off the WS 'branch' command, so
+// there is nothing to do on success.
+export function rewindToMessage(id, msgId) {
+  return branchTo(id, msgId).catch((e) =>
+    addToast({
+      title: 'Could not rewind',
+      detail: String(e.message || e),
+      type: 'error',
+    })
+  );
 }
 
 export async function execShell(id, command, silent) {

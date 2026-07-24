@@ -306,6 +306,15 @@ type ConfigChanged struct {
 	Thinking       string
 	PermissionMode string
 	PathScope      string
+	// CompactAt is the new soft compaction threshold in tokens, set only on a
+	// threshold change. A pointer because 0 is itself a meaningful value ("use
+	// the model window"), so nil is the only way to say "unchanged" here.
+	CompactAt *int
+	// ContextWindow is the new model's input window in tokens, set only on a
+	// model switch. It travels with the switch because it is the denominator
+	// every context reading is measured against — a client that kept the old
+	// one would report percentages against a window the session no longer has.
+	ContextWindow int
 }
 
 // ---------------------------------------------------------------------------

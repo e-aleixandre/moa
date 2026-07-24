@@ -190,15 +190,21 @@ func RegisterHandlers(sctx *SessionContext) {
 		if err != nil {
 			return fmt.Errorf("provider error: %w", err)
 		}
+		oldWindow := sctx.Agent.Model().MaxInput
 		if err := sctx.Agent.SetModel(newProvider, newModel); err != nil {
 			return err
 		}
-		sctx.Bus.Publish(ConfigChanged{
-			SessionID: sctx.SessionID,
-			Model:     newModel.Name,
-			Provider:  newModel.Provider,
-			Thinking:  sctx.Agent.ThinkingLevel(),
-		})
+		changed := ConfigChanged{
+			SessionID:     sctx.SessionID,
+			Model:         newModel.Name,
+			Provider:      newModel.Provider,
+			Thinking:      sctx.Agent.ThinkingLevel(),
+			ContextWindow: newModel.MaxInput,
+		}
+		if at, ok := rescaleCompactAt(sctx, oldWindow, newModel.MaxInput); ok {
+			changed.CompactAt = &at
+		}
+		sctx.Bus.Publish(changed)
 		return nil
 	})
 
@@ -212,6 +218,21 @@ func RegisterHandlers(sctx *SessionContext) {
 		sctx.Bus.Publish(ConfigChanged{
 			SessionID: sctx.SessionID,
 			Thinking:  cmd.Level,
+		})
+		return nil
+	})
+
+	b.OnCommand(func(cmd SetCompactAt) error {
+		if cmd.Tokens < 0 {
+			return fmt.Errorf("compaction threshold cannot be negative")
+		}
+		if err := sctx.Agent.SetCompactAt(cmd.Tokens); err != nil {
+			return err
+		}
+		tokens := cmd.Tokens
+		sctx.Bus.Publish(ConfigChanged{
+			SessionID: sctx.SessionID,
+			CompactAt: &tokens,
 		})
 		return nil
 	})
@@ -416,6 +437,14 @@ func RegisterHandlers(sctx *SessionContext) {
 
 	b.OnQuery(func(q GetThinkingLevel) (string, error) {
 		return sctx.Agent.ThinkingLevel(), nil
+	})
+
+	b.OnQuery(func(q GetCompactAt) (int, error) {
+		return sctx.Agent.CompactAt(), nil
+	})
+
+	b.OnQuery(func(q GetCompactAtFloor) (int, error) {
+		return sctx.Agent.CompactAtFloor(), nil
 	})
 
 	b.OnQuery(func(q GetContextUsage) (int, error) {
@@ -2164,6 +2193,36 @@ func firstLine(s string) string {
 		s = s[:80] + "…"
 	}
 	return s
+}
+
+// rescaleCompactAt carries a soft compaction threshold across a model change.
+// The threshold is stored in tokens but chosen as a share of the window ("compact
+// at 70%"), and windows differ by model: 700k means 70% on a 1M model and "past
+// the brim, so never" on a 200k one — which would quietly turn the user's limit
+// back into auto. So the share is what survives, not the number.
+//
+// Returns the new threshold and whether it moved. A share that no longer fits
+// under the new window becomes 0 (auto), which is what it would effectively be
+// anyway, but stored honestly instead of as a number the engine has to clamp.
+func rescaleCompactAt(sctx *SessionContext, oldWindow, newWindow int) (int, bool) {
+	current := sctx.Agent.CompactAt()
+	if current <= 0 || oldWindow <= 0 || newWindow <= 0 || newWindow == oldWindow {
+		return 0, false
+	}
+	rescaled := int(float64(current) / float64(oldWindow) * float64(newWindow))
+	if floor := sctx.Agent.CompactAtFloor(); rescaled < floor {
+		rescaled = floor
+	}
+	if rescaled >= newWindow {
+		rescaled = 0
+	}
+	if rescaled == current {
+		return 0, false
+	}
+	if err := sctx.Agent.SetCompactAt(rescaled); err != nil {
+		return 0, false
+	}
+	return rescaled, true
 }
 
 // messageText extracts the concatenated text content from an AgentMessage.

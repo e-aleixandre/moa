@@ -43,8 +43,8 @@
   content: "";
   width: 6px;
   height: 6px;
-  border-radius: 2px;
-  background: var(--blue);
+  border-radius: var(--radius-full);
+  background: var(--sky);
   flex: none;
 }
 

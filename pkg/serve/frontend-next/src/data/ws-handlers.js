@@ -393,6 +393,9 @@ export function handleWsInit(id, data) {
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
     contextPercent: data.context_percent ?? -1,
+    contextWindow: data.context_window || 0,
+    compactAt: data.compact_at || 0,
+    compactAtMin: data.compact_at_min || 0,
     permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission || null,
     pendingAsk: data.pending_ask || null,
@@ -940,6 +943,17 @@ export function handleWsConfigChange(id, data) {
   };
   if (data.permission_mode) {
     patch.permissionMode = data.permission_mode;
+  }
+  // compact_at is sent only on a threshold change, and 0 is a real value
+  // ("compact at the model window") — so presence, not truthiness, is the test.
+  if (data.compact_at != null) {
+    patch.compactAt = data.compact_at;
+  }
+  // A model switch carries the new window, since it is the denominator every
+  // context reading uses. Without it the ring and the compaction limit would
+  // keep measuring against the window of the model we just left.
+  if (data.context_window) {
+    patch.contextWindow = data.context_window;
   }
   updateSession(id, patch);
 }

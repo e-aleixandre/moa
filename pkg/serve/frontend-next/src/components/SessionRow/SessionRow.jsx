@@ -21,6 +21,12 @@ const STATE_LABEL_SUFFIX = {
   error: ", error",
 };
 
+// The card variant takes three OPTIONAL extras, all additive — omit them and the
+// card renders exactly as it always has:
+//   when  — short age, right-aligned on the title row ("now", "18m")
+//   brief — one line of live status under the title. Renderable, not just text,
+//           so a caller can bold a lead-in (<><b>Needs you: </b>…</>)
+//   path  — the session's working directory, the last and quietest line
 export function SessionRow({
   title,
   state = "idle",
@@ -30,6 +36,9 @@ export function SessionRow({
   meta,
   age,
   pane,
+  when,
+  brief,
+  path,
   onClick,
   onClose,
   ...rest
@@ -67,8 +76,11 @@ export function SessionRow({
               <span class="title" aria-hidden="true">{title}</span>
               {pane && <span class="pane" aria-hidden="true">{pane}</span>}
               {unseen && <span class="unseen" aria-hidden="true" />}
+              {when && <span class="when" aria-hidden="true">{when}</span>}
             </span>
             {meta && <span class="r2" aria-hidden="true">{meta}</span>}
+            {brief && <span class="brief" aria-hidden="true">{brief}</span>}
+            {path && <span class="path" aria-hidden="true">{path}</span>}
           </>
         ) : (
           <>

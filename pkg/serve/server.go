@@ -585,13 +585,16 @@ func handleConfig(mgr *Manager) http.HandlerFunc {
 			Model          string `json:"model"`
 			Thinking       string `json:"thinking"`
 			PermissionMode string `json:"permission_mode"`
+			// Pointer: 0 is a real value here ("compact at the model window"),
+			// so only nil can mean "this request isn't changing the threshold".
+			CompactAt *int `json:"compact_at"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		result := map[string]string{}
+		result := map[string]any{}
 
 		if body.PermissionMode != "" {
 			mode, err := mgr.SetPermissionMode(sess.ID, body.PermissionMode)
@@ -615,6 +618,19 @@ func handleConfig(mgr *Manager) http.HandlerFunc {
 			for k, v := range reconf {
 				result[k] = v
 			}
+		}
+
+		if body.CompactAt != nil {
+			tokens, err := mgr.SetCompactAt(sess.ID, *body.CompactAt)
+			if err != nil {
+				if errors.Is(err, ErrBusy) {
+					http.Error(w, "session is busy", http.StatusConflict)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			result["compact_at"] = tokens
 		}
 
 		writeJSON(w, http.StatusOK, result)

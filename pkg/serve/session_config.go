@@ -98,6 +98,26 @@ func (m *Manager) SetTitle(sessionID, title string) (string, error) {
 	return title, nil
 }
 
+// SetCompactAt changes a session's soft compaction threshold (tokens), so the
+// agent compacts once context passes it rather than waiting for the full model
+// window. 0 restores the window-based default. Like model/thinking this
+// reconfigures the agent, so it is only allowed while the session is idle.
+func (m *Manager) SetCompactAt(sessionID string, tokens int) (int, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return 0, ErrNotFound
+	}
+	state := sess.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission {
+		return 0, ErrBusy
+	}
+	if err := sess.runtime.Bus.Execute(bus.SetCompactAt{Tokens: tokens}); err != nil {
+		return 0, err
+	}
+	current, _ := bus.QueryTyped[bus.GetCompactAt, int](sess.runtime.Bus, bus.GetCompactAt{})
+	return current, nil
+}
+
 // SetPermissionMode changes the permission mode for a session via bus command.
 func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
 	sess, ok := m.Get(sessionID)

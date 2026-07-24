@@ -77,13 +77,22 @@ function mobileDocChildren(blocks, onOpenSubagent) {
   return out;
 }
 
-function MobileStreamBlock({ block, onOpenSubagent, sessionId }) {
+function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
   switch (block.kind) {
     case "system":
       return <div class="mstream-system">{block.text}</div>;
     case "waypoint":
       return (
-        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined} attachments={block.attachments} sessionId={sessionId}>
+        <UserWaypoint
+          time={block.time}
+          label={block.steer ? "You — steer" : undefined}
+          attachments={block.attachments}
+          sessionId={sessionId}
+          onRewind={rewind && block.msgId ? () => rewind.to(block.msgId) : undefined}
+          onOpenTimeline={rewind?.openTimeline}
+          rewindDisabled={rewind?.disabled}
+          rewindPreview={block.text}
+        >
           <p>{block.text}</p>
         </UserWaypoint>
       );
@@ -105,7 +114,7 @@ const AT_BOTTOM_PX = 80;
 // MobileStream — same stick-to-bottom / "new messages" scroll intent as the
 // desktop Stream, sized for the mobile stream container. `lead` and `tail`
 // render inside the scroller before and after the blocks, respectively.
-export function MobileStream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl }) {
+export function MobileStream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   const stickToBottom = useRef(true);
@@ -189,7 +198,7 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
       >
         {lead}
         {blocks.map((block) => (
-          <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} />
+          <MobileStreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
         ))}
         {tail}
       </div>

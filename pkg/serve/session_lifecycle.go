@@ -661,10 +661,15 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		return nil, fmt.Errorf("resume: %w", err)
 	}
 
-	// 3. Restore permission mode.
+	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {
 		if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: savedPermMode}); err != nil {
 			slog.Warn("resume: permission mode", "id", id, "error", err)
+		}
+	}
+	if at := saved.CompactAtMeta(); at > 0 {
+		if err := sess.runtime.Bus.Execute(bus.SetCompactAt{Tokens: at}); err != nil {
+			slog.Warn("resume: context limit", "id", id, "error", err)
 		}
 	}
 

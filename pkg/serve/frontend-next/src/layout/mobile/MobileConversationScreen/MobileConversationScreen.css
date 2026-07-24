@@ -4,7 +4,11 @@
   flex-direction: column;
   height: 100vh; /* fallback for browsers without dvh */
   height: 100dvh; /* dynamic viewport: excludes the mobile browser toolbar */
-  background: var(--crust);
+  /* Same --base the desktop ConversationScreen sits on, and the same surface the
+     composer paints below: the screen is ONE sheet from the first message to the
+     status line. On --crust the composer's own --base read as a lighter band
+     glued to the bottom, which is exactly the seam the fade is meant to erase. */
+  background: var(--base);
   overflow: hidden;
 }
 
@@ -13,10 +17,18 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden; /* wide blocks (code/table) scroll inside their own box */
-  /* The persistent header is gone (STATUSLINE-EXPLICIT-SESSIONS): the stream now
-     owns the top safe-area inset so the first message clears the iOS status bar
-     in an installed PWA. */
-  padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-4) var(--space-2);
+  /* There is no header: the stream owns the top safe-area inset so the first
+     message clears the iOS status bar in an installed PWA, plus enough room for
+     the floating title chip that hovers over it (top 12px + ~30px tall). Later
+     messages still scroll UNDER the chip — that is what its blur is for — but
+     the top of the transcript is never born hidden behind it. */
+  padding: calc(50px + env(safe-area-inset-top)) var(--space-4) var(--space-2);
+  /* The last line dissolves instead of being cut. This fades the TEXT's own
+     alpha rather than painting a slab of --base over it, so nothing is laid on
+     top of what sits below the stream — the now-line stays at full contrast.
+     Short on purpose (28px): a taller fade dims text that is still being read. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
 }
 
 /* The user's waypoint opens the stream: no extra top margin. */

@@ -94,7 +94,25 @@ const (
 	MetaThinking       = "thinking"
 	MetaPathScope      = "path_scope"
 	MetaAllowedPaths   = "allowed_paths"
+	MetaCompactAt      = "compact_at"
 )
+
+// CompactAtMeta returns the persisted soft compaction threshold in tokens, or 0
+// when none was set (the default window-based behavior). Metadata round-trips
+// through JSON, so a number read back from disk arrives as float64 while one
+// set in this process is still an int — both are accepted.
+func (s *Session) CompactAtMeta() int {
+	if s.Metadata == nil {
+		return 0
+	}
+	switch v := s.Metadata[MetaCompactAt].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	}
+	return 0
+}
 
 // SetRuntimeMetadata persists the core session configuration (model, cwd,
 // permission mode, thinking level) into Metadata. Called on every state

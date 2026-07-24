@@ -33,6 +33,17 @@ type GetSessionState struct{ SessionID string }
 // Handler returns: int
 type GetContextUsage struct{ SessionID string }
 
+// GetCompactAt returns the soft compaction threshold in tokens (0 = the default
+// window-based behavior).
+// Handler returns: int
+type GetCompactAt struct{ SessionID string }
+
+// GetCompactAtFloor returns the lowest compaction threshold the engine honors,
+// in tokens. A UI offering the threshold needs it to bound its own control: below
+// it the engine raises the value, so anything lower would be a promise it breaks.
+// Handler returns: int
+type GetCompactAtFloor struct{ SessionID string }
+
 // GetSessionCost returns the accumulated session cost in USD (main run + subagents).
 // Handler returns: float64
 type GetSessionCost struct{ SessionID string }

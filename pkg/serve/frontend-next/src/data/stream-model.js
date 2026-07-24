@@ -15,12 +15,16 @@
 //       closes the current assistant turn: assistant content after it starts a
 //       fresh document.
 //
-//   { kind:'waypoint', time, text, attachments? }
+//   { kind:'waypoint', time, text, msgId?, attachments? }
 //       A user turn. `text` is the joined text of the user message. `time` is
 //       the message ts when present (else undefined — we never invent one).
 //       `attachments` is the list of non-text content items (images/files),
 //       passed through untouched so a photo message renders as an attachment
-//       instead of breaking.
+//       instead of breaking. `msgId` is the server's message id, which is also
+//       the session-tree entry id (session/tree.go Append sets `e.ID` from
+//       `Message.MsgID`) — i.e. exactly the `entry_id` the branch API takes, so
+//       a waypoint can offer "rewind here" without any lookup. Absent for
+//       messages that arrived without one; the affordance just doesn't render.
 //
 //   { kind:'document', blocks:[...] }        // a FINISHED assistant turn
 //   { kind:'streaming', blocks:[...] }       // the LIVE assistant turn
@@ -279,9 +283,11 @@ export function projectStream(session) {
       currentLedger = null;
       closeDelegation();
       const attachments = attachmentsOf(msg.content);
+      const msgId = msg.msg_id || msg._msg_id || '';
       const wp = {
         kind: 'waypoint',
-        id: `wp-${msg.msg_id || msg._msg_id || abs}`,
+        id: `wp-${msgId || abs}`,
+        msgId,
         time: msg.ts,
         text: joinText(msg.content),
       };

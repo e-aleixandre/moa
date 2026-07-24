@@ -28,6 +28,54 @@
   font-size: var(--text-xs);
 }
 
+/* the rewind mark — every user message is a branch point, so this sits on every
+   one of them and must be quiet enough to disappear while reading. It rides the
+   header row next to the timestamp (not over the text, not a floating overlay),
+   inherits the peach the header already wears, and rests at 45% opacity: legible
+   as a mark, not loud enough to compete with the message. Full strength on
+   hover/focus. It is pushed to the right edge so the eye meets it only when
+   looking for it. */
+.waypoint .wp-rewind {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 26px, not 44: it repeats down the whole transcript, and a full tap target on
+     every message would put a row of buttons beside every thing you wrote. The
+     negative margin claws back the padding so it doesn't grow the header row. */
+  width: 26px;
+  height: 26px;
+  margin-top: -5px;
+  margin-bottom: -5px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--peach);
+  opacity: 0.45;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+
+.waypoint .wp-rewind:hover:not(:disabled),
+.waypoint .wp-rewind:active:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--peach) 14%, transparent);
+}
+
+.waypoint .wp-rewind:disabled {
+  opacity: 0.18;
+  cursor: default;
+}
+
+.waypoint .wp-rewind:focus-visible {
+  opacity: 1;
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .waypoint .body {
   color: var(--text);
   font-size: var(--text-md);
@@ -106,6 +154,113 @@
   height: 14px;
   flex: none;
   color: var(--peach);
+}
+
+/* the rewind confirmation — a short sheet: what you go back to, what it costs
+   (nothing), and the way out. Same Sheet chassis as the image lightbox above. */
+.wp-rewind-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.wp-rewind-lead {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+}
+
+.wp-rewind-quote {
+  margin: 0;
+  border-left: 3px solid var(--peach);
+  border-radius: 3px var(--radius-md) var(--radius-md) 3px;
+  background: color-mix(in srgb, var(--surface0) 45%, transparent);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  /* a long prompt shouldn't push the buttons off a phone screen */
+  max-height: 30vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.wp-rewind-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--overlay0);
+}
+
+.wp-rewind-acts {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.wp-rewind-go,
+.wp-rewind-cancel {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-md);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+/* peach = the user's own color, the same one the waypoint's spine wears: this
+   action moves the conversation back to one of YOUR messages */
+.wp-rewind-go {
+  background: var(--peach);
+  color: var(--crust);
+  font-weight: var(--weight-semibold);
+}
+
+.wp-rewind-go:hover,
+.wp-rewind-go:active {
+  background: color-mix(in srgb, var(--peach) 85%, var(--text));
+}
+
+.wp-rewind-cancel {
+  background: var(--surface0);
+  color: var(--subtext0);
+}
+
+.wp-rewind-cancel:hover,
+.wp-rewind-cancel:active {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+.wp-rewind-all {
+  align-self: center;
+  border: 0;
+  background: none;
+  color: var(--overlay1);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: var(--space-2);
+}
+
+.wp-rewind-all:hover,
+.wp-rewind-all:active {
+  color: var(--subtext0);
+}
+
+.wp-rewind-go:focus-visible,
+.wp-rewind-cancel:focus-visible,
+.wp-rewind-all:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .wp-image-lightbox {

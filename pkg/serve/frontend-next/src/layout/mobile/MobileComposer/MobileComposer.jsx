@@ -6,40 +6,25 @@ import "./MobileComposer.css";
 // the REAL, shared <Composer> (send / queue / slash / @-mention / attachments /
 // stop) and, below it, the persistent mobile chrome (<MobileStatusLine>).
 //
-// STATUSLINE-EXPLICIT-SESSIONS / FOUR DOORS: the old MobileHeader + horizontal
-// SessionStrip are gone; the status line is the ONLY persistent chrome. It holds
-// four single-scope doors — context ring + cost (→ Context & usage), the
-// ModelPill (→ This session), the permission chip (→ Permissions), and an
-// explicit, always-visible Sessions control (→ the SessionDrawer, whose footer
-// hosts global Settings) that also aggregates cross-session attention. Live
-// activity is NOT in the line: it lives in the ephemeral now-line rendered above
-// this composer (MobileNowLine). Each door opens the approved bottom sheet
-// (MobileSheet), which — per device feedback — covers the full mobile container
-// (scrim + sheet flush to the bottom, like the SessionDrawer), so the composer
-// is never left exposed under it.
+// The old MobileHeader + horizontal SessionStrip are gone; the status line is
+// the only persistent chrome down here. It holds three single-scope doors —
+// context ring + cost (→ Context & usage), the ModelPill (→ Model & thinking)
+// and the permission chip (→ Permissions) — plus the per-run token heartbeat at the
+// right. Sessions is NOT among them: that door is the floating title chip at the
+// top of the screen (MobileTitleChip). Live activity is not in the line either:
+// it lives in the ephemeral now-line rendered above this composer
+// (MobileNowLine). Each door opens the approved bottom sheet (MobileSheet),
+// which — per device feedback — covers the full mobile container (scrim + sheet
+// flush to the bottom), so the composer is never left exposed under it.
 //
 // Visual fit is CSS-only (MobileComposer.css); the composer's own textarea uses
 // --text-input (≥16px) so iOS never auto-zooms, and this wrapper keeps the
 // bottom safe-area inset via the status line below it.
-export function MobileComposer({
-  session,
-  usage,
-  attnCount = 0,
-  onOpenSessions,
-  onRewind,
-  rewindDisabled = false,
-}) {
+export function MobileComposer({ session, usage }) {
   return (
     <div class="mcomposer">
       <Composer sessionId={session.id} session={session} shortPlaceholder />
-      <MobileStatusLine
-        session={session}
-        usage={usage}
-        attnCount={attnCount}
-        onOpenSessions={onOpenSessions}
-        onRewind={onRewind}
-        rewindDisabled={rewindDisabled}
-      />
+      <MobileStatusLine session={session} usage={usage} />
     </div>
   );
 }

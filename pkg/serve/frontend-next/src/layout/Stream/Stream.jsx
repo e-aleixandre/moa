@@ -79,13 +79,24 @@ function docChildren(blocks, onOpenSubagent) {
   return out;
 }
 
-function StreamBlock({ block, onOpenSubagent, sessionId }) {
+function StreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
   switch (block.kind) {
     case "system":
       return <div class="stream-system">{block.text}</div>;
     case "waypoint":
       return (
-        <UserWaypoint time={block.time} label={block.steer ? "You — steer" : undefined} attachments={block.attachments} sessionId={sessionId}>
+        <UserWaypoint
+          time={block.time}
+          label={block.steer ? "You — steer" : undefined}
+          attachments={block.attachments}
+          sessionId={sessionId}
+          // The waypoint's own rewind mark, offered only when the block carries
+          // the message id the branch API needs (see stream-model.js).
+          onRewind={rewind && block.msgId ? () => rewind.to(block.msgId) : undefined}
+          onOpenTimeline={rewind?.openTimeline}
+          rewindDisabled={rewind?.disabled}
+          rewindPreview={block.text}
+        >
           <p>{block.text}</p>
         </UserWaypoint>
       );
@@ -104,7 +115,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId }) {
 
 const AT_BOTTOM_PX = 80;
 
-export function Stream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl }) {
+export function Stream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind }) {
   const containerRef = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   // Length of the in-flight tool's streaming output (a tool_update grows this
@@ -198,7 +209,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
         <div class="stream-col">
           {lead}
           {blocks.map((block) => (
-            <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} />
+            <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
           ))}
           {tail}
         </div>

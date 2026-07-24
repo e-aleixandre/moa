@@ -413,6 +413,30 @@ export function shortPath(cwd, maxLen = 42) {
   return '…' + p.slice(-(maxLen - 1));
 }
 
+/** Collapse the server's home prefix to "~". Unlike shortPath this needs the
+ *  real home directory (from /api/capabilities) and never truncates, so it is
+ *  the one to use for a path the user can edit. */
+export function tildify(path, home) {
+  if (!home) return path;
+  if (path === home) return '~';
+  if (path.startsWith(home + '/')) return '~' + path.slice(home.length);
+  return path;
+}
+
+/** The inverse of tildify: turn a typed "~/..." back into an absolute path. */
+export function expandHome(path, home) {
+  if (!home) return path;
+  if (path === '~') return home;
+  if (path.startsWith('~/')) return home + path.slice(1);
+  return path;
+}
+
+/** Last segment of a path ("/a/b/c" → "c"), "/" for the root. */
+export function basename(p) {
+  const parts = p.split('/').filter(Boolean);
+  return parts.pop() || '/';
+}
+
 /** Default window (days) for "recent" session lists. Older sessions are hidden
  *  from the lists to avoid overload but remain findable via search. */
 export const RECENT_DAYS = 7;

@@ -194,11 +194,58 @@
   color: var(--text);
 }
 
+/* Only rows that carry a `when` stretch the title, so the age lands on the far
+   right. Scoped with :has() on purpose — stretching it unconditionally would
+   also push the `unseen` dot to the edge on rows without one, moving a pixel on
+   the desktop Spine that has no reason to move. */
+.session-row.variant-card .r1:has(.when) .title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .session-row.variant-card .r2 {
   font-family: var(--mono);
   font-size: var(--text-xs);
   color: var(--overlay0);
   padding-left: var(--space-4);
+}
+
+/* when / brief / path — the optional extras. All three are omitted unless the
+   caller passes them, so a card that only gets title+state+meta is unchanged.
+   They share the title's left inset so the three text lines align under it,
+   clear of the state dot. */
+.session-row.variant-card .when {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  color: var(--overlay0);
+  flex: none;
+}
+
+.session-row.variant-card .brief {
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+  padding-left: var(--space-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-row.variant-card .path {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  color: var(--overlay0);
+  padding-left: var(--space-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-row.variant-card.needs-yellow .brief {
+  color: var(--yellow);
+}
+
+.session-row.variant-card.needs-red .brief {
+  color: var(--red);
 }
 
 /* pane — optional mono badge (P1/P2/P3…) indicating the grid pane the

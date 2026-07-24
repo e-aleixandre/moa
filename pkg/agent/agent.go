@@ -811,6 +811,20 @@ func (a *Agent) CompactAt() int {
 	return a.config.Compaction.CompactAt
 }
 
+// CompactAtFloor returns the lowest threshold SetCompactAt will actually honor,
+// in tokens. Reads the agent's own compaction settings rather than the package
+// defaults, since a session may have been built with different reserve/keep
+// values.
+func (a *Agent) CompactAtFloor() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	settings := core.DefaultCompactionSettings
+	if a.config.Compaction != nil {
+		settings = *a.config.Compaction
+	}
+	return settings.MinCompactAt()
+}
+
 // SetPermissionCheck swaps the permission check function at runtime.
 // nil disables permission checks. Returns error if the agent is running.
 func (a *Agent) SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error {

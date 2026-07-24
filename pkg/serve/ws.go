@@ -193,6 +193,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "config_change", Data: ConfigChangeData{
 			Model: e.Model, Provider: e.Provider, Thinking: e.Thinking,
 			PermissionMode: e.PermissionMode, PathScope: e.PathScope,
+			CompactAt: e.CompactAt, ContextWindow: e.ContextWindow,
 		}}, true
 	case bus.PlanModeChanged:
 		return Event{Type: "plan_mode", Data: PlanModeData{
@@ -383,6 +384,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 	msgs, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	ctxPct, _ := bus.QueryTyped[bus.GetContextUsage, int](b, bus.GetContextUsage{})
+	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
+	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
+	initModel, _ := bus.QueryTyped[bus.GetModel, core.Model](b, bus.GetModel{})
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](b, bus.GetPermissionMode{})
 	pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](b, bus.GetPendingApproval{})
 	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
@@ -405,6 +409,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 		HistoryTruncated:  historyTruncated,
 		State:             state,
 		ContextPercent:    ctxPct,
+		ContextWindow:     initModel.MaxInput,
+		CompactAt:         compactAt,
+		CompactAtMin:      compactAtMin,
 		PermissionMode:    permMode,
 		Tasks:             taskList,
 		PathScope:         pathInfo.Scope,

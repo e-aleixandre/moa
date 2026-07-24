@@ -161,7 +161,18 @@ type SessionInfo struct {
 	PlanMode       string                     `json:"plan_mode,omitempty"`
 	PlanFile       string                     `json:"plan_file,omitempty"`
 	ContextPercent int                        `json:"context_percent"` // 0-100, -1 if unknown
-	PermissionMode string                     `json:"permission_mode"` // "yolo", "ask", "auto"
+	// ContextWindow is the model's usable input window in tokens — the
+	// denominator ContextPercent is measured against, and the scale CompactAt
+	// is expressed on, so a UI can show the limit as a percentage of the ring.
+	ContextWindow int `json:"context_window,omitempty"`
+	// CompactAt is the soft compaction threshold in tokens; 0 means the session
+	// compacts only when it approaches ContextWindow.
+	CompactAt int `json:"compact_at,omitempty"`
+	// CompactAtMin is the lowest threshold the engine honors, in tokens. A UI
+	// picking a threshold must not offer below it — the engine would raise the
+	// value and compact somewhere other than where the control says.
+	CompactAtMin   int    `json:"compact_at_min,omitempty"`
+	PermissionMode string `json:"permission_mode"` // "yolo", "ask", "auto"
 	CostUSD        float64                    `json:"cost_usd"`        // accumulated session spend (main run + subagents)
 	Activity       *attention.SessionActivity `json:"activity,omitempty"`
 	// CacheExpiresAt is when the Anthropic prompt cache for this session goes
@@ -239,6 +250,8 @@ func (s *ManagedSession) info() SessionInfo {
 	stateErr, _ := bus.QueryTyped[bus.GetSessionError, string](b, bus.GetSessionError{})
 	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
+	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
+	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
 
 	s.mu.Lock()
 	lastRun := s.lastRunAt
@@ -258,6 +271,9 @@ func (s *ManagedSession) info() SessionInfo {
 		Error:          stateErr,
 		UntrustedMCP:   s.infra.UntrustedMCP,
 		ContextPercent: ctxPct,
+		ContextWindow:  model.MaxInput,
+		CompactAt:      compactAt,
+		CompactAtMin:   compactAtMin,
 		PermissionMode: permMode,
 		CostUSD:        cost,
 

@@ -125,6 +125,14 @@ type SetPermissionMode struct {
 	Mode      string
 }
 
+// SetCompactAt changes the soft compaction threshold in tokens, so the session
+// compacts once context passes it instead of waiting for the full model window.
+// 0 restores the default (window-based) behavior.
+type SetCompactAt struct {
+	SessionID string
+	Tokens    int
+}
+
 // ---------------------------------------------------------------------------
 // Path policy
 // ---------------------------------------------------------------------------

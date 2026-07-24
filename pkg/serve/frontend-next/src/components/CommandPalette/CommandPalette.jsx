@@ -16,6 +16,7 @@ import { allTileIds, findTile } from "../../data/tileTree.js";
 import { addToast } from "../../data/notifications.js";
 import {
   sessionTitle, sessionDotState, isRecentSession, projectLabel,
+  tildify, expandHome, basename,
 } from "../../data/util/format.js";
 import { modLabel } from "../../data/util/shortcut.js";
 import "./CommandPalette.css";
@@ -40,26 +41,10 @@ function getModels() {
     .catch(() => []);
 }
 
-// ── Pure path helpers — ported verbatim from the old SPA's NewSessionSheet
-// (tildify/expandHome/basename/parentDir/truncMiddle/relativeWhen). They mirror
-// the server's ~ handling so displayed paths stay short and typed ~ paths
-// resolve.
-function tildify(path, home) {
-  if (!home) return path;
-  if (path === home) return "~";
-  if (path.startsWith(home + "/")) return "~" + path.slice(home.length);
-  return path;
-}
-function expandHome(path, home) {
-  if (!home) return path;
-  if (path === "~") return home;
-  if (path.startsWith("~/")) return home + path.slice(1);
-  return path;
-}
-function basename(p) {
-  const parts = p.split("/").filter(Boolean);
-  return parts.pop() || "/";
-}
+// ── Pure path helpers — ported verbatim from the old SPA's NewSessionSheet.
+// tildify/expandHome/basename moved to data/util/format.js once the mobile
+// drawer's new-session screen needed the same ~ handling; parentDir and
+// truncMiddle stay here because only the palette's rows use them.
 function parentDir(p) {
   const parts = p.split("/").filter(Boolean);
   parts.pop();
@@ -730,6 +715,17 @@ export function CommandPalette({
 
   const onVeil = (e) => { if (e.target === e.currentTarget) onClose(); };
 
+  // Back from the "create" step — same rule the Backspace shortcut already
+  // follows: step back to search only if that is where we CAME FROM. Opened
+  // straight into create (the drawer's +), search is not a previous screen, and
+  // falling into it would drop the user in a second session list they never
+  // asked for.
+  const onCrumbBack = () => {
+    if (initialStep === "create") { onClose(); return; }
+    setStep("search");
+    inputRef.current?.focus();
+  };
+
   // ── Mobile chassis (bottom sheet) ───────────────────────────────────────────
   // TODO 5L (overlay-history hook): the palette doesn't use Sheet — it has its
   // own two chassis (mobile bottom sheet / desktop centered veil) and Escape
@@ -752,7 +748,7 @@ export function CommandPalette({
           <div class="grab" aria-hidden="true" />
           <div class="m-input-row">
             {step === "create"
-              ? <button type="button" class="crumb-chip" onClick={() => { setStep("search"); inputRef.current?.focus(); }}><ArrowLeft size={11} /> New session</button>
+              ? <button type="button" class="crumb-chip" onClick={onCrumbBack}><ArrowLeft size={11} /> New session</button>
               : <Search size={16} aria-hidden="true" />}
             <input
               ref={inputRef}

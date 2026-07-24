@@ -194,7 +194,7 @@
 }
 
 /* Permission mode */
-.status-strip .status-strip-pill.perm-yolo { color: var(--green); background: var(--green-dim); }
+.status-strip .status-strip-pill.perm-yolo { color: var(--maroon); background: var(--maroon-dim); }
 .status-strip .status-strip-pill.perm-ask { color: var(--yellow); background: var(--yellow-dim); }
 .status-strip .status-strip-pill.perm-auto { color: var(--blue); background: var(--blue-dim); }
 

@@ -22,7 +22,7 @@ import { activityPhase, activityText, formatElapsed } from "../../data/util/acti
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
-import { configureSession, archiveSession, unarchiveSession, openPersistedSubagent } from "../../data/session-actions.js";
+import { configureSession, archiveSession, unarchiveSession, openPersistedSubagent, rewindToMessage } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
@@ -351,6 +351,11 @@ export function ConversationScreen({ version }) {
             <Stream
               session={session}
               blocks={blocks}
+              rewind={{
+                to: (msgId) => rewindToMessage(session.id, msgId),
+                openTimeline: () => setRewindOpen(true),
+                disabled: settingsBusy,
+              }}
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
               tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
             />

@@ -21,6 +21,9 @@ type InitData struct {
 	Messages          []core.AgentMessage `json:"messages"`
 	State             string              `json:"state"`
 	ContextPercent    int                 `json:"context_percent"`
+	ContextWindow     int                 `json:"context_window,omitempty"`
+	CompactAt         int                 `json:"compact_at,omitempty"`
+	CompactAtMin      int                 `json:"compact_at_min,omitempty"`
 	PermissionMode    string              `json:"permission_mode"`
 	PathScope         string              `json:"path_scope,omitempty"`
 	PendingPermission *PermissionData     `json:"pending_permission,omitempty"`
@@ -285,6 +288,12 @@ type ConfigChangeData struct {
 	Thinking       string `json:"thinking,omitempty"`
 	PermissionMode string `json:"permission_mode,omitempty"`
 	PathScope      string `json:"path_scope,omitempty"`
+	// CompactAt carries a compaction-threshold change only. Pointer because 0
+	// ("compact at the model window") is a real setting, not "unchanged".
+	CompactAt *int `json:"compact_at,omitempty"`
+	// ContextWindow carries a model switch's new input window, the denominator
+	// for every context percentage the client shows.
+	ContextWindow int `json:"context_window,omitempty"`
 }
 
 // SubagentCountData is sent when async subagent jobs start/finish.

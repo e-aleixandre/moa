@@ -34,6 +34,15 @@ type CompactionPayload struct {
 // exceeds the threshold and compaction retriggers every single turn.
 const compactionTailMargin = 4000
 
+// MinCompactAt is the lowest CompactAt that still behaves as asked: below it
+// EffectiveWindow silently raises the threshold to avoid per-turn thrash. A UI
+// offering a threshold has to read this rather than assume, since it moves with
+// ReserveTokens and KeepRecent — a control that let you pick below it would be
+// promising a compaction point the engine will not honor.
+func (s CompactionSettings) MinCompactAt() int {
+	return s.ReserveTokens + s.KeepRecent + compactionTailMargin
+}
+
 // EffectiveWindow returns the context window to use for compaction decisions.
 // When CompactAt is set (>0) it caps the model's real window so compaction fires
 // earlier; it is clamped to maxInput, so an over-large value harmlessly degrades
@@ -42,7 +51,7 @@ const compactionTailMargin = 4000
 func (s CompactionSettings) EffectiveWindow(maxInput int) int {
 	if s.CompactAt > 0 && s.CompactAt < maxInput {
 		eff := s.CompactAt
-		if floor := s.ReserveTokens + s.KeepRecent + compactionTailMargin; eff < floor {
+		if floor := s.MinCompactAt(); eff < floor {
 			eff = floor
 		}
 		if eff < maxInput {

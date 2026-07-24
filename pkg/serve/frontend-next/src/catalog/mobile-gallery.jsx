@@ -330,7 +330,7 @@ export function MobileConversationSpecimen() {
 }
 
 // DrawerSpecimen — the conversation specimen with the sessions drawer forced
-// open on top of it, so the gallery can show the bottom-sheet statically.
+// open on top of it, so the gallery can show the dropdown statically.
 function DrawerSpecimen() {
   return (
     <>
@@ -338,11 +338,14 @@ function DrawerSpecimen() {
       <SessionDrawer
         open
         onClose={noop}
-        sessions={DRAWER_SESSIONS}
+        active={DRAWER_SESSIONS.filter((s) => !s.saved)}
+        saved={DRAWER_SESSIONS.filter((s) => s.saved)}
         activeCount={4}
         savedCount={2}
+        projects={[{ cwd: "/home/dev/moa" }, { cwd: "/home/dev/moa/pulse-api" }]}
         onSelect={noop}
-        onNew={noop}
+        onCreate={noop}
+        onSettings={noop}
         onCloseSession={noop}
         onReopenSession={noop}
         onDeleteSession={noop}
