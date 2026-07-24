@@ -15,6 +15,11 @@ var knownModels = map[string]Model{
 		// 90% prompt-cache discount on input applies (cache read ~= Input*0.1).
 		Pricing: &Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
 	},
+	"claude-opus-5": {
+		ID: "claude-opus-5", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Opus 5", MaxInput: 1_000_000, MaxOutput: 131072,
+		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25},
+	},
 	"claude-opus-4-8": {
 		ID: "claude-opus-4-8", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Opus 4.8", MaxInput: 1_000_000, MaxOutput: 131072,
@@ -106,7 +111,7 @@ var knownModels = map[string]Model{
 var modelAliases = map[string]string{
 	// Anthropic
 	"sonnet": "claude-sonnet-5",
-	"opus":   "claude-opus-4-8",
+	"opus":   "claude-opus-5",
 	"haiku":  "claude-haiku-4-5-20251001",
 	"fable":  "claude-fable-5",
 	// OpenAI
@@ -242,6 +247,29 @@ type ModelEntry struct {
 	Alias string // shortest alias, empty if none
 }
 
+// modelDisplayOrder is the explicit order models appear in selectors (web
+// dropdown + TUI). Grouped by provider, and within each provider roughly by
+// generation and then by capability/power — not strict release date (e.g.
+// Fable 5 before Opus 5 before Sonnet 5, and GPT-5.6 Sol before Terra before
+// Luna). Models not listed here fall to the end, in provider-then-name order.
+var modelDisplayOrder = []string{
+	// Anthropic
+	"claude-fable-5",
+	"claude-opus-5",
+	"claude-sonnet-5",
+	"claude-opus-4-8",
+	"claude-haiku-4-5-20251001",
+	// OpenAI
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-5.6-luna",
+	"gpt-5.5",
+	"gpt-5.4-mini",
+	"gpt-5.3-codex",
+	"gpt-5.3-codex-spark",
+	"gpt-5.2-codex",
+}
+
 func ListModels() []ModelEntry {
 	// Deduplicate by canonical ID.
 	byID := make(map[string]Model)
@@ -257,6 +285,13 @@ func ListModels() []ModelEntry {
 		}
 	}
 
+	// Explicit display rank: listed models keep modelDisplayOrder; the rest
+	// sort after them (provider then name).
+	rank := make(map[string]int, len(modelDisplayOrder))
+	for i, id := range modelDisplayOrder {
+		rank[id] = i
+	}
+
 	result := make([]ModelEntry, 0, len(byID))
 	for _, m := range byID {
 		result = append(result, ModelEntry{
@@ -266,6 +301,14 @@ func ListModels() []ModelEntry {
 	}
 
 	sort.Slice(result, func(i, j int) bool {
+		ri, oki := rank[result[i].Model.ID]
+		rj, okj := rank[result[j].Model.ID]
+		if oki && okj {
+			return ri < rj
+		}
+		if oki != okj {
+			return oki // ranked models come before unranked
+		}
 		if result[i].Model.Provider != result[j].Model.Provider {
 			return result[i].Model.Provider < result[j].Model.Provider
 		}

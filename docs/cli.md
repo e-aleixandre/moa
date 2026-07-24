@@ -50,7 +50,7 @@ See [Web UI](./serve.md) for details.
 | Alias | Resolves to |
 |-------|------------|
 | `sonnet` | `claude-sonnet-5` |
-| `opus` | `claude-opus-4-8` |
+| `opus` | `claude-opus-5` |
 | `haiku` | `claude-haiku-4-5-20251001` |
 | `fable` | `claude-fable-5` |
 | `codex` | `gpt-5.3-codex` |

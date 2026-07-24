@@ -339,10 +339,11 @@ func resolveMaxTokens(req core.Request) int {
 }
 
 // supportsAdaptiveThinking reports whether a model supports Anthropic adaptive
-// thinking (Opus 4.8 and Sonnet 5). Haiku 4.5 uses manual extended thinking.
+// thinking (Opus 5, Opus 4.8 and Sonnet 5). Haiku 4.5 uses manual extended thinking.
 func supportsAdaptiveThinking(modelID string) bool {
 	id := strings.ToLower(modelID)
-	return strings.Contains(id, "opus-4-8") ||
+	return strings.Contains(id, "opus-5") ||
+		strings.Contains(id, "opus-4-8") ||
 		strings.Contains(id, "opus-4.8") ||
 		strings.Contains(id, "sonnet-5")
 }
