@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-24
+
+### Added
+
+- The mobile usage sheet can now set where a session compacts, as a share of the
+  context window. The threshold survives a resume and is rescaled when the model
+  changes, so "compact at 70%" stays 70% on a window of a different size.
+- Any of your own messages can be rewound from the transcript, on mobile and
+  desktop alike.
+- The mobile conversation carries a title chip, and starting a session from the
+  drawer offers a directory picker.
+
+### Changed
+
+- Mobile sheets are lighter: the session drawer, the model selector, and the
+  permission flows lost chrome that the phone had no room for.
+
 ## [0.13.0] - 2026-07-23
 
 ### Added
