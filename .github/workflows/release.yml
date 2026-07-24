@@ -42,6 +42,14 @@ jobs:
             exit 1
           }
 
+      - name: Require a CHANGELOG entry for this version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -qF "## [${version}]" CHANGELOG.md || {
+            echo "CHANGELOG.md has no '## [${version}]' section. Every release must say what changed." >&2
+            exit 1
+          }
+
       - name: Build frontend
         working-directory: pkg/serve/frontend
         run: |
