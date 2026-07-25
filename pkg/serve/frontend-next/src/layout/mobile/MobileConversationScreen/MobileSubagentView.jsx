@@ -1,30 +1,39 @@
 import { useEffect, useState } from "preact/hooks";
-import { ChevronLeft, GitFork, Rocket, X, Check, Copy } from "lucide-preact";
+import { ChevronLeft, GitFork, X, Check, Copy } from "lucide-preact";
 import { Spinner } from "../../../primitives/index.js";
-import { ModelPill, TokenFlow, UserWaypoint } from "../../../components/index.js";
+import { RunModeChip, UserWaypoint } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
+import { StatusLineRow } from "../MobileStatusLine/StatusLineRow.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { subagentView, canPromote } from "../../../data/subagent-view-model.js";
-import { fmtTokens, copyToClipboard, truncateText, sessionTitle } from "../../../data/util/format.js";
+import { fmtTokens, copyToClipboard, sessionTitle } from "../../../data/util/format.js";
+import { fmtCost } from "../../../data/util/usage-pills.js";
 import { modelAccent } from "../../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
 import { updateSession } from "../../../data/store.js";
-// The fork's header wears the shared `.mhead` (see SUBAGENT-VIEW-RECONCILE
-// below), whose rules live in MobileHeader.css. MobileHeader itself is no
-// longer part of the mobile screen, so this import is what keeps those rules
-// in the graph rather than relying on some other consumer to pull them in.
-import "../MobileHeader/MobileHeader.css";
+// The now-line above the composer reuses MobileNowLine's rules verbatim (same
+// grammar, different subject), so its stylesheet has to be in the graph even
+// though this screen doesn't render that component.
+import "./MobileNowLine.css";
 import "./MobileSubagentView.css";
 
 // MobileSubagentView — full-screen push counterpart of the desktop SubagentView
-// (5J, INC-34). It wears the PARENT thread's chrome (SUBAGENT-VIEW-RECONCILE):
-// the header is a variant of the shared `.mhead` and the composer sits in the
-// `.mcomposer` pill, so the fork reads as "the same house, zoomed into a
-// branch" rather than a foreign screen. What stays fork-proper: the full-screen
-// push, the breadcrumb/codename in accent, the sibling rail, the task card, the
-// below-composer now-line, and the terminal outcome banner. Reuses the pure
-// subagentView() projection; rebounds to the parent when the subagent was
-// pruned.
+// (5J, INC-34). It is the parent screen with a different subject: same now-line
+// above the composer, same composer pill, same status line below it
+// (StatusLineRow) — except every number in that line is the CHILD's (its own
+// context window, spend, model, effort and tokens), because a screen zoomed
+// into a branch that reported the trunk's figures would be describing something
+// you can't see. Nothing in the line is a door: a child's model or effort isn't
+// changed from inside it.
+//
+// What stays fork-proper: the full-screen push, a one-row header with the
+// codename in accent and the way back, the run-mode chip, the sibling rail, the
+// task card and the terminal outcome banner. The header survives even though
+// the parent screen no longer has one — it is what says "you are one level in,
+// and here is the way out".
+//
+// Reuses the pure subagentView() projection; rebounds to the parent when the
+// subagent was pruned.
 
 export function MobileSubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
@@ -63,50 +72,18 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   const onPromote = () => { promoteSubagent(session.id, jobId).catch(() => {}); };
   const onSibling = (id) => { updateSession(session.id, { viewingSubagent: id }); };
 
-  const usage = view.usage;
-  const hasTokens = usage && (usage.inputTokens != null || usage.outputTokens != null);
-  const cost = usage && usage.costUSD > 0 ? `~$${usage.costUSD.toFixed(3)}` : null;
-
   return (
     <div class="msa">
-      <header class="mhead msa-head">
-        <div class="mhead-row">
-          <button type="button" class="msa-back" aria-label="Back to parent" onClick={onBack}>
-            <ChevronLeft size={20} />
-          </button>
-          <div class="mhead-switch msa-ident" role="presentation">
-            <GitFork size={13} style={{ color: `var(--${accent})` }} aria-hidden="true" />
-            <span class="mhead-title" style={{ color: `var(--${accent})` }}>{view.name}</span>
-          </div>
-          {view.model && (
-            <ModelPill model={view.model} level={view.thinking} accent={modelAccent(view.model)} variant="glyph" />
-          )}
-          <div class="msa-actions">
-            {canPromote(view) && (
-              <button type="button" class="msa-abtn" aria-label="Promote to background" onClick={onPromote}>
-                <Rocket size={18} />
-              </button>
-            )}
-            {!view.terminal && (
-              <button
-                type="button"
-                class={`msa-abtn cancel${confirmCancel ? " armed" : ""}`}
-                aria-label="Cancel subagent"
-                onClick={onCancel}
-              >
-                {confirmCancel ? <span class="msa-sure">sure?</span> : <X size={18} />}
-              </button>
-            )}
-          </div>
-        </div>
-        <div class="mhead-sub">
-          <span class="mhead-meta msa-crumbline">
-            <button type="button" class="msa-parent" onClick={onBack}>
-              {sessionTitle(session)}
-            </button>
-            {view.task ? ` › ${truncateText(view.task, 60)}` : ""}
-          </span>
-        </div>
+      <header class="msa-head">
+        <button type="button" class="msa-back" aria-label={`Back to ${sessionTitle(session)}`} onClick={onBack}>
+          <ChevronLeft size={20} />
+        </button>
+        <span class="msa-ident">
+          <GitFork size={13} style={{ color: `var(--${accent})` }} aria-hidden="true" />
+          <span class="msa-kind">subagent</span>
+          <span class="msa-name" style={{ color: `var(--${accent})` }}>{view.name}</span>
+        </span>
+        <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
       </header>
 
       {view.siblings.length > 1 && (
@@ -137,33 +114,61 @@ export function MobileSubagentView({ session, jobId, onBack }) {
         }
       />
 
-      {view.terminal ? (
-        <MobileOutcome view={view} onBack={onBack} />
-      ) : (
-        <div class="mcomposer msa-foot">
-          <Composer
-            key={`steer-${jobId}`}
-            sessionId={session.id}
-            session={session}
-            shortPlaceholder
-            steer={{ jobId, name: view.name, onRebound: onBack }}
-          />
-          {/* Now-line sits below the composer in the parent's status slot. */}
-          <div class="mcomposer-status msa-nowline">
-            <span class="work is-live msa-now-act">
-              ● {view.action || "working"}
-              {view.elapsed ? ` · ${view.elapsed}` : ""}
-            </span>
-            {hasTokens && (
-              <span class="tokens">
-                <TokenFlow up={usage.inputTokens || 0} down={usage.outputTokens || 0} variant="compact" />
+      {view.terminal && <MobileOutcome view={view} onBack={onBack} />}
+
+      {/* Same anatomy as the parent screen: the ephemeral activity line above
+          the composer, the composer, and — always, terminal or not — the status
+          line pinned below. Only the subject changes. */}
+      <div class="mcomposer msa-foot">
+        {!view.terminal && (
+          <>
+            <div class="mnowline" role="status" aria-live="polite">
+              <span class="mnowline-act">
+                <span class="txt is-live">{view.action || "working"}</span>
               </span>
-            )}
-            {cost && <span class="spend">{cost}</span>}
-          </div>
-        </div>
-      )}
+              {view.elapsed && <span class="mnowline-elapsed">{view.elapsed}</span>}
+            </div>
+            <Composer
+              key={`steer-${jobId}`}
+              sessionId={session.id}
+              session={session}
+              shortPlaceholder
+              steer={{
+                jobId,
+                name: view.name,
+                onRebound: onBack,
+                onStop: onCancel,
+                stopArmed: confirmCancel,
+              }}
+            />
+          </>
+        )}
+        <BranchStatusLine session={session} view={view} />
+      </div>
     </div>
+  );
+}
+
+// BranchStatusLine — the parent's status line, measuring the branch. Every
+// number here belongs to the CHILD (its own context window, its own spend, its
+// own model and effort, its own tokens); the permission mode is the session's,
+// and stays because it is the policy the child's tools run under. Nothing is a
+// door: a child's settings aren't changed from inside it, so each segment is
+// the same face without the tap.
+function BranchStatusLine({ session, view }) {
+  const usage = view.usage;
+  return (
+    <StatusLineRow
+      contextPercent={view.contextPercent}
+      contextLabel={`Subagent context ${view.contextPercent}% used`}
+      cost={usage && usage.costUSD > 0 ? fmtCost(usage.costUSD) : undefined}
+      model={view.model}
+      modelAccent={modelAccent(view.model)}
+      thinking={view.thinking}
+      perm={session.permissionMode || "yolo"}
+      tokensUp={(usage && usage.inputTokens) || 0}
+      tokensDown={(usage && usage.outputTokens) || 0}
+    />
   );
 }
 

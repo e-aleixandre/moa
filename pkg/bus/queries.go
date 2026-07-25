@@ -208,6 +208,10 @@ type SubagentSnapshot struct {
 	// child has closed at least one message.
 	Usage   *core.Usage
 	CostUSD float64
+	// ContextPercent is how full the CHILD's own context window is (0-100), or
+	// -1 when unknown, so a reconnecting client restores the child's reading
+	// rather than showing the parent's or nothing at all.
+	ContextPercent int
 	// AccentIndex is the subagent's stable per-session creation ordinal (see
 	// bus.SubagentStarted.AccentIndex), used by clients to derive a
 	// deterministic accent color that survives reconnects.

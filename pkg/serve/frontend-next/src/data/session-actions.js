@@ -453,24 +453,26 @@ export async function openPersistedSubagent(id, jobId) {
   const transcript = t.order === 'newest_first'
     ? [...(t.messages || [])].reverse()
     : (t.messages || []);
-  const usage = (t.cost_usd || (t.usage && (t.usage.input || t.usage.output)))
-    ? {
-        inputTokens: (t.usage && t.usage.input) || 0,
-        outputTokens: (t.usage && t.usage.output) || 0,
-        costUSD: t.cost_usd || 0,
-      }
+  // The endpoint reports the child's own figures at top level; older payloads
+  // nested the tokens under `usage`, so both shapes are read.
+  const inputTokens = t.input_tokens != null ? t.input_tokens : (t.usage && t.usage.input) || 0;
+  const outputTokens = t.output_tokens != null ? t.output_tokens : (t.usage && t.usage.output) || 0;
+  const usage = (t.cost_usd || inputTokens || outputTokens)
+    ? { inputTokens, outputTokens, costUSD: t.cost_usd || 0 }
     : null;
   const subs = { ...(store.get().sessions[id].subagents || {}) };
   subs[jobId] = {
     jobId,
     task: t.task || '',
     model: t.model || '',
+    thinking: t.thinking || 'off',
     status: t.status || 'completed',
     async: !!t.async,
     messages: normalizeConversationProjection(transcript),
     streamingText: null,
     thinkingText: null,
     usage,
+    contextPercent: t.context_percent == null ? -1 : t.context_percent,
   };
   updateSession(id, { subagents: subs, viewingSubagent: jobId });
 }

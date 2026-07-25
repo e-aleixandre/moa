@@ -153,6 +153,10 @@ export function subagentView(session, jobId) {
       thinkingText: sub.thinkingText,
     }),
     usage: sub.usage || null,
+    // How full the CHILD's own window is (0-100), or -1 when its model has no
+    // known window. The parent's reading is never substituted: a status line
+    // inside the fork describes the fork.
+    contextPercent: Number.isInteger(sub.contextPercent) ? sub.contextPercent : -1,
   };
 
   if (terminal) {

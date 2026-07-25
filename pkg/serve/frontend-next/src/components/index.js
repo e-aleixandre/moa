@@ -1,5 +1,6 @@
 export { SessionRow } from "./SessionRow/SessionRow.jsx";
 export { ModelPill } from "./ModelPill/ModelPill.jsx";
+export { RunModeChip } from "./RunModeChip/RunModeChip.jsx";
 export { ModelSelector } from "./ModelSelector/ModelSelector.jsx";
 export { Segmented } from "./Segmented/Segmented.jsx";
 export { PermissionCard } from "./PermissionCard/PermissionCard.jsx";

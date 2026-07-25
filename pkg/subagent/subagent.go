@@ -95,10 +95,12 @@ type Config struct {
 
 	// OnChildUsage is called each time a child closes a message (its
 	// message_end), with the child's accumulated usage/cost so far (cost using
-	// the CHILD's model pricing). It lets live UIs show running tokens/cost
-	// before the terminal OnChildEnd. Same aggregation as OnChildEnd, so the
-	// live value stays consistent with the final total.
-	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64)
+	// the CHILD's model pricing) and how full its own context window is
+	// (0-100, or -1 when its model has no known window). It lets live UIs show
+	// running tokens/cost/context before the terminal OnChildEnd. Same
+	// aggregation as OnChildEnd, so the live value stays consistent with the
+	// final total.
+	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
 
 	// OnChildEnd is called once when a child agent (sync or async) finishes,
 	// with its final status and aggregated usage/cost (cost computed with the
@@ -586,9 +588,10 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// aggregation as OnChildEnd, keeping the live value consistent
 			// with the final total.
 			usage, cost := childUsage(msgs), childCost(model, msgs)
-			jobs.setUsage(j.id, usage, cost)
+			ctxPct := childContextPercent(msgs, model, child.CompactionEpoch())
+			jobs.setUsage(j.id, usage, cost, ctxPct)
 			if cfg.OnChildUsage != nil {
-				cfg.OnChildUsage(j.id, usage, cost)
+				cfg.OnChildUsage(j.id, usage, cost, ctxPct)
 			}
 		}
 	})
@@ -611,7 +614,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)
 	finalMsgs = msgs
 	jobs.setMessages(j.id, msgs)
-	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs))
+	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs), childContextPercent(msgs, model, child.CompactionEpoch()))
 	if err != nil {
 		// Classify from authoritative signals, not the returned error's chain
 		// (a provider may wrap a context error while the context is still live).
@@ -745,6 +748,24 @@ func childUsage(msgs []core.AgentMessage) *core.Usage {
 		return nil
 	}
 	return &total
+}
+
+// childContextPercent measures how full the CHILD's own context window is,
+// 0-100, or -1 when its model carries no window to measure against. Same
+// arithmetic as the parent's GetContextUsage handler (pkg/bus/handlers.go),
+// against the child's transcript, the child's model and the child's compaction
+// epoch — a child is a separate agent, so the parent's reading describes
+// nothing about it.
+func childContextPercent(msgs []core.AgentMessage, model core.Model, epoch int) int {
+	if model.MaxInput <= 0 {
+		return -1
+	}
+	est := core.EstimateContextTokens(msgs, "", nil, epoch)
+	pct := (est.Tokens * 100) / model.MaxInput
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
 }
 
 // childCost computes the USD cost of a child's usage using the CHILD's model

@@ -206,6 +206,7 @@ const SUBAGENT_RUNNING = {
         async: false,
         status: "running",
         usage: { inputTokens: 14200, outputTokens: 4100, costUSD: 0.031 },
+        contextPercent: 44,
         messages: [
           { _type: "tool_start", tool_call_id: "t2", tool_name: "grep", args: { pattern: "Merge pull request" }, status: "ok", result: "23 matches" },
           { _type: "tool_start", tool_call_id: "t3", tool_name: "read", args: { path: "CHANGELOG.md" }, status: "ok", result: "88 lines" },
@@ -241,6 +242,7 @@ const SUBAGENT_COMPLETED = {
         async: false,
         status: "completed",
         usage: { inputTokens: 31200, outputTokens: 4800, costUSD: 0.041 },
+        contextPercent: 61,
         result: "full sweep green, -race clean, 2 skips (docker)",
         messages: [
           { _type: "tool_start", tool_call_id: "c1", tool_name: "bash", args: { cmd: "go test -race ./..." }, status: "ok", result: "ok  full sweep\n412 tests" },

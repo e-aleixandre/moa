@@ -1371,7 +1371,7 @@ func TestSubagentOnChildUsageMidRun(t *testing.T) {
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
 		ParentTools:     reg,
-		OnChildUsage: func(jobID string, usage *core.Usage, costUSD float64) {
+		OnChildUsage: func(jobID string, usage *core.Usage, costUSD float64, contextPct int) {
 			mu.Lock()
 			usageCalls++
 			mu.Unlock()
@@ -2250,5 +2250,31 @@ func TestSubagentWaitUnknownJob(t *testing.T) {
 	res, err := wait.Execute(context.Background(), map[string]any{"job_id": "sa-nope"}, nil)
 	if err != nil || !res.IsError || !strings.Contains(textOf(res), "unknown job ID") {
 		t.Fatalf("expected unknown-job error, got %+v %v", res, err)
+	}
+}
+
+func TestChildContextPercent(t *testing.T) {
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: strings.Repeat("token ", 500)}}}),
+		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{{Type: "text", Text: strings.Repeat("reply ", 500)}}}),
+	}
+
+	// No window to measure against: the child's model is unknown to the
+	// registry, so the honest answer is "unknown", never 0 (which reads as
+	// "empty" in a UI ring).
+	if got := childContextPercent(msgs, core.Model{ID: "mystery"}, 0); got != -1 {
+		t.Fatalf("unknown window = %d, want -1", got)
+	}
+
+	// Clamped at the brim rather than reported over 100.
+	if got := childContextPercent(msgs, core.Model{MaxInput: 1}, 0); got != 100 {
+		t.Fatalf("overflowing window = %d, want 100", got)
+	}
+
+	// A transcript that grows never reads as emptier.
+	small := childContextPercent(msgs[:1], core.Model{MaxInput: 20_000}, 0)
+	big := childContextPercent(msgs, core.Model{MaxInput: 20_000}, 0)
+	if small < 0 || big < small {
+		t.Fatalf("percent should grow with the transcript: %d then %d", small, big)
 	}
 }

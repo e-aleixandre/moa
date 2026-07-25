@@ -87,6 +87,9 @@ type SubagentInitData struct {
 	InputTokens  int     `json:"input_tokens,omitempty"`
 	OutputTokens int     `json:"output_tokens,omitempty"`
 	CostUSD      float64 `json:"cost_usd,omitempty"`
+	// ContextPercent restores the child's own context reading after a
+	// reconnect (0-100, -1 unknown) — see SubagentUsageData.ContextPercent.
+	ContextPercent int `json:"context_percent"`
 	// AccentIndex is the subagent's stable per-session creation ordinal, used
 	// by the client to derive a deterministic accent color that survives
 	// reconnects (instead of one derived from array/map position).
@@ -337,6 +340,11 @@ type SubagentUsageData struct {
 	InputTokens  int     `json:"input_tokens"`
 	OutputTokens int     `json:"output_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
+	// ContextPercent is how full the CHILD's own window is (0-100), or -1 when
+	// its model has no known window. Sent unconditionally (no omitempty): 0 is
+	// a real reading, and a client that fell back to the parent's percentage
+	// would be showing a number about a different agent.
+	ContextPercent int `json:"context_percent"`
 }
 
 // SubagentEndData is sent when a subagent finishes, carrying its usage/cost.

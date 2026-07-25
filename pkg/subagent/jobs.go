@@ -59,6 +59,12 @@ type job struct {
 	messages              []core.AgentMessage
 	usage                 *core.Usage
 	costUSD               float64
+	// contextPct is how full the child's OWN context window is (0-100), or -1
+	// when its model is unknown so no window can be measured. The parent's
+	// percentage says nothing about a child: they hold different transcripts
+	// and often run different models, so a UI zoomed into the child has to
+	// read this one.
+	contextPct int
 	// accentIndex is a per-session creation ordinal (0, 1, 2, ...) assigned
 	// when the job is created, monotonically increasing and never reused
 	// (even once earlier subagents finish). It lets clients derive a stable
@@ -83,6 +89,7 @@ type jobSnapshot struct {
 	Sync             bool
 	Usage            *core.Usage
 	CostUSD          float64
+	ContextPercent   int
 	AccentIndex      int
 }
 
@@ -134,6 +141,9 @@ func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync
 			promoted:         make(chan struct{}),
 			startedAt:        time.Now(),
 			sync:             sync,
+			// Unknown until the child closes its first message, which is also
+			// when there is a transcript worth measuring.
+			contextPct: -1,
 		}
 
 		s.mu.Lock()
@@ -231,6 +241,7 @@ func snapshotLocked(j *job) jobSnapshot {
 		Sync:             j.sync,
 		Usage:            j.usage,
 		CostUSD:          j.costUSD,
+		ContextPercent:   j.contextPct,
 		AccentIndex:      j.accentIndex,
 	}
 }
@@ -268,10 +279,11 @@ func (s *jobStore) messages(id string) []core.AgentMessage {
 	return copied
 }
 
-// setUsage records the child's aggregated usage/cost on the job, so that
-// subagent_status can surface tokens/cost while the job is still running or
-// after it completes.
-func (s *jobStore) setUsage(id string, usage *core.Usage, costUSD float64) {
+// setUsage records the child's aggregated usage/cost and context fill on the
+// job, so that subagent_status can surface tokens/cost while the job is still
+// running or after it completes, and a reconnecting client can restore the
+// child's own context reading instead of starting blank.
+func (s *jobStore) setUsage(id string, usage *core.Usage, costUSD float64, contextPct int) {
 	j, ok := s.get(id)
 	if !ok {
 		return
@@ -279,6 +291,7 @@ func (s *jobStore) setUsage(id string, usage *core.Usage, costUSD float64) {
 	j.mu.Lock()
 	j.usage = usage
 	j.costUSD = costUSD
+	j.contextPct = contextPct
 	j.mu.Unlock()
 }
 
@@ -551,6 +564,9 @@ type JobInfo struct {
 	// can restore live cost without resetting it.
 	Usage   *core.Usage
 	CostUSD float64
+	// ContextPercent is how full the CHILD's own context window is (0-100),
+	// or -1 when unknown — see job.contextPct.
+	ContextPercent int
 	// AccentIndex is the job's stable creation ordinal (see job.accentIndex),
 	// used by clients to pick a deterministic accent color that survives
 	// reconnects.
@@ -593,6 +609,7 @@ func (j *Jobs) Snapshot() []JobInfo {
 			FinishedAt:       snap.FinishedAt,
 			Usage:            snap.Usage,
 			CostUSD:          snap.CostUSD,
+			ContextPercent:   snap.ContextPercent,
 			AccentIndex:      snap.AccentIndex,
 		})
 	}

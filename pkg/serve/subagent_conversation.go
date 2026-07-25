@@ -19,11 +19,19 @@ type SubagentSummary struct {
 	JobID      string    `json:"job_id"`
 	Task       string    `json:"task"`
 	Model      string    `json:"model,omitempty"`
+	Thinking   string    `json:"thinking,omitempty"`
 	Status     string    `json:"status"`
 	Async      bool      `json:"async"`
 	StartedAt  time.Time `json:"started_at,omitempty"`
 	FinishedAt time.Time `json:"finished_at,omitempty"`
 	Source     string    `json:"source"`
+	// Usage/cost/context of the CHILD, so a client reopening a finished
+	// subagent shows the same figures its live view showed. ContextPercent is
+	// -1 when unknown; the tokens and cost are omitted when zero.
+	InputTokens    int     `json:"input_tokens,omitempty"`
+	OutputTokens   int     `json:"output_tokens,omitempty"`
+	CostUSD        float64 `json:"cost_usd,omitempty"`
+	ContextPercent int     `json:"context_percent"`
 }
 
 type subagentListResponse struct {
@@ -39,6 +47,7 @@ type subagentConversationResponse struct {
 	JobID      string                `json:"job_id"`
 	Task       string                `json:"task"`
 	Model      string                `json:"model,omitempty"`
+	Thinking   string                `json:"thinking,omitempty"`
 	Status     string                `json:"status"`
 	Async      bool                  `json:"async"`
 	StartedAt  time.Time             `json:"started_at,omitempty"`
@@ -48,6 +57,11 @@ type subagentConversationResponse struct {
 	Messages   []ConversationMessage `json:"messages"`
 	NextCursor string                `json:"next_cursor,omitempty"`
 	HasMore    bool                  `json:"has_more"`
+	// Mirrors SubagentSummary's figures (see there).
+	InputTokens    int     `json:"input_tokens,omitempty"`
+	OutputTokens   int     `json:"output_tokens,omitempty"`
+	CostUSD        float64 `json:"cost_usd,omitempty"`
+	ContextPercent int     `json:"context_percent"`
 }
 
 type subagentConversationSnapshot struct {
@@ -108,9 +122,11 @@ func handleSubagentConversation(m *Manager) http.HandlerFunc {
 		response := subagentConversationResponse{
 			SessionID: r.PathValue("id"), JobID: snapshot.summary.JobID,
 			Task:  snapshot.summary.Task,
-			Model: snapshot.summary.Model, Status: snapshot.summary.Status, Async: snapshot.summary.Async,
+			Model: snapshot.summary.Model, Thinking: snapshot.summary.Thinking, Status: snapshot.summary.Status, Async: snapshot.summary.Async,
 			StartedAt: snapshot.summary.StartedAt, FinishedAt: snapshot.summary.FinishedAt,
 			Source: snapshot.summary.Source, Order: "newest_first", Messages: page, HasMore: hasMore,
+			InputTokens: snapshot.summary.InputTokens, OutputTokens: snapshot.summary.OutputTokens,
+			CostUSD: snapshot.summary.CostUSD, ContextPercent: snapshot.summary.ContextPercent,
 		}
 		if hasMore {
 			response.NextCursor, err = m.encodeConversationCursor(conversationCursor{SessionID: response.SessionID, BeforeID: nextBefore, Scope: subagentCursorScope(response.JobID)})
@@ -223,11 +239,22 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 }
 
 func subagentSummaryFromLive(info subagent.JobInfo) SubagentSummary {
-	return SubagentSummary{JobID: info.JobID, Task: info.Task, Model: info.Model, Status: info.Status, Async: info.Async, StartedAt: info.StartedAt, FinishedAt: info.FinishedAt, Source: "active"}
+	s := SubagentSummary{JobID: info.JobID, Task: info.Task, Model: info.Model, Thinking: info.Thinking, Status: info.Status, Async: info.Async, StartedAt: info.StartedAt, FinishedAt: info.FinishedAt, Source: "active", CostUSD: info.CostUSD, ContextPercent: info.ContextPercent}
+	if info.Usage != nil {
+		s.InputTokens, s.OutputTokens = info.Usage.Input, info.Usage.Output
+	}
+	return s
 }
 
 func subagentSummaryFromTranscript(transcript session.SubagentTranscript) SubagentSummary {
-	return SubagentSummary{JobID: transcript.JobID, Task: transcript.Task, Model: transcript.Model, Status: transcript.Status, Async: transcript.Async, StartedAt: transcript.StartedAt, FinishedAt: transcript.FinishedAt, Source: "persisted"}
+	s := SubagentSummary{JobID: transcript.JobID, Task: transcript.Task, Model: transcript.Model, Thinking: transcript.Thinking, Status: transcript.Status, Async: transcript.Async, StartedAt: transcript.StartedAt, FinishedAt: transcript.FinishedAt, Source: "persisted", CostUSD: transcript.CostUSD, ContextPercent: -1}
+	if transcript.ContextPercent != nil {
+		s.ContextPercent = *transcript.ContextPercent
+	}
+	if transcript.Usage != nil {
+		s.InputTokens, s.OutputTokens = transcript.Usage.Input, transcript.Usage.Output
+	}
+	return s
 }
 
 func sortedSubagentSummaries(items map[string]SubagentSummary) []SubagentSummary {

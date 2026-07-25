@@ -469,6 +469,7 @@ function initSubagents(raw) {
       usage: (sa.input_tokens || sa.output_tokens || sa.cost_usd)
         ? { inputTokens: sa.input_tokens || 0, outputTokens: sa.output_tokens || 0, costUSD: sa.cost_usd || 0 }
         : null,
+      contextPercent: sa.context_percent == null ? -1 : sa.context_percent,
       // Stable per-session creation ordinal from the server, so the accent
       // color derived from it survives WS reconnects (see stream-model.js's
       // subagentAccentIndex). Undefined when the server didn't send one
@@ -1192,12 +1193,14 @@ export function handleWsSubagentStart(id, data) {
 }
 
 // handleWsSubagentUsage applies the backend's live, cumulative token/cost
-// tally for one subagent (subagent_usage). The backend sends the running
-// total on every event, so this SETS sub.usage rather than accumulating it.
+// tally and context reading for one subagent (subagent_usage). The backend
+// sends the running total on every event, so this SETS them rather than
+// accumulating.
 // Silently ignored if the subagent isn't known yet (e.g. usage arrived before
 // subagent_start, or the subagent was already pruned).
-export function handleWsSubagentUsage(id, jobId, inputTokens, outputTokens, costUSD) {
+export function handleWsSubagentUsage(id, data) {
   const sess = store.get().sessions[id];
+  const jobId = data?.job_id;
   if (!sess || !jobId) return;
   const existing = sess.subagents?.[jobId];
   if (!existing) return;
@@ -1206,10 +1209,14 @@ export function handleWsSubagentUsage(id, jobId, inputTokens, outputTokens, cost
     [jobId]: {
       ...existing,
       usage: {
-        inputTokens: inputTokens || 0,
-        outputTokens: outputTokens || 0,
-        costUSD: costUSD || 0,
+        inputTokens: data.input_tokens || 0,
+        outputTokens: data.output_tokens || 0,
+        costUSD: data.cost_usd || 0,
       },
+      // The child's own context fill. -1 (unknown) when its model carries no
+      // window; the parent's percentage is never a stand-in, since the two
+      // agents hold different transcripts.
+      contextPercent: data.context_percent == null ? -1 : data.context_percent,
     },
   };
   updateSession(id, { subagents: subs });

@@ -23,6 +23,7 @@ const RUNNING = {
         async: false,
         status: "running",
         usage: { inputTokens: 14200, outputTokens: 4100, costUSD: 0.031, elapsedMs: 72000 },
+        contextPercent: 44,
         messages: [
           { _type: "tool_start", tool_call_id: "t1", tool_name: "bash", args: { cmd: "git log v0.10.0..HEAD --merges --oneline" }, status: "ok", result: "23 merges" },
           { _type: "tool_start", tool_call_id: "t2", tool_name: "grep", args: { pattern: "Merge pull request" }, status: "ok", result: "23 matches" },
@@ -60,6 +61,7 @@ const COMPLETED = {
         async: false,
         status: "completed",
         usage: { inputTokens: 31200, outputTokens: 4800, costUSD: 0.041, elapsedMs: 161000 },
+        contextPercent: 61,
         result: "full sweep green, -race clean, 2 skips (docker)",
         messages: [
           { _type: "tool_start", tool_call_id: "c1", tool_name: "bash", args: { cmd: "go test -race ./..." }, status: "ok", result: "ok  full sweep\n412 tests" },
@@ -86,6 +88,7 @@ const FAILED = {
         async: false,
         status: "failed",
         usage: { inputTokens: 12100, outputTokens: 1900, costUSD: 0.018, elapsedMs: 63000 },
+        contextPercent: 29,
         messages: [
           { _type: "tool_start", tool_call_id: "f1", tool_name: "read", args: { path: "pkg/session/schema.go" }, status: "ok", result: "164 lines" },
           { _type: "tool_start", tool_call_id: "f2", tool_name: "bash", args: { cmd: 'sqlite3 state.db ".schema"' }, status: "error", result: "Error: database is locked\nretry 2/3 after 2s… retry 3/3 after 4s…\nError: database is locked (SQLITE_BUSY)" },

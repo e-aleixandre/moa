@@ -1,0 +1,44 @@
+/* RunModeChip — sync/async state (flat label) or the promote action (bordered
+   button) in the subagent header. Both shapes share metrics so the header does
+   not reflow when a promoted child switches from one to the other. */
+.runmode {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay1);
+  white-space: nowrap;
+}
+
+/* The action half: a border is the whole difference, and it is the difference
+   between "this is how it runs" and "tap to change how it runs". */
+.runmode--action {
+  position: relative;
+  border-color: var(--surface1);
+  color: var(--subtext0);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ≥44px touch target without growing the chip. */
+.runmode--action::after {
+  content: "";
+  position: absolute;
+  inset: -9px -4px;
+}
+
+.runmode--action:active {
+  background: var(--surface0);
+}
+
+.runmode--action:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}

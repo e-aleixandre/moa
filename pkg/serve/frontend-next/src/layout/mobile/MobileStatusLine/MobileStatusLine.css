@@ -38,8 +38,14 @@
 /* ── Door 1: context ring + cost — ONE tap target, ONE usage scope.
    Teal SVG ring (canonical StatusStrip color), never escalates by color, never
    encodes session state. The cost is its natural sibling. ── */
+/* Layout lives on the class, not on the button reset above: inside a subagent
+   these segments are spans (nothing there is a door), and a segment that only
+   held its shape as a <button> would wrap into two lines the moment it stopped
+   being one. */
 .mstatusline .msl-ctx {
   position: relative;
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
   flex: none;
   color: var(--subtext0);
@@ -136,6 +142,8 @@
 .mstatusline .msl-perm {
   flex: none;
   position: relative;
+  display: inline-flex;
+  align-items: center;
   padding: 2px 0;
 }
 .mstatusline .msl-perm::after {

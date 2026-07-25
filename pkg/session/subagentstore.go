@@ -21,11 +21,20 @@ type SubagentTranscript struct {
 	Task       string              `json:"task"`
 	Model      string              `json:"model"`
 	Status     string              `json:"status"`
+	Thinking   string              `json:"thinking,omitempty"`
 	Async      bool                `json:"async"`
 	StartedAt  time.Time           `json:"started_at,omitempty"`
 	FinishedAt time.Time           `json:"finished_at,omitempty"`
 	Usage      *core.Usage         `json:"usage,omitempty"`
 	CostUSD    float64             `json:"cost_usd,omitempty"`
+	// ContextPercent is how full the child's own window was when it finished
+	// (0-100). Stored alongside usage so reopening a finished subagent
+	// restores the same reading it had while it ran. A POINTER because 0 is a
+	// real reading (a child that barely used its window) and has to stay
+	// distinguishable from a transcript written before this was recorded:
+	// nil means unknown, and unknown hides the ring instead of drawing an
+	// empty one.
+	ContextPercent *int `json:"context_percent,omitempty"`
 	Messages   []core.AgentMessage `json:"messages"`
 }
 

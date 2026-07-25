@@ -1,6 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import { Check } from "lucide-preact";
-import { ModelSelector, ModelPill, TokenFlow } from "../../../components/index.js";
+import { ModelSelector } from "../../../components/index.js";
 import { api } from "../../../data/api.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
 import {
@@ -15,6 +15,7 @@ import { configureSession } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel, fmtTokens } from "../../../data/util/format.js";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
+import { StatusLineRow } from "./StatusLineRow.jsx";
 import "./MobileStatusLine.css";
 
 // MobileStatusLine — the persistent mobile chrome. One line pinned under the
@@ -44,6 +45,11 @@ import "./MobileStatusLine.css";
 // floating title chip at the top of the screen (MobileTitleChip), which also
 // carries the cross-session attention dot. One door per destination, and the
 // one that switches session belongs next to the session's own name.
+//
+// The line's FACE — ring, cost, model, permission, tokens — is StatusLineRow,
+// shared with the subagent view so the two screens wear one line rather than
+// two that resemble each other. This component owns what makes it the trunk's:
+// the session's data, and the doors.
 //
 // Every destination lays out real shared data (usageForSession / ModelSelector /
 // the canonical MODES / configureSession) in the mock's visual structure. Global
@@ -269,91 +275,35 @@ export function MobileStatusLine({ session, usage }) {
     : "";
   const permMode = model.perm.mode;
 
-  // Ring geometry: teal arc over a surface1 track, matching the mock's SVG ring
-  // (pathLength 100 → dasharray "pct 100-pct"). Kept as SVG (not a conic mask) so
-  // the stroke width reads exactly like the approved capture.
-  const ringPct = hasCtx ? Math.min(100, Math.max(0, ctx)) : 0;
-
   const changePerm = (value) => {
     if (value !== permMode) configureSession(session.id, { permissionMode: value });
     setPermsOpen(false);
   };
 
   return (
-    <div class="mstatusline">
-      {hasCtx && (
-        <button
-          type="button"
-          class="msl-ctx"
-          onClick={() => setUsageOpen(true)}
-          aria-haspopup="dialog"
-          aria-expanded={usageOpen}
-          aria-label={
-            spend
-              ? `Context ${ctx}% used, ~${spend} spent — open context and usage`
-              : `Context ${ctx}% used — open context and usage`
-          }
-        >
-          <svg class="msl-ring" viewBox="0 0 36 36" aria-hidden="true">
-            <circle class="t" cx="18" cy="18" r="15.5" pathLength="100" />
-            <circle
-              class="f"
-              cx="18"
-              cy="18"
-              r="15.5"
-              pathLength="100"
-              stroke-dasharray={`${ringPct} ${100 - ringPct}`}
-            />
-          </svg>
-          <span class="msl-ctx-pct">{ctx}%</span>
-          {spend && (
-            <span class={`msl-cost spend-${model.spendLevel || "normal"}`} aria-hidden="true">
-              ~{spend}
-            </span>
-          )}
-        </button>
-      )}
-
-      {hasCtx && hasSession && <span class="msl-div" aria-hidden="true" />}
-
-      {hasSession && (
-        <ModelPill
-          model={modelName}
-          accent={modelAccent(session.model)}
-          variant="bars"
-          level={thinking}
-          onClick={() => setSessionOpen(true)}
-          aria-haspopup="dialog"
-          aria-expanded={sessionOpen}
-          aria-label="Model and thinking — change"
-        />
-      )}
-
-      {hasSession && <span class="msl-div" aria-hidden="true" />}
-
-      {hasSession && (
-        <button
-          type="button"
-          class="msl-perm"
-          onClick={() => setPermsOpen(true)}
-          aria-haspopup="dialog"
-          aria-expanded={permsOpen}
-          aria-label={`Permission mode: ${permMode.toUpperCase()} — change`}
-        >
-          <span class={`perm-chip perm-${permMode}`} aria-hidden="true">
-            {permMode}
-          </span>
-        </button>
-      )}
-
-      <span class="msl-spacer" aria-hidden="true" />
-
-      {hasTokens && (
-        <span class="msl-tokens">
-          <TokenFlow up={tokensUp} down={tokensDown} variant="compact" />
-        </span>
-      )}
-
+    <StatusLineRow
+      contextPercent={hasCtx ? ctx : undefined}
+      contextLabel={
+        spend
+          ? `Context ${ctx}% used, ~${spend} spent — open context and usage`
+          : `Context ${ctx}% used — open context and usage`
+      }
+      cost={spend}
+      spendLevel={model.spendLevel || "normal"}
+      model={hasSession ? modelName : ""}
+      modelAccent={hasSession ? modelAccent(session.model) : "lavender"}
+      modelLabel="Model and thinking — change"
+      thinking={thinking}
+      perm={hasSession ? permMode : null}
+      tokensUp={hasTokens ? tokensUp : 0}
+      tokensDown={hasTokens ? tokensDown : 0}
+      onContext={() => setUsageOpen(true)}
+      onModel={() => setSessionOpen(true)}
+      onPerm={() => setPermsOpen(true)}
+      contextOpen={usageOpen}
+      modelOpen={sessionOpen}
+      permOpen={permsOpen}
+    >
       {hasSession && (
         <MobileSheet
           open={usageOpen}
@@ -420,6 +370,6 @@ export function MobileStatusLine({ session, usage }) {
           </div>
         </MobileSheet>
       )}
-    </div>
+    </StatusLineRow>
   );
 }
