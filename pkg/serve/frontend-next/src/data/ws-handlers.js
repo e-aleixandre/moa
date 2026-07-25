@@ -48,6 +48,10 @@ export function normalizeHistory(raw, liveSubagents = []) {
             status,
             result: resultText,
             note: extractToolNote(resultText, status === 'rejected'),
+            // The subagent tool records the job it spawned on its result: the
+            // tool call ID is the provider's, so this is the only link from a
+            // restored card to a subagent transcript on disk.
+            subagentJobId: tr?.custom?.subagent_job_id || undefined,
           });
         }
       }

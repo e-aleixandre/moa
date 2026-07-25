@@ -787,6 +787,40 @@ func TestAsyncSubagentStatusAndCompletion(t *testing.T) {
 	})
 }
 
+// The job ID recorded on the result is what ties a card in the parent's
+// transcript to a subagent transcript on disk once the live job is gone — the
+// tool call ID belongs to the provider, so it cannot carry that link.
+func TestSubagentResultCarriesJobID(t *testing.T) {
+	for _, tc := range []struct {
+		name, task string
+		async      bool
+	}{
+		{name: "sync", task: "do it"},
+		{name: "async", task: "do it", async: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sub, _, _, jobs := newSubagentToolsWithStore(t, Config{
+				DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+				ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(textResponse("child done")), nil },
+			})
+
+			res, err := sub.Execute(context.Background(), map[string]any{"task": tc.task, "async": tc.async}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobID, _ := res.Custom["subagent_job_id"].(string)
+			if jobID == "" {
+				t.Fatalf("result carries no subagent_job_id: %#v", res.Custom)
+			}
+			if tc.async {
+				if _, ok := jobs.snapshot(jobID); !ok {
+					t.Fatalf("no job for recorded ID %q", jobID)
+				}
+			}
+		})
+	}
+}
+
 func TestSubagentTimeoutSurfacesActionableMessage(t *testing.T) {
 	// A provider that blocks until the context is cancelled, then reports the
 	// context error — mimicking a real stream that outlives the child's own

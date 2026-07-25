@@ -259,7 +259,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil)
-				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), nil
+				return taggedWithJob(core.TextResult("Subagent started in background.\nJob ID: "+job.id+"\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), job.id), nil
 			}
 
 			// Sync: the child still runs in its own goroutine (unified with
@@ -464,14 +464,33 @@ func linker(parentCtx context.Context, jobCancel context.CancelFunc, j *job) {
 	}
 }
 
-// awaitSyncResult blocks until j finishes or is promoted to background,
+// taggedWithJob records on the tool result which subagent the call spawned.
+// The tool call ID is the provider's, so once the live job is gone this
+// annotation is the only thing tying a card in the parent's transcript to a
+// persisted subagent transcript — which is what lets a reopened conversation
+// still open the subagent it launched.
+func taggedWithJob(r core.Result, jobID string) core.Result {
+	if r.Custom == nil {
+		r.Custom = make(map[string]any, 1)
+	}
+	r.Custom["subagent_job_id"] = jobID
+	return r
+}
+
+// awaitSyncResult is syncResult plus the job tag every subagent result carries.
+func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Model) (core.Result, error) {
+	result, err := syncResult(cfg, jobs, j, task, model)
+	return taggedWithJob(result, j.id), err
+}
+
+// syncResult blocks until j finishes or is promoted to background,
 // deciding which happened by consulting j.isPromoted() — never by which
 // channel of the select fired, since Go's select picks pseudo-randomly among
 // ready cases and both may be ready in a promote-vs-finish race. This
 // guarantees the result is delivered exactly once, via a single lane:
 // promoted → async (OnAsyncComplete, from runJob's defer); not promoted →
 // this function's return value.
-func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Model) (core.Result, error) {
+func syncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Model) (core.Result, error) {
 	select {
 	case <-j.done:
 	case <-j.promoted:

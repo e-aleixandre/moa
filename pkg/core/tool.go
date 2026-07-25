@@ -54,6 +54,11 @@ type ExecuteFunc func(ctx context.Context, params map[string]any, onUpdate func(
 type Result struct {
 	Content []Content `json:"content"`
 	IsError bool      `json:"is_error,omitempty"`
+	// Custom annotates the recorded tool result with facts the UI needs but the
+	// model does not — it is merged into the tool_result message's own Custom
+	// map and never reaches the provider. The subagent tool uses it to record
+	// which job a call spawned, a link that is otherwise lost on restart.
+	Custom map[string]any `json:"custom,omitempty"`
 }
 
 // TextResult creates a Result with a single text content block.

@@ -34,3 +34,21 @@ func TestConsumeStream_CancelledTurnWithLateDoneIsNotSuccess(t *testing.T) {
 		t.Fatalf("msg = %v, want the complete final message preserved for history", msg)
 	}
 }
+
+// A tool's Custom annotations reach the recorded tool_result: that map is how
+// the subagent tool records which job a call spawned, and the UI reads it back
+// from the transcript long after the job is gone.
+func TestToolResultMessageCarriesResultCustom(t *testing.T) {
+	call := core.Content{Type: "tool_call", ToolCallID: "toolu_1", ToolName: "subagent"}
+	result := core.Result{Content: []core.Content{core.TextContent("done")}, Custom: map[string]any{"subagent_job_id": "sa-1"}}
+
+	msg := toolResultMessage(call, result, false, false)
+	if got := msg.Custom["subagent_job_id"]; got != "sa-1" {
+		t.Fatalf("subagent_job_id = %v, want sa-1", got)
+	}
+
+	rejected := toolResultMessage(call, result, false, true)
+	if rejected.Custom["subagent_job_id"] != "sa-1" || rejected.Custom["rejected"] != true {
+		t.Fatalf("annotations and rejection must coexist, got %+v", rejected.Custom)
+	}
+}
