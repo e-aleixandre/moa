@@ -18,6 +18,7 @@ export function ModelPill({
   variant = "bars",
   accent = "lavender",
   hot = false,
+  readOnly = false,
   onClick,
   onMeterClick,
   ...rest
@@ -26,6 +27,20 @@ export function ModelPill({
   // the caller doesn't pass `hot` — the spec requires the pill to reflect xhigh
   // as hot everywhere (desktop and mobile).
   const isHot = hot || level === "xhigh";
+  // Read-only: the same pill as a plain span. Used inside a subagent, where the
+  // model is the CHILD's and can't be changed from there — a disabled button
+  // would promise an action that doesn't exist anywhere, rather than stating a
+  // fact.
+  if (readOnly) {
+    return (
+      <span class="model-pill" {...rest}>
+        <span class="m-name" style={{ color: `var(--${accent})` }}>
+          {model}
+        </span>
+        <ThinkingMeter variant={variant} level={level} hot={isHot} label={`Thinking: ${level}`} />
+      </span>
+    );
+  }
   if (onMeterClick) {
     return (
       <span class="model-pill model-pill--split" {...rest}>

@@ -95,10 +95,12 @@ type Config struct {
 
 	// OnChildUsage is called each time a child closes a message (its
 	// message_end), with the child's accumulated usage/cost so far (cost using
-	// the CHILD's model pricing). It lets live UIs show running tokens/cost
-	// before the terminal OnChildEnd. Same aggregation as OnChildEnd, so the
-	// live value stays consistent with the final total.
-	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64)
+	// the CHILD's model pricing) and how full its own context window is
+	// (0-100, or -1 when its model has no known window). It lets live UIs show
+	// running tokens/cost/context before the terminal OnChildEnd. Same
+	// aggregation as OnChildEnd, so the live value stays consistent with the
+	// final total.
+	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
 
 	// OnChildEnd is called once when a child agent (sync or async) finishes,
 	// with its final status and aggregated usage/cost (cost computed with the
@@ -257,7 +259,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil)
-				return core.TextResult("Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), nil
+				return taggedWithJob(core.TextResult("Subagent started in background.\nJob ID: "+job.id+"\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), job.id), nil
 			}
 
 			// Sync: the child still runs in its own goroutine (unified with
@@ -462,14 +464,33 @@ func linker(parentCtx context.Context, jobCancel context.CancelFunc, j *job) {
 	}
 }
 
-// awaitSyncResult blocks until j finishes or is promoted to background,
+// taggedWithJob records on the tool result which subagent the call spawned.
+// The tool call ID is the provider's, so once the live job is gone this
+// annotation is the only thing tying a card in the parent's transcript to a
+// persisted subagent transcript — which is what lets a reopened conversation
+// still open the subagent it launched.
+func taggedWithJob(r core.Result, jobID string) core.Result {
+	if r.Custom == nil {
+		r.Custom = make(map[string]any, 1)
+	}
+	r.Custom["subagent_job_id"] = jobID
+	return r
+}
+
+// awaitSyncResult is syncResult plus the job tag every subagent result carries.
+func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Model) (core.Result, error) {
+	result, err := syncResult(cfg, jobs, j, task, model)
+	return taggedWithJob(result, j.id), err
+}
+
+// syncResult blocks until j finishes or is promoted to background,
 // deciding which happened by consulting j.isPromoted() — never by which
 // channel of the select fired, since Go's select picks pseudo-randomly among
 // ready cases and both may be ready in a promote-vs-finish race. This
 // guarantees the result is delivered exactly once, via a single lane:
 // promoted → async (OnAsyncComplete, from runJob's defer); not promoted →
 // this function's return value.
-func awaitSyncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Model) (core.Result, error) {
+func syncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Model) (core.Result, error) {
 	select {
 	case <-j.done:
 	case <-j.promoted:
@@ -586,9 +607,10 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// aggregation as OnChildEnd, keeping the live value consistent
 			// with the final total.
 			usage, cost := childUsage(msgs), childCost(model, msgs)
-			jobs.setUsage(j.id, usage, cost)
+			ctxPct := childContextPercent(msgs, model, child.CompactionEpoch())
+			jobs.setUsage(j.id, usage, cost, ctxPct)
 			if cfg.OnChildUsage != nil {
-				cfg.OnChildUsage(j.id, usage, cost)
+				cfg.OnChildUsage(j.id, usage, cost, ctxPct)
 			}
 		}
 	})
@@ -611,7 +633,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)
 	finalMsgs = msgs
 	jobs.setMessages(j.id, msgs)
-	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs))
+	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs), childContextPercent(msgs, model, child.CompactionEpoch()))
 	if err != nil {
 		// Classify from authoritative signals, not the returned error's chain
 		// (a provider may wrap a context error while the context is still live).
@@ -745,6 +767,24 @@ func childUsage(msgs []core.AgentMessage) *core.Usage {
 		return nil
 	}
 	return &total
+}
+
+// childContextPercent measures how full the CHILD's own context window is,
+// 0-100, or -1 when its model carries no window to measure against. Same
+// arithmetic as the parent's GetContextUsage handler (pkg/bus/handlers.go),
+// against the child's transcript, the child's model and the child's compaction
+// epoch — a child is a separate agent, so the parent's reading describes
+// nothing about it.
+func childContextPercent(msgs []core.AgentMessage, model core.Model, epoch int) int {
+	if model.MaxInput <= 0 {
+		return -1
+	}
+	est := core.EstimateContextTokens(msgs, "", nil, epoch)
+	pct := (est.Tokens * 100) / model.MaxInput
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
 }
 
 // childCost computes the USD cost of a child's usage using the CHILD's model

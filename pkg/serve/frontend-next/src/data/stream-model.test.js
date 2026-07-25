@@ -288,6 +288,27 @@ test('an async originating tool call appears once in the dock and its canonical 
   expect(liveTrayAgents(completed)).toHaveLength(0);
 });
 
+// After a reload nothing is live, so the tool call's own ID — the provider's —
+// is all that is left of the link to the job. The subagent tool records the job
+// ID on its result for exactly this: without it the restored row would point at
+// a job the server has never heard of, and tapping it would do nothing.
+test('a restored tool call opens the job recorded on its result', () => {
+  const s = session([
+    tool('toolu_1', 'subagent', { task: 'Analyze auth' }, 'done', 'Found three issues', { subagentJobId: 'sa-1' }),
+  ]);
+  const agents = projectStream(s).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents).toEqual([expect.objectContaining({ id: 'sa-1', state: 'done' })]);
+});
+
+test('a restored async tool call yields to its completion card instead of doubling it', () => {
+  const s = session([
+    tool('call_1', 'subagent', { task: 'Review ws.go' }, 'done', 'Subagent started in background.', { subagentJobId: 'sa-1' }),
+    tool('subagent-sa-1', 'subagent', { task: 'Review ws.go' }, 'done', 'Looks good'),
+  ]);
+  const agents = projectStream(s).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+  expect(agents).toEqual([expect.objectContaining({ id: 'sa-1', state: 'done', chip: 'Looks good' })]);
+});
+
 test('parallel subagents with identical tasks remain distinct by origin tool call ID', () => {
   const s = session([
     tool('toolu_1', 'subagent', { task: 'Review the same file' }, 'running'),

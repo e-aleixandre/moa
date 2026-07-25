@@ -637,6 +637,15 @@ test('a start-before-subagent placeholder becomes terminal when its bash ends', 
   expect(liveTrayAgents(store.get().sessions.s1)).toEqual([]);
 });
 
+test('normalizeHistory carries the job ID the subagent tool recorded on its result', () => {
+  const raw = [
+    { role: 'assistant', msg_id: 'a1', content: [{ type: 'tool_call', tool_call_id: 'toolu_1', tool_name: 'subagent', arguments: { task: 'work' } }] },
+    { role: 'tool_result', tool_call_id: 'toolu_1', custom: { subagent_job_id: 'sa-1' }, content: [{ type: 'text', text: 'done' }] },
+  ];
+  const out = normalizeHistory(raw);
+  expect(out[0]).toEqual(expect.objectContaining({ tool_name: 'subagent', subagentJobId: 'sa-1' }));
+});
+
 test('normalizeHistory reloads a bash_job custom notification as a bash card', () => {
   const raw = [{
     role: 'user',

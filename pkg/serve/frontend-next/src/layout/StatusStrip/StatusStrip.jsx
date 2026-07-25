@@ -23,6 +23,11 @@ import { activityPhase } from "../../data/util/activity.js";
 // `onOpenUsage` (optional) turns the cost segment into the Usage panel trigger;
 // `showTokens` (default true) is set false by compact densities (pane/mobile),
 // where tokens drop to level 2.
+//
+// Every datum arrives as a prop, and each control is a control only when its
+// handler is passed — which is what lets the subagent view wear this same strip
+// read-only, measuring the CHILD (its context, its tokens, its spend) instead
+// of the session.
 export function StatusStrip({
   ctxPercent,
   tokensUp,
@@ -31,6 +36,7 @@ export function StatusStrip({
   spend,
   session,
   usage,
+  taskLive,
   onOpenUsage,
   onPermChange,
   permBusy = false,
@@ -47,7 +53,10 @@ export function StatusStrip({
 
   const hasSpend = !!spend;
   const phase = activityPhase(session);
-  const workIsLive = phase === "working" || phase === "thinking";
+  // taskLive overrides the session-derived liveness for a strip whose task
+  // belongs to something other than the main run — a subagent's, whose activity
+  // can be live while the parent sits idle (an async child), or the reverse.
+  const workIsLive = taskLive == null ? phase === "working" || phase === "thinking" : taskLive;
   // The cost segment is the natural door to the Usage panel: it is the only
   // "money" datum on the line, so tapping it to see "more money" is self-
   // explanatory. When there is no cost yet but the panel is still reachable, a

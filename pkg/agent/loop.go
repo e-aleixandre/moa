@@ -1073,6 +1073,12 @@ func toolResultMessage(tc core.Content, result core.Result, isError bool, reject
 		tc.ToolCallID, tc.ToolName,
 		result.Content, isError,
 	))
+	for key, value := range result.Custom {
+		if msg.Custom == nil {
+			msg.Custom = make(map[string]any)
+		}
+		msg.Custom[key] = value
+	}
 	if rejected {
 		if msg.Custom == nil {
 			msg.Custom = make(map[string]any)

@@ -96,14 +96,16 @@
   grid-column: 3;
 }
 
-.mcomposer .composer.is-busy .composer-send-wrap {
+.mcomposer .composer.has-stop .composer-send-wrap {
   grid-column: 4;
 }
 
-/* Busy: the pill grows a 4th column so the ghost Stop sits beside Send
-   ([+][textarea][stop][send]) instead of Stop replacing Send. On mobile there
-   is no Esc, so this ghost is the ONLY stop affordance. */
-.mcomposer .composer.is-busy {
+/* Whenever there is a Stop, the pill grows a 4th column so the ghost sits
+   beside Send ([+][textarea][stop][send]) instead of on top of it. That is the
+   parent run's Stop while busy, and the subagent's Stop in steer mode — keyed
+   on the stop's presence rather than on "busy", which steer mode is not. On
+   mobile there is no Esc, so this ghost is the ONLY stop affordance. */
+.mcomposer .composer.has-stop {
   grid-template-columns: auto 1fr auto auto;
 }
 
@@ -124,13 +126,13 @@
 
 /* Busy Send keeps its own ≥44px hit-area (the 36px button lives inside the
    wrap, which the grid places in column 4). */
-.mcomposer .composer.is-busy .composer-send {
+.mcomposer .composer.has-stop .composer-send {
   position: relative;
 }
 
 /* Match the ghost Stop's ≥44px hit-area (busy Send is 36px). Cap sideways
    growth to -4px so it never overlaps the adjacent Stop (8px column gap). */
-.mcomposer .composer.is-busy .composer-send::after {
+.mcomposer .composer.has-stop .composer-send::after {
   content: "";
   position: absolute;
   inset: -4px;

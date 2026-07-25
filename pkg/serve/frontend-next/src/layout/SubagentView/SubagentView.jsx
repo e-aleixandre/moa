@@ -1,10 +1,12 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, GitFork, Rocket, X, Check, Copy } from "lucide-preact";
+import { ArrowLeft, GitFork, X, Check, Copy } from "lucide-preact";
 import { Spinner, Kbd, IconButton } from "../../primitives/index.js";
-import { ModelPill, TokenFlow, UserWaypoint } from "../../components/index.js";
+import { ModelPill, RunModeChip, UserWaypoint } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
+import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
+import { fmtCost } from "../../data/util/usage-pills.js";
 import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format.js";
 import { modelAccent } from "../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
@@ -108,24 +110,15 @@ export function SubagentView({ session, jobId, onBack }) {
         </div>
         <div class="sa-head-actions">
           {view.model && (
-            <ModelPill model={view.model} level={view.thinking} accent={modelAccent(view.model)} variant="glyph" />
+            <ModelPill
+              model={view.model}
+              level={view.thinking}
+              accent={modelAccent(view.model)}
+              variant="glyph"
+              readOnly
+            />
           )}
-          {canPromote(view) && (
-            <IconButton label="Promote — run in background, unblocks parent" onClick={onPromote}>
-              <Rocket size={15} />
-            </IconButton>
-          )}
-          {!view.terminal && (
-            <button
-              type="button"
-              class={`sa-cancel${confirmCancel ? " armed" : ""}`}
-              onClick={onCancel}
-              title="Cancel subagent"
-              aria-label="Cancel subagent"
-            >
-              {confirmCancel ? "sure?" : <X size={15} />}
-            </button>
-          )}
+          <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
           <Kbd>esc</Kbd>
         </div>
       </header>
@@ -166,41 +159,45 @@ export function SubagentView({ session, jobId, onBack }) {
       {view.terminal ? (
         <OutcomeBanner view={view} onBack={onBack} />
       ) : (
-        <>
-          <Composer
-            key={`steer-${jobId}`}
-            sessionId={session.id}
-            session={session}
-            steer={{
-              jobId,
-              name: view.name,
-              onRebound: onBack,
-            }}
-          />
-          <NowLine view={view} />
-        </>
+        <Composer
+          key={`steer-${jobId}`}
+          sessionId={session.id}
+          session={session}
+          steer={{
+            jobId,
+            name: view.name,
+            onRebound: onBack,
+            onStop: onCancel,
+            stopArmed: confirmCancel,
+          }}
+        />
       )}
+      <BranchStrip session={session} view={view} />
     </div>
   );
 }
 
-// NowLine — fused status below the composer. Segments missing a backend datum
-// are omitted rather than shown as undefined/NaN.
-function NowLine({ view }) {
+// BranchStrip — the parent's own StatusStrip, measuring the branch: the
+// child's activity, its context window, its tokens and its spend. The
+// permission chip is the session's, because that is the policy the child's
+// tools run under; everything else describes the child, and nothing is a
+// control, since a child's settings are not changed from inside it.
+function BranchStrip({ session, view }) {
   const usage = view.usage;
-  const hasTokens = usage && (usage.inputTokens != null || usage.outputTokens != null);
-  const cost = usage && usage.costUSD > 0 ? `~$${usage.costUSD.toFixed(3)}` : null;
+  const activity = view.terminal
+    ? view.outcome
+    : `${view.action || "working"}${view.elapsed ? ` · ${view.elapsed}` : ""}`;
   return (
-    <div class="sa-nowline" aria-hidden="true">
-      <span class="sa-nowline-act is-live">
-        {view.action || "working"}{view.elapsed ? ` · ${view.elapsed}` : ""}
-      </span>
-      {hasTokens && (
-        <span class="sa-nowline-tok">
-          <TokenFlow up={usage.inputTokens || 0} down={usage.outputTokens || 0} variant="strip" />
-        </span>
-      )}
-      {cost && <span class="sa-nowline-cost">{cost}</span>}
+    <div class="sa-strip">
+      <StatusStrip
+        ctxPercent={view.contextPercent}
+        tokensUp={(usage && usage.inputTokens) || 0}
+        tokensDown={(usage && usage.outputTokens) || 0}
+        task={activity}
+        taskLive={!view.terminal}
+        spend={usage && usage.costUSD > 0 ? fmtCost(usage.costUSD) : undefined}
+        session={session}
+      />
     </div>
   );
 }

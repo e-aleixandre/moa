@@ -221,13 +221,7 @@ function routeEvent(sessionId, evt) {
       handleWsSubagentEnd(sessionId, evt.data);
       break;
     case 'subagent_usage':
-      handleWsSubagentUsage(
-        sessionId,
-        evt.data.job_id,
-        evt.data.input_tokens,
-        evt.data.output_tokens,
-        evt.data.cost_usd,
-      );
+      handleWsSubagentUsage(sessionId, evt.data);
       break;
     case 'bash_job_start':
       handleWsBashJobStart(sessionId, evt.data);

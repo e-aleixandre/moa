@@ -138,6 +138,14 @@
   background: color-mix(in srgb, var(--red) 12%, transparent);
 }
 
+/* Armed — the first tap of a two-tap stop (subagent steer mode). Filled rather
+   than outlined, so "the next tap does it" is visible without a word of copy
+   and without the button moving. */
+.composer-wrap .composer-stop-ghost.is-armed {
+  background: color-mix(in srgb, var(--red) 22%, transparent);
+  border-color: var(--red);
+}
+
 /* ≥44px hit-area (P7/INC-35) without growing the visual button. */
 .composer-wrap .composer-stop-ghost::after {
   content: "";

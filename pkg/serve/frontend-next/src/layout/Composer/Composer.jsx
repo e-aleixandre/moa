@@ -822,7 +822,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
           ))}
         </div>
       )}
-      <div class={`composer${busy ? " is-busy" : ""}`}>
+      <div class={`composer${busy ? " is-busy" : ""}${busy || (steer && steer.onStop) ? " has-stop" : ""}`}>
         <input
           ref={attachInputRef}
           type="file"
@@ -890,17 +890,29 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
           {busy && hasText && !summary && (
             <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
           )}
-          {busy && (
+          {(busy || (steer && steer.onStop)) && (
             /* Stop no longer REPLACES Send while busy — it joins it as a
                secondary (ghost) action. Send keeps its identity in every state
                so "you can always talk to it" (steer) reads at a glance; on
-               mobile this ghost is also the only Stop (no Esc). */
+               mobile this ghost is also the only Stop (no Esc).
+
+               In steer mode it stops the SUBAGENT, not the parent run: the
+               composer is aimed at the child, so the stop next to it has to be
+               too. The owner passes the action (and arms the confirm), since
+               "are you sure" belongs with the view that knows which child this
+               is. */
             <button
               type="button"
-              class="composer-stop-ghost"
-              aria-label="Stop the run (Esc)"
-              title="Stop — ends the run (Esc)"
-              onClick={handleStop}
+              class={`composer-stop-ghost${steer && steer.stopArmed ? " is-armed" : ""}`}
+              aria-label={steer && steer.onStop ? `Stop ${steer.name}` : "Stop the run (Esc)"}
+              title={
+                steer && steer.onStop
+                  ? steer.stopArmed
+                    ? "Tap again to stop this subagent"
+                    : `Stop — cancels ${steer.name}`
+                  : "Stop — ends the run (Esc)"
+              }
+              onClick={steer && steer.onStop ? steer.onStop : handleStop}
             >
               <Square size={13} />
             </button>

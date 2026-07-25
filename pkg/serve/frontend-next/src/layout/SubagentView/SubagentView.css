@@ -79,41 +79,6 @@
   flex: none;
 }
 
-/* Cancel button: 32px visual, ≥44px hit-area via pseudo-element (INC-35). */
-.subagent-view .sa-cancel {
-  position: relative;
-  min-width: 32px;
-  height: 32px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--overlay1);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
-}
-
-.subagent-view .sa-cancel::after {
-  content: "";
-  position: absolute;
-  inset: -6px;
-}
-
-.subagent-view .sa-cancel:hover {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-}
-
-.subagent-view .sa-cancel.armed {
-  color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 45%, transparent);
-  background: color-mix(in srgb, var(--red) 14%, transparent);
-}
-
 /* ── sibling rail ───────────────────────────────────────────────────────── */
 .subagent-view .sa-rail {
   display: flex;
@@ -172,71 +137,12 @@
   margin-bottom: var(--space-1);
 }
 
-/* ── fused now-line ─────────────────────────────────────────────────────── */
-.subagent-view .sa-nowline {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-8);
-  max-width: 844px;
-  margin: 0 auto;
-  width: 100%;
+/* ── status strip ───────────────────────────────────────────────────────
+   The parent's own strip, measuring the branch (see BranchStrip). It needs no
+   rules of its own — sharing StatusStrip's means the two screens cannot drift
+   — beyond keeping it out of the flex stretch. */
+.subagent-view .sa-strip {
   flex: none;
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay1);
-}
-
-.subagent-view .sa-nowline-act {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  color: var(--subtext0);
-}
-
-.subagent-view .sa-nowline-act::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 2px;
-  background: var(--blue);
-  flex: none;
-}
-
-.subagent-view .sa-nowline-act.is-live {
-  background: linear-gradient(
-    90deg,
-    var(--subtext0) 0%,
-    var(--subtext0) 35%,
-    var(--sky) 50%,
-    var(--subtext0) 65%,
-    var(--subtext0) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  background-size: 200% 100%;
-  animation: work-shimmer 2.5s ease-in-out infinite;
-}
-
-.subagent-view .sa-nowline-tok,
-.subagent-view .sa-nowline-cost {
-  flex: none;
-  color: var(--overlay0);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .subagent-view .sa-nowline-act.is-live {
-    animation: none;
-    background: none;
-    -webkit-background-clip: border-box;
-    background-clip: border-box;
-    color: var(--subtext0);
-  }
 }
 
 /* ── outcome banner ─────────────────────────────────────────────────────── */

@@ -442,6 +442,11 @@ type SubagentUsage struct {
 	JobID     string
 	Usage     *core.Usage
 	CostUSD   float64
+	// ContextPercent is how full the CHILD's own context window is (0-100), or
+	// -1 when its model has no known window. It travels with usage because a
+	// client zoomed into the child measures it against the child's window, not
+	// the parent's: different transcript, often a different model.
+	ContextPercent int
 }
 
 // SubagentEvent transports a single already-typed bus event from a subagent

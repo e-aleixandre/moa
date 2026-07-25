@@ -787,6 +787,40 @@ func TestAsyncSubagentStatusAndCompletion(t *testing.T) {
 	})
 }
 
+// The job ID recorded on the result is what ties a card in the parent's
+// transcript to a subagent transcript on disk once the live job is gone — the
+// tool call ID belongs to the provider, so it cannot carry that link.
+func TestSubagentResultCarriesJobID(t *testing.T) {
+	for _, tc := range []struct {
+		name, task string
+		async      bool
+	}{
+		{name: "sync", task: "do it"},
+		{name: "async", task: "do it", async: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sub, _, _, jobs := newSubagentToolsWithStore(t, Config{
+				DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+				ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(textResponse("child done")), nil },
+			})
+
+			res, err := sub.Execute(context.Background(), map[string]any{"task": tc.task, "async": tc.async}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobID, _ := res.Custom["subagent_job_id"].(string)
+			if jobID == "" {
+				t.Fatalf("result carries no subagent_job_id: %#v", res.Custom)
+			}
+			if tc.async {
+				if _, ok := jobs.snapshot(jobID); !ok {
+					t.Fatalf("no job for recorded ID %q", jobID)
+				}
+			}
+		})
+	}
+}
+
 func TestSubagentTimeoutSurfacesActionableMessage(t *testing.T) {
 	// A provider that blocks until the context is cancelled, then reports the
 	// context error — mimicking a real stream that outlives the child's own
@@ -1371,7 +1405,7 @@ func TestSubagentOnChildUsageMidRun(t *testing.T) {
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
 		ParentTools:     reg,
-		OnChildUsage: func(jobID string, usage *core.Usage, costUSD float64) {
+		OnChildUsage: func(jobID string, usage *core.Usage, costUSD float64, contextPct int) {
 			mu.Lock()
 			usageCalls++
 			mu.Unlock()
@@ -2250,5 +2284,31 @@ func TestSubagentWaitUnknownJob(t *testing.T) {
 	res, err := wait.Execute(context.Background(), map[string]any{"job_id": "sa-nope"}, nil)
 	if err != nil || !res.IsError || !strings.Contains(textOf(res), "unknown job ID") {
 		t.Fatalf("expected unknown-job error, got %+v %v", res, err)
+	}
+}
+
+func TestChildContextPercent(t *testing.T) {
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.Message{Role: "user", Content: []core.Content{{Type: "text", Text: strings.Repeat("token ", 500)}}}),
+		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{{Type: "text", Text: strings.Repeat("reply ", 500)}}}),
+	}
+
+	// No window to measure against: the child's model is unknown to the
+	// registry, so the honest answer is "unknown", never 0 (which reads as
+	// "empty" in a UI ring).
+	if got := childContextPercent(msgs, core.Model{ID: "mystery"}, 0); got != -1 {
+		t.Fatalf("unknown window = %d, want -1", got)
+	}
+
+	// Clamped at the brim rather than reported over 100.
+	if got := childContextPercent(msgs, core.Model{MaxInput: 1}, 0); got != 100 {
+		t.Fatalf("overflowing window = %d, want 100", got)
+	}
+
+	// A transcript that grows never reads as emptier.
+	small := childContextPercent(msgs[:1], core.Model{MaxInput: 20_000}, 0)
+	big := childContextPercent(msgs, core.Model{MaxInput: 20_000}, 0)
+	if small < 0 || big < small {
+		t.Fatalf("percent should grow with the transcript: %d then %d", small, big)
 	}
 }

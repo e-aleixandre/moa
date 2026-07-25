@@ -274,6 +274,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}
 		return Event{Type: "subagent_usage", Data: SubagentUsageData{
 			JobID: e.JobID, InputTokens: inputTok, OutputTokens: outputTok, CostUSD: e.CostUSD,
+			ContextPercent: e.ContextPercent,
 		}}, true
 	case bus.SubagentEnded:
 		var inputTok, outputTok int
@@ -458,6 +459,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 				Status:           sa.Status,
 				Async:            sa.Async,
 				Messages:         messages,
+				ContextPercent:   sa.ContextPercent,
 				AccentIndex:      sa.AccentIndex,
 			}
 			if !sa.StartedAt.IsZero() {

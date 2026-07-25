@@ -1,10 +1,8 @@
 /* MobileSubagentView (5J, INC-34) — full-screen push over the mobile
-   conversation. It wears the parent's chrome (SUBAGENT-VIEW-RECONCILE): the
-   header is a `.mhead` variant and the composer sits in the `.mcomposer` pill.
-   Fork-proper marks stay: breadcrumb/codename in accent, sibling strip, task
-   card, and — below the
-   composer, in the parent's status slot — the now-line, or an outcome banner on
-   terminal states. */
+   conversation, wearing the parent's chrome: the composer sits in the
+   `.mcomposer` pill, with `.mnowline` above it and `.mstatusline` below, all
+   three from the parent's own stylesheets. Bespoke here: the one-row header,
+   the sibling strip, the task-card label and the terminal outcome banner. */
 .msa {
   position: absolute;
   inset: 0;
@@ -24,22 +22,55 @@
   .msa { animation: none; }
 }
 
+/* One row: the way back, who you are looking at, how it runs. The parent screen
+   is headerless (its name floats in MobileTitleChip), so this bar is the whole
+   signal that you are one level in — which is why it stays, and why it is kept
+   as light as a chip: transparent over the transcript, no border, no fill. A
+   solid bar here would be heavier chrome than the screen it branched from. */
 .msa-head {
-  /* Wears the shared `.mhead` chrome (solid --mantle, safe-area top inset,
-     border, row metrics). msa-head only neutralizes the identity block (not a
-     drawer switcher here) and keeps the back button at mhead density. */
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* Same 12px + inset the parent's floating title chip uses, so the branch
+     starts exactly where the trunk starts instead of a few pixels higher. */
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) var(--space-2) 4px;
+  min-height: 44px;
 }
 
-/* Identity block reuses .mhead-switch layout but isn't interactive. */
-.msa-head .msa-ident {
-  cursor: default;
-  gap: var(--space-1);
+/* Identity: the fork glyph, the kind, and the codename in the subagent's own
+   accent — the same color the tray, the delegation block and the sibling rail
+   give it, so the branch is recognizable before the name is read. */
+.msa-ident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
 }
 
-/* 44px hit-areas for back and action icons. */
-.msa-back,
-.msa-abtn {
+.msa-kind {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.msa-name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The chip sits at the far end of the row. */
+.msa-head .runmode {
+  margin-left: auto;
+}
+
+/* 44px hit-area for the back chevron. */
+.msa-back {
   width: 44px;
   height: 44px;
   display: grid;
@@ -50,44 +81,8 @@
   color: var(--subtext0);
   cursor: pointer;
   flex: none;
-}
-
-/* Keep mhead's visual row density despite the 44px tap box (same negative-margin
-   technique as .mhead-switch). */
-.msa-back { margin: -12px 0 -12px calc(-1 * var(--space-2)); }
-
-.msa-abtn.cancel { color: var(--overlay1); }
-.msa-abtn.cancel.armed { color: var(--red); }
-.msa-sure {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--red);
-}
-
-/* Breadcrumb line (row 2) reuses .mhead-sub/.mhead-meta; the parent link is an
-   inline unstyled button with a downward-safe ≥44px hit area. */
-.msa-parent {
-  background: none;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  text-decoration: underline dotted;
-  cursor: pointer;
-  position: relative;
-}
-
-.msa-parent::after {
-  content: "";
-  position: absolute;
-  inset: -14px -6px;
-}
-
-.msa-actions {
-  display: flex;
-  align-items: center;
-  flex: none;
+  /* Pull the tap box back to the screen edge without indenting the row. */
+  margin-left: -10px;
 }
 
 /* sibling strip */
@@ -135,23 +130,11 @@
   margin-bottom: var(--space-1);
 }
 
-/* now-line below the composer — restyled as the parent's .mcomposer-status
-   slot; only accent + ellipsis override the shared status line. */
+/* Foot: now-line, composer, status line — the parent's stack, wearing the
+   parent's rules (.mnowline from MobileNowLine.css, .mstatusline from
+   MobileStatusLine.css). Nothing is restyled here; if it looked different, the
+   two screens would have drifted. */
 .msa-foot { flex: none; }
-
-.msa-nowline {
-  border-top: 1px solid var(--surface0);
-}
-
-.msa-now-act {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
 
 /* outcome banner */
 .msa-outcome {

@@ -217,24 +217,30 @@ export function projectStream(session) {
       // 'subagent'.
       if (msg.tool_name === 'subagent') {
         const rawToolCallID = String(msg.tool_call_id || '');
-        const origin = originToolCalls.ids.has(rawToolCallID)
-          ? originToolCalls.byID.get(rawToolCallID)
-          : null;
-        if (origin) {
-          // The live job is authoritative while it runs. Once terminal, an
-          // async job gets its own canonical completion card; sync jobs do
-          // not, so their original tool-call card becomes the one done row.
-          if (!isTerminalSubagent(origin) || canonicalSubagentJobIds.has(String(origin.jobId))) {
-            continue;
-          }
+        // A completion card carries the job in its own key; the model's own
+        // tool call does not — its ID belongs to the provider, so the job comes
+        // from the live entry it spawned or, once nothing is live, from the ID
+        // the tool recorded on its result (subagentJobId). Without that a
+        // restored card would point at a job the server has never heard of, and
+        // opening it would do nothing.
+        const completionCard = /^subagent[-_]/.test(rawToolCallID);
+        const origin = originToolCalls.byID.get(rawToolCallID) || null;
+        const jobId = origin
+          ? String(origin.jobId)
+          : (msg.subagentJobId || rawToolCallID.replace(/^subagent[-_]/, ''));
+        if (!completionCard) {
+          // The live job is authoritative while it runs — the dock or the
+          // running row shows it. Once terminal, an async job gets its own
+          // completion card and this tool call is a duplicate of it; sync jobs
+          // never get one, so their tool call becomes the one done row.
+          if (origin && !isTerminalSubagent(origin)) continue;
+          if (canonicalSubagentJobIds.has(jobId)) continue;
         }
-        const jobId = String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
         if (!currentDelegation) {
           currentDelegation = { type: 'delegation', id: `delegation-${abs}`, agents: [], settled: true };
           doc.blocks.push(currentDelegation);
         }
-        const displayJobID = origin ? String(origin.jobId) : jobId;
-        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, displayJobID, msg.accentIndex), displayJobID));
+        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex), jobId));
         closeLedger();
         continue;
       }
@@ -456,17 +462,14 @@ function canonicalSubagentJobIdsOf(messages) {
 // originToolCallsOf indexes live and terminal subagents by the exact model
 // tool-call ID that created them. Empty IDs from older servers are ignored.
 function originToolCallsOf(subagents) {
-  const ids = new Set();
   const byID = new Map();
   const list = Array.isArray(subagents) ? subagents : Object.values(subagents || {});
   for (const sub of list) {
     const id = sub && sub.originToolCallId;
     if (!id) continue;
-    const key = String(id);
-    ids.add(key);
-    byID.set(key, sub);
+    byID.set(String(id), sub);
   }
-  return { ids, byID };
+  return { byID };
 }
 
 function isTerminalSubagent(subagent) {

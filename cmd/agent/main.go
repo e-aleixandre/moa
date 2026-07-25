@@ -289,9 +289,9 @@ func main() {
 				JobID: jobID, Inner: inner,
 			})
 		},
-		OnSubagentUsage: func(jobID string, usage *core.Usage, costUSD float64) {
+		OnSubagentUsage: func(jobID string, usage *core.Usage, costUSD float64, contextPct int) {
 			preBus.Publish(bus.SubagentUsage{
-				JobID: jobID, Usage: usage, CostUSD: costUSD,
+				JobID: jobID, Usage: usage, CostUSD: costUSD, ContextPercent: contextPct,
 			})
 		},
 		OnSubagentEnd: func(jobID, status string, usage *core.Usage, costUSD float64) {

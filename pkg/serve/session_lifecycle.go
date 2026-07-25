@@ -220,10 +220,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 			}
 		},
-		OnSubagentUsage: func(jobID string, usage *core.Usage, costUSD float64) {
+		OnSubagentUsage: func(jobID string, usage *core.Usage, costUSD float64, contextPct int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentUsage{
-					SessionID: s.ID, JobID: jobID, Usage: usage, CostUSD: costUSD,
+					SessionID: s.ID, JobID: jobID, Usage: usage, CostUSD: costUSD, ContextPercent: contextPct,
 				})
 			}
 		},
@@ -490,6 +490,7 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 			StartedAt:        info.StartedAt,
 			Usage:            info.Usage,
 			CostUSD:          info.CostUSD,
+			ContextPercent:   info.ContextPercent,
 			AccentIndex:      info.AccentIndex,
 		})
 	}
