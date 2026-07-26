@@ -3125,3 +3125,35 @@ func TestLoop_EmptyResponseAccountsCostBeforeRetry(t *testing.T) {
 		t.Errorf("expected exactly 1 provider call (no retry after budget blown), got %d", provider.calls)
 	}
 }
+
+// TestCheckpointReader_NilDuringPrepareRun locks H3: a prepare-compact run is
+// discarded by restoreConversation, so an auto-compaction inside it must not
+// consume the checkpoint slot — otherwise the real compaction that follows
+// runs with an empty slot, losing the checkpoint entirely.
+func TestCheckpointReader_NilDuringPrepareRun(t *testing.T) {
+	slot := sessioncheckpoint.New()
+	if err := slot.Write("state worth keeping"); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{config: AgentConfig{SessionCheckpoint: slot}}
+
+	reader := a.checkpointReader()
+	if reader == nil {
+		t.Fatal("normal runs must be able to consume the checkpoint")
+	}
+	text, consume := reader()
+	if text != "state worth keeping" {
+		t.Fatalf("unexpected checkpoint text: %q", text)
+	}
+	consume()
+	if got, _ := slot.Read(); got != "" {
+		t.Fatal("consume should clear the slot")
+	}
+}
+
+func TestCheckpointReader_NilWithoutSlot(t *testing.T) {
+	a := &Agent{}
+	if a.checkpointReader() != nil {
+		t.Fatal("no slot configured should yield no reader")
+	}
+}

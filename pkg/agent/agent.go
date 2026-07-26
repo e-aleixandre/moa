@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -336,6 +337,11 @@ type AgentConfig struct {
 	// Compaction settings. nil = use DefaultCompactionSettings.
 	// Set Enabled:false to disable.
 	Compaction *core.CompactionSettings
+
+	// SessionCheckpoint is the ephemeral handoff slot. When set, automatic
+	// compaction appends its contents to the summary and clears it, matching
+	// the manual CompactWithCheckpoint path.
+	SessionCheckpoint *sessioncheckpoint.Slot
 
 	// DrainTimeout is the maximum time Send/Run will wait for subscribers to
 	// finish processing events before returning. Default: 2s.
@@ -1036,12 +1042,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint string) (*
 	if result == nil {
 		return nil, nil
 	}
-	if checkpoint != "" {
-		result.Summary += "\n\n--- BEGIN SESSION CHECKPOINT ---\n" + checkpoint + "\n--- END SESSION CHECKPOINT ---"
-		if len(compacted) > 0 {
-			compacted[0].Content = []core.Content{core.TextContent(result.Summary)}
-		}
-	}
+	compaction.AppendCheckpoint(result, compacted, checkpoint)
 	for i := range compacted {
 		compacted[i].EnsureMsgID()
 	}
@@ -1279,8 +1280,18 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare func(), tools *c
 		materializeContent:  a.config.MaterializeContent,
 		permissionCheck:     permissionCheck,
 		compaction:          a.config.Compaction,
-		drainSteers:         a.steers.drainUntilBarrier,
-		settleSteers:        a.steers.settle,
+		// A prepare-compact run writes the checkpoint and is then discarded by
+		// restoreConversation, so an auto-compaction inside it must not consume
+		// the slot: doing so would clear the checkpoint the real compaction is
+		// about to read.
+		readCheckpoint: func() func() (string, func()) {
+			if allowCheckpoint {
+				return nil
+			}
+			return a.checkpointReader()
+		}(),
+		drainSteers:  a.steers.drainUntilBarrier,
+		settleSteers: a.steers.settle,
 	}
 
 	var err error
@@ -1420,4 +1431,22 @@ func (a *Agent) RunCost() float64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.lastRunCost
+}
+
+// checkpointReader adapts the session checkpoint slot for the agent loop.
+// Returns nil when no slot is configured. The returned consume callback clears
+// the slot only if it still holds the generation that was read, so a checkpoint
+// written while compaction was in flight survives.
+func (a *Agent) checkpointReader() func() (string, func()) {
+	slot := a.config.SessionCheckpoint
+	if slot == nil {
+		return nil
+	}
+	return func() (string, func()) {
+		text, gen := slot.Read()
+		if strings.TrimSpace(text) == "" {
+			return "", func() {}
+		}
+		return text, func() { slot.ClearIfGeneration(gen) }
+	}
 }

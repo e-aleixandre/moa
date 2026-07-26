@@ -518,6 +518,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MaxRunDuration:      maxRunDuration,
 		MaxBudget:           maxBudget,
 		MaterializeContent:  cfg.MaterializeContent,
+		SessionCheckpoint:   sessionCheckpoint,
 	}
 	if gate != nil {
 		agentCfg.PermissionCheck = gate.Check

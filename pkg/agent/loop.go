@@ -110,6 +110,10 @@ type loopConfig struct {
 
 	// Compaction
 	compaction *core.CompactionSettings
+	// readCheckpoint returns the ephemeral session checkpoint to append to an
+	// automatic compaction summary, and a callback to clear it once consumed.
+	// Nil when no checkpoint slot is wired.
+	readCheckpoint func() (string, func())
 
 	// Steering messages injected between steps
 	drainSteers func() []core.SteerItem
@@ -222,6 +226,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 						Type: core.AgentEventCompactionEnd, Error: err,
 					})
 				} else if result != nil {
+					// Consume the ephemeral checkpoint here too. The manual
+					// path already appended it; without this, an automatic
+					// compaction dropped it on the floor.
+					var consumeCheckpoint func()
+					if cfg.readCheckpoint != nil {
+						text, consume := cfg.readCheckpoint()
+						compaction.AppendCheckpoint(result, compacted, text)
+						consumeCheckpoint = consume
+					}
 					for i := range compacted {
 						compacted[i].EnsureMsgID()
 					}
@@ -229,6 +242,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.state.Messages = compacted
 					cfg.state.CompactionEpoch++
 					cfg.stateMu.Unlock()
+					if consumeCheckpoint != nil {
+						consumeCheckpoint()
+					}
 					// Account for compaction LLM call cost.
 					addRunCost(cfg, result.Usage)
 					emitLifecycle(cfg, core.AgentEvent{
