@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -25,8 +26,62 @@ type Result struct {
 	Usage         *core.Usage // LLM usage for the summarization call
 }
 
-// estimatedSummaryTokens is a conservative estimate for the summary message.
-const estimatedSummaryTokens = 2000
+// checkpointBegin and checkpointEnd delimit the ephemeral session checkpoint
+// appended to a summary. The checkpoint bypasses the summarizer entirely, so
+// it cannot be dropped or paraphrased by the model.
+const (
+	checkpointBegin = "--- BEGIN SESSION CHECKPOINT ---"
+	checkpointEnd   = "--- END SESSION CHECKPOINT ---"
+)
+
+// AppendCheckpoint mechanically appends a checkpoint to a summary and rewrites
+// the summary message in place. Both the manual and automatic compaction paths
+// must call this: previously only the manual path did, so an automatic
+// compaction silently discarded a checkpoint the user had already paid for.
+func AppendCheckpoint(result *Result, compacted []core.AgentMessage, checkpoint string) {
+	if result == nil || strings.TrimSpace(checkpoint) == "" {
+		return
+	}
+	appended := "\n\n" + checkpointBegin + "\n" + checkpoint + "\n" + checkpointEnd
+	result.Summary += appended
+	if len(compacted) > 0 {
+		compacted[0].Content = []core.Content{core.TextContent(result.Summary)}
+	}
+	// Keep the reported post-compaction size honest: the checkpoint can add
+	// several thousand tokens that the caller would otherwise never see.
+	result.TokensAfter += core.EstimateTokens(core.Message{
+		Role:    "compaction_summary",
+		Content: []core.Content{core.TextContent(appended)},
+	})
+}
+
+// summaryMaxTokens is the hard output budget for a generated summary.
+//
+// This used to be unset: the call inherited the provider default and the
+// observed size settled around 3.5k tokens regardless of how much was being
+// summarized — an emergent ceiling, not a designed one. Measured survival of
+// irrecoverable claims improves when the summarizer is allowed more room, so
+// the budget is now explicit and generous, while still bounded so the
+// post-compaction floor cannot drift upward without limit.
+const summaryMaxTokens = 8000
+
+// summaryTokenBudget is the summary allowance for a given context window.
+// A flat 8k reserve starves small-window models: it is subtracted from the
+// space available to keep recent turns, and below ~24k it made the cut point
+// degenerate entirely. Scaling with the window keeps the reserve meaningful
+// on large models and harmless on small ones.
+//
+// The same function feeds both the cut-point reserve and the real output cap,
+// so the two can never diverge.
+func summaryTokenBudget(contextWindow int) int {
+	if contextWindow <= 0 {
+		return summaryMaxTokens
+	}
+	if b := contextWindow / 8; b < summaryMaxTokens {
+		return b
+	}
+	return summaryMaxTokens
+}
 
 // FindCutPoint returns the index of the first message to KEEP (everything
 // before it gets summarized). Returns 0 if nothing needs cutting.
@@ -40,9 +95,10 @@ func FindCutPoint(msgs []core.AgentMessage, contextTokens, contextWindow int, se
 	}
 
 	// How many tokens we want to keep.
-	targetKeep := settings.KeepRecent + estimatedSummaryTokens
+	summaryReserve := summaryTokenBudget(contextWindow)
+	targetKeep := settings.KeepRecent + summaryReserve
 	// But ensure we actually drop below the threshold.
-	maxKeep := contextWindow - settings.ReserveTokens - estimatedSummaryTokens
+	maxKeep := contextWindow - settings.ReserveTokens - summaryReserve
 	if maxKeep < targetKeep {
 		targetKeep = maxKeep
 	}
@@ -101,45 +157,192 @@ func maxSerializationChars(maxInput int) int {
 	return limit
 }
 
+// Tool result budgeting.
+//
+// The previous flat 500-char head-truncation hid the end of every result,
+// which is where outcomes live: the assertion that failed, the final error,
+// the summary line of a test run.
+//
+// Two policies, both borrowed from gemini-cli's compression pass
+// (packages/core: COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET):
+//   - a global budget walked newest-first, so recent results keep full
+//     fidelity and only older ones get squeezed;
+//   - head+tail retention for anything that must be squeezed, so a truncated
+//     result still shows what it was and how it ended.
+const (
+	// toolResultBudget is the per-result floor: even the oldest result keeps
+	// this much once the global budget is exhausted.
+	toolResultBudget = 1000
+	// toolResultGlobalCap is the absolute ceiling for tool-result characters
+	// in one serialized transcript, spent newest-first. The effective budget
+	// is also bounded by a share of the serialization limit (see
+	// toolResultBudgets) so tool output can never crowd out the dialogue.
+	toolResultGlobalCap = 300_000
+	// toolResultShareNum/Den bound the tool-result budget as a fraction of the
+	// whole transcript budget. User and assistant turns carry the intent that
+	// cannot be recovered by re-reading the repo, so they keep the majority.
+	toolResultShareNum = 1
+	toolResultShareDen = 2
+	// toolResultFullDivisor sizes the per-result cap relative to the global
+	// budget, so a single huge result cannot starve everything older.
+	toolResultFullDivisor = 15
+)
+
+// toolResultBudgets derives the global tool-result budget and the per-result
+// cap from the transcript limit. A fixed 300k budget exceeded the whole
+// serialization limit on small-context models (128k model → 256k limit),
+// letting a handful of recent tool results evict every user turn.
+func toolResultBudgets(limit int) (global, perResult int) {
+	global = limit * toolResultShareNum / toolResultShareDen
+	if global > toolResultGlobalCap {
+		global = toolResultGlobalCap
+	}
+	perResult = global / toolResultFullDivisor
+	if perResult < toolResultBudget {
+		perResult = toolResultBudget
+	}
+	return global, perResult
+}
+
+// toolResultTailShare is the fraction of the budget reserved for the tail.
+const toolResultTailShare = 0.4
+
+// elideMiddle trims text to budget, keeping the head and the tail. Returns the
+// input unchanged when it already fits. Cuts are snapped to rune boundaries so
+// the transcript never contains a broken multi-byte character.
+func elideMiddle(text string, budget int) string {
+	if budget <= 0 || len(text) <= budget {
+		return text
+	}
+	// Reserve room for the marker so the elided result never exceeds budget.
+	const markerReserve = 32
+	usable := budget - markerReserve
+	if usable < 2 {
+		return text[:runeSafeEnd(text, budget)]
+	}
+	tail := int(float64(usable) * toolResultTailShare)
+	head := usable - tail
+	omitted := len(text) - head - tail
+	if head <= 0 || tail <= 0 || omitted <= 0 {
+		return text[:runeSafeEnd(text, budget)]
+	}
+	headEnd := runeSafeEnd(text, head)
+	tailStart := runeSafeStart(text, len(text)-tail)
+	return text[:headEnd] +
+		fmt.Sprintf("\n… [%d chars elided] …\n", omitted) +
+		text[tailStart:]
+}
+
+// runeSafeEnd moves i back to the nearest rune boundary at or before i.
+func runeSafeEnd(s string, i int) int {
+	if i >= len(s) {
+		return len(s)
+	}
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return i
+}
+
+// runeSafeStart moves i forward to the nearest rune boundary at or after i.
+func runeSafeStart(s string, i int) int {
+	if i <= 0 {
+		return 0
+	}
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return i
+}
+
 // SerializeForSummary converts messages to a human-readable transcript for
 // the summarization prompt. Truncates at a limit derived from the model's
 // context window (maxInput tokens). Pass 0 for the default (400k chars).
+//
+// When the transcript exceeds the limit, the OLDEST messages are dropped
+// rather than the newest. The previous implementation appended forward and
+// broke on overflow, discarding the most recent turns — precisely the ones
+// closest to the kept tail and most likely to describe live work.
 func SerializeForSummary(msgs []core.AgentMessage, maxInput int) string {
 	limit := maxSerializationChars(maxInput)
+
+	// Walk newest-first so recent tool results claim the budget before older
+	// ones, then restore chronological order for the transcript.
+	rendered := make([]string, len(msgs))
+	total := 0
+	toolBudget, perResult := toolResultBudgets(limit)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		s := renderMessage(msgs[i], &toolBudget, perResult)
+		rendered[i] = s
+		total += len(s)
+	}
+
+	// Drop from the front until the remainder fits, but never drop the last
+	// message: emptying the transcript would make the summarizer replace real
+	// history with a summary of nothing.
+	start := 0
+	for start < len(rendered)-1 && total > limit {
+		total -= len(rendered[start])
+		start++
+	}
+	if total > limit && start < len(rendered) {
+		rendered[start] = elideMiddle(rendered[start], limit)
+	}
+
 	var b strings.Builder
-	for _, m := range msgs {
-		switch m.Role {
-		case "user":
-			b.WriteString("[User]: ")
-			b.WriteString(extractText(m.Message))
-			b.WriteByte('\n')
-		case "assistant":
-			b.WriteString("[Assistant]: ")
-			b.WriteString(extractText(m.Message))
-			b.WriteByte('\n')
-			for _, c := range m.Content {
-				if c.Type == "tool_call" {
-					fmt.Fprintf(&b, "  [Tool call: %s]\n", c.ToolName)
-				}
-			}
-		case "tool_result":
-			text := extractText(m.Message)
-			// Truncate long tool results.
-			if len(text) > 500 {
-				text = text[:500] + "..."
-			}
-			fmt.Fprintf(&b, "[Tool result: %s]: %s\n", m.ToolName, text)
-		case "compaction_summary":
-			b.WriteString("[Previous summary]: ")
-			b.WriteString(extractText(m.Message))
-			b.WriteByte('\n')
-		}
-		if b.Len() > limit {
-			b.WriteString("\n[...truncated]\n")
-			break
-		}
+	if start > 0 {
+		fmt.Fprintf(&b, "[...%d earlier messages omitted (transcript exceeded serialization limit)...]\n", start)
+	}
+	for _, s := range rendered[start:] {
+		b.WriteString(s)
 	}
 	return b.String()
+}
+
+// renderMessage formats one message for the summarization transcript.
+// toolBudget is the remaining global allowance for tool results and is
+// decremented as results consume it; pass nil to apply only the per-result
+// floor.
+func renderMessage(m core.AgentMessage, toolBudget *int, perResult int) string {
+	var b strings.Builder
+	switch m.Role {
+	case "user":
+		b.WriteString("[User]: ")
+		b.WriteString(extractText(m.Message))
+		b.WriteByte('\n')
+	case "assistant":
+		b.WriteString("[Assistant]: ")
+		b.WriteString(extractText(m.Message))
+		b.WriteByte('\n')
+		for _, c := range m.Content {
+			if c.Type == "tool_call" {
+				fmt.Fprintf(&b, "  [Tool call: %s]\n", c.ToolName)
+			}
+		}
+	case "tool_result":
+		text := elideMiddle(extractText(m.Message), toolResultAllowance(toolBudget, perResult))
+		fmt.Fprintf(&b, "[Tool result: %s]: %s\n", m.ToolName, text)
+	case "compaction_summary":
+		b.WriteString("[Previous summary]: ")
+		b.WriteString(extractText(m.Message))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// toolResultAllowance returns the character budget for the next tool result,
+// drawing from the global allowance while it lasts and falling back to the
+// per-result floor once it is spent.
+func toolResultAllowance(remaining *int, perResult int) int {
+	if remaining == nil || *remaining <= toolResultBudget {
+		return toolResultBudget
+	}
+	allow := *remaining
+	if allow > perResult {
+		allow = perResult
+	}
+	*remaining -= allow
+	return allow
 }
 
 func extractText(m core.Message) string {
@@ -276,6 +479,17 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 	serialized := SerializeForSummary(msgs, model.MaxInput)
 	prompt := buildPrompt(serialized, previousSummary)
 
+	// Give the summarizer an explicit output budget. Without one the size of
+	// the summary is whatever the provider defaults to, which is how the
+	// ~3.5k-token ceiling arose without anyone choosing it.
+	opts.MaxTokens = summaryBudget(model)
+	// Summarization is extraction, not reasoning, and thinking tokens are
+	// charged against the same output budget: leaving the session's thinking
+	// level on would spend most of MaxTokens before a single line of summary
+	// is written, making the summary smaller than the ceiling this budget is
+	// meant to lift.
+	opts.ThinkingLevel = ""
+
 	req := core.Request{
 		Model:  model,
 		System: summarizationSystemPrompt,
@@ -400,4 +614,15 @@ func formatFileOps(ops FileOps) string {
 		}
 	}
 	return b.String()
+}
+
+// summaryBudget returns the output token budget for a summarization call,
+// clamped so a small-context model is never asked for a summary that cannot
+// coexist with the tail it must accompany.
+func summaryBudget(model core.Model) *int {
+	budget := summaryTokenBudget(model.MaxInput)
+	if model.MaxOutput > 0 && budget > model.MaxOutput {
+		budget = model.MaxOutput
+	}
+	return &budget
 }

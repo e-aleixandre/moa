@@ -2,8 +2,10 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/ealeixandre/moa/pkg/core"
 )
@@ -159,11 +161,13 @@ func TestSerializeForSummary_Truncation(t *testing.T) {
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("second")}}},
 	}
 	s := SerializeForSummary(msgs, 0)
-	if !strings.Contains(s, "[...truncated]") {
-		t.Fatal("expected truncation marker")
+	if !strings.Contains(s, "earlier messages omitted") {
+		t.Fatal("expected omission marker")
 	}
-	if strings.Contains(s, "second") {
-		t.Fatal("second message should be truncated")
+	// The newest message must survive: dropping it would hide the work
+	// closest to the kept tail.
+	if !strings.Contains(s, "second") {
+		t.Fatal("most recent message must be kept when dropping for size")
 	}
 }
 
@@ -178,16 +182,16 @@ func TestSerializeForSummary_ModelDerivedLimit(t *testing.T) {
 		}}},
 	}
 	s := SerializeForSummary(msgs, 128_000) // limit = 256k chars
-	if !strings.Contains(s, "[...truncated]") {
-		t.Fatal("expected truncation for 128k model")
+	if !strings.Contains(s, "earlier messages omitted") {
+		t.Fatal("expected omission for 128k model")
 	}
-	if strings.Contains(s, "tail") {
-		t.Fatal("tail message should be truncated")
+	if !strings.Contains(s, "tail") {
+		t.Fatal("most recent message must be kept when dropping for size")
 	}
 
 	// Same messages with a 400k model should NOT truncate.
 	s2 := SerializeForSummary(msgs, 400_000) // limit = 800k chars
-	if strings.Contains(s2, "[...truncated]") {
+	if strings.Contains(s2, "earlier messages omitted") {
 		t.Fatal("should not truncate for 400k model")
 	}
 	if !strings.Contains(s2, "tail") {
@@ -563,5 +567,234 @@ func TestGenerateSummary_ReturnsUsage(t *testing.T) {
 	}
 	if gotUsage.Input != 100 || gotUsage.Output != 50 {
 		t.Errorf("usage = %+v, want Input:100 Output:50", gotUsage)
+	}
+}
+
+func TestElideMiddle_KeepsHeadAndTail(t *testing.T) {
+	text := strings.Repeat("A", 3000) + "FINAL_ANSWER"
+	got := elideMiddle(text, toolResultBudget)
+	if len(got) > toolResultBudget+64 {
+		t.Fatalf("elided text too long: %d", len(got))
+	}
+	if !strings.HasPrefix(got, "AAAA") {
+		t.Fatal("head not preserved")
+	}
+	// The tail is where a tool result states its outcome; the old flat
+	// head-truncation dropped it.
+	if !strings.Contains(got, "FINAL_ANSWER") {
+		t.Fatal("tail not preserved")
+	}
+	if !strings.Contains(got, "chars elided") {
+		t.Fatal("missing elision marker")
+	}
+}
+
+func TestElideMiddle_ShortTextUnchanged(t *testing.T) {
+	if got := elideMiddle("short", toolResultBudget); got != "short" {
+		t.Fatalf("short text modified: %q", got)
+	}
+}
+
+func TestSerializeForSummary_ToolResultKeepsOutcome(t *testing.T) {
+	long := strings.Repeat("noise ", 2000) + "FAIL: assertion failed at line 42"
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "tool_result", ToolName: "bash",
+			Content: []core.Content{core.TextContent(long)}}},
+	}
+	s := SerializeForSummary(msgs, 0)
+	if !strings.Contains(s, "FAIL: assertion failed at line 42") {
+		t.Fatal("tool result outcome lost in serialization")
+	}
+}
+
+func TestSerializeForSummary_DropsOldestNotNewest(t *testing.T) {
+	big := strings.Repeat("x", 100_000)
+	var msgs []core.AgentMessage
+	for i := 0; i < 6; i++ {
+		msgs = append(msgs, core.AgentMessage{Message: core.Message{
+			Role: "user", Content: []core.Content{core.TextContent(big)}}})
+	}
+	msgs[0].Content = []core.Content{core.TextContent("OLDEST " + big)}
+	msgs[5].Content = []core.Content{core.TextContent("NEWEST " + big)}
+
+	s := SerializeForSummary(msgs, 0) // 400k char limit, ~600k of content
+	if strings.Contains(s, "OLDEST") {
+		t.Fatal("oldest message should have been dropped first")
+	}
+	if !strings.Contains(s, "NEWEST") {
+		t.Fatal("newest message must survive")
+	}
+}
+
+func TestAppendCheckpoint_RewritesSummaryMessage(t *testing.T) {
+	res := &Result{Summary: "## Goal\nship it"}
+	compacted := []core.AgentMessage{
+		{Message: core.Message{Role: "compaction_summary",
+			Content: []core.Content{core.TextContent(res.Summary)}}},
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hi")}}},
+	}
+	AppendCheckpoint(res, compacted, "waiting on user decision about X")
+
+	if !strings.Contains(res.Summary, "waiting on user decision about X") {
+		t.Fatal("checkpoint not appended to summary")
+	}
+	got := extractText(compacted[0].Message)
+	if !strings.Contains(got, "waiting on user decision about X") {
+		t.Fatal("summary message not rewritten: the appended checkpoint would be lost")
+	}
+	if !strings.Contains(got, checkpointBegin) || !strings.Contains(got, checkpointEnd) {
+		t.Fatal("missing checkpoint delimiters")
+	}
+}
+
+func TestAppendCheckpoint_NoopWhenEmpty(t *testing.T) {
+	res := &Result{Summary: "## Goal\nship it"}
+	compacted := []core.AgentMessage{
+		{Message: core.Message{Role: "compaction_summary",
+			Content: []core.Content{core.TextContent(res.Summary)}}},
+	}
+	AppendCheckpoint(res, compacted, "   ")
+	if strings.Contains(res.Summary, checkpointBegin) {
+		t.Fatal("empty checkpoint should not add delimiters")
+	}
+}
+
+func TestElideMiddle_PreservesRuneBoundaries(t *testing.T) {
+	// Spanish + emoji: byte-level cuts would split multi-byte runes and emit
+	// invalid UTF-8, which some providers reject outright.
+	text := strings.Repeat("configuración ñandú 🚀 ", 500)
+	for _, budget := range []int{101, 257, 1001, 2003} {
+		got := elideMiddle(text, budget)
+		if !utf8.ValidString(got) {
+			t.Fatalf("invalid UTF-8 produced at budget %d", budget)
+		}
+	}
+}
+
+func TestSerializeForSummary_RecentToolResultsGetMoreBudget(t *testing.T) {
+	// Newest-first budgeting (gemini-cli's policy): a recent result keeps far
+	// more detail than an equally sized ancient one.
+	body := func(tag string) string {
+		return tag + strings.Repeat(" filler", 3000) + " END_" + tag
+	}
+	var msgs []core.AgentMessage
+	for i := 0; i < 60; i++ {
+		tag := fmt.Sprintf("R%02d", i)
+		msgs = append(msgs, core.AgentMessage{Message: core.Message{
+			Role: "tool_result", ToolName: "bash",
+			Content: []core.Content{core.TextContent(body(tag))}}})
+	}
+	s := SerializeForSummary(msgs, 0)
+
+	// Both ends must still state how they ended.
+	if !strings.Contains(s, "END_R59") {
+		t.Fatal("newest tool result lost its outcome")
+	}
+	if !strings.Contains(s, "END_R00") {
+		t.Fatal("oldest tool result lost its outcome")
+	}
+}
+
+func TestToolResultAllowance_FallsBackToFloor(t *testing.T) {
+	_, perResult := toolResultBudgets(defaultMaxSerializationChars)
+	remaining := toolResultBudget / 2
+	if got := toolResultAllowance(&remaining, perResult); got != toolResultBudget {
+		t.Fatalf("exhausted budget should yield the floor, got %d", got)
+	}
+	full := toolResultGlobalCap
+	if got := toolResultAllowance(&full, perResult); got != perResult {
+		t.Fatalf("fresh budget should cap at %d, got %d", perResult, got)
+	}
+}
+
+// TestToolResultBudgets_NeverExceedsTranscript locks H1: a fixed global budget
+// larger than the serialization limit let a few recent tool results evict the
+// entire user dialogue on small-context models.
+func TestToolResultBudgets_NeverExceedsTranscript(t *testing.T) {
+	for _, maxInput := range []int{32_000, 128_000, 200_000, 1_000_000} {
+		limit := maxSerializationChars(maxInput)
+		global, perResult := toolResultBudgets(limit)
+		if global > limit/2 {
+			t.Fatalf("maxInput=%d: tool budget %d exceeds half the transcript limit %d",
+				maxInput, global, limit)
+		}
+		if perResult > global {
+			t.Fatalf("maxInput=%d: per-result cap %d exceeds global %d", maxInput, perResult, global)
+		}
+	}
+}
+
+// TestSerializeForSummary_ToolsDoNotEvictDialogue verifies user turns survive a
+// transcript dominated by huge tool results.
+func TestSerializeForSummary_ToolsDoNotEvictDialogue(t *testing.T) {
+	var msgs []core.AgentMessage
+	for i := 0; i < 40; i++ {
+		msgs = append(msgs, core.AgentMessage{Message: core.Message{
+			Role: "user", Content: []core.Content{
+				core.TextContent(fmt.Sprintf("USERTURN_%02d decide this", i))}}})
+		msgs = append(msgs, core.AgentMessage{Message: core.Message{
+			Role: "tool_result", ToolName: "bash", Content: []core.Content{
+				core.TextContent(strings.Repeat("x", 60_000))}}})
+	}
+	s := SerializeForSummary(msgs, 128_000) // 256k char limit
+
+	var kept int
+	for i := 0; i < 40; i++ {
+		if strings.Contains(s, fmt.Sprintf("USERTURN_%02d", i)) {
+			kept++
+		}
+	}
+	if kept < 30 {
+		t.Fatalf("tool results evicted the dialogue: only %d/40 user turns survived", kept)
+	}
+}
+
+// TestSerializeForSummary_NeverEmptyTranscript locks H5: a single message
+// larger than the whole limit used to leave only the omission marker, so the
+// summarizer replaced real history with a summary of nothing.
+func TestSerializeForSummary_NeverEmptyTranscript(t *testing.T) {
+	huge := "DECISION_MARKER " + strings.Repeat("x", 900_000)
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent(huge)}}},
+	}
+	s := SerializeForSummary(msgs, 0)
+	if !strings.Contains(s, "DECISION_MARKER") {
+		t.Fatal("oversized lone message must be elided, not dropped")
+	}
+}
+
+// TestSummaryTokenBudget_ScalesWithWindow locks H6: a flat 8k reserve made the
+// cut point degenerate on small-window models.
+func TestSummaryTokenBudget_ScalesWithWindow(t *testing.T) {
+	if got := summaryTokenBudget(200_000); got != summaryMaxTokens {
+		t.Fatalf("large window should get the full budget, got %d", got)
+	}
+	if got := summaryTokenBudget(32_000); got >= summaryMaxTokens {
+		t.Fatalf("small window should get a reduced budget, got %d", got)
+	}
+	for _, w := range []int{16_000, 24_000, 32_000, 128_000, 1_000_000} {
+		settings := core.CompactionSettings{KeepRecent: 20000, ReserveTokens: 16384}
+		if maxKeep := w - settings.ReserveTokens - summaryTokenBudget(w); w > 24_000 && maxKeep <= 0 {
+			t.Fatalf("window %d yields non-positive keep budget %d", w, maxKeep)
+		}
+	}
+}
+
+func TestElideMiddle_RespectsBudgetIncludingMarker(t *testing.T) {
+	text := strings.Repeat("y", 50_000)
+	for _, budget := range []int{1000, 2000, 20_000} {
+		if got := elideMiddle(text, budget); len(got) > budget {
+			t.Fatalf("budget %d exceeded: got %d chars", budget, len(got))
+		}
+	}
+}
+
+func TestAppendCheckpoint_CountsTowardTokensAfter(t *testing.T) {
+	res := &Result{Summary: "## Goal\nship", TokensAfter: 1000}
+	compacted := []core.AgentMessage{{Message: core.Message{Role: "compaction_summary",
+		Content: []core.Content{core.TextContent(res.Summary)}}}}
+	AppendCheckpoint(res, compacted, strings.Repeat("state ", 500))
+	if res.TokensAfter <= 1000 {
+		t.Fatal("checkpoint tokens must be reflected in TokensAfter")
 	}
 }
