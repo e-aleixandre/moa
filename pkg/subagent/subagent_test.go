@@ -1536,7 +1536,7 @@ func TestFormatDurationArg(t *testing.T) {
 }
 
 func TestTimeoutMessage(t *testing.T) {
-	msg := timeoutMessage(10*time.Minute, "")
+	msg := timeoutMessage(10*time.Minute, "", "", false)
 	if !strings.Contains(msg, "timed out after 10m0s") {
 		t.Errorf("message should state the effective duration: %q", msg)
 	}
@@ -1546,7 +1546,7 @@ func TestTimeoutMessage(t *testing.T) {
 	if strings.Contains(msg, "Partial output") {
 		t.Errorf("no partial should not mention partial output: %q", msg)
 	}
-	withPartial := timeoutMessage(10*time.Minute, "did half the work")
+	withPartial := timeoutMessage(10*time.Minute, "did half the work", "", false)
 	if !strings.Contains(withPartial, "Partial output before the timeout:\ndid half the work") {
 		t.Errorf("partial should be included: %q", withPartial)
 	}
@@ -2310,5 +2310,91 @@ func TestChildContextPercent(t *testing.T) {
 	big := childContextPercent(msgs, core.Model{MaxInput: 20_000}, 0)
 	if small < 0 || big < small {
 		t.Fatalf("percent should grow with the transcript: %d then %d", small, big)
+	}
+}
+
+// TestTimeoutMessage_SuggestsResume locks the recovery path: a timed-out child
+// keeps its transcript, so the parent must be told to continue it rather than
+// redo the work. Measured over real sessions, only 1 of 304 failed subagents
+// was ever resumed because this message never mentioned the option.
+func TestTimeoutMessage_SuggestsResume(t *testing.T) {
+	msg := timeoutMessage(10*time.Minute, "half done", "sa-abc123", true)
+	if !strings.Contains(msg, `resume="sa-abc123"`) {
+		t.Errorf("should name the resumable job: %q", msg)
+	}
+	if !strings.Contains(msg, "half done") {
+		t.Errorf("partial work must survive: %q", msg)
+	}
+
+	// Without a transcript loader (TUI today) resume is impossible: do not
+	// advertise it.
+	noResume := timeoutMessage(10*time.Minute, "", "sa-abc123", false)
+	if strings.Contains(noResume, "resume=") {
+		t.Errorf("must not suggest resume when unsupported: %q", noResume)
+	}
+	if !strings.Contains(noResume, "max_duration") {
+		t.Errorf("should still give actionable guidance: %q", noResume)
+	}
+}
+
+func TestTurnLimitMessage(t *testing.T) {
+	msg := turnLimitMessage("wrote three files", "sa-xyz", true)
+	if !strings.Contains(msg, `resume="sa-xyz"`) {
+		t.Errorf("should offer resume: %q", msg)
+	}
+	if !strings.Contains(msg, "wrote three files") {
+		t.Errorf("partial work must survive: %q", msg)
+	}
+	// The budget exists to stop a runaway child: never suggest simply raising it.
+	if !strings.Contains(msg, "split the task") {
+		t.Errorf("should suggest splitting when not converging: %q", msg)
+	}
+	if strings.Contains(turnLimitMessage("", "sa-xyz", false), "resume=") {
+		t.Errorf("must not suggest resume when unsupported")
+	}
+}
+
+// TestSubagentTurnLimitSurfacesResumableMessage locks the end-to-end path for a
+// child that exhausts its turn budget: the run must be reported as a guardrail
+// stop that keeps its work and can be continued, not as a bare error.
+func TestSubagentTurnLimitSurfacesResumableMessage(t *testing.T) {
+	// A provider that always asks for another tool call, so the child never
+	// converges and burns through its turn budget.
+	spin := make([]func(context.Context, core.Request) (<-chan core.AssistantEvent, error), 0, 8)
+	for i := 0; i < 8; i++ {
+		spin = append(spin, toolCallResponse(fmt.Sprintf("c%d", i), "noop", map[string]any{}))
+	}
+	provider := newMockProvider(spin...)
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		ChildMaxTurns:   2,
+		TranscriptLoader: func(string) ([]core.AgentMessage, error) {
+			return []core.AgentMessage{core.WrapMessage(core.Message{
+				Role: "user", Content: []core.Content{core.TextContent("prior")},
+			})}, nil
+		},
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "spin", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, 3*time.Second, func() bool {
+		r, _ := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+		return strings.Contains(textOf(r), "Status: failed")
+	})
+	r, _ := statusTool.Execute(context.Background(), map[string]any{"job_id": jobID}, nil)
+	got := textOf(r)
+	if !strings.Contains(got, "turn budget") {
+		t.Errorf("expected a turn-budget message, got %q", got)
+	}
+	if !strings.Contains(got, "resume=") {
+		t.Errorf("expected the message to offer resume, got %q", got)
+	}
+	if strings.Contains(got, "max turns exceeded") {
+		t.Errorf("raw sentinel should not reach the parent: %q", got)
 	}
 }

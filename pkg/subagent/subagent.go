@@ -645,6 +645,13 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			jobs.setCancelled(j.id)
 			return
 		}
+		if errors.Is(err, agent.ErrMaxTurnsExceeded) {
+			// Same recovery as a timeout: the child hit a guardrail rather than
+			// failing, and its transcript is intact. Without this the parent got
+			// a bare "max turns exceeded" and always restarted from zero.
+			jobs.setFailed(j.id, turnLimitMessage(timeoutPartial(msgs), j.id, cfg.TranscriptLoader != nil))
+			return
+		}
 		if child.TimedOut() {
 			// The child exhausted its own MaxRunDuration budget (not an
 			// inherited parent deadline — child.TimedOut() already excludes
@@ -652,7 +659,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// "stream: context deadline exceeded", and keep whatever it produced
 			// before the deadline so the work isn't lost.
 			_, effective := resolveChildGuardrails(cfg, maxRunDuration)
-			jobs.setFailed(j.id, timeoutMessage(effective, timeoutPartial(msgs)))
+			jobs.setFailed(j.id, timeoutMessage(effective, timeoutPartial(msgs), j.id, cfg.TranscriptLoader != nil))
 			return
 		}
 		jobs.setFailed(j.id, err.Error())
@@ -666,10 +673,36 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 // effective duration that tripped and a suggested larger max_duration. The
 // actionable guidance goes LAST so it survives tail-truncation on the async
 // notification path (which keeps the final lines).
-func timeoutMessage(effective time.Duration, partial string) string {
-	guidance := fmt.Sprintf("subagent timed out after %s (its max run duration). Re-run with a larger max_duration (e.g. %q) for long tasks, or split the task into smaller steps.", effective, formatDurationArg(suggestLongerDuration(effective)))
+func timeoutMessage(effective time.Duration, partial, jobID string, canResume bool) string {
+	// The child's transcript survives the deadline, so the cheapest recovery is
+	// to continue it rather than redo it. Say so explicitly: measured over real
+	// sessions, only 1 of 304 failed subagents was ever resumed, because this
+	// message only ever suggested re-running from scratch.
+	var guidance string
+	if canResume && jobID != "" {
+		guidance = fmt.Sprintf("subagent timed out after %s (its max run duration). Its work so far is saved: resume it with resume=%q and a larger max_duration (e.g. %q) to continue where it stopped, instead of starting over. Re-run from scratch only if the partial work is unusable.", effective, jobID, formatDurationArg(suggestLongerDuration(effective)))
+	} else {
+		guidance = fmt.Sprintf("subagent timed out after %s (its max run duration). Re-run with a larger max_duration (e.g. %q) for long tasks, or split the task into smaller steps.", effective, formatDurationArg(suggestLongerDuration(effective)))
+	}
 	if partial != "" {
 		return "Partial output before the timeout:\n" + partial + "\n\n" + guidance
+	}
+	return guidance
+}
+
+// turnLimitMessage is the counterpart of timeoutMessage for a child that
+// exhausted its turn budget. The budget exists to stop a runaway child, so the
+// guidance must not simply invite raising it: resuming continues the same work
+// with a fresh budget, and a child that made no progress should be split up
+// rather than given more rope.
+func turnLimitMessage(partial, jobID string, canResume bool) string {
+	guidance := "subagent stopped after using up its turn budget."
+	if canResume && jobID != "" {
+		guidance += fmt.Sprintf(" Its work so far is saved: resume it with resume=%q to continue with a fresh budget.", jobID)
+	}
+	guidance += " If it was not converging, split the task into smaller steps instead of retrying it whole."
+	if partial != "" {
+		return "Partial output before the turn limit:\n" + partial + "\n\n" + guidance
 	}
 	return guidance
 }
