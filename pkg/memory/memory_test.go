@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -367,5 +368,104 @@ func TestPermissions(t *testing.T) {
 	}
 	if fileInfo.Mode().Perm()&0o077 != 0 {
 		t.Errorf("file too permissive: %o", fileInfo.Mode().Perm())
+	}
+}
+
+// TestFormatIndex_GlobalsSurviveManyProjectFacts locks the fix for the
+// starvation bug: with a large project corpus, global facts (standing user
+// instructions) were pushed out of the prompt entirely.
+func TestFormatIndex_GlobalsSurviveManyProjectFacts(t *testing.T) {
+	var mems []Memory
+	for i := 0; i < 200; i++ {
+		mems = append(mems, Memory{
+			Name: fmt.Sprintf("project-fact-%03d", i), Scope: ScopeProject,
+			Description: strings.Repeat("d", 100),
+		})
+	}
+	for i := 0; i < 28; i++ {
+		mems = append(mems, Memory{
+			Name: fmt.Sprintf("global-fact-%03d", i), Scope: ScopeGlobal,
+			Description: strings.Repeat("g", 100),
+		})
+	}
+	s := &Store{}
+	idx := s.FormatIndex(mems)
+
+	if len(idx) > maxIndexBytes+256 {
+		t.Fatalf("index over budget: %d bytes", len(idx))
+	}
+	var globals, projects int
+	for _, line := range strings.Split(idx, "\n") {
+		if strings.Contains(line, "global/") {
+			globals++
+		}
+		if strings.Contains(line, "project/") {
+			projects++
+		}
+	}
+	if globals == 0 {
+		t.Fatal("no global facts in index: standing user instructions would never reach the model")
+	}
+	if projects == 0 {
+		t.Fatal("no project facts in index")
+	}
+	if !strings.Contains(idx, "more facts not shown") {
+		t.Fatal("expected truncation note")
+	}
+}
+
+// TestFormatIndex_FewGlobalsDoNotWasteBudget verifies the reserved share rolls
+// over to project facts when there are few globals.
+func TestFormatIndex_FewGlobalsDoNotWasteBudget(t *testing.T) {
+	var mems []Memory
+	for i := 0; i < 200; i++ {
+		mems = append(mems, Memory{
+			Name: fmt.Sprintf("project-fact-%03d", i), Scope: ScopeProject,
+			Description: strings.Repeat("d", 100),
+		})
+	}
+	mems = append(mems, Memory{Name: "only-global", Scope: ScopeGlobal, Description: "x"})
+
+	s := &Store{}
+	idx := s.FormatIndex(mems)
+	if !strings.Contains(idx, "global/only-global") {
+		t.Fatal("the single global fact must be present")
+	}
+	if n := strings.Count(idx, "project/"); n < 60 {
+		t.Fatalf("unused global budget did not roll over: only %d project facts", n)
+	}
+}
+
+// TestFormatIndex_RollsOverBothWays locks the mirror case: with many globals
+// and few project facts, a one-way roll-over left most of the budget unused
+// while dropping hundreds of globals.
+func TestFormatIndex_RollsOverBothWays(t *testing.T) {
+	var mems []Memory
+	for i := 0; i < 500; i++ {
+		mems = append(mems, Memory{
+			Name: fmt.Sprintf("global-fact-%03d", i), Scope: ScopeGlobal,
+			Description: strings.Repeat("g", 100),
+		})
+	}
+	for i := 0; i < 5; i++ {
+		mems = append(mems, Memory{
+			Name: fmt.Sprintf("project-fact-%03d", i), Scope: ScopeProject,
+			Description: strings.Repeat("d", 100),
+		})
+	}
+	s := &Store{}
+	idx := s.FormatIndex(mems)
+
+	if len(idx) < maxIndexBytes*3/4 {
+		t.Fatalf("budget under-used: %d of %d bytes", len(idx), maxIndexBytes)
+	}
+	if n := strings.Count(idx, "global/"); n < 50 {
+		t.Fatalf("globals starved despite free budget: only %d shown", n)
+	}
+	if n := strings.Count(idx, "project/"); n != 5 {
+		t.Fatalf("all 5 project facts should fit, got %d", n)
+	}
+	if len(idx) > maxIndexBytes+256 {
+		t.Fatalf("index over budget: %d bytes", len(idx))
 	}
 }

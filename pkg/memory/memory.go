@@ -153,21 +153,60 @@ func (s *Store) FormatIndex(mems []Memory) string {
 	if len(mems) == 0 {
 		return ""
 	}
-	var sb strings.Builder
-	truncated := false
+	// Global facts are cross-project preferences and standing user
+	// instructions; project facts are far more numerous and churn faster.
+	// A single ordered budget starved globals completely (measured: 0 of 28
+	// globals reached the prompt with 102 project facts present), which
+	// silently dropped standing instructions. Reserve a share of the budget
+	// for globals, then let project facts use whatever is left.
+	var globals, projects []Memory
 	for _, m := range mems {
+		if m.Scope == ScopeGlobal {
+			globals = append(globals, m)
+		} else {
+			projects = append(projects, m)
+		}
+	}
+
+	// Roll over unused budget in BOTH directions: render each scope against
+	// its reserved share first, then let each one claim whatever the other
+	// left unused. A one-way roll-over wasted most of the budget in the
+	// mirror case (many globals, few project facts).
+	globalBudget := maxIndexBytes * globalIndexShareNum / globalIndexShareDen
+	projectFirst, _ := renderIndexLines(projects, maxIndexBytes-globalBudget)
+	globalText, globalDropped := renderIndexLines(globals, maxIndexBytes-len(projectFirst))
+	projectText, projectDropped := renderIndexLines(projects, maxIndexBytes-len(globalText))
+
+	var sb strings.Builder
+	sb.WriteString(projectText)
+	sb.WriteString(globalText)
+	if dropped := globalDropped + projectDropped; dropped > 0 {
+		slog.Warn("memory: index truncated in prompt",
+			"limit_bytes", maxIndexBytes, "facts", len(mems),
+			"dropped_project", projectDropped, "dropped_global", globalDropped)
+		fmt.Fprintf(&sb, "- … (%d more facts not shown; use the memory tool's list action to see all)\n", dropped)
+	}
+	return sb.String()
+}
+
+// globalIndexShare reserves a fraction of the index budget for global facts.
+const (
+	globalIndexShareNum = 1
+	globalIndexShareDen = 3
+)
+
+// renderIndexLines emits one bullet per fact until budget is exhausted.
+// Returns the rendered text and how many facts did not fit.
+func renderIndexLines(mems []Memory, budget int) (string, int) {
+	var sb strings.Builder
+	for i, m := range mems {
 		line := "- " + m.ID() + " — " + m.Description + "\n"
-		if sb.Len()+len(line) > maxIndexBytes {
-			truncated = true
-			break
+		if sb.Len()+len(line) > budget {
+			return sb.String(), len(mems) - i
 		}
 		sb.WriteString(line)
 	}
-	if truncated {
-		slog.Warn("memory: index truncated in prompt", "limit_bytes", maxIndexBytes, "facts", len(mems))
-		sb.WriteString("- … (index truncated; use the memory tool's list action to see all)\n")
-	}
-	return sb.String()
+	return sb.String(), 0
 }
 
 // Read returns the full fact for a canonical ID ("project/foo", "global/foo")
