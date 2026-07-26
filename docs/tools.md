@@ -44,6 +44,30 @@ Conditionally registered:
 - Use `write` for new files or complete rewrites
 - Use `bash` when you need actual shell behavior
 
+## Memory
+
+`memory` stores single-fact notes that survive across sessions. Each fact has a
+type that decides its scope: `user` and `feedback` are global (visible in every
+project), `project` and `reference` are scoped to the current workspace.
+
+Only an **index** — one line per fact — is injected into the prompt; full bodies
+are read on demand. The index has a byte budget, and each scope gets a reserved
+share of it with the leftover rolling over in both directions. Without that
+reservation the more numerous project facts crowd out the global ones entirely,
+which is the wrong trade: global facts are standing instructions and user
+preferences, the ones that do not expire.
+
+Memory is for durable, non-obvious facts. It is not a task tracker and not a
+scratchpad:
+
+- **Anything verifiable by looking at the repository does not belong here.** A
+  fact should point at the code rather than restate it, or it will quietly go
+  stale as the code changes.
+- Prefer updating an existing fact over adding a near-duplicate, and delete
+  facts that have become wrong.
+- Current task state, progress notes and handoffs are not memories — they die
+  with the work. Use the session checkpoint or the task tracker.
+
 ## Bash: persistent state & background jobs
 
 `bash` persists working directory and exported environment between calls within

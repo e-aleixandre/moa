@@ -104,6 +104,42 @@ The TUI and serve layer subscribe to events for rendering. The agent loop publis
 
 Sessions persist full message history plus metadata using atomic file writes. Both TUI and serve use the same session store for persistence and resume.
 
+## Compaction
+
+When a session approaches its context window it is summarized: an older prefix
+of the conversation is replaced by a single summary message, and a recent tail
+is kept verbatim. `FindCutPoint` picks the boundary, `SerializeForSummary`
+renders the prefix for the summarizer, and `Compact` performs the swap.
+
+What survives compaction is whatever the summary records, so the design goal is
+not compression but **retention of what cannot be recovered by other means**.
+File contents, command output and code can be read again; decisions, rejected
+approaches, constraints and user intent cannot. Three properties follow:
+
+- **Recency is protected.** On overflow the serializer drops the *oldest*
+  messages, never the newest, and never the final message — an empty transcript
+  would let a summary of nothing replace real history.
+- **Tool results keep their ending.** Their budget is spent newest-first, and
+  anything that must be shortened keeps its head *and* its tail: the outcome of
+  a tool call (the failing assertion, the final error) lives at the end. Tool
+  output is capped at a share of the transcript so it cannot evict the dialogue,
+  which is the part carrying intent.
+- **The output budget is explicit.** The summary has a declared token budget
+  that scales with the context window, and the cut point reserves that same
+  figure so the two cannot drift apart. Thinking is disabled for the call, since
+  it draws from the same output budget.
+
+The **session checkpoint** (`pkg/sessioncheckpoint`) is an escape hatch from the
+summarizer: a small slot the model can write before compaction, appended to the
+summary mechanically so it cannot be omitted or paraphrased. Both the manual and
+automatic paths append it. It is ephemeral — consumed once, cleared by
+generation so a checkpoint written mid-compaction is not lost, and never
+consumed by a failed or cancelled compaction.
+
+Compaction is lossy by construction. The full transcript remains on disk: the
+session log is append-only, so a summarized session can still be inspected in
+full after the fact.
+
 ## Design constraints
 
 - The agent loop depends on a hook interface, not a concrete extension host.

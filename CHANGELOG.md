@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Compaction no longer summarizes over the most recent turns. When the
+  conversation overflowed the summarizer's input, the stretch that fell off was
+  the newest one — the part describing live work.
+- Tool results reaching the summarizer keep their ending. They were cut to 500
+  characters from the head, hiding the outcome of every call: the failing
+  assertion, the final error, the line summing up a test run. Measured across
+  12,598 real results, the summarizer saw 23.6% of what it was asked to
+  summarize; it now sees 53.5%.
+- The summary has an explicit size budget that scales with the context window.
+  Previously its ceiling was whatever the provider defaulted to, regardless of
+  how much was being summarized.
+- The session checkpoint survives automatic compaction. Only manual compaction
+  appended it, so an automatic one silently discarded a checkpoint the model had
+  already been asked to write.
+- Global memory facts reach the prompt. The index budget was consumed by project
+  facts before ever reaching the globals, so standing instructions and user
+  preferences were never visible to the model.
+
 ## [0.15.0] - 2026-07-24
 
 ### Added
