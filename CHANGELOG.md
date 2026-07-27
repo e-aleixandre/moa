@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-27
+
+### Added
+
+- A shared image or HTML file opens readable on a phone. The preview takes the
+  whole screen instead of a small centred box, and a document laid out for a
+  phone is no longer rendered at desktop width and shrunk to fit — on a 390px
+  viewport the preview area more than doubles. Images have their own
+  pinch/pan/double-tap zoom, so enlarging one no longer means zooming the entire
+  app; on a desktop, drag and ctrl+wheel do the same, plus a full-screen toggle.
+- Opening a subagent shows the subagent's own figures — its context, model,
+  effort, tokens and cost — instead of the parent session's, and reopening a
+  finished one reads the same as while it ran.
+
 ### Fixed
 
 - Compaction no longer summarizes over the most recent turns. When the
@@ -26,6 +40,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Global memory facts reach the prompt. The index budget was consumed by project
   facts before ever reaching the globals, so standing instructions and user
   preferences were never visible to the model.
+- One oversized image no longer breaks a conversation for good. Providers reject
+  an image above their per-side limit outright, and since the history is replayed
+  every turn the failure repeats on every later message. Such an image is now
+  kept on disk instead of sent inline, and a conversation already carrying one
+  becomes usable again.
+- Locking the phone no longer closes the subagent you were reading: reconnecting
+  dropped any subagent that had finished while the screen was off.
+- The mobile conversation is a single surface from the status bar down. The
+  scroll lock, the theme colour and the subagent view each used a slightly
+  different background, which showed as a darker band under the clock.
+- A subagent that hits its time or turn limit now tells the parent it can be
+  resumed, and keeps its partial work in both cases. The limit was reachable
+  without any hint that the child's transcript was still there.
+- A finished subagent opens from its card again after a page reload. The
+  restored card pointed at the tool-call id rather than the job, so the tap
+  quietly did nothing.
+
+### Changed
+
+- The web UI is a single frontend served at the root. The retired one is gone,
+  and with it the `/next/` path: a PWA installed from `/next/` has to be
+  installed again from the root.
 
 ## [0.15.0] - 2026-07-24
 
