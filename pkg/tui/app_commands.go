@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ealeixandre/moa/pkg/bus"
@@ -17,6 +19,25 @@ import (
 )
 
 // --- Commands ---
+
+// cutCommand reports whether cmd is `name` optionally followed by an argument,
+// and returns the trimmed argument. The name/argument boundary is the first run
+// of whitespace of ANY kind, matching ParseCommand (strings.Fields) — so an
+// argument that begins on a new line (Alt+Enter in the textarea) is recognized
+// rather than folded into the command name and rejected as unknown.
+func cutCommand(cmd, name string) (rest string, ok bool) {
+	if cmd == name {
+		return "", true
+	}
+	if !strings.HasPrefix(cmd, name) {
+		return "", false
+	}
+	r, sz := utf8.DecodeRuneInString(cmd[len(name):])
+	if !unicode.IsSpace(r) {
+		return "", false // e.g. "compactfoo" is not the compact command
+	}
+	return strings.TrimSpace(cmd[len(name)+sz:]), true
+}
 
 func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	if strings.HasPrefix(cmd, "model ") {
@@ -45,8 +66,8 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m.handleRenameCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "rename")))
 	}
 
-	if cmd == "compact" || strings.HasPrefix(cmd, "compact ") {
-		return m.handleCompactCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "compact")))
+	if rest, ok := cutCommand(cmd, "compact"); ok {
+		return m.handleCompactCommand(rest)
 	}
 
 	switch cmd {

@@ -2324,6 +2324,32 @@ func TestSubmitBusy_QueuesCompactFocus(t *testing.T) {
 	}
 }
 
+// TUI idle /compact with a multiline focus (Alt+Enter in the textarea) must be
+// recognized as the compact command and forward the focus, not fall through to
+// "unknown command". Regression for the newline entry-point gap.
+func TestHandleCommand_IdleCompactMultilineFocus(t *testing.T) {
+	m := newSwitchTestApp(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	var got bus.CompactSession
+	b.OnCommand(func(cmd bus.CompactSession) error { got = cmd; return nil })
+	m.runtime.Bus = b
+	m.s.running = false
+
+	updated, teaCmd := m.handleCommand("compact\nkeep phase 3")
+	if teaCmd == nil {
+		t.Fatal("idle /compact with a newline focus produced no command (fell through to unknown)")
+	}
+	// The returned command executes the bus CompactSession; run it.
+	if msg := teaCmd(); msg == nil {
+		t.Fatal("compact command returned no message")
+	}
+	if got.Focus != "keep phase 3" {
+		t.Fatalf("CompactSession.Focus = %q, want %q", got.Focus, "keep phase 3")
+	}
+	_ = updated
+}
+
 // TestSubmitBusy_RejectsRefusedCommand: a PolicyReject command mid-run is
 // refused (no queue, no bus command) with a status message.
 func TestSubmitBusy_RejectsRefusedCommand(t *testing.T) {
