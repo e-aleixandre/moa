@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-27
+
+### Added
+
+- `/compact` takes an optional focus: `/compact keep everything about the phase 3
+  work` tells the summarizer what to hold onto, so the thread you are about to
+  continue keeps its detail instead of being flattened like everything else. It
+  applies to that one compaction only — a later automatic compaction is
+  unaffected — and works both immediately and when queued mid-run.
+
+### Fixed
+
+- The mobile conversation no longer shows a dark band under the status bar. The
+  gradient that covers the top edge of the transcript still faded from the old
+  near-black surface after the rest moved to the lighter one.
+
 ## [0.16.0] - 2026-07-27
 
 ### Added
