@@ -165,13 +165,26 @@ func scanJPEGSize(data []byte) (width, height int, ok bool) {
 // above MaxImageDimension. Only the header is decoded, so the cost is bounded
 // regardless of image size.
 func ImageExceedsMaxDimension(b64 string) (width, height int, exceeds bool) {
+	// Try the small window first: almost every image puts its size in the first
+	// few hundred bytes, and this runs for every image block on every request,
+	// so the common case must not pay for the pathological one.
+	if w, h, ok := decodePrefix(b64, imageHeaderBytes); ok {
+		return w, h, w > MaxImageDimension || h > MaxImageDimension
+	}
+	// Nothing readable in the prefix: either an unsupported format, or a JPEG
+	// whose frame header sits behind a lot of metadata. Only that second case
+	// justifies the wider window.
+	w, h, _ := decodePrefix(b64, jpegScanBytes)
+	return w, h, w > MaxImageDimension || h > MaxImageDimension
+}
+
+// decodePrefix measures the image from the first `limit` bytes of a base64
+// payload. ok reports whether a size was actually read.
+func decodePrefix(b64 string, limit int) (width, height int, ok bool) {
 	head := b64
 	// base64 is 4 chars per 3 bytes; decode only what the header needs, cut on a
 	// 4-char group boundary so the truncated string decodes without padding.
-	// The bound is the JPEG scan window rather than imageHeaderBytes, because a
-	// late SOF is exactly the case this has to catch — the scan itself skips
-	// segment by segment and does not decode pixels.
-	if max := (jpegScanBytes/3 + 1) * 4; len(head) > max {
+	if max := (limit/3 + 1) * 4; len(head) > max {
 		head = head[:max-max%4]
 	}
 	decoded, err := base64.StdEncoding.DecodeString(head)
@@ -179,5 +192,5 @@ func ImageExceedsMaxDimension(b64 string) (width, height int, exceeds bool) {
 		return 0, 0, false
 	}
 	w, h := ImageDimensions(decoded)
-	return w, h, w > MaxImageDimension || h > MaxImageDimension
+	return w, h, w > 0 && h > 0
 }
