@@ -1,44 +1,176 @@
-import { render } from 'preact';
-import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
-import { store } from './store.js';
-import { loadSessions, startPolling, stopPolling, startUsagePolling, stopUsagePolling } from './session-actions.js';
-import { getVersion, reconnectAll } from './api.js';
+import { render } from "preact";
+import { useState, useEffect } from "preact/hooks";
+import "./index.css";
+import { Catalog } from "./catalog/catalog.jsx";
+import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
+import { MobileGallery } from "./catalog/mobile-gallery.jsx";
+import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
+import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
+import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
+import { store, setState as setStoreState } from "./data/store.js";
+import { togglePalette, closePalette } from "./data/palette.js";
+import { bindRouter } from "./data/router.js";
+import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
+import { hasBlockingOverlay } from "./data/overlays.js";
 import {
-  setMobile, autoFillTiles, autoSelectMobile, focusTileByIndex, openSession,
-} from './tile-actions.js';
-import { inputBarRegistry } from './components/InputBar.jsx';
-import { registerServiceWorker } from './pwa.js';
-import { refreshPushState } from './push-client.js';
-import { useHotkeys } from './hooks/useHotkeys.js';
-import { TileTree } from './components/TileTree.jsx';
-import { ChatView } from './components/ChatView.jsx';
-import { SessionOverview } from './components/SessionOverview.jsx';
-import { ToastContainer } from './components/Toast.jsx';
-import { CommandPalette } from './components/CommandPalette.jsx';
-import { LayoutBar } from './components/LayoutBar.jsx';
-import { PulsePairingPanel } from './components/PulsePairingPanel.jsx';
-import './styles/index.css';
+  loadSessions, startPolling, stopPolling,
+  startUsagePolling, stopUsagePolling,
+} from "./data/session-actions.js";
+import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
+import { refreshPushState } from "./data/push-client.js";
+import {
+  setMobile, autoFillTiles, autoSelectMobile, openSession,
+} from "./data/tile-actions.js";
 
-function App() {
-  const [state, setState] = useState(store.get());
-  const [overview, setOverview] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [paletteMode, setPaletteMode] = useState('search');
-  const [pairingOpen, setPairingOpen] = useState(false);
+const welcomeStyle = {
+  maxWidth: "640px",
+  margin: "0 auto",
+  padding: "var(--space-12) var(--space-6) var(--space-6)",
+  textAlign: "center",
+};
+
+function Welcome() {
+  return (
+    <div style={welcomeStyle}>
+      <h1
+        style={{
+          fontSize: "var(--text-2xl)",
+          fontWeight: "var(--weight-semibold)",
+          letterSpacing: "var(--tracking-tight)",
+          color: "var(--peach)",
+        }}
+      >
+        moa · next
+      </h1>
+      <p
+        style={{
+          fontSize: "var(--text-md)",
+          color: "var(--subtext0)",
+          lineHeight: "var(--leading-relaxed)",
+          marginTop: "var(--space-3)",
+        }}
+      >
+        Scaffold for the new web frontend (Phase 0). Used to verify that the
+        design tokens load correctly before building anything else.
+      </p>
+      <a
+        href="?view=catalog"
+        style={{
+          display: "inline-block",
+          marginTop: "var(--space-5)",
+          fontSize: "var(--text-sm)",
+          color: "var(--lavender)",
+        }}
+      >
+        View primitives catalog →
+      </a>
+    </div>
+  );
+}
+
+function CatalogScreen() {
+  return (
+    <>
+      <div style={{ textAlign: "center", padding: "var(--space-3) 0 0" }}>
+        <a
+          href="?"
+          style={{ fontSize: "var(--text-sm)", color: "var(--lavender)" }}
+        >
+          ← Back to conversation screen
+        </a>
+      </div>
+      <Welcome />
+      <Catalog />
+    </>
+  );
+}
+
+// GALLERIES — the mock-driven design galleries (catalog / grid / live / mobile).
+// Reachable by direct URL only (?view=…); see GALLERY_LINKS below for the
+// discreet footer nav rendered ONLY on the galleries, never on the real
+// conversation/grid screens (no floating ViewSwitch over live UI).
+const GALLERY_LINKS = [
+  { key: "catalog", label: "Catalog", href: "?view=catalog" },
+  { key: "live", label: "Live states", href: "?view=live" },
+  { key: "subagent", label: "Subagent", href: "?view=subagent" },
+  { key: "mobile", label: "Mobile", href: "?view=mobile" },
+];
+
+const galleryNavStyle = {
+  display: "flex",
+  justifyContent: "center",
+  gap: "var(--space-4)",
+  padding: "var(--space-4)",
+  borderTop: "1px solid var(--surface0)",
+  fontSize: "var(--text-sm)",
+};
+
+// GalleryNav — the discreet, non-intrusive way to move between galleries. It
+// is a static footer strip (not a floating overlay), so it never covers the
+// design being reviewed and never appears over the real product screens.
+function GalleryNav({ current }) {
+  return (
+    <nav style={galleryNavStyle} aria-label="Galleries">
+      <a href="?" style={{ color: "var(--overlay1)" }}>← Conversation</a>
+      {GALLERY_LINKS.map((v) => (
+        <a
+          key={v.key}
+          href={v.href}
+          aria-current={v.key === current ? "page" : undefined}
+          style={{ color: v.key === current ? "var(--peach)" : "var(--lavender)" }}
+        >
+          {v.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+// view — selects the screen. Absence (or an unknown value) shows the REAL,
+// store-connected conversation screen. `?view=grid` opens the real pane
+// grid. `?view=catalog|live|subagent|mobile` open the mock galleries with their
+// GalleryNav. The value lives in the store (seeded from the URL) so the
+// conversation ⇄ grid hop flips it in place via the router (data/router.js)
+// with no full-page reload; consumers read state.view reactively.
+
+// useBootstrap wires the app to the data engine: session loading, polling,
+// version, mobile breakpoint, and foreground/background lifecycle. Ported from
+// the old SPA's App (pkg/serve/frontend/src/app.jsx).
+function useBootstrap() {
   const [version, setVersion] = useState(null);
+  const [state, setState] = useState(store.get());
 
   useEffect(() => store.subscribe(setState), []);
 
+  // Install the single popstate listener so the browser Back/Forward buttons
+  // keep the store's `view` in sync with the URL (in-app conversation ⇄ grid
+  // hops use pushState, no reload — see data/router.js).
+  useEffect(() => bindRouter(), []);
+
+  // Mobile breakpoint → setMobile. Also lock the document to the viewport on
+  // mobile (adds .mobile-locked to <html>): the mobile shell owns its own
+  // internal scroll (.mconv-stream), so the page itself must not scroll — on
+  // iOS a scrollable document lets Safari pan the whole page up to reveal a
+  // focused input and never pans it back when the keyboard closes, leaving a
+  // gap and pushing the header out of view (reset.css min-height:100vh made the
+  // document taller than the visual viewport). Locking html/body/#root to the
+  // dynamic viewport height keeps the header pinned.
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
-    const handler = (e) => setMobile(e.matches);
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handler = (e) => {
+      setMobile(e.matches);
+      document.documentElement.classList.toggle("mobile-locked", e.matches);
+    };
     handler(mq);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    mq.addEventListener("change", handler);
+    return () => {
+      mq.removeEventListener("change", handler);
+      document.documentElement.classList.remove("mobile-locked");
+    };
   }, []);
 
-  // Version state changes at most once per six-hour server cache window. Poll
-  // lightly so a long-lived dashboard eventually reflects a completed check.
+  // Version poll: state changes at most once per six-hour server cache window;
+  // retry 60s on failure, refresh every 6h.
   useEffect(() => {
     let retry;
     const refresh = () => getVersion().then(setVersion).catch(() => {
@@ -49,135 +181,231 @@ function App() {
     return () => { clearInterval(timer); clearTimeout(retry); };
   }, []);
 
+  // Initial session load + selection, polling.
   useEffect(() => {
-    loadSessions().then(() => {
-      // A push notification tap can cold-start the app at /?session=<id>.
-      const wanted = new URLSearchParams(location.search).get('session');
-      if (wanted && openSession(wanted)) {
-        history.replaceState({}, '', location.pathname); // don't re-pin on refresh
-      } else if (store.get().isMobile) autoSelectMobile();
-      else autoFillTiles();
-    });
+    let mounted = true;
+    loadSessions()
+      .then(() => {
+        if (!mounted) return; // unmounted mid-flight: don't touch the store/view
+        const wanted = new URLSearchParams(location.search).get("session");
+        if (wanted && openSession(wanted)) {
+          // Strip only ?session= (a one-shot deep-link that must not re-pin on
+          // refresh) while preserving ?view= so a `?view=grid&session=X` link
+          // keeps the URL in sync with the store's seeded view.
+          const params = new URLSearchParams(location.search);
+          params.delete("session");
+          const qs = params.toString();
+          history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
+        } else if (store.get().isMobile) {
+          autoSelectMobile();
+        } else {
+          autoFillTiles();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setStoreState({ sessionsLoaded: true });
+      });
     startPolling();
     startUsagePolling();
-    registerServiceWorker();
+    // Reconcile the browser's actual push state on load (/next relies on the
+    // root /sw.js, no SW registration here). Guarded internally for unsupported.
     refreshPushState();
-    return () => stopUsagePolling();
+    return () => {
+      mounted = false;
+      stopPolling();
+      stopUsagePolling();
+      syncConnections([]); // tear down every live WS + pending reconnect
+    };
   }, []);
 
-  // Foreground/background lifecycle. On return to the foreground (or regained
-  // network): force an immediate reconnect + refresh — iOS drops the WebSocket
-  // when the PWA backgrounds and may leave it half-open, so the session would
-  // otherwise sit frozen (and up to the full backoff behind) until a manual
-  // reload. While hidden: pause the poll (nothing to refresh; saves battery).
+  // Foreground/background + online lifecycle: reconnect + refresh on return,
+  // pause polling while hidden.
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         reconnectAll();
         loadSessions();
         startPolling();
+        // Also restarts the usage timer, and refreshes immediately so the
+        // status line is not showing a number from before the app was hidden.
+        startUsagePolling();
       } else {
         stopPolling();
+        // Without this the usage timer kept polling every minute in the
+        // background: battery and data spent on a screen nobody is looking at.
+        stopUsagePolling();
       }
     };
     const onOnline = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== "visible") return;
       reconnectAll();
       loadSessions();
     };
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('online', onOnline);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onOnline);
     return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('online', onOnline);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 
-  // Warm focus from a push tap: the SW postMessages an open-session request to
-  // the already-running window instead of navigating.
+  // Re-fill tiles / re-select mobile when the layout or session count changes,
+  // so a newly-loaded session lands in the focused tile automatically.
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
-    const onMsg = (e) => {
-      if (e.data?.type === 'open-session' && e.data.sessionId) openSession(e.data.sessionId);
-    };
-    navigator.serviceWorker.addEventListener('message', onMsg);
-    return () => navigator.serviceWorker.removeEventListener('message', onMsg);
-  }, []);
-
-  useEffect(() => {
-    if (!state.isMobile) {
-      autoFillTiles();
-      setOverview(false);
-    } else {
-      autoSelectMobile();
-    }
+    if (!state.isMobile) autoFillTiles();
+    else autoSelectMobile();
   }, [state.isMobile, Object.keys(state.sessions).length]);
 
-  const toggleOverview = useCallback(() => {
-    setOverview(v => !v);
+  // ⌘K / Ctrl+K — global command-palette toggle. Active in every view.
+  // The chord always works, even inside the composer textarea (spec §6): we
+  // never gate on the focus target, so ⌘K opens/closes from anywhere. esc is
+  // handled inside the palette itself (this only owns the open chord).
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        // Defer to a higher-layer overlay (model/settings popover, etc.): don't
+        // open the palette underneath it (spec §6). The palette closing itself
+        // still works because it owns esc; ⌘K when the palette is the top layer
+        // toggles it (it never registers as a blocking overlay).
+        if (hasBlockingOverlay() && !store.get().paletteOpen) return;
+        e.preventDefault();
+        togglePalette("search");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const openPalette = useCallback((mode = 'search') => {
-    setPaletteMode(mode);
-    setPaletteOpen(true);
-  }, []);
-  const closePalette = useCallback(() => setPaletteOpen(false), []);
-  const openPairing = useCallback(() => setPairingOpen(true), []);
+  return version;
+}
 
-  const hotkeys = useMemo(() => [
-    { key: 'k', mod: true, handler: () => setPaletteOpen(v => !v) },
-    { key: 'Escape', handler: () => {
-      if (paletteOpen) setPaletteOpen(false);
-      else if (pairingOpen) setPairingOpen(false);
-      else if (overview) setOverview(false);
-    }},
-    ...Array.from({ length: 9 }, (_, i) => ({
-      key: String(i + 1), mod: true,
-      handler: () => { if (!state.isMobile) focusTileByIndex(i); },
-    })),
-    { key: 'o', mod: true, handler: () => {
-      if (state.isMobile) setOverview(v => !v);
-    }},
-    { key: '.', mod: true, handler: () => {
-      const entry = inputBarRegistry.get(state.focusedTile);
-      if (entry) entry.toggleVoice();
-    }},
-  ], [state.isMobile, state.focusedTile, overview, paletteOpen, pairingOpen]);
+// GlobalPairingPanel — the Pulse pairing Sheet, mounted ONCE next to
+// GlobalPalette so the ⌘K "Pair Pulse…" action can open it over any real
+// screen. Open state lives in the pulse-pairing-panel controller (a small
+// global pub/sub, not the session store — pairing is device-wide).
+function GlobalPairingPanel() {
+  const [open, setOpen] = useState(isPulsePairingOpen());
+  useEffect(() => subscribePulsePairing(setOpen), []);
+  return <PulsePairingPanel open={open} onClose={closePulsePairing} />;
+}
 
-  useHotkeys(hotkeys);
+// GlobalPalette — the ⌘K command palette, mounted ONCE here so it's global
+// to conversation / grid / mobile (outside the view switch). It subscribes to
+// the store for open state + context derivation: context is the current view
+// (grid vs mobile vs conversation) and focusedPane is the grid's focused tile's
+// 1-based index (null off the grid). The palette reads the session list from
+// the store itself, so this only supplies open/close + chassis context.
+function GlobalPalette() {
+  const [state, setState] = useState(store.get());
+  useEffect(() => store.subscribe(setState), []);
 
-  if (state.isMobile) {
-    return (
-      <div class="app mobile">
-        {overview ? (
-          <SessionOverview
-            state={state}
-            onSelect={() => setOverview(false)}
-            onNewSession={() => { setOverview(false); openPalette('create'); }}
-            onOpenPairing={openPairing}
-            version={version}
-          />
-        ) : (
-          <ChatView state={state} onToggleOverview={toggleOverview} onOpenPalette={() => openPalette('create')} />
-        )}
-        <ToastContainer />
-        <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenPairing={openPairing} />
-        <PulsePairingPanel open={pairingOpen} onClose={() => setPairingOpen(false)} />
-      </div>
-    );
+  const context = state.view === "grid" ? "grid" : state.isMobile ? "mobile" : "conversation";
+  let focusedPane = null;
+  if (context === "grid") {
+    const ids = allTileIdsSafe(state.tileTree);
+    const idx = ids.indexOf(state.focusedTile);
+    focusedPane = idx >= 0 ? idx + 1 : null;
   }
 
   return (
-    <div class="app desktop">
-      <div class="main">
-        <LayoutBar state={state} onOpenPalette={() => openPalette('search')} onOpenPairing={openPairing} version={version} />
-        <TileTree state={state} />
-      </div>
-      <ToastContainer />
-      <CommandPalette open={paletteOpen} onClose={closePalette} state={state} initialMode={paletteMode} onOpenPairing={openPairing} />
-      <PulsePairingPanel open={pairingOpen} onClose={() => setPairingOpen(false)} />
-    </div>
+    <CommandPalette
+      open={state.paletteOpen}
+      onClose={closePalette}
+      context={context}
+      focusedPane={focusedPane}
+      initialStep={state.paletteStep}
+    />
   );
 }
 
-render(<App />, document.getElementById('root'));
+// allTileIdsSafe — DFS tile order without importing tileTree's helper twice
+// (findTile is already imported for other derivations); a tiny local walk keeps
+// the focusedPane derivation self-contained.
+function allTileIdsSafe(tree) {
+  if (!tree) return [];
+  if (tree.type === "tile") return [tree.id];
+  return tree.children.flatMap(allTileIdsSafe);
+}
+
+// App — routes to the selected screen. The conversation screen is the default
+// and the only store-connected one; galleries stay mock. Bootstrap runs for every
+// view so returning to "?" keeps a live store, but galleries just don't consume
+// it. The command palette mounts over the REAL screens only (never the mock
+// galleries).
+function App() {
+  const version = useBootstrap();
+  const [state, setState] = useState(store.get());
+  useEffect(() => store.subscribe(setState), []);
+  const view = state.view;
+
+  if (view === "catalog") {
+    return (
+      <>
+        <CatalogScreen />
+        <GalleryNav current="catalog" />
+      </>
+    );
+  }
+  if (view === "live") {
+    return (
+      <>
+        <LiveStatesGallery />
+        <GalleryNav current="live" />
+      </>
+    );
+  }
+  if (view === "subagent") {
+    return (
+      <>
+        <SubagentGallery />
+        <GalleryNav current="subagent" />
+      </>
+    );
+  }
+  if (view === "mobile") {
+    return (
+      <>
+        <MobileGallery />
+        <GalleryNav current="mobile" />
+      </>
+    );
+  }
+  if (view === "grid") {
+    // Real, store-connected pane grid — no ViewSwitch overlay.
+    return (
+      <>
+        <PaneGridScreen version={version} />
+        <GlobalPalette />
+        <GlobalPairingPanel />
+        <ToastContainer />
+      </>
+    );
+  }
+  // Default: real, store-connected conversation screen. On a mobile
+  // viewport (state.isMobile, driven by the matchMedia breakpoint in
+  // useBootstrap) mount the connected mobile screen instead of the desktop
+  // ConversationScreen. Both are single-session containers over the same store;
+  // the GlobalPalette mounts over either (its context derives to 'mobile'). No
+  // ViewSwitch.
+  if (state.isMobile) {
+    return (
+      <>
+        <MobileConversationScreen />
+        <GlobalPalette />
+        <GlobalPairingPanel />
+        <ToastContainer />
+      </>
+    );
+  }
+  return (
+    <>
+      <ConversationScreen version={version} />
+      <GlobalPalette />
+      <GlobalPairingPanel />
+      <ToastContainer />
+    </>
+  );
+}
+
+render(<App />, document.getElementById("root"));

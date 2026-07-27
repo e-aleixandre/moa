@@ -1,14 +1,14 @@
 .PHONY: build build-linux test vet lint clean run \
-       fe fe-install fe-dev fe-next fe-next-install serve
+       fe fe-install fe-dev serve
 
 BIN := bin/moa
 
 # ─── Go ────────────────────────────────────────────────────
 
-build: fe fe-next
+build: fe
 	go build -o $(BIN) ./cmd/agent
 
-build-linux: fe fe-next
+build-linux: fe
 	GOOS=linux GOARCH=amd64 go build -o bin/moa-linux-amd64 ./cmd/agent
 
 test:
@@ -23,7 +23,6 @@ lint: vet
 clean:
 	rm -rf bin/
 	rm -f pkg/serve/static/app.js pkg/serve/static/app.css
-	rm -f pkg/serve/static-next/app.js pkg/serve/static-next/app.css
 
 run: build
 	./$(BIN) $(ARGS)
@@ -36,16 +35,10 @@ fe-install:
 fe:
 	cd pkg/serve/frontend && npm run build
 
-fe-next-install:
-	cd pkg/serve/frontend-next && npm install
-
-fe-next:
-	cd pkg/serve/frontend-next && npm run build
-
-# Dev mode: serve static from disk so esbuild changes appear on reload.
-# Run `make fe` in another terminal after editing src/.
+# Dev mode: serve the build output from disk so a rebuild shows up on reload.
+# Run `cd pkg/serve/frontend && npm run build -- --watch` in another terminal.
 fe-dev:
-	MOA_SERVE_STATIC_DIR=pkg/serve/frontend/src ./$(BIN) serve --port 8899
+	MOA_SERVE_STATIC_DIR=pkg/serve/static ./$(BIN) serve --port 8899
 
 # Build everything and start the server.
 serve: build

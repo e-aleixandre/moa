@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
+import { requestWakeLock, releaseWakeLock } from '../data/wake-lock.js';
 
 /**
  * useVoice — MediaRecorder → backend transcription → insert text.
@@ -84,6 +85,8 @@ export function useVoice(onTranscript, onError) {
   const finish = useCallback((discard) => {
     startTokenRef.current++; // invalidate any pending async start()
     startingRef.current = false;
+    // Recording is ending — let the screen sleep again.
+    releaseWakeLock();
     const rec = recorderRef.current;
     if (rec) {
       rec._discard = discard;
@@ -175,12 +178,29 @@ export function useVoice(onTranscript, onError) {
     };
 
     recorder.onerror = (e) => {
+      // An autonomous recorder failure never went through finish(), so release
+      // the wake lock and reset UI here. The identity check avoids touching a
+      // newer recording that may already own recorderRef.
+      if (recorderRef.current === recorder) {
+        recorderRef.current = null;
+        setRecording(false);
+        releaseWakeLock();
+      }
       reportError('Recording failed: ' + (e.error?.message || 'unknown error'));
     };
 
     recorder.onstop = async () => {
       // Stop mic tracks so the browser indicator goes away.
       stream.getTracks().forEach(t => t.stop());
+
+      // finish() nulls recorderRef before calling stop(), so a non-null match
+      // here means the recorder stopped on its own (device/stream cut) without
+      // releasing the wake lock or resetting the UI — do it now.
+      if (recorderRef.current === recorder) {
+        recorderRef.current = null;
+        setRecording(false);
+        releaseWakeLock();
+      }
 
       const durationMs = Date.now() - startedAt;
       if (recorder._discard || durationMs < MIN_RECORDING_MS || chunks.length === 0) {
@@ -259,6 +279,10 @@ export function useVoice(onTranscript, onError) {
     }
     recorderRef.current = recorder;
     setRecording(true);
+    // Recording is live — keep the screen awake so the phone doesn't auto-lock
+    // mid-sentence and cut the mic off. Released in finish() on stop/cancel/
+    // unmount. Best-effort: a no-op where the Wake Lock API is unsupported.
+    requestWakeLock();
   }, [onTranscript, reportError]);
 
   const toggle = useCallback(() => {

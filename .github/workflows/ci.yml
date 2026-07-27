@@ -31,7 +31,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             pkg/serve/frontend/package-lock.json
-            pkg/serve/frontend-next/package-lock.json
 
       - name: Build frontend
         working-directory: pkg/serve/frontend
@@ -39,11 +38,6 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build frontend-next
-        working-directory: pkg/serve/frontend-next
-        run: |
-          npm ci
-          npm run build
 
       - name: Build
         run: go build ./...
@@ -67,9 +61,6 @@ jobs:
         working-directory: pkg/serve/frontend
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Audit production frontend-next dependencies
-        working-directory: pkg/serve/frontend-next
-        run: npm audit --omit=dev --audit-level=high
 
   lint:
     name: Lint
@@ -87,7 +78,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             pkg/serve/frontend/package-lock.json
-            pkg/serve/frontend-next/package-lock.json
 
       - name: Build frontend
         working-directory: pkg/serve/frontend
@@ -95,11 +85,6 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build frontend-next
-        working-directory: pkg/serve/frontend-next
-        run: |
-          npm ci
-          npm run build
 
       - uses: golangci/golangci-lint-action@v9
         with:

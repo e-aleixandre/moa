@@ -6,11 +6,13 @@ const outdir = "../static";
 
 mkdirSync(outdir, { recursive: true });
 
-// Static assets copied verbatim into the build output. The service worker
-// (sw.js) and manifest must sit at the site root so the SW controls scope "/".
+// Static assets copied verbatim into the build output: the shell, the PWA
+// manifest, the service worker (push + installability) and the icons the
+// manifest points at. They are served from the root, which is also the
+// manifest's scope, so the paths inside them are absolute.
 const staticAssets = [
   "index.html",
-  "manifest.json",
+  "manifest.webmanifest",
   "sw.js",
   "icon-192.png",
   "icon-512.png",

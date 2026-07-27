@@ -165,22 +165,20 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 
 ## Frontend development
 
-The web UI is the **redesigned frontend** in `pkg/serve/frontend-next/` (Preact),
-served at `/` (and, for an already-installed PWA, still at `/next/`). Build it,
+The web UI is a Preact SPA in `pkg/serve/frontend/`, served at `/`. Build it,
 then override the embedded output for live development:
 
 ```bash
-# build the SPA into pkg/serve/static-next (embedded at compile time)
-cd pkg/serve/frontend-next && node esbuild.mjs   # or: bun esbuild.mjs
+# build the SPA into pkg/serve/static (embedded at compile time)
+cd pkg/serve/frontend && node esbuild.mjs   # or: bun esbuild.mjs
 
 # serve that build directory without recompiling the binary
-MOA_SERVE_STATIC_NEXT_DIR=pkg/serve/static-next moa serve
+MOA_SERVE_STATIC_DIR=pkg/serve/static moa serve
 ```
 
-`MOA_SERVE_STATIC_DIR` no longer overrides the interface at `/` — after the
-cutover the old SPA is retired and that tree only provides the shared root
-assets the frontend references absolutely (the service worker `/sw.js` and the
-PWA icons).
+The build output is one tree: the app bundle plus the assets the PWA references
+absolutely at the root — the service worker (`/sw.js`, which push runs through),
+the icons and the manifest.
 
 <p align="center">
   <img src="./assets/serve-desktop-overview.png" alt="Desktop" width="900" />

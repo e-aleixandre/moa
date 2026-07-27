@@ -33,7 +33,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             pkg/serve/frontend/package-lock.json
-            pkg/serve/frontend-next/package-lock.json
 
       - name: Validate stable SemVer tag
         run: |
@@ -56,11 +55,6 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build frontend-next
-        working-directory: pkg/serve/frontend-next
-        run: |
-          npm ci
-          npm run build
 
       - uses: goreleaser/goreleaser-action@v7
         with:

@@ -32,9 +32,6 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-//go:embed static-next
-var staticNextFS embed.FS
-
 // serverOptions holds optional hardening configuration for NewServer.
 type serverOptions struct {
 	allowedHosts []string
@@ -146,50 +143,20 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
 
-	// The old SPA is no longer the default interface, but its `static` tree is
-	// kept to serve the shared ROOT assets the redesigned frontend references
-	// absolutely: the service worker (/sw.js, for push + installability) and the
-	// PWA icons. Explicit routes below win over the "GET /" catch-all (Go 1.22
-	// ServeMux precedence: a more specific pattern beats "/").
-	var legacyAssetHandler http.Handler
+	var staticHandler http.Handler
 	if dir := os.Getenv("MOA_SERVE_STATIC_DIR"); dir != "" {
-		legacyAssetHandler = http.FileServer(http.Dir(dir))
+		staticHandler = http.FileServer(http.Dir(dir))
 	} else {
 		sub, err := fs.Sub(staticFS, "static")
 		if err != nil {
 			panic("serve: embedded static filesystem missing 'static' subtree: " + err.Error())
 		}
-		legacyAssetHandler = http.FileServer(http.FS(sub))
+		staticHandler = http.FileServer(http.FS(sub))
 	}
-	for _, p := range []string{
-		"/sw.js",
-		"/icon-192.png",
-		"/icon-512.png",
-		"/icon-maskable-512.png",
-		"/apple-touch-icon.png",
-	} {
-		mux.Handle("GET "+p, legacyAssetHandler)
-	}
-
-	var staticNextHandler http.Handler
-	if dir := os.Getenv("MOA_SERVE_STATIC_NEXT_DIR"); dir != "" {
-		staticNextHandler = http.FileServer(http.Dir(dir))
-	} else {
-		sub, err := fs.Sub(staticNextFS, "static-next")
-		if err != nil {
-			panic("serve: embedded static filesystem missing 'static-next' subtree: " + err.Error())
-		}
-		staticNextHandler = http.FileServer(http.FS(sub))
-	}
-	// The redesigned frontend is now the default at the root. /next/ keeps
-	// serving it too so an already-installed PWA (manifest scope /next/) still
-	// launches at its saved start URL.
-	mux.Handle("GET /", staticNextHandler)
-	mux.Handle("GET /next/", http.StripPrefix("/next", withManifestType(staticNextHandler)))
-	// The root PWA manifest needs scope "/" (a fresh install from the root),
-	// while /next/manifest.webmanifest keeps scope "/next/" for the already-
-	// installed app. Serve the root-scoped variant under the canonical name.
-	mux.Handle("GET /manifest.webmanifest", withManifestType(rewriteRequestPath(staticNextHandler, "/manifest-root.webmanifest")))
+	mux.Handle("GET /", staticHandler)
+	// The manifest needs its own content type; everything else the file server
+	// types correctly from its extension.
+	mux.Handle("GET /manifest.webmanifest", withManifestType(staticHandler))
 
 	var devices *deviceStore
 	if o.token != "" || o.deviceAuth {
@@ -1185,17 +1152,6 @@ const maxSendBodySize = 90 << 20
 
 func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-}
-
-// rewriteRequestPath serves `next` with the request URL path forced to `path`.
-// Used to serve a differently-named file under a canonical URL (the root-scoped
-// PWA manifest at /manifest.webmanifest maps to /manifest-root.webmanifest).
-func rewriteRequestPath(next http.Handler, path string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = path
-		next.ServeHTTP(w, r2)
-	})
 }
 
 // withManifestType sets the canonical PWA manifest content type on responses

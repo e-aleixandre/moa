@@ -129,7 +129,7 @@ you need Go 1.25+ and Node.js/npm for the embedded web frontends:
 git clone https://github.com/ealeixandre/moa.git
 cd moa
 
-make fe-install fe-next-install
+make fe-install
 make build
 # → ./bin/moa
 ```

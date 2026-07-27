@@ -1,14 +1,15 @@
 {
+  "name": "moa-frontend-next",
   "private": true,
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch"
   },
   "dependencies": {
-    "dompurify": "^3.2.0",
-    "highlight.js": "^11.11.0",
+    "dompurify": "^3.4.12",
+    "highlight.js": "^11.11.1",
     "lucide-preact": "^0.577.0",
-    "marked": "^15.0.0",
+    "marked": "^18.0.6",
     "preact": "^10.25.0",
     "qrcode": "^1.5.4"
   },
