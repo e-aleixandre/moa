@@ -72,8 +72,10 @@ html.mobile-locked #root {
   min-height: 0;
   overflow: hidden;
   /* The installed-PWA safe area and any iOS overscroll must continue the
-     headerless conversation surface instead of revealing the document base. */
-  background: var(--crust);
+     headerless conversation surface instead of revealing the document base.
+     That surface is --base (see .mconv): on --crust the status-bar inset read
+     as a darker band sitting above the conversation. */
+  background: var(--base);
   /* iOS: stop rubber-band / overscroll chaining to the document. */
   overscroll-behavior: none;
 }

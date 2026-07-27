@@ -1,6 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
 import { ChevronLeft, GitFork, X, Check, Copy } from "lucide-preact";
-import { Spinner } from "../../../primitives/index.js";
 import { RunModeChip, UserWaypoint } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { StatusLineRow } from "../MobileStatusLine/StatusLineRow.jsx";
@@ -10,7 +9,6 @@ import { fmtTokens, copyToClipboard, sessionTitle } from "../../../data/util/for
 import { fmtCost } from "../../../data/util/usage-pills.js";
 import { modelAccent } from "../../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
-import { updateSession } from "../../../data/store.js";
 // The now-line above the composer reuses MobileNowLine's rules verbatim (same
 // grammar, different subject), so its stylesheet has to be in the graph even
 // though this screen doesn't render that component.
@@ -70,7 +68,6 @@ export function MobileSubagentView({ session, jobId, onBack }) {
     cancelSubagent(session.id, jobId).catch(() => {});
   };
   const onPromote = () => { promoteSubagent(session.id, jobId).catch(() => {}); };
-  const onSibling = (id) => { updateSession(session.id, { viewingSubagent: id }); };
 
   return (
     <div class="msa">
@@ -85,23 +82,6 @@ export function MobileSubagentView({ session, jobId, onBack }) {
         </span>
         <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
       </header>
-
-      {view.siblings.length > 1 && (
-        <div class="msa-rail">
-          {view.siblings.map((s) => (
-            <button
-              type="button"
-              key={s.id}
-              class={`msa-rail-chip${s.active ? " active" : ""}`}
-              style={s.active ? { borderColor: `var(--${s.accent})` } : undefined}
-              onClick={() => onSibling(s.id)}
-            >
-              <Spinner color={s.accent} size={8} />
-              <span style={{ color: `var(--${s.accent})` }}>{s.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
 
       <MobileStream
         session={{ id: `${session.id}:${jobId}`, messages: [] }}
