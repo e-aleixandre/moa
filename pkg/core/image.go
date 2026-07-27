@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -27,9 +28,17 @@ import (
 const MaxImageDimension = 8000
 
 // imageHeaderBytes bounds how much of an image is decoded to read its size.
-// DecodeConfig only needs the header; for JPEG the SOF marker sits after any
-// EXIF/ICC segments, which this comfortably covers.
+// DecodeConfig only needs the header, which for JPEG means everything up to the
+// SOF marker. That marker sits after any EXIF/ICC segments, and those are
+// bounded only by the format itself, so a header can legitimately be larger
+// than this — scanJPEGSize handles that case without buffering the whole file.
 const imageHeaderBytes = 256 << 10
+
+// jpegScanBytes bounds the segment walk for a JPEG whose SOF sits past
+// imageHeaderBytes. The walk jumps segment to segment rather than reading them,
+// so this only bounds how far a deliberately padded file can push the frame
+// header before it is treated as unmeasurable.
+const jpegScanBytes = 4 << 20
 
 // ImageDimensions reports the pixel size from an image header. Returns 0,0 when
 // the format is unsupported or the header is unreadable — an unknown size is
@@ -40,14 +49,116 @@ func ImageDimensions(data []byte) (width, height int) {
 			width, height = 0, 0
 		}
 	}()
-	if len(data) > imageHeaderBytes {
-		data = data[:imageHeaderBytes]
+	// WebP is accepted as an inline image but has no decoder in the standard
+	// library, so image.DecodeConfig reports "unknown format" and the size
+	// silently reads as 0x0 — which every caller treats as "fine to send".
+	// The header carries the size in a fixed layout, so read it directly
+	// rather than pull in a full decoder for four integers.
+	if w, h, ok := webPSize(data); ok {
+		return w, h
 	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	head := data
+	if len(head) > imageHeaderBytes {
+		head = head[:imageHeaderBytes]
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(head))
 	if err != nil {
+		// A JPEG whose SOF sits past the truncation point fails here, and
+		// falling through would report 0x0 (i.e. "not oversized"). Walk the
+		// segment chain instead, which skips over EXIF/ICC without decoding.
+		if w, h, ok := scanJPEGSize(data); ok {
+			return w, h
+		}
 		return 0, 0
 	}
 	return cfg.Width, cfg.Height
+}
+
+// webPSize reads the pixel size out of a WebP header. Covers the three
+// container variants (lossy VP8, lossless VP8L, extended VP8X); returns false
+// for anything else, including a truncated header.
+func webPSize(data []byte) (width, height int, ok bool) {
+	if len(data) < 21 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return 0, 0, false
+	}
+	switch string(data[12:16]) {
+	case "VP8 ":
+		// Lossy: 3-byte frame tag, 3-byte start code, then 14-bit dimensions.
+		if len(data) < 30 || data[23] != 0x9d || data[24] != 0x01 || data[25] != 0x2a {
+			return 0, 0, false
+		}
+		w := int(binary.LittleEndian.Uint16(data[26:28]) & 0x3fff)
+		h := int(binary.LittleEndian.Uint16(data[28:30]) & 0x3fff)
+		return w, h, true
+	case "VP8L":
+		// Lossless: signature byte, then 14-bit width and height minus one,
+		// packed across a little-endian 32-bit field.
+		if len(data) < 25 || data[20] != 0x2f {
+			return 0, 0, false
+		}
+		bits := binary.LittleEndian.Uint32(data[21:25])
+		return int(bits&0x3fff) + 1, int((bits>>14)&0x3fff) + 1, true
+	case "VP8X":
+		// Extended: 24-bit canvas size minus one.
+		if len(data) < 30 {
+			return 0, 0, false
+		}
+		w := int(uint32(data[24]) | uint32(data[25])<<8 | uint32(data[26])<<16)
+		h := int(uint32(data[27]) | uint32(data[28])<<8 | uint32(data[29])<<16)
+		return w + 1, h + 1, true
+	}
+	return 0, 0, false
+}
+
+// scanJPEGSize walks the JPEG segment chain to the frame header, skipping
+// metadata segments by their declared length instead of decoding them. Used
+// when the SOF marker sits beyond imageHeaderBytes, which happens with large
+// EXIF or embedded colour profiles.
+func scanJPEGSize(data []byte) (width, height int, ok bool) {
+	if len(data) < 4 || data[0] != 0xff || data[1] != 0xd8 {
+		return 0, 0, false
+	}
+	if len(data) > jpegScanBytes {
+		data = data[:jpegScanBytes]
+	}
+	for i := 2; i+3 < len(data); {
+		if data[i] != 0xff {
+			return 0, 0, false
+		}
+		marker := data[i+1]
+		// Padding and standalone markers carry no length field.
+		if marker == 0xff {
+			i++
+			continue
+		}
+		if marker == 0x01 || (marker >= 0xd0 && marker <= 0xd9) {
+			i += 2
+			continue
+		}
+		if i+3 >= len(data) {
+			return 0, 0, false
+		}
+		length := int(binary.BigEndian.Uint16(data[i+2 : i+4]))
+		if length < 2 {
+			return 0, 0, false
+		}
+		// SOF0..SOF15, excluding the DHT/JPG/DAC markers interleaved in that
+		// range, carry the frame dimensions.
+		if marker >= 0xc0 && marker <= 0xcf && marker != 0xc4 && marker != 0xc8 && marker != 0xcc {
+			if i+9 >= len(data) {
+				return 0, 0, false
+			}
+			h := int(binary.BigEndian.Uint16(data[i+5 : i+7]))
+			w := int(binary.BigEndian.Uint16(data[i+7 : i+9]))
+			return w, h, true
+		}
+		// Entropy-coded data follows the scan header; the size is not here.
+		if marker == 0xda {
+			return 0, 0, false
+		}
+		i += 2 + length
+	}
+	return 0, 0, false
 }
 
 // ImageExceedsMaxDimension reports whether a base64 image payload has a side
@@ -57,7 +168,10 @@ func ImageExceedsMaxDimension(b64 string) (width, height int, exceeds bool) {
 	head := b64
 	// base64 is 4 chars per 3 bytes; decode only what the header needs, cut on a
 	// 4-char group boundary so the truncated string decodes without padding.
-	if max := (imageHeaderBytes/3 + 1) * 4; len(head) > max {
+	// The bound is the JPEG scan window rather than imageHeaderBytes, because a
+	// late SOF is exactly the case this has to catch — the scan itself skips
+	// segment by segment and does not decode pixels.
+	if max := (jpegScanBytes/3 + 1) * 4; len(head) > max {
 		head = head[:max-max%4]
 	}
 	decoded, err := base64.StdEncoding.DecodeString(head)
