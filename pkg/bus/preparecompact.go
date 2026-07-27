@@ -12,7 +12,7 @@ import (
 // checkpointCompacter is optional to keep the narrow AgentController interface
 // compatible with test and extension controllers.
 type checkpointCompacter interface {
-	CompactWithCheckpoint(context.Context, string) (*core.CompactionPayload, error)
+	CompactWithCheckpoint(ctx context.Context, checkpoint, focus string) (*core.CompactionPayload, error)
 }
 
 // prepareCompactSender is intentionally specific: callers cannot provide an
@@ -37,12 +37,14 @@ func compactWithCheckpoint(ctx context.Context, sctx *SessionContext, checkpoint
 		return nil, err
 	}
 	if a, ok := sctx.Agent.(checkpointCompacter); ok {
-		return a.CompactWithCheckpoint(ctx, checkpoint)
+		// Prepare-compact does not take a user focus; the preparation turn is
+		// its way of shaping what survives.
+		return a.CompactWithCheckpoint(ctx, checkpoint, "")
 	}
 	if strings.TrimSpace(checkpoint) != "" {
 		return nil, fmt.Errorf("agent does not support checkpoint-preserving compaction")
 	}
-	return sctx.Agent.Compact(ctx)
+	return sctx.Agent.Compact(ctx, "")
 }
 
 func clearPersistedCheckpoint(slot *sessioncheckpoint.Slot, text string, gen uint64, persist func() error) (err error) {

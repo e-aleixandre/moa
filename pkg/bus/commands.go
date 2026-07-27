@@ -162,8 +162,13 @@ type RemoveAllowedPath struct {
 // ClearSession resets the conversation (agent.Reset).
 type ClearSession struct{ SessionID string }
 
-// CompactSession triggers manual compaction.
-type CompactSession struct{ SessionID string }
+// CompactSession triggers manual compaction. Focus, when non-empty, is a
+// one-shot instruction from `/compact <focus>` forwarded to the summarizer to
+// tell it what to keep in the foreground; it is not persisted on the session.
+type CompactSession struct {
+	SessionID string
+	Focus     string
+}
 
 // PrepareCompactSession runs a short internal preparation turn then compacts
 // without releasing the session slot between the two phases.

@@ -222,7 +222,7 @@ func executeBarrier(sctx *SessionContext, raw string) error {
 	name, rest := splitCommand(raw)
 	switch name {
 	case "compact":
-		return sctx.Bus.Execute(CompactSession{SessionID: sctx.SessionID})
+		return sctx.Bus.Execute(CompactSession{SessionID: sctx.SessionID, Focus: strings.TrimSpace(rest)})
 	case "prepare-compact":
 		return sctx.Bus.Execute(PrepareCompactSession{SessionID: sctx.SessionID})
 	case "clear":

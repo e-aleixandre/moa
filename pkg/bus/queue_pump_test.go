@@ -77,6 +77,26 @@ func TestPump_QueuedBarrierExecutesAtIdle(t *testing.T) {
 	}
 }
 
+// A queued `/compact <focus>` barrier carries its focus argument through to the
+// agent, the same as the immediate path.
+func TestPump_QueuedCompactBarrierForwardsFocus(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	compactStarted, cmu := collect[CompactionStarted](b)
+	fa.Steer(core.SteerItem{ID: "c1", Text: "/compact focus on phase 3", Command: "/compact focus on phase 3"})
+	requestPump(sctx)
+	if !waitForLen(b, compactStarted, cmu, 1, 2*time.Second) {
+		t.Fatal("barrier never ran compact")
+	}
+	if got := fa.focusPassed(); got != "focus on phase 3" {
+		t.Fatalf("focus passed via barrier = %q, want %q", got, "focus on phase 3")
+	}
+}
+
 // A QueueCommand that lands on an already-idle session (the classifier saw the
 // session busy, but the run finished and drained an empty queue before the
 // barrier arrived) must still be executed: the handler kicks the pump after

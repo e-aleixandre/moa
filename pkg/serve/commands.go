@@ -162,11 +162,12 @@ func cmdClear(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, err
 	return &CommandResult{OK: true, Message: "started a new conversation", NewSessionID: newSess.ID}, nil
 }
 
-func cmdCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+func cmdCompact(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
-	if err := sess.runtime.Bus.Execute(bus.CompactSession{}); err != nil {
+	focus := strings.TrimSpace(strings.Join(args, " "))
+	if err := sess.runtime.Bus.Execute(bus.CompactSession{Focus: focus}); err != nil {
 		return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "conversation compacted"}, nil

@@ -20,7 +20,7 @@ type commandDef struct {
 var allCommands = []commandDef{
 	{Name: "model", Args: "<spec>", Desc: "Switch model or open picker"},
 	{Name: "thinking", Args: "<level>", Desc: "Set thinking level (off/low/medium/high/xhigh)"},
-	{Name: "compact", Desc: "Force context compaction"},
+	{Name: "compact", Args: "[focus]", Desc: "Force context compaction (optional focus for the summary)"},
 	{Name: "prepare-compact", Desc: "Prepare handoff then compact context"},
 	{Name: "plan", Desc: "Toggle plan mode (plan-then-execute workflow)"},
 	{Name: "goal", Args: "<objective> [flags]|stop|status", Desc: "Autonomous maker→verifier loop toward an objective"},

@@ -289,9 +289,11 @@ func TestExtractFileOps_MultiEditAndApplyPatch(t *testing.T) {
 type mockProvider struct {
 	response string
 	err      error
+	lastReq  core.Request
 }
 
-func (m *mockProvider) Stream(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+func (m *mockProvider) Stream(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	m.lastReq = req
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -311,13 +313,57 @@ func TestGenerateSummary_Normal(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	summary, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	summary, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(summary, "Test goal") {
 		t.Fatalf("unexpected summary: %s", summary)
 	}
+}
+
+// A `/compact <focus>` instruction is forwarded into the summarizer prompt so
+// it keeps the named work in full detail; an empty focus adds nothing.
+func TestGenerateSummary_ForwardsFocus(t *testing.T) {
+	prov := &mockProvider{response: "## Goal\nx"}
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
+	}
+	if _, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "", "keep everything about phase 3"); err != nil {
+		t.Fatal(err)
+	}
+	prompt := userPromptText(t, prov.lastReq)
+	if !strings.Contains(prompt, "<focus>") || !strings.Contains(prompt, "keep everything about phase 3") {
+		t.Fatalf("focus not forwarded into prompt:\n%s", prompt)
+	}
+}
+
+func TestGenerateSummary_NoFocusIsClean(t *testing.T) {
+	prov := &mockProvider{response: "## Goal\nx"}
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
+	}
+	// Whitespace-only focus must be treated as none.
+	if _, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "", "   "); err != nil {
+		t.Fatal(err)
+	}
+	if prompt := userPromptText(t, prov.lastReq); strings.Contains(prompt, "<focus>") {
+		t.Fatalf("blank focus should add no focus block:\n%s", prompt)
+	}
+}
+
+func userPromptText(t *testing.T, req core.Request) string {
+	t.Helper()
+	if len(req.Messages) == 0 {
+		t.Fatal("request had no messages")
+	}
+	var b strings.Builder
+	for _, c := range req.Messages[len(req.Messages)-1].Content {
+		if c.Type == "text" {
+			b.WriteString(c.Text)
+		}
+	}
+	return b.String()
 }
 
 func TestGenerateSummary_FallbackToFinalMessage(t *testing.T) {
@@ -334,7 +380,7 @@ func TestGenerateSummary_FallbackToFinalMessage(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	summary, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	summary, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +402,7 @@ func TestGenerateSummary_EmptyOutput(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	_, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	_, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "", "")
 	if err == nil {
 		t.Fatal("expected error for empty output")
 	}
@@ -367,7 +413,7 @@ func TestGenerateSummary_ProviderError(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	_, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	_, _, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -381,7 +427,7 @@ func TestCompact_NothingToCompact(t *testing.T) {
 		makeMsg("assistant", "hi", 100),
 	}
 	prov := &mockProvider{response: "summary"}
-	result, out, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 200, 200_000, core.DefaultCompactionSettings)
+	result, out, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 200, 200_000, core.DefaultCompactionSettings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +452,7 @@ func TestCompact_ProducesValidOutput(t *testing.T) {
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 16384, KeepRecent: 10000}
 	prov := &mockProvider{response: "## Goal\nBuild a thing"}
 
-	result, compacted, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 210000, 200_000, settings)
+	result, compacted, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 210000, 200_000, settings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +492,7 @@ func TestCompact_ExtractsPreviousSummary(t *testing.T) {
 		capture:  func(req core.Request) { capturedReq = req },
 	}
 
-	result, _, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 110000, 200_000, settings)
+	result, _, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 110000, 200_000, settings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +535,7 @@ func TestCompact_FailureReturnsOriginalMessages(t *testing.T) {
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 16384, KeepRecent: 10000}
 	prov := &mockProvider{err: context.DeadlineExceeded}
 
-	result, out, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 105000, 200_000, settings)
+	result, out, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 105000, 200_000, settings, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -512,7 +558,7 @@ func TestCompact_MultiCompaction(t *testing.T) {
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 16384, KeepRecent: 10000}
 	prov := &mockProvider{response: "first summary"}
 
-	_, compacted, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 110000, 200_000, settings)
+	_, compacted, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, 110000, 200_000, settings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +573,7 @@ func TestCompact_MultiCompaction(t *testing.T) {
 	)
 	prov.response = "second summary"
 
-	_, compacted2, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, compacted, 110000, 200_000, settings)
+	_, compacted2, err := Compact(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, compacted, 110000, 200_000, settings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +604,7 @@ func TestGenerateSummary_ReturnsUsage(t *testing.T) {
 	msgs := []core.AgentMessage{
 		{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("hello")}}},
 	}
-	_, gotUsage, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "")
+	_, gotUsage, err := GenerateSummary(context.Background(), prov, core.Model{ID: "test"}, core.StreamOptions{}, msgs, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

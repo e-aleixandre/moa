@@ -45,6 +45,10 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m.handleRenameCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "rename")))
 	}
 
+	if cmd == "compact" || strings.HasPrefix(cmd, "compact ") {
+		return m.handleCompactCommand(strings.TrimSpace(strings.TrimPrefix(cmd, "compact")))
+	}
+
 	switch cmd {
 	case "model", "models":
 		model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
@@ -105,25 +109,6 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.s.expanded = false
 		m.updateViewport()
 		return m, nil
-
-	case "compact":
-		if m.s.running {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: "Cannot compact while agent is running",
-			})
-			return m, nil
-		}
-		// A compact behaves like a run: the input stays enabled in queue
-		// (steer) mode so a message typed meanwhile is delivered when the
-		// compaction finishes instead of being lost.
-		m.s.running = true
-		m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
-		m.status.SetText("compacting context...")
-		b := m.runtime.Bus
-		return m, func() tea.Msg {
-			err := b.Execute(bus.CompactSession{})
-			return compactResultMsg{Err: err}
-		}
 
 	case "prepare-compact":
 		if m.s.running {
@@ -1269,6 +1254,27 @@ func (m appModel) handleTasksCommand(args string) (tea.Model, tea.Cmd) {
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Usage: /tasks [done <n> | reset | show [all|current|hidden]]"})
 		m.updateViewport()
 		return m, nil
+	}
+}
+
+// handleCompactCommand runs a manual /compact, optionally forwarding a one-shot
+// focus (from `/compact <focus>`) to the summarizer. A compact behaves like a
+// run: the input stays enabled in queue (steer) mode so a message typed
+// meanwhile is delivered when the compaction finishes instead of being lost.
+func (m appModel) handleCompactCommand(focus string) (tea.Model, tea.Cmd) {
+	if m.s.running {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Cannot compact while agent is running",
+		})
+		return m, nil
+	}
+	m.s.running = true
+	m.input.textarea.Placeholder = "Steer the agent... (Enter to send)"
+	m.status.SetText("compacting context...")
+	b := m.runtime.Bus
+	return m, func() tea.Msg {
+		err := b.Execute(bus.CompactSession{Focus: strings.TrimSpace(focus)})
+		return compactResultMsg{Err: err}
 	}
 }
 

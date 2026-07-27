@@ -218,7 +218,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 				result, compacted, err := compaction.Compact(
 					ctx, cfg.provider, cfg.model, cfg.streamOpts,
-					cfg.state.Messages, estimate.Tokens, window, *cfg.compaction,
+					cfg.state.Messages, estimate.Tokens, window, *cfg.compaction, "",
 				)
 				if err != nil {
 					// Non-fatal: log and continue with full context.

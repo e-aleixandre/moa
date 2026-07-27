@@ -39,6 +39,7 @@ type fakeAgent struct {
 	compactErr       error
 	compactPayload   *core.CompactionPayload
 	checkpointPassed string
+	compactFocus     string
 	compactHook      func()
 
 	setModelProvider core.Provider
@@ -269,9 +270,10 @@ func (f *fakeAgent) Reset() error {
 	return nil
 }
 
-func (f *fakeAgent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
+func (f *fakeAgent) Compact(ctx context.Context, focus string) (*core.CompactionPayload, error) {
 	f.mu.Lock()
 	f.compactCalled = true
+	f.compactFocus = focus
 	hook := f.compactHook
 	f.mu.Unlock()
 	// Let a test observe state / queue a steer while compaction is "in flight",
@@ -284,11 +286,11 @@ func (f *fakeAgent) Compact(ctx context.Context) (*core.CompactionPayload, error
 	return f.compactPayload, f.compactErr
 }
 
-func (f *fakeAgent) CompactWithCheckpoint(ctx context.Context, checkpoint string) (*core.CompactionPayload, error) {
+func (f *fakeAgent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus string) (*core.CompactionPayload, error) {
 	f.mu.Lock()
 	f.checkpointPassed = checkpoint
 	f.mu.Unlock()
-	return f.Compact(ctx)
+	return f.Compact(ctx, focus)
 }
 
 func (f *fakeAgent) SnapshotConversation() ([]core.AgentMessage, int) {
@@ -448,6 +450,12 @@ func (f *fakeAgent) wasCompactCalled() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.compactCalled
+}
+
+func (f *fakeAgent) focusPassed() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.compactFocus
 }
 
 func (f *fakeAgent) getSteered() string {
@@ -1342,6 +1350,22 @@ func TestHandler_CompactSession(t *testing.T) {
 	}
 	if len(e.Messages) != 1 {
 		t.Fatalf("Messages len = %d", len(e.Messages))
+	}
+}
+
+// The one-shot focus from `/compact <focus>` reaches the agent unchanged.
+func TestHandler_CompactSession_ForwardsFocus(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{messages: []core.AgentMessage{{Message: core.Message{Role: "user"}}}}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(CompactSession{Focus: "keep phase 3"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fa.focusPassed(); got != "keep phase 3" {
+		t.Fatalf("focus passed to agent = %q, want %q", got, "keep phase 3")
 	}
 }
 

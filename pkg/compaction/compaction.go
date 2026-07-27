@@ -475,9 +475,12 @@ func (f FileOps) Modified() []string {
 
 // GenerateSummary makes an LLM call to summarize conversation messages.
 // Returns the summary text, provider-reported usage (may be nil), or an error.
-func GenerateSummary(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, previousSummary string) (string, *core.Usage, error) {
+// focus, when non-empty, is a caller instruction (from `/compact <focus>`) that
+// tells the summarizer what to keep in the foreground; it is advisory and never
+// replaces the structured format.
+func GenerateSummary(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, previousSummary, focus string) (string, *core.Usage, error) {
 	serialized := SerializeForSummary(msgs, model.MaxInput)
-	prompt := buildPrompt(serialized, previousSummary)
+	prompt := buildPrompt(serialized, previousSummary, focus)
 
 	// Give the summarizer an explicit output budget. Without one the size of
 	// the summary is whatever the provider defaults to, which is how the
@@ -540,8 +543,10 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 
 // Compact orchestrates context compaction. Returns nil Result if nothing
 // needs compacting. On LLM failure, returns the error with the original
-// messages unchanged (non-fatal).
-func Compact(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, contextTokens, contextWindow int, settings core.CompactionSettings) (*Result, []core.AgentMessage, error) {
+// messages unchanged (non-fatal). focus is an optional caller instruction
+// (from `/compact <focus>`) telling the summarizer what to keep in the
+// foreground; empty for automatic compaction.
+func Compact(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, contextTokens, contextWindow int, settings core.CompactionSettings, focus string) (*Result, []core.AgentMessage, error) {
 	cutIndex := FindCutPoint(msgs, contextTokens, contextWindow, settings)
 	if cutIndex <= 0 {
 		return nil, msgs, nil
@@ -559,7 +564,7 @@ func Compact(ctx context.Context, provider core.Provider, model core.Model, opts
 
 	fileOps := ExtractFileOps(toSummarize)
 
-	summary, usage, err := GenerateSummary(ctx, provider, model, opts, toSummarize, previousSummary)
+	summary, usage, err := GenerateSummary(ctx, provider, model, opts, toSummarize, previousSummary, focus)
 	if err != nil {
 		return nil, msgs, fmt.Errorf("compaction: %w", err)
 	}

@@ -9,7 +9,7 @@
 // keep in sync with the server's command table if it changes.
 export const COMMANDS = [
   { name: 'clear', desc: 'Clear conversation history' },
-  { name: 'compact', desc: 'Compact conversation context' },
+  { name: 'compact', desc: 'Compact conversation context', args: '[focus]' },
   { name: 'model', desc: 'Switch model', args: '<model>' },
   { name: 'thinking', desc: 'Set thinking level', args: '<off|low|medium|high|xhigh>' },
   { name: 'permissions', desc: 'Set permission mode', args: '<yolo|ask|auto>' },

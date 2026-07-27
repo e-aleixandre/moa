@@ -281,7 +281,7 @@ func RegisterHandlers(sctx *SessionContext) {
 					e = fmt.Errorf("compaction panic: %v", r)
 				}
 			}()
-			return sctx.Agent.Compact(sctx.SessionCtx)
+			return sctx.Agent.Compact(sctx.SessionCtx, cmd.Focus)
 		}()
 		// Settle the state BEFORE publishing results, mirroring startRun:
 		// reactors observing CompactionEnded must see idle/error, not running.

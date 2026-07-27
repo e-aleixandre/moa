@@ -1899,7 +1899,7 @@ func TestCompact_SerializesAgainstRun(t *testing.T) {
 	}
 
 	compactErr := make(chan error, 1)
-	go func() { _, e := ag.Compact(context.Background()); compactErr <- e }()
+	go func() { _, e := ag.Compact(context.Background(), ""); compactErr <- e }()
 
 	select {
 	case <-started:
@@ -1983,7 +1983,7 @@ func TestCompact_RetainedUserKeepsStableMsgID(t *testing.T) {
 	}
 
 	const checkpointText = "exact checkpoint body"
-	payload, err := ag.CompactWithCheckpoint(context.Background(), checkpointText)
+	payload, err := ag.CompactWithCheckpoint(context.Background(), checkpointText, "")
 	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
 	}

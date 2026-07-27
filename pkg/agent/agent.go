@@ -966,8 +966,8 @@ func (a *Agent) Drain(timeout time.Duration) {
 // Compact forces context compaction regardless of the auto-compaction threshold.
 // Returns the compaction payload on success, nil if there was nothing to compact,
 // or an error if the agent is running or compaction fails.
-func (a *Agent) Compact(ctx context.Context) (*core.CompactionPayload, error) {
-	return a.CompactWithCheckpoint(ctx, "")
+func (a *Agent) Compact(ctx context.Context, focus string) (*core.CompactionPayload, error) {
+	return a.CompactWithCheckpoint(ctx, "", focus)
 }
 
 func (a *Agent) SnapshotConversation() ([]core.AgentMessage, int) {
@@ -989,7 +989,9 @@ func (a *Agent) RestoreConversation(messages []core.AgentMessage, epoch int) err
 
 // CompactWithCheckpoint is Compact with a mechanically appended ephemeral
 // checkpoint. The checkpoint bypasses the summarizer so it cannot be omitted.
-func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint string) (*core.CompactionPayload, error) {
+// focus is an optional caller instruction (from `/compact <focus>`) forwarded
+// to the summarizer; empty for automatic compaction.
+func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus string) (*core.CompactionPayload, error) {
 	a.mu.Lock()
 	if a.cancel != nil {
 		a.mu.Unlock()
@@ -1033,7 +1035,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint string) (*
 	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel}
 	result, compacted, err := compaction.Compact(
 		ctx, provider, model, streamOpts,
-		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings,
+		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings, focus,
 	)
 	if err != nil {
 		return nil, err
