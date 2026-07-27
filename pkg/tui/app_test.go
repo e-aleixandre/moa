@@ -2306,6 +2306,24 @@ func TestSubmitBusy_QueuesCommandBarrier(t *testing.T) {
 	}
 }
 
+// A busy-session /compact with a focus argument enqueues the whole line, so the
+// focus survives into the barrier (which executeBarrier later splits back out).
+func TestSubmitBusy_QueuesCompactFocus(t *testing.T) {
+	m := newSwitchTestApp(t)
+	b := bus.NewLocalBus()
+	defer b.Close()
+	var queued bus.QueueCommand
+	b.OnCommand(func(cmd bus.QueueCommand) error { queued = cmd; return nil })
+	m.runtime.Bus = b
+	m.s.running = true
+
+	m.submitBusy("/compact keep phase 3")
+
+	if queued.Raw != "compact keep phase 3" {
+		t.Fatalf("QueueCommand.Raw = %q, want %q", queued.Raw, "compact keep phase 3")
+	}
+}
+
 // TestSubmitBusy_RejectsRefusedCommand: a PolicyReject command mid-run is
 // refused (no queue, no bus command) with a status message.
 func TestSubmitBusy_RejectsRefusedCommand(t *testing.T) {

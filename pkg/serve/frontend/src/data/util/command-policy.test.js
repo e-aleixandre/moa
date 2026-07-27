@@ -10,6 +10,13 @@ test('queue commands (rewrite/reconfigure the run) wait for idle', () => {
   }
 });
 
+test('a multiline slash command splits on the newline, matching the server', () => {
+  // A focus that starts on a new line (Shift+Enter in the composer) must not
+  // fold the name and argument into one unknown token.
+  expect(classifyCommand('/compact\nkeep phase 3')).toBe(POLICY_QUEUE);
+  expect(classifyCommand('/compact\tkeep phase 3')).toBe(POLICY_QUEUE);
+});
+
 test('reject commands (mode/rewind) are refused while busy', () => {
   for (const raw of ['/undo', '/branch', '/back', '/plan']) {
     expect(classifyCommand(raw)).toBe(POLICY_REJECT);

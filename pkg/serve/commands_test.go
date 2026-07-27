@@ -301,3 +301,33 @@ func TestExecCommand_PolicyGateWhileRunning(t *testing.T) {
 		return sessState(sess) == StateIdle || sessState(sess) == StateError
 	})
 }
+
+// The idle web path forwards a /compact focus argument into CompactSession,
+// mirroring the TUI. The session bus is swapped for a local one so the command
+// is intercepted before it reaches the agent.
+func TestCmdCompact_ForwardsFocusIdle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bus.NewLocalBus()
+	defer b.Close()
+	var got bus.CompactSession
+	b.OnCommand(func(cmd bus.CompactSession) error { got = cmd; return nil })
+	sess.runtime.Bus = b
+
+	res, err := mgr.ExecCommand(sess.ID, "/compact keep phase 3", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("compact not OK: %+v", res)
+	}
+	if got.Focus != "keep phase 3" {
+		t.Fatalf("CompactSession.Focus = %q, want %q", got.Focus, "keep phase 3")
+	}
+}

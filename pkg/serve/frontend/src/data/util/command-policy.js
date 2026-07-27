@@ -17,13 +17,15 @@ const QUEUE = new Set(['compact', 'clear', 'model', 'thinking', 'verify']);
 const REJECT = new Set(['undo', 'branch', 'back', 'plan']);
 
 // splitCommand normalizes a raw slash line into [name, rest]. A leading slash is
-// optional; surrounding whitespace is trimmed. Mirrors bus.splitCommand.
+// optional; surrounding whitespace is trimmed. The name/rest boundary is the
+// first whitespace of any kind (space, tab, newline), mirroring bus.splitCommand
+// so classification matches the immediate parser even for a multiline command.
 function splitCommand(raw) {
   let s = (raw || '').trim();
   if (s.startsWith('/')) s = s.slice(1);
   s = s.trim();
   if (!s) return ['', ''];
-  const i = s.search(/[ \t]/);
+  const i = s.search(/\s/);
   if (i >= 0) return [s.slice(0, i).toLowerCase(), s.slice(i + 1).trim()];
   return [s.toLowerCase(), ''];
 }

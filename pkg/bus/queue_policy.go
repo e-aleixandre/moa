@@ -1,6 +1,9 @@
 package bus
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 // QueuePolicy classifies how a slash command behaves when it is issued while
 // the session is BUSY (a run is in flight, or the agent is otherwise occupied).
@@ -98,7 +101,10 @@ func classifyGoal(rest string) QueuePolicy {
 }
 
 // splitCommand normalizes a raw slash command into (lowercased name, rest).
-// A leading slash is optional; surrounding whitespace is trimmed.
+// A leading slash is optional; surrounding whitespace is trimmed. The name/rest
+// boundary is the first run of whitespace of ANY kind (space, tab, newline), so
+// classification matches the immediate parser (strings.Fields): a slash command
+// whose argument starts on a new line still splits into name + argument.
 func splitCommand(raw string) (name, rest string) {
 	s := strings.TrimSpace(raw)
 	s = strings.TrimPrefix(s, "/")
@@ -106,8 +112,10 @@ func splitCommand(raw string) (name, rest string) {
 	if s == "" {
 		return "", ""
 	}
-	if i := strings.IndexAny(s, " \t"); i >= 0 {
-		return strings.ToLower(s[:i]), strings.TrimSpace(s[i+1:])
+	if i := strings.IndexFunc(s, unicode.IsSpace); i >= 0 {
+		// Trim from the whitespace itself so a multi-byte whitespace rune is
+		// removed whole, not sliced mid-rune.
+		return strings.ToLower(s[:i]), strings.TrimSpace(s[i:])
 	}
 	return strings.ToLower(s), ""
 }

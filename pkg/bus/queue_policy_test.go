@@ -71,6 +71,11 @@ func TestSplitCommand(t *testing.T) {
 		{"", "", ""},
 		{"/", "", ""},
 		{"/GOAL Status", "goal", "Status"}, // rest keeps original case
+		// A newline between name and argument (a multiline composer allows it)
+		// must split the same as a space, so a busy-session /compact still
+		// classifies as a command rather than one long unknown name.
+		{"/compact\nkeep phase 3", "compact", "keep phase 3"},
+		{"/compact\tkeep phase 3", "compact", "keep phase 3"},
 	}
 	for _, c := range cases {
 		name, rest := splitCommand(c.in)
