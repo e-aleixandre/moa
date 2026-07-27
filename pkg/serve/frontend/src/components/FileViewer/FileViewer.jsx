@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'preact/hooks';
-import { Download, Loader2 } from 'lucide-preact';
+import { Download, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
 import { Sheet } from '../Sheet/Sheet.jsx';
 import { renderMarkdown } from '../../data/util/markdown.js';
 import { downloadFile } from '../../data/util/file-download.js';
 import { readCapped } from '../../data/util/file-preview.js';
-import { buildHTMLSrcdoc, HTML_PREVIEW_SANDBOX } from '../../data/util/html-preview.js';
+import { buildHTMLSrcdoc, HTML_PREVIEW_SANDBOX, HTML_PREVIEW_VIEWPORT } from '../../data/util/html-preview.js';
 import { previewKind, looksBinary } from '../../data/util/file-card.js';
+import { usePinchZoom } from '../../hooks/usePinchZoom.js';
 import './FileViewer.css';
 
 const MAX_PREVIEW_SIZE = 2 * 1024 * 1024;
@@ -19,6 +20,8 @@ const MAX_HIGHLIGHT_SIZE = 150 * 1024;
 export function FileViewer({ name, mime, url, size, onClose }) {
   const [state, setState] = useState({ kind: 'loading' });
   const [downloading, setDownloading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const { containerRef, contentRef, zoomed } = usePinchZoom();
 
   // Scroll-lock only — the back-gesture/history binding lives once in the
   // Sheet this component renders into (data/overlay-history.js via
@@ -89,15 +92,35 @@ export function FileViewer({ name, mime, url, size, onClose }) {
   };
 
   return (
-    <Sheet open onClose={onClose} title={name} ariaLabel={`Preview ${name}`} class="file-viewer-sheet">
+    <Sheet
+      open
+      onClose={onClose}
+      title={name}
+      ariaLabel={`Preview ${name}`}
+      class={`file-viewer-sheet${expanded ? ' is-expanded' : ''}`}
+    >
       <div class="file-viewer-toolbar">
+        <button
+          class="file-viewer-action"
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? 'Exit full screen' : 'View full screen'}
+          aria-pressed={expanded}
+        >
+          {expanded ? <Minimize2 /> : <Maximize2 />}
+          <span class="file-viewer-action-label">{expanded ? 'Exit' : 'Full screen'}</span>
+        </button>
         <button class="file-viewer-action" onClick={handleDownload} disabled={downloading} title="Download or share">
-          {downloading ? <Loader2 class="spin" /> : <Download />} Download
+          {downloading ? <Loader2 class="spin" /> : <Download />}
+          <span class="file-viewer-action-label">Download</span>
         </button>
       </div>
       <div class="file-viewer-body">
         {state.kind === 'loading' && <div class="file-viewer-status"><Loader2 class="spin" /> Loading preview…</div>}
-        {state.kind === 'image' && <div class="file-viewer-image-wrap"><img src={state.url} alt={name} /></div>}
+        {state.kind === 'image' && (
+          <div class={`file-viewer-image-wrap${zoomed ? ' is-zoomed' : ''}`} ref={containerRef}>
+            <img src={state.url} alt={name} ref={contentRef} draggable={false} />
+          </div>
+        )}
         {state.kind === 'document' && (
           <iframe class="file-viewer-frame" sandbox={HTML_PREVIEW_SANDBOX} srcdoc={state.srcdoc} referrerpolicy="no-referrer" title={name} />
         )}
@@ -138,7 +161,7 @@ export function buildSrcdoc(kind, content) {
     // Avoid highlighting large mobile previews.
     body = `<pre class="plain-text">${escapeHtml(content)}</pre>`;
   }
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>${iframeStyles}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">${HTML_PREVIEW_VIEWPORT}<style>${iframeStyles}</style></head><body>${body}</body></html>`;
 }
 
 const iframeStyles = `

@@ -6,6 +6,51 @@
   display: flex;
   flex-direction: column;
 }
+
+/* Full-screen mode: the sheet takes the whole viewport, no rounded corners or
+   backdrop margin, so a shared document gets every pixel. */
+.file-viewer-sheet.is-expanded {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  border: 0;
+}
+.sheet-overlay:has(.file-viewer-sheet.is-expanded) {
+  padding: 0;
+}
+.file-viewer-sheet.is-expanded .sheet-body {
+  padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+}
+
+/* On a phone the preview is the task: use the full screen from the start,
+   inset only by the safe areas. A 96vw box inside a padded overlay wasted a
+   fifth of the screen on margins. */
+@media (max-width: 768px) {
+  .sheet-overlay:has(.file-viewer-sheet) {
+    padding: 0;
+  }
+  .file-viewer-sheet {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    border: 0;
+  }
+  .file-viewer-sheet .sheet-head {
+    padding: max(var(--space-3), env(safe-area-inset-top)) var(--space-4) 0;
+  }
+  .file-viewer-sheet .sheet-head h3 {
+    font-size: var(--text-base);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-viewer-sheet .sheet-body {
+    padding: 0 var(--space-3) max(var(--space-3), env(safe-area-inset-bottom));
+  }
+}
 .file-viewer-sheet .sheet-body {
   flex: 1;
   min-height: 0;
@@ -17,6 +62,7 @@
 .file-viewer-toolbar {
   display: flex;
   justify-content: flex-end;
+  gap: var(--space-2);
   padding: var(--space-3) 0;
   flex: none;
 }
@@ -36,6 +82,25 @@
 .file-viewer-action:hover { background: var(--surface1); }
 .file-viewer-action:disabled { opacity: 0.6; cursor: default; }
 .file-viewer-action .lucide { width: 16px; height: 16px; }
+
+/* Phones: keep the 44px touch target but drop the labels, so a long filename
+   keeps the room in the header. */
+@media (max-width: 768px) {
+  .file-viewer-action {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 10px;
+  }
+  .file-viewer-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 
 .file-viewer-body {
   flex: 1;
@@ -63,9 +128,24 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  overflow: auto;
+  overflow: hidden;
+  /* The pinch gesture is handled by usePinchZoom, which calls preventDefault;
+     touch-action keeps the browser from page-zooming or panning first. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.file-viewer-image-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.file-viewer-image-wrap img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  -webkit-touch-callout: none;
+}
+.file-viewer-image-wrap.is-zoomed {
+  cursor: grab;
+}
 .file-viewer-status {
   margin: auto;
   max-width: 360px;

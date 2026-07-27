@@ -16,6 +16,16 @@ test('HTML source documents permit HTTPS rendering assets and connections', () =
   expect(srcdoc).toContain('<script src="https://cdn.example/app.js"></script>');
 });
 
+test('previews declare a device-width viewport so phones do not shrink them', () => {
+  const srcdoc = buildHTMLSrcdoc('<p>hi</p>', '');
+
+  expect(srcdoc).toContain('name="viewport"');
+  expect(srcdoc).toContain('width=device-width');
+  // The meta must precede the content, or the layout is computed at the
+  // default desktop width before it applies.
+  expect(srcdoc.indexOf('name="viewport"')).toBeLessThan(srcdoc.indexOf('<body>'));
+});
+
 test('HTML previews retain the restrictive script-only sandbox permission', () => {
   expect(HTML_PREVIEW_SANDBOX).toBe('allow-scripts');
   expect(HTML_PREVIEW_SANDBOX).not.toContain('allow-same-origin');
