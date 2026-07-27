@@ -36,7 +36,7 @@ func NewRead(cfg ToolConfig) core.Tool {
 	return core.Tool{
 		Name:        "read",
 		Label:       "Read",
-		Description: "Read a file. Supports text, images (jpg, png, gif, webp), and PDF (requires pdftotext). Text/PDF truncated to 2000 lines or 50KB. Use offset/limit for large files.",
+		Description: "Read a file. Supports text, images (jpg, png, gif, webp), and PDF (requires pdftotext). Text/PDF truncated to 2000 lines or 50KB. Use offset/limit for large files. Images must be at most 8000 px per side.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -143,6 +143,16 @@ func readImage(path, mimeType string) (core.Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
+	}
+
+	// An oversized image is rejected by the provider with a hard 400, and since
+	// history is replayed every turn it would leave the whole conversation
+	// unsendable. Fail here instead, with an actionable message for the model.
+	if w, h := core.ImageDimensions(data); w > core.MaxImageDimension || h > core.MaxImageDimension {
+		return core.ErrorResult(fmt.Sprintf(
+			"image is %dx%d px; both sides must be at most %d px (provider limit). "+
+				"Resize or crop it first (e.g. split a tall screenshot into sections) and read the smaller file.",
+			w, h, core.MaxImageDimension)), nil
 	}
 
 	// Auto-detect mime if needed

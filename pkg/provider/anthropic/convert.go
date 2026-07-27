@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/ealeixandre/moa/pkg/core"
@@ -225,6 +226,18 @@ func convertContentBlocks(blocks []core.Content) []any {
 				"text": b.Text,
 			})
 		case "image":
+			// A single oversized image makes every subsequent request fail with a
+			// hard 400, because history is replayed each turn. Substitute a note
+			// so an already-poisoned conversation stays usable; the read tool
+			// rejects such images up front for anything recorded from now on.
+			if w, h, tooBig := core.ImageExceedsMaxDimension(b.Data); tooBig {
+				result = append(result, map[string]any{
+					"type": "text",
+					"text": fmt.Sprintf("[image omitted: %dx%d px exceeds the %d px per-side limit; "+
+						"resize or split it and read it again]", w, h, core.MaxImageDimension),
+				})
+				continue
+			}
 			result = append(result, map[string]any{
 				"type": "image",
 				"source": map[string]any{

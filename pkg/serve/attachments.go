@@ -5,10 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -54,6 +50,12 @@ var allowedImageMimes = map[string]bool{
 
 const nativeContentFallbackNote = "Nota: este adjunto supera el límite acumulado de contenido binario nativo de la sesión, así que se\n" +
 	"guardó en disco para evitar que el historial y las solicitudes al modelo crezcan sin límite."
+
+// oversizedImageNote explains why an image the user attached was not sent
+// inline to the model. Formatted with width, height and the limit.
+const oversizedImageNote = "Nota: esta imagen mide %dx%d px y supera el límite de %d px por lado que acepta el proveedor,\n" +
+	"así que se guardó en disco en vez de enviarse al modelo. Redimensiónala o pártela en trozos si\n" +
+	"necesitas que el modelo la vea."
 
 // bytesLookLikeImage reports whether data's magic bytes match the declared
 // image MIME. Uses net/http content sniffing plus explicit checks so a binary
@@ -229,6 +231,18 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 			if len(decoded) > maxImageBytes {
 				return nil, nil, nil, fmt.Errorf("%w: attachment %q: image exceeds %d MB", ErrBadAttachment, a.Name, maxImageBytes>>20)
 			}
+			// Oversized images are rejected by providers with a hard 400 that,
+			// because history is replayed every turn, would break the session
+			// from here on. Keep the file (on disk, readable by tools) instead
+			// of sending it inline.
+			if w, h := core.ImageDimensions(decoded); w > core.MaxImageDimension || h > core.MaxImageDimension {
+				block, derr := toDisk(a, decoded, fmt.Sprintf(oversizedImageNote, w, h, core.MaxImageDimension))
+				if derr != nil {
+					return nil, nil, nil, derr
+				}
+				content = append(content, block)
+				continue
+			}
 			if priorNativeDocBytes+nativeBinaryBytes+int64(len(decoded)) > maxSessionNativeDocBytes {
 				block, derr := toDisk(a, decoded, nativeContentFallbackNote)
 				if derr != nil {
@@ -280,16 +294,11 @@ func safeAttachmentMime(declared string) string {
 }
 
 func imageDimensions(data []byte) (width, height int) {
-	defer func() {
-		if recover() != nil {
-			width, height = 0, 0
-		}
-	}()
-	config, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || config.Width < 0 || config.Height < 0 || config.Width > maxImageDimension || config.Height > maxImageDimension {
+	w, h := core.ImageDimensions(data)
+	if w < 0 || h < 0 || w > maxImageDimension || h > maxImageDimension {
 		return 0, 0
 	}
-	return config.Width, config.Height
+	return w, h
 }
 
 // priorNativeDocBytes returns the native image bytes already committed to (or
