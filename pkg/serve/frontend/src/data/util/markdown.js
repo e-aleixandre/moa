@@ -1,6 +1,6 @@
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
-// frontend-next divergence from the ported engine: import highlight.js core +
+// Divergence from the ported engine: import highlight.js core +
 // a selective language subset instead of the full package. The full import
 // pulls ~984KB of languages into the bundle; core + this subset covers the
 // languages moa's assistant emits most. This is a DELIBERATE subset (not the

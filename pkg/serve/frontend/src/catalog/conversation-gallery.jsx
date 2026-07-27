@@ -33,7 +33,7 @@ const LEDGER_CMD_ROWS = fuseLedgerDetails(
       status: "ok",
       command:
         "cd /home/ealeixandre/dev/moa/serve-redesign && \\\n" +
-        "  git add pkg/serve/frontend-next/src pkg/serve/static-next && \\\n" +
+        "  git add pkg/serve/frontend/src pkg/serve/static && \\\n" +
         '  git commit -m "feat(serve): playful working verbs + shimmer"',
       body:
         "[feat/serve-redesign 12a6c60] feat(serve): playful working verbs + shimmer\n" +

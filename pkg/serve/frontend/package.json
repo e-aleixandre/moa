@@ -1,5 +1,5 @@
 {
-  "name": "moa-frontend-next",
+  "name": "moa-frontend",
   "private": true,
   "scripts": {
     "build": "node esbuild.mjs",
