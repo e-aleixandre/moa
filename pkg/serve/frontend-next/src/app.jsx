@@ -88,7 +88,7 @@ function CatalogScreen() {
 // GALLERIES — the mock-driven design galleries (catalog / grid / live / mobile).
 // Reachable by direct URL only (?view=…); see GALLERY_LINKS below for the
 // discreet footer nav rendered ONLY on the galleries, never on the real
-// conversation/grid screens (decision D5: no floating ViewSwitch over live UI).
+// conversation/grid screens (no floating ViewSwitch over live UI).
 const GALLERY_LINKS = [
   { key: "catalog", label: "Catalog", href: "?view=catalog" },
   { key: "live", label: "Live states", href: "?view=live" },
@@ -127,7 +127,7 @@ function GalleryNav({ current }) {
 }
 
 // view — selects the screen. Absence (or an unknown value) shows the REAL,
-// store-connected conversation screen (5C). `?view=grid` opens the real pane
+// store-connected conversation screen. `?view=grid` opens the real pane
 // grid. `?view=catalog|live|subagent|mobile` open the mock galleries with their
 // GalleryNav. The value lives in the store (seeded from the URL) so the
 // conversation ⇄ grid hop flips it in place via the router (data/router.js)
@@ -135,8 +135,7 @@ function GalleryNav({ current }) {
 
 // useBootstrap wires the app to the data engine: session loading, polling,
 // version, mobile breakpoint, and foreground/background lifecycle. Ported from
-// the old SPA's App (pkg/serve/frontend/src/app.jsx), sessions-only — PWA,
-// push, palette, pairing, hotkeys are deferred (see the // 5x notes).
+// the old SPA's App (pkg/serve/frontend/src/app.jsx).
 function useBootstrap() {
   const [version, setVersion] = useState(null);
   const [state, setState] = useState(store.get());
@@ -209,7 +208,7 @@ function useBootstrap() {
       });
     startPolling();
     startUsagePolling();
-    // Reconcile the browser's actual push state on load (D4: /next relies on the
+    // Reconcile the browser's actual push state on load (/next relies on the
     // root /sw.js, no SW registration here). Guarded internally for unsupported.
     refreshPushState();
     return () => {
@@ -228,8 +227,14 @@ function useBootstrap() {
         reconnectAll();
         loadSessions();
         startPolling();
+        // Also restarts the usage timer, and refreshes immediately so the
+        // status line is not showing a number from before the app was hidden.
+        startUsagePolling();
       } else {
         stopPolling();
+        // Without this the usage timer kept polling every minute in the
+        // background: battery and data spent on a screen nobody is looking at.
+        stopUsagePolling();
       }
     };
     const onOnline = () => {
@@ -252,7 +257,7 @@ function useBootstrap() {
     else autoSelectMobile();
   }, [state.isMobile, Object.keys(state.sessions).length]);
 
-  // ⌘K / Ctrl+K — global command-palette toggle (5H). Active in every view.
+  // ⌘K / Ctrl+K — global command-palette toggle. Active in every view.
   // The chord always works, even inside the composer textarea (spec §6): we
   // never gate on the focus target, so ⌘K opens/closes from anywhere. esc is
   // handled inside the palette itself (this only owns the open chord).
@@ -272,14 +277,10 @@ function useBootstrap() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // 5x: warm-focus push (SW postMessage), hotkeys (Ctrl+1..9), and
-  // service-worker registration for /next are wired in later subphases (D4: no
-  // /next SW in phase 5). Pulse pairing + push subscription land in 5N.
-
   return version;
 }
 
-// GlobalPairingPanel — the Pulse pairing Sheet (5N), mounted ONCE next to
+// GlobalPairingPanel — the Pulse pairing Sheet, mounted ONCE next to
 // GlobalPalette so the ⌘K "Pair Pulse…" action can open it over any real
 // screen. Open state lives in the pulse-pairing-panel controller (a small
 // global pub/sub, not the session store — pairing is device-wide).
@@ -289,7 +290,7 @@ function GlobalPairingPanel() {
   return <PulsePairingPanel open={open} onClose={closePulsePairing} />;
 }
 
-// GlobalPalette — the ⌘K command palette (5H), mounted ONCE here so it's global
+// GlobalPalette — the ⌘K command palette, mounted ONCE here so it's global
 // to conversation / grid / mobile (outside the view switch). It subscribes to
 // the store for open state + context derivation: context is the current view
 // (grid vs mobile vs conversation) and focusedPane is the grid's focused tile's
@@ -328,7 +329,7 @@ function allTileIdsSafe(tree) {
 }
 
 // App — routes to the selected screen. The conversation screen is the default
-// and the only 5C-connected one; galleries stay mock. Bootstrap runs for every
+// and the only store-connected one; galleries stay mock. Bootstrap runs for every
 // view so returning to "?" keeps a live store, but galleries just don't consume
 // it. The command palette mounts over the REAL screens only (never the mock
 // galleries).
@@ -371,7 +372,7 @@ function App() {
     );
   }
   if (view === "grid") {
-    // Real, store-connected pane grid (5G) — no ViewSwitch overlay (D5).
+    // Real, store-connected pane grid — no ViewSwitch overlay.
     return (
       <>
         <PaneGridScreen version={version} />
@@ -381,12 +382,12 @@ function App() {
       </>
     );
   }
-  // Default: real, store-connected conversation screen (5C). On a mobile
+  // Default: real, store-connected conversation screen. On a mobile
   // viewport (state.isMobile, driven by the matchMedia breakpoint in
-  // useBootstrap) mount the connected mobile screen (5I) instead of the desktop
+  // useBootstrap) mount the connected mobile screen instead of the desktop
   // ConversationScreen. Both are single-session containers over the same store;
   // the GlobalPalette mounts over either (its context derives to 'mobile'). No
-  // ViewSwitch (D5).
+  // ViewSwitch.
   if (state.isMobile) {
     return (
       <>

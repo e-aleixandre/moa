@@ -407,7 +407,7 @@ test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', () => {
   expect(steers[0].id).toBe('q1');
 });
 
-// Regression for bug #2: a stale "compacting" spinner must be cleared by the
+// Regression: a stale "compacting" spinner must be cleared by the
 // authoritative snapshot when the compaction finished while the pane had no WS.
 test('handleWsInit clears a stale compacting spinner from the snapshot', () => {
   seedSession('s1');
@@ -419,7 +419,7 @@ test('handleWsInit clears a stale compacting spinner from the snapshot', () => {
   expect(store.get().sessions.s1.compacting).toBe(false);
 });
 
-// Regression for bug #2: a compaction still running at reconnect must restore
+// Regression: a compaction still running at reconnect must restore
 // the spinner from the snapshot.
 test('handleWsInit restores an in-progress compacting spinner from the snapshot', () => {
   seedSession('s1');
@@ -428,7 +428,7 @@ test('handleWsInit restores an in-progress compacting spinner from the snapshot'
   expect(store.get().sessions.s1.compacting).toBe(true);
 });
 
-// Regression for bug #3: a reconnect during generation must restore the whole
+// Regression: a reconnect during generation must restore the whole
 // streamed-so-far reply from the snapshot, not start from the next delta.
 test('handleWsInit restores the in-flight streamed reply from the snapshot', () => {
   seedSession('s1');
@@ -454,7 +454,7 @@ test('handleWsInit clears streaming buffers when nothing is in flight', () => {
   expect(store.get().sessions.s1.thinkingText).toBe(null);
 });
 
-// Regression for bug #7: persisted goal-lifecycle markers (role "goal") must
+// Regression: persisted goal-lifecycle markers (role "goal") must
 // rebuild as system lines so a reopened conversation shows the goal record.
 test('normalizeHistory renders role "goal" markers as system lines', () => {
   const out = normalizeHistory([
@@ -750,4 +750,36 @@ test('handleWsInit rehydrates run token totals', () => {
   handleWsInit('s1', { messages: [], run_tokens_up: 1200, run_tokens_down: 300 });
   expect(store.get().sessions.s1.runTokensUp).toBe(1200);
   expect(store.get().sessions.s1.runTokensDown).toBe(300);
+});
+
+test('handleWsInit keeps the finished subagent being viewed', () => {
+  // The init snapshot lists live jobs only. Reconnecting (screen sleep, network
+  // change) must not delete a finished transcript the reader has open, or the
+  // subagent view bounces back to the parent mid-read.
+  setState({ sessions: { s1: { id: 's1', messages: [], viewingSubagent: 'sa-done',
+    subagents: { 'sa-done': { jobId: 'sa-done', status: 'completed', messages: [] } } } } });
+
+  handleWsInit('s1', { messages: [], subagents: [{ job_id: 'sa-live', status: 'running' }] });
+
+  const subs = store.get().sessions.s1.subagents;
+  expect(subs['sa-done']).toBeTruthy();
+  expect(subs['sa-live']).toBeTruthy();
+});
+
+test('handleWsInit does not resurrect finished subagents nobody is viewing', () => {
+  setState({ sessions: { s1: { id: 's1', messages: [], viewingSubagent: null,
+    subagents: { 'sa-old': { jobId: 'sa-old', status: 'completed', messages: [] } } } } });
+
+  handleWsInit('s1', { messages: [], subagents: [] });
+
+  expect(store.get().sessions.s1.subagents['sa-old']).toBeUndefined();
+});
+
+test('handleWsInit prefers the server copy when the viewed job is still live', () => {
+  setState({ sessions: { s1: { id: 's1', messages: [], viewingSubagent: 'sa-1',
+    subagents: { 'sa-1': { jobId: 'sa-1', status: 'running', task: 'stale' } } } } });
+
+  handleWsInit('s1', { messages: [], subagents: [{ job_id: 'sa-1', status: 'running', task: 'fresh' }] });
+
+  expect(store.get().sessions.s1.subagents['sa-1'].task).toBe('fresh');
 });

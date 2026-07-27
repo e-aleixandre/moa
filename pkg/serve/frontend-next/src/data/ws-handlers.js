@@ -392,6 +392,16 @@ export function handleWsInit(id, data) {
 	delete pendingBashDeltas[id];
   delete pendingToolCallBuffers[id];
   delete materializedTextDuringMessage[id];
+  // A finished subagent opened from its card lives only in local state: the
+  // init snapshot lists live jobs only, so replacing the map outright would
+  // delete the very transcript being read and bounce the reader back to the
+  // parent — which is what happens on mobile every time the screen sleeps.
+  const prev = store.get().sessions[id] || {};
+  const viewing = prev.viewingSubagent;
+  const keptLocal = viewing && prev.subagents && prev.subagents[viewing]
+    && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
+    ? { [viewing]: prev.subagents[viewing] }
+    : null;
   updateSession(id, {
     messages: normalizeHistory(data.messages || [], data.subagents),
     historyTruncated: !!data.history_truncated,
@@ -429,7 +439,10 @@ export function handleWsInit(id, data) {
     // reconnect replaces stale local totals even when the run is already idle.
     runTokensUp: data.run_tokens_up || 0,
     runTokensDown: data.run_tokens_down || 0,
-    subagents: initBashJobs(data.bash_jobs, initSubagents(data.subagents)),
+    subagents: {
+      ...(keptLocal || {}),
+      ...initBashJobs(data.bash_jobs, initSubagents(data.subagents)),
+    },
     // subagentCount is otherwise live-only (WS subagent_count events). If an
     // async job finished while this pane had no WS (backgrounded on mobile),
     // that terminal count=0 event was missed and the badge/dot would stay
@@ -704,7 +717,6 @@ export function handleWsToolCallStart(id, data) {
     startedAt: Date.now(),
   });
 
-  // Clean up buffer.
   if (buffered) {
     delete pendingToolCallBuffers[id][data.tool_call_id];
     if (Object.keys(pendingToolCallBuffers[id]).length === 0) {
