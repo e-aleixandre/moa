@@ -313,7 +313,7 @@ func (s *Service) handleEvent(st *loopState, m inboxMsg) {
 		}
 	case bus.GoalIterationEnded:
 		// Only narrate a verifier-unavailable pause (Err set); routine
-		// satisfied/not-satisfied verdicts are too noisy for voice in Phase 2.
+		// satisfied/not-satisfied verdicts are too noisy for voice.
 		if e.Err != nil {
 			s.emitBriefing(st, snap, KindGoalStalled, P1Terminal,
 				s.lang.spokenGoalStalled(snap.alias, e.Iteration), "iter-err:"+e.Err.Error())
@@ -511,7 +511,7 @@ func (s *Service) emitRunTermination(st *loopState, snap *sessionSnapshot, e bus
 	}
 }
 
-// emitBriefing narrates an ephemeral progress/terminal note (Phase 2). Unlike
+// emitBriefing narrates an ephemeral progress/terminal note. Unlike
 // a P0 item it is NOT stored, NOT queued, NOT resolvable, and NOT replayed on
 // reconnect. It is spoken once — and ONLY if a voice client is actually
 // listening. This is the "chief of staff tells you how things are going"

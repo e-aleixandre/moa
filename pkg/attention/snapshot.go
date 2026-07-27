@@ -48,7 +48,7 @@ type sessionSnapshot struct {
 	tools       map[string]toolInfo
 	activitySeq uint64
 
-	// Phase 2 novelty filter: signatures of the last progress briefing emitted
+	// Novelty filter: signatures of the last progress briefing emitted
 	// per kind, so a repeated identical verdict (e.g. the same goal-iteration
 	// feedback) isn't narrated twice. Keyed by Kind.
 	lastBriefSig map[Kind]string

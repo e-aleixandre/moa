@@ -707,7 +707,7 @@ func TestToolResultAllowance_FallsBackToFloor(t *testing.T) {
 	}
 }
 
-// TestToolResultBudgets_NeverExceedsTranscript locks H1: a fixed global budget
+// TestToolResultBudgets_NeverExceedsTranscript locks in: a fixed global budget
 // larger than the serialization limit let a few recent tool results evict the
 // entire user dialogue on small-context models.
 func TestToolResultBudgets_NeverExceedsTranscript(t *testing.T) {
@@ -749,7 +749,7 @@ func TestSerializeForSummary_ToolsDoNotEvictDialogue(t *testing.T) {
 	}
 }
 
-// TestSerializeForSummary_NeverEmptyTranscript locks H5: a single message
+// TestSerializeForSummary_NeverEmptyTranscript locks in: a single message
 // larger than the whole limit used to leave only the omission marker, so the
 // summarizer replaced real history with a summary of nothing.
 func TestSerializeForSummary_NeverEmptyTranscript(t *testing.T) {
@@ -763,7 +763,7 @@ func TestSerializeForSummary_NeverEmptyTranscript(t *testing.T) {
 	}
 }
 
-// TestSummaryTokenBudget_ScalesWithWindow locks H6: a flat 8k reserve made the
+// TestSummaryTokenBudget_ScalesWithWindow locks in: a flat 8k reserve made the
 // cut point degenerate on small-window models.
 func TestSummaryTokenBudget_ScalesWithWindow(t *testing.T) {
 	if got := summaryTokenBudget(200_000); got != summaryMaxTokens {

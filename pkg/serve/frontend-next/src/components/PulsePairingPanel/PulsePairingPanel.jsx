@@ -17,9 +17,9 @@ function expiryLabel(seconds) {
     : `0:${String(remainder).padStart(2, "0")}`;
 }
 
-// PulsePairingPanel — QR pairing flow for Pulse (5N). Wrapped in the shared
+// PulsePairingPanel — QR pairing flow for Pulse. Wrapped in the shared
 // Sheet so it inherits the overlay-history back-gesture close (like the file/
-// HTML viewers in 5L); the Sheet owns the chrome/close, this owns the QR/expiry/
+// HTML viewers); the Sheet owns the chrome/close, this owns the QR/expiry/
 // manual logic. Reached from the ⌘K "Pair Pulse…" action.
 export function PulsePairingPanel({ open, onClose }) {
   const [pairing, setPairing] = useState(null);

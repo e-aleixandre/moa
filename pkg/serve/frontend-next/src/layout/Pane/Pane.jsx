@@ -13,13 +13,13 @@ import "./Pane.css";
 // thinking level stays accessible/real instead of a static string, and the
 // level logic already living in the primitive isn't duplicated.
 //
-// `footer` (Phase 3B) — optional slot for the pane's pulse ("● streaming",
+// `footer` — optional slot for the pane's pulse ("● streaming",
 // "waiting 0:42"…), like in the "grid alive" section of the live
 // states mockup. `hideComposer` hides the fake input when the footer already
 // visually closes the panel (avoids duplicating send affordances in the live
 // panes of the demo gallery).
 //
-// 5G — the pane is now the leaf of the REAL tile tree. All the wiring props
+// The pane is the leaf of the REAL tile tree. All the wiring props
 // below are OPTIONAL and retro-compatible: without them the component renders
 // exactly as the galleries expect (the mock `p-input` and no drag/split/focus
 // affordances). The connected grid (PaneGrid) supplies them:
@@ -52,7 +52,7 @@ export function Pane({
   children,
   footer,
   hideComposer = false,
-  // --- 5G connected props (all optional) ---
+  // --- connected props (all optional) ---
   tileNumber,
   onSplitRight,
   onSplitDown,

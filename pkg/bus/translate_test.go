@@ -11,8 +11,8 @@ import (
 
 // TestTranslateAgentEvent_ParityWithBridge checks that TranslateAgentEvent
 // (the pure function used by both the session Bridge and the subagent event
-// sink) produces exactly the same events that bridgeEvent used to publish
-// directly, for a representative sample of AgentEvent types.
+// sink) produces exactly the events bridgeEvent publishes, for a
+// representative sample of AgentEvent types.
 func TestTranslateAgentEvent_ParityWithBridge(t *testing.T) {
 	const sid = "sess-1"
 	const gen = uint64(7)

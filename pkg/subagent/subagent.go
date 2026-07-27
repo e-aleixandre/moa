@@ -274,8 +274,8 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			job := jobs.createSyncWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
 			// Isolate the child's shell state (subshell semantics): seed a
 			// copy from the parent. Always tag the child ctx with the job's own
-			// ID (stable across a promotion, unlike the old ephemeral childID)
-			// so all child tool executions retain their owner. runJob drops the
+			// ID (stable across a promotion) so all child tool executions retain
+			// their owner. runJob drops the
 			// snapshot when it finishes.
 			jobCtx = core.WithAgentID(jobCtx, job.id)
 			if cfg.BashState != nil {
@@ -873,11 +873,9 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 			}
 			return nil
 		},
-		// Compaction was off when the child's turn budget was low (<=30):
-		// a short, focused child was unlikely to blow its context before
-		// exhausting turns. Now that defaultChildMaxTurns is 100, a child on
-		// a long task could realistically hit the context window first, so
-		// compaction is enabled with the same defaults as the main session.
+		// With a turn budget as high as defaultChildMaxTurns, a child on a long
+		// task can realistically hit the context window before exhausting turns,
+		// so compaction runs with the same defaults as the main session.
 		Compaction: &core.CompactionSettings{
 			Enabled:       true,
 			ReserveTokens: core.DefaultCompactionSettings.ReserveTokens,

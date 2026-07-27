@@ -76,7 +76,7 @@
   font-weight: var(--weight-semibold);
 }
 
-/* Bash jobs carry no identity accent (INC-22): mono neutral label. */
+/* Bash jobs carry no identity accent: mono neutral label. */
 .agent-tray .agent-chip.bash .agent-who {
   font-family: var(--mono);
   font-weight: var(--weight-normal);

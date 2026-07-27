@@ -23,7 +23,7 @@ import { activityPhase, activityText, formatElapsed } from "../../data/util/acti
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import "./PaneGrid.css";
 
-// PaneGrid — 5G. Renders the REAL binary split tree (state.tileTree) recursively:
+// PaneGrid. Renders the REAL binary split tree (state.tileTree) recursively:
 // a split node becomes two flex split-panes with a ResizeHandle between them; a
 // leaf becomes a ConnectedPane (session's live Stream + Composer, or an empty
 // dropzone). The old SPA's TileTree.jsx/Tile.jsx are ported 1:1, retargeted to
@@ -91,7 +91,7 @@ function ResizeHandle({ path, direction }) {
 }
 
 // ConnectedPane — a leaf tile bound to a real session (or empty). Wires the
-// Pane's optional 5G props to the tile actions and mounts the live Stream +
+// Pane's optional connected props to the tile actions and mounts the live Stream +
 // Composer (+ blocking) when a session is assigned.
 function ConnectedPane({ node, state, tileIndex }) {
   const tileId = node.id;

@@ -151,7 +151,7 @@ func TestGoalDriver_PublishesVerifyStartEnd(t *testing.T) {
 	}
 }
 
-// TestGoalDriver_PersistsMarkers is the regression guard for bug #7: goal
+// TestGoalDriver_PersistsMarkers is the regression guard for: goal
 // lifecycle events must leave a persistent record in the conversation (role
 // "goal") so they survive a reload — not just ephemeral in-memory frontend
 // state. A finite satisfied goal produces a start marker, an iteration marker,

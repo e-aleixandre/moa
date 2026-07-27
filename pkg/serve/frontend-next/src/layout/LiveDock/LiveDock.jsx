@@ -15,7 +15,7 @@ import { useSpotlight } from "./use-live-dock.js";
 //
 // Agents come from liveTrayAgents(session): { id, kind:'subagent'|'bash',
 // name, accent?, action?, time? }. bash carries no fanout identity accent
-// (INC-22): neutral --blue dot + mono `bash` label.
+//: neutral --blue dot + mono `bash` label.
 //
 // `open`/`onToggle` make the expanded/collapsed state CONTROLLED, so the
 // caller can persist it per session (store.sessions[id].dockOpen) instead of

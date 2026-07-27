@@ -16,8 +16,6 @@ import (
 // Only durable content (blocks + streaming text). Ephemeral content
 // (spinner, notices) is rendered outside the viewport in View().
 // Also recalculates viewport dimensions from current terminal size.
-// refreshTaskDisplay updates the status bar task segment and plan segment with current progress.
-// refreshTaskDisplay is now in app.go (uses bus queries)
 
 func (m *appModel) updateViewport() {
 	// Check scroll position BEFORE resizing — resizing can change maxYOffset
@@ -147,7 +145,7 @@ func (m *appModel) buildBottomChrome() string {
 	return strings.Join(parts, "\n")
 }
 
-// renderViewportContent renders blocks for the viewport (last N turns + streaming).
+// renderViewportContent renders the visible blocks plus any streaming content.
 func (m *appModel) renderViewportContent() string {
 	if m.s.viewingSubagent != "" {
 		if content := m.renderSubagentViewportContent(); content != "" {
@@ -213,8 +211,6 @@ func (m *appModel) recomputeInputEnabled() {
 }
 
 // --- Helpers ---
-// forceRepaint, waitForBusEvent, renderTick, cleanup, accumulateCacheStats,
-// refreshContextSegment, refreshTaskDisplay are now in app.go (bus-based)
 
 // thinkingLevels defines the cycle order for Shift+Tab.
 var thinkingLevels = core.ThinkingLevels

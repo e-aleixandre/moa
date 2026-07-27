@@ -1,14 +1,14 @@
-// subagent-view-model.js — PURE projection for the SubagentView (5J). Given the
+// subagent-view-model.js — PURE projection for the SubagentView. Given the
 // store's `session` object and the job_id being viewed, it derives everything
 // the view needs (identity accent, sibling rail, terminal state + outcome
 // banner) WITHOUT any preact/DOM. It reuses the same live-subagent rules as the
 // stream projection (liveSubagents/liveAgent/FANOUT_ACCENTS) so the fork's
 // accent and its siblings never diverge from the fanout block it zooms into.
 //
-// The heart of the "cero divergencia" contract: the sub-conversation body is
+// The heart of the "zero divergence" contract: the sub-conversation body is
 // projected by the very same projectStream() the parent stream uses — so a
 // subagent transcript renders with the identical ledger/diff/prose
-// pipeline (INC-37). This module only computes the FRAME (accent, siblings,
+// pipeline. This module only computes the FRAME (accent, siblings,
 // task card text, terminal outcome); the body is projectStream(subSession).
 
 import {
@@ -80,7 +80,7 @@ function resultChip(sub) {
 }
 
 // subagentView is the single entry point. Returns null when the viewed job_id
-// no longer exists in the session (the "rebote": the caller clears
+// no longer exists in the session (the "rebound": the caller clears
 // viewingSubagent and falls back to the parent). Otherwise a plain descriptor:
 //
 //   {
@@ -95,7 +95,7 @@ export function subagentView(session, jobId) {
   if (!session || !jobId) return null;
   const subs = normalizeSubagents(session.subagents);
   const sub = subs[jobId];
-  if (!sub) return null; // rebote — the subagent was pruned
+  if (!sub) return null; // rebound — the subagent was pruned
 
   const seen = seenJobIdsOf(session.messages);
   const { subs: live } = liveSubagents(subs, seen);

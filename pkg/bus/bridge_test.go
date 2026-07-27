@@ -688,7 +688,7 @@ func TestBridgeEvent_MessageUpdate_NilAssistantEvent(t *testing.T) {
 	expectNone(got, b, t)
 }
 
-// Regression for bug #3 (reconnect renders the reply from mid-stream): the
+// Regression for "reconnect renders the reply from mid-stream": the
 // authoritative streaming aggregate must accumulate the partial text/thinking
 // as deltas are published and clear once the message ends, so a snapshot taken
 // mid-generation (GetStreamingAggregate) restores the whole streamed-so-far
@@ -757,7 +757,7 @@ func TestBridgeEvent_StreamingAggregate(t *testing.T) {
 	}
 }
 
-// Regression for the atomicity blocker (bug #3, Terra pass 1): because the
+// Regression for the atomicity blocker: because the
 // aggregate is accumulative (concatenated deltas), the snapshot cut and the
 // aggregate text must be captured together under streamMu, or a delta folded
 // into the snapshot text could ALSO carry a seq > cut and be replayed live,
@@ -1045,7 +1045,7 @@ func TestBridgeEvent_CompactionEnded(t *testing.T) {
 	}
 }
 
-// Regression for bug #2: the automatic (bridge-driven) compaction path must
+// Regression: the automatic (bridge-driven) compaction path must
 // toggle the authoritative compacting flag around the lifecycle events, and the
 // run-end/error safety net must clear it if a run dies without a CompactionEnd.
 func TestBridgeEvent_CompactingFlag(t *testing.T) {
@@ -1177,7 +1177,7 @@ func TestHandler_SteerAgent(t *testing.T) {
 		t.Fatalf("steered = %q", fa.getSteered())
 	}
 	// The queue must be inspectable with the authoritative ID so a reconnect
-	// snapshot can reconcile the chip by ID (bug #5).
+	// snapshot can reconcile the chip by ID.
 	pending, err := QueryTyped[GetPendingSteers, []core.SteerItem](b, GetPendingSteers{})
 	if err != nil {
 		t.Fatal(err)
@@ -1209,7 +1209,7 @@ func TestHandler_SteerAgent_MintsMissingID(t *testing.T) {
 }
 
 // A full steer queue must surface ErrSteerQueueFull so the caller doesn't
-// confirm a message that would never be delivered (bug #5, Terra #7).
+// confirm a message that would never be delivered.
 func TestHandler_SteerAgent_QueueFull(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -1224,7 +1224,7 @@ func TestHandler_SteerAgent_QueueFull(t *testing.T) {
 }
 
 // Internal steers (subagent/bash completions) are delivered but must not appear
-// in the user-visible queue snapshot (bug #5, Terra #3).
+// in the user-visible queue snapshot.
 func TestHandler_SteerAgent_InternalExcludedFromSnapshot(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -1248,7 +1248,7 @@ func TestHandler_SteerAgent_InternalExcludedFromSnapshot(t *testing.T) {
 }
 
 // Canceling the queue must broadcast SteersCanceled so every client of the
-// shared queue clears its chips (bug #5, Terra #5).
+// shared queue clears its chips.
 func TestHandler_CancelSteer_PublishesEvent(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -1399,7 +1399,7 @@ func TestHandler_CompactSession_ErrorSettlesState(t *testing.T) {
 	}
 }
 
-// Regression for bug #2 (ghost compacting spinner): the authoritative
+// Regression for the ghost compacting spinner: the authoritative
 // compacting flag must be true while a compaction runs and cleared once it
 // finishes — on both the success and error paths — so a reconnect snapshot
 // (GetCompacting) never restores a stale spinner.

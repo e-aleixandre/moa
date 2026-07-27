@@ -143,7 +143,6 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, numStr, text))
 	}
 
-	// Show saved rules count if any exist in auto mode
 	if p.mode == permission.ModeAuto {
 		lines = append(lines, "")
 		if p.ruleMode {
@@ -157,7 +156,6 @@ func (p *permissionPrompt) View(width int, theme Theme) string {
 		lines = append(lines, dim.Render("  Esc cancel · Tab amend"))
 	}
 
-	// Show status after saving a rule
 	_ = green // used by caller status blocks
 
 	content := strings.Join(lines, "\n")

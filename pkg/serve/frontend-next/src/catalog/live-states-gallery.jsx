@@ -18,7 +18,7 @@ import "./live-states-gallery.css";
 // subagent fan-out, a background job with a collapsible log tail,
 // and the grid with three live panes at once. Everything reuses existing
 // primitives and components (Pane, AgentTray, AssistantDocument, ...); no
-// new layout is invented beyond what the phase explicitly requires
+// new layout is invented beyond what is explicitly required
 // (FanoutBlock, BackgroundJob, StreamingSkeleton/TypingDots, ToolTicker).
 
 const FANOUT_AGENTS = [

@@ -1,4 +1,4 @@
-/* SubagentView (5J) — "inside the fork". The header is a breadcrumb; the
+/* SubagentView — "inside the fork". The header is a breadcrumb; the
    now-line fuses status+pulse below the
    steer composer (same slot as the parent's status line); the outcome banner
    replaces both on terminal states.

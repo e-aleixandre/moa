@@ -53,7 +53,6 @@ function playBeep() {
   } catch (_) { /* ignore */ }
 }
 
-// Browser notifications
 function browserNotify(title, body) {
   if (!document.hidden) return;
   if ('Notification' in window && Notification.permission === 'granted') {

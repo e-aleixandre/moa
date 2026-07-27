@@ -8,7 +8,7 @@ import { activityPhase } from "../../data/util/activity.js";
 // StatusStrip — mono strip under the composer: the app's bottom telemetry line,
 // mirroring the TUI statusline. This is the TWO-LEVEL redesign (TELEMETRY-
 // SETTINGS-REDESIGN spec §2/§5): the line is glance + the door to the Usage
-// panel, NOT the whole accounting dump ported in 5O.
+// panel, NOT the whole accounting dump.
 //
 // Level 1 (this line): the context ring, per-run tokens (desktop full only),
 // the permission chip, the current task, and the session cost — plus the modes

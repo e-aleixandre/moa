@@ -146,7 +146,7 @@
   border-color: var(--red);
 }
 
-/* ≥44px hit-area (P7/INC-35) without growing the visual button. */
+/* ≥44px hit-area without growing the visual button. */
 .composer-wrap .composer-stop-ghost::after {
   content: "";
   position: absolute;
@@ -324,7 +324,7 @@
   flex-shrink: 0;
 }
 
-/* --- Voice / push-to-talk (5M) ------------------------------------------- */
+/* --- Voice / push-to-talk ------------------------------------------- */
 
 /* Wrapper so the "slide up to lock" hint can float above the send/record
    button (Telegram-style affordance). */

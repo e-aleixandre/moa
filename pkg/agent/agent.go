@@ -47,9 +47,8 @@ var ErrDoomLoop = errors.New("doom loop detected")
 
 const steerBufferSize = 32 // capacity of the steer queue
 
-// steerQueue is an inspectable, order-preserving queue of steer items,
-// replacing the old unbuffered-inspection chan string. Safe for concurrent
-// use.
+// steerQueue is an inspectable, order-preserving queue of steer items.
+// Safe for concurrent use.
 type steerQueue struct {
 	mu    sync.Mutex
 	items []core.SteerItem
@@ -66,7 +65,7 @@ type steerQueue struct {
 }
 
 // push appends an item, returning false (dropping it) if the queue is already
-// at steerBufferSize (mirrors the old non-blocking channel send). The bool lets
+// at steerBufferSize. The bool lets
 // callers surface a "queue full" rejection instead of silently confirming.
 func (q *steerQueue) push(it core.SteerItem) bool {
 	q.mu.Lock()

@@ -26,8 +26,7 @@ import { configureSession, archiveSession, unarchiveSession, openPersistedSubage
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
-// screen. This is the 5C wiring pattern (the standard for the following
-// subphases): ONE component per screen subscribes to the store, derives the
+// screen. Wiring pattern: ONE component per screen subscribes to the store, derives the
 // focused session, and passes real props DOWN to the presentational children
 // (Spine/ChatHead/Stream/StatusStrip). The children stay dumb — they never read
 // the store themselves. App owns the bootstrap (polling/WS/version); this
@@ -35,10 +34,7 @@ import "./ConversationScreen.css";
 //
 // Three states: LOADING (sessions not fetched yet), EMPTY (no focused session),
 // and a normal shown session.
-//
-// AgentTray (5J) and Composer (5D) are left with their own mock/empty render in
-// 5C — not connected. PermissionCard/AskUserCard (5F) are not rendered by
-// Stream yet.
+
 
 // spineSessions splits the store's sessions into the Spine's ACTIVE and SAVED
 // lists. Active = not 'saved' and not archived, ordered by `updated` desc.
@@ -127,8 +123,7 @@ export function ConversationScreen({ version }) {
   }, [activityActive]);
 
   // onSelectSession routes a Spine click to the focused tile (desktop) via
-  // openSession, which leaves the tile showing that session. // 5G: the next's
-  // own pane model replaces the tile tree; until then we reuse it verbatim.
+  // openSession, which leaves the tile showing that session.
   const onSelectSession = (id) => { openSession(id); };
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
@@ -187,7 +182,7 @@ export function ConversationScreen({ version }) {
     setNotifOpen(false);
   }, [activeId]);
 
-  // --- Notifications popover (ChatHead's Bell) — device-wide push + sound (5N).
+  // --- Notifications popover (ChatHead's Bell) — device-wide push + sound.
   // Not session-scoped, but anchored in the head next to the other popovers so
   // it inherits the same click-outside + Escape wiring.
   const [notifOpen, setNotifOpen] = useState(false);
@@ -272,7 +267,7 @@ export function ConversationScreen({ version }) {
     const selectedModel = matchSelectedModel(specs, session.model);
     const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
     const settingsBusy = session.state === "running" || session.state === "permission";
-    // 5J: when a subagent is being viewed, the SubagentView takes over the main
+    // When a subagent is being viewed, the SubagentView takes over the main
     // column (in place of the parent stream/composer/status). Its jobId must
     // still exist in the session (the view itself rebounds to null via onBack if
     // it was pruned).

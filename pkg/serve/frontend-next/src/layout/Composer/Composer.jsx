@@ -25,15 +25,11 @@ import "./Composer.css";
 // history — that can't be lifted without churn. It receives `sessionId` and
 // `session` by props (the ConversationScreen container reads them from the
 // store), exactly like the old SPA's InputBar. The queue/recall/abort/history/
-// draft logic (5D) plus slash commands/@-mentions/attachments/shell escapes/
-// cache warning (5E) are ported faithfully from pkg/serve/frontend/src/
-// components/InputBar.jsx, recording the pieces that belong to later
-// subphases as stubs.
+// draft logic plus slash commands/@-mentions/attachments/shell escapes/
+// cache warning are ported faithfully from pkg/serve/frontend/src/
+// components/InputBar.jsx.
 //
-// Deferred to later subphases (NOT wired here):
-//   5F — permission / ask_user prompts.
-//
-// 5J — subagent steering: when `steer` is set ({ jobId, name, onRebound }) the
+// Subagent steering: when `steer` is set ({ jobId, name, onRebound }) the
 // composer becomes a STEER box for a live subagent. It stays visually IDENTICAL
 // to the normal composer (same pill, no accent border) — the subagent view's
 // header identifies who you're writing to, so the input uses the standard
@@ -79,7 +75,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const attachInputRef = useRef(null);
   const sessionState = session?.state;
   const pendingSteers = session?.pendingSteers;
-  // In 5J steer mode the box targets a subagent, not the parent run — so it
+  // In steer mode the box targets a subagent, not the parent run — so it
   // must never enter the parent's "busy" affordances (Stop button, Esc-aborts,
   // queue note). It always shows a Send button that fires a steer.
   const busy = sessionState === "running" && !steer;
@@ -108,7 +104,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
 
   // Fetch /goal flag metadata + transcription capability once on mount (mirrors
   // InputBar's capabilities check). `transcribe` drives whether the send button
-  // doubles as a push-to-talk mic (5M).
+  // doubles as a push-to-talk mic.
   useEffect(() => {
     fetch('/api/capabilities', { headers: { 'X-Moa-Request': '1' } })
       .then(r => r.json())
@@ -278,7 +274,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       el.value = '/' + cmd.name + ' ';
       setCmdSuggestions(null);
       el.focus();
-      // Mirror the flag branch: fire input so 5D's draft/hasText/autoResize
+      // Mirror the flag branch: fire input so the draft/hasText/autoResize
       // stay in sync (a reload before the next keystroke would otherwise lose
       // the just-picked command).
       el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -371,7 +367,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     const atts = attachments;
     if (!text && atts.length === 0) return;
 
-    // 5J steer mode: everything the user types goes to the live subagent as a
+    // Steer mode: everything the user types goes to the live subagent as a
     // steer. No slash/shell/queue semantics, no attachments (the subagent steer
     // endpoint is text-only). Clear the box and fire; the caller shows optimistic
     // feedback / rebounds to the parent if the subagent already finished.
@@ -534,7 +530,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const handleSendInnerRef = useRef(handleSendInner);
   handleSendInnerRef.current = handleSendInner;
 
-  // --- Voice / push-to-talk (5M) ---
+  // --- Voice / push-to-talk ---
   // insertAtCursor drops transcribed text at the textarea caret (with a space
   // separator when needed), then fires input so drafts/hasText/autoResize/
   // suggestions stay in sync. Ported from InputBar.insertAtCursor.
@@ -918,7 +914,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             </button>
           )}
           {(() => {
-            // The send button doubles as push-to-talk (5M): tap = send/steer,
+            // The send button doubles as push-to-talk: tap = send/steer,
             // hold = record, slide up while holding = lock hands-free. The
             // pointer GESTURE is attached whenever voice is usable — in every
             // state, including with text to send and while the agent is busy

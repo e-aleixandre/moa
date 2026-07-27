@@ -1,7 +1,7 @@
 // stream-model.test.js — run with `bun test`
 //
 // Exhaustive coverage of the stream projection: this is the piece of most
-// judgment in phase 5, so the grouping rules (ledgers, fanout, background,
+// judgment, so the grouping rules (ledgers, fanout, background,
 // streaming, truncation) are pinned here with plain session fixtures.
 import { test, expect } from 'bun:test';
 import { LIVE_FULL_MAX_CHARS, LIVE_FULL_MAX_LINES, projectStream, liveTrayAgents } from './stream-model.js';
@@ -219,7 +219,6 @@ test('two live subagents form a delegation block, one running agent row each', (
   expect(byId.j2.state).toBe('running');
   // accents cycle by index → the two agents differ
   expect(byId.j1.accent).not.toBe(byId.j2.accent);
-  // no fanout anymore
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
@@ -522,7 +521,6 @@ test('a live async bash job goes to the dock, not an inline background block', (
   });
   const blocks = projectStream(s);
   const doc = blocks[blocks.length - 1];
-  // No inline background block anymore.
   expect(doc.blocks.some(b => b.type === 'background')).toBe(false);
   // It surfaces in the dock instead.
   const tray = liveTrayAgents(s);
@@ -1152,7 +1150,7 @@ test('projectStream does not mutate the input session', () => {
   expect(JSON.parse(JSON.stringify(s))).toEqual(snapshot);
 });
 
-// ── 12. stable block ids (Terra 5C: keys must survive re-projection) ─────────
+// ── 12. stable block ids (keys must survive re-projection) ─────────
 test('block ids are stable across re-projection and unique', () => {
   const s = session([
     user('do it', { msg_id: 'u1' }),

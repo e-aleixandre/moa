@@ -1,6 +1,6 @@
 // voice-gestures.js — the pure push-to-talk gesture state machine.
 //
-// This is the single most fragile piece of the voice feature (5M): a tap must
+// This is the single most fragile piece of the voice feature: a tap must
 // send, a press-and-hold must record, a slide-up must lock hands-free, and iOS
 // Safari's habit of firing `pointercancel` mid-hold (it hijacks the long-press
 // for Haptic Touch / the callout menu) must NOT drop the recording. The old SPA

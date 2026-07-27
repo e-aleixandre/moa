@@ -112,7 +112,7 @@ func (s *jobStore) createWithOrigin(task, model string, cancel context.CancelFun
 }
 
 // createSync creates a job for a synchronous subagent run (sync=true), so
-// that live-agent tracking (bandeja, subagent_status, count) has a single
+// that live-agent tracking (tray, subagent_status, count) has a single
 // source of truth across sync and async subagents.
 func (s *jobStore) createSync(task, model string, cancel context.CancelFunc, thinking ...string) *job {
 	return s.createJob(task, model, cancel, true, "", thinking...)
@@ -544,7 +544,7 @@ func randomJobID() string {
 }
 
 // ---------------------------------------------------------------------------
-// Jobs — exported handle for external consumers (bandeja, init snapshot,
+// Jobs — exported handle for external consumers (tray, init snapshot,
 // cancellation). Wraps the package-private jobStore.
 // ---------------------------------------------------------------------------
 

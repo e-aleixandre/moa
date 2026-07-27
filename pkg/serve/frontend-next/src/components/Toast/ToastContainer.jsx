@@ -14,7 +14,7 @@ const TONE = {
   info: "info",
 };
 
-// ToastContainer — global toast stack (5N). Subscribes to the shared toast
+// ToastContainer — global toast stack. Subscribes to the shared toast
 // queue (notifications.js) and renders each entry via the Toast primitive.
 // Mounted ONCE in app.jsx so it's global to desktop and mobile. Clicking a
 // toast that carries a sessionId brings that session into view (openSession

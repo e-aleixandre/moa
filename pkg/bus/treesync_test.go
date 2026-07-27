@@ -64,7 +64,7 @@ func TestDisplayMessages_IncludesInFlightTurn(t *testing.T) {
 // TestCompact_RetainedUserKeepsStableMsgID), the tree syncer must recognize a
 // user message retained across a compaction and not re-append it after the
 // EntryCompaction marker. This isolates the syncer's dedup contract; the actual
-// bug #13 root cause (anonymous ingress) is guarded in pkg/agent.
+// root cause (anonymous ingress) is guarded in pkg/agent.
 func TestTreeSyncer_NoDuplicateUserAcrossCompaction(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()

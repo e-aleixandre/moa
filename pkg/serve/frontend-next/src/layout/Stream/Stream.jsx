@@ -11,7 +11,7 @@ import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
 import "./Stream.css";
 
-// Stream — the scrollable conversation area. In 5C it renders the REAL
+// Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
 // block `kind` to its Studio component. Auto-scroll (stick-to-bottom + "new
 // messages" button) and the 200-message / truncation guard are ported verbatim

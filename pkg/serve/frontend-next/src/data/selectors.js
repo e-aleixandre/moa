@@ -1,6 +1,6 @@
 // selectors.js — pure derivations the UI containers read from the store state.
 // These bridge the tile-tree session model (shared with the old SPA, reused
-// verbatim — see the 5C decision) and the single-session conversation screen of
+// verbatim) and the single-session conversation screen of
 // frontend-next.
 
 import { findTile } from './tileTree.js';

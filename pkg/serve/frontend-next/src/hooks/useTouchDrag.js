@@ -14,7 +14,7 @@ import { useRef, useCallback, useEffect } from 'preact/hooks';
  * Drop targets register themselves via registerDropTarget(el, handlers).
  *
  * Ported verbatim from the old SPA (pkg/serve/frontend/src/hooks/
- * useTouchDrag.js) for the 5G pane grid.
+ * useTouchDrag.js) for the pane grid.
  */
 
 const LONG_PRESS_MS = 300;
@@ -106,13 +106,11 @@ export function useTouchDrag({ data, onDragStart, ghostClass }) {
 
     e.preventDefault();
 
-    // Move ghost
     if (ghostEl) {
       ghostEl.style.left = (touch.clientX - 20) + 'px';
       ghostEl.style.top = (touch.clientY - 20) + 'px';
     }
 
-    // Hit-test drop targets
     const hit = findDropTarget(touch.clientX, touch.clientY);
     const prevTarget = currentTargetRef.current;
 

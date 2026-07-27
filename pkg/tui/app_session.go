@@ -53,10 +53,6 @@ func pinnedSetsEqual(a, b map[string]bool) bool {
 	return true
 }
 
-// --- Session persistence ---
-// Note: Session saving is now handled by the bus persistence reactor.
-// The TUI no longer calls saveSession() directly.
-
 func newModelSwitchEvent(model core.Model) *pendingTimelineEvent {
 	name := model.Name
 	if name == "" {

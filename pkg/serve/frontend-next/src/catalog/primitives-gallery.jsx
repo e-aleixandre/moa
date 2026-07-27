@@ -143,11 +143,11 @@ function ThinkingMeterTable() {
 }
 
 // PrimitivesGallery — shows the component system's atoms
-// (Phase 1, block 1) in all their states, for visual review on /next.
+// in all their states, for visual review on /next.
 export function PrimitivesGallery() {
   return (
     <section>
-      <h2>Átomos</h2>
+      <h2>Atoms</h2>
 
       <h3>StateDot</h3>
       <StateDotRow />

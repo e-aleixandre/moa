@@ -1,4 +1,4 @@
-// palette.js — command-palette open/close controller (5H).
+// palette.js — command-palette open/close controller.
 //
 // The palette's open state lives in the STORE (see store.js: paletteOpen /
 // paletteStep) rather than in a second pub/sub system, so the global mount in

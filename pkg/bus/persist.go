@@ -33,9 +33,8 @@ type SessionRebinder interface {
 	RebindSession(sess *session.Session)
 }
 
-// collectMetadata gathers all session metadata for persistence.
-// Uses the same map[string]any format as session.Session.Metadata
-// (the existing persistence format — no schema change).
+// collectMetadata gathers all session metadata for persistence, in the
+// map[string]any format of session.Session.Metadata.
 func collectMetadata(sctx *SessionContext) map[string]any {
 	meta := make(map[string]any)
 	m := sctx.Agent.Model()

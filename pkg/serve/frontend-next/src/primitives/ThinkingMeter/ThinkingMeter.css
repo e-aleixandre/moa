@@ -38,7 +38,7 @@
   box-shadow: 0 0 6px color-mix(in srgb, var(--peach) 60%, transparent);
 }
 
-/* Dial — medidor cónico */
+/* Dial — conic meter */
 
 .thinking-meter.variant-dial {
   width: 22px;

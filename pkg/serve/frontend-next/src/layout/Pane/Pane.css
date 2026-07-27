@@ -280,7 +280,7 @@
   flex: none;
 }
 
-/* p-foot — pane pulse (Phase 3B: "● streaming", "waiting 0:42"…), optional
+/* p-foot — pane pulse ("● streaming", "waiting 0:42"…), optional
    footer between the body and the fake composer. */
 .pane .p-foot {
   flex: none;
@@ -309,7 +309,7 @@
   margin-left: auto;
 }
 
-/* ── 5G: drag-and-drop + attention ── */
+/* ── drag-and-drop + attention ── */
 
 .pane.drag-over {
   outline: 2px dashed var(--mauve);
@@ -330,7 +330,7 @@
   border: 1px solid var(--surface1);
 }
 
-/* ── 5G: connected pane body — Stream + Composer + blocking ──
+/* ── connected pane body — Stream + Composer + blocking ──
    In a connected pane the body is the live Stream (its own scroll), so we drop
    the generic p-body padding/overflow and let Stream/Composer own their layout
    at panel density. */

@@ -1,5 +1,5 @@
 // usage-pills — pure selectors + formatters for the StatusStrip's plan-usage
-// telemetry (phase 5O). This is the DUAL-source logic ported from the old
+// telemetry. This is the DUAL-source logic ported from the old
 // TaskBar, kept UI-free so it can be unit-tested in isolation.
 //
 // The two providers report plan usage from different places:

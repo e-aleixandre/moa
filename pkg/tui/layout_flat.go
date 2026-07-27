@@ -7,8 +7,8 @@ import (
 	"github.com/muesli/reflow/wordwrap"
 )
 
-// FlatLayout renders the original v1 flat design with single-tone tool blocks
-// and an inline "running…" indicator.
+// FlatLayout renders a flat design with single-tone tool blocks and an inline
+// "running…" indicator.
 type FlatLayout struct{}
 
 func (FlatLayout) RenderUserMessage(text string, width int, theme Theme) string {

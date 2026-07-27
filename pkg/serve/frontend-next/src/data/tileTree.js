@@ -30,7 +30,6 @@ export function allTileIds(tree) {
   return tree.children.flatMap(allTileIds);
 }
 
-// All assigned session IDs
 export function allSessionIds(tree) {
   if (!tree) return [];
   if (tree.type === 'tile') return tree.sessionId ? [tree.sessionId] : [];

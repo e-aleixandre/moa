@@ -130,8 +130,8 @@ function LeadingScale() {
         <div class="lead-item" key={name}>
           <span class="type-label">{name} ({values[name] || "…"})</span>
           <p class="lead-sample" style={{ lineHeight: `var(${name})` }}>
-            Un agente de programación mantiene varias sesiones a la vez; esta
-            muestra de dos líneas enseña cómo respira el interlineado del token.
+            A coding agent keeps several sessions going at once; this two-line
+            sample shows how the token's line height breathes.
           </p>
         </div>
       ))}
@@ -190,44 +190,44 @@ export function Catalog() {
     <div class="catalog">
       <h1>Token catalog</h1>
       <p class="lead">
-        Galería de referencia de los design tokens (frontend-next, Fase 0).
+        Reference gallery for the design tokens.
         Los valores se leen de tokens.css en tiempo real — paleta Catppuccin
         Mocha, solo lectura.
       </p>
 
       <section>
-        <h2>Colores</h2>
+        <h2>Colors</h2>
         {Object.entries(COLOR_GROUPS).map(([title, names]) => (
           <ColorGroup key={title} title={title} names={names} />
         ))}
       </section>
 
       <section>
-        <h2>Espaciado</h2>
+        <h2>Spacing</h2>
         <SpaceScale />
       </section>
 
       <section>
-        <h2>Tipografía</h2>
-        <h3>Tamaños</h3>
+        <h2>Typography</h2>
+        <h3>Sizes</h3>
         <TypeScale />
-        <h3>Pesos</h3>
+        <h3>Weights</h3>
         <WeightScale />
-        <h3>Interlineado</h3>
+        <h3>Line height</h3>
         <LeadingScale />
         <h3>Tracking</h3>
         <TrackingScale />
       </section>
 
       <section>
-        <h2>Elevación</h2>
+        <h2>Elevation</h2>
         <ShadowScale />
       </section>
 
       <section>
-        <h2>Capas y tempos</h2>
+        <h2>Layers and tempos</h2>
         <TokenTable title="z-index" names={ZINDEX} />
-        <TokenTable title="Tempos (animación)" names={TEMPOS} />
+        <TokenTable title="Tempos (animation)" names={TEMPOS} />
       </section>
 
       <PrimitivesGallery />

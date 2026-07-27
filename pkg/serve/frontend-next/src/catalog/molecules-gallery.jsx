@@ -215,7 +215,7 @@ function SheetDemo() {
 }
 
 // MoleculesGallery — shows the component system's molecules
-// (Phase 1, block 2) in their variants/states, for visual review on /next.
+// in their variants/states, for visual review on /next.
 export function MoleculesGallery() {
   return (
     <section>

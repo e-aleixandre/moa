@@ -55,7 +55,7 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   const holdRef = useRef(null); // { pointerId, el, timer, onWinUp, onWinCancel } | null
   // True between a pointerdown and the synthetic click it triggers (mouse/touch),
   // so onClick can swallow that duplicate instead of treating it as a keyboard
-  // activation (bug #1 from the old InputBar).
+  // activation (a bug the old InputBar had).
   const pointerDrivenRef = useRef(false);
   const clickSuppressTimer = useRef(null);
   // After a "stop" action the reducer sits in its inert `transcribing` phase
@@ -186,7 +186,7 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   const onPointerUp = useCallback(() => {
     // A pointerup that lands on the button synthesizes a click afterwards; keep
     // pointerDrivenRef set so onClick swallows it instead of double-firing.
-    // Self-clear after a beat in case no click arrives (bug #1 pattern).
+    // Self-clear after a beat in case no click arrives.
     clearClickSuppressTimer();
     clickSuppressTimer.current = setTimeout(() => {
       pointerDrivenRef.current = false;

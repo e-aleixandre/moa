@@ -1,4 +1,4 @@
-/* MobileSubagentView (5J, INC-34) — full-screen push over the mobile
+/* MobileSubagentView — full-screen push over the mobile
    conversation, wearing the parent's chrome: the composer sits in the
    `.mcomposer` pill, with `.mnowline` above it and `.mstatusline` below, all
    three from the parent's own stylesheets. Bespoke here: the one-row header,

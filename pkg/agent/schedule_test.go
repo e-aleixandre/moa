@@ -17,7 +17,7 @@ import (
 // schedHooks is a minimal Hooks implementation for schedule tests.
 type schedHooks struct{}
 
-func (h schedHooks) FireBeforeAgentStart(context.Context) []core.AgentMessage        { return nil }
+func (h schedHooks) FireBeforeAgentStart(context.Context) []core.AgentMessage { return nil }
 func (h schedHooks) FireToolCall(context.Context, string, map[string]any) *core.ToolCallDecision {
 	return nil
 }
@@ -547,9 +547,9 @@ func TestSchedule_ResultsInOriginalOrder(t *testing.T) {
 
 	done := runExecuteTools(context.Background(), cfg, calls)
 
-	<-started       // slow has started
-	close(proceed)  // let slow finish
-	<-done          // wait for executeTools to complete
+	<-started      // slow has started
+	close(proceed) // let slow finish
+	<-done         // wait for executeTools to complete
 
 	// Phase 3 always appends in original order, so messages should be:
 	// [0] = slow result, [1] = fast result

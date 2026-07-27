@@ -9,7 +9,7 @@ import (
 
 // spoken.go — deterministic "written for the ear" templates.
 //
-// Phase 1A wording is 100% deterministic (no model). Language follows the
+// Wording is 100% deterministic (no model). Language follows the
 // server's configured STT language (en/es; "auto" -> en), so briefings match
 // the user's spoken language (design §7). Every template prefixes the session
 // alias so audio-only users always know which conversation an item is about.
@@ -17,7 +17,7 @@ import (
 // Fidelity rule (design §3.3): questions are relayed as-is; permission text
 // always states the risk in strong words and never softens it.
 
-// lang is the resolved briefing language. Only en/es in Phase 1A.
+// lang is the resolved briefing language. Only en/es are supported.
 type lang string
 
 const (
@@ -154,12 +154,12 @@ func dangerLabels(l lang) map[string]string {
 	}
 }
 
-// -- Phase 2 progress/terminal templates ------------------------------------
+// -- Progress/terminal templates ---------------------------------------------
 //
 // These are EPHEMERAL briefings (progress narration), not P0 items. The Spoken
 // text for a run's result uses a deterministic fallback: the first sentence of
 // the final text with markdown stripped, truncated (design §3.4). No LLM in
-// Phase 2 — the model summary is Phase 4.
+// The model-written summary is a separate, later concern.
 
 // spokenRunOK narrates a successfully finished run. hadEdits colors the wording
 // ("made changes" vs "finished"). finalText is summarized deterministically.
@@ -255,7 +255,7 @@ func (l lang) spokenVerifyFail(alias, summary string) string {
 }
 
 // firstSentence strips markdown noise and returns the first sentence of s,
-// truncated to max runes. Deterministic (no model). Used as the Phase 2/3
+// truncated to max runes. Deterministic (no model). Used as the
 // fallback wording for run/goal results (design §3.4).
 func firstSentence(s string, max int) string {
 	s = stripMarkdown(s)

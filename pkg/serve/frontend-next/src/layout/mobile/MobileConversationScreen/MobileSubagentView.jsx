@@ -16,7 +16,7 @@ import "./MobileNowLine.css";
 import "./MobileSubagentView.css";
 
 // MobileSubagentView — full-screen push counterpart of the desktop SubagentView
-// (5J, INC-34). It is the parent screen with a different subject: same now-line
+//. It is the parent screen with a different subject: same now-line
 // above the composer, same composer pill, same status line below it
 // (StatusLineRow) — except every number in that line is the CHILD's (its own
 // context window, spend, model, effort and tokens), because a screen zoomed

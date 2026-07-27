@@ -776,7 +776,7 @@ func TestZeroValue_Panics(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Close + Unsubscribe race (review issue #1)
+// Close + Unsubscribe race
 // ---------------------------------------------------------------------------
 
 func TestClose_ConcurrentUnsubscribe(t *testing.T) {
@@ -800,7 +800,7 @@ func TestClose_ConcurrentUnsubscribe(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Publish + Unsubscribe inflight leak (review issue #2)
+// Publish + Unsubscribe inflight leak
 // ---------------------------------------------------------------------------
 
 func TestPublish_UnsubscribeDuringPublish_DrainReachesZero(t *testing.T) {
@@ -830,7 +830,7 @@ func TestPublish_UnsubscribeDuringPublish_DrainReachesZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Subscribe after Close (review issue #3)
+// Subscribe after Close
 // ---------------------------------------------------------------------------
 
 func TestSubscribe_AfterClose(t *testing.T) {
@@ -856,7 +856,7 @@ func TestSubscribe_AfterClose(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Unsubscribe from within handler (review issue #4)
+// Unsubscribe from within handler
 // ---------------------------------------------------------------------------
 
 func TestUnsubscribe_FromHandler(t *testing.T) {

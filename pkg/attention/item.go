@@ -6,7 +6,7 @@
 // today, native app tomorrow) connects to a single WebSocket and reads spoken
 // briefings instead of the raw per-session bus; it never decides what matters.
 //
-// Phase 1A scope (this file set): P0 items only — the things that STOP an agent
+// Scope of this file set: P0 items — the things that STOP an agent
 // and require the user: ask_user, permission_request, and error. No progress
 // (P1/P2/P3), no digest, no LLM summaries, no coalescing. See
 // tmp/plans/attention-service-design.md.
@@ -19,7 +19,7 @@ package attention
 
 import "time"
 
-// Priority ranks how urgently an item needs the user's attention. Phase 1A only
+// Priority ranks how urgently an item needs the user's attention. Only
 // emits P0; higher-numbered levels are defined for later phases so the wire
 // protocol is stable.
 type Priority int
@@ -28,16 +28,16 @@ const (
 	// P0Blocking: the agent is STOPPED waiting for the user (ask_user,
 	// permission_request, error). Interrupt now.
 	P0Blocking Priority = 0
-	// P1Terminal: a run finished with an error / a goal ended. (Phase 2)
+	// P1Terminal: a run finished with an error / a goal ended.
 	P1Terminal Priority = 1
-	// P2Progress: a run finished OK / a goal iteration was satisfied. (Phase 2)
+	// P2Progress: a run finished OK / a goal iteration was satisfied.
 	P2Progress Priority = 2
-	// P3Ambient: subagents, tasks, cost. (Phase 3)
+	// P3Ambient: subagents, tasks, cost.
 	P3Ambient Priority = 3
 )
 
 // Kind is the semantic type of an attention item. Used for dedup signatures and
-// client rendering. Phase 1A uses only the P0 kinds.
+// client rendering.
 type Kind string
 
 const (
@@ -45,7 +45,7 @@ const (
 	KindPermission Kind = "permission" // agent requests permission to run a tool
 	KindError      Kind = "error"      // session entered the error state
 
-	// Phase 2 progress/terminal kinds. These are EPHEMERAL briefings, not
+	// Progress/terminal kinds. These are EPHEMERAL briefings, not
 	// tracked P0 items: the chief-of-staff telling you how things are going.
 	KindRunOK       Kind = "run_ok"       // a run finished successfully (P2)
 	KindGoalEnded   Kind = "goal_ended"   // a goal loop stopped (P1)

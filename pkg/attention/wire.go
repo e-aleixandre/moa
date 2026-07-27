@@ -29,7 +29,7 @@ type ServerMsg struct {
 	// attention (a new item) / item_update (state change of an existing item)
 	Item *AttentionItem `json:"item,omitempty"`
 
-	// briefing (Phase 2): an ephemeral progress/terminal note. It is NOT
+	// briefing: an ephemeral progress/terminal note. It is NOT
 	// tracked or resolvable. The sole exception is a successful run completion,
 	// whose Termination metadata is retained for recovery in init.
 	Briefing *Briefing `json:"briefing,omitempty"`
@@ -123,7 +123,7 @@ type ClientMsg struct {
 }
 
 // whitelisted reports whether a bus event is one the Attention Service acts on
-// in Phase 1A. Everything else (deltas, tool streaming, cost, context, tasks,
+// here. Everything else (deltas, tool streaming, cost, context, tasks,
 // compaction, config) is ignored here — future phases extend this list, they
 // never fall back to "everything minus noise" (review point 3).
 func whitelisted(ev any) bool {
@@ -139,7 +139,7 @@ func whitelisted(ev any) bool {
 		bus.SubagentEnded,
 		bus.ToolExecStarted,
 		bus.ToolExecEnded,
-		// Phase 2: progress/terminal briefings.
+		// Progress/terminal briefings.
 		bus.GoalEnded,
 		bus.GoalIterationEnded,
 		bus.GoalChanged,

@@ -1,4 +1,4 @@
-/* PaneGrid — 5G: the real binary split-tree layout. The container fills the
+/* PaneGrid: the real binary split-tree layout. The container fills the
    main column; the tree is a nest of flex splits with thin resize handles. */
 
 .pane-grid {

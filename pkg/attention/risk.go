@@ -13,8 +13,8 @@ import (
 // when in doubt, escalate. A false "high" is annoying; a false "low" on an
 // `rm -rf` is dangerous.
 //
-// Phase 1A uses this for the spoken text and the risk fields on AttentionItem.
-// The future natural-language command summary (Phase 5) may only improve wording
+// This feeds the spoken text and the risk fields on AttentionItem.
+// A future natural-language command summary may only improve wording
 // AROUND these flags, never contradict them.
 
 // Risk flag identifiers. Stable strings — clients and tests depend on them.

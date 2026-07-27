@@ -237,23 +237,19 @@ export function formatDiff(oldText, newText, startLine = 1) {
   const contextStart = Math.max(0, prefixLen - maxContext);
   const pad = n => String(n).padStart(3);
 
-  // Context before
   for (let i = contextStart; i < prefixLen; i++) {
     lines.push(`${pad(base + i + 1)}   ${oldLines[i]}`);
   }
 
-  // Removed lines
   for (let i = prefixLen; i < oldLines.length - suffixLen; i++) {
     lines.push(`${pad(base + i + 1)} - ${oldLines[i]}`);
   }
 
-  // Added lines
   let newStart = prefixLen;
   for (let i = prefixLen; i < newLines.length - suffixLen; i++) {
     lines.push(`${pad(base + newStart + 1 + (i - prefixLen))} + ${newLines[i]}`);
   }
 
-  // Context after
   const afterStart = oldLines.length - suffixLen;
   const afterEnd = Math.min(oldLines.length, afterStart + maxContext);
   for (let i = afterStart; i < afterEnd; i++) {

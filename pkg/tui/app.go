@@ -88,7 +88,6 @@ type pendingTimelineEvent struct {
 	Message core.AgentMessage
 }
 
-// appModel is the root Bubble Tea model.
 type pickerPurpose int
 
 const (
@@ -96,6 +95,7 @@ const (
 	pickerForReviewConfig
 )
 
+// appModel is the root Bubble Tea model.
 type appModel struct {
 	// Pointer to mutable state — safe across Bubble Tea model copies
 	s *state
@@ -1929,7 +1929,7 @@ func (m *appModel) handleRunEnded(e bus.RunEnded) []tea.Cmd {
 	// Keep queuedSteers: a steer that arrived during the run's last turn is
 	// still genuinely queued on the agent (it will be delivered on the next run
 	// and reconciled by its Steered event). Dumping it into the transcript here
-	// would show it as consumed while it is still pending (mostrar la verdad).
+	// would show it as consumed while it is still pending (show the truth).
 	m.status.SetText("")
 	m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 	m.input.SetEnabled(true)

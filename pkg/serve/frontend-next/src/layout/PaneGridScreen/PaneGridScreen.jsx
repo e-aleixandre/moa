@@ -10,8 +10,8 @@ import { openPalette } from "../../data/palette.js";
 import { sessionTitle } from "../../data/util/format.js";
 import "./PaneGridScreen.css";
 
-// PaneGridScreen — root organism AND container of the desktop pane grid (5G).
-// Same 5C container pattern as ConversationScreen: subscribes to the store,
+// PaneGridScreen — root organism AND container of the desktop pane grid.
+// Same container pattern as ConversationScreen: subscribes to the store,
 // derives sessions/tileTree/focusedTile, and passes real props down to the
 // presentational Spine / GridToolbar / PaneGrid. Owns the grid-only global
 // keyboard shortcuts (⌘/Alt+1–9 → focus pane N).
@@ -81,8 +81,8 @@ export function PaneGridScreen({ version }) {
   })();
 
   // needsYouCount — sessions currently assigned to a visible pane that need
-  // attention (permission/error). Derived from the store (no /api/attention in
-  // 5G — kept simple, per the plan).
+  // attention (permission/error). Derived from the store (no /api/attention —
+  // kept simple).
   const assigned = new Set(allSessionIds(state.tileTree));
   const needsYou = Object.values(state.sessions).filter(
     (s) => assigned.has(s.id) && (s.state === "permission" || s.state === "error")

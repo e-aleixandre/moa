@@ -17,7 +17,7 @@ type agentSendErrorMsg struct {
 	Err error
 }
 
-// renderTickMsg triggers a stream cache refresh during streaming (~60fps).
+// renderTickMsg triggers a stream cache refresh during streaming (renderInterval).
 type renderTickMsg struct{}
 
 // cacheColdMsg fires when the prompt cache is expected to have gone cold (last
@@ -94,5 +94,3 @@ type shellResultMsg struct {
 	Delivered   bus.UserShellDelivery
 	DeliveryErr error
 }
-
-// clearScreenDoneMsg is in expand.go (unchanged)

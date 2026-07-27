@@ -40,13 +40,13 @@ import "./MobileConversationScreen.css";
 // RewindTimeline) and the store→props wiring. Model/thinking, permissions, path
 // and usage live behind the status line's doors (MobileStatusLine); global
 // settings (notifications) live behind the SessionDrawer footer. All reuse the
-// real shared components — so the screen no longer manages those overlays itself.
+// real shared components.
 //
 // Architecture (OPTION B): the mobile screen reuses the desktop's data
 // projection (projectStream) and shared components; the only divergence is the
 // mobile layout chrome (MobileStream renders the SAME tool-group card, just
 // denser). No data logic is duplicated. The mock specimen used by the design
-// gallery now lives in mobile-gallery.jsx (see MobileConversationSpecimen).
+// gallery lives in mobile-gallery.jsx (see MobileConversationSpecimen).
 
 // relAge — coarse relative age from an `updated` epoch (mirrors the desktop
 // ConversationScreen's spineSessions helper; kept local to avoid a shared
@@ -70,7 +70,7 @@ function relAge(updated) {
 // invent a summary — we degrade to the brief, then to the activity/state.
 // Saved sessions render NO brief (return ""): the grey StateDot and the drawer's
 // group counter already carry the "saved" state, so a "Saved" line is redundant.
-// // TODO(5x): a true last-message preview would need the projection or the API
+// TODO: a true last-message preview would need the projection or the API
 // to carry one; not added here (out of scope, would touch the backend/model).
 function sessionBrief(sess) {
   if (sess.briefProgress) return sess.briefProgress;
@@ -300,7 +300,7 @@ export function MobileConversationScreen() {
     const blocks = projectStream(session);
     const blocking = session.untrustedMcp || session.pendingPerm;
     if (session.viewingSubagent) {
-      // 5J: the subagent view takes over the whole conversation surface (below
+      // The subagent view takes over the whole conversation surface (below
       // the header/strip), pushed full-screen. onBack clears viewingSubagent.
       body = (
         <MobileSubagentView

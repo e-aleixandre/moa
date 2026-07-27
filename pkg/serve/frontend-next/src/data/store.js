@@ -75,7 +75,7 @@ let state = {
 
   activeSession: null,
 
-  // Command palette (⌘K, 5H). Lives in the store so the global mount in
+  // Command palette (⌘K). Lives in the store so the global mount in
   // app.jsx and the per-screen Spine buttons (onSearch/onNewSession) read and
   // write the same state rather than standing up a second pub/sub system.
   // paletteOpen toggles the overlay; paletteStep picks the initial step

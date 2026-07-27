@@ -3,7 +3,7 @@
 // Covers the SubagentView projection: identity accent, sibling rail (only for a
 // real fanout), terminal outcome mapping + error/result extraction, live now-
 // line segments, the rebound (pruned job → null), and canPromote gating. Plus
-// the AgentTray's liveTrayAgents (bash without identity accent — INC-22).
+// the AgentTray's liveTrayAgents (bash without identity accent).
 import { test, expect } from 'bun:test';
 import { subagentView, canPromote } from './subagent-view-model.js';
 import { liveTrayAgents } from './stream-model.js';
@@ -193,7 +193,7 @@ test("subagent B's accent survives a reconnect that drops a finished sibling and
   expect(view.accent).toBe('teal');
 });
 
-// ── session.subagents as array (minor #9) ─────────────────────────────────
+// ── session.subagents as array ─────────────────────────────────
 test('subagentView tolerates session.subagents as an array', () => {
   const session = { id: 's1', messages: [], subagents: [sub({ jobId: 'j1' })] };
   const v = subagentView(session, 'j1');
@@ -219,7 +219,7 @@ test('liveTrayAgents keeps async subagent identity accents and strips bash accen
   expect(subChip.accent).toBe('sky');
   expect(bashChip.kind).toBe('bash');
   expect(bashChip.name).toBe('bash');
-  expect(bashChip.accent).toBeUndefined(); // no identity color for bash (INC-22)
+  expect(bashChip.accent).toBeUndefined(); // no identity color for bash
 });
 
 test('liveTrayAgents excludes SYNC subagents (they stay inline)', () => {

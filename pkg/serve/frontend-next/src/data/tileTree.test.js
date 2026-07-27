@@ -1,6 +1,6 @@
 // tileTree.test.js — run with `bun test`.
 //
-// Covers the 5G pane-grid engine: the pure snap math (snapToRatio), the binary
+// Covers the pane-grid engine: the pure snap math (snapToRatio), the binary
 // split-tree operations (swapSessions), and the store-backed tile actions
 // (applyPreset / splitTile / closeTile). api.js is mocked so the actions'
 // syncConnections side effect doesn't touch the network.

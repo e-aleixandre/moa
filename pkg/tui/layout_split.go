@@ -7,7 +7,7 @@ import (
 	"github.com/muesli/reflow/wordwrap"
 )
 
-// SplitLayout renders the v3 split design with per-verb accent colors,
+// SplitLayout renders the split design with per-verb accent colors,
 // right-aligned status badges, and generous spacing.
 //
 // Tool blocks use a single Surface0 background (matching the HTML mockup).

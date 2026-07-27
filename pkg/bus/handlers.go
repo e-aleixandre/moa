@@ -124,9 +124,9 @@ func RegisterHandlers(sctx *SessionContext) {
 		// like a run: this is what keeps a queued /verify barrier in its position
 		// (a concurrent SendPrompt can't slip in while it runs). A second caller
 		// fails the transition and gets ErrSessionBusy. The atomic below is a
-		// belt against two verifies that both somehow saw idle. (The serve/TUI
-		// direct /verify commands are routed through here in a later commit; for
-		// now only the queued barrier uses this state-occupying path.)
+		// belt against two verifies that both somehow saw idle. The serve/TUI
+		// direct /verify commands do not go through here; only the queued
+		// barrier uses this state-occupying path.
 		if sctx.State != nil {
 			if err := sctx.State.Transition(StateRunning); err != nil {
 				return ErrSessionBusy
@@ -563,10 +563,6 @@ func RegisterHandlers(sctx *SessionContext) {
 		}, nil
 	})
 
-	// GetSessionState returns the current state.
-	// Note: "permission" state is defined but not wired in this phase.
-	// Permission bridges (Gate.Requests → PermissionRequested) remain
-	// in serve/TUI until Fase 2b.
 	b.OnQuery(func(q GetSessionState) (string, error) {
 		if sctx.State == nil {
 			return "idle", nil

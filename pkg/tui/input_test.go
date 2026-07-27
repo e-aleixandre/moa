@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// T-A4: cursor byte offset must be correct with double-width runes and soft-wrap.
+// Cursor byte offset must be correct with double-width runes and soft-wrap.
 
 func TestCursorByteOffset_WideRunes(t *testing.T) {
 	m := newInput()

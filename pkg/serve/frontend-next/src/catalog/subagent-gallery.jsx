@@ -1,7 +1,7 @@
 import { SubagentView } from "../layout/SubagentView/SubagentView.jsx";
 import "./live-states-gallery.css";
 
-// SubagentGallery — static specimens of the real SubagentView (5J), mounted with
+// SubagentGallery — static specimens of the real SubagentView, mounted with
 // mock store-shaped sessions so the implemented view (not the mockup) can be
 // eyeballed at ?view=subagent. Each specimen is a { session, jobId } pair that
 // exercises one state: running with siblings, thinking (lone), completed, failed.

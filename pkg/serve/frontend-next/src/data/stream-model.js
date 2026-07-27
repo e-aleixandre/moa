@@ -4,7 +4,7 @@
 // ws-handlers / conversation-reducer) and returns a serializable array. This is
 // the single place that decides how tool calls group into ledgers, how live
 // subagents become a fanout, and how live async bash jobs become background
-// strips. Every visual subphase downstream (5C) consumes this contract, so the
+// strips. Everything downstream consumes this contract, so the
 // grouping rules live here — isolated and exhaustively tested.
 //
 // ── OUTPUT CONTRACT (array of plain objects, each with a `kind`) ─────────────
@@ -31,14 +31,14 @@
 //       One assistant turn = everything the assistant produced between one user
 //       message (or the start) and the next user message. `blocks` is the
 //       assistant's prose and activity INTERLEAVED IN ORDER. A turn is
-//       `streaming` (skeleton/cursor in 5C) when there is live output at the
+//       `streaming` when there is live output at the
 //       tail: session.streamingText, session.thinkingText, a trailing
 //       tool_start still in status generating/running, or live subagents/bash
 //       jobs in session.subagents. Otherwise it is a `document`. Sub-block
 //       types:
 //
 //         { type:'prose', text }
-//             A run of assistant markdown text (raw; markdown rendered in 5C).
+//             A run of assistant markdown text (raw; markdown rendered downstream).
 //
 //         (thinking is intentionally NOT projected — see the live-work section
 //          below: it streams then vanishes on turn end, so we don't draw it.)
@@ -95,9 +95,8 @@
 //     blocks the conversation, so it joins this turn's delegation block like a
 //     terminated one; an ASYNC subagent, and ALL bash (kind:'bash' is always
 //     async background work), never appear inline — they only surface through
-//     liveTrayAgents() for the LiveDock. There is no more `background` block:
-//     async bash used to get one, but it moved to the dock permanently (the
-//     loose auto-expanding BG·JOB strip in the stream is retired). Anything
+//     liveTrayAgents() for the LiveDock. There is NO `background` block: async
+//     bash lives in the dock permanently, never as a loose inline strip. Anything
 //     whose job_id already appears in messages is skipped (dedup — completed
 //     entries also linger in the map).
 //   • Edit diff = sibling block after the ledger (full width), only for real
@@ -120,7 +119,7 @@ export const LIVE_FULL_MAX_LINES = 400;
 export const LIVE_FULL_MAX_CHARS = 20000;
 
 // Fanout accent palette, cycled by agent index (see FanoutBlock.css). Exported
-// so the SubagentView (5J) assigns the SAME accent a subagent had in the fanout
+// so the SubagentView assigns the SAME accent a subagent had in the fanout
 // (single source of truth for the sky/teal/mauve identity) instead of inventing
 // its own palette.
 export const FANOUT_ACCENTS = ['sky', 'teal', 'mauve', 'peach', 'blue', 'lavender'];
@@ -478,7 +477,7 @@ function isTerminalSubagent(subagent) {
 
 // liveTrayAgents projects a session into the LiveDock's chip descriptors: the
 // LIVE ASYNC subagents (each carrying its fanout identity accent) followed by
-// ALL live bash jobs (no identity accent — INC-22: spinner overlay1 + mono
+// ALL live bash jobs (no identity accent: spinner overlay1 + mono
 // `bash`; kind:'bash' is always async background work). SYNC subagents are
 // excluded — they block the conversation, so they stay inline in the
 // delegation block instead ("async in the dock, sync inline"). It reuses the
@@ -725,7 +724,7 @@ function toFileBlock(msg) {
 // into the LIVE real subagents and LIVE async bash jobs (kind:'bash'). Only
 // entries with status running/cancelling are kept — terminated ones already
 // live in session.messages — and anything whose job_id already appeared in
-// messages is dropped for robustness (dedup). Exported so the AgentTray (5J)
+// messages is dropped for robustness (dedup). Exported so the AgentTray
 // derives its live chips from the SAME rule the stream uses, rather than
 // duplicating "which subagents are alive" logic.
 export function liveSubagents(subagents, seenJobIds) {

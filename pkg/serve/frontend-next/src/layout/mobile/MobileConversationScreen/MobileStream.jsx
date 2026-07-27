@@ -11,7 +11,7 @@ import { renderMarkdown, renderMarkdownWithCaret } from "../../../data/util/mark
 import { fuseLedgerDetails } from "../../../data/util/ledger-details.jsx";
 import "./MobileStream.css";
 
-// MobileStream — the mobile counterpart to the desktop Stream (5C). It consumes
+// MobileStream — the mobile counterpart to the desktop Stream. It consumes
 // the SAME projection (projectStream, passed in as `blocks`) and renders the
 // SAME shared components — including the SAME unified tool-group card
 // (<ActivityLedger>, the .tg card), just denser and folding to 1 done row

@@ -11,8 +11,8 @@ import {
 import "./RewindTimeline.css";
 
 // RewindTimeline — non-destructive time travel. Opens as a Sheet with a
-// vertical list of branch points (both user AND assistant turns, per
-// INC-29); jumping to one calls branchTo, which starts a NEW branch on the
+// vertical list of branch points (both user AND assistant turns);
+// jumping to one calls branchTo, which starts a NEW branch on the
 // server — nothing is ever deleted, and the WebSocket reload (ws-handlers.js
 // 'branch' command) takes care of refreshing the message list, so this
 // component only needs to close itself after a successful jump.

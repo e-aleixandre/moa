@@ -6,8 +6,7 @@ import "./MobileComposer.css";
 // the REAL, shared <Composer> (send / queue / slash / @-mention / attachments /
 // stop) and, below it, the persistent mobile chrome (<MobileStatusLine>).
 //
-// The old MobileHeader + horizontal SessionStrip are gone; the status line is
-// the only persistent chrome down here. It holds three single-scope doors —
+// The status line is the only persistent chrome down here. It holds three single-scope doors —
 // context ring + cost (→ Context & usage), the ModelPill (→ Model & thinking)
 // and the permission chip (→ Permissions) — plus the per-run token heartbeat at the
 // right. Sessions is NOT among them: that door is the floating title chip at the

@@ -33,7 +33,7 @@ function SpineVersion({ version }) {
 // (trigger, no real input yet), ACTIVE/SAVED lists of SessionRow
 // (variant="card") and footer with Pulse status + settings.
 //
-// Connected in 5C: the ConversationScreen container builds `activeSessions`/
+// Connected: the ConversationScreen container builds `activeSessions`/
 // `savedSessions` from the store and passes them in, along with `activeId`
 // (the focused session, highlighted). The mock arrays below are kept only as a
 // fallback for isolated rendering (e.g. galleries) — with real data the
@@ -113,8 +113,6 @@ export function Spine({
       </button>
 
       <div class="spine-foot">
-        {/* 5N: Pulse pairing status is wired with the pairing subphase; until
-            then we don't assert a paired state we haven't checked. */}
         <IconButton label="Settings" onClick={onSettings}>
           <Settings size={15} />
         </IconButton>

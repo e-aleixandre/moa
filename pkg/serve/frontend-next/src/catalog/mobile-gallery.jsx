@@ -15,10 +15,10 @@ import { MobileSubagentView } from "../layout/mobile/MobileConversationScreen/Mo
 import "../layout/mobile/MobileConversationScreen/MobileConversationScreen.css";
 import "./mobile-gallery.css";
 
-// mobile-gallery — the MOCK design specimens for the mobile screen. In 5I the
-// real MobileConversationScreen became a store-connected container (needs a
-// populated store + a live WS), which the static design gallery can't provide.
-// To keep the design surface reviewable WITHOUT a backend, the former 4A mock
+// mobile-gallery — the MOCK design specimens for the mobile screen. The real
+// MobileConversationScreen is a store-connected container (needs a populated
+// store + a live WS), which the static design gallery can't provide.
+// To keep the design surface reviewable WITHOUT a backend, the mock
 // (hardcoded sessions / ledgers / conversation) lives HERE as
 // MobileConversationSpecimen, decoupled from the connected container. It never
 // touches the store — it renders the presentational chrome (MobileHeader /
@@ -188,7 +188,7 @@ function MobileComposerSpecimen({ status, perm = "yolo", spend, tokensUp, tokens
   );
 }
 
-// SUBAGENT SPECIMENS — the real MobileSubagentView (5J) mounted with mock
+// SUBAGENT SPECIMENS — the real MobileSubagentView mounted with mock
 // store-shaped sessions, mirroring the desktop SubagentGallery so the mobile
 // fork view is reviewable at ?view=mobile too. Each is a { session, jobId }
 // pair; onBack is a no-op (no live store to clear here). The steer Composer it
@@ -356,8 +356,8 @@ function DrawerSpecimen() {
   );
 }
 
-// MobileGallery — shows the mobile conversation specimen (sub-phase 4A) and the
-// sessions drawer (sub-phase 4B) inside realistic phone frames (notch, rounded
+// MobileGallery — shows the mobile conversation specimen and the
+// sessions drawer inside realistic phone frames (notch, rounded
 // corners, shadow) laid out side by side.
 export function MobileGallery() {
   return (

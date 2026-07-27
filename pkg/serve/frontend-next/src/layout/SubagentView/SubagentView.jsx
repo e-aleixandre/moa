@@ -13,9 +13,9 @@ import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
 import "./SubagentView.css";
 
-// SubagentView — "inside the fork" (5J). Zoom into ONE subagent: its
-// transcript rendered by the SAME Stream as the parent (cero divergencia,
-// INC-37), framed by a breadcrumb header, a sibling rail, a task card, a fused
+// SubagentView — "inside the fork". Zoom into ONE subagent: its
+// transcript rendered by the SAME Stream as the parent (zero divergence),
+// framed by a breadcrumb header, a sibling rail, a task card, a fused
 // now-line, and — on terminal — an outcome banner.
 //
 // It reuses the pure projection subagentView(session, jobId) for everything
@@ -202,7 +202,7 @@ function BranchStrip({ session, view }) {
   );
 }
 
-// OutcomeBanner — terminal state (INC-38): green completed / red failed /
+// OutcomeBanner — terminal state: green completed / red failed /
 // neutral cancelled. Enters once (fade+rise) then stays still.
 function OutcomeBanner({ view, onBack }) {
   const [copied, setCopied] = useState(false);

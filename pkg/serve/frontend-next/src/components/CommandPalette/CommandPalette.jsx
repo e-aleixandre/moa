@@ -152,7 +152,7 @@ function Highlight({ text, query }) {
 
 const CAP_NO_QUERY = 8; // spec §2 — cap the no-query session list; scroll for more
 
-// CommandPalette — the ⌘K palette (5H). One ranked list of sessions + actions
+// CommandPalette — the ⌘K palette. One ranked list of sessions + actions
 // (no modes), plus a create-session step. Mounted ONCE globally in app.jsx,
 // outside the view switch, so it's the same organism over conversation / grid /
 // mobile. It subscribes to the store itself for the live session list (never
@@ -307,14 +307,14 @@ export function CommandPalette({
         run: () => { onClose(); navigate("grid"); },
       });
     }
-    // Pair Pulse — opens the QR pairing panel (5N). Available in every context;
+    // Pair Pulse — opens the QR pairing panel. Available in every context;
     // pairing is a device-wide action, not session- or view-scoped.
     list.push({
       id: "__pair-pulse", label: "Pair Pulse…", sublabel: "connect a phone via QR",
       icon: <Smartphone size={14} />, accent: "", shortcut: null,
       run: () => { onClose(); openPulsePairing(); },
     });
-    // TODO 5H nice-to-have: Layout preset actions (grid only), Archive current,
+    // TODO nice-to-have: Layout preset actions (grid only), Archive current,
     // Settings — cheap via this action.run() pattern, left out to keep CORE tight.
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -533,7 +533,7 @@ export function CommandPalette({
     if (sel.kind === "create-from-query") {
       // CORE fallback: open create with the query preserved (recents/browse
       // filter by it). NICE-TO-HAVE: send the query as the first message.
-      // TODO 5H: create then sendMessage(newId, query).
+      // TODO: create then sendMessage(newId, query).
       setStep("create");
       return;
     }
@@ -727,7 +727,7 @@ export function CommandPalette({
   };
 
   // ── Mobile chassis (bottom sheet) ───────────────────────────────────────────
-  // TODO 5L (overlay-history hook): the palette doesn't use Sheet — it has its
+  // TODO (overlay-history hook): the palette doesn't use Sheet — it has its
   // own two chassis (mobile bottom sheet / desktop centered veil) and Escape
   // here doesn't always close (it steps back from the "create" step first,
   // see onKeyDown above), so wiring it to data/overlay-history.js needs a bit

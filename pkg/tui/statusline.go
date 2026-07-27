@@ -11,7 +11,6 @@ import (
 
 // StatusLine renders a horizontal bar composed of ordered segments.
 // Designed for extensibility: segments can be added/removed/replaced by key.
-// Two instances are used: one above the input (top) and one below (bottom).
 //
 // Thread-safe: segments can be updated from any goroutine (e.g., agent
 // event subscribers). The View renders a consistent snapshot.

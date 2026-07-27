@@ -1,7 +1,7 @@
 // fuzzy.test.js — run with `bun test`.
 //
 // Covers the pure subsequence matcher (fuzzyMatch) and its highlight-index
-// variant (fuzzyMatchIndices) used by the command palette (5H).
+// variant (fuzzyMatchIndices) used by the command palette.
 import { test, expect, describe } from 'bun:test';
 
 import { fuzzyMatch, fuzzyMatchIndices } from './fuzzy.js';

@@ -495,7 +495,7 @@ func TestPermissionRequest_ExitsTranscript(t *testing.T) {
 	}
 }
 
-// --- Test 2: handleBusEvent message_end flushes blocks ---
+// --- handleBusEvent message_end flushes blocks ---
 
 func TestHandleBusEvent_MessageEnd_AppendsBlocks(t *testing.T) {
 	m := newTestModel()
@@ -536,7 +536,7 @@ func TestHandleBusEvent_MessageEnd_NoContent(t *testing.T) {
 	}
 }
 
-// --- Test 3: patchFromMessages corrects text without dropping tool blocks ---
+// --- patchFromMessages corrects text without dropping tool blocks ---
 
 func TestPatchFromMessages_PreservesToolBlocks(t *testing.T) {
 	m := newTestModel()
@@ -680,8 +680,8 @@ func TestPatchFromMessages_NilMessages(t *testing.T) {
 	}
 }
 
-// Test for the async emitter race: agentRunResultMsg arrives before
-// AgentEventMessageEnd is processed, so assistant/thinking blocks don't exist yet.
+// Async emitter race: the run result arrives before the message_end event is
+// processed, so assistant/thinking blocks don't exist yet.
 func TestPatchFromMessages_CreatesMissingBlocks(t *testing.T) {
 	m := newTestModel()
 	// Only a user block exists — MessageEnd event wasn't processed
@@ -736,7 +736,7 @@ func TestPatchFromMessages_CreatesMissingAssistantOnly(t *testing.T) {
 	}
 }
 
-// --- Test 4: handleRunEnded resets state ---
+// --- handleRunEnded resets state ---
 
 func TestHandleRunEnded_ResetsState(t *testing.T) {
 	m := newSwitchTestApp(t)
@@ -777,7 +777,7 @@ func TestHandleBusEvent_RunEnded_IgnoresOldGen(t *testing.T) {
 	}
 }
 
-// --- Test 5: resize invalidates stream cache ---
+// --- resize invalidates stream cache ---
 
 func TestWindowResize_InvalidatesStreamCache(t *testing.T) {
 	m := newTestModel()
@@ -830,7 +830,7 @@ func TestWindowResize_UpdatesViewportOnResize(t *testing.T) {
 	}
 }
 
-// --- Test 7: /clear resets all state ---
+// --- /clear resets all state ---
 
 func TestClear_ResetsState(t *testing.T) {
 	m := newTestModel()
@@ -863,7 +863,7 @@ func TestClear_ResetsState(t *testing.T) {
 	}
 }
 
-// --- Test: /clear starts a fresh session and leaves the previous one on disk ---
+// --- /clear starts a fresh session and leaves the previous one on disk ---
 
 func TestClearCommand_StartsFreshSessionAndKeepsPreviousOnDisk(t *testing.T) {
 	ag, err := agent.New(agent.AgentConfig{
@@ -899,7 +899,7 @@ func TestClearCommand_StartsFreshSessionAndKeepsPreviousOnDisk(t *testing.T) {
 	}
 }
 
-// --- Test: handleBusEvent tool events ---
+// --- handleBusEvent tool events ---
 
 func TestHandleBusEvent_ToolStart_AppendsBlock(t *testing.T) {
 	m := newTestModel()
@@ -1022,7 +1022,7 @@ func TestHandleBusEvent_ParallelTools_CountsCorrectly(t *testing.T) {
 	}
 }
 
-// --- Test: renderSingleBlock ---
+// --- renderSingleBlock ---
 
 func TestRenderSingleBlock_HidesThinkingWhenDisabled(t *testing.T) {
 	r := newRenderer(80)
@@ -1049,7 +1049,7 @@ func TestRenderSingleBlock_UnknownType(t *testing.T) {
 	}
 }
 
-// --- Test: summarizeToolBlock ---
+// --- summarizeToolBlock ---
 
 func TestSummarizeToolBlock_Bash(t *testing.T) {
 	block := messageBlock{
@@ -1519,8 +1519,8 @@ func TestRebuildFromMessages_RendersModelSwitchSessionEvent(t *testing.T) {
 	}
 }
 
-// Regression for bug #7: persisted goal-lifecycle markers (role "goal") must
-// rebuild as status blocks so a reopened conversation shows the goal record.
+// Regression: persisted goal-lifecycle markers (role "goal") must rebuild as
+// status blocks so a reopened conversation shows the goal record.
 func TestRebuildFromMessages_RendersGoalMarkers(t *testing.T) {
 	m := newTestModel()
 
@@ -1553,8 +1553,8 @@ func TestRebuildFromMessages_RendersGoalMarkers(t *testing.T) {
 	}
 }
 
-// Bug #7 parity: a fresh goal activation shows a live start line (matching the
-// persisted marker rendered on reopen); a re-announcement must not duplicate it.
+// A fresh goal activation shows a live start line (matching the persisted
+// marker rendered on reopen); a re-announcement must not duplicate it.
 func TestHandleGoalChanged_AddsLiveStartLineOnce(t *testing.T) {
 	m := newTestModel()
 	m.statusBar = NewStatusLine(statusLineStyle)
@@ -1798,7 +1798,7 @@ func TestBuildToolBlockData_AskUser_Pending(t *testing.T) {
 }
 
 // TestSteerQueue verifies steers go to queuedSteers (not blocks) and
-// move to blocks only when AgentEventSteer fires.
+// move to blocks only when the steer event fires.
 func TestSteerQueue(t *testing.T) {
 	m := newTestModel()
 	m.s.running = true
@@ -1856,7 +1856,7 @@ func TestSteerQueue(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("first steer not added to blocks after AgentEventSteer")
+		t.Error("first steer not added to blocks after the steer event")
 	}
 
 	m.handleBusEvent(bus.Steered{RunGen: gen, ID: "sy", Text: "and also Y"})
@@ -1883,7 +1883,7 @@ func TestSteerQueue(t *testing.T) {
 		}
 	}
 
-	// Simulate patchFromMessages (what handleRunResult does).
+	// Simulate patchFromMessages (what the run-end reconciliation does).
 	// With steers, the server has multiple assistant messages.
 	// Patch must NOT overwrite the first with the second.
 	m.s.runStartMsgCount = 0
@@ -1919,7 +1919,7 @@ func TestSteerQueue(t *testing.T) {
 }
 
 // TestPatchFromMessages_CreatesBlocks verifies that patchFromMessages creates
-// assistant blocks for server messages that arrived after agentRunResultMsg.
+// assistant blocks for server messages that arrived after the run result.
 func TestPatchFromMessages_CreatesBlocks(t *testing.T) {
 	m := newTestModel()
 	m.s.runStartBlockIdx = 0
@@ -2157,7 +2157,7 @@ func TestHandleModelSwitch_UnknownModel_ReportsAndStops(t *testing.T) {
 	}
 }
 
-// T-L2: Ctrl+C must dismiss overlays instead of being swallowed.
+// Ctrl+C must dismiss overlays instead of being swallowed.
 
 func TestSettingsMenu_CtrlCCloses(t *testing.T) {
 	m := newTestModel()

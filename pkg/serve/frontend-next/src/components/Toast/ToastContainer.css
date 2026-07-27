@@ -1,4 +1,4 @@
-/* ToastContainer — the global fixed toast stack (5N). Top-right on desktop; on
+/* ToastContainer — the global fixed toast stack. Top-right on desktop; on
    a narrow viewport it spans the width and clears the status-bar inset. The
    individual toast chrome lives in Toast.css; this only positions the stack. */
 

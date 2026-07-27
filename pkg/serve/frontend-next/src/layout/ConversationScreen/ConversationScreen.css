@@ -17,7 +17,7 @@
   background: var(--base);
 }
 
-/* LOADING / EMPTY states of the conversation container (5C). Centered, quiet
+/* LOADING / EMPTY states of the conversation container. Centered, quiet
    placeholders — no invented content. */
 .conversation-screen .conversation-placeholder,
 .conversation-screen .conversation-empty {

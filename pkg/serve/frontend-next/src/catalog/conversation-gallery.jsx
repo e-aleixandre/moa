@@ -161,11 +161,11 @@ export function ConversationGallery() {
   const [streaming, setStreaming] = useState(true);
   return (
     <section>
-      <h2>Primitivas de conversación</h2>
+      <h2>Conversation primitives</h2>
       <p class="lead">
-        Registro de trabajo ("Studio"): el prompt del usuario es un waypoint,
-        el trabajo del agente fluye como documento, las tool calls van en un
-        activity ledger colapsable.
+        Work log ("Studio"): the user's prompt is a waypoint, the agent's work
+        flows as a document, and tool calls sit in a collapsible activity
+        ledger.
       </p>
 
       <div class="conv-stream">

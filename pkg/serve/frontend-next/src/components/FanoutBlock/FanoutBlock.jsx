@@ -64,8 +64,8 @@ function DoneRow({ name, result, resultDesc, onViewReport }) {
 // { id, name, accent, state: "running"|"done", action, time, result, resultDesc, onViewReport }
 // `id` is each subagent's stable key (recommended for live states
 // that update/reorder); falls back to the name if missing.
-// `onOpenAgent(id)` (5J) opens a running subagent's SubagentView when its row is
-// clicked (INC-06); done rows keep the explicit "view report →" affordance.
+// `onOpenAgent(id)` opens a running subagent's SubagentView when its row is
+// clicked; done rows keep the explicit "view report →" affordance.
 export function FanoutBlock({ task, count, startedAt, agents = [], onViewReport, onOpenAgent }) {
   const n = count ?? agents.length;
   return (

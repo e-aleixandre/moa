@@ -1,10 +1,10 @@
 // moa service worker.
 //
-// Lifecycle (Fase 1): minimal install/activate so moa serve is installable as a
+// Lifecycle: minimal install/activate so moa serve is installable as a
 // PWA. There is no offline caching — the app is only used over the tailnet
 // against a live server.
 //
-// Web Push (Fase 3): a 'push' handler turns the encrypted payload from
+// Web Push: a 'push' handler turns the encrypted payload from
 // pkg/push.Dispatcher into a system notification, and 'notificationclick' routes
 // the tap to the right session (focusing an open window or opening a new one).
 

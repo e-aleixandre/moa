@@ -2,10 +2,10 @@
 // server sync. Distinct from notifications.js (in-page toasts/sound/vibration).
 // The UI observes pushState to render the "notifications" control.
 //
-// D4 (phase 5): /next does NOT register its own service worker. Push is handled
+// /next does NOT register its own service worker. Push is handled
 // by the ROOT service worker at /sw.js (scope /), which already exists in
-// pkg/serve/static/. A notification opens the old frontend until the phase-6
-// cutover — accepted.
+// pkg/serve/static/. A notification opens the old frontend until the cutover —
+// accepted.
 
 import { api } from './api.js';
 import { addToast } from './notifications.js';
@@ -59,7 +59,7 @@ function withTimeout(promise, ms, label) {
 // readyRegistration returns an active service-worker registration, registering
 // it on demand. We avoid navigator.serviceWorker.ready because on iOS it can
 // stay pending forever when the page isn't yet controlled by a worker. Instead
-// we register (or reuse) the ROOT worker (/sw.js, D4) and wait for it to reach
+// we register (or reuse) the ROOT worker (/sw.js) and wait for it to reach
 // 'activated'.
 async function readyRegistration() {
   let reg = await navigator.serviceWorker.getRegistration('/');

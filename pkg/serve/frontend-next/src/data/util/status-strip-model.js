@@ -1,6 +1,6 @@
 // status-strip-model — pure classifier that splits a session's telemetry into
 // the TWO levels of the redesigned StatusStrip (TELEMETRY-SETTINGS-REDESIGN
-// spec). It replaces the flat 11-pill dump ported in 5O with a hierarchy of
+// spec). It replaces a flat 11-pill dump with a hierarchy of
 // attention:
 //
 //   • Level 1 (the line, always in view): pulse (activity/ctx/cost, rendered by

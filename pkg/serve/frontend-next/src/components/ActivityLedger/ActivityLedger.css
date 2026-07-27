@@ -19,7 +19,7 @@
   background: color-mix(in srgb, var(--mantle) 65%, transparent);
   font-family: var(--mono);
   font-size: var(--text-sm);
-  /* THE AIR (#56): a clear gap off the prose above, generous below. */
+  /* THE AIR: a clear gap off the prose above, generous below. */
   margin: var(--space-4) 0 var(--space-5);
 }
 

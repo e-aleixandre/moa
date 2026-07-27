@@ -129,31 +129,26 @@ func (p pickerModel) View(width int) string {
 }
 
 func (p pickerModel) renderEntry(idx int, e pickerEntry) string {
-	// Cursor indicator.
 	cursor := "  "
 	if idx == p.cursor {
 		cursor = "▸ "
 	}
 
-	// Scoped indicator.
 	pin := "  "
 	if e.scoped {
 		pin = "● "
 	}
 
-	// Model name.
 	name := e.model.Name
 	if name == "" {
 		name = e.model.ID
 	}
 
-	// Alias hint.
 	alias := ""
 	if e.alias != "" {
 		alias = fmt.Sprintf(" (%s)", e.alias)
 	}
 
-	// Current marker.
 	current := ""
 	if e.current {
 		current = " ✓"

@@ -367,8 +367,8 @@ func TestLoop_SimpleTextResponse(t *testing.T) {
 	}
 }
 
-// TestIngress_AllUserMessagesGetMsgID is the contract guard for bug #13
-// (compact duplicating retained user messages). Every path that inserts a
+// TestIngress_AllUserMessagesGetMsgID is the contract guard against compact
+// duplicating retained user messages. Every path that inserts a
 // message into agent state must leave it with a non-empty MsgID before it can
 // be synced to the tree — otherwise the tree syncer first records it under a
 // positional "legacy:<index>" identity, then compaction assigns it a real
@@ -1925,8 +1925,8 @@ func TestCompact_SerializesAgainstRun(t *testing.T) {
 	}
 }
 
-// TestCompact_RetainedUserKeepsStableMsgID is the faithful integration guard for
-// bug #13. It drives real ingress (Send) followed by a real Compact() and checks
+// TestCompact_RetainedUserKeepsStableMsgID is the faithful integration guard
+// against the same duplication. It drives real ingress (Send) followed by a real Compact() and checks
 // that a user message retained across compaction keeps the SAME, non-empty MsgID
 // it had once synced. The bug: Send inserted the user without a MsgID, so the
 // tree syncer first recorded it under a positional "legacy:<index>" identity,
@@ -3126,7 +3126,7 @@ func TestLoop_EmptyResponseAccountsCostBeforeRetry(t *testing.T) {
 	}
 }
 
-// TestCheckpointReader_NilDuringPrepareRun locks H3: a prepare-compact run is
+// TestCheckpointReader_NilDuringPrepareRun locks in: a prepare-compact run is
 // discarded by restoreConversation, so an auto-compaction inside it must not
 // consume the checkpoint slot — otherwise the real compaction that follows
 // runs with an empty slot, losing the checkpoint entirely.

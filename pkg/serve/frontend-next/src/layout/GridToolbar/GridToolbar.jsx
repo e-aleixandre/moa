@@ -7,7 +7,7 @@ import "./GridToolbar.css";
 // ChatHead in the conversation view. Layout presets + splits + hint +
 // attention lamp (on the right).
 //
-// 5G — connected to the REAL layout presets (data/layoutPresets.js). Each mini
+// Connected to the REAL layout presets (data/layoutPresets.js). Each mini
 // preview is drawn with the preset's own `miniStyle`/`cells` (CSS grid), and a
 // click calls onPresetSelect(preset.id) → applyPreset. The active preset is
 // highlighted when `activePreset` matches its id (the container detects a match
