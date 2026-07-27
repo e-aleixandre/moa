@@ -146,6 +146,9 @@
 .file-viewer-image-wrap.is-zoomed {
   cursor: grab;
 }
+.file-viewer-image-wrap.is-zoomed:active {
+  cursor: grabbing;
+}
 .file-viewer-status {
   margin: auto;
   max-width: 360px;

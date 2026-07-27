@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 const MAX_SCALE = 8;
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_SLOP = 30; // px between taps that still counts as a double tap
+const TAP_SLOP = 10; // px of travel past which a touch is a pan, not a tap
 const DOUBLE_TAP_SCALE = 2.5;
 
 function distance(a, b) {
@@ -112,6 +113,7 @@ export function usePinchZoom({ minScale = 1 } = {}) {
         // keeps its normal scrolling.
         gesture.current = {
           pan: true,
+          moved: false,
           startTouchX: e.touches[0].clientX,
           startTouchY: e.touches[0].clientY,
           startX: tf.current.x,
@@ -126,8 +128,11 @@ export function usePinchZoom({ minScale = 1 } = {}) {
       if (!g) return;
       if (g.pan && e.touches.length === 1) {
         e.preventDefault();
-        tf.current.x = g.startX + (e.touches[0].clientX - g.startTouchX);
-        tf.current.y = g.startY + (e.touches[0].clientY - g.startTouchY);
+        const dx = e.touches[0].clientX - g.startTouchX;
+        const dy = e.touches[0].clientY - g.startTouchY;
+        if (Math.hypot(dx, dy) > TAP_SLOP) g.moved = true;
+        tf.current.x = g.startX + dx;
+        tf.current.y = g.startY + dy;
         clamp();
         apply();
         return;
@@ -154,12 +159,17 @@ export function usePinchZoom({ minScale = 1 } = {}) {
     };
 
     const onTouchEnd = (e) => {
+      // Whether the finger travelled has to survive into the tap handler, which
+      // runs right after this one — otherwise a pan that ends near where the
+      // previous one ended reads as a double tap and throws the zoom away.
+      if (gesture.current?.pan && gesture.current.moved) lastTap.current = { t: 0, x: 0, y: 0 };
       if (e.touches.length === 0) gesture.current = null;
       else if (e.touches.length === 1 && gesture.current && !gesture.current.pan) {
         // Lifting one finger of a pinch continues as a pan rather than
         // freezing until every finger is up.
         gesture.current = {
           pan: true,
+          moved: true,
           startTouchX: e.touches[0].clientX,
           startTouchY: e.touches[0].clientY,
           startX: tf.current.x,
@@ -199,9 +209,51 @@ export function usePinchZoom({ minScale = 1 } = {}) {
 
     // Trackpad pinch and ctrl+wheel on desktop arrive as a wheel event.
     const onWheel = (e) => {
-      if (!e.ctrlKey) return;
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setScale(tf.current.scale * (1 - e.deltaY * 0.01), e.clientX, e.clientY);
+        return;
+      }
+      // Zoomed in, a plain wheel scrolls the content the way the overflow it
+      // replaced used to. At rest it is left alone so the page still scrolls.
+      if (tf.current.scale <= minScale) return;
       e.preventDefault();
-      setScale(tf.current.scale * (1 - e.deltaY * 0.01), e.clientX, e.clientY);
+      tf.current.x -= e.deltaX;
+      tf.current.y -= e.deltaY;
+      clamp();
+      apply();
+    };
+
+    // Mouse drag to pan. The touch path cannot cover this: without it, zooming
+    // in on a desktop would crop the image with no way to reach the rest.
+    const onPointerDown = (e) => {
+      if (e.pointerType === "touch" || e.button !== 0 || tf.current.scale <= minScale) return;
+      e.preventDefault();
+      container.setPointerCapture?.(e.pointerId);
+      gesture.current = {
+        mouse: true,
+        startTouchX: e.clientX,
+        startTouchY: e.clientY,
+        startX: tf.current.x,
+        startY: tf.current.y,
+      };
+      content.style.transition = "";
+    };
+
+    const onPointerMove = (e) => {
+      const g = gesture.current;
+      if (!g?.mouse) return;
+      e.preventDefault();
+      tf.current.x = g.startX + (e.clientX - g.startTouchX);
+      tf.current.y = g.startY + (e.clientY - g.startTouchY);
+      clamp();
+      apply();
+    };
+
+    const onPointerUp = (e) => {
+      if (!gesture.current?.mouse) return;
+      container.releasePointerCapture?.(e.pointerId);
+      gesture.current = null;
     };
 
     const onDoubleClick = (e) => {
@@ -220,6 +272,10 @@ export function usePinchZoom({ minScale = 1 } = {}) {
     container.addEventListener("touchend", onTouchEndTap, opts);
     container.addEventListener("wheel", onWheel, opts);
     container.addEventListener("dblclick", onDoubleClick);
+    container.addEventListener("pointerdown", onPointerDown, opts);
+    container.addEventListener("pointermove", onPointerMove, opts);
+    container.addEventListener("pointerup", onPointerUp);
+    container.addEventListener("pointercancel", onPointerUp);
     return () => {
       container.removeEventListener("touchstart", onTouchStart, opts);
       container.removeEventListener("touchmove", onTouchMove, opts);
@@ -228,6 +284,10 @@ export function usePinchZoom({ minScale = 1 } = {}) {
       container.removeEventListener("touchend", onTouchEndTap, opts);
       container.removeEventListener("wheel", onWheel, opts);
       container.removeEventListener("dblclick", onDoubleClick);
+      container.removeEventListener("pointerdown", onPointerDown, opts);
+      container.removeEventListener("pointermove", onPointerMove, opts);
+      container.removeEventListener("pointerup", onPointerUp);
+      container.removeEventListener("pointercancel", onPointerUp);
     };
     // `zoomed` is read inside the handlers only to avoid redundant setState;
     // rebinding on every zoom change would tear down mid-gesture.

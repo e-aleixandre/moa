@@ -170,3 +170,29 @@ func TestImageDimensions_UnknownStaysZero(t *testing.T) {
 		}
 	}
 }
+
+// The entry points (read tool, attachments) hand over decoded bytes, and those
+// must be measured however far in the frame header sits — a cap there would be
+// a way in for an image with enough metadata in front of it.
+func TestImageDimensions_JPEGWithVeryLateSOF(t *testing.T) {
+	buf := []byte{0xff, 0xd8}
+	// ~5 MB of APP1 segments, past both imageHeaderBytes and jpegScanBytes.
+	for len(buf) < 5<<20 {
+		seg := make([]byte, 65535)
+		binary.BigEndian.PutUint16(seg[0:2], 65535)
+		buf = append(buf, 0xff, 0xe1)
+		buf = append(buf, seg...)
+	}
+	sof := make([]byte, 11)
+	binary.BigEndian.PutUint16(sof[0:2], 11)
+	sof[2] = 8
+	binary.BigEndian.PutUint16(sof[3:5], 9001)
+	binary.BigEndian.PutUint16(sof[5:7], 40)
+	buf = append(buf, 0xff, 0xc0)
+	buf = append(buf, sof...)
+
+	w, h := ImageDimensions(buf)
+	if w != 40 || h != 9001 {
+		t.Fatalf("got %dx%d, want 40x9001 (the guarded paths must not cap the scan)", w, h)
+	}
+}

@@ -34,10 +34,10 @@ const MaxImageDimension = 8000
 // than this — scanJPEGSize handles that case without buffering the whole file.
 const imageHeaderBytes = 256 << 10
 
-// jpegScanBytes bounds the segment walk for a JPEG whose SOF sits past
-// imageHeaderBytes. The walk jumps segment to segment rather than reading them,
-// so this only bounds how far a deliberately padded file can push the frame
-// header before it is treated as unmeasurable.
+// jpegScanBytes bounds how much of a base64 payload is decoded when looking for
+// a frame header that is not near the front. It only applies to the base64 path
+// (the last-resort check on an already-recorded image); the callers that guard
+// the way in hand over the decoded bytes and are measured in full.
 const jpegScanBytes = 4 << 20
 
 // ImageDimensions reports the pixel size from an image header. Returns 0,0 when
@@ -114,12 +114,13 @@ func webPSize(data []byte) (width, height int, ok bool) {
 // metadata segments by their declared length instead of decoding them. Used
 // when the SOF marker sits beyond imageHeaderBytes, which happens with large
 // EXIF or embedded colour profiles.
+//
+// The walk is not length-capped: it jumps from segment to segment, so its cost
+// is the number of segments, not the size of the file. Capping it would leave
+// a way in for an image with enough metadata in front of its frame header.
 func scanJPEGSize(data []byte) (width, height int, ok bool) {
 	if len(data) < 4 || data[0] != 0xff || data[1] != 0xd8 {
 		return 0, 0, false
-	}
-	if len(data) > jpegScanBytes {
-		data = data[:jpegScanBytes]
 	}
 	for i := 2; i+3 < len(data); {
 		if data[i] != 0xff {
