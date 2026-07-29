@@ -98,3 +98,20 @@ func (sm *StateMachine) ForceState(s SessionState) {
 	defer sm.mu.Unlock()
 	sm.current = s
 }
+
+// DoIfIdle runs fn while holding the state lock, but only if the current state
+// is idle (not running, not permission, not error). It returns whether fn ran.
+// Holding the lock across fn makes the idle check and fn atomic with respect to
+// state transitions: a run cannot start (idle → running) while fn executes, so a
+// caller that mutates the live tool set under it cannot race a run beginning.
+// fn must not call back into the state machine (it would deadlock) and should be
+// short.
+func (sm *StateMachine) DoIfIdle(fn func()) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.current != StateIdle {
+		return false
+	}
+	fn()
+	return true
+}

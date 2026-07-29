@@ -19,6 +19,13 @@ type mcpControl interface {
 	SetScopeDisabled(scope core.MCPDisableScope, name string, disabled bool)
 	Reconcile(ctx context.Context) []mcp.ControllerStatus
 	Restart(ctx context.Context, name string) (mcp.ServerStatus, error)
+	// SessionDisabled returns the server names vetoed in SESSION scope, and
+	// SetSessionDisabled replaces that set wholesale. The TUI uses these to keep
+	// the session (process-memory) scope per-conversation: on a conversation
+	// switch it saves the outgoing set and restores the incoming one, so a
+	// session-scope veto set in one conversation doesn't leak into another.
+	SessionDisabled() []string
+	SetSessionDisabled(names []string)
 }
 
 // mcpScopeOrder is the cycle order for the 's' key, defaulting to session.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -129,12 +130,24 @@ type appModel struct {
 	// picker stays busy until the outstanding action completes.
 	mcpActionGen     uint64
 	mcpActionPending bool
-	cmdPalette       cmdPalette
-	filePicker       filePicker
-	permPrompt       permissionPrompt
-	askPrompt        askPrompt
-	sessionBrowser   sessionBrowser
-	statusBar        *StatusLine
+	// mcpReconcileArmed is a one-flight guard for a deferred MCP reconcile that
+	// drains at the next quiescence when a toggle happened while busy. Pointer
+	// because appModel is copied by value throughout the Bubble Tea loop.
+	mcpReconcileArmed *atomic.Bool
+	// mcpSessionVetoes remembers each conversation's SESSION-scope MCP vetoes by
+	// session ID. The TUI shares one controller, so switching conversations must
+	// save the outgoing set and restore the incoming one; otherwise a session
+	// veto set in one conversation would leak into another.
+	mcpSessionVetoes map[string][]string
+	// mcpActiveSessionID is the conversation whose session vetoes are currently
+	// loaded into the controller (so a switch knows which set to save).
+	mcpActiveSessionID string
+	cmdPalette         cmdPalette
+	filePicker         filePicker
+	permPrompt         permissionPrompt
+	askPrompt          askPrompt
+	sessionBrowser     sessionBrowser
+	statusBar          *StatusLine
 
 	// Session persistence
 	sessionStore session.SessionStore
@@ -263,6 +276,8 @@ func New(ctx context.Context, cfg Config) appModel {
 		unsubAll:             unsubAll,
 		baseCtx:              ctx,
 		mcpCtrl:              mcpControlOrNil(cfg.MCPController),
+		mcpSessionVetoes:     map[string][]string{},
+		mcpReconcileArmed:    &atomic.Bool{},
 		renderer:             newRenderer(80),
 		viewport:             vp,
 		input:                newInput(),
@@ -288,6 +303,12 @@ func New(ctx context.Context, cfg Config) appModel {
 		m.statusBar.UpdateVersionSegment(cfg.ReleaseInfo.DisplayVersion(), "")
 	}
 	m.filePicker.SetWorkDir(cfg.CWD)
+
+	// Anchor the MCP session-scope to the initial conversation so a later switch
+	// saves/restores the right per-conversation veto set.
+	if cfg.Session != nil {
+		m.mcpActiveSessionID = cfg.Session.ID
+	}
 
 	// Query initial state from bus for display.
 	b := cfg.Runtime.Bus

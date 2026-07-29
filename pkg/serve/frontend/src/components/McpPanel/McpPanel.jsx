@@ -160,18 +160,28 @@ export function McpPanel({ sessionId, mcpTick }) {
   // load superseded by a newer one (e.g. a fast mcpTick after switching).
   const reqSeqRef = useRef(0);
 
+  // Tracks the panel's current session for async callbacks that captured an
+  // older `load` (e.g. a ServerRow mutation that resolves after a session
+  // switch): they must not commit stale rows into a different session's panel.
+  const liveSessionRef = useRef(sessionId);
+  useEffect(() => {
+    liveSessionRef.current = sessionId;
+  }, [sessionId]);
+
   const load = useCallback(() => {
     if (!sessionId) return;
     const seq = ++reqSeqRef.current;
     const forSession = sessionId;
     api("GET", `/api/sessions/${sessionId}/mcp`)
       .then((r) => {
-        if (seq !== reqSeqRef.current || forSession !== sessionId) return; // superseded
+        // Drop if superseded by a newer load or if the panel moved to another
+        // session since this load was issued (liveSessionRef is always current).
+        if (seq !== reqSeqRef.current || forSession !== liveSessionRef.current) return;
         setData(r && Array.isArray(r.servers) ? r : { servers: [], available_scopes: {} });
         setFailed(false);
       })
       .catch(() => {
-        if (seq !== reqSeqRef.current || forSession !== sessionId) return;
+        if (seq !== reqSeqRef.current || forSession !== liveSessionRef.current) return;
         setFailed(true);
       });
   }, [sessionId]);

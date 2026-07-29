@@ -222,3 +222,24 @@ func TestStateMachine_LastError(t *testing.T) {
 		t.Fatalf("after idle, lastError = %q, want empty", sm.LastError())
 	}
 }
+
+// TestStateMachine_DoIfIdle: fn runs (and returns true) only when idle; when
+// the machine is running the callback is skipped and false is returned. This is
+// the atomicity primitive the MCP reconcile relies on to avoid mutating the
+// tool set as a run begins.
+func TestStateMachine_DoIfIdle(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sm := NewStateMachine(b, "s1")
+
+	ran := false
+	if ok := sm.DoIfIdle(func() { ran = true }); !ok || !ran {
+		t.Fatalf("DoIfIdle should run fn when idle (ok=%v ran=%v)", ok, ran)
+	}
+
+	sm.MustTransition(StateRunning)
+	ran = false
+	if ok := sm.DoIfIdle(func() { ran = true }); ok || ran {
+		t.Fatalf("DoIfIdle must skip fn when running (ok=%v ran=%v)", ok, ran)
+	}
+}

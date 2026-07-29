@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/mcp"
 )
@@ -15,6 +18,51 @@ func mcpControlOrNil(c *mcp.Controller) mcpControl {
 		return nil
 	}
 	return c
+}
+
+// switchMCPSessionScope saves the current conversation's SESSION-scope MCP
+// vetoes and loads the incoming conversation's, keeping the process-memory
+// session scope per-conversation on the shared controller. It reconciles when
+// the set actually changes so the tool registry matches the new conversation.
+// No-op without a controller.
+func (m *appModel) switchMCPSessionScope(newSessionID string) {
+	if m.mcpCtrl == nil {
+		return
+	}
+	if m.mcpActiveSessionID == newSessionID {
+		return
+	}
+	// Save the outgoing conversation's session vetoes.
+	if m.mcpActiveSessionID != "" {
+		m.mcpSessionVetoes[m.mcpActiveSessionID] = m.mcpCtrl.SessionDisabled()
+	}
+	// Load the incoming conversation's set (empty if never toggled).
+	incoming := m.mcpSessionVetoes[newSessionID]
+	before := m.mcpCtrl.SessionDisabled()
+	m.mcpCtrl.SetSessionDisabled(incoming)
+	m.mcpActiveSessionID = newSessionID
+	// Reconcile only if the effective set changed (order-insensitive compare).
+	if !sameStringSet(before, incoming) {
+		m.mcpCtrl.Reconcile(m.baseCtx)
+		m.updateMCPSegment()
+	}
+}
+
+// sameStringSet reports whether two name slices contain the same set of names.
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, x := range a {
+		seen[x] = struct{}{}
+	}
+	for _, y := range b {
+		if _, ok := seen[y]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // handleMCPCommand opens the /mcp picker. It refuses while the agent is running
@@ -167,6 +215,7 @@ func (m appModel) applyMCPToggle(scope core.MCPDisableScope, name string, disabl
 
 	ctrl := m.mcpCtrl
 	ctx := m.baseCtx
+	rt := m.runtime
 	m.mcpActionGen++
 	gen := m.mcpActionGen
 	m.mcpActionPending = true
@@ -175,9 +224,41 @@ func (m appModel) applyMCPToggle(scope core.MCPDisableScope, name string, disabl
 	m.updateViewport()
 	return m, func() tea.Msg {
 		ctrl.SetScopeDisabled(scope, name, disabled)
-		ctrl.Reconcile(ctx)
-		return mcpActionResultMsg{gen: gen, action: "toggle", name: name, scope: scope, disabled: disabled}
+		// Reconcile atomically against run-start (parity with serve): if a run or
+		// background job is active, defer — the preference is recorded and applied
+		// at the next quiescence.
+		applied := true
+		if rt != nil {
+			applied = rt.DoIfQuiescent(func() { ctrl.Reconcile(ctx) })
+			if !applied {
+				m.armTUIReconcile(ctrl, ctx, rt)
+			}
+		} else {
+			ctrl.Reconcile(ctx)
+		}
+		return mcpActionResultMsg{gen: gen, action: "toggle", name: name, scope: scope, disabled: disabled, deferred: !applied}
 	}
+}
+
+// armTUIReconcile drains a deferred MCP reconcile at the next quiescence,
+// mirroring serve's armMCPReconcile. It is one-flight per controller/runtime and
+// re-tries if a run sneaks in before it can reconcile under the state lock.
+func (m *appModel) armTUIReconcile(ctrl mcpControl, ctx context.Context, rt *bus.SessionRuntime) {
+	if !m.mcpReconcileArmed.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer m.mcpReconcileArmed.Store(false)
+		for {
+			if !rt.WaitQuiescent(ctx) {
+				return // context cancelled
+			}
+			if rt.DoIfQuiescent(func() { ctrl.Reconcile(ctx) }) {
+				rt.Bus.Publish(bus.MCPChanged{})
+				return
+			}
+		}
+	}()
 }
 
 // mcpPickerRestart restarts the selected server if it is enabled, off the UI
@@ -187,8 +268,13 @@ func (m appModel) mcpPickerRestart() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if st.State == mcp.StateDisabled || !st.Enabled {
+	if st.State == mcp.StateDisabled || !st.Enabled || !st.DesiredEnabled {
 		m.mcpPicker.status = "Server is disabled; enable it first."
+		m.updateViewport()
+		return m, nil
+	}
+	if st.PendingAction != "" {
+		m.mcpPicker.status = "Server is settling; try again in a moment."
 		m.updateViewport()
 		return m, nil
 	}
@@ -238,6 +324,14 @@ func (m *appModel) handleMCPActionResult(msg mcpActionResultMsg) {
 	case "restart":
 		m.mcpPicker.status = msg.name + " restarted."
 	default: // toggle
+		if msg.deferred {
+			verb := "enable"
+			if msg.disabled {
+				verb = "disable"
+			}
+			m.mcpPicker.status = "Will " + verb + " " + msg.name + " in " + mcpScopeLabel(msg.scope) + " when work finishes."
+			break
+		}
 		st, _ := m.mcpPickerServer(msg.name)
 		switch {
 		case !msg.disabled && len(st.DisabledScopes) > 0:

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -51,6 +52,38 @@ func (f *fakeMCPControl) Reconcile(context.Context) []mcp.ControllerStatus {
 func (f *fakeMCPControl) Restart(_ context.Context, name string) (mcp.ServerStatus, error) {
 	f.restarts = append(f.restarts, name)
 	return mcp.ServerStatus{Name: name}, f.restartErr
+}
+
+func (f *fakeMCPControl) SessionDisabled() []string {
+	var out []string
+	for _, st := range f.servers {
+		if scopeVetoes(st, core.MCPScopeSession) {
+			out = append(out, st.Name)
+		}
+	}
+	return out
+}
+
+func (f *fakeMCPControl) SetSessionDisabled(names []string) {
+	want := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		want[n] = struct{}{}
+	}
+	for i := range f.servers {
+		_, veto := want[f.servers[i].Name]
+		has := scopeVetoes(f.servers[i], core.MCPScopeSession)
+		if veto && !has {
+			f.servers[i].DisabledScopes = append(f.servers[i].DisabledScopes, core.MCPScopeSession)
+		} else if !veto && has {
+			var kept []core.MCPDisableScope
+			for _, s := range f.servers[i].DisabledScopes {
+				if s != core.MCPScopeSession {
+					kept = append(kept, s)
+				}
+			}
+			f.servers[i].DisabledScopes = kept
+		}
+	}
 }
 
 func boolStr(b bool) string {
@@ -146,6 +179,8 @@ func newMCPTestModel(ctrl mcpControl) appModel {
 	m := newTestModel()
 	m.statusBar = NewStatusLine(statusLineStyle)
 	m.mcpCtrl = ctrl
+	m.mcpSessionVetoes = map[string][]string{}
+	m.mcpReconcileArmed = &atomic.Bool{}
 	return m
 }
 
@@ -310,5 +345,29 @@ func TestMCPReopenStaysBusyAndIgnoresStaleResult(t *testing.T) {
 	m.handleMCPActionResult(staleMsg)
 	if !m.mcpActionPending || !m.mcpPicker.busy {
 		t.Fatal("a stale result must be ignored (pending/busy preserved)")
+	}
+}
+
+// TestMCPSessionScopePerConversation: a SESSION-scope veto set in conversation A
+// must not leak into conversation B, and must be restored when returning to A.
+func TestMCPSessionScopePerConversation(t *testing.T) {
+	f := &fakeMCPControl{servers: mcpStatuses()}
+	m := newMCPTestModel(f)
+	m.mcpActiveSessionID = "A"
+
+	// Disable github in SESSION scope for conversation A.
+	f.SetSessionDisabled([]string{"github"})
+
+	// Switch to B: A's session veto is saved, B starts clean.
+	m.switchMCPSessionScope("B")
+	if got := f.SessionDisabled(); len(got) != 0 {
+		t.Fatalf("conversation B should have no session vetoes, got %v", got)
+	}
+
+	// Back to A: its veto is restored.
+	m.switchMCPSessionScope("A")
+	got := f.SessionDisabled()
+	if len(got) != 1 || got[0] != "github" {
+		t.Fatalf("conversation A should restore its session veto, got %v", got)
 	}
 }

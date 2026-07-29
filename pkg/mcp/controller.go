@@ -219,11 +219,78 @@ func (c *Controller) SetScopeDisabled(scope core.MCPDisableScope, name string, d
 	}
 }
 
+// Policy returns a deep copy of the controller's current in-memory disable
+// policy (all scopes). Callers use it to rebuild a replacement manager/controller
+// on reload from the LIVE policy, not a stale bootstrap snapshot.
+func (c *Controller) Policy() core.MCPDisablePolicy {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cp := func(m map[string]struct{}) map[string]struct{} {
+		if m == nil {
+			return nil
+		}
+		out := make(map[string]struct{}, len(m))
+		for k := range m {
+			out[k] = struct{}{}
+		}
+		return out
+	}
+	return core.MCPDisablePolicy{
+		Global:  cp(c.policy.Global),
+		Project: cp(c.policy.Project),
+		Session: cp(c.policy.Session),
+	}
+}
+
+// SessionDisabled returns the server names currently vetoed in SESSION scope.
+func (c *Controller) SessionDisabled() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.policy.Session))
+	for name := range c.policy.Session {
+		out = append(out, name)
+	}
+	return out
+}
+
+// SetSessionDisabled replaces the SESSION-scope veto set wholesale (global and
+// project scopes are untouched). It does not reconcile; the caller reconciles at
+// quiescence. Used by single-controller frontends (the TUI) to swap the
+// process-memory session scope when the active conversation changes.
+func (c *Controller) SetSessionDisabled(names []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	set := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		if n != "" {
+			set[n] = struct{}{}
+		}
+	}
+	c.policy.Session = set
+}
+
 // Restart restarts one server and re-syncs its tools by exact name. It refuses a
-// disabled server (ErrServerDisabled) — restart must not bypass policy.
+// server the policy wants disabled — whether already applied (Manager returns
+// ErrServerDisabled) or still pending a deferred reconcile — so restart never
+// bypasses a desired disable and spawns a process that policy says should be off.
 func (c *Controller) Restart(ctx context.Context, name string) (ServerStatus, error) {
 	c.op.Lock()
 	defer c.op.Unlock()
+
+	// Honor the desired policy, not just the applied state: a busy toggle records
+	// a veto (pending) while the process is still running, and a restart must not
+	// revive it.
+	c.mu.Lock()
+	policy := c.policy
+	c.mu.Unlock()
+	if core.ResolveMCPDisabled(name, policy).Disabled {
+		for _, st := range c.mgr.Status() {
+			if st.Name == name {
+				return st, ErrServerDisabled
+			}
+		}
+		return ServerStatus{}, ErrServerDisabled
+	}
 
 	st, err := c.mgr.RestartServer(ctx, name)
 	if err != nil {

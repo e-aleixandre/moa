@@ -457,6 +457,20 @@ func (r *SessionRuntime) IsQuiescent() bool {
 	return state != StateRunning && state != StatePermission && !r.sctx.hasBackgroundWork()
 }
 
+// DoIfQuiescent runs fn atomically with respect to run-start if the session is
+// quiescent, returning whether it ran. It holds the state lock across fn (via
+// StateMachine.DoIfIdle) so a run cannot begin between the quiescence check and
+// fn — closing the check-then-act race for a live tool-set mutation. Background
+// work is also required to be absent; that part is a snapshot (background jobs
+// don't flip a tool set mid-fn), but the run-start edge, which does, is
+// serialized. fn must not call back into the state machine.
+func (r *SessionRuntime) DoIfQuiescent(fn func()) bool {
+	if r.sctx.hasBackgroundWork() {
+		return false
+	}
+	return r.State.DoIfIdle(fn)
+}
+
 // WaitQuiescent waits for the complete autonomous session chain to finish.
 // Unlike WaitSettled, it does not return in the gap after a foreground run
 // becomes idle while auto-verify, a goal verifier, or an asynchronous child

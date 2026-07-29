@@ -148,6 +148,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
 	moaCfg := m.loadConfig(cwd)
+	var mcpSources *core.MCPDisableSources
+	if m.mcpSourcesLoader != nil {
+		mcpSources = m.mcpSourcesLoader(cwd)
+	}
 
 	cpStore := checkpoint.New(20)
 	subagentTexts := &sync.Map{}
@@ -165,6 +169,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Provider:           prov,
 		ProviderFactory:    m.providerFactory,
 		MoaCfg:             &moaCfg,
+		MCPDisableSources:  mcpSources,
 		Ctx:                sessionCtx,
 		EnableAskUser:      true,
 		BeforeWrite:        cpStore.Capture,
@@ -930,13 +935,21 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 
 	merged := core.MergeMCPServers(sessionCfg.MCPServers, projectServers)
 
+	// Use the LIVE disable policy (session toggles mutate the controller, not the
+	// bootstrap snapshot in infra.mcpPolicy), so a reload doesn't revive a server
+	// disabled since startup.
+	reloadPolicy := s.infra.mcpPolicy
+	if s.infra.mcpController != nil {
+		reloadPolicy = s.infra.mcpController.Policy()
+	}
+
 	var newMgr *mcp.Manager
 	var newTools []core.Tool
 	if len(merged) > 0 {
 		newMgr = mcp.NewManager(nil, s.CWD)
 		// Honor the session's disable policy on reload too, so a vetoed server
 		// isn't spawned just because the project's .mcp.json became trusted.
-		newMgr.Start(s.infra.sessionCtx, merged, s.infra.mcpPolicy.DisabledSet())
+		newMgr.Start(s.infra.sessionCtx, merged, reloadPolicy.DisabledSet())
 		newTools = newMgr.Tools()
 	}
 
@@ -975,7 +988,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		s.infra.mcpController = mcp.NewController(mcp.ControllerConfig{
 			Manager:  newMgr,
 			Registry: s.infra.toolReg,
-			Policy:   s.infra.mcpPolicy,
+			Policy:   reloadPolicy,
 		})
 	} else {
 		s.infra.mcpController = nil

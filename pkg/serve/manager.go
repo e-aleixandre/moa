@@ -385,8 +385,12 @@ type Manager struct {
 	workspaceRoot   string
 	moaCfg          core.MoaConfig
 	configLoader    func(cwd string) core.MoaConfig
-	sessionBaseDir  string // root for session stores; empty = default (~/.config/moa/sessions/)
-	attachStore     *attachment.Store
+	// mcpSourcesLoader resolves the provenance (global vs project) of MCP disable
+	// vetoes for a cwd. nil when a custom ConfigLoader is in use (tests), in which
+	// case bootstrap falls back to treating the merged list as global.
+	mcpSourcesLoader func(cwd string) *core.MCPDisableSources
+	sessionBaseDir   string // root for session stores; empty = default (~/.config/moa/sessions/)
+	attachStore      *attachment.Store
 
 	// savedCache caches the result of session.ListAll to avoid
 	// re-scanning disk on every poll (frontend polls every 3s).
@@ -439,8 +443,16 @@ type ManagerConfig struct {
 // runs — cancelling it aborts every active session.
 func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	configLoader := cfg.ConfigLoader
+	// mcpSourcesLoader is wired only for the standard config loader; a custom
+	// ConfigLoader (tests) leaves it nil, and bootstrap then treats disabled
+	// servers as global-scoped.
+	var mcpSourcesLoader func(cwd string) *core.MCPDisableSources
 	if configLoader == nil {
 		configLoader = core.LoadMoaConfig
+		mcpSourcesLoader = func(cwd string) *core.MCPDisableSources {
+			src := core.LoadMoaConfigResolved(cwd).MCPDisabled
+			return &src
+		}
 	}
 	schedulePath := cfg.SchedulePath
 	if schedulePath == "" {
@@ -487,26 +499,27 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		slog.Warn("conversation cursor key unavailable", "error", err)
 	}
 	m := &Manager{
-		sessions:        make(map[string]*ManagedSession),
-		resuming:        make(map[string]struct{}),
-		baseCtx:         ctx,
-		providerFactory: cfg.ProviderFactory,
-		transcriber:     cfg.Transcriber,
-		usagePoller:     cfg.UsagePoller,
-		pushStore:       cfg.PushStore,
-		pushDispatcher:  cfg.PushDispatcher,
-		defaultModel:    cfg.DefaultModel,
-		workspaceRoot:   cfg.WorkspaceRoot,
-		moaCfg:          cfg.MoaCfg,
-		configLoader:    configLoader,
-		sessionBaseDir:  cfg.SessionBaseDir,
-		attachStore:     attachStore,
-		savedCacheTTL:   30 * time.Second,
-		fileScanner:     files.NewScanner(),
-		scheduler:       scheduler,
-		attention:       attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
-		conversationKey: conversationKey,
-		version:         release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
+		sessions:         make(map[string]*ManagedSession),
+		resuming:         make(map[string]struct{}),
+		baseCtx:          ctx,
+		providerFactory:  cfg.ProviderFactory,
+		transcriber:      cfg.Transcriber,
+		usagePoller:      cfg.UsagePoller,
+		pushStore:        cfg.PushStore,
+		pushDispatcher:   cfg.PushDispatcher,
+		defaultModel:     cfg.DefaultModel,
+		workspaceRoot:    cfg.WorkspaceRoot,
+		moaCfg:           cfg.MoaCfg,
+		configLoader:     configLoader,
+		mcpSourcesLoader: mcpSourcesLoader,
+		sessionBaseDir:   cfg.SessionBaseDir,
+		attachStore:      attachStore,
+		savedCacheTTL:    30 * time.Second,
+		fileScanner:      files.NewScanner(),
+		scheduler:        scheduler,
+		attention:        attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
+		conversationKey:  conversationKey,
+		version:          release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
 	if cfg.UpdateCheckEnabled && cfg.UpdateChecker != nil {
 		go func() {

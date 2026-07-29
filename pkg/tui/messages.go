@@ -51,6 +51,7 @@ type mcpActionResultMsg struct {
 	name     string
 	scope    core.MCPDisableScope
 	disabled bool // toggle's target state (only meaningful for action=="toggle")
+	deferred bool // toggle recorded but reconcile deferred to quiescence (busy)
 	err      error
 }
 

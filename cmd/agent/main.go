@@ -240,6 +240,10 @@ func main() {
 	// File checkpoints for /undo.
 	cpStore := checkpoint.New(20)
 
+	// Resolve MCP disable provenance from disk (reflecting any project-config
+	// trust just granted), so project-scope vetoes aren't misattributed to global.
+	mcpDisableSources := core.LoadMoaConfigResolved(cwd).MCPDisabled
+
 	sess, err := bootstrap.BuildSession(bootstrap.SessionConfig{
 		CWD:      cwd,
 		Model:    resolvedModel,
@@ -252,6 +256,7 @@ func main() {
 			return build.Provider, nil
 		},
 		MoaCfg:              &moaCfg,
+		MCPDisableSources:   &mcpDisableSources,
 		Ctx:                 ctx,
 		ThinkingLevel:       *thinking,
 		MaxTurns:            *maxTurns,

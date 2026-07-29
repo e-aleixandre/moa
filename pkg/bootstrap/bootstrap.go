@@ -46,6 +46,14 @@ type SessionConfig struct {
 	// Config overrides. When nil, loaded from disk via core.LoadMoaConfig(CWD).
 	MoaCfg *core.MoaConfig
 
+	// MCPDisableSources gives the provenance (global/project) of MCP disable
+	// vetoes when MoaCfg is injected. The merged MoaCfg.DisabledMCPServers loses
+	// which scope each name came from, so callers that inject MoaCfg should also
+	// pass the resolved sources; otherwise a project-only veto would be
+	// misattributed to global and could never be cleared by editing Project.
+	// Ignored when MoaCfg is nil (bootstrap resolves provenance from disk).
+	MCPDisableSources *core.MCPDisableSources
+
 	// Context for MCP servers and subagent async jobs. Required.
 	Ctx context.Context
 
@@ -203,9 +211,15 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	var mcpDisableSources core.MCPDisableSources
 	if cfg.MoaCfg != nil {
 		moaCfg = *cfg.MoaCfg
-		// An injected config carries its own disabled list (project provenance
-		// is unknowable here, so treat it as global for resolution purposes).
-		mcpDisableSources = core.MCPDisableSources{Global: moaCfg.DisabledMCPServers}
+		if cfg.MCPDisableSources != nil {
+			// Caller supplied resolved provenance (global vs project); use it so
+			// scope editing and the panel tell the truth.
+			mcpDisableSources = *cfg.MCPDisableSources
+		} else {
+			// No provenance available: the merged list can only be treated as
+			// global for resolution purposes.
+			mcpDisableSources = core.MCPDisableSources{Global: moaCfg.DisabledMCPServers}
+		}
 	} else {
 		resolved := core.LoadMoaConfigResolved(cfg.CWD)
 		moaCfg = resolved.Config

@@ -151,6 +151,29 @@ func TestControllerRestartRefusesDisabled(t *testing.T) {
 	}
 }
 
+// TestControllerRestartRefusesPendingDisable: a server is running (ready), then
+// a veto is recorded but NOT yet reconciled (a busy toggle). Restart must honor
+// the desired policy and refuse, so it can't revive a server that is about to be
+// disabled.
+func TestControllerRestartRefusesPendingDisable(t *testing.T) {
+	c, _, _ := newTestController(t, map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, nil, core.MCPDisablePolicy{})
+	// Server is up. Record a session veto without reconciling.
+	c.SetScopeDisabled(core.MCPScopeSession, "ping", true)
+	st, err := c.Restart(context.Background(), "ping")
+	if err == nil {
+		t.Fatal("restart must refuse a server pending a disable")
+	}
+	if !errors.Is(err, ErrServerDisabled) {
+		t.Fatalf("want ErrServerDisabled, got %v", err)
+	}
+	// The status returned should still name the server for the caller's UI.
+	if st.Name != "" && st.Name != "ping" {
+		t.Fatalf("unexpected status name %q", st.Name)
+	}
+}
+
 // TestRestartPlatformGate documents that restart is gated on the platform's
 // ability to reap a process tree: on POSIX it is supported (a running server
 // restarts), on Windows RestartServer must return ErrRestartUnsupported. This

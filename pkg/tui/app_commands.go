@@ -957,6 +957,11 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.autoTitled = false
 
 	m.session = sess
+	// Keep the shared controller's SESSION-scope vetoes scoped to this
+	// conversation (save the old, load the new).
+	if sess != nil {
+		m.switchMCPSessionScope(sess.ID)
+	}
 	m.sessionBrowser.Close()
 	m.input.SetEnabled(true)
 	m.s.blocks = m.s.blocks[:0]

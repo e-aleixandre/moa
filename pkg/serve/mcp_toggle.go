@@ -75,14 +75,19 @@ func (s *ManagedSession) setMCPServerDisabled(scope core.MCPDisableScope, server
 
 	ctrl.SetScopeDisabled(scope, server, disabled)
 
-	if !s.runtime.IsQuiescent() {
-		// Record the preference and reconcile later; the deferred reconcile is
-		// armed once (armMCPReconcile) and drains at the next quiescence.
-		s.armMCPReconcile()
-		return false, nil
+	// Reconcile atomically with respect to run-start: DoIfQuiescent holds the
+	// state lock across the reconcile, so a SendPrompt can't begin a run between
+	// the idle check and the tool-set mutation.
+	if s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(s.infra.sessionCtx) }) {
+		return true, nil
 	}
-	ctrl.Reconcile(s.infra.sessionCtx)
-	return true, nil
+	// Not quiescent: record the preference; the deferred reconcile is armed once
+	// (armMCPReconcile) and drains at the next quiescence.
+	s.armMCPReconcile()
+	// Publish now so this and other affected sessions show the pending state
+	// live — the deferred change triggers no manager transition of its own.
+	s.publishMCPChanged()
+	return false, nil
 }
 
 // armMCPReconcile schedules a one-shot reconcile of this session's MCP policy at
@@ -94,17 +99,31 @@ func (s *ManagedSession) armMCPReconcile() {
 		return // already armed; the pending reconcile will pick up this change too
 	}
 	go func() {
-		if !s.runtime.WaitQuiescent(s.infra.sessionCtx) {
-			s.mcpReconcilePending.Store(false)
-			return // context cancelled (session tearing down)
-		}
-		s.mcpReconcilePending.Store(false)
-		s.mu.Lock()
-		ctrl := s.infra.mcpController
-		ctx := s.infra.sessionCtx
-		s.mu.Unlock()
-		if ctrl != nil {
-			ctrl.Reconcile(ctx)
+		// Loop: WaitQuiescent then reconcile atomically under the state lock. If a
+		// run sneaks in between the wait and the lock, DoIfQuiescent returns false
+		// and we wait again, so the deferred reconcile never mutates the tool set
+		// under a live run.
+		for {
+			if !s.runtime.WaitQuiescent(s.infra.sessionCtx) {
+				s.mcpReconcilePending.Store(false)
+				return // context cancelled (session tearing down)
+			}
+			s.mu.Lock()
+			ctrl := s.infra.mcpController
+			ctx := s.infra.sessionCtx
+			s.mu.Unlock()
+			if ctrl == nil {
+				s.mcpReconcilePending.Store(false)
+				return
+			}
+			done := s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(ctx) })
+			if done {
+				s.mcpReconcilePending.Store(false)
+				s.publishMCPChanged()
+				return
+			}
+			// Lost the race to a run that just started; wait for the next
+			// quiescence and try again.
 		}
 	}()
 }
