@@ -14,14 +14,15 @@
 .mcomposer {
   flex: none;
   background: var(--base);
-  /* Bottom = a small fixed gap PLUS the home-indicator safe area. This inset
-     sits below whatever the composer stacks on top of it — the persistent
-     status line (main conversation) or the subagent now-line — so neither needs
-     to re-add it. In an installed PWA env(safe-area-inset-bottom) reserves ~34px
-     for the home indicator; keep the fixed part tight so it doesn't stack into a
-     wasted strip. */
+  /* Bottom = the LARGER of a small visual gap or the home-indicator safe area,
+     never their sum. This reserve sits below whatever the composer stacks on top
+     of it — the persistent status line (main conversation) or the subagent
+     now-line — so neither needs to re-add it. env(safe-area-inset-bottom) varies
+     by device (0 on a phone with no home indicator, ~20-34px with one); max()
+     lets the browser pick, so the layout adapts instead of being calibrated to
+     one device's inset (which left a dead band on phones with a larger inset). */
   padding: var(--space-2) var(--space-3)
-    calc(var(--space-1) + 2px + env(safe-area-inset-bottom));
+    max(calc(var(--space-1) + 2px), env(safe-area-inset-bottom, 0px));
 }
 
 /* The shared Composer brings its own .composer-wrap/.composer; drop its own
