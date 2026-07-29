@@ -67,11 +67,22 @@ func (m appModel) handleMCPPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.updateViewport()
 				return m, nil
 			}
-		case tea.KeyEsc:
+		case tea.KeyEsc, tea.KeyCtrlC:
 			m.mcpPicker.pendingConfirm = mcpPendingToggle{}
 			m.mcpPicker.status = "Cancelled."
 			m.updateViewport()
 			return m, nil
+		}
+		return m, nil
+	}
+
+	// While a lifecycle action is in flight, only Esc/Ctrl-C (close) is honored;
+	// toggles/restarts are blocked to keep the controller single-writer.
+	if m.mcpPicker.busy {
+		if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlC {
+			m.mcpPicker.Close()
+			m.recomputeInputEnabled()
+			m.updateViewport()
 		}
 		return m, nil
 	}
@@ -133,11 +144,11 @@ func (m appModel) mcpPickerToggle() (tea.Model, tea.Cmd) {
 }
 
 // applyMCPToggle records the veto in the controller, persists project/global
-// scopes, reconciles, and refreshes the picker rows. It sets a transient status
-// that is honest about a removed override still leaving the server disabled by
-// another scope.
+// scopes, then reconciles OFF the UI goroutine (a reconcile can block for the
+// server start timeout). The live row/segment refresh arrives via
+// bus.MCPChanged; mcpActionResultMsg clears the busy state and reports the
+// honest outcome. A persist failure aborts before touching controller memory.
 func (m appModel) applyMCPToggle(scope core.MCPDisableScope, name string, disabled bool) (tea.Model, tea.Cmd) {
-	// Persist first for durable scopes; a failure leaves memory untouched.
 	if scope == core.MCPScopeProject || scope == core.MCPScopeGlobal {
 		save := core.SaveGlobalConfig
 		if scope == core.MCPScopeProject {
@@ -151,26 +162,20 @@ func (m appModel) applyMCPToggle(scope core.MCPDisableScope, name string, disabl
 		}
 	}
 
-	m.mcpCtrl.SetScopeDisabled(scope, name, disabled)
-	m.mcpCtrl.Reconcile(m.baseCtx)
-	m.refreshMCPPicker()
-
-	// Honest transient status: removing one veto may leave others.
-	st, _ := m.mcpPickerServer(name)
-	switch {
-	case !disabled && len(st.DisabledScopes) > 0:
-		m.mcpPicker.status = mcpScopeLabel(scope) + " override removed; still disabled by another scope."
-	case disabled:
-		m.mcpPicker.status = name + " disabled in " + mcpScopeLabel(scope) + "."
-	default:
-		m.mcpPicker.status = name + " enabled."
-	}
+	ctrl := m.mcpCtrl
+	ctx := m.baseCtx
+	m.mcpPicker.busy = true
+	m.mcpPicker.status = ""
 	m.updateViewport()
-	m.updateMCPSegment()
-	return m, nil
+	return m, func() tea.Msg {
+		ctrl.SetScopeDisabled(scope, name, disabled)
+		ctrl.Reconcile(ctx)
+		return mcpActionResultMsg{action: "toggle", name: name, scope: scope, disabled: disabled}
+	}
 }
 
-// mcpPickerRestart restarts the selected server if it is enabled.
+// mcpPickerRestart restarts the selected server if it is enabled, off the UI
+// goroutine (a restart can block for the server start timeout).
 func (m appModel) mcpPickerRestart() (tea.Model, tea.Cmd) {
 	st, ok := m.mcpPicker.selected()
 	if !ok {
@@ -181,16 +186,54 @@ func (m appModel) mcpPickerRestart() (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 	}
-	if _, err := m.mcpCtrl.Restart(m.baseCtx, st.Name); err != nil {
-		m.mcpPicker.status = "Restart failed: " + err.Error()
-		m.updateViewport()
-		return m, nil
+	ctrl := m.mcpCtrl
+	ctx := m.baseCtx
+	name := st.Name
+	m.mcpPicker.busy = true
+	m.mcpPicker.status = ""
+	m.updateViewport()
+	return m, func() tea.Msg {
+		_, err := ctrl.Restart(ctx, name)
+		return mcpActionResultMsg{action: "restart", name: name, err: err}
+	}
+}
+
+// handleMCPActionResult applies the outcome of an async toggle/restart: it
+// clears the busy flag, refreshes rows from the controller, and sets an honest
+// status. Live refresh of unrelated rows/segment happens via bus.MCPChanged.
+func (m *appModel) handleMCPActionResult(msg mcpActionResultMsg) {
+	m.mcpPicker.busy = false
+	if !m.mcpPicker.active {
+		return // picker was closed while the action ran; nothing to display
 	}
 	m.refreshMCPPicker()
-	m.mcpPicker.status = st.Name + " restarted."
+
+	if msg.err != nil {
+		switch msg.action {
+		case "restart":
+			m.mcpPicker.status = "Restart failed: " + msg.err.Error()
+		default:
+			m.mcpPicker.status = "Action failed: " + msg.err.Error()
+		}
+		m.updateViewport()
+		return
+	}
+
+	switch msg.action {
+	case "restart":
+		m.mcpPicker.status = msg.name + " restarted."
+	default: // toggle
+		st, _ := m.mcpPickerServer(msg.name)
+		switch {
+		case !msg.disabled && len(st.DisabledScopes) > 0:
+			m.mcpPicker.status = mcpScopeLabel(msg.scope) + " override removed; still disabled by another scope."
+		case msg.disabled:
+			m.mcpPicker.status = msg.name + " disabled in " + mcpScopeLabel(msg.scope) + "."
+		default:
+			m.mcpPicker.status = msg.name + " enabled."
+		}
+	}
 	m.updateViewport()
-	m.updateMCPSegment()
-	return m, nil
 }
 
 // refreshMCPPicker reloads the picker's server rows from the controller,

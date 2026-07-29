@@ -22,6 +22,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/checkpoint"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/mcp"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/provider/openai"
 	"github.com/ealeixandre/moa/pkg/release"
@@ -422,6 +423,27 @@ func main() {
 			}
 			return nil
 		})
+
+		// Wire the shared MCP controller into the TUI runtime, mirroring what
+		// serve does per session: (1) rebuild the base system prompt from the
+		// registry whenever the tool set changes (enable/disable/restart), and
+		// (2) publish bus.MCPChanged on every server transition so the status
+		// line and an open /mcp picker refresh live — including external crashes.
+		if sess.MCPController != nil {
+			toolReg := sess.ToolReg
+			build := sess.BuildBasePrompt
+			if toolReg != nil && build != nil {
+				sess.MCPController.SetRefreshPrompt(func() {
+					rt.RefreshBaseSystemPrompt(build(toolReg.Specs()))
+				})
+			}
+			if sess.MCPManager != nil {
+				mcpBus := rt.Bus
+				sess.MCPManager.OnChange(func(mcp.ServerStatus) {
+					mcpBus.Publish(bus.MCPChanged{})
+				})
+			}
+		}
 
 		// Attach persister BEFORE bus restore so state changes are persisted.
 		// Attach even in browser mode (persistedSess may be nil): the persister

@@ -190,8 +190,8 @@ func TestControllerSetScopeDisabledOnlyTouchesThatScope(t *testing.T) {
 	// Add a session veto on top of the global one.
 	c.SetScopeDisabled(core.MCPScopeSession, "ping", true)
 	st := findStatus(t, c, "ping")
-	if len(st.DisabledScopes) != 2 {
-		t.Fatalf("scopes = %v, want global+session", st.DisabledScopes)
+	if len(st.DisabledScopes) != 2 || st.DisabledScopes[0] != core.MCPScopeGlobal || st.DisabledScopes[1] != core.MCPScopeSession {
+		t.Fatalf("scopes = %v, want [global session] in stable order", st.DisabledScopes)
 	}
 
 	// Remove only the session veto: global must remain, server still disabled.

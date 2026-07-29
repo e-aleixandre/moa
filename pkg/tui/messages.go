@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/verify"
 )
@@ -38,6 +39,18 @@ type pinnedModelsSavedMsg struct{ err error }
 // Success display is handled by the CompactionEnded bus event.
 type compactResultMsg struct {
 	Err error
+}
+
+// mcpActionResultMsg reports the outcome of an async MCP lifecycle action
+// (reconcile after a toggle, or a restart) started from the /mcp picker. The
+// live row/segment refresh itself arrives via bus.MCPChanged; this message
+// clears the in-flight state and reports success or failure for that action.
+type mcpActionResultMsg struct {
+	action   string // "toggle" or "restart"
+	name     string
+	scope    core.MCPDisableScope
+	disabled bool // toggle's target state (only meaningful for action=="toggle")
+	err      error
 }
 
 // sessionBrowserLoadedMsg carries the session list shown by --resume.

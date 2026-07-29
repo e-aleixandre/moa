@@ -51,6 +51,11 @@ type mcpPicker struct {
 
 	// status is a transient one-line message (e.g. "still disabled globally").
 	status string
+
+	// busy marks an in-flight lifecycle action (reconcile/restart) running off
+	// the UI goroutine; it blocks further toggles/restarts until the result
+	// message arrives, and is shown in the footer.
+	busy bool
 }
 
 // mcpPendingToggle is a toggle captured while a broad-scope confirm is showing.
@@ -68,6 +73,7 @@ func (p *mcpPicker) Open(servers []mcp.ControllerStatus, projectTrusted bool) {
 	p.confirmed = map[core.MCPDisableScope]bool{}
 	p.pendingConfirm = mcpPendingToggle{}
 	p.status = ""
+	p.busy = false
 	p.active = true
 }
 
@@ -162,6 +168,8 @@ func (p *mcpPicker) Render(width int) string {
 		}
 		fmt.Fprintf(&sb, "\n  Confirm %s %q for %s scope — affects %s.  y/N\n",
 			verb, p.pendingConfirm.name, mcpScopeLabel(p.pendingConfirm.scope), where)
+	} else if p.busy {
+		sb.WriteString("\n  working…\n")
 	} else if p.status != "" {
 		fmt.Fprintf(&sb, "\n  %s\n", p.status)
 	}

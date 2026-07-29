@@ -638,6 +638,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case voiceResultMsg:
 		return m.handleVoiceResult(msg)
 
+	case mcpActionResultMsg:
+		m.handleMCPActionResult(msg)
+		return m, nil
+
 	case compactResultMsg:
 		// A message queued during the compact may have started a follow-up run
 		// (the pump drains the queue at the idle point). If the session is
@@ -1663,6 +1667,16 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 		if e.PathScope != "" {
 			m.statusBar.UpdatePathScopeSegment(e.PathScope)
+		}
+
+	// --- MCP ---
+	case bus.MCPChanged:
+		// A server changed state (toggle result, restart, or an external
+		// crash/exit). Recompute the status-line segment and, if the picker is
+		// open, reload its rows so the live state matches the web panel.
+		m.updateMCPSegment()
+		if m.mcpPicker.active {
+			m.refreshMCPPicker()
 		}
 
 	// --- Plan mode ---
