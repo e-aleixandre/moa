@@ -520,6 +520,27 @@ func (r *SessionRuntime) Context() *SessionContext {
 	return r.sctx
 }
 
+// RefreshBaseSystemPrompt sets a freshly built base system prompt and re-applies
+// it, composing plan/goal fragments on top. Callers use it after the tool set
+// changes at runtime (e.g. an MCP server is enabled or disabled) so the model is
+// never told about a tool that is no longer registered. It must be called while
+// the agent is not running; the MCP controller only reconciles at quiescence,
+// which guarantees that.
+func (r *SessionRuntime) RefreshBaseSystemPrompt(base string) {
+	if r.sctx.Agent == nil {
+		return
+	}
+	r.sctx.BaseSystemPrompt = base
+	// rebuildSystemPrompt re-applies BaseSystemPrompt + plan/goal fragments, but
+	// it is a no-op when neither mode is active — in that case set the base
+	// prompt directly so a plain session still picks up the new tool list.
+	if r.sctx.PlanMode == nil && r.sctx.Goal == nil {
+		_ = r.sctx.Agent.SetSystemPrompt(base)
+		return
+	}
+	rebuildSystemPrompt(r.sctx)
+}
+
 // SwitchSession atomically restores sess into this long-lived runtime. It
 // restores history, runtime metadata, the tree syncer, and cost before
 // rebinding persistence; direct restoration intentionally emits no

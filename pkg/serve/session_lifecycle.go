@@ -413,14 +413,23 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		bashJobs:   bs.BashJobs,
 		pathPolicy: bs.PathPolicy,
 		infra: serveInfra{
-			sessionCtx:    sessionCtx,
-			sessionCancel: sessionCancel,
-			toolReg:       bs.ToolReg,
-			mcpMgr:        bs.MCPManager,
-			UntrustedMCP:  bs.UntrustedMCP,
+			sessionCtx:      sessionCtx,
+			sessionCancel:   sessionCancel,
+			toolReg:         bs.ToolReg,
+			mcpMgr:          bs.MCPManager,
+			mcpController:   bs.MCPController,
+			mcpPolicy:       bs.MCPPolicy,
+			buildBasePrompt: bs.BuildBasePrompt,
+			UntrustedMCP:    bs.UntrustedMCP,
 		},
 		sharedFiles: shared,
 	}
+	// Wire the MCP controller's prompt refresh now that the runtime exists: when
+	// a server is enabled/disabled the tool set changes, so the base system
+	// prompt must be rebuilt from the registry (never string-patched) and
+	// re-applied to the agent. bs.BuildBasePrompt captures the same inputs used
+	// at construction.
+	sess.wireMCPRefresh()
 	if opts != nil {
 		sess.TitleSource = opts.titleSource
 		// A resumed session with prior history has already lived past its first
@@ -827,45 +836,50 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 	return sum
 }
 
+// wireMCPRefresh connects the MCP controller's prompt-refresh hook to this
+// session's runtime. When a server is enabled/disabled/restarted the tool set
+// changes, so the base system prompt is rebuilt from the registry (never
+// string-patched) and re-applied to the agent. No-op if there is no controller
+// or prompt builder.
+func (s *ManagedSession) wireMCPRefresh() {
+	ctrl := s.infra.mcpController
+	build := s.infra.buildBasePrompt
+	reg := s.infra.toolReg
+	rt := s.runtime
+	if ctrl == nil || build == nil || reg == nil || rt == nil {
+		return
+	}
+	ctrl.SetRefreshPrompt(func() {
+		rt.RefreshBaseSystemPrompt(build(reg.Specs()))
+	})
+}
+
 // RestartMCPServer restarts a single MCP server for this session and re-syncs
 // the tool registry with its (possibly changed) tool set. Other servers are
-// untouched. Returns ErrNoMCP if the session has no MCP manager, or
-// mcp.ErrUnknownServer for a name it doesn't manage.
+// untouched. Returns ErrNoMCP if the session has no MCP manager,
+// mcp.ErrUnknownServer for a name it doesn't manage, mcp.ErrServerDisabled for a
+// disabled server (enable it first), or ErrBusy if the session is running or
+// awaiting a permission decision.
 func (s *ManagedSession) RestartMCPServer(name string) (mcp.ServerStatus, error) {
 	s.mu.Lock()
-	mgr := s.infra.mcpMgr
+	ctrl := s.infra.mcpController
 	ctx := s.infra.sessionCtx
 	s.mu.Unlock()
-	if mgr == nil {
+	if ctrl == nil {
 		return mcp.ServerStatus{}, ErrNoMCP
 	}
 
-	status, err := mgr.RestartServer(ctx, name)
-	if err != nil {
-		return mcp.ServerStatus{}, err
+	// A restart swaps this server's tool schemas. If a model turn is in flight
+	// (or a permission decision is pending), it was handed the pre-restart tools
+	// and could then hit an "unknown tool" between response and dispatch. Guard
+	// with the same busy check reloadMCP uses; the controller re-syncs the
+	// registry by exact tool name (correct even for long server names).
+	state := s.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission {
+		return mcp.ServerStatus{}, ErrBusy
 	}
 
-	// Re-sync the registry: a restarted server may expose a different tool set,
-	// so drop this server's stale tools and register whatever it now offers.
-	// Deregistering only this server's tools (not all MCP tools) keeps the other
-	// servers' registrations intact. New closures route through the fresh
-	// session; old ones would have kept working too, but the schema/name set can
-	// change across generations, so a clean re-register is the honest thing.
-	prefix := mcp.ServerToolPrefix(name)
-	s.mu.Lock()
-	for _, spec := range s.infra.toolReg.Specs() {
-		if strings.HasPrefix(spec.Name, prefix) {
-			s.infra.toolReg.Unregister(spec.Name)
-		}
-	}
-	for _, t := range mgr.Tools() {
-		if strings.HasPrefix(t.Name, prefix) {
-			core.RegisterOrLog(s.infra.toolReg, t)
-		}
-	}
-	s.mu.Unlock()
-
-	return status, nil
+	return ctrl.Restart(ctx, name)
 }
 
 // reloadMCP reloads MCP servers for a session.
@@ -882,7 +896,9 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 	var newTools []core.Tool
 	if len(merged) > 0 {
 		newMgr = mcp.NewManager(nil, s.CWD)
-		newMgr.Start(s.infra.sessionCtx, merged, nil)
+		// Honor the session's disable policy on reload too, so a vetoed server
+		// isn't spawned just because the project's .mcp.json became trusted.
+		newMgr.Start(s.infra.sessionCtx, merged, s.infra.mcpPolicy.DisabledSet())
 		newTools = newMgr.Tools()
 	}
 
@@ -915,8 +931,21 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		core.RegisterOrLog(s.infra.toolReg, t)
 	}
 	s.infra.mcpMgr = newMgr
+	// Rebuild the controller over the new manager (the old one pointed at the
+	// now-closed manager) and rewire its prompt refresh.
+	if newMgr != nil {
+		s.infra.mcpController = mcp.NewController(mcp.ControllerConfig{
+			Manager:  newMgr,
+			Registry: s.infra.toolReg,
+			Policy:   s.infra.mcpPolicy,
+		})
+	} else {
+		s.infra.mcpController = nil
+	}
 	s.infra.UntrustedMCP = false
 	s.mu.Unlock()
+
+	s.wireMCPRefresh()
 
 	// Phase 4: cleanup old.
 	if oldMgr != nil {

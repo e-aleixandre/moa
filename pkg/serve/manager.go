@@ -141,7 +141,12 @@ type serveInfra struct {
 	sessionCancel context.CancelFunc
 	toolReg       *core.Registry
 	mcpMgr        *mcp.Manager
-	UntrustedMCP  bool
+	mcpController *mcp.Controller
+	mcpPolicy     core.MCPDisablePolicy
+	// buildBasePrompt rebuilds the base system prompt from a tool-spec set. Kept
+	// so a manager swap (reloadMCP) can rewire a fresh controller's refresh.
+	buildBasePrompt func([]core.ToolSpec) string
+	UntrustedMCP    bool
 }
 
 // MCPSummary is the glanceable MCP health for the status line: how many servers

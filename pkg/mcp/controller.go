@@ -74,6 +74,16 @@ func NewController(cfg ControllerConfig) *Controller {
 	return c
 }
 
+// SetRefreshPrompt sets the prompt-refresh hook after construction. The frontend
+// creates the hook once its runtime exists (the runtime owns the base system
+// prompt), which is later than when bootstrap builds the Controller. Guarded by
+// op so it can't race an in-flight reconcile.
+func (c *Controller) SetRefreshPrompt(fn func()) {
+	c.op.Lock()
+	c.refreshPrompt = fn
+	c.op.Unlock()
+}
+
 // Status returns the manager's server snapshots decorated with policy: whether
 // each server is enabled by policy (desired), and which scopes veto it.
 func (c *Controller) Status() []ControllerStatus {
