@@ -154,14 +154,26 @@ export function McpPanel({ sessionId, mcpTick }) {
   // re-prompt for every toggle in the same session of interaction.
   const confirmedRef = useRef({});
 
+  // Guards against a stale GET landing after the session changed or the panel
+  // unmounted: each load captures the session it was issued for and is dropped
+  // if that is no longer the current one. reqSeq also drops an older in-flight
+  // load superseded by a newer one (e.g. a fast mcpTick after switching).
+  const reqSeqRef = useRef(0);
+
   const load = useCallback(() => {
     if (!sessionId) return;
+    const seq = ++reqSeqRef.current;
+    const forSession = sessionId;
     api("GET", `/api/sessions/${sessionId}/mcp`)
       .then((r) => {
+        if (seq !== reqSeqRef.current || forSession !== sessionId) return; // superseded
         setData(r && Array.isArray(r.servers) ? r : { servers: [], available_scopes: {} });
         setFailed(false);
       })
-      .catch(() => setFailed(true));
+      .catch(() => {
+        if (seq !== reqSeqRef.current || forSession !== sessionId) return;
+        setFailed(true);
+      });
   }, [sessionId]);
 
   // Reload on open, on live mcp_change (mcpTick), and reset confirmations +
@@ -169,9 +181,15 @@ export function McpPanel({ sessionId, mcpTick }) {
   useEffect(() => {
     confirmedRef.current = {};
     setScope("session");
+    setData(null); // don't show the previous session's servers while reloading
   }, [sessionId]);
   useEffect(() => {
     load();
+    // Invalidate any in-flight load when the session changes or we unmount, so
+    // its late response is ignored.
+    return () => {
+      reqSeqRef.current++;
+    };
   }, [load, mcpTick]);
 
   const scopes = data?.available_scopes || {};
