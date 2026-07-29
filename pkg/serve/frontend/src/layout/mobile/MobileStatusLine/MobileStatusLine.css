@@ -166,6 +166,43 @@
   text-transform: lowercase;
 }
 
+/* ── MCP health (RIGHT, before the token heartbeat) — present only when the
+   session has servers. A plug + count; the alert variant turns red so a crashed
+   server is glanceable without opening the sheet. It is the door onto the MCP
+   panel, so it carries the same tap-target padding as the other doors. ── */
+.mstatusline .msl-mcp {
+  flex: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 0;
+  margin-left: var(--space-3);
+}
+.mstatusline .msl-mcp::after {
+  content: "";
+  position: absolute;
+  inset: -8px -4px;
+}
+.mstatusline .msl-mcp-chip {
+  pointer-events: none;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-normal);
+  color: var(--overlay1);
+}
+.mstatusline .msl-mcp-chip svg {
+  width: 12px;
+  height: 12px;
+}
+.mstatusline .msl-mcp-bad {
+  color: var(--red);
+  font-weight: var(--weight-medium);
+}
+
 /* ── the per-run token heartbeat (RIGHT) — read-only, not a door. Same shared
    TokenFlow the desktop StatusStrip carries in the same corner, in its compact
    variant (no " tok" unit) because the mobile line has no room for it. ── */

@@ -1,5 +1,5 @@
 import "./StatusStrip.css";
-import { ClipboardList, Map, Flame, Target, Gauge } from "lucide-preact";
+import { ClipboardList, Map, Flame, Target, Gauge, Plug, AlertTriangle } from "lucide-preact";
 import { statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
 import { TokenFlow } from "../../components/TokenFlow/TokenFlow.jsx";
@@ -38,6 +38,7 @@ export function StatusStrip({
   usage,
   taskLive,
   onOpenUsage,
+  onOpenMcp,
   onPermChange,
   permBusy = false,
   showTokens = true,
@@ -121,6 +122,36 @@ export function StatusStrip({
           lives on the group (not one segment) so it stays right-aligned no
           matter which segments are present. */}
       <span class="status-strip-right">
+        {session?.mcp && session.mcp.total > 0 && (() => {
+          const unhealthy = session.mcp.unhealthy > 0;
+          const label = unhealthy
+            ? `MCP: ${session.mcp.unhealthy} of ${session.mcp.total} need attention`
+            : `MCP: ${session.mcp.total} server${session.mcp.total === 1 ? "" : "s"} ready`;
+          const body = (
+            <>
+              {unhealthy ? <AlertTriangle /> : <Plug />}
+              {unhealthy ? `${session.mcp.unhealthy}!` : `mcp ${session.mcp.total}`}
+            </>
+          );
+          return onOpenMcp ? (
+            <button
+              type="button"
+              class={`status-strip-mcp status-strip-mcp-btn${unhealthy ? " status-strip-mcp-bad" : ""}`}
+              onClick={onOpenMcp}
+              aria-label={`${label} — open MCP servers`}
+              title={label}
+            >
+              {body}
+            </button>
+          ) : (
+            <span
+              class={`status-strip-mcp${unhealthy ? " status-strip-mcp-bad" : ""}`}
+              title={label}
+            >
+              {body}
+            </span>
+          );
+        })()}
         {showTokens && hasTokens && (
           <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="strip" /></span>
         )}

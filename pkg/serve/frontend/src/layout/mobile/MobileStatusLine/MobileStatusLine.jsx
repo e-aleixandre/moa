@@ -16,6 +16,7 @@ import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel, fmtTokens } from "../../../data/util/format.js";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { StatusLineRow } from "./StatusLineRow.jsx";
+import { McpPanel } from "../../../components/McpPanel/McpPanel.jsx";
 import "./MobileStatusLine.css";
 
 // MobileStatusLine — the persistent mobile chrome. One line pinned under the
@@ -238,6 +239,7 @@ export function MobileStatusLine({ session, usage }) {
   const [usageOpen, setUsageOpen] = useState(false);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [permsOpen, setPermsOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const [models, setModels] = useState(null); // null = not fetched yet
 
   const sessionId = session ? session.id : null;
@@ -245,6 +247,7 @@ export function MobileStatusLine({ session, usage }) {
     setUsageOpen(false);
     setSessionOpen(false);
     setPermsOpen(false);
+    setMcpOpen(false);
   }, [sessionId]);
 
   useEffect(() => {
@@ -295,6 +298,9 @@ export function MobileStatusLine({ session, usage }) {
       modelLabel="Model and thinking — change"
       thinking={thinking}
       perm={hasSession ? permMode : null}
+      mcp={hasSession ? session.mcp : null}
+      onMcp={() => setMcpOpen(true)}
+      mcpOpen={mcpOpen}
       tokensUp={hasTokens ? tokensUp : 0}
       tokensDown={hasTokens ? tokensDown : 0}
       onContext={() => setUsageOpen(true)}
@@ -368,6 +374,17 @@ export function MobileStatusLine({ session, usage }) {
               );
             })}
           </div>
+        </MobileSheet>
+      )}
+
+      {hasSession && session.mcp && session.mcp.total > 0 && (
+        <MobileSheet
+          open={mcpOpen}
+          onClose={() => setMcpOpen(false)}
+          title="MCP servers"
+          scope="this session"
+        >
+          <McpPanel sessionId={session.id} />
         </MobileSheet>
       )}
     </StatusLineRow>

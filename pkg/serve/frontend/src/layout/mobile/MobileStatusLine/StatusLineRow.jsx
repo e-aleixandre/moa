@@ -1,4 +1,5 @@
 import { ModelPill, TokenFlow } from "../../../components/index.js";
+import { Plug } from "lucide-preact";
 import "./MobileStatusLine.css";
 
 // StatusLineRow — the face of the mobile status line: context ring + cost,
@@ -26,6 +27,9 @@ export function StatusLineRow({
   modelLabel,
   thinking = "off",
   perm,
+  mcp,
+  onMcp,
+  mcpOpen,
   tokensUp = 0,
   tokensDown = 0,
   onContext,
@@ -136,6 +140,38 @@ export function StatusLineRow({
         ))}
 
       <span class="msl-spacer" aria-hidden="true" />
+
+      {/* MCP health — present only when the session has servers. A plug + count
+          normally; the alert variant (any server failed/exited) turns red and is
+          what makes a crashed Playwright glanceable without opening anything. */}
+      {mcp && mcp.total > 0 && (() => {
+        const unhealthy = mcp.unhealthy > 0;
+        const label = unhealthy
+          ? `MCP: ${mcp.unhealthy} of ${mcp.total} need attention — open MCP servers`
+          : `MCP: ${mcp.total} server${mcp.total === 1 ? "" : "s"} ready — open MCP servers`;
+        const inner = (
+          <span class={`msl-mcp-chip${unhealthy ? " msl-mcp-bad" : ""}`} aria-hidden="true">
+            <Plug />
+            {unhealthy ? `${mcp.unhealthy}!` : mcp.total}
+          </span>
+        );
+        return onMcp ? (
+          <button
+            type="button"
+            class="msl-mcp"
+            onClick={onMcp}
+            aria-haspopup="dialog"
+            aria-expanded={mcpOpen}
+            aria-label={label}
+          >
+            {inner}
+          </button>
+        ) : (
+          <span class="msl-mcp" aria-label={label}>
+            {inner}
+          </span>
+        );
+      })()}
 
       {hasTokens && (
         <span class="msl-tokens">

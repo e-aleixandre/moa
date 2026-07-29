@@ -8,6 +8,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
+import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -229,6 +230,27 @@ export function ConversationScreen({ version }) {
     };
   }, [usageOpen]);
 
+  // --- MCP panel popover (StatusStrip's MCP segment) — per-session server
+  // health + restart. Same anchor/click-outside/Escape wiring as the usage
+  // popover; its own anchor so the two don't fight over one ref.
+  const [mcpOpen, setMcpOpen] = useState(false);
+  useEffect(() => { setMcpOpen(false); }, [activeId]);
+  useEffect(() => {
+    if (!mcpOpen) return;
+    const unregister = registerOverlay("conv-mcp-popover");
+    const onDocDown = (e) => {
+      if (usageAnchorRef.current && !usageAnchorRef.current.contains(e.target)) setMcpOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setMcpOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      unregister();
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mcpOpen]);
+
   const spine = (
     <Spine
       version={version}
@@ -382,6 +404,7 @@ export function ConversationScreen({ version }) {
                 session={session}
                 usage={state.usage}
                 onOpenUsage={() => setUsageOpen((v) => !v)}
+                onOpenMcp={() => setMcpOpen((v) => !v)}
                 onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
                 permBusy={settingsBusy}
                 showTokens={true}
@@ -394,6 +417,11 @@ export function ConversationScreen({ version }) {
                     ctxPercent={session.contextPercent}
                     costUSD={session.costUSD}
                   />
+                </div>
+              )}
+              {mcpOpen && (
+                <div class="status-strip-usage-popover status-strip-mcp-popover">
+                  <McpPanel sessionId={session.id} />
                 </div>
               )}
             </div>

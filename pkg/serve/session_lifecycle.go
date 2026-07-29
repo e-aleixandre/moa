@@ -808,6 +808,25 @@ func (s *ManagedSession) MCPStatus() []mcp.ServerStatus {
 	return mgr.Status()
 }
 
+// mcpSummary rolls this session's MCP server states into the glanceable counts
+// carried in SessionInfo. Returns nil when there are no servers, so the status
+// line indicator stays absent rather than showing an empty "0 servers".
+func (s *ManagedSession) mcpSummary() *MCPSummary {
+	status := s.MCPStatus()
+	if len(status) == 0 {
+		return nil
+	}
+	sum := &MCPSummary{Total: len(status)}
+	for _, st := range status {
+		if st.State == mcp.StateReady {
+			sum.Ready++
+		} else {
+			sum.Unhealthy++
+		}
+	}
+	return sum
+}
+
 // RestartMCPServer restarts a single MCP server for this session and re-syncs
 // the tool registry with its (possibly changed) tool set. Other servers are
 // untouched. Returns ErrNoMCP if the session has no MCP manager, or

@@ -144,6 +144,15 @@ type serveInfra struct {
 	UntrustedMCP  bool
 }
 
+// MCPSummary is the glanceable MCP health for the status line: how many servers
+// this session has and how many are not ready. The indicator shows only when
+// Total > 0 and turns to an alert color when Unhealthy > 0.
+type MCPSummary struct {
+	Total     int `json:"total"`
+	Ready     int `json:"ready"`
+	Unhealthy int `json:"unhealthy"`
+}
+
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
 	ID             string                     `json:"id"`
@@ -158,6 +167,12 @@ type SessionInfo struct {
 	Updated        time.Time                  `json:"updated"`
 	Error          string                     `json:"error,omitempty"`
 	UntrustedMCP   bool                       `json:"untrusted_mcp,omitempty"`
+	// MCP summarizes this session's MCP servers for the status line: a count and
+	// whether any is unhealthy, so the indicator can appear only when servers
+	// exist and turn red when one has failed or exited. The full per-server
+	// detail is fetched on demand from GET /api/sessions/{id}/mcp. Omitted when
+	// the session has no MCP servers.
+	MCP *MCPSummary `json:"mcp,omitempty"`
 	PlanMode       string                     `json:"plan_mode,omitempty"`
 	PlanFile       string                     `json:"plan_file,omitempty"`
 	ContextPercent int                        `json:"context_percent"` // 0-100, -1 if unknown
@@ -256,6 +271,8 @@ func (s *ManagedSession) info() SessionInfo {
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
 
+	mcpSummary := s.mcpSummary()
+
 	s.mu.Lock()
 	lastRun := s.lastRunAt
 	cacheTTL := s.cacheTTL
@@ -273,6 +290,7 @@ func (s *ManagedSession) info() SessionInfo {
 		Updated:        s.Updated,
 		Error:          stateErr,
 		UntrustedMCP:   s.infra.UntrustedMCP,
+		MCP:            mcpSummary,
 		ContextPercent: ctxPct,
 		ContextWindow:  model.MaxInput,
 		CompactAt:      compactAt,
