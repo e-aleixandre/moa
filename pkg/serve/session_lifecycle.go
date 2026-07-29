@@ -502,6 +502,7 @@ var (
 	ErrBusy         = errors.New("session is busy")
 	ErrInvalidCWD   = errors.New("invalid working directory")
 	ErrInvalidModel = errors.New("invalid model")
+	ErrNoMCP        = errors.New("session has no MCP servers")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.
@@ -793,6 +794,59 @@ func (s *ManagedSession) flushLiveSubagentTranscripts() {
 		}
 		s.persistSubagentTranscript(info.JobID, info.Status, nil, 0)
 	}
+}
+
+// MCPStatus returns the health snapshot of this session's MCP servers (empty if
+// none are configured).
+func (s *ManagedSession) MCPStatus() []mcp.ServerStatus {
+	s.mu.Lock()
+	mgr := s.infra.mcpMgr
+	s.mu.Unlock()
+	if mgr == nil {
+		return nil
+	}
+	return mgr.Status()
+}
+
+// RestartMCPServer restarts a single MCP server for this session and re-syncs
+// the tool registry with its (possibly changed) tool set. Other servers are
+// untouched. Returns ErrNoMCP if the session has no MCP manager, or
+// mcp.ErrUnknownServer for a name it doesn't manage.
+func (s *ManagedSession) RestartMCPServer(name string) (mcp.ServerStatus, error) {
+	s.mu.Lock()
+	mgr := s.infra.mcpMgr
+	ctx := s.infra.sessionCtx
+	s.mu.Unlock()
+	if mgr == nil {
+		return mcp.ServerStatus{}, ErrNoMCP
+	}
+
+	status, err := mgr.RestartServer(ctx, name)
+	if err != nil {
+		return mcp.ServerStatus{}, err
+	}
+
+	// Re-sync the registry: a restarted server may expose a different tool set,
+	// so drop this server's stale tools and register whatever it now offers.
+	// Deregistering only this server's tools (not all MCP tools) keeps the other
+	// servers' registrations intact. New closures route through the fresh
+	// session; old ones would have kept working too, but the schema/name set can
+	// change across generations, so a clean re-register is the honest thing.
+	prefix := mcp.ServerToolPrefix(name)
+	s.mu.Lock()
+	for _, spec := range s.infra.toolReg.Specs() {
+		if strings.HasPrefix(spec.Name, prefix) {
+			s.infra.toolReg.Unregister(spec.Name)
+		}
+	}
+	for _, t := range mgr.Tools() {
+		if strings.HasPrefix(t.Name, prefix) {
+			core.RegisterOrLog(s.infra.toolReg, t)
+		}
+	}
+	s.mu.Unlock()
+
+	return status, nil
 }
 
 // reloadMCP reloads MCP servers for a session.

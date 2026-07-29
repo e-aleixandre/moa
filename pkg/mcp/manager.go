@@ -25,6 +25,14 @@ const serverStartTimeout = 15 * time.Second
 // Exported so other packages can detect MCP tools without hardcoding the prefix.
 const ToolPrefix = "mcp__"
 
+// ServerToolPrefix returns the sanitized name prefix shared by every registered
+// tool of a given server, so callers can match a server's tools in a registry.
+// It mirrors the sanitization wrapTool applies, so it stays correct even for
+// server names containing characters that get rewritten.
+func ServerToolPrefix(server string) string {
+	return sanitizeToolName(ToolPrefix + server + "__")
+}
+
 // ServerState is the lifecycle state of a single MCP server, surfaced to the UI.
 type ServerState string
 

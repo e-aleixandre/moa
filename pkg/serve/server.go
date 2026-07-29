@@ -24,6 +24,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/core"
 	"github.com/ealeixandre/moa/pkg/goal"
+	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/session"
 	"github.com/ealeixandre/moa/pkg/subagent"
 	"github.com/ealeixandre/moa/pkg/usage"
@@ -125,6 +126,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleSubagentList(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleSubagentConversation(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/mcp", handleMCPStatus(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/mcp/{server}/restart", handleMCPRestart(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
@@ -745,6 +748,49 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
+	}
+}
+
+// handleMCPStatus returns the health snapshot of a session's MCP servers.
+func handleMCPStatus(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		// Always an array (never null) so the client can render an empty panel.
+		status := sess.MCPStatus()
+		if status == nil {
+			status = []mcp.ServerStatus{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"servers": status})
+	}
+}
+
+// handleMCPRestart restarts a single MCP server for a session and returns its
+// post-restart status.
+func handleMCPRestart(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		server := r.PathValue("server")
+		status, err := sess.RestartMCPServer(server)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrNoMCP):
+				http.Error(w, "session has no MCP servers", http.StatusNotFound)
+			case errors.Is(err, mcp.ErrUnknownServer):
+				http.Error(w, fmt.Sprintf("unknown MCP server %q", server), http.StatusNotFound)
+			default:
+				http.Error(w, fmt.Sprintf("restart failed: %v", err), http.StatusInternalServerError)
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
 	}
 }
 
