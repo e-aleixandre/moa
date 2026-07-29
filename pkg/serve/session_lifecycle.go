@@ -805,21 +805,26 @@ func (s *ManagedSession) flushLiveSubagentTranscripts() {
 	}
 }
 
-// MCPStatus returns the health snapshot of this session's MCP servers (empty if
-// none are configured).
-func (s *ManagedSession) MCPStatus() []mcp.ServerStatus {
+// MCPStatus returns the policy-decorated health snapshot of this session's MCP
+// servers (empty if none are configured). Each entry carries the applied enabled
+// state, desired-enabled, the scopes that veto it, and any pending action.
+func (s *ManagedSession) MCPStatus() []mcp.ControllerStatus {
 	s.mu.Lock()
-	mgr := s.infra.mcpMgr
+	ctrl := s.infra.mcpController
 	s.mu.Unlock()
-	if mgr == nil {
+	if ctrl == nil {
 		return nil
 	}
-	return mgr.Status()
+	return ctrl.Status()
 }
 
 // mcpSummary rolls this session's MCP server states into the glanceable counts
 // carried in SessionInfo. Returns nil when there are no servers, so the status
 // line indicator stays absent rather than showing an empty "0 servers".
+//
+// A disabled server is a voluntary choice, so it is counted as Disabled (neutral)
+// rather than Unhealthy; only an enabled server that failed or exited is an
+// alarm. Pending counts servers whose desired policy hasn't been applied yet.
 func (s *ManagedSession) mcpSummary() *MCPSummary {
 	status := s.MCPStatus()
 	if len(status) == 0 {
@@ -827,10 +832,19 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 	}
 	sum := &MCPSummary{Total: len(status)}
 	for _, st := range status {
-		if st.State == mcp.StateReady {
+		switch {
+		case st.State == mcp.StateDisabled:
+			sum.Disabled++
+		case st.State == mcp.StateReady:
 			sum.Ready++
-		} else {
-			sum.Unhealthy++
+		default:
+			// Enabled but not ready: starting is transient, failed/exited alerts.
+			if st.State == mcp.StateFailed || st.State == mcp.StateExited {
+				sum.Unhealthy++
+			}
+		}
+		if st.PendingAction != "" {
+			sum.Pending++
 		}
 	}
 	return sum

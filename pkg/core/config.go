@@ -46,6 +46,18 @@ func canonicalOrRaw(path string) string {
 	return path
 }
 
+// CanonicalOrRaw is the exported form of canonicalOrRaw: a clean, absolute,
+// symlink-resolved path, falling back to the input on failure. Used to compare
+// session working directories when fanning out project-scoped preferences.
+func CanonicalOrRaw(path string) string { return canonicalOrRaw(path) }
+
+// LoadGlobalConfig loads only the user's global moa config
+// (~/.config/moa/config.json), without merging any project config. Callers that
+// need the trusted-project allowlist or global-only settings use this.
+func LoadGlobalConfig() MoaConfig {
+	return loadConfigFile(globalConfigPath())
+}
+
 // CanonicalizePath returns a clean, absolute, symlink-resolved path.
 // Falls back to Abs+Clean if EvalSymlinks fails (e.g., broken symlinks).
 func CanonicalizePath(path string) (string, error) {

@@ -85,7 +85,8 @@ func (c *Controller) SetRefreshPrompt(fn func()) {
 }
 
 // Status returns the manager's server snapshots decorated with policy: whether
-// each server is enabled by policy (desired), and which scopes veto it.
+// each server is enabled by policy (desired), which scopes veto it, the applied
+// enabled state, and any pending action (desired differs from applied).
 func (c *Controller) Status() []ControllerStatus {
 	c.mu.Lock()
 	policy := c.policy
@@ -95,22 +96,127 @@ func (c *Controller) Status() []ControllerStatus {
 	out := make([]ControllerStatus, 0, len(raw))
 	for _, st := range raw {
 		res := core.ResolveMCPDisabled(st.Name, policy)
-		out = append(out, ControllerStatus{
-			ServerStatus:   st,
-			DesiredEnabled: !res.Disabled,
-			DisabledScopes: res.Scopes,
-		})
+		out = append(out, decorateStatus(st, res))
 	}
 	return out
 }
 
+// decorateStatus builds a ControllerStatus from a raw manager snapshot and a
+// policy resolution. Applied-enabled means the running manager is not in the
+// disabled state (a failed-but-enabled server is still "enabled"); pending is
+// set only when the desired policy and the applied state disagree.
+func decorateStatus(st ServerStatus, res core.MCPDisableResolution) ControllerStatus {
+	appliedEnabled := st.State != StateDisabled
+	desiredEnabled := !res.Disabled
+	pending := ""
+	if desiredEnabled && !appliedEnabled {
+		pending = "enable"
+	} else if !desiredEnabled && appliedEnabled {
+		pending = "disable"
+	}
+	return ControllerStatus{
+		ServerStatus:   st,
+		Enabled:        appliedEnabled,
+		DesiredEnabled: desiredEnabled,
+		DisabledScopes: res.Scopes,
+		PendingAction:  pending,
+	}
+}
+
 // ControllerStatus is a manager ServerStatus plus the policy view: what the
-// configuration wants (DesiredEnabled) and why (DisabledScopes), independent of
-// the applied runtime State (which may still be catching up, e.g. failed).
+// configuration wants (DesiredEnabled) and why (DisabledScopes), the applied
+// runtime enablement (Enabled), and PendingAction when the two disagree (the
+// server is mid-transition or awaiting quiescence).
 type ControllerStatus struct {
 	ServerStatus
+	Enabled        bool                   `json:"enabled"`
 	DesiredEnabled bool                   `json:"desired_enabled"`
 	DisabledScopes []core.MCPDisableScope `json:"disabled_scopes,omitempty"`
+	PendingAction  string                 `json:"pending_action,omitempty"`
+}
+
+// UnmatchedDisabled reports disabled-server preferences that don't correspond to
+// any server configured in this session, split by the scopes that veto each. A
+// global name absent here may still exist in another project, so these are
+// "unmatched", not globally "orphaned".
+func (c *Controller) UnmatchedDisabled() []UnmatchedDisabled {
+	c.mu.Lock()
+	policy := c.policy
+	c.mu.Unlock()
+
+	configured := map[string]struct{}{}
+	for _, st := range c.mgr.Status() {
+		configured[st.Name] = struct{}{}
+	}
+
+	names := map[string]struct{}{}
+	for n := range policy.Global {
+		names[n] = struct{}{}
+	}
+	for n := range policy.Project {
+		names[n] = struct{}{}
+	}
+	for n := range policy.Session {
+		names[n] = struct{}{}
+	}
+
+	var out []UnmatchedDisabled
+	for name := range names {
+		if _, ok := configured[name]; ok {
+			continue
+		}
+		res := core.ResolveMCPDisabled(name, policy)
+		out = append(out, UnmatchedDisabled{Name: name, Scopes: res.Scopes})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// UnmatchedDisabled is a disabled-server preference with no matching configured
+// server in the session, plus the scopes that veto it.
+type UnmatchedDisabled struct {
+	Name   string                 `json:"name"`
+	Scopes []core.MCPDisableScope `json:"scopes,omitempty"`
+}
+
+// SetScopeDisabled adds or removes a server name from one scope of this
+// Controller's in-memory policy. It mutates only the requested scope's set
+// (vetoes in other scopes are independent). It does NOT reconcile or persist;
+// the caller decides when to Reconcile (at quiescence) and whether to persist
+// (project/global scopes). Session scope is process-lifetime only.
+func (c *Controller) SetScopeDisabled(scope core.MCPDisableScope, name string, disabled bool) {
+	if name == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var set map[string]struct{}
+	switch scope {
+	case core.MCPScopeGlobal:
+		set = c.policy.Global
+	case core.MCPScopeProject:
+		set = c.policy.Project
+	case core.MCPScopeSession:
+		set = c.policy.Session
+	default:
+		return
+	}
+	if set == nil {
+		set = map[string]struct{}{}
+	}
+	if disabled {
+		set[name] = struct{}{}
+	} else {
+		delete(set, name)
+	}
+	switch scope {
+	case core.MCPScopeGlobal:
+		c.policy.Global = set
+	case core.MCPScopeProject:
+		c.policy.Project = set
+	case core.MCPScopeSession:
+		c.policy.Session = set
+	}
 }
 
 // Restart restarts one server and re-syncs its tools by exact name. It refuses a

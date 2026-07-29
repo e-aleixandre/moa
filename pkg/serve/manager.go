@@ -126,6 +126,11 @@ type ManagedSession struct {
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
 	verifyRunning atomic.Bool
+	// mcpReconcilePending is a one-flight guard: it is set when an MCP toggle
+	// arrives while the session is busy, so its reconcile is deferred to the next
+	// quiescence. Further toggles coalesce into the same pending reconcile, which
+	// re-reads the latest policy when it fires.
+	mcpReconcilePending atomic.Bool
 }
 
 // title returns the current session title under lock.
@@ -149,13 +154,18 @@ type serveInfra struct {
 	UntrustedMCP    bool
 }
 
-// MCPSummary is the glanceable MCP health for the status line: how many servers
-// this session has and how many are not ready. The indicator shows only when
-// Total > 0 and turns to an alert color when Unhealthy > 0.
+// MCPSummary is the glanceable MCP health for the status line. Total counts all
+// configured servers (including disabled ones); Disabled is the count in the
+// intentionally-off state (neutral, not an alarm); Unhealthy counts only servers
+// that are enabled yet failed/exited (the alert color); Pending counts servers
+// mid-transition (desired differs from applied). The indicator shows whenever
+// Total > 0 and turns to an alert color only when Unhealthy > 0.
 type MCPSummary struct {
 	Total     int `json:"total"`
 	Ready     int `json:"ready"`
+	Disabled  int `json:"disabled"`
 	Unhealthy int `json:"unhealthy"`
+	Pending   int `json:"pending"`
 }
 
 // SessionInfo is the public representation returned by List/Get endpoints.
@@ -394,6 +404,13 @@ type Manager struct {
 	attention *attention.Service
 	versionMu sync.RWMutex
 	version   release.Result
+
+	// mcpConfigMu serializes MCP disable-preference mutations across the whole
+	// process: SaveGlobalConfig/SaveProjectConfig do atomic read-modify-write per
+	// file, but two toggles racing on the same file could still lose an update
+	// between read and rename. It also serializes the fan-out to open sessions so
+	// two concurrent toggles don't interleave reconciles.
+	mcpConfigMu sync.Mutex
 }
 
 // ManagerConfig configures a Manager.

@@ -127,6 +127,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleSubagentConversation(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/mcp", handleMCPStatus(manager))
+	mux.HandleFunc("PATCH /api/sessions/{id}/mcp/{server}", handleMCPToggle(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/mcp/{server}/restart", handleMCPRestart(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
@@ -751,7 +752,9 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-// handleMCPStatus returns the health snapshot of a session's MCP servers.
+// handleMCPStatus returns the policy-decorated health snapshot of a session's
+// MCP servers, plus which scopes are writable and any disabled preferences that
+// don't match a configured server.
 func handleMCPStatus(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := mgr.Get(r.PathValue("id"))
@@ -762,14 +765,22 @@ func handleMCPStatus(mgr *Manager) http.HandlerFunc {
 		// Always an array (never null) so the client can render an empty panel.
 		status := sess.MCPStatus()
 		if status == nil {
-			status = []mcp.ServerStatus{}
+			status = []mcp.ControllerStatus{}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"servers": status})
+		unmatched := sess.mcpUnmatchedDisabled()
+		if unmatched == nil {
+			unmatched = []mcp.UnmatchedDisabled{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"servers":            status,
+			"available_scopes":   sess.mcpAvailableScopes(),
+			"unmatched_disabled": unmatched,
+		})
 	}
 }
 
 // handleMCPRestart restarts a single MCP server for a session and returns its
-// post-restart status.
+// post-restart decorated status.
 func handleMCPRestart(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := mgr.Get(r.PathValue("id"))
@@ -778,19 +789,84 @@ func handleMCPRestart(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		server := r.PathValue("server")
-		status, err := sess.RestartMCPServer(server)
-		if err != nil {
+		if _, err := sess.RestartMCPServer(server); err != nil {
 			switch {
 			case errors.Is(err, ErrNoMCP):
 				http.Error(w, "session has no MCP servers", http.StatusNotFound)
 			case errors.Is(err, mcp.ErrUnknownServer):
 				http.Error(w, fmt.Sprintf("unknown MCP server %q", server), http.StatusNotFound)
+			case errors.Is(err, mcp.ErrServerDisabled):
+				http.Error(w, "server is disabled; enable it before restarting", http.StatusConflict)
+			case errors.Is(err, ErrBusy):
+				http.Error(w, "session is busy; try again when it is idle", http.StatusConflict)
 			default:
 				http.Error(w, fmt.Sprintf("restart failed: %v", err), http.StatusInternalServerError)
 			}
 			return
 		}
-		writeJSON(w, http.StatusOK, status)
+		// Return the decorated snapshot so the client sees the same shape as GET.
+		st, _ := sess.mcpServerStatus(server)
+		writeJSON(w, http.StatusOK, st)
+	}
+}
+
+// handleMCPToggle applies a disable/enable preference for one server in one
+// scope, persisting project/global scopes and fanning the change out to every
+// affected open session.
+func handleMCPToggle(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		server := r.PathValue("server")
+		if server == "" {
+			http.Error(w, "empty server name", http.StatusBadRequest)
+			return
+		}
+
+		var body struct {
+			Scope    string `json:"scope"`
+			Disabled bool   `json:"disabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		scope, err := parseMCPScope(body.Scope)
+		if err != nil {
+			http.Error(w, "scope must be one of session, project, global", http.StatusBadRequest)
+			return
+		}
+		if !sess.mcpServerConfigured(server) {
+			http.Error(w, fmt.Sprintf("unknown MCP server %q", server), http.StatusNotFound)
+			return
+		}
+
+		res, err := mgr.ToggleMCPServer(sess, mcpDisableParams{Scope: scope, Disabled: body.Disabled}, server)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrProjectUntrusted):
+				http.Error(w, "project config is untrusted; trust it before writing project scope", http.StatusConflict)
+			case errors.Is(err, ErrScopeInvalid):
+				http.Error(w, "scope must be one of session, project, global", http.StatusBadRequest)
+			default:
+				http.Error(w, fmt.Sprintf("saving preference failed: %v", err), http.StatusInternalServerError)
+			}
+			return
+		}
+
+		st, _ := sess.mcpServerStatus(server)
+		status := http.StatusOK
+		if res.pending > 0 {
+			status = http.StatusAccepted
+		}
+		writeJSON(w, status, map[string]any{
+			"server":            st,
+			"affected_sessions": res.affected,
+			"pending_sessions":  res.pending,
+		})
 	}
 }
 
