@@ -2,10 +2,13 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -32,6 +35,226 @@ func mustGetwd(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return cwd
+}
+
+// TestMCPServerHelper is a long-lived helper MCP server used by the lifecycle
+// tests (status, exit detection, restart). It exposes one "ping" tool and runs
+// until its stdin closes or it is killed. A PID file lets a test kill the exact
+// subprocess to simulate a crash.
+func TestMCPServerHelper(t *testing.T) {
+	if os.Getenv("GO_WANT_MCP_SERVER_HELPER") != "1" {
+		return
+	}
+	if pidFile := os.Getenv("MCP_PID_OUTPUT"); pidFile != "" {
+		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600)
+	}
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "ping-helper", Version: "0.1"}, nil)
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "ping",
+		Description: "Replies pong",
+	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, input any) (*sdkmcp.CallToolResult, any, error) {
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "pong"}},
+		}, nil, nil
+	})
+	if err := server.Run(context.Background(), &sdkmcp.StdioTransport{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func helperServerConfig(pidFile string) core.MCPServer {
+	return core.MCPServer{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestMCPServerHelper$", "--"},
+		Env: map[string]string{
+			"GO_WANT_MCP_SERVER_HELPER": "1",
+			"MCP_PID_OUTPUT":            pidFile,
+		},
+	}
+}
+
+func TestManagerStatusAfterStart(t *testing.T) {
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	})
+	defer mgr.Close()
+
+	st := mgr.Status()
+	if len(st) != 1 {
+		t.Fatalf("expected 1 server status, got %d", len(st))
+	}
+	if st[0].Name != "ping" || st[0].State != StateReady {
+		t.Fatalf("status = %+v, want ready ping", st[0])
+	}
+	if st[0].ToolCount != 1 || len(st[0].ToolNames) != 1 || st[0].ToolNames[0] != "ping" {
+		t.Fatalf("tools = %+v, want [ping]", st[0].ToolNames)
+	}
+}
+
+func TestManagerStatusFailedServer(t *testing.T) {
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"broken": {Command: "definitely-not-a-real-binary-xyz"},
+	})
+	defer mgr.Close()
+
+	st := mgr.Status()
+	if len(st) != 1 || st[0].State != StateFailed {
+		t.Fatalf("status = %+v, want one failed server", st)
+	}
+	if st[0].Error == "" {
+		t.Fatal("failed server should carry an error message")
+	}
+	// A failed server is still restartable (unknown binary stays failed).
+	got, err := mgr.RestartServer(context.Background(), "broken")
+	if err != nil {
+		t.Fatalf("RestartServer returned error: %v", err)
+	}
+	if got.State != StateFailed {
+		t.Fatalf("restart of broken server = %s, want failed", got.State)
+	}
+}
+
+func TestManagerDetectsServerExit(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	mgr := NewManager(nil, "")
+
+	changes := make(chan ServerStatus, 16)
+	mgr.OnChange(func(s ServerStatus) { changes <- s })
+
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(pidFile),
+	})
+	defer mgr.Close()
+
+	// Capture the tool the way the registry does: once, at startup. The closure
+	// must keep working (routing through the session) after the server dies.
+	var pingTool *core.Tool
+	for _, tl := range mgr.Tools() {
+		tl := tl
+		if tl.Label == "ping/ping" {
+			pingTool = &tl
+		}
+	}
+	if pingTool == nil {
+		t.Fatal("ping tool missing")
+	}
+
+	pid := waitForPID(t, pidFile)
+
+	// Kill the subprocess out from under the manager: it must notice and flip
+	// to exited, and a tool call must then fail cleanly (not hang).
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	_ = proc.Kill()
+
+	if !waitForState(t, mgr, "ping", StateExited, 5*time.Second) {
+		t.Fatal("manager did not detect the server exit")
+	}
+
+	// The OnChange callback must have fired with the exit (ready first, then
+	// exited). Drain what we have and require at least one exited notification.
+	sawExit := false
+	for drained := false; !drained; {
+		select {
+		case s := <-changes:
+			if s.Name == "ping" && s.State == StateExited {
+				sawExit = true
+			}
+		default:
+			drained = true
+		}
+	}
+	if !sawExit {
+		t.Fatal("OnChange never reported the exit")
+	}
+
+	// A tool call against the dead server returns an error result, not a hang.
+	res, err := pingTool.Execute(context.Background(), map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("Execute returned a hard error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("tool call against exited server should be an error result")
+	}
+}
+
+func TestManagerRestartServer(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(pidFile),
+	})
+	defer mgr.Close()
+
+	pid1 := waitForPID(t, pidFile)
+
+	st, err := mgr.RestartServer(context.Background(), "ping")
+	if err != nil {
+		t.Fatalf("RestartServer: %v", err)
+	}
+	if st.State != StateReady {
+		t.Fatalf("post-restart state = %s, want ready", st.State)
+	}
+
+	pid2 := waitForPID(t, pidFile)
+	if pid2 == pid1 {
+		t.Fatal("restart did not spawn a new process")
+	}
+
+	// Tools still work after restart (closures route through the fresh session).
+	for _, tl := range mgr.Tools() {
+		if tl.Label == "ping/ping" {
+			res, err := tl.Execute(context.Background(), map[string]any{}, nil)
+			if err != nil || res.IsError {
+				t.Fatalf("ping after restart failed: err=%v res=%+v", err, res)
+			}
+			return
+		}
+	}
+	t.Fatal("ping tool missing after restart")
+}
+
+func TestManagerRestartUnknownServer(t *testing.T) {
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), nil)
+	defer mgr.Close()
+	if _, err := mgr.RestartServer(context.Background(), "nope"); !errors.Is(err, ErrUnknownServer) {
+		t.Fatalf("err = %v, want ErrUnknownServer", err)
+	}
+}
+
+func waitForPID(t *testing.T, pidFile string) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(pidFile)
+		if err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && pid > 0 {
+				return pid
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("helper never wrote its PID to %s", pidFile)
+	return 0
+}
+
+func waitForState(t *testing.T, mgr *Manager, name string, want ServerState, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, s := range mgr.Status() {
+			if s.Name == name && s.State == want {
+				return true
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
 }
 
 func TestManagerStartsServerInConfiguredCWD(t *testing.T) {
@@ -202,11 +425,11 @@ func TestWrapMCPTool_InMemory(t *testing.T) {
 
 	st, ct := sdkmcp.NewInMemoryTransports()
 
-	serverSession, err := server.Connect(ctx, st, nil)
+	srvSession, err := server.Connect(ctx, st, nil)
 	if err != nil {
 		t.Fatalf("server connect: %v", err)
 	}
-	defer func() { _ = serverSession.Close() }()
+	defer func() { _ = srvSession.Close() }()
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "moa-test", Version: "0.1"}, nil)
 	session, err := client.Connect(ctx, ct, nil)
@@ -224,11 +447,11 @@ func TestWrapMCPTool_InMemory(t *testing.T) {
 		t.Fatalf("expected 1 tool, got %d", len(list.Tools))
 	}
 
-	// Wrap as core.Tool
-	tool, err := wrapMCPTool("test-server", list.Tools[0], session)
-	if err != nil {
-		t.Fatalf("wrapMCPTool: %v", err)
-	}
+	// Wrap as core.Tool via the manager's routing wrapper.
+	m := NewManager(nil, "")
+	sess := &serverSession{name: "test-server", session: session, state: StateReady}
+	ti := toolInfo{name: list.Tools[0].Name, description: list.Tools[0].Description}
+	tool := m.wrapTool(sess, ti)
 
 	// Verify metadata
 	if tool.Name != "mcp__test-server__greet" {
@@ -268,15 +491,17 @@ func TestWrapMCPTool_ErrorResult(t *testing.T) {
 	})
 
 	st, ct := sdkmcp.NewInMemoryTransports()
-	serverSession, _ := server.Connect(ctx, st, nil)
-	defer func() { _ = serverSession.Close() }()
+	srvSession, _ := server.Connect(ctx, st, nil)
+	defer func() { _ = srvSession.Close() }()
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "moa-test", Version: "0.1"}, nil)
 	session, _ := client.Connect(ctx, ct, nil)
 	defer func() { _ = session.Close() }()
 
 	list, _ := session.ListTools(ctx, nil)
-	tool, _ := wrapMCPTool("test-server", list.Tools[0], session)
+	m := NewManager(nil, "")
+	sess := &serverSession{name: "test-server", session: session, state: StateReady}
+	tool := m.wrapTool(sess, toolInfo{name: list.Tools[0].Name})
 
 	result, err := tool.Execute(ctx, map[string]any{}, nil)
 	if err != nil {
