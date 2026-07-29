@@ -71,6 +71,7 @@ type MoaConfig struct {
 	PinnedModels           []string             `json:"pinned_models"`                           // Model IDs pinned for Ctrl+P cycling
 	BraveAPIKey            string               `json:"brave_api_key"`                           // Brave Search API key for web_search tool
 	MCPServers             map[string]MCPServer `json:"mcp_servers"`                             // MCP tool server connections
+	DisabledMCPServers     []string             `json:"disabled_mcp_servers,omitempty"`          // MCP server names vetoed at this config level (server stays configured but is not started)
 	TrustedMCPPaths        []string             `json:"trusted_mcp_paths"`                       // Project paths trusted for .mcp.json auto-load
 	TrustedProjectPaths    []string             `json:"trusted_project_paths"`                   // Project paths trusted for .moa/config.json + .moa/tools/* auto-load
 	PlanReviewModel        string               `json:"plan_review_model"`                       // Model for plan reviewer (default: current model)
@@ -276,11 +277,15 @@ func mergeScalar[T comparable](base, override T) T {
 
 func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged := MoaConfig{
-		DisableSandbox:      base.DisableSandbox || override.DisableSandbox,
-		AllowedPaths:        append(base.AllowedPaths, override.AllowedPaths...),
-		PathScope:           mergeScalar(base.PathScope, override.PathScope),
-		PinnedModels:        base.PinnedModels, // global-only preference; project level ignored
-		MCPServers:          MergeMCPServers(base.MCPServers, override.MCPServers),
+		DisableSandbox: base.DisableSandbox || override.DisableSandbox,
+		AllowedPaths:   append(base.AllowedPaths, override.AllowedPaths...),
+		PathScope:      mergeScalar(base.PathScope, override.PathScope),
+		PinnedModels:   base.PinnedModels, // global-only preference; project level ignored
+		MCPServers:     MergeMCPServers(base.MCPServers, override.MCPServers),
+		// disabled is a veto that accumulates across levels: a project can add
+		// to but never relax a global disable (union, deduplicated). Provenance
+		// is lost here, so a scope-aware caller uses LoadMoaConfigResolved.
+		DisabledMCPServers:  unionStrings(base.DisabledMCPServers, override.DisabledMCPServers),
 		TrustedMCPPaths:     base.TrustedMCPPaths,     // global-only; persisted via SaveGlobalConfig
 		TrustedProjectPaths: base.TrustedProjectPaths, // global-only; persisted via SaveGlobalConfig
 		Permissions: PermissionsConfig{
