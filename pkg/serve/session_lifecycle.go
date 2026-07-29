@@ -832,16 +832,14 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 	}
 	sum := &MCPSummary{Total: len(status)}
 	for _, st := range status {
-		switch {
-		case st.State == mcp.StateDisabled:
+		switch st.State {
+		case mcp.StateDisabled:
 			sum.Disabled++
-		case st.State == mcp.StateReady:
+		case mcp.StateReady:
 			sum.Ready++
-		default:
-			// Enabled but not ready: starting is transient, failed/exited alerts.
-			if st.State == mcp.StateFailed || st.State == mcp.StateExited {
-				sum.Unhealthy++
-			}
+		case mcp.StateFailed, mcp.StateExited:
+			// Enabled but not ready; starting is transient, failed/exited alerts.
+			sum.Unhealthy++
 		}
 		if st.PendingAction != "" {
 			sum.Pending++
