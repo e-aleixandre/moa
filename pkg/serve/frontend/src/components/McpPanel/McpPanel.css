@@ -1,0 +1,241 @@
+/* McpSheetBody — the per-session MCP panel inside a MobileSheet. Rows carry a
+   server's name, state, tool count and a Restart button; unhealthy rows lift to
+   the alert color. Mirrors the visual language of the usage sheet rows. */
+
+.mcp-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Scope selector header: picks which level (session/project/global) the
+   per-row toggle writes to. */
+.mcp-scopebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.mcp-scopebar-label {
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+}
+.mcp-scope-select {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font);
+  /* iOS auto-zooms inputs under 16px on focus; keep it at 16px. */
+  font-size: 16px;
+  color: var(--text);
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md, 10px);
+  padding: 7px 10px;
+}
+.mcp-scope-select:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.mcp-scope-note {
+  font-size: var(--text-xs);
+  color: var(--yellow);
+}
+
+.mcp-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+}
+
+.mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface0);
+}
+.mcp-row-bad {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--surface0));
+  background: color-mix(in srgb, var(--red) 10%, var(--surface0));
+}
+
+.mcp-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.mcp-row-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-row-state {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+}
+.mcp-st-ready {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.mcp-st-restarting {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+}
+.mcp-st-progress {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+}
+.mcp-st-disabled {
+  color: var(--subtext0);
+  background: color-mix(in srgb, var(--overlay0) 22%, transparent);
+}
+.mcp-st-bad {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+
+/* Veto badges: the scopes currently disabling a server. Neutral, compact. */
+.mcp-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.mcp-badge {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--subtext1);
+  background: color-mix(in srgb, var(--overlay0) 20%, transparent);
+  border-radius: var(--radius-full);
+  padding: 1px 7px;
+}
+
+/* Pending: the desired policy hasn't been applied because the session is busy. */
+.mcp-row-pending {
+  font-size: var(--text-xs);
+  color: var(--yellow);
+}
+
+/* Row that is intentionally off: dim, never alarming. */
+.mcp-row-off {
+  opacity: 0.72;
+}
+
+/* Disable/enable toggle scoped to the header's selected level. */
+.mcp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-xs);
+  color: var(--subtext1);
+  cursor: pointer;
+  min-width: 0;
+}
+.mcp-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--peach);
+  cursor: pointer;
+}
+.mcp-toggle-off {
+  opacity: 0.5;
+  cursor: default;
+}
+.mcp-toggle-off input {
+  cursor: default;
+}
+
+.mcp-row-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.mcp-row-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.mcp-row-tools {
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+}
+
+.mcp-row-restart {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 1px solid var(--surface1);
+  background: var(--base);
+  color: var(--subtext1);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  padding: 6px 11px;
+  border-radius: var(--radius-full);
+}
+.mcp-row-restart:hover,
+.mcp-row-restart:active {
+  color: var(--text);
+  border-color: var(--overlay0);
+}
+.mcp-row-restart:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.mcp-row-restart:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.mcp-row-error {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  line-height: var(--leading-normal);
+  color: color-mix(in srgb, var(--red) 85%, var(--text));
+  word-break: break-word;
+}
+
+.mcp-empty {
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+  padding: var(--space-2) 0;
+}
+
+.mcp-spin {
+  animation: mcp-spin 0.8s linear infinite;
+}
+@keyframes mcp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

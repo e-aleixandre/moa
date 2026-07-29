@@ -208,6 +208,9 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		return m.handleBranchCommand()
 
+	case "mcp":
+		return m.handleMCPCommand()
+
 	case "exit", "quit":
 		m.cleanup()
 		return m, tea.Quit

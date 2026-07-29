@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-29
+
+### Added
+
+- MCP servers now have a live health panel and status-line indicator in both the
+  web app and the terminal UI. The status line shows how many servers are
+  configured and turns red only when a server that should be running actually
+  failed or exited; a deliberately disabled server is shown as a neutral
+  "(N off)" note, never as an error.
+- You can enable or disable individual MCP servers without editing config files,
+  at three scopes: just this session (in memory, until the process restarts),
+  this project, or globally. Vetoes accumulate — a server disabled globally
+  stays disabled even if a narrower scope tries to re-enable it — and the UI is
+  honest about it: removing one scope's override tells you when another scope
+  still keeps the server off. Project-scope changes require the project's config
+  to be trusted first.
+  - Web: open the MCP panel from the status line, pick a scope, and toggle each
+    server; broad scopes ask for confirmation.
+  - Terminal: the new `/mcp` command opens a picker — `s` cycles the scope,
+    space toggles the selected server, `r` restarts a running one, and
+    project/global changes ask for a y/N confirmation.
+- A single MCP server can be restarted in place from the panel/picker when it
+  has failed, without restarting the whole session.
+
+### Changed
+
+- Disabling a server now takes effect as soon as the session is idle: if you
+  toggle it mid-run, the preference is recorded and applied at the next quiet
+  point rather than being refused. The base system prompt is rebuilt from the
+  live tool set whenever servers are enabled, disabled or restarted, so the
+  agent's advertised tools always match what is actually running.
+
+### Fixed
+
+- MCP server processes are no longer orphaned when a restart and a shutdown race
+  each other; per-server lifecycle operations are now serialized.
+- On desktop, entering or leaving a subagent view now lands at the bottom of the
+  transcript instead of leaving the scroll position stranded mid-conversation.
+
 ## [0.17.2] - 2026-07-29
 
 ### Fixed

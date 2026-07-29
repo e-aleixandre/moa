@@ -173,6 +173,7 @@ const (
 	SegmentCache       = "cache"
 	SegmentCacheCold   = "cache_cold" // prompt cache has gone cold since last run
 	SegmentContext     = "context"
+	SegmentMCP         = "mcp"         // configured MCP servers; red only when one really failed
 	SegmentUsage       = "usage"       // plan quota (5h + weekly windows)
 	SegmentUsageExtra  = "usage_extra" // pay-as-you-go spend alert
 	SegmentOverage     = "overage"     // this session is drawing on extra usage NOW
@@ -195,6 +196,7 @@ const (
 	PriorityCacheCold   = 86 // right after the cache-hit meter it replaces
 	PriorityUsage       = 87 // grouped with the other meters
 	PriorityContext     = 90 // rightmost of the built-ins
+	PriorityMCP         = 88 // grouped with the meters, before context
 	PriorityVersion     = 100
 )
 
@@ -349,6 +351,27 @@ func (sl *StatusLine) UpdateContextSegment(pct int) {
 
 	text := statusLineKeyStyle.Render("context ") + style.Render(fmt.Sprintf("%d%%", pct))
 	sl.Set(SegmentContext, text, PriorityContext)
+}
+
+// UpdateMCPSegment sets the MCP servers segment: a plain count, turning red only
+// when a server that should be running actually failed/exited (unhealthy > 0).
+// A deliberately disabled server is neutral — it never reddens the status line.
+// total == 0 removes the segment (no servers configured).
+func (sl *StatusLine) UpdateMCPSegment(total, unhealthy, disabled int) {
+	if total <= 0 {
+		sl.Remove(SegmentMCP)
+		return
+	}
+	var value string
+	if unhealthy > 0 {
+		value = statusLineContextHighStyle.Render(fmt.Sprintf("%d!", unhealthy))
+	} else {
+		value = statusLineValueStyle.Render(fmt.Sprintf("%d", total))
+	}
+	if disabled > 0 {
+		value += statusLineKeyStyle.Render(fmt.Sprintf(" (%d off)", disabled))
+	}
+	sl.Set(SegmentMCP, statusLineKeyStyle.Render("mcp ")+value, PriorityMCP)
 }
 
 // usageStyle picks a color for a utilization percentage, matching the context

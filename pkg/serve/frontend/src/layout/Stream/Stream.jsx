@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "preact/hooks";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "preact/hooks";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -176,8 +176,14 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     liveToolTailLen,
   ]);
 
-  // Switching to another session starts pinned to the latest again.
-  useEffect(() => {
+  // Switching to another session (and the initial mount) starts pinned to the
+  // latest again. useLayoutEffect, not useEffect: on desktop, entering/leaving a
+  // subagent swaps Stream <-> SubagentView, remounting this Stream at
+  // scrollTop=0. A plain effect runs AFTER paint, so the user sees the whole
+  // transcript scroll down. A layout effect positions synchronously before
+  // paint, so it is born at the bottom. (Mobile overlays its subagent view
+  // instead of swapping, so it never remounts and never showed this.)
+  useLayoutEffect(() => {
     stickToBottom.current = true;
     setShowNewBtn(false);
     scrollToBottomNow();

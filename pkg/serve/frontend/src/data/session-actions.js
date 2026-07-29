@@ -75,6 +75,10 @@ export async function loadSessions() {
         cacheExpiresAt: cacheExpiresAtMs(info.cache_expires_at),
         error: wsOwns ? existing.error : (info.error || null),
         untrustedMcp: info.untrusted_mcp || false,
+        // MCP health summary (poll-driven server truth): {total, ready,
+        // unhealthy} or null when the session has no MCP servers. Not WS-owned —
+        // it reflects the manager's live state, refreshed on each poll.
+        mcp: info.mcp || null,
         messages: existing ? existing.messages : [],
         contextPercent: wsOwns ? existing.contextPercent : (info.context_percent ?? (existing ? existing.contextPercent : -1)),
         contextWindow: wsOwns ? existing.contextWindow : (info.context_window || (existing ? existing.contextWindow : 0)),

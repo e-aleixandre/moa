@@ -16,6 +16,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/release"
@@ -117,12 +118,23 @@ type appModel struct {
 	thinkingPicker thinkingPicker
 	branchPicker   branchPicker
 	subagentPicker subagentPicker
-	cmdPalette     cmdPalette
-	filePicker     filePicker
-	permPrompt     permissionPrompt
-	askPrompt      askPrompt
-	sessionBrowser sessionBrowser
-	statusBar      *StatusLine
+	mcpPicker      mcpPicker
+	// mcpCtrl is the shared MCP controller (one per process in the TUI). nil when
+	// the session has no MCP servers, which hides the /mcp picker and segment.
+	mcpCtrl mcpControl
+	// mcpActionInFlight tracks an async MCP toggle/restart that outlives the
+	// picker being closed and reopened. It is a monotonic generation: a result
+	// message carries the generation it belongs to, so a stale result (from an
+	// action started before the picker was closed) is ignored, and a reopened
+	// picker stays busy until the outstanding action completes.
+	mcpActionGen     uint64
+	mcpActionPending bool
+	cmdPalette       cmdPalette
+	filePicker       filePicker
+	permPrompt       permissionPrompt
+	askPrompt        askPrompt
+	sessionBrowser   sessionBrowser
+	statusBar        *StatusLine
 
 	// Session persistence
 	sessionStore session.SessionStore
@@ -198,6 +210,7 @@ type Config struct {
 	ReleaseInfo           release.Info                            // build metadata shown immediately in the status line
 	UpdateChecker         *release.Checker                        // optional stable-release checker
 	UpdateCheckEnabled    bool                                    // false disables the asynchronous check
+	MCPController         *mcp.Controller                         // shared MCP controller (nil = no MCP servers / picker hidden)
 }
 
 // isStructuralBusEvent returns true for events that must not be dropped.
@@ -249,6 +262,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		quit:                 quit,
 		unsubAll:             unsubAll,
 		baseCtx:              ctx,
+		mcpCtrl:              mcpControlOrNil(cfg.MCPController),
 		renderer:             newRenderer(80),
 		viewport:             vp,
 		input:                newInput(),
@@ -296,6 +310,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		m.statusBar.UpdatePathScopeSegment(pathInfo.Scope)
 	}
 	m.statusBar.UpdateContextSegment(0)
+	m.updateMCPSegment()
 
 	// Plan mode initial display.
 	if planInfo, err := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{}); err == nil {
@@ -630,6 +645,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case voiceResultMsg:
 		return m.handleVoiceResult(msg)
 
+	case mcpActionResultMsg:
+		m.handleMCPActionResult(msg)
+		return m, nil
+
 	case compactResultMsg:
 		// A message queued during the compact may have started a follow-up run
 		// (the pump drains the queue at the idle point). If the session is
@@ -830,6 +849,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.subagentPicker.active {
 		return m.handleSubagentPickerKey(msg)
+	}
+
+	if m.mcpPicker.active {
+		return m.handleMCPPickerKey(msg)
 	}
 
 	if m.settingsMenu.active {
@@ -1651,6 +1674,16 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 		if e.PathScope != "" {
 			m.statusBar.UpdatePathScopeSegment(e.PathScope)
+		}
+
+	// --- MCP ---
+	case bus.MCPChanged:
+		// A server changed state (toggle result, restart, or an external
+		// crash/exit). Recompute the status-line segment and, if the picker is
+		// open, reload its rows so the live state matches the web panel.
+		m.updateMCPSegment()
+		if m.mcpPicker.active {
+			m.refreshMCPPicker()
 		}
 
 	// --- Plan mode ---

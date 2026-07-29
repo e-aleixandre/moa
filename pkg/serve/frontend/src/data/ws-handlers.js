@@ -981,6 +981,22 @@ export function handleWsContextUpdate(id, data) {
   }
 }
 
+// handleWsMcpChange reflects a live MCP server transition: it refreshes the
+// glanceable status-line summary and bumps mcpTick, a monotonic counter an open
+// MCP panel watches to re-fetch the full per-server detail (the summary alone
+// can't carry per-server state/scope changes).
+export function handleWsMcpChange(id, data) {
+  const mcp = {
+    total: data.total || 0,
+    ready: data.ready || 0,
+    disabled: data.disabled || 0,
+    unhealthy: data.unhealthy || 0,
+    pending: data.pending || 0,
+  };
+  const prev = store.get().sessions[id];
+  updateSession(id, { mcp, mcpTick: ((prev && prev.mcpTick) || 0) + 1 });
+}
+
 export function handleWsSessionCost(id, data) {
   if (data.cost_usd != null) {
     updateSession(id, { costUSD: data.cost_usd });

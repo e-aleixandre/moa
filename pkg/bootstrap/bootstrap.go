@@ -116,19 +116,27 @@ type SessionConfig struct {
 
 // Session is a fully wired session ready for agent.Run/Send.
 type Session struct {
-	Agent             *agent.Agent
-	ToolReg           *core.Registry
-	TaskStore         *tasks.Store
-	PlanMode          *planmode.PlanMode
-	Goal              *goal.Goal
-	AskBridge         *askuser.Bridge
-	Gate              *permission.Gate
-	MCPManager        *mcp.Manager
-	PathPolicy        *tool.PathPolicy
-	AgentsMD          string
-	Skills            []skill.Skill
-	SkillsIndex       string
-	SystemPrompt      string
+	Agent         *agent.Agent
+	ToolReg       *core.Registry
+	TaskStore     *tasks.Store
+	PlanMode      *planmode.PlanMode
+	Goal          *goal.Goal
+	AskBridge     *askuser.Bridge
+	Gate          *permission.Gate
+	MCPManager    *mcp.Manager
+	MCPController *mcp.Controller
+	MCPPolicy     core.MCPDisablePolicy
+	PathPolicy    *tool.PathPolicy
+	AgentsMD      string
+	Skills        []skill.Skill
+	SkillsIndex   string
+	SystemPrompt  string
+	// BuildBasePrompt regenerates the base system prompt from a tool-spec set,
+	// capturing the same inputs (AgentsMD, CWD, verify, indexes) used at
+	// construction. The MCP controller uses it to rebuild the prompt after a
+	// server is enabled/disabled, so the model is never told about a tool that
+	// is no longer registered.
+	BuildBasePrompt   func([]core.ToolSpec) string
 	MemoryStore       *memory.Store
 	SessionCheckpoint *sessioncheckpoint.Slot
 	HasVerify         bool
@@ -192,10 +200,16 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	// 1. Load config.
 	var moaCfg core.MoaConfig
+	var mcpDisableSources core.MCPDisableSources
 	if cfg.MoaCfg != nil {
 		moaCfg = *cfg.MoaCfg
+		// An injected config carries its own disabled list (project provenance
+		// is unknowable here, so treat it as global for resolution purposes).
+		mcpDisableSources = core.MCPDisableSources{Global: moaCfg.DisabledMCPServers}
 	} else {
-		moaCfg = core.LoadMoaConfig(cfg.CWD)
+		resolved := core.LoadMoaConfigResolved(cfg.CWD)
+		moaCfg = resolved.Config
+		mcpDisableSources = resolved.MCPDisabled
 	}
 
 	// Budget: config default, overridden by explicit SessionConfig value.
@@ -361,12 +375,25 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		}
 	}
 	var mcpMgr *mcp.Manager
+	var mcpController *mcp.Controller
+	mcpPolicy := core.NewMCPDisablePolicy(mcpDisableSources)
 	if len(moaCfg.MCPServers) > 0 {
 		mcpMgr = mcp.NewManager(nil, cfg.CWD)
-		mcpMgr.Start(cfg.Ctx, moaCfg.MCPServers)
+		// Resolve the disabled set BEFORE spawning so a vetoed server never
+		// starts a process (e.g. never launches a Chrome for a disabled
+		// Playwright). Disabled servers still get a placeholder for the panel.
+		mcpMgr.Start(cfg.Ctx, moaCfg.MCPServers, mcpPolicy.DisabledSet())
 		for _, t := range mcpMgr.Tools() {
 			core.RegisterOrLog(toolReg, t)
 		}
+		// The Controller coordinates policy + registry + prompt on top of the
+		// manager. refreshPrompt is wired by the frontend once its runtime
+		// exists (SetRefreshPrompt); until then reconciles just skip the refresh.
+		mcpController = mcp.NewController(mcp.ControllerConfig{
+			Manager:  mcpMgr,
+			Registry: toolReg,
+			Policy:   mcpPolicy,
+		})
 	}
 
 	// 8. Skills.
@@ -391,6 +418,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		AskBridge:         askBridge,
 		Gate:              gate,
 		MCPManager:        mcpMgr,
+		MCPController:     mcpController,
+		MCPPolicy:         mcpPolicy,
 		PathPolicy:        pathPolicy,
 		AgentsMD:          agentsMD,
 		Skills:            skills,
@@ -494,14 +523,17 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	sess.Goal = goal.New()
 
 	// 12. System prompt (after ALL tools registered).
-	systemPrompt := agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
-		AgentsMD:    agentsMD,
-		Tools:       toolReg.Specs(),
-		CWD:         cfg.CWD,
-		HasVerify:   hasVerify,
-		MemoryIndex: memoryIndex,
-		SkillsIndex: skillsIndex,
-	})
+	sess.BuildBasePrompt = func(specs []core.ToolSpec) string {
+		return agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
+			AgentsMD:    agentsMD,
+			Tools:       specs,
+			CWD:         cfg.CWD,
+			HasVerify:   hasVerify,
+			MemoryIndex: memoryIndex,
+			SkillsIndex: skillsIndex,
+		})
+	}
+	systemPrompt := sess.BuildBasePrompt(toolReg.Specs())
 	sess.SystemPrompt = systemPrompt
 
 	// 13. Agent.

@@ -146,6 +146,23 @@ func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
 	}
 }
 
+func TestWsEventFromBus_MCPChanged(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.MCPChanged{
+		SessionID: "s1", Total: 3, Ready: 1, Disabled: 1, Unhealthy: 1, Pending: 1,
+	})
+	if !ok || ev.Type != "mcp_change" {
+		t.Fatalf("Type = %q ok=%v, want mcp_change", ev.Type, ok)
+	}
+	data, ok := ev.Data.(MCPChangeData)
+	if !ok {
+		t.Fatalf("Data type = %T, want MCPChangeData", ev.Data)
+	}
+	want := MCPChangeData{Total: 3, Ready: 1, Disabled: 1, Unhealthy: 1, Pending: 1}
+	if data != want {
+		t.Fatalf("Data = %+v, want %+v", data, want)
+	}
+}
+
 func TestWsEventFromBus_RunTokensUpdated(t *testing.T) {
 	ev, ok := wsEventFromBus(bus.RunTokensUpdated{SessionID: "s1", RunGen: 4, Up: 125, Down: 75})
 	if !ok || ev.Type != "run_tokens" {

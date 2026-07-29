@@ -126,6 +126,11 @@ type ManagedSession struct {
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
 	verifyRunning atomic.Bool
+	// mcpReconcilePending is a one-flight guard: it is set when an MCP toggle
+	// arrives while the session is busy, so its reconcile is deferred to the next
+	// quiescence. Further toggles coalesce into the same pending reconcile, which
+	// re-reads the latest policy when it fires.
+	mcpReconcilePending atomic.Bool
 }
 
 // title returns the current session title under lock.
@@ -141,7 +146,26 @@ type serveInfra struct {
 	sessionCancel context.CancelFunc
 	toolReg       *core.Registry
 	mcpMgr        *mcp.Manager
-	UntrustedMCP  bool
+	mcpController *mcp.Controller
+	mcpPolicy     core.MCPDisablePolicy
+	// buildBasePrompt rebuilds the base system prompt from a tool-spec set. Kept
+	// so a manager swap (reloadMCP) can rewire a fresh controller's refresh.
+	buildBasePrompt func([]core.ToolSpec) string
+	UntrustedMCP    bool
+}
+
+// MCPSummary is the glanceable MCP health for the status line. Total counts all
+// configured servers (including disabled ones); Disabled is the count in the
+// intentionally-off state (neutral, not an alarm); Unhealthy counts only servers
+// that are enabled yet failed/exited (the alert color); Pending counts servers
+// mid-transition (desired differs from applied). The indicator shows whenever
+// Total > 0 and turns to an alert color only when Unhealthy > 0.
+type MCPSummary struct {
+	Total     int `json:"total"`
+	Ready     int `json:"ready"`
+	Disabled  int `json:"disabled"`
+	Unhealthy int `json:"unhealthy"`
+	Pending   int `json:"pending"`
 }
 
 // SessionInfo is the public representation returned by List/Get endpoints.
@@ -158,6 +182,12 @@ type SessionInfo struct {
 	Updated        time.Time                  `json:"updated"`
 	Error          string                     `json:"error,omitempty"`
 	UntrustedMCP   bool                       `json:"untrusted_mcp,omitempty"`
+	// MCP summarizes this session's MCP servers for the status line: a count and
+	// whether any is unhealthy, so the indicator can appear only when servers
+	// exist and turn red when one has failed or exited. The full per-server
+	// detail is fetched on demand from GET /api/sessions/{id}/mcp. Omitted when
+	// the session has no MCP servers.
+	MCP *MCPSummary `json:"mcp,omitempty"`
 	PlanMode       string                     `json:"plan_mode,omitempty"`
 	PlanFile       string                     `json:"plan_file,omitempty"`
 	ContextPercent int                        `json:"context_percent"` // 0-100, -1 if unknown
@@ -256,6 +286,8 @@ func (s *ManagedSession) info() SessionInfo {
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
 
+	mcpSummary := s.mcpSummary()
+
 	s.mu.Lock()
 	lastRun := s.lastRunAt
 	cacheTTL := s.cacheTTL
@@ -273,6 +305,7 @@ func (s *ManagedSession) info() SessionInfo {
 		Updated:        s.Updated,
 		Error:          stateErr,
 		UntrustedMCP:   s.infra.UntrustedMCP,
+		MCP:            mcpSummary,
 		ContextPercent: ctxPct,
 		ContextWindow:  model.MaxInput,
 		CompactAt:      compactAt,
@@ -371,6 +404,13 @@ type Manager struct {
 	attention *attention.Service
 	versionMu sync.RWMutex
 	version   release.Result
+
+	// mcpConfigMu serializes MCP disable-preference mutations across the whole
+	// process: SaveGlobalConfig/SaveProjectConfig do atomic read-modify-write per
+	// file, but two toggles racing on the same file could still lose an update
+	// between read and rename. It also serializes the fan-out to open sessions so
+	// two concurrent toggles don't interleave reconciles.
+	mcpConfigMu sync.Mutex
 }
 
 // ManagerConfig configures a Manager.

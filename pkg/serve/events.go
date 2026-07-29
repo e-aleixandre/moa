@@ -193,6 +193,17 @@ type ContextUpdateData struct {
 	ContextPercent int `json:"context_percent"`
 }
 
+// MCPChangeData carries the rolled-up MCP summary counts for the status-line
+// indicator, matching the MCPSummary fields. An open panel re-fetches full
+// per-server detail from GET /api/sessions/{id}/mcp when this arrives.
+type MCPChangeData struct {
+	Total     int `json:"total"`
+	Ready     int `json:"ready"`
+	Disabled  int `json:"disabled"`
+	Unhealthy int `json:"unhealthy"`
+	Pending   int `json:"pending"`
+}
+
 // RunTokensData carries the current run's estimated logical input/output traffic.
 type RunTokensData struct {
 	Up   int `json:"up"`
