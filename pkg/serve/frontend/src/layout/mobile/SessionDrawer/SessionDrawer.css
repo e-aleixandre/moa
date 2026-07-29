@@ -276,7 +276,35 @@
 .sdrawer-foot {
   flex: none;
   display: flex;
+  align-items: stretch;
   border-top: 1px solid var(--surface0);
+}
+
+/* Build version, trailing the Settings button. Mono + dim so it reads as a
+   quiet status stamp, not an action; the update variant lifts to peach and is a
+   real link to the latest release. */
+.sdrawer-ver {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-4);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.sdrawer-ver-update {
+  color: var(--peach);
+  font-weight: var(--weight-medium);
+}
+.sdrawer-ver-update:hover,
+.sdrawer-ver-update:active {
+  background: var(--surface0);
+}
+.sdrawer-ver-update:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
 .sdrawer-settings {

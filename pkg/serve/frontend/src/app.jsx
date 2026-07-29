@@ -391,7 +391,7 @@ function App() {
   if (state.isMobile) {
     return (
       <>
-        <MobileConversationScreen />
+        <MobileConversationScreen version={version} />
         <GlobalPalette />
         <GlobalPairingPanel />
         <ToastContainer />

@@ -9,6 +9,36 @@ import "./SessionDrawer.css";
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// DrawerVersion — the build version in the drawer footer, mirroring the desktop
+// Spine's SpineVersion: plain "vX.Y.Z" normally, or a link to the latest release
+// when the server's update check reports one available. The mobile app had no
+// version surface after the redesign; this is it (gap #3 decision: it lives on
+// the drawer, next to Settings).
+function DrawerVersion({ version }) {
+  if (!version?.current) return null;
+  // current/latest already arrive v-prefixed from the server (release
+  // DisplayVersion / cache), so use them verbatim — don't add another "v".
+  const current = version.current;
+  if (version.update_available && version.latest) {
+    return (
+      <a
+        class="sdrawer-ver sdrawer-ver-update"
+        href="https://github.com/ealeixandre/moa/releases/latest"
+        target="_blank"
+        rel="noreferrer"
+        title={`Update available: ${version.latest}`}
+      >
+        {current} ↑ {version.latest}
+      </a>
+    );
+  }
+  return (
+    <span class="sdrawer-ver" title="moa version">
+      {current}
+    </span>
+  );
+}
+
 // SessionCardMenu — the per-card ⋯ overflow (TELEMETRY-SETTINGS-REDESIGN §3.3).
 // Session lifecycle (close / reopen / delete) is list management, not a
 // conversation setting, so it lives here on the card rather than inside the
@@ -193,6 +223,7 @@ export function SessionDrawer({
   onSelect,
   onCreate,
   onSettings,
+  version = null,
   onCloseSession,
   onReopenSession,
   onDeleteSession,
@@ -420,6 +451,7 @@ export function SessionDrawer({
               >
                 <Settings size={14} aria-hidden="true" /> Settings
               </button>
+              <DrawerVersion version={version} />
             </div>
           </>
         )}

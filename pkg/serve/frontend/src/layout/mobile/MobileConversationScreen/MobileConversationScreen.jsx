@@ -162,7 +162,7 @@ function recentSavedSessions(sessions, limit = 3) {
     }));
 }
 
-export function MobileConversationScreen() {
+export function MobileConversationScreen({ version = null }) {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
 
@@ -379,6 +379,7 @@ export function MobileConversationScreen() {
         onSelect={onSelectFromDrawer}
         onCreate={onCreate}
         onSettings={onSettingsFromDrawer}
+        version={version}
         onCloseSession={(id) => archiveSession(id)}
         onReopenSession={(id) => resumeSession(id)}
         onDeleteSession={(id) => deleteSession(id)}
