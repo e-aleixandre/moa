@@ -797,6 +797,8 @@ func handleMCPRestart(mgr *Manager) http.HandlerFunc {
 				http.Error(w, fmt.Sprintf("unknown MCP server %q", server), http.StatusNotFound)
 			case errors.Is(err, mcp.ErrServerDisabled):
 				http.Error(w, "server is disabled; enable it before restarting", http.StatusConflict)
+			case errors.Is(err, mcp.ErrRestartUnsupported):
+				http.Error(w, "restarting a single MCP server is not supported on this platform", http.StatusNotImplemented)
 			case errors.Is(err, ErrBusy):
 				http.Error(w, "session is busy; try again when it is idle", http.StatusConflict)
 			default:

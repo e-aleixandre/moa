@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -147,6 +148,30 @@ func TestControllerRestartRefusesDisabled(t *testing.T) {
 	})
 	if _, err := c.Restart(context.Background(), "ping"); err == nil {
 		t.Fatal("restart of a disabled server should fail")
+	}
+}
+
+// TestRestartPlatformGate documents that restart is gated on the platform's
+// ability to reap a process tree: on POSIX it is supported (a running server
+// restarts), on Windows RestartServer must return ErrRestartUnsupported. This
+// build only exercises the current platform's branch.
+func TestRestartPlatformGate(t *testing.T) {
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, nil)
+	defer mgr.Close()
+	if !waitForState(t, mgr, "ping", StateReady, 5*time.Second) {
+		t.Fatal("server not ready")
+	}
+
+	_, err := mgr.RestartServer(context.Background(), "ping")
+	if procGroupSupported {
+		if err != nil {
+			t.Fatalf("restart on a proc-group platform should succeed, got %v", err)
+		}
+	} else if !errors.Is(err, ErrRestartUnsupported) {
+		t.Fatalf("restart without proc-group support must return ErrRestartUnsupported, got %v", err)
 	}
 }
 

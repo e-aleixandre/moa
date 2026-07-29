@@ -386,12 +386,23 @@ var ErrUnknownServer = errors.New("unknown MCP server")
 // a server that is currently disabled by policy; enable it first.
 var ErrServerDisabled = errors.New("MCP server is disabled")
 
+// ErrRestartUnsupported is returned by RestartServer on platforms that cannot
+// reap a subprocess's whole tree (Windows). Restarting there would risk
+// orphaning the old process tree, so it is refused; a full session restart
+// recreates servers instead.
+var ErrRestartUnsupported = errors.New("restarting a single MCP server is not supported on this platform")
+
 // RestartServer tears down one server's process tree and starts it again,
 // re-discovering its tools. Other servers are untouched. The returned status is
 // the post-restart snapshot; a failed restart leaves the server in StateFailed
 // (still restartable). Tool names may differ across generations, so the caller
 // should re-sync its tool registry from Tools() afterwards.
 func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus, error) {
+	if !procGroupSupported {
+		// Refuse rather than orphan: without process-group cleanup, tearing the
+		// old tree down before re-dialing cannot be guaranteed (see proc_windows.go).
+		return ServerStatus{}, ErrRestartUnsupported
+	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()

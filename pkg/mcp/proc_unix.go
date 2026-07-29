@@ -7,6 +7,11 @@ import (
 	"syscall"
 )
 
+// procGroupSupported reports whether the platform can reap a subprocess's whole
+// tree (see setProcGroup). True on POSIX; false on Windows, where restart is
+// refused rather than risk orphaning the old process tree.
+const procGroupSupported = true
+
 // setProcGroup puts the server subprocess in its own process group so the whole
 // tree can be killed together. The MCP SDK's transport Close only signals the
 // direct child (e.g. the node process), which leaves grandchildren — most

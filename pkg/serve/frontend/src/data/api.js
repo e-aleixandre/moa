@@ -24,6 +24,12 @@ import {
 
 export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
 export const DEFAULT_API_TIMEOUT_MS = 15000;
+// An MCP restart tears the old process tree down and then dials the new one,
+// which the backend allows up to serverStartTimeout (15s) for the dial alone,
+// on top of graceful teardown. The default 15s client deadline would abort a
+// slow-but-valid restart and mislabel it as failed, so restart uses a longer,
+// coherent timeout.
+export const MCP_RESTART_TIMEOUT_MS = 30000;
 
 export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS } = {}) {
   const controller = timeoutMs > 0 ? new AbortController() : null;

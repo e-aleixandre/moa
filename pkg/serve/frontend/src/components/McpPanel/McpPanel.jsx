@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { RefreshCw, Plug, AlertTriangle, Check } from "lucide-preact";
-import { api } from "../../data/api.js";
+import { api, MCP_RESTART_TIMEOUT_MS } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import "./McpPanel.css";
 
@@ -56,7 +56,7 @@ function ServerRow({ sessionId, server, scope, scopeWritable, onMutated, request
     if (busy) return;
     setBusy(true);
     try {
-      const fresh = await api("POST", `/api/sessions/${sessionId}/mcp/${encodeURIComponent(server.name)}/restart`);
+      const fresh = await api("POST", `/api/sessions/${sessionId}/mcp/${encodeURIComponent(server.name)}/restart`, null, { timeoutMs: MCP_RESTART_TIMEOUT_MS });
       onMutated(fresh);
     } catch (e) {
       addToast({ title: `Could not restart ${server.name}`, detail: String(e.message || e), type: "error" });
