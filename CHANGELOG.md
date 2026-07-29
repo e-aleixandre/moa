@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-07-29
+
+### Fixed
+
+- Installed as a Home Screen web app on iOS, the app now fills the whole screen
+  instead of leaving a dark native band below the interface on newer iPhones
+  (e.g. iPhone 17 Pro). The deprecated `black-translucent` status-bar mode was
+  making iOS 26 hand the web app a short viewport; the app now takes its
+  full-screen chrome from the web manifest alone.
+- The mobile composer no longer stacks a fixed gap on top of the home-indicator
+  safe area, so there is no extra dead strip under the status line on devices
+  with a larger bottom inset.
+
 ## [0.17.1] - 2026-07-29
 
 ### Fixed
