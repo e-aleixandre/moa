@@ -16,6 +16,7 @@ import (
 	"github.com/ealeixandre/moa/pkg/bus"
 	"github.com/ealeixandre/moa/pkg/clipboard"
 	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/ealeixandre/moa/pkg/mcp"
 	"github.com/ealeixandre/moa/pkg/planmode"
 	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
 	"github.com/ealeixandre/moa/pkg/release"
@@ -117,6 +118,10 @@ type appModel struct {
 	thinkingPicker thinkingPicker
 	branchPicker   branchPicker
 	subagentPicker subagentPicker
+	mcpPicker      mcpPicker
+	// mcpCtrl is the shared MCP controller (one per process in the TUI). nil when
+	// the session has no MCP servers, which hides the /mcp picker and segment.
+	mcpCtrl        mcpControl
 	cmdPalette     cmdPalette
 	filePicker     filePicker
 	permPrompt     permissionPrompt
@@ -198,6 +203,7 @@ type Config struct {
 	ReleaseInfo           release.Info                            // build metadata shown immediately in the status line
 	UpdateChecker         *release.Checker                        // optional stable-release checker
 	UpdateCheckEnabled    bool                                    // false disables the asynchronous check
+	MCPController         *mcp.Controller                         // shared MCP controller (nil = no MCP servers / picker hidden)
 }
 
 // isStructuralBusEvent returns true for events that must not be dropped.
@@ -249,6 +255,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		quit:                 quit,
 		unsubAll:             unsubAll,
 		baseCtx:              ctx,
+		mcpCtrl:              mcpControlOrNil(cfg.MCPController),
 		renderer:             newRenderer(80),
 		viewport:             vp,
 		input:                newInput(),
@@ -296,6 +303,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		m.statusBar.UpdatePathScopeSegment(pathInfo.Scope)
 	}
 	m.statusBar.UpdateContextSegment(0)
+	m.updateMCPSegment()
 
 	// Plan mode initial display.
 	if planInfo, err := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{}); err == nil {
@@ -830,6 +838,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.subagentPicker.active {
 		return m.handleSubagentPickerKey(msg)
+	}
+
+	if m.mcpPicker.active {
+		return m.handleMCPPickerKey(msg)
 	}
 
 	if m.settingsMenu.active {

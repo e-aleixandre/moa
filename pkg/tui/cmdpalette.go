@@ -29,6 +29,7 @@ var allCommands = []commandDef{
 	{Name: "tasks", Args: "[done <n> | reset | show]", Desc: "View/manage tasks"},
 	{Name: "undo", Desc: "Revert files changed in the last agent turn"},
 	{Name: "branch", Desc: "Rewind to an earlier point and start a new conversation branch"},
+	{Name: "mcp", Desc: "View and enable/disable MCP servers"},
 	{Name: "verify", Desc: "Run project verification checks"},
 	{Name: "prompt", Args: "<name>", Desc: "Insert a prompt template"},
 	{Name: "rename", Args: "<new title>", Desc: "Rename this session"},

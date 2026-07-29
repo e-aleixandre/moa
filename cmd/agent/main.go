@@ -462,6 +462,7 @@ func main() {
 			CWD:                   cwd,
 			PinnedModels:          moaCfg.PinnedModels,
 			PromptTemplates:       promptTemplates,
+			MCPController:         sess.MCPController,
 			OnPinnedModelsChange: func(ids []string) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 					cfg.PinnedModels = ids
