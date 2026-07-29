@@ -6,18 +6,19 @@ import "./Spine.css";
 
 function SpineVersion({ version }) {
   if (!version?.current) return null;
-  const current = `v${version.current}`;
+  // current/latest already arrive v-prefixed from the server (release
+  // DisplayVersion / cache), so use them verbatim — don't add another "v".
+  const current = version.current;
   if (version.update_available && version.latest) {
-    const latest = `v${version.latest}`;
     return (
       <a
         class="ver ver-update"
         href="https://github.com/ealeixandre/moa/releases/latest"
         target="_blank"
         rel="noreferrer"
-        title={`Update available: ${latest}`}
+        title={`Update available: ${version.latest}`}
       >
-        {current} ↑ {latest}
+        {current} ↑ {version.latest}
       </a>
     );
   }
