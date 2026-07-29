@@ -175,6 +175,11 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
+	case bus.MCPChanged:
+		return Event{Type: "mcp_change", Data: MCPChangeData{
+			Total: e.Total, Ready: e.Ready, Disabled: e.Disabled,
+			Unhealthy: e.Unhealthy, Pending: e.Pending,
+		}}, true
 	case bus.RunTokensUpdated:
 		return Event{Type: "run_tokens", Data: RunTokensData{Up: e.Up, Down: e.Down}}, true
 	case bus.SessionCostUpdated:

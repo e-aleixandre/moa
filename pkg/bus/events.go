@@ -252,6 +252,21 @@ type ContextUpdated struct {
 	Percent   int
 }
 
+// MCPChanged is published when a session's MCP servers change: a server
+// connects, exits, is restarted, or is enabled/disabled. It carries the rolled
+// up counts for the status-line indicator so clients can recolor without a
+// round-trip; an open panel re-fetches the full per-server detail on receipt.
+// Counts mirror serve.MCPSummary but stay primitive so the bus keeps no
+// dependency on the serve layer.
+type MCPChanged struct {
+	SessionID string
+	Total     int
+	Ready     int
+	Disabled  int
+	Unhealthy int
+	Pending   int
+}
+
 // RunTokensUpdated carries the current run's estimated logical input and
 // output traffic, excluding resent context and provider cache usage.
 type RunTokensUpdated struct {

@@ -71,7 +71,7 @@ function ServerRow({ sessionId, server, onUpdated }) {
   );
 }
 
-export function McpPanel({ sessionId }) {
+export function McpPanel({ sessionId, mcpTick }) {
   const [servers, setServers] = useState(null); // null = loading
   const [failed, setFailed] = useState(false);
 
@@ -85,9 +85,12 @@ export function McpPanel({ sessionId }) {
       .catch(() => setFailed(true));
   }, [sessionId]);
 
+  // Reload on open and whenever a live mcp_change event bumps the tick, so a
+  // server that crashed, recovered, or was toggled elsewhere reflects here
+  // without the user reopening the sheet.
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, mcpTick]);
 
   const onUpdated = (fresh) => {
     // Splice the restarted server's fresh status in place; a full reload would

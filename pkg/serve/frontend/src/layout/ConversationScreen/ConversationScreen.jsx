@@ -421,7 +421,7 @@ export function ConversationScreen({ version }) {
               )}
               {mcpOpen && (
                 <div class="status-strip-usage-popover status-strip-mcp-popover">
-                  <McpPanel sessionId={session.id} />
+                  <McpPanel sessionId={session.id} mcpTick={session.mcpTick} />
                 </div>
               )}
             </div>

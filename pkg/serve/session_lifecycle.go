@@ -851,20 +851,46 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 }
 
 // wireMCPRefresh connects the MCP controller's prompt-refresh hook to this
-// session's runtime. When a server is enabled/disabled/restarted the tool set
-// changes, so the base system prompt is rebuilt from the registry (never
-// string-patched) and re-applied to the agent. No-op if there is no controller
-// or prompt builder.
+// session's runtime, and registers a manager OnChange callback that publishes
+// MCPChanged so clients recolor the status line live. When a server is
+// enabled/disabled/restarted the tool set changes, so the base system prompt is
+// rebuilt from the registry (never string-patched) and re-applied to the agent.
+// No-op if there is no controller or prompt builder.
 func (s *ManagedSession) wireMCPRefresh() {
 	ctrl := s.infra.mcpController
 	build := s.infra.buildBasePrompt
 	reg := s.infra.toolReg
+	mgr := s.infra.mcpMgr
 	rt := s.runtime
 	if ctrl == nil || build == nil || reg == nil || rt == nil {
 		return
 	}
 	ctrl.SetRefreshPrompt(func() {
 		rt.RefreshBaseSystemPrompt(build(reg.Specs()))
+	})
+	if mgr != nil {
+		// Fired from a manager goroutine on any server transition. We recompute
+		// the summary (cheap) and publish; the bus fan-out is asynchronous, so
+		// this never blocks the manager's lifecycle work.
+		mgr.OnChange(func(mcp.ServerStatus) { s.publishMCPChanged() })
+	}
+}
+
+// publishMCPChanged emits the current MCP summary on the session bus so open
+// clients recolor the status line and an open panel re-fetches detail. No-op
+// when the session has no MCP servers.
+func (s *ManagedSession) publishMCPChanged() {
+	sum := s.mcpSummary()
+	if sum == nil {
+		return
+	}
+	s.runtime.Bus.Publish(bus.MCPChanged{
+		SessionID: s.ID,
+		Total:     sum.Total,
+		Ready:     sum.Ready,
+		Disabled:  sum.Disabled,
+		Unhealthy: sum.Unhealthy,
+		Pending:   sum.Pending,
 	})
 }
 
