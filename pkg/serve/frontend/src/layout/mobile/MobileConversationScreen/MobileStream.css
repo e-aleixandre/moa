@@ -13,25 +13,11 @@
   flex: 1;
 }
 
-/* The transcript enters a headerless viewport. Cover its hard top edge with
-   the same surface that extends through the iOS safe area, then dissolve into
-   the scrollable content. It is visual only: gestures and controls remain
-   available beneath it. */
-.mstream::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: var(--z-sticky);
-  height: calc(env(safe-area-inset-top) + var(--space-6));
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    var(--base) 0,
-    var(--base) env(safe-area-inset-top),
-    color-mix(in srgb, var(--base) 72%, transparent) calc(env(safe-area-inset-top) + var(--space-2)),
-    transparent 100%
-  );
-}
+/* No painted top cover: the transcript's hard top edge is dissolved by the
+   scroller's own top mask (see .mconv-stream in MobileConversationScreen.css),
+   which fades the content's alpha into the --base that .mconv paints behind it.
+   A ::before slab of --base used to sit here, but layering one color band over
+   another is exactly what read as a hard seam under the status bar. */
 
 .mstream-system {
   text-align: center;
