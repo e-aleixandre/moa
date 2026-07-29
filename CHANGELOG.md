@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MCP server processes are no longer orphaned when a restart and a shutdown race
   each other; per-server lifecycle operations are now serialized.
+- Restarting a single MCP server no longer times out in the UI before a slow but
+  valid restart finishes, and it is refused on platforms that cannot reliably
+  reap the old process tree (rather than risk orphaning it).
 - On desktop, entering or leaving a subagent view now lands at the bottom of the
   transcript instead of leaving the scroll position stranded mid-conversation.
 
