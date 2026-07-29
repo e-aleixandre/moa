@@ -38,6 +38,9 @@ func (m appModel) handleMCPCommand() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.mcpPicker.Open(servers, m.mcpProjectTrusted())
+	// If an action started in a previous open is still running, keep the picker
+	// busy so a second one can't start (single-writer to the controller).
+	m.mcpPicker.busy = m.mcpActionPending
 	m.input.SetEnabled(false)
 	m.updateViewport()
 	return m, nil
@@ -164,13 +167,16 @@ func (m appModel) applyMCPToggle(scope core.MCPDisableScope, name string, disabl
 
 	ctrl := m.mcpCtrl
 	ctx := m.baseCtx
+	m.mcpActionGen++
+	gen := m.mcpActionGen
+	m.mcpActionPending = true
 	m.mcpPicker.busy = true
 	m.mcpPicker.status = ""
 	m.updateViewport()
 	return m, func() tea.Msg {
 		ctrl.SetScopeDisabled(scope, name, disabled)
 		ctrl.Reconcile(ctx)
-		return mcpActionResultMsg{action: "toggle", name: name, scope: scope, disabled: disabled}
+		return mcpActionResultMsg{gen: gen, action: "toggle", name: name, scope: scope, disabled: disabled}
 	}
 }
 
@@ -189,19 +195,28 @@ func (m appModel) mcpPickerRestart() (tea.Model, tea.Cmd) {
 	ctrl := m.mcpCtrl
 	ctx := m.baseCtx
 	name := st.Name
+	m.mcpActionGen++
+	gen := m.mcpActionGen
+	m.mcpActionPending = true
 	m.mcpPicker.busy = true
 	m.mcpPicker.status = ""
 	m.updateViewport()
 	return m, func() tea.Msg {
 		_, err := ctrl.Restart(ctx, name)
-		return mcpActionResultMsg{action: "restart", name: name, err: err}
+		return mcpActionResultMsg{gen: gen, action: "restart", name: name, err: err}
 	}
 }
 
 // handleMCPActionResult applies the outcome of an async toggle/restart: it
 // clears the busy flag, refreshes rows from the controller, and sets an honest
-// status. Live refresh of unrelated rows/segment happens via bus.MCPChanged.
+// status. Live refresh of unrelated rows/segment happens via bus.MCPChanged. A
+// stale result (from an action superseded by a newer one, e.g. after close and
+// reopen) is ignored so it can't clobber the current action's state.
 func (m *appModel) handleMCPActionResult(msg mcpActionResultMsg) {
+	if msg.gen != m.mcpActionGen {
+		return // superseded; a newer action owns the busy state
+	}
+	m.mcpActionPending = false
 	m.mcpPicker.busy = false
 	if !m.mcpPicker.active {
 		return // picker was closed while the action ran; nothing to display

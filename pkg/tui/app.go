@@ -121,13 +121,20 @@ type appModel struct {
 	mcpPicker      mcpPicker
 	// mcpCtrl is the shared MCP controller (one per process in the TUI). nil when
 	// the session has no MCP servers, which hides the /mcp picker and segment.
-	mcpCtrl        mcpControl
-	cmdPalette     cmdPalette
-	filePicker     filePicker
-	permPrompt     permissionPrompt
-	askPrompt      askPrompt
-	sessionBrowser sessionBrowser
-	statusBar      *StatusLine
+	mcpCtrl mcpControl
+	// mcpActionInFlight tracks an async MCP toggle/restart that outlives the
+	// picker being closed and reopened. It is a monotonic generation: a result
+	// message carries the generation it belongs to, so a stale result (from an
+	// action started before the picker was closed) is ignored, and a reopened
+	// picker stays busy until the outstanding action completes.
+	mcpActionGen     uint64
+	mcpActionPending bool
+	cmdPalette       cmdPalette
+	filePicker       filePicker
+	permPrompt       permissionPrompt
+	askPrompt        askPrompt
+	sessionBrowser   sessionBrowser
+	statusBar        *StatusLine
 
 	// Session persistence
 	sessionStore session.SessionStore

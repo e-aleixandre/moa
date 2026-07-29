@@ -46,6 +46,7 @@ type compactResultMsg struct {
 // live row/segment refresh itself arrives via bus.MCPChanged; this message
 // clears the in-flight state and reports success or failure for that action.
 type mcpActionResultMsg struct {
+	gen      uint64 // action generation this result belongs to (stale results ignored)
 	action   string // "toggle" or "restart"
 	name     string
 	scope    core.MCPDisableScope

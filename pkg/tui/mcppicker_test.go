@@ -271,3 +271,44 @@ func TestMCPActionResultAfterCloseIsSilent(t *testing.T) {
 		t.Fatalf("closed picker must not gain a status, got %q", m.mcpPicker.status)
 	}
 }
+
+// TestMCPReopenStaysBusyAndIgnoresStaleResult: an action started, then the
+// picker is closed and reopened while it is still running. The reopened picker
+// must stay busy (no second action), and the old result must be ignored so it
+// can't clobber a newer one.
+func TestMCPReopenStaysBusyAndIgnoresStaleResult(t *testing.T) {
+	f := &fakeMCPControl{servers: mcpStatuses()}
+	m := newMCPTestModel(f)
+	m.mcpPicker.Open(f.Status(), true)
+
+	// Start action gen 1 but do not deliver its result yet.
+	model, cmd := m.mcpPickerToggle()
+	m = model.(appModel)
+	staleMsg := cmd().(mcpActionResultMsg)
+	if !m.mcpActionPending {
+		t.Fatal("action should be pending")
+	}
+
+	// Close and reopen: the picker must come back busy (action still running).
+	m.mcpPicker.Close()
+	model, _ = m.handleMCPCommand()
+	m = model.(appModel)
+	if !m.mcpPicker.busy {
+		t.Fatal("reopened picker must stay busy while an action is in flight")
+	}
+	// A key press must not start a second action.
+	before := len(f.scopeCalls)
+	model, cmd2 := m.handleMCPPickerKey(tea.KeyMsg{Type: tea.KeySpace})
+	m = model.(appModel)
+	if cmd2 != nil || len(f.scopeCalls) != before {
+		t.Fatal("no second action may start while busy")
+	}
+
+	// The stale result (gen 1) is still current here since no newer action ran;
+	// simulate supersession by bumping the generation, then delivering it.
+	m.mcpActionGen++
+	m.handleMCPActionResult(staleMsg)
+	if !m.mcpActionPending || !m.mcpPicker.busy {
+		t.Fatal("a stale result must be ignored (pending/busy preserved)")
+	}
+}
