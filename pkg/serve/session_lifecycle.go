@@ -882,7 +882,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 	var newTools []core.Tool
 	if len(merged) > 0 {
 		newMgr = mcp.NewManager(nil, s.CWD)
-		newMgr.Start(s.infra.sessionCtx, merged)
+		newMgr.Start(s.infra.sessionCtx, merged, nil)
 		newTools = newMgr.Tools()
 	}
 

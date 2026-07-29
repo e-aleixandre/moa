@@ -87,7 +87,7 @@ func TestManagerStatusAfterStart(t *testing.T) {
 	mgr := NewManager(nil, "")
 	mgr.Start(context.Background(), map[string]core.MCPServer{
 		"ping": helperServerConfig(""),
-	})
+	}, nil)
 	defer mgr.Close()
 
 	st := mgr.Status()
@@ -106,7 +106,7 @@ func TestManagerStatusFailedServer(t *testing.T) {
 	mgr := NewManager(nil, "")
 	mgr.Start(context.Background(), map[string]core.MCPServer{
 		"broken": {Command: "definitely-not-a-real-binary-xyz"},
-	})
+	}, nil)
 	defer mgr.Close()
 
 	st := mgr.Status()
@@ -135,7 +135,7 @@ func TestManagerDetectsServerExit(t *testing.T) {
 
 	mgr.Start(context.Background(), map[string]core.MCPServer{
 		"ping": helperServerConfig(pidFile),
-	})
+	}, nil)
 	defer mgr.Close()
 
 	// Capture the tool the way the registry does: once, at startup. The closure
@@ -197,7 +197,7 @@ func TestManagerRestartServer(t *testing.T) {
 	mgr := NewManager(nil, "")
 	mgr.Start(context.Background(), map[string]core.MCPServer{
 		"ping": helperServerConfig(pidFile),
-	})
+	}, nil)
 	defer mgr.Close()
 
 	pid1 := waitForPID(t, pidFile)
@@ -230,10 +230,135 @@ func TestManagerRestartServer(t *testing.T) {
 
 func TestManagerRestartUnknownServer(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), nil)
+	mgr.Start(context.Background(), nil, nil)
 	defer mgr.Close()
 	if _, err := mgr.RestartServer(context.Background(), "nope"); !errors.Is(err, ErrUnknownServer) {
 		t.Fatalf("err = %v, want ErrUnknownServer", err)
+	}
+}
+
+func TestManagerStartInitiallyDisabled(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(pidFile),
+	}, map[string]bool{"ping": true})
+	defer mgr.Close()
+
+	st := mgr.Status()
+	if len(st) != 1 || st[0].State != StateDisabled {
+		t.Fatalf("status = %+v, want one disabled server", st)
+	}
+	if st[0].ToolCount != 0 {
+		t.Fatalf("disabled server should have 0 tools, got %d", st[0].ToolCount)
+	}
+	if st[0].Error != "" {
+		t.Fatalf("disabled is not a failure; error should be empty, got %q", st[0].Error)
+	}
+	// No process should have been spawned.
+	if _, err := os.ReadFile(pidFile); err == nil {
+		t.Fatal("disabled server must not spawn a process")
+	}
+	// The server has no tools registered.
+	if tools := mgr.Tools(); len(tools) != 0 {
+		t.Fatalf("disabled server exposes %d tools, want 0", len(tools))
+	}
+}
+
+func TestManagerRestartDisabledServerRefused(t *testing.T) {
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, map[string]bool{"ping": true})
+	defer mgr.Close()
+
+	if _, err := mgr.RestartServer(context.Background(), "ping"); !errors.Is(err, ErrServerDisabled) {
+		t.Fatalf("err = %v, want ErrServerDisabled", err)
+	}
+}
+
+func TestManagerEnableThenDisable(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(pidFile),
+	}, map[string]bool{"ping": true})
+	defer mgr.Close()
+
+	// Enable: it should dial, become ready, and expose its tool.
+	st, err := mgr.SetServerEnabled(context.Background(), "ping", true)
+	if err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if st.State != StateReady || st.ToolCount != 1 {
+		t.Fatalf("after enable = %+v, want ready with 1 tool", st)
+	}
+	pid := waitForPID(t, pidFile)
+	if !processAlive(pid) {
+		t.Fatal("enabled server process should be alive")
+	}
+	if len(mgr.Tools()) != 1 {
+		t.Fatalf("enabled server should expose 1 tool, got %d", len(mgr.Tools()))
+	}
+
+	// Disable: it should tear the process down and drop its tools.
+	st, err = mgr.SetServerEnabled(context.Background(), "ping", false)
+	if err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if st.State != StateDisabled || st.ToolCount != 0 {
+		t.Fatalf("after disable = %+v, want disabled with 0 tools", st)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for processAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if processAlive(pid) {
+		t.Fatal("disabled server process should have been killed")
+	}
+	if len(mgr.Tools()) != 0 {
+		t.Fatalf("disabled server should expose 0 tools, got %d", len(mgr.Tools()))
+	}
+	// A disabled server that never exited must NOT be reported as exited: the
+	// state stays disabled (the exit watcher was invalidated).
+	if s := mgr.Status(); len(s) != 1 || s[0].State != StateDisabled {
+		t.Fatalf("status after disable = %+v, want disabled (not exited)", s)
+	}
+}
+
+func TestManagerEnableIdempotent(t *testing.T) {
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, nil) // starts enabled
+	defer mgr.Close()
+
+	if !waitForState(t, mgr, "ping", StateReady, 5*time.Second) {
+		t.Fatal("server not ready")
+	}
+	// Enabling an already-running server is a no-op, not a restart.
+	st, err := mgr.SetServerEnabled(context.Background(), "ping", true)
+	if err != nil {
+		t.Fatalf("enable no-op: %v", err)
+	}
+	if st.State != StateReady {
+		t.Fatalf("state = %s, want ready", st.State)
+	}
+}
+
+func TestManagerDisableIdempotent(t *testing.T) {
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, map[string]bool{"ping": true})
+	defer mgr.Close()
+
+	st, err := mgr.SetServerEnabled(context.Background(), "ping", false)
+	if err != nil {
+		t.Fatalf("disable no-op: %v", err)
+	}
+	if st.State != StateDisabled {
+		t.Fatalf("state = %s, want disabled", st.State)
 	}
 }
 
@@ -292,7 +417,7 @@ func TestManagerConcurrentRestartsNoOrphan(t *testing.T) {
 	mgr := NewManager(nil, "")
 	mgr.Start(context.Background(), map[string]core.MCPServer{
 		"ping": pidTrackingConfig(pidLog),
-	})
+	}, nil)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -345,7 +470,7 @@ func TestManagerCloseRacingRestartNoOrphan(t *testing.T) {
 		mgr := NewManager(nil, "")
 		mgr.Start(context.Background(), map[string]core.MCPServer{
 			"ping": pidTrackingConfig(pidLog),
-		})
+		}, nil)
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -422,7 +547,7 @@ func TestManagerStartsServerInConfiguredCWD(t *testing.T) {
 				"MCP_CWD_OUTPUT":     output,
 			},
 		},
-	})
+	}, nil)
 	defer mgr.Close()
 
 	got, err := os.ReadFile(output)

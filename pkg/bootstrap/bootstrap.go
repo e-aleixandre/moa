@@ -363,7 +363,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	var mcpMgr *mcp.Manager
 	if len(moaCfg.MCPServers) > 0 {
 		mcpMgr = mcp.NewManager(nil, cfg.CWD)
-		mcpMgr.Start(cfg.Ctx, moaCfg.MCPServers)
+		mcpMgr.Start(cfg.Ctx, moaCfg.MCPServers, nil)
 		for _, t := range mcpMgr.Tools() {
 			core.RegisterOrLog(toolReg, t)
 		}

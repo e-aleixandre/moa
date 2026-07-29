@@ -45,6 +45,16 @@ const (
 	StateExited ServerState = "exited"
 	// StateRestarting means a restart is in progress.
 	StateRestarting ServerState = "restarting"
+	// StateStarting means an enable is in progress (initial connect after being
+	// disabled). Distinct from restarting so the UI doesn't imply a prior run.
+	StateStarting ServerState = "starting"
+	// StateDisabling means a disable is in progress: the process tree is being
+	// torn down. It exists so we never report a server as fully disabled while
+	// its resources are still being released.
+	StateDisabling ServerState = "disabling"
+	// StateDisabled means the server is configured but intentionally not
+	// running (no process, no tools). It is an expected state, not a failure.
+	StateDisabled ServerState = "disabled"
 )
 
 // ServerStatus is an immutable snapshot of one server's health, for the UI.
@@ -143,7 +153,11 @@ func (m *Manager) OnChange(fn func(ServerStatus)) {
 // and discovers tools. Servers that fail to start are recorded as failed and
 // skipped (non-fatal) — they still appear in Status so the UI can show the
 // error and offer a restart.
-func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer) {
+//
+// initiallyDisabled names servers that are configured but must not be spawned:
+// they get a StateDisabled placeholder (visible in Status, no process, no
+// tools) so the UI can offer to enable them. A nil map starts everything.
+func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, initiallyDisabled map[string]bool) {
 	m.mu.Lock()
 	m.configs = make(map[string]core.MCPServer, len(servers))
 	for name, cfg := range servers {
@@ -162,6 +176,12 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer) 
 	results := make([]*serverSession, len(names))
 	var wg sync.WaitGroup
 	for i, name := range names {
+		if initiallyDisabled[name] {
+			// No process for a disabled server; a placeholder keeps it visible
+			// and enable-able.
+			results[i] = newDisabledSession(name)
+			continue
+		}
 		wg.Add(1)
 		go func(i int, name string) {
 			defer wg.Done()
@@ -179,13 +199,23 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer) 
 
 	for _, sess := range results {
 		st := sess.status()
-		if st.State == StateReady {
+		switch st.State {
+		case StateReady:
 			m.logger.Info("MCP server connected", "server", st.Name, "tools", st.ToolCount)
-		} else {
+		case StateDisabled:
+			m.logger.Info("MCP server disabled", "server", st.Name)
+		default:
 			m.logger.Warn("MCP server failed to start", "server", st.Name, "error", st.Error)
 		}
 		m.notify(st)
 	}
+}
+
+// newDisabledSession builds a placeholder for a configured-but-disabled server:
+// no process, no connection, no tools, in StateDisabled.
+func newDisabledSession(name string) *serverSession {
+	now := time.Now()
+	return &serverSession{name: name, state: StateDisabled, changedAt: now}
 }
 
 // dialServer connects one server and returns a serverSession recording the
@@ -330,6 +360,10 @@ func (m *Manager) Status() []ServerStatus {
 // manage.
 var ErrUnknownServer = errors.New("unknown MCP server")
 
+// ErrServerDisabled is returned when an operation (e.g. restart) is attempted on
+// a server that is currently disabled by policy; enable it first.
+var ErrServerDisabled = errors.New("MCP server is disabled")
+
 // RestartServer tears down one server's process tree and starts it again,
 // re-discovering its tools. Other servers are untouched. The returned status is
 // the post-restart snapshot; a failed restart leaves the server in StateFailed
@@ -367,6 +401,16 @@ func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus,
 		return ServerStatus{}, errors.New("manager closed")
 	}
 
+	// Restart honors policy: a disabled server must be enabled first, not
+	// silently spawned by a restart. The state read is a snapshot; the
+	// lifecycle lock we hold prevents a concurrent enable/disable from racing.
+	sess.mu.Lock()
+	disabled := sess.state == StateDisabled
+	sess.mu.Unlock()
+	if disabled {
+		return sess.status(), ErrServerDisabled
+	}
+
 	// Mark restarting and grab the old connection to tear down.
 	sess.mu.Lock()
 	sess.state = StateRestarting
@@ -401,6 +445,114 @@ func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus,
 	m.logger.Info("MCP server restarted", "server", name, "tools", st.ToolCount)
 	m.notify(st)
 	return st, nil
+}
+
+// SetServerEnabled applies an enable/disable transition to one server, honoring
+// the same per-server lifecycle serialization as RestartServer.
+//
+// Disabling tears the process tree down and leaves the server in StateDisabled
+// (no process, no tools, no error). Enabling dials it exactly like a start;
+// success yields StateReady, failure StateFailed (the preference stays enabled,
+// so the failure is visible and retryable rather than silently reverted).
+//
+// It is idempotent: enabling an already-running server or disabling an
+// already-disabled one is a no-op that returns the current status. Tool sets
+// change across this transition, so the caller must re-sync its tool registry
+// from Tools() afterwards.
+func (m *Manager) SetServerEnabled(ctx context.Context, name string, enabled bool) (ServerStatus, error) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return ServerStatus{}, errors.New("manager closed")
+	}
+	sess, ok := m.byName[name]
+	cfg, hasCfg := m.configs[name]
+	m.mu.Unlock()
+	if !ok || !hasCfg {
+		return ServerStatus{}, ErrUnknownServer
+	}
+
+	sess.lifecycle.Lock()
+	defer sess.lifecycle.Unlock()
+
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return ServerStatus{}, errors.New("manager closed")
+	}
+
+	sess.mu.Lock()
+	currentlyDisabled := sess.state == StateDisabled
+	sess.mu.Unlock()
+
+	if enabled {
+		if !currentlyDisabled {
+			// Already running (or failed/exited). Enabling is a no-op here; use
+			// RestartServer to recover an unhealthy-but-enabled server.
+			return sess.status(), nil
+		}
+		return m.enableLocked(ctx, sess, cfg), nil
+	}
+
+	if currentlyDisabled {
+		return sess.status(), nil // already disabled
+	}
+	return m.disableLocked(sess), nil
+}
+
+// enableLocked dials a disabled server. The caller must hold sess.lifecycle.
+func (m *Manager) enableLocked(ctx context.Context, sess *serverSession, cfg core.MCPServer) ServerStatus {
+	sess.mu.Lock()
+	sess.state = StateStarting
+	sess.err = ""
+	sess.changedAt = time.Now()
+	sess.mu.Unlock()
+	m.notify(sess.status())
+
+	if err := m.connect(ctx, sess, cfg); err != nil {
+		sess.setFailed(err.Error())
+		st := sess.status()
+		m.logger.Warn("MCP server enable failed", "server", sess.name, "error", err)
+		m.notify(st)
+		return st
+	}
+	st := sess.status()
+	m.logger.Info("MCP server enabled", "server", sess.name, "tools", st.ToolCount)
+	m.notify(st)
+	return st
+}
+
+// disableLocked tears down a running server and marks it disabled. The caller
+// must hold sess.lifecycle.
+func (m *Manager) disableLocked(sess *serverSession) ServerStatus {
+	sess.mu.Lock()
+	sess.state = StateDisabling
+	sess.err = ""
+	sess.changedAt = time.Now()
+	sess.gen++ // invalidate the old exit watcher so it won't report StateExited
+	oldSession := sess.session
+	oldCmd := sess.cmd
+	sess.session = nil
+	sess.tools = nil
+	sess.mu.Unlock()
+	m.notify(sess.status())
+
+	if oldSession != nil {
+		_ = oldSession.Close()
+	}
+	if oldCmd != nil {
+		killProcGroup(oldCmd)
+	}
+
+	sess.mu.Lock()
+	sess.state = StateDisabled
+	sess.changedAt = time.Now()
+	st := sess.statusLocked()
+	sess.mu.Unlock()
+	m.logger.Info("MCP server disabled", "server", sess.name)
+	m.notify(st)
+	return st
 }
 
 // Close gracefully shuts down all server sessions and kills their process trees.
