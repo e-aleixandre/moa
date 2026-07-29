@@ -85,6 +85,14 @@ type Manager struct {
 type serverSession struct {
 	name string
 
+	// lifecycle serializes an entire start/restart/close transition for this
+	// server: teardown of the old process, the dial, and the final state write.
+	// It is deliberately coarser than mu — which only guards the short snapshot
+	// of fields — so two restarts (or a restart racing Close) can never both
+	// spawn a process and orphan one, while Status() can still read state under
+	// mu without blocking on a 15s dial.
+	lifecycle sync.Mutex
+
 	mu        sync.Mutex
 	cmd       *exec.Cmd
 	client    *sdkmcp.Client
@@ -340,6 +348,25 @@ func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus,
 		return ServerStatus{}, ErrUnknownServer
 	}
 
+	// Hold the per-server lifecycle lock across the ENTIRE transition (state
+	// flip, old-process teardown, dial, final state). This serializes two
+	// concurrent restarts of the same server — otherwise both could dial and
+	// one freshly spawned process would be orphaned (unreachable by Close or a
+	// later restart) — and it lets Close wait for an in-flight restart instead
+	// of racing it.
+	sess.lifecycle.Lock()
+	defer sess.lifecycle.Unlock()
+
+	// Re-check closed now that we hold the lifecycle lock: Close sets closed
+	// under m.mu before it reaps servers, so if it won the race we must not
+	// spawn a process it will never see.
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return ServerStatus{}, errors.New("manager closed")
+	}
+
 	// Mark restarting and grab the old connection to tear down.
 	sess.mu.Lock()
 	sess.state = StateRestarting
@@ -386,6 +413,12 @@ func (m *Manager) Close() {
 	m.mu.Unlock()
 
 	for _, s := range servers {
+		// Take the lifecycle lock so we serialize against an in-flight restart:
+		// either it already committed a fresh connection (which we then tear
+		// down here) or it has not yet re-checked closed and will bail before
+		// spawning. Without this, a restart could commit a new process AFTER we
+		// reaped this session, orphaning it once the owning session is gone.
+		s.lifecycle.Lock()
 		s.mu.Lock()
 		session := s.session
 		cmd := s.cmd
@@ -399,6 +432,7 @@ func (m *Manager) Close() {
 		if cmd != nil {
 			killProcGroup(cmd)
 		}
+		s.lifecycle.Unlock()
 	}
 }
 

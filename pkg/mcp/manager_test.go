@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -47,6 +49,14 @@ func TestMCPServerHelper(t *testing.T) {
 	}
 	if pidFile := os.Getenv("MCP_PID_OUTPUT"); pidFile != "" {
 		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600)
+	}
+	// MCP_PID_APPEND collects every spawned generation's PID (one per line) so a
+	// concurrency test can later assert that none leaked past Close.
+	if pidLog := os.Getenv("MCP_PID_APPEND"); pidLog != "" {
+		if f, err := os.OpenFile(pidLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			_, _ = f.WriteString(strconv.Itoa(os.Getpid()) + "\n")
+			_ = f.Close()
+		}
 	}
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "ping-helper", Version: "0.1"}, nil)
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
@@ -224,6 +234,148 @@ func TestManagerRestartUnknownServer(t *testing.T) {
 	defer mgr.Close()
 	if _, err := mgr.RestartServer(context.Background(), "nope"); !errors.Is(err, ErrUnknownServer) {
 		t.Fatalf("err = %v, want ErrUnknownServer", err)
+	}
+}
+
+// pidTrackingConfig runs the ping helper but also appends every generation's PID
+// to pidLog, so a concurrency test can verify no process leaks past Close.
+func pidTrackingConfig(pidLog string) core.MCPServer {
+	return core.MCPServer{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestMCPServerHelper$", "--"},
+		Env: map[string]string{
+			"GO_WANT_MCP_SERVER_HELPER": "1",
+			"MCP_PID_APPEND":            pidLog,
+		},
+	}
+}
+
+// readPIDs returns every distinct PID the helper has recorded so far.
+func readPIDs(t *testing.T, pidLog string) []int {
+	t.Helper()
+	data, err := os.ReadFile(pidLog)
+	if err != nil {
+		return nil
+	}
+	seen := map[int]bool{}
+	var out []int
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if pid, err := strconv.Atoi(line); err == nil && !seen[pid] {
+			seen[pid] = true
+			out = append(out, pid)
+		}
+	}
+	return out
+}
+
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Unix, signal 0 probes for existence without affecting the process.
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// TestManagerConcurrentRestartsNoOrphan drives many concurrent restarts of the
+// same server. Every restart spawns a fresh process, and the per-server
+// lifecycle lock must ensure that at any moment only the current generation is
+// owned; after Close, none of the spawned processes may survive. A regression
+// (two restarts both dialing) would leak a process the manager never tracks,
+// which Close cannot reap — this test would then find it alive.
+func TestManagerConcurrentRestartsNoOrphan(t *testing.T) {
+	pidLog := filepath.Join(t.TempDir(), "pids")
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"ping": pidTrackingConfig(pidLog),
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = mgr.RestartServer(context.Background(), "ping")
+		}()
+	}
+	wg.Wait()
+
+	// Exactly one generation should be owned and ready after the dust settles.
+	if !waitForState(t, mgr, "ping", StateReady, 5*time.Second) {
+		t.Fatal("server not ready after concurrent restarts")
+	}
+
+	mgr.Close()
+
+	// After Close, every process the helper ever spawned must be dead. A leaked
+	// generation (the blocker) would still be alive here.
+	pids := readPIDs(t, pidLog)
+	if len(pids) < 2 {
+		t.Fatalf("expected several spawned generations, got %d", len(pids))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		alive := []int{}
+		for _, pid := range pids {
+			if processAlive(pid) {
+				alive = append(alive, pid)
+			}
+		}
+		if len(alive) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("processes leaked past Close: %v", alive)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestManagerCloseRacingRestartNoOrphan races Close against a restart of the
+// same server. Whichever wins, no spawned process may survive Close: if the
+// restart commits a fresh connection it must be torn down, and if Close wins
+// the restart must bail before spawning.
+func TestManagerCloseRacingRestartNoOrphan(t *testing.T) {
+	for attempt := 0; attempt < 5; attempt++ {
+		pidLog := filepath.Join(t.TempDir(), "pids")
+		mgr := NewManager(nil, "")
+		mgr.Start(context.Background(), map[string]core.MCPServer{
+			"ping": pidTrackingConfig(pidLog),
+		})
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = mgr.RestartServer(context.Background(), "ping")
+		}()
+		go func() {
+			defer wg.Done()
+			mgr.Close()
+		}()
+		wg.Wait()
+
+		pids := readPIDs(t, pidLog)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			alive := []int{}
+			for _, pid := range pids {
+				if processAlive(pid) {
+					alive = append(alive, pid)
+				}
+			}
+			if len(alive) == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("attempt %d: processes leaked past Close: %v", attempt, alive)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 }
 
