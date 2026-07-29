@@ -6,7 +6,13 @@
   <!-- --base, matching the conversation surface: this paints the iOS status-bar
        area in the installed PWA, and --crust showed as a darker band there. -->
   <meta name="theme-color" content="#1e1e2e">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- NO apple-mobile-web-app-capable: that legacy iOS home-screen mode needs a
+       matching apple-touch-startup-image per device or iOS letterboxes the app
+       to a legacy 812pt viewport on devices newer than the mode (e.g. iPhone 17
+       Pro showed a ~150px native band below the webview). The manifest's
+       display:standalone is the modern path iOS 16.4+ uses, and it gets the real
+       full-screen viewport. status-bar-style below only applied in that legacy
+       mode; theme-color drives the status bar in standalone. -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="moa">
