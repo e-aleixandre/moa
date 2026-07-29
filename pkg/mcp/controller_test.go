@@ -176,3 +176,100 @@ func TestControllerStartsDisabledFromPolicy(t *testing.T) {
 		t.Fatal("disabled server missing from Status")
 	}
 }
+
+// TestControllerSetScopeDisabledOnlyTouchesThatScope verifies a scope toggle is
+// surgical: disabling in session then removing it leaves other scopes intact,
+// and Status reflects the accumulated vetoes.
+func TestControllerSetScopeDisabledOnlyTouchesThatScope(t *testing.T) {
+	c, _, _ := newTestController(t, map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, map[string]bool{"ping": true}, core.MCPDisablePolicy{
+		Global: map[string]struct{}{"ping": {}},
+	})
+
+	// Add a session veto on top of the global one.
+	c.SetScopeDisabled(core.MCPScopeSession, "ping", true)
+	st := findStatus(t, c, "ping")
+	if len(st.DisabledScopes) != 2 {
+		t.Fatalf("scopes = %v, want global+session", st.DisabledScopes)
+	}
+
+	// Remove only the session veto: global must remain, server still disabled.
+	c.SetScopeDisabled(core.MCPScopeSession, "ping", false)
+	st = findStatus(t, c, "ping")
+	if len(st.DisabledScopes) != 1 || st.DisabledScopes[0] != core.MCPScopeGlobal {
+		t.Fatalf("scopes = %v, want [global] only", st.DisabledScopes)
+	}
+	if st.DesiredEnabled {
+		t.Fatal("server should still be desired-disabled by the global veto")
+	}
+}
+
+// TestControllerUnmatchedDisabled: a disabled preference for a name that isn't a
+// configured server is reported as unmatched (per-session semantics), not as a
+// phantom server row.
+func TestControllerUnmatchedDisabled(t *testing.T) {
+	c, _, _ := newTestController(t, map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, nil, core.MCPDisablePolicy{
+		Project: map[string]struct{}{"gone-from-mcp-json": {}},
+	})
+
+	unmatched := c.UnmatchedDisabled()
+	if len(unmatched) != 1 || unmatched[0].Name != "gone-from-mcp-json" {
+		t.Fatalf("unmatched = %+v, want one 'gone-from-mcp-json'", unmatched)
+	}
+	if len(unmatched[0].Scopes) != 1 || unmatched[0].Scopes[0] != core.MCPScopeProject {
+		t.Fatalf("unmatched scopes = %v, want [project]", unmatched[0].Scopes)
+	}
+	// The configured server is NOT reported as unmatched.
+	for _, u := range unmatched {
+		if u.Name == "ping" {
+			t.Fatal("a configured server must never appear in unmatched_disabled")
+		}
+	}
+}
+
+// TestControllerPendingActionWhenNotReconciled: setting a scope veto without
+// reconciling leaves desired and applied disagreeing, which Status must surface
+// as a pending action (the truth: the policy wants off but the process is still
+// up).
+func TestControllerPendingActionWhenNotReconciled(t *testing.T) {
+	c, _, _ := newTestController(t, map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, nil, core.MCPDisablePolicy{})
+	if !waitForState(t, c.mgr, "ping", StateReady, 5*time.Second) {
+		t.Fatal("server not ready")
+	}
+
+	// Desire it disabled but do NOT reconcile: applied stays enabled/ready.
+	c.SetScopeDisabled(core.MCPScopeSession, "ping", true)
+	st := findStatus(t, c, "ping")
+	if st.DesiredEnabled {
+		t.Fatal("desired should be disabled")
+	}
+	if !st.Enabled {
+		t.Fatal("applied should still be enabled (not reconciled yet)")
+	}
+	if st.PendingAction != "disable" {
+		t.Fatalf("pending_action = %q, want disable", st.PendingAction)
+	}
+
+	// After reconcile the disagreement clears.
+	c.Reconcile(context.Background())
+	st = findStatus(t, c, "ping")
+	if st.PendingAction != "" || st.Enabled {
+		t.Fatalf("after reconcile: pending=%q enabled=%v, want cleared+disabled", st.PendingAction, st.Enabled)
+	}
+}
+
+func findStatus(t *testing.T, c *Controller, name string) ControllerStatus {
+	t.Helper()
+	for _, st := range c.Status() {
+		if st.Name == name {
+			return st
+		}
+	}
+	t.Fatalf("server %q not in Status", name)
+	return ControllerStatus{}
+}
