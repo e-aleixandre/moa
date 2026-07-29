@@ -344,6 +344,28 @@ func (m *Manager) Tools() []core.Tool {
 	return all
 }
 
+// ToolsForServer returns the wrapped tools of one server, and whether that
+// server is managed. Callers use it to re-sync a registry after a per-server
+// transition (restart/enable/disable) by exact tool name, rather than matching
+// a sanitized textual prefix — which is unreliable for long server names, where
+// the truncating hash of the prefix differs from the hash of a full tool name.
+func (m *Manager) ToolsForServer(name string) ([]core.Tool, bool) {
+	m.mu.Lock()
+	sess, ok := m.byName[name]
+	m.mu.Unlock()
+	if !ok {
+		return nil, false
+	}
+	sess.mu.Lock()
+	tools := append([]toolInfo(nil), sess.tools...)
+	sess.mu.Unlock()
+	out := make([]core.Tool, 0, len(tools))
+	for _, ti := range tools {
+		out = append(out, m.wrapTool(sess, ti))
+	}
+	return out, true
+}
+
 // Status returns an immutable snapshot of every server's health, in config
 // discovery order, for the UI.
 func (m *Manager) Status() []ServerStatus {
