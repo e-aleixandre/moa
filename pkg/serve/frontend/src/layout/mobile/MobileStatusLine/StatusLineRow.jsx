@@ -146,9 +146,10 @@ export function StatusLineRow({
           what makes a crashed Playwright glanceable without opening anything. */}
       {mcp && mcp.total > 0 && (() => {
         const unhealthy = mcp.unhealthy > 0;
+        const disabledNote = mcp.disabled > 0 ? `, ${mcp.disabled} disabled` : "";
         const label = unhealthy
-          ? `MCP: ${mcp.unhealthy} of ${mcp.total} need attention — open MCP servers`
-          : `MCP: ${mcp.total} server${mcp.total === 1 ? "" : "s"} ready — open MCP servers`;
+          ? `MCP: ${mcp.unhealthy} of ${mcp.total} need attention${disabledNote} — open MCP servers`
+          : `MCP: ${mcp.total} server${mcp.total === 1 ? "" : "s"}${disabledNote} — open MCP servers`;
         const inner = (
           <span class={`msl-mcp-chip${unhealthy ? " msl-mcp-bad" : ""}`} aria-hidden="true">
             <Plug />

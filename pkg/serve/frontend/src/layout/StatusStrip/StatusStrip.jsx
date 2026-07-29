@@ -124,9 +124,10 @@ export function StatusStrip({
       <span class="status-strip-right">
         {session?.mcp && session.mcp.total > 0 && (() => {
           const unhealthy = session.mcp.unhealthy > 0;
+          const disabledNote = session.mcp.disabled > 0 ? `, ${session.mcp.disabled} disabled` : "";
           const label = unhealthy
-            ? `MCP: ${session.mcp.unhealthy} of ${session.mcp.total} need attention`
-            : `MCP: ${session.mcp.total} server${session.mcp.total === 1 ? "" : "s"} ready`;
+            ? `MCP: ${session.mcp.unhealthy} of ${session.mcp.total} need attention${disabledNote}`
+            : `MCP: ${session.mcp.total} server${session.mcp.total === 1 ? "" : "s"}${disabledNote} ready`;
           const body = (
             <>
               {unhealthy ? <AlertTriangle /> : <Plug />}

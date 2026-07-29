@@ -8,6 +8,38 @@
   gap: var(--space-3);
 }
 
+/* Scope selector header: picks which level (session/project/global) the
+   per-row toggle writes to. */
+.mcp-scopebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.mcp-scopebar-label {
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+}
+.mcp-scope-select {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font);
+  /* iOS auto-zooms inputs under 16px on focus; keep it at 16px. */
+  font-size: 16px;
+  color: var(--text);
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md, 10px);
+  padding: 7px 10px;
+}
+.mcp-scope-select:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.mcp-scope-note {
+  font-size: var(--text-xs);
+  color: var(--yellow);
+}
+
 .mcp-summary {
   display: inline-flex;
   align-items: center;
@@ -73,9 +105,76 @@
   color: var(--yellow);
   background: color-mix(in srgb, var(--yellow) 15%, transparent);
 }
+.mcp-st-progress {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+}
+.mcp-st-disabled {
+  color: var(--subtext0);
+  background: color-mix(in srgb, var(--overlay0) 22%, transparent);
+}
 .mcp-st-bad {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+
+/* Veto badges: the scopes currently disabling a server. Neutral, compact. */
+.mcp-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.mcp-badge {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--subtext1);
+  background: color-mix(in srgb, var(--overlay0) 20%, transparent);
+  border-radius: var(--radius-full);
+  padding: 1px 7px;
+}
+
+/* Pending: the desired policy hasn't been applied because the session is busy. */
+.mcp-row-pending {
+  font-size: var(--text-xs);
+  color: var(--yellow);
+}
+
+/* Row that is intentionally off: dim, never alarming. */
+.mcp-row-off {
+  opacity: 0.72;
+}
+
+/* Disable/enable toggle scoped to the header's selected level. */
+.mcp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-xs);
+  color: var(--subtext1);
+  cursor: pointer;
+  min-width: 0;
+}
+.mcp-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--peach);
+  cursor: pointer;
+}
+.mcp-toggle-off {
+  opacity: 0.5;
+  cursor: default;
+}
+.mcp-toggle-off input {
+  cursor: default;
+}
+
+.mcp-row-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
 }
 
 .mcp-row-meta {
