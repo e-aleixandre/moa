@@ -16,10 +16,19 @@ const transcribeEndpoint = "/v1/audio/transcriptions"
 // Compile-time check that OpenAI implements Transcriber.
 var _ core.Transcriber = (*OpenAI)(nil)
 
-// Transcribe sends audio to the OpenAI Whisper API and returns the transcribed text.
+// Transcribe sends audio to the OpenAI transcription API and returns the text.
 // filename should include the extension (e.g. "audio.webm") so the API can detect
 // the format. Supported formats: mp3, mp4, mpeg, mpga, m4a, wav, webm, ogg.
+//
+// opts.Model selects the transcription model; empty falls back to the package
+// default. Note that response_format stays "json": the newer models reject
+// "verbose_json", and we only ever read the text field anyway.
 func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename string, opts core.TranscribeOptions) (string, error) {
+	model := opts.Model
+	if model == "" {
+		model = core.DefaultSTTModel
+	}
+
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 
@@ -34,7 +43,7 @@ func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename strin
 			pw.CloseWithError(err)
 			return
 		}
-		if err := mw.WriteField("model", "whisper-1"); err != nil {
+		if err := mw.WriteField("model", model); err != nil {
 			pw.CloseWithError(err)
 			return
 		}

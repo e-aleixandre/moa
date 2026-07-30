@@ -73,7 +73,8 @@ CLI flags override both at runtime. Project config extends global config; some f
 | `auto_verify` | bool | `false` | Run verification checks automatically after changes |
 | `brave_api_key` | string | | Enables the `web_search` tool |
 | `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
-| `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids Whisper mis-detecting short clips. Use `"auto"` to let the model detect |
+| `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids mis-detection on short clips. Use `"auto"` to let the model detect |
+| `stt_model` | string | `"gpt-transcribe"` | Speech-to-text model. `"gpt-4o-mini-transcribe"` costs half as much per minute; `"whisper-1"` is the older, slower default |
 | `persistent_shell` | bool | `true` | Whether `bash` persists working directory and exported env between calls in a session |
 | `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
 

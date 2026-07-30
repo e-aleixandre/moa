@@ -705,3 +705,36 @@ func TestMergeConfigs_STTLanguage_ProjectOverride(t *testing.T) {
 		t.Errorf("project override: got %q, want en", got)
 	}
 }
+
+func TestGetSTTModel(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty uses the default", "", DefaultSTTModel},
+		{"whitespace only uses the default", "   ", DefaultSTTModel},
+		{"explicit model wins", "whisper-1", "whisper-1"},
+		{"trims whitespace", "  gpt-4o-mini-transcribe  ", "gpt-4o-mini-transcribe"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := GetSTTModel(MoaConfig{STTModel: c.in}); got != c.want {
+				t.Errorf("GetSTTModel(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestMergeConfigs_STTModel_ProjectOverride(t *testing.T) {
+	base := MoaConfig{STTModel: "gpt-transcribe"}
+	project := MoaConfig{STTModel: "whisper-1"}
+	merged := mergeConfigs(base, project)
+	if got := GetSTTModel(merged); got != "whisper-1" {
+		t.Errorf("project override: got %q, want whisper-1", got)
+	}
+	// An empty project value must not erase the global choice.
+	if got := GetSTTModel(mergeConfigs(base, MoaConfig{})); got != "gpt-transcribe" {
+		t.Errorf("empty project value: got %q, want gpt-transcribe", got)
+	}
+}
