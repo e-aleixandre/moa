@@ -151,19 +151,13 @@
   position: absolute;
   inset: -8px -4px;
 }
-/* Stripped like the ModelPill above, and for the same reason. The mode KEEPS its
-   canonical color (green/yellow/blue — the same traffic light the desktop
-   StatusStrip uses), because the color IS the safety signal; only the filled
-   background goes. */
+/* The chip's own styling (mono, lowercase, no fill, canonical color) now lives
+   in PermissionControl.css and is shared with the desktop strip, so this datum
+   has a single definition. Here it is a passive span inside the row's button, so
+   it must not swallow the tap. */
 .mstatusline .msl-perm .perm-chip {
   pointer-events: none;
   flex: none;
-  padding: 0;
-  background: none;
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  font-weight: var(--weight-normal);
-  text-transform: lowercase;
 }
 
 /* ── MCP health (RIGHT, before the token heartbeat) — present only when the

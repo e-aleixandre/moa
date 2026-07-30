@@ -10,9 +10,10 @@ import { activityPhase } from "../../data/util/activity.js";
 // SETTINGS-REDESIGN spec §2/§5): the line is glance + the door to the Usage
 // panel, NOT the whole accounting dump.
 //
-// Level 1 (this line): the context ring, per-run tokens (desktop full only),
-// the permission chip, the current task, and the session cost — plus the modes
-// that are currently ACTIVE (plan/goal/tasks) and the on-extra alert.
+// Level 1 (this line): the context ring + session cost (leading the line, same
+// side as the mobile line), per-run tokens, the permission chip, the current
+// task, and the modes that are currently ACTIVE (plan/goal/tasks) plus the
+// on-extra alert.
 // Level 2 (the full accounting: cost breakdown, tokens, detailed context, plan
 // windows, extra) lives in the UsagePanel, opened by tapping the cost segment.
 //
@@ -66,19 +67,65 @@ export function StatusStrip({
 
   return (
     <div class="status-strip">
-      {/* LEFT: the activity leads the line (a status "Working…" reads best at
-          the start, not floating mid-row), then the permission chip + the
-          currently-active modes. */}
+      {/* LEFT: context + cost lead the line, matching the mobile line so the same
+          datum sits on the same side in both densities. They share a segment
+          because the cost is the door to the same Usage panel the ring explains. */}
+      {(hasCtx || hasSpend) && (
+        <span class="status-strip-usage">
+          {hasCtx && (
+            <span class="status-strip-ctx">
+              <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
+              ctx {ctxPercent}%
+            </span>
+          )}
+
+          {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
+              Falls back to plain text otherwise (galleries / other consumers). */}
+          {hasSpend ? (
+            costTrigger ? (
+              <button
+                type="button"
+                class={`status-strip-spend status-strip-spend-btn spend-${model.spendLevel || "normal"}`}
+                onClick={onOpenUsage}
+                aria-label="Show usage"
+                title="Estimated session cost"
+              >
+                {/* The tilde marks an estimated accumulated session cost. */}
+                <b>~{spend}</b>
+              </button>
+            ) : (
+              <span class={`status-strip-spend spend-${model.spendLevel || "normal"}`}>
+                <b>~{spend}</b>
+              </span>
+            )
+          ) : (
+            costTrigger && (
+              <button
+                type="button"
+                class="status-strip-gauge"
+                onClick={onOpenUsage}
+                aria-label="Show usage"
+                title="Show usage"
+              >
+                <Gauge />
+              </button>
+            )
+          )}
+        </span>
+      )}
+
+      {/* Then the activity, the permission chip and the currently-active modes. */}
       {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
 
       {/* Permission chip — a control (subphase b): tap opens a 3-option menu
           (never cycles). onPermChange is optional so gallery/other consumers can
-          render it read-only; without it, it's a plain badge. */}
+          render it read-only; without it, it's the same chip as a plain span, so
+          the read-only line looks identical to the interactive one. */}
       {onPermChange ? (
         <PermissionControl mode={perm.mode} disabled={permBusy} onChange={onPermChange} />
       ) : (
-        <span class={`status-strip-pill perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
-          {perm.mode.toUpperCase()}
+        <span class={`perm-chip perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
+          {perm.mode}
         </span>
       )}
 
@@ -117,10 +164,9 @@ export function StatusStrip({
         </span>
       )}
 
-      {/* RIGHT: the run's telemetry grouped and anchored to the right edge —
-          per-run tokens, the context ring, and the session cost. margin-left
-          lives on the group (not one segment) so it stays right-aligned no
-          matter which segments are present. */}
+      {/* RIGHT: what is left of the run's telemetry, anchored to the right edge —
+          MCP health and the per-run tokens. margin-left lives on the group (not
+          one segment) so it stays right-aligned no matter which are present. */}
       <span class="status-strip-right">
         {session?.mcp && session.mcp.total > 0 && (() => {
           const unhealthy = session.mcp.unhealthy > 0;
@@ -155,45 +201,6 @@ export function StatusStrip({
         })()}
         {showTokens && hasTokens && (
           <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="strip" /></span>
-        )}
-        {hasCtx && (
-          <span class="status-strip-ctx">
-            <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
-            ctx {ctxPercent}%
-          </span>
-        )}
-
-        {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
-            Falls back to plain text otherwise (galleries / other consumers). */}
-        {hasSpend ? (
-          costTrigger ? (
-            <button
-              type="button"
-              class={`status-strip-spend status-strip-spend-btn spend-${model.spendLevel || "normal"}`}
-              onClick={onOpenUsage}
-              aria-label="Show usage"
-              title="Estimated session cost"
-            >
-              {/* The tilde marks an estimated accumulated session cost. */}
-              <b>~{spend}</b>
-            </button>
-          ) : (
-            <span class={`status-strip-spend spend-${model.spendLevel || "normal"}`}>
-              <b>~{spend}</b>
-            </span>
-          )
-        ) : (
-          costTrigger && (
-            <button
-              type="button"
-              class="status-strip-gauge"
-              onClick={onOpenUsage}
-              aria-label="Show usage"
-              title="Show usage"
-            >
-              <Gauge />
-            </button>
-          )
         )}
       </span>
     </div>

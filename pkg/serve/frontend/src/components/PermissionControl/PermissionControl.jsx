@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "preact/hooks";
-import { Shield, Check } from "lucide-preact";
+import { Check } from "lucide-preact";
 import { registerOverlay } from "../../data/overlays.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import "./PermissionControl.css";
@@ -23,6 +23,13 @@ import "./PermissionControl.css";
 // anchored to a mid-line chip did. The chip itself stays on the status line in
 // both densities so its accent color remains a glanceable safety signal — only
 // the act of changing moves into the sheet.
+//
+// The chip wears the STATUS-LINE language in every density: mono, lowercase, no
+// filled background and no icon, keeping only the mode's canonical color, which
+// is what actually carries the safety signal. The mobile line established that
+// vocabulary and the desktop strip used to disagree (filled pill + shield +
+// uppercase) for the very same datum; one definition here is what keeps the two
+// lines from drifting apart again.
 //
 // Self-contained: owns its open state, click-outside, Escape and overlay-history
 // registration, so the call sites just drop it in. `disabled` locks it while the
@@ -96,8 +103,7 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
         title={disabled ? "Permission mode (locked while the agent is running)" : "Permission mode"}
         onClick={() => setOpen((v) => !v)}
       >
-        <Shield aria-hidden="true" />
-        {mode.toUpperCase()}
+        {mode}
       </button>
 
       {sheet ? (
