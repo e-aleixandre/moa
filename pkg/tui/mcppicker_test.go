@@ -181,6 +181,7 @@ func newMCPTestModel(ctrl mcpControl) appModel {
 	m.mcpCtrl = ctrl
 	m.mcpSessionVetoes = map[string][]string{}
 	m.mcpReconcileArmed = &atomic.Bool{}
+	m.mcpReconcileDirty = &atomic.Bool{}
 	return m
 }
 

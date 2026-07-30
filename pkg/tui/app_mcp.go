@@ -74,17 +74,15 @@ func (m appModel) handleMCPCommand() (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 	}
-	if m.s.running {
-		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot change MCP servers while agent is running"})
-		m.updateViewport()
-		return m, nil
-	}
 	servers := m.mcpCtrl.Status()
 	if len(servers) == 0 {
 		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "No MCP servers configured for this session"})
 		m.updateViewport()
 		return m, nil
 	}
+	// The picker opens even while the agent is running: a toggle made mid-run is
+	// recorded and deferred to the next quiescence (parity with the web panel),
+	// so a reconcile never mutates the live tool set under an active run.
 	m.mcpPicker.Open(servers, m.mcpProjectTrusted())
 	// If an action started in a previous open is still running, keep the picker
 	// busy so a second one can't start (single-writer to the controller).
@@ -244,18 +242,28 @@ func (m appModel) applyMCPToggle(scope core.MCPDisableScope, name string, disabl
 // mirroring serve's armMCPReconcile. It is one-flight per controller/runtime and
 // re-tries if a run sneaks in before it can reconcile under the state lock.
 func (m *appModel) armTUIReconcile(ctrl mcpControl, ctx context.Context, rt *bus.SessionRuntime) {
+	m.mcpReconcileDirty.Store(true)
 	if !m.mcpReconcileArmed.CompareAndSwap(false, true) {
 		return
 	}
 	go func() {
-		defer m.mcpReconcileArmed.Store(false)
 		for {
 			if !rt.WaitQuiescent(ctx) {
+				m.mcpReconcileArmed.Store(false)
 				return // context cancelled
 			}
-			if rt.DoIfQuiescent(func() { ctrl.Reconcile(ctx) }) {
-				rt.Bus.Publish(bus.MCPChanged{})
+			m.mcpReconcileDirty.Store(false)
+			if !rt.DoIfQuiescent(func() { ctrl.Reconcile(ctx) }) {
+				m.mcpReconcileDirty.Store(true)
+				continue // lost the race to a run; retry at next quiescence
+			}
+			rt.Bus.Publish(bus.MCPChanged{})
+			m.mcpReconcileArmed.Store(false)
+			if !m.mcpReconcileDirty.Load() {
 				return
+			}
+			if !m.mcpReconcileArmed.CompareAndSwap(false, true) {
+				return // another worker owns the dirty change
 			}
 		}
 	}()

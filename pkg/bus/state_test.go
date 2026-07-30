@@ -242,4 +242,13 @@ func TestStateMachine_DoIfIdle(t *testing.T) {
 	if ok := sm.DoIfIdle(func() { ran = true }); ok || ran {
 		t.Fatalf("DoIfIdle must skip fn when running (ok=%v ran=%v)", ok, ran)
 	}
+
+	// StateError is a startable/quiescent state (WaitQuiescent treats it as
+	// settled), so DoIfIdle must run fn there too — otherwise a deferred MCP
+	// reconcile would busy-spin against an errored session.
+	sm.MustTransition(StateError)
+	ran = false
+	if ok := sm.DoIfIdle(func() { ran = true }); !ok || !ran {
+		t.Fatalf("DoIfIdle should run fn in StateError (ok=%v ran=%v)", ok, ran)
+	}
 }

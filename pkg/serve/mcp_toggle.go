@@ -79,6 +79,10 @@ func (s *ManagedSession) setMCPServerDisabled(scope core.MCPDisableScope, server
 	// state lock across the reconcile, so a SendPrompt can't begin a run between
 	// the idle check and the tool-set mutation.
 	if s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(s.infra.sessionCtx) }) {
+		// Publish unconditionally: a scope change whose applied state is already
+		// controlled by another veto makes Reconcile a manager no-op (no OnChange
+		// fires), yet the scope badges of every affected session must refresh.
+		s.publishMCPChanged()
 		return true, nil
 	}
 	// Not quiescent: record the preference; the deferred reconcile is armed once
@@ -95,8 +99,11 @@ func (s *ManagedSession) setMCPServerDisabled(scope core.MCPDisableScope, server
 // reconcile (it re-reads the current policy when it fires, so it always applies
 // the latest desired state).
 func (s *ManagedSession) armMCPReconcile() {
+	// Mark that desired policy changed. If a worker is already running, it will
+	// observe the dirty flag and loop; only start a new worker if none is alive.
+	s.mcpReconcileDirty.Store(true)
 	if !s.mcpReconcilePending.CompareAndSwap(false, true) {
-		return // already armed; the pending reconcile will pick up this change too
+		return // a worker is alive and will pick up the dirty flag
 	}
 	go func() {
 		// Loop: WaitQuiescent then reconcile atomically under the state lock. If a
@@ -116,14 +123,28 @@ func (s *ManagedSession) armMCPReconcile() {
 				s.mcpReconcilePending.Store(false)
 				return
 			}
+			// Consume the dirty flag before reconciling: a toggle arriving after
+			// this point re-sets it and is caught by the re-check below.
+			s.mcpReconcileDirty.Store(false)
 			done := s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(ctx) })
-			if done {
-				s.mcpReconcilePending.Store(false)
-				s.publishMCPChanged()
+			if !done {
+				// Lost the race to a run that just started; a toggle may also have
+				// re-dirtied. Ensure we retry.
+				s.mcpReconcileDirty.Store(true)
+				continue
+			}
+			s.publishMCPChanged()
+			// Release the one-flight, then re-check dirty. If a toggle set dirty
+			// between the reconcile and here, it may have seen pending still true
+			// and declined to start a worker; re-acquire and loop so its change is
+			// not dropped.
+			s.mcpReconcilePending.Store(false)
+			if !s.mcpReconcileDirty.Load() {
 				return
 			}
-			// Lost the race to a run that just started; wait for the next
-			// quiescence and try again.
+			if !s.mcpReconcilePending.CompareAndSwap(false, true) {
+				return // another worker started and owns the dirty change
+			}
 		}
 	}()
 }

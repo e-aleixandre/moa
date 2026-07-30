@@ -100,16 +100,18 @@ func (sm *StateMachine) ForceState(s SessionState) {
 }
 
 // DoIfIdle runs fn while holding the state lock, but only if the current state
-// is idle (not running, not permission, not error). It returns whether fn ran.
-// Holding the lock across fn makes the idle check and fn atomic with respect to
-// state transitions: a run cannot start (idle → running) while fn executes, so a
-// caller that mutates the live tool set under it cannot race a run beginning.
-// fn must not call back into the state machine (it would deadlock) and should be
-// short.
+// is one from which a run may start (idle or error — not running, not
+// permission). It returns whether fn ran. Holding the lock across fn makes the
+// check and fn atomic with respect to state transitions: a run cannot start
+// while fn executes, so a caller that mutates the live tool set under it cannot
+// race a run beginning. The startable set matches WaitQuiescent's notion of
+// quiescence (which also treats StateError as settled), so a deferred caller
+// that waits for quiescence and then calls this does not busy-spin. fn must not
+// call back into the state machine (it would deadlock) and should be short.
 func (sm *StateMachine) DoIfIdle(fn func()) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	if sm.current != StateIdle {
+	if sm.current == StateRunning || sm.current == StatePermission {
 		return false
 	}
 	fn()

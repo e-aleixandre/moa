@@ -89,7 +89,7 @@ func (c *Controller) SetRefreshPrompt(fn func()) {
 // enabled state, and any pending action (desired differs from applied).
 func (c *Controller) Status() []ControllerStatus {
 	c.mu.Lock()
-	policy := c.policy
+	policy := clonePolicy(c.policy)
 	c.mu.Unlock()
 
 	raw := c.mgr.Status()
@@ -141,7 +141,7 @@ type ControllerStatus struct {
 // "unmatched", not globally "orphaned".
 func (c *Controller) UnmatchedDisabled() []UnmatchedDisabled {
 	c.mu.Lock()
-	policy := c.policy
+	policy := clonePolicy(c.policy)
 	c.mu.Unlock()
 
 	configured := map[string]struct{}{}
@@ -225,6 +225,12 @@ func (c *Controller) SetScopeDisabled(scope core.MCPDisableScope, name string, d
 func (c *Controller) Policy() core.MCPDisablePolicy {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return clonePolicy(c.policy)
+}
+
+// clonePolicy deep-copies a disable policy so a snapshot can be traversed
+// without the controller lock while SetScopeDisabled mutates the live maps.
+func clonePolicy(p core.MCPDisablePolicy) core.MCPDisablePolicy {
 	cp := func(m map[string]struct{}) map[string]struct{} {
 		if m == nil {
 			return nil
@@ -236,9 +242,9 @@ func (c *Controller) Policy() core.MCPDisablePolicy {
 		return out
 	}
 	return core.MCPDisablePolicy{
-		Global:  cp(c.policy.Global),
-		Project: cp(c.policy.Project),
-		Session: cp(c.policy.Session),
+		Global:  cp(p.Global),
+		Project: cp(p.Project),
+		Session: cp(p.Session),
 	}
 }
 
@@ -281,7 +287,7 @@ func (c *Controller) Restart(ctx context.Context, name string) (ServerStatus, er
 	// a veto (pending) while the process is still running, and a restart must not
 	// revive it.
 	c.mu.Lock()
-	policy := c.policy
+	policy := clonePolicy(c.policy)
 	c.mu.Unlock()
 	if core.ResolveMCPDisabled(name, policy).Disabled {
 		for _, st := range c.mgr.Status() {
@@ -322,7 +328,7 @@ func (c *Controller) Reconcile(ctx context.Context) []ControllerStatus {
 	defer c.op.Unlock()
 
 	c.mu.Lock()
-	policy := c.policy
+	policy := clonePolicy(c.policy)
 	c.mu.Unlock()
 
 	changed := false

@@ -163,10 +163,11 @@ export function McpPanel({ sessionId, mcpTick }) {
   // Tracks the panel's current session for async callbacks that captured an
   // older `load` (e.g. a ServerRow mutation that resolves after a session
   // switch): they must not commit stale rows into a different session's panel.
+  // Assigned synchronously during render (not in a passive effect) so there is
+  // no render-to-effect window where an A-load could still pass the guard after
+  // the panel has switched to B.
   const liveSessionRef = useRef(sessionId);
-  useEffect(() => {
-    liveSessionRef.current = sessionId;
-  }, [sessionId]);
+  liveSessionRef.current = sessionId;
 
   const load = useCallback(() => {
     if (!sessionId) return;

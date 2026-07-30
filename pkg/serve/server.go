@@ -739,7 +739,13 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 		}
 
 		sessionCfg := mgr.loadConfig(cwd)
-		if err := sess.reloadMCP(sessionCfg); err != nil {
+		// Serialize with MCP toggles: reloadMCP snapshots the live policy and
+		// swaps the manager/controller; a concurrent ToggleMCPServer would
+		// otherwise apply to the old controller and be lost in the replacement.
+		mgr.mcpConfigMu.Lock()
+		err := sess.reloadMCP(sessionCfg)
+		mgr.mcpConfigMu.Unlock()
+		if err != nil {
 			if errors.Is(err, ErrBusy) {
 				http.Error(w, "session is busy; try again when idle", http.StatusConflict)
 				return

@@ -126,11 +126,14 @@ type ManagedSession struct {
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
 	verifyRunning atomic.Bool
-	// mcpReconcilePending is a one-flight guard: it is set when an MCP toggle
-	// arrives while the session is busy, so its reconcile is deferred to the next
-	// quiescence. Further toggles coalesce into the same pending reconcile, which
-	// re-reads the latest policy when it fires.
+	// mcpReconcilePending is the one-flight guard for the deferred-reconcile
+	// worker: set while the worker goroutine is alive so toggles coalesce onto
+	// it. mcpReconcileDirty records that desired policy changed since the last
+	// reconcile; the worker loops until it observes a clean state under a
+	// release/re-check handshake, so a toggle that arrives just as the worker is
+	// exiting is never dropped.
 	mcpReconcilePending atomic.Bool
+	mcpReconcileDirty   atomic.Bool
 }
 
 // title returns the current session title under lock.

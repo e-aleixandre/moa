@@ -133,7 +133,10 @@ type appModel struct {
 	// mcpReconcileArmed is a one-flight guard for a deferred MCP reconcile that
 	// drains at the next quiescence when a toggle happened while busy. Pointer
 	// because appModel is copied by value throughout the Bubble Tea loop.
+	// mcpReconcileDirty records a desired-policy change so a toggle arriving as
+	// the worker exits is not dropped.
 	mcpReconcileArmed *atomic.Bool
+	mcpReconcileDirty *atomic.Bool
 	// mcpSessionVetoes remembers each conversation's SESSION-scope MCP vetoes by
 	// session ID. The TUI shares one controller, so switching conversations must
 	// save the outgoing set and restore the incoming one; otherwise a session
@@ -278,6 +281,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		mcpCtrl:              mcpControlOrNil(cfg.MCPController),
 		mcpSessionVetoes:     map[string][]string{},
 		mcpReconcileArmed:    &atomic.Bool{},
+		mcpReconcileDirty:    &atomic.Bool{},
 		renderer:             newRenderer(80),
 		viewport:             vp,
 		input:                newInput(),
