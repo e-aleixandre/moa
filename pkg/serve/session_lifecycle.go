@@ -921,15 +921,16 @@ func (s *ManagedSession) RestartMCPServer(name string) (mcp.ServerStatus, error)
 
 	// A restart swaps this server's tool schemas. If a model turn is in flight
 	// (or a permission decision is pending), it was handed the pre-restart tools
-	// and could then hit an "unknown tool" between response and dispatch. Guard
-	// with the same busy check reloadMCP uses; the controller re-syncs the
-	// registry by exact tool name (correct even for long server names).
-	state := s.runtime.State.Current()
-	if state == bus.StateRunning || state == bus.StatePermission {
+	// and could then hit an "unknown tool" between response and dispatch. Run the
+	// restart inside DoIfQuiescent so it holds the state lock across the tool-set
+	// mutation: a SendPrompt can't transition Idle/Error → Running in the gap and
+	// receive the old registry. If not quiescent, refuse with ErrBusy.
+	var st mcp.ServerStatus
+	var restartErr error
+	if !s.runtime.DoIfQuiescent(func() { st, restartErr = ctrl.Restart(ctx, name) }) {
 		return mcp.ServerStatus{}, ErrBusy
 	}
-
-	return ctrl.Restart(ctx, name)
+	return st, restartErr
 }
 
 // reloadMCP reloads MCP servers for a session.
@@ -965,49 +966,52 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		return fmt.Errorf("MCP servers started but no tools available; keeping existing tools")
 	}
 
-	// Phase 2: check state via bus.
-	state := s.runtime.State.Current()
-	if state == bus.StateRunning || state == bus.StatePermission {
+	// Phase 2+3: swap the tool set atomically against run-start. DoIfQuiescent
+	// holds the state lock across the swap, so a SendPrompt can't transition
+	// Idle/Error → Running between a busy check and the registry mutation and be
+	// handed a half-swapped tool set. If not quiescent, refuse with ErrBusy.
+	swapped := s.runtime.DoIfQuiescent(func() {
+		s.mu.Lock()
+		oldMgr := s.infra.mcpMgr
+
+		// Deregister old MCP tools.
+		for _, spec := range s.infra.toolReg.Specs() {
+			if strings.HasPrefix(spec.Name, mcp.ToolPrefix) {
+				s.infra.toolReg.Unregister(spec.Name)
+			}
+		}
+		// Register new tools.
+		for _, t := range newTools {
+			core.RegisterOrLog(s.infra.toolReg, t)
+		}
+		s.infra.mcpMgr = newMgr
+		// Rebuild the controller over the new manager (the old one pointed at the
+		// now-closed manager) and rewire its prompt refresh.
+		if newMgr != nil {
+			s.infra.mcpController = mcp.NewController(mcp.ControllerConfig{
+				Manager:  newMgr,
+				Registry: s.infra.toolReg,
+				Policy:   reloadPolicy,
+			})
+		} else {
+			s.infra.mcpController = nil
+		}
+		s.infra.UntrustedMCP = false
+		s.mu.Unlock()
+
+		s.wireMCPRefresh()
+
+		// Cleanup old manager after the swap (still inside the barrier: closing it
+		// can't race a run that was blocked from starting).
+		if oldMgr != nil {
+			oldMgr.Close()
+		}
+	})
+	if !swapped {
 		if newMgr != nil {
 			newMgr.Close()
 		}
 		return ErrBusy
-	}
-
-	// Phase 3: swap tools.
-	s.mu.Lock()
-	oldMgr := s.infra.mcpMgr
-
-	// Deregister old MCP tools.
-	for _, spec := range s.infra.toolReg.Specs() {
-		if strings.HasPrefix(spec.Name, mcp.ToolPrefix) {
-			s.infra.toolReg.Unregister(spec.Name)
-		}
-	}
-	// Register new tools.
-	for _, t := range newTools {
-		core.RegisterOrLog(s.infra.toolReg, t)
-	}
-	s.infra.mcpMgr = newMgr
-	// Rebuild the controller over the new manager (the old one pointed at the
-	// now-closed manager) and rewire its prompt refresh.
-	if newMgr != nil {
-		s.infra.mcpController = mcp.NewController(mcp.ControllerConfig{
-			Manager:  newMgr,
-			Registry: s.infra.toolReg,
-			Policy:   reloadPolicy,
-		})
-	} else {
-		s.infra.mcpController = nil
-	}
-	s.infra.UntrustedMCP = false
-	s.mu.Unlock()
-
-	s.wireMCPRefresh()
-
-	// Phase 4: cleanup old.
-	if oldMgr != nil {
-		oldMgr.Close()
 	}
 	return nil
 }
