@@ -2,9 +2,11 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -723,6 +725,71 @@ func TestGetSTTModel(t *testing.T) {
 				t.Errorf("GetSTTModel(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+func TestBuildSTTPrompt(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"nil yields no prompt", nil, ""},
+		{"empty yields no prompt", []string{}, ""},
+		{"only blanks yield no prompt", []string{"", "   "}, ""},
+		{"single term", []string{"goreleaser"}, "goreleaser"},
+		{"joined with commas", []string{"MCP", "Preact"}, "MCP, Preact"},
+		{"trims and drops blanks", []string{"  MCP  ", "", "Preact"}, "MCP, Preact"},
+		{"drops case-insensitive duplicates keeping the first spelling",
+			[]string{"Preact", "preact", "PREACT"}, "Preact"},
+		{"collapses inner whitespace", []string{"status   line"}, "status line"},
+		{"newlines and commas inside a term become spaces",
+			[]string{"MCP\npanel", "a,b"}, "MCP panel, a b"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := BuildSTTPrompt(c.in); got != c.want {
+				t.Errorf("BuildSTTPrompt(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// Long vocabularies degrade transcription, so the list is capped rather than
+// passed through wholesale.
+func TestBuildSTTPrompt_CapsLongVocabularies(t *testing.T) {
+	vocab := make([]string, 0, sttVocabularyLimit+10)
+	for i := range sttVocabularyLimit + 10 {
+		vocab = append(vocab, fmt.Sprintf("term%d", i))
+	}
+	got := BuildSTTPrompt(vocab)
+	if n := len(strings.Split(got, ", ")); n != sttVocabularyLimit {
+		t.Errorf("kept %d terms, want %d", n, sttVocabularyLimit)
+	}
+	if !strings.HasPrefix(got, "term0, term1, ") {
+		t.Errorf("should keep the first terms, got %q", got[:40])
+	}
+	if strings.Contains(got, "term"+fmt.Sprint(sttVocabularyLimit)) {
+		t.Error("kept a term past the limit")
+	}
+}
+
+// A project's jargon must add to the global vocabulary, not replace it.
+func TestMergeConfigs_STTVocabulary_Accumulates(t *testing.T) {
+	base := MoaConfig{STTVocabulary: []string{"Aleixandre"}}
+	project := MoaConfig{STTVocabulary: []string{"goreleaser"}}
+	merged := mergeConfigs(base, project)
+	if got := BuildSTTPrompt(merged.STTVocabulary); got != "Aleixandre, goreleaser" {
+		t.Errorf("merged vocabulary = %q, want both terms", got)
+	}
+	// Merging must not mutate the inputs: a second merge from the same base
+	// would otherwise inherit the first project's terms.
+	other := mergeConfigs(base, MoaConfig{STTVocabulary: []string{"bubbletea"}})
+	if got := BuildSTTPrompt(other.STTVocabulary); got != "Aleixandre, bubbletea" {
+		t.Errorf("second merge leaked terms from the first: %q", got)
+	}
+	if len(base.STTVocabulary) != 1 {
+		t.Errorf("base was mutated: %q", base.STTVocabulary)
 	}
 }
 

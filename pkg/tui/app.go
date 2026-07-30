@@ -221,6 +221,7 @@ type Config struct {
 	Transcriber           core.Transcriber                        // speech-to-text for voice input (nil = disabled)
 	STTLanguage           string                                  // ISO-639-1 language hint for STT ("" = auto-detect)
 	STTModel              string                                  // STT model id ("" = provider default)
+	STTVocabulary         []string                                // words the transcriber tends to get wrong (names, jargon)
 	CacheTTL              time.Duration                           // prompt-cache retention (Anthropic); drives the "cache cold" hint
 	UsagePoller           *usage.Poller                           // plan usage poller (nil = usage tracking disabled)
 	ProviderFactory       func(core.Model) (core.Provider, error) // one-shot LLM calls (auto-titling); nil disables
@@ -302,7 +303,12 @@ func New(ctx context.Context, cfg Config) appModel {
 		updateCheckEnabled:   cfg.UpdateCheckEnabled,
 		lastFiveHPct:         -1,
 		lastWeekPct:          -1,
-		voice:                voiceRecorder{transcriber: cfg.Transcriber, language: cfg.STTLanguage, model: cfg.STTModel},
+		voice: voiceRecorder{
+			transcriber: cfg.Transcriber,
+			language:    cfg.STTLanguage,
+			model:       cfg.STTModel,
+			vocabPrompt: core.BuildSTTPrompt(cfg.STTVocabulary),
+		},
 	}
 	if cfg.ReleaseInfo.Version != "" {
 		m.statusBar.UpdateVersionSegment(cfg.ReleaseInfo.DisplayVersion(), "")

@@ -75,8 +75,19 @@ CLI flags override both at runtime. Project config extends global config; some f
 | `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
 | `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids mis-detection on short clips. Use `"auto"` to let the model detect |
 | `stt_model` | string | `"gpt-transcribe"` | Speech-to-text model. `"gpt-4o-mini-transcribe"` costs half as much per minute; `"whisper-1"` is the older, slower default |
+| `stt_vocabulary` | string[] | `[]` | Words the transcriber keeps getting wrong (names, jargon, product names). Accumulates across scopes: a project adds its terms to your global ones. Keep it short — long lists make transcription worse (max 50 terms) |
 | `persistent_shell` | bool | `true` | Whether `bash` persists working directory and exported env between calls in a session |
 | `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
+
+Start `stt_vocabulary` empty and add words only once you catch the transcriber
+getting them wrong. It is a hint, not a substitution: listing a word biases
+spelling toward it, so a long list starts forcing your terms onto words that
+merely sound similar. Because it accumulates, your own name belongs in the
+global config and a project's jargon in its `.moa/config.json`:
+
+```json
+{ "stt_vocabulary": ["goreleaser", "Preact", "esbuild"] }
+```
 
 ### Subagents
 

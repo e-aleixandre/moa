@@ -1103,6 +1103,7 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 		opts := core.TranscribeOptions{
 			Language: core.GetSTTLanguage(mgr.moaCfg),
 			Model:    core.GetSTTModel(mgr.moaCfg),
+			Prompt:   core.BuildSTTPrompt(mgr.moaCfg.STTVocabulary),
 		}
 		text, err := mgr.transcriber.Transcribe(r.Context(), file, header.Filename, opts)
 		if err != nil {

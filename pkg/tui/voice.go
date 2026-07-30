@@ -36,6 +36,7 @@ type voiceRecorder struct {
 	transcriber core.Transcriber
 	language    string             // ISO-639-1 hint passed to the transcriber ("" = auto)
 	model       string             // STT model id ("" = provider default)
+	vocabPrompt string             // spelling hint built from the configured vocabulary ("" = none)
 	cancel      context.CancelFunc // cancels the recording process
 	tmpFile     string             // path to temp audio file
 	done        chan struct{}      // closed when the recorder process has exited (WAV finalized)
@@ -156,6 +157,7 @@ func (v *voiceRecorder) stopAndTranscribe() tea.Cmd {
 	transcriber := v.transcriber
 	language := v.language
 	model := v.model
+	vocabPrompt := v.vocabPrompt
 	done := v.done
 
 	return func() tea.Msg {
@@ -186,7 +188,7 @@ func (v *voiceRecorder) stopAndTranscribe() tea.Cmd {
 			return voiceResultMsg{Err: fmt.Errorf("recording too short")}
 		}
 
-		opts := core.TranscribeOptions{Language: language, Model: model}
+		opts := core.TranscribeOptions{Language: language, Model: model, Prompt: vocabPrompt}
 		text, err := transcriber.Transcribe(context.Background(), f, "recording.wav", opts)
 		if err != nil {
 			return voiceResultMsg{Err: err}

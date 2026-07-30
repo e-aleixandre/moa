@@ -498,6 +498,7 @@ func main() {
 			Transcriber:        transcriber,
 			STTLanguage:        core.GetSTTLanguage(moaCfg),
 			STTModel:           core.GetSTTModel(moaCfg),
+			STTVocabulary:      moaCfg.STTVocabulary,
 			CacheTTL:           core.CacheTTLDuration(moaCfg),
 			UsagePoller:        newAnthropicUsagePoller(authStore),
 			ProviderFactory:    providerFactory,
