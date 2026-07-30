@@ -904,6 +904,13 @@ func (s *ManagedSession) publishMCPChanged() {
 // disabled server (enable it first), or ErrBusy if the session is running or
 // awaiting a permission decision.
 func (s *ManagedSession) RestartMCPServer(name string) (mcp.ServerStatus, error) {
+	// Serialize with reconcile/reload so a restart never runs concurrently with a
+	// policy reconcile or a manager swap; the desired-policy check inside
+	// Controller.Restart then reflects any disable committed before we acquired
+	// the guard (finding: restart must not respawn a now-disabled server).
+	s.mcpLifecycleMu.Lock()
+	defer s.mcpLifecycleMu.Unlock()
+
 	s.mu.Lock()
 	ctrl := s.infra.mcpController
 	ctx := s.infra.sessionCtx

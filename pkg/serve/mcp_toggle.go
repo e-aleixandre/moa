@@ -66,32 +66,67 @@ type mcpToggleResult struct {
 // caller never claims a server is off while a run is still holding its tools.
 // Returns whether the change was applied (true) or left pending (false).
 func (s *ManagedSession) setMCPServerDisabled(scope core.MCPDisableScope, server string, disabled bool) (applied bool, err error) {
-	s.mu.Lock()
-	ctrl := s.infra.mcpController
-	s.mu.Unlock()
-	if ctrl == nil {
+	// Write the desired policy AND reconcile under the lifecycle guard, so the
+	// policy change is serialized with restart/reload: a restart can't snapshot a
+	// stale (still-enabled) policy and then respawn a server this toggle just
+	// vetoed. mcpApplyPolicy re-reads the live controller after taking the guard.
+	applied, hasCtrl := s.mcpApplyPolicy(scope, server, disabled)
+	if !hasCtrl {
 		return false, ErrNoMCP
 	}
-
-	ctrl.SetScopeDisabled(scope, server, disabled)
-
-	// Reconcile atomically with respect to run-start: DoIfQuiescent holds the
-	// state lock across the reconcile, so a SendPrompt can't begin a run between
-	// the idle check and the tool-set mutation.
-	if s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(s.infra.sessionCtx) }) {
+	if applied {
 		// Publish unconditionally: a scope change whose applied state is already
 		// controlled by another veto makes Reconcile a manager no-op (no OnChange
 		// fires), yet the scope badges of every affected session must refresh.
 		s.publishMCPChanged()
 		return true, nil
 	}
-	// Not quiescent: record the preference; the deferred reconcile is armed once
-	// (armMCPReconcile) and drains at the next quiescence.
+	// Not quiescent: the preference is recorded; arm the deferred reconcile.
 	s.armMCPReconcile()
 	// Publish now so this and other affected sessions show the pending state
 	// live — the deferred change triggers no manager transition of its own.
 	s.publishMCPChanged()
 	return false, nil
+}
+
+// mcpApplyPolicy records a scope veto and reconciles once, all under the MCP
+// lifecycle guard so it is serialized with restart/reload. It returns whether
+// the reconcile applied (applied=false when not quiescent — the caller then
+// defers) and whether a controller exists (hasCtrl=false means no MCP for this
+// session). The policy write happens even when not quiescent, so a deferred
+// reconcile later applies the recorded preference.
+func (s *ManagedSession) mcpApplyPolicy(scope core.MCPDisableScope, server string, disabled bool) (applied, hasCtrl bool) {
+	s.mcpLifecycleMu.Lock()
+	defer s.mcpLifecycleMu.Unlock()
+	s.mu.Lock()
+	ctrl := s.infra.mcpController
+	ctx := s.infra.sessionCtx
+	s.mu.Unlock()
+	if ctrl == nil {
+		return false, false
+	}
+	ctrl.SetScopeDisabled(scope, server, disabled)
+	return s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(ctx) }), true
+}
+
+// mcpReconcileNow reconciles the session's MCP policy once, serialized with all
+// other MCP lifecycle operations (restart/reload) via mcpLifecycleMu and made
+// run-atomic via DoIfQuiescent. It re-reads the live controller after acquiring
+// the guard, so it never reconciles through a controller a concurrent reload
+// has already swapped out. Returns whether it applied (applied=false when not
+// quiescent) and whether a controller exists (hasCtrl=false means MCP is gone,
+// so a deferred worker should stop retrying).
+func (s *ManagedSession) mcpReconcileNow() (applied, hasCtrl bool) {
+	s.mcpLifecycleMu.Lock()
+	defer s.mcpLifecycleMu.Unlock()
+	s.mu.Lock()
+	ctrl := s.infra.mcpController
+	ctx := s.infra.sessionCtx
+	s.mu.Unlock()
+	if ctrl == nil {
+		return false, false
+	}
+	return s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(ctx) }), true
 }
 
 // armMCPReconcile schedules a one-shot reconcile of this session's MCP policy at
@@ -106,30 +141,27 @@ func (s *ManagedSession) armMCPReconcile() {
 		return // a worker is alive and will pick up the dirty flag
 	}
 	go func() {
-		// Loop: WaitQuiescent then reconcile atomically under the state lock. If a
-		// run sneaks in between the wait and the lock, DoIfQuiescent returns false
-		// and we wait again, so the deferred reconcile never mutates the tool set
-		// under a live run.
+		// Loop: WaitQuiescent then reconcile via mcpReconcileNow, which serializes
+		// with restart/reload (mcpLifecycleMu) and is run-atomic (DoIfQuiescent).
+		// If a run sneaks in between the wait and the reconcile, mcpReconcileNow
+		// returns false and we wait again — the deferred reconcile never mutates
+		// the tool set under a live run or concurrently with a manager swap.
 		for {
 			if !s.runtime.WaitQuiescent(s.infra.sessionCtx) {
 				s.mcpReconcilePending.Store(false)
 				return // context cancelled (session tearing down)
 			}
-			s.mu.Lock()
-			ctrl := s.infra.mcpController
-			ctx := s.infra.sessionCtx
-			s.mu.Unlock()
-			if ctrl == nil {
-				s.mcpReconcilePending.Store(false)
-				return
-			}
 			// Consume the dirty flag before reconciling: a toggle arriving after
 			// this point re-sets it and is caught by the re-check below.
 			s.mcpReconcileDirty.Store(false)
-			done := s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(ctx) })
-			if !done {
+			applied, hasCtrl := s.mcpReconcileNow()
+			if !hasCtrl {
+				s.mcpReconcilePending.Store(false)
+				return // MCP is gone (reload removed all servers, or teardown)
+			}
+			if !applied {
 				// Lost the race to a run that just started; a toggle may also have
-				// re-dirtied. Ensure we retry.
+				// re-dirtied. Ensure we retry at the next quiescence.
 				s.mcpReconcileDirty.Store(true)
 				continue
 			}

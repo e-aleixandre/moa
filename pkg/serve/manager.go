@@ -134,6 +134,12 @@ type ManagedSession struct {
 	// exiting is never dropped.
 	mcpReconcilePending atomic.Bool
 	mcpReconcileDirty   atomic.Bool
+	// mcpLifecycleMu serializes every MCP lifecycle operation for this session —
+	// reconcile (immediate and deferred), restart, and reload — so they never
+	// mutate the shared tool registry or the manager/controller concurrently. It
+	// must be acquired WITHOUT holding s.mu or the runtime state lock; the
+	// reconcile it guards is still made run-atomic separately via DoIfQuiescent.
+	mcpLifecycleMu sync.Mutex
 }
 
 // title returns the current session title under lock.
@@ -173,27 +179,27 @@ type MCPSummary struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID             string                     `json:"id"`
-	Title          string                     `json:"title"`
-	Archived       bool                       `json:"archived,omitempty"`
-	State          SessionState               `json:"state"`
-	Model          string                     `json:"model"`
-	Provider       string                     `json:"provider"`
-	Thinking       string                     `json:"thinking"`
-	CWD            string                     `json:"cwd"`
-	Created        time.Time                  `json:"created"`
-	Updated        time.Time                  `json:"updated"`
-	Error          string                     `json:"error,omitempty"`
-	UntrustedMCP   bool                       `json:"untrusted_mcp,omitempty"`
+	ID           string       `json:"id"`
+	Title        string       `json:"title"`
+	Archived     bool         `json:"archived,omitempty"`
+	State        SessionState `json:"state"`
+	Model        string       `json:"model"`
+	Provider     string       `json:"provider"`
+	Thinking     string       `json:"thinking"`
+	CWD          string       `json:"cwd"`
+	Created      time.Time    `json:"created"`
+	Updated      time.Time    `json:"updated"`
+	Error        string       `json:"error,omitempty"`
+	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
 	// detail is fetched on demand from GET /api/sessions/{id}/mcp. Omitted when
 	// the session has no MCP servers.
-	MCP *MCPSummary `json:"mcp,omitempty"`
-	PlanMode       string                     `json:"plan_mode,omitempty"`
-	PlanFile       string                     `json:"plan_file,omitempty"`
-	ContextPercent int                        `json:"context_percent"` // 0-100, -1 if unknown
+	MCP            *MCPSummary `json:"mcp,omitempty"`
+	PlanMode       string      `json:"plan_mode,omitempty"`
+	PlanFile       string      `json:"plan_file,omitempty"`
+	ContextPercent int         `json:"context_percent"` // 0-100, -1 if unknown
 	// ContextWindow is the model's usable input window in tokens — the
 	// denominator ContextPercent is measured against, and the scale CompactAt
 	// is expressed on, so a UI can show the limit as a percentage of the ring.
@@ -204,8 +210,8 @@ type SessionInfo struct {
 	// CompactAtMin is the lowest threshold the engine honors, in tokens. A UI
 	// picking a threshold must not offer below it — the engine would raise the
 	// value and compact somewhere other than where the control says.
-	CompactAtMin   int    `json:"compact_at_min,omitempty"`
-	PermissionMode string `json:"permission_mode"` // "yolo", "ask", "auto"
+	CompactAtMin   int                        `json:"compact_at_min,omitempty"`
+	PermissionMode string                     `json:"permission_mode"` // "yolo", "ask", "auto"
 	CostUSD        float64                    `json:"cost_usd"`        // accumulated session spend (main run + subagents)
 	Activity       *attention.SessionActivity `json:"activity,omitempty"`
 	// CacheExpiresAt is when the Anthropic prompt cache for this session goes

@@ -728,6 +728,14 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
+		// Hold mcpConfigMu across the trust write AND the reload: a concurrent
+		// GLOBAL ToggleMCPServer also does a read-modify-write of the global
+		// config, so the two must not interleave (lost update / temp-file
+		// collision). ToggleMCPServer takes mcpConfigMu then the per-session
+		// lifecycle guard; we take the same order below.
+		mgr.mcpConfigMu.Lock()
+		defer mgr.mcpConfigMu.Unlock()
+
 		if err := core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 			if core.IsMCPPathTrusted(*cfg, cwd) {
 				return
@@ -739,12 +747,13 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 		}
 
 		sessionCfg := mgr.loadConfig(cwd)
-		// Serialize with MCP toggles: reloadMCP snapshots the live policy and
-		// swaps the manager/controller; a concurrent ToggleMCPServer would
-		// otherwise apply to the old controller and be lost in the replacement.
-		mgr.mcpConfigMu.Lock()
+		// Serialize the reload with this session's reconcile/restart via the
+		// per-session lifecycle guard: reloadMCP swaps the manager/controller and
+		// mutates the shared tool registry, which must not overlap a deferred
+		// reconcile or a restart.
+		sess.mcpLifecycleMu.Lock()
 		err := sess.reloadMCP(sessionCfg)
-		mgr.mcpConfigMu.Unlock()
+		sess.mcpLifecycleMu.Unlock()
 		if err != nil {
 			if errors.Is(err, ErrBusy) {
 				http.Error(w, "session is busy; try again when idle", http.StatusConflict)
