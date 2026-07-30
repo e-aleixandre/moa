@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Enabling, disabling, restarting and reloading MCP servers are now safe under
+  concurrent use: a toggle made mid-run is applied atomically the moment the
+  session goes quiet (never against an in-flight run), toggles are never lost
+  when they arrive as a deferred change is being applied, and a restart refuses
+  to revive a server you just disabled. Server enable/disable state is also kept
+  per conversation in the terminal UI, so a session-scoped change in one
+  conversation no longer leaks into another.
 - MCP server processes are no longer orphaned when a restart and a shutdown race
   each other; per-server lifecycle operations are now serialized.
 - Restarting a single MCP server no longer times out in the UI before a slow but
