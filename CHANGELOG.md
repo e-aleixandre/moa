@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-07-30
+
+### Changed
+
+- The MCP panel is now a per-server dossier: the list at rest is one calm line
+  per server, and opening one reveals its own detail where all three scopes are
+  set together, so the scope you are changing is always next to the switch you
+  are touching. It replaces the panel-wide scope selector, whose hidden mode
+  reinterpreted every row at once.
+  - Each scope carries a plain On/Off chip and, when another scope is what
+    actually keeps a server off, the panel says so in words instead of leaving
+    you to infer it from badges. The word "veto" is gone from the interface.
+  - Broad (project/global) changes now confirm inline inside the panel rather
+    than through a native browser dialog, which never belonged in an installed
+    web app.
+  - An untrusted project scope shows a locked chip with its reason instead of
+    hiding the capability.
+- The desktop status line now speaks the same language as the mobile one: the
+  permission mode is the same quiet chip in both — its color still carries the
+  safety signal — instead of a filled pill with an icon on desktop only, and
+  context + cost lead the line in both densities instead of sitting on opposite
+  sides. Model selection stays in the desktop header and the task/mode pills
+  stay desktop-only, where the density difference is deliberate.
+
 ## [0.18.0] - 2026-07-29
 
 ### Added
