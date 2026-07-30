@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Speech-to-text now uses `gpt-transcribe` instead of `whisper-1`: on the same
+  Spanish dictation it was faster, 25% cheaper per minute, and got the technical
+  vocabulary right where Whisper garbled it ("MCP" became "MSP", "goreleaser"
+  became "Gore Leaser") — precisely the words you end up dictating to an agent.
+  The model is now a config key (`stt_model`) rather than a constant, so trying
+  another one — `gpt-4o-mini-transcribe` halves the cost, `whisper-1` goes back
+  — needs no rebuild, and a project can override the global choice.
+
 ## [0.18.1] - 2026-07-30
 
 ### Changed
