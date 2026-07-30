@@ -92,3 +92,7 @@ In `ask` or `auto` mode, tool calls prompt for approval:
 ## Voice input
 
 Requires `openai-transcribe` login and `sox` (macOS) or `arecord` (Linux) installed. Toggle with `Ctrl+R` or `/voice`.
+
+If it keeps mangling a name or a piece of jargon, add that word to
+[`stt_vocabulary`](configuration.md#features). The model and the language hint
+are configurable there too.
