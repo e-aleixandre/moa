@@ -13,6 +13,16 @@
   flex: none;
 }
 
+/* Context + cost lead the line, mirroring the mobile line so the same datum
+   lives on the same side in both densities. They sit in one group because the
+   cost opens the very Usage panel the ring summarises. */
+.status-strip .status-strip-usage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  flex: none;
+}
+
 .status-strip .status-strip-ctx {
   display: flex;
   align-items: center;

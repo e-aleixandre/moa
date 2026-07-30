@@ -382,9 +382,8 @@ export function MobileStatusLine({ session, usage }) {
           open={mcpOpen}
           onClose={() => setMcpOpen(false)}
           title="MCP servers"
-          scope="this session"
         >
-          <McpPanel sessionId={session.id} mcpTick={session.mcpTick} />
+          <McpPanel sessionId={session.id} mcpTick={session.mcpTick} variant="sheet" />
         </MobileSheet>
       )}
     </StatusLineRow>

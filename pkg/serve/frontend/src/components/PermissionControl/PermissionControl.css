@@ -1,29 +1,31 @@
 /* PermissionControl — the permission chip as a control + its 3-option menu.
-   The chip mirrors the StatusStrip perm pill; the menu reuses the head-popover
-   panel chrome (mantle/border/shadow) but opens UPWARD, since the strip lives
-   at the bottom of the viewport. Catppuccin Mocha tokens only. */
+   The chip wears the status-line language (mono/lowercase/no fill), identical on
+   desktop and mobile; the menu reuses the head-popover panel chrome
+   (mantle/border/shadow) but opens UPWARD, since the strip lives at the bottom
+   of the viewport. Catppuccin Mocha tokens only. */
 .perm-control {
   position: relative;
   display: inline-flex;
   flex: none;
 }
 
-/* The chip. Same compact uppercase badge as the other StatusStrip pills, but a
-   button: it carries the ≥44px tap target via a pseudo-element so the visual
-   stays dense (technique already used across the redesign). */
+/* The chip. It speaks the STATUS-LINE language in every density: mono,
+   lowercase, no fill and no icon — only the mode's color, which is what carries
+   the safety signal. It carries the ≥44px tap target via a pseudo-element so
+   the visual stays dense (technique already used across the redesign). */
 .perm-chip {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 1px var(--space-2);
+  padding: 0;
   border: 0;
+  background: none;
   border-radius: var(--radius-full);
-  font-family: inherit;
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  font-family: var(--mono);
+  font-weight: var(--weight-normal);
+  font-size: var(--text-micro);
+  text-transform: lowercase;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -40,11 +42,11 @@
   cursor: default;
   opacity: 0.6;
 }
-/* YOLO is maroon, not green: it is the mode that never asks, so the badge should
-   read as "you took the brakes off", not as "all good". */
-.perm-chip.perm-yolo { color: var(--maroon); background: var(--maroon-dim); }
-.perm-chip.perm-ask { color: var(--yellow); background: var(--yellow-dim); }
-.perm-chip.perm-auto { color: var(--blue); background: var(--blue-dim); }
+/* YOLO is maroon, not green: it is the mode that never asks, so it should read
+   as "you took the brakes off", not as "all good". */
+.perm-chip.perm-yolo { color: var(--maroon); }
+.perm-chip.perm-ask { color: var(--yellow); }
+.perm-chip.perm-auto { color: var(--blue); }
 .perm-chip:not(:disabled):hover { filter: brightness(1.15); }
 
 /* The menu — opens upward from the chip. Right-aligned to the chip and
