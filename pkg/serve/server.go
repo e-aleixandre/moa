@@ -1100,7 +1100,10 @@ func handleTranscribe(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		defer file.Close() //nolint:errcheck
-		opts := core.TranscribeOptions{Language: core.GetSTTLanguage(mgr.moaCfg)}
+		opts := core.TranscribeOptions{
+			Language: core.GetSTTLanguage(mgr.moaCfg),
+			Model:    core.GetSTTModel(mgr.moaCfg),
+		}
 		text, err := mgr.transcriber.Transcribe(r.Context(), file, header.Filename, opts)
 		if err != nil {
 			slog.Warn("transcription failed",

@@ -12,10 +12,13 @@ type TranscribeOptions struct {
 	Language string
 	// Prompt biases the decoder toward specific vocabulary/spelling. Optional.
 	Prompt string
+	// Model is the provider's model id. Empty lets the provider pick its own
+	// default, so callers that do not care keep working.
+	Model string
 }
 
 // Transcriber converts audio to text. Providers that support speech-to-text
-// (e.g. OpenAI Whisper) implement this interface.
+// (e.g. OpenAI) implement this interface.
 type Transcriber interface {
 	Transcribe(ctx context.Context, audio io.Reader, filename string, opts TranscribeOptions) (string, error)
 }

@@ -100,6 +100,7 @@ type MoaConfig struct {
 	UpdateCheck            *bool                `json:"update_check,omitempty"`                  // nil = true (check stable releases at most every 6h)
 	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
 	STTLanguage            string               `json:"stt_language,omitempty"`                  // Speech-to-text language as ISO-639-1 (e.g. "es", "en"). Empty = "en"; "auto" lets the model detect.
+	STTModel               string               `json:"stt_model,omitempty"`                     // Speech-to-text model id. Empty = "gpt-transcribe".
 	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`            // Max turns per subagent run. 0 = use package default.
 	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"`     // Max subagent run duration as Go duration string. Empty = use package default.
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
@@ -177,6 +178,25 @@ func GetSTTLanguage(cfg MoaConfig) string {
 		return "en"
 	}
 	return lang
+}
+
+// DefaultSTTModel is the speech-to-text model used when none is configured.
+//
+// gpt-transcribe replaced whisper-1 as the default: on our own Spanish dictation
+// it was faster, 25% cheaper per minute, and noticeably better at technical
+// names (whisper turned "MCP" into "MSP" and "goreleaser" into "Gore Leaser").
+const DefaultSTTModel = "gpt-transcribe"
+
+// GetSTTModel returns the speech-to-text model id to send to the provider.
+//
+// Set "stt_model" in config to try another one (e.g. "whisper-1" to go back, or
+// "gpt-4o-mini-transcribe" for half the price) without needing a new build:
+// these models appear and change price faster than moa releases.
+func GetSTTModel(cfg MoaConfig) string {
+	if model := strings.TrimSpace(cfg.STTModel); model != "" {
+		return model
+	}
+	return DefaultSTTModel
 }
 
 // GetMaxRunDuration parses MaxRunDurationStr into a time.Duration.
@@ -314,6 +334,7 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		CodeReviewThinking: mergeScalar(base.CodeReviewThinking, override.CodeReviewThinking),
 		CacheTTL:           mergeScalar(base.CacheTTL, override.CacheTTL),
 		STTLanguage:        mergeScalar(base.STTLanguage, override.STTLanguage),
+		STTModel:           mergeScalar(base.STTModel, override.STTModel),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {

@@ -20,7 +20,7 @@ type voiceState int
 const (
 	voiceIdle         voiceState = iota
 	voiceRecording               // sox/arecord is capturing audio
-	voiceTranscribing            // audio sent to Whisper, waiting for text
+	voiceTranscribing            // audio sent to the STT model, waiting for text
 )
 
 // voiceResultMsg carries the transcribed text (or error) back to the TUI.
@@ -35,6 +35,7 @@ type voiceRecorder struct {
 	state       voiceState
 	transcriber core.Transcriber
 	language    string             // ISO-639-1 hint passed to the transcriber ("" = auto)
+	model       string             // STT model id ("" = provider default)
 	cancel      context.CancelFunc // cancels the recording process
 	tmpFile     string             // path to temp audio file
 	done        chan struct{}      // closed when the recorder process has exited (WAV finalized)
@@ -96,7 +97,7 @@ func (v *voiceRecorder) startRecording(parentCtx context.Context) tea.Cmd {
 		var cmd *exec.Cmd
 		switch recCmd {
 		case "rec":
-			// SoX: record to WAV, 16kHz mono (optimal for Whisper).
+			// SoX: record to WAV, 16kHz mono (plenty for speech-to-text).
 			cmd = exec.CommandContext(ctx, "rec",
 				"-q",            // quiet
 				"-r", "16000",   // sample rate
@@ -154,6 +155,7 @@ func (v *voiceRecorder) stopAndTranscribe() tea.Cmd {
 	path := v.tmpFile
 	transcriber := v.transcriber
 	language := v.language
+	model := v.model
 	done := v.done
 
 	return func() tea.Msg {
@@ -184,7 +186,8 @@ func (v *voiceRecorder) stopAndTranscribe() tea.Cmd {
 			return voiceResultMsg{Err: fmt.Errorf("recording too short")}
 		}
 
-		text, err := transcriber.Transcribe(context.Background(), f, "recording.wav", core.TranscribeOptions{Language: language})
+		opts := core.TranscribeOptions{Language: language, Model: model}
+		text, err := transcriber.Transcribe(context.Background(), f, "recording.wav", opts)
 		if err != nil {
 			return voiceResultMsg{Err: err}
 		}
