@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -485,5 +486,65 @@ func TestAutomationReplyCapAdmissionIsAtomic(t *testing.T) {
 	}
 	if got := loadedCount(); got > maxAutomationLoadedSessions {
 		t.Fatalf("resident set %d exceeds cap %d", got, maxAutomationLoadedSessions)
+	}
+}
+
+// Direct admission-primitive test: many concurrent resumeSession calls for
+// distinct on-disk sessions competing for one remaining slot admit exactly one.
+// Wider window than the HTTP test above: the contenders enter simultaneously.
+func TestResumeSessionCapAdmitsExactlyOne(t *testing.T) {
+	_, mgr := automationInteractServer(t, core.MoaConfig{DisableSandbox: true})
+
+	// Five ordinary sessions saved to disk and unloaded: resumable contenders.
+	const contenders = 5
+	ids := make([]string, contenders)
+	for i := range ids {
+		sess, err := mgr.CreateSession(CreateOpts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = sess.ID
+		unloadSession(t, mgr, sess.ID)
+	}
+
+	loadedCount := func() int {
+		mgr.mu.RLock()
+		defer mgr.mu.RUnlock()
+		return len(mgr.sessions) + len(mgr.resuming)
+	}
+	cap := loadedCount() + 1 // exactly one free slot
+
+	start := make(chan struct{})
+	results := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			<-start // all contenders enter the admission check together
+			_, err := mgr.resumeSession(id, cap)
+			results <- err
+		}(id)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	var admitted, refused int
+	for err := range results {
+		switch {
+		case err == nil:
+			admitted++
+		case errors.Is(err, ErrAutomationTooManySessions):
+			refused++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if admitted != 1 || refused != contenders-1 {
+		t.Fatalf("admitted=%d refused=%d, want 1/%d", admitted, refused, contenders-1)
+	}
+	if got := loadedCount(); got > cap {
+		t.Fatalf("resident set %d exceeds cap %d", got, cap)
 	}
 }
