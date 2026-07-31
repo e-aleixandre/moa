@@ -8,8 +8,8 @@ package planmode
 import (
 	"sync"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 // planningAllowlist are the tool names available during planning mode.

@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // DefaultModelSpec is the cheap, fast model used for title generation when the

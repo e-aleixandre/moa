@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/attachment"
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/attachment"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func TestGetAttachment(t *testing.T) {

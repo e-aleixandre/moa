@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func TestBuildSystemPrompt_CustomToolDescRuneBoundary(t *testing.T) {

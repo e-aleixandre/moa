@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"fmt"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // CurrentPermissionMode returns the string representation of the current mode.

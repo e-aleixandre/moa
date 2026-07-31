@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 func TestIsStructuralBusEvent_SubagentEvent_Unwraps(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ealeixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/goal"
 )
 
 // commandDef describes a slash command.

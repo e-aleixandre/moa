@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func appendConversationTestMessage(sess *ManagedSession, id, role, text string, custom map[string]any, extra ...core.Content) {

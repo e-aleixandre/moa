@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // NewFind creates the find tool.

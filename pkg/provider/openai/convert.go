@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // responsesRequest is the JSON body for POST /v1/responses (or /codex/responses).

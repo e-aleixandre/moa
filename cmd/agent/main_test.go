@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/auth"
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/auth"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func newTestAuthStore(t *testing.T) *auth.Store {

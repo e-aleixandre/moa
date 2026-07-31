@@ -17,18 +17,18 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ealeixandre/moa/pkg/auth"
-	"github.com/ealeixandre/moa/pkg/bootstrap"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/checkpoint"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/mcp"
-	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
-	"github.com/ealeixandre/moa/pkg/provider/openai"
-	"github.com/ealeixandre/moa/pkg/release"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/tool"
-	"github.com/ealeixandre/moa/pkg/tui"
+	"github.com/e-aleixandre/moa/pkg/auth"
+	"github.com/e-aleixandre/moa/pkg/bootstrap"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/checkpoint"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/mcp"
+	promptpkg "github.com/e-aleixandre/moa/pkg/prompt"
+	"github.com/e-aleixandre/moa/pkg/provider/openai"
+	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/tui"
 )
 
 // Set by goreleaser ldflags.

@@ -17,11 +17,11 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
-	"github.com/ealeixandre/moa/pkg/attention"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/release"
-	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/attention"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *Manager, context.CancelFunc) {

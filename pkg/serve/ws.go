@@ -7,10 +7,10 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // wsReactor bridges typed bus events to a per-WebSocket Event channel.

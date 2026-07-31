@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ealeixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/release"
 )
 
 func runUpdate(args []string) {

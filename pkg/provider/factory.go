@@ -3,9 +3,9 @@ package provider
 import (
 	"fmt"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/provider/anthropic"
-	"github.com/ealeixandre/moa/pkg/provider/openai"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/provider/anthropic"
+	"github.com/e-aleixandre/moa/pkg/provider/openai"
 )
 
 // Config holds credentials needed to create a provider.

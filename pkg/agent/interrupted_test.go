@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // TestInterruptedMarkerText is the regression guard for the bug where a ChatGPT

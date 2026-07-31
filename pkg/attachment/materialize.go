@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // MaterializeMessages returns a copy of msgs in which referenced images become

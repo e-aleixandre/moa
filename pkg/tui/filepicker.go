@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ealeixandre/moa/pkg/files"
+	"github.com/e-aleixandre/moa/pkg/files"
 )
 
 const (

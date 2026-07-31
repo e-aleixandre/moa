@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // ErrNotFound is returned by Load when the session ID does not exist.

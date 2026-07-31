@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // TestHeadless_ServerPattern simulates the usage pattern Specflow (and any

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // Check defines a single verification step.

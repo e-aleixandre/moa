@@ -13,14 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bootstrap"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/checkpoint"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/subagent"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/bootstrap"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/checkpoint"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // CreateOpts configures a new session.

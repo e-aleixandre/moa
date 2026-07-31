@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func writeJPEG(t *testing.T, path string, w, h int) {

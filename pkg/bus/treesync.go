@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // TreeSyncer keeps a session.Tree in sync with agent message mutations.

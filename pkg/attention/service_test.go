@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 // fakeClient is a test clientSink that records everything the loop sends it.

@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/pulsebrief"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/pulsebrief"
 )
 
 // briefDebounce coalesces bursts of brief-worthy events into a single

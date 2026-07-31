@@ -1,8 +1,8 @@
 package serve
 
 import (
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // Event is a JSON-serializable event sent to WebSocket clients.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 // captureJSONLines runs fn with stdout redirected and returns parsed JSON objects.

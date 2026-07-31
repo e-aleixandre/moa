@@ -8,9 +8,9 @@
 package bootstrap
 
 import (
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/permission"
 )
 
 // RuntimeConfig returns a bus.RuntimeConfig pre-populated with all session

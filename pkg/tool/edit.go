@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // NewEdit creates the edit tool.

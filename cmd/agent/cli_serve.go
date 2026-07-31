@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/auth"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/provider/openai"
-	"github.com/ealeixandre/moa/pkg/push"
-	"github.com/ealeixandre/moa/pkg/release"
-	"github.com/ealeixandre/moa/pkg/serve"
-	"github.com/ealeixandre/moa/pkg/usage"
+	"github.com/e-aleixandre/moa/pkg/auth"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/provider/openai"
+	"github.com/e-aleixandre/moa/pkg/push"
+	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/serve"
+	"github.com/e-aleixandre/moa/pkg/usage"
 )
 
 func runServe(args []string) {

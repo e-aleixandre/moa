@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // Deadlines for blocking hooks.

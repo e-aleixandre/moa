@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/permission"
 )
 
 // nopProvider is a minimal provider that does nothing (for testing wiring only).

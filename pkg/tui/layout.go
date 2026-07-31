@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // Layout controls how each block type is rendered to a string.

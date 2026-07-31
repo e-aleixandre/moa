@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func TestBuildRequestBody_Basic(t *testing.T) {

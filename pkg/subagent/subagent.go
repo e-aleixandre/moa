@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/agent"
-	"github.com/ealeixandre/moa/pkg/bus"
-	agentcontext "github.com/ealeixandre/moa/pkg/context"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	agentcontext "github.com/e-aleixandre/moa/pkg/context"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 const (

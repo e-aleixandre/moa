@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/attention"
+	"github.com/e-aleixandre/moa/pkg/attention"
 )
 
 // subscribeAttention attaches a session to the server-owned attention service.

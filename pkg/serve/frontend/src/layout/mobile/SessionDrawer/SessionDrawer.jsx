@@ -23,7 +23,7 @@ function DrawerVersion({ version }) {
     return (
       <a
         class="sdrawer-ver sdrawer-ver-update"
-        href="https://github.com/ealeixandre/moa/releases/latest"
+        href="https://github.com/e-aleixandre/moa/releases/latest"
         target="_blank"
         rel="noreferrer"
         title={`Update available: ${version.latest}`}

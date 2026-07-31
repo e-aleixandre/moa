@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 type evaluatorTestProvider struct{ events []core.AssistantEvent }

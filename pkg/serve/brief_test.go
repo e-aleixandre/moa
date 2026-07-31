@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 const briefTestResponse = "ATTEMPTING: Repair the brief integration\nPROGRESS: tests are running"

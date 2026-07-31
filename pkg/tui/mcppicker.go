@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/mcp"
 )
 
 // mcpControl is the narrow surface the picker needs from the shared MCP

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // transcribeFields captures the multipart fields the provider sent, so the tests

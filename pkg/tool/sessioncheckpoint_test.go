@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 )
 
 func TestSessionCheckpointToolActionsAndEffect(t *testing.T) {

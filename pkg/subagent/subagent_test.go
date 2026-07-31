@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/agent"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 type mockProvider struct {

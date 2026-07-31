@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/goal"
-	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // verdictProvider streams a fixed assistant text (used as the verifier's reply).

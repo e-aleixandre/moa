@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // NewMultiEdit creates the multiedit tool for atomic batch edits to a single file.

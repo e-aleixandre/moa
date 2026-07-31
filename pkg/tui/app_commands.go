@@ -11,11 +11,11 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/verify"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/verify"
 )
 
 // --- Commands ---

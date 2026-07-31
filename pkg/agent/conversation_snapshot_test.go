@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func TestConversationSnapshotRestoresEphemeralMessages(t *testing.T) {

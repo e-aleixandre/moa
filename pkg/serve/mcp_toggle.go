@@ -3,8 +3,8 @@ package serve
 import (
 	"errors"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/mcp"
 )
 
 // Errors returned by the MCP toggle path, mapped to HTTP status by the handler.

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // listDirectory lists the contents of a resolved directory path.

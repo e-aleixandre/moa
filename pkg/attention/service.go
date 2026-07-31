@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 // service.go — the Attention Service actor.

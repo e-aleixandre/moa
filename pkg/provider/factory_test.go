@@ -3,7 +3,7 @@ package provider
 import (
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func TestNew_Anthropic(t *testing.T) {

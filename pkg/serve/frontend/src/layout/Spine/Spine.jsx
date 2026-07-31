@@ -13,7 +13,7 @@ function SpineVersion({ version }) {
     return (
       <a
         class="ver ver-update"
-        href="https://github.com/ealeixandre/moa/releases/latest"
+        href="https://github.com/e-aleixandre/moa/releases/latest"
         target="_blank"
         rel="noreferrer"
         title={`Update available: ${version.latest}`}

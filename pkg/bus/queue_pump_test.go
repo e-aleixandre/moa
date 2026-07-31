@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // collect subscribes and records events of type T until the test ends.

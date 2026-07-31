@@ -3,7 +3,7 @@ package attention
 import (
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 // wire.go — the /api/pulse/guardian/ws protocol (design §4) and the bus event

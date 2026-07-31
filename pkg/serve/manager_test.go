@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/attention"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/subagent"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/attention"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // --- Mock provider ---

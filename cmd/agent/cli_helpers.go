@@ -10,9 +10,9 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/ealeixandre/moa/pkg/auth"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/provider"
+	"github.com/e-aleixandre/moa/pkg/auth"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/provider"
 )
 
 // ProviderBuildResult wraps a provider with optional auth notice.

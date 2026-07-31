@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func approxEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }

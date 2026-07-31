@@ -98,7 +98,7 @@ const LEDGER_READ_ROWS = [
           {"    ws_test.go:88: missed event: seq=1042 (snapshot ended at 1041,\n"}
           {"    subscription started at 1043)\n"}
           <span class="r">FAIL</span>
-          {"\tgithub.com/ealeixandre/moa/pkg/serve\t0.412s"}
+          {"\tgithub.com/e-aleixandre/moa/pkg/serve\t0.412s"}
         </div>
       ),
     },

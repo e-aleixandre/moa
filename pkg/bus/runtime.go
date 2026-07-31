@@ -8,16 +8,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/askuser"
-	"github.com/ealeixandre/moa/pkg/checkpoint"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/goal"
-	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/planmode"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
-	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/askuser"
+	"github.com/e-aleixandre/moa/pkg/checkpoint"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/planmode"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // RuntimeConfig holds all dependencies for creating a SessionRuntime.

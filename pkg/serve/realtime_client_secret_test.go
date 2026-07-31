@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 type realtimeRoundTripper func(*http.Request) (*http.Response, error)

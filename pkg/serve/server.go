@@ -19,15 +19,15 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 
-	"github.com/ealeixandre/moa/pkg/attachment"
-	"github.com/ealeixandre/moa/pkg/bootstrap"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/goal"
-	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/subagent"
-	"github.com/ealeixandre/moa/pkg/usage"
+	"github.com/e-aleixandre/moa/pkg/attachment"
+	"github.com/e-aleixandre/moa/pkg/bootstrap"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/usage"
 )
 
 //go:embed static

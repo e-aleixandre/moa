@@ -6,9 +6,9 @@ import (
 	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/planmode"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/planmode"
 )
 
 // --- Plan mode ---
