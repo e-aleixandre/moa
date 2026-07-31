@@ -92,6 +92,10 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		return nil, err
 	}
 	sess.Origin = persisted.Origin()
+	// Wire the outbound completion callback before the session is reachable, so
+	// the very first run cannot end before the subscription exists. A no-op
+	// unless the caller supplied a callback_url.
+	m.subscribeAutomationCallback(sess, opts.extraMeta)
 
 	// Persist before exposing the session. A successful create must not turn
 	// into an invisible ephemeral conversation on the next restart.
@@ -474,6 +478,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 	m.subscribeCacheClock(sess)
 	m.subscribeAttention(sess)
+	// A resumed automation session carries its callback target in the persisted
+	// metadata, so the loop keeps closing across a restart. Freshly created ones
+	// are wired by CreateSession, which holds the creation-time metadata.
+	if opts != nil {
+		m.subscribeAutomationCallback(sess, opts.initialMetadata)
+	}
 
 	return sess, nil
 }

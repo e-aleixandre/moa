@@ -60,8 +60,8 @@ Request body:
 | `title` | no | Session title, max 200 bytes (treated as manually set, so auto-titling won't overwrite it) |
 | `origin` | no | Free-form label for the caller, e.g. `linear-webhook`, max 64 bytes; defaults to `automation` |
 | `idempotency_key` | no | Deduplicates retries, max 256 bytes — see below |
-| `callback_url` | no | Absolute `http`/`https` URL to notify when the run settles, max 2048 bytes |
-| `callback_secret` | no | Shared secret for signing that future callback, max 256 bytes; requires `callback_url` |
+| `callback_url` | no | Absolute `http`/`https` URL to notify when the run settles, max 2048 bytes — see [Callbacks](#callbacks) |
+| `callback_secret` | no | Shared secret for HMAC-signing that callback, max 256 bytes; requires `callback_url` |
 
 A field over its limit is rejected with `400`; the body as a whole is capped as
 every other API body is.
@@ -187,12 +187,89 @@ attention push reaches your phone, where you decide as always. Because the
 prompt came from outside (see [Security model](#security-model)), configure those
 permissions at least as tightly as you would for a session you drive yourself.
 
-## Callbacks (future release)
+## Callbacks
 
-`callback_url` and `callback_secret` are validated and stored today, but **no
-callback is delivered yet**. Outbound delivery when a run goes quiescent —
-`done` / `failed` / `needs_input`, with a short summary and a link to the
-session, plus optional HMAC signing — lands in a following release. Until then,
-poll `GET /api/sessions/{id}` (with the browser credential) or just watch the
-session from the UI. The secret is stored in plain text in the session file; see
-[Security model](#security-model).
+If you passed a `callback_url`, Moa POSTs a small JSON body to it when the run
+settles — that is what closes the loop for a machine caller. The mobile push
+notification keeps working independently; the two channels (machine + human) are
+deliberately separate.
+
+A callback is sent when:
+
+| Status | When |
+|--------|------|
+| `done` | The run finished without error **and** the session went quiescent (no subagent or background bash work still pending, which could start another run) |
+| `failed` | The run ended with an error — sent immediately |
+| `needs_input` | The run is blocked on a permission prompt or `ask_user`, i.e. a human is now in the loop. Sent **at most once per run**, however many times the agent asks; the eventual `done`/`failed` is still sent afterwards |
+
+Payload:
+
+```json
+{
+  "session_id": "s_01H…",
+  "status": "done",
+  "title": "Fix the failing test in pkg/serve",
+  "summary": "Fixed the nil deref in handleSend and added a regression test.",
+  "url": "/?session=s_01H…",
+  "timestamp": "2026-07-31T12:00:00Z"
+}
+```
+
+- `summary` is the run's **final assistant message**, truncated to 500 bytes
+  (falling back to the last assistant message in the transcript). It is not an
+  LLM-written summary: generating one would cost a model call per callback, and
+  a hint plus the link is enough — the detail lives in the session.
+- `url` is relative, exactly like the one returned by `POST
+  /api/automation/runs`; join it to the base URL your integration uses.
+- `error` is present only for `status: "failed"`, and carries the run error
+  truncated the same way.
+
+### Signature
+
+When the run was created with a `callback_secret`, the request carries an
+HMAC-SHA256 of the **raw body** keyed with that secret:
+
+```
+X-Moa-Signature: sha256=<hex>
+Content-Type: application/json
+User-Agent: moa-automation
+```
+
+Verify it over the exact bytes you received, before parsing them:
+
+```python
+import hmac, hashlib
+expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+if not hmac.compare_digest(expected, request.headers["X-Moa-Signature"]):
+    abort(401)
+```
+
+Without a `callback_secret` no signature header is sent.
+
+### Delivery guarantees
+
+Best-effort, never blocking the session:
+
+- 3 attempts, backing off 1s → 5s → 25s, then the delivery is dropped with a
+  warning in the server log.
+- Network errors and `408`/`429`/`5xx` are retried; any other non-2xx is treated
+  as a permanent refusal and not retried.
+- 10s timeout per attempt. Redirects are **not** followed (a `30x` could send a
+  signed payload to a host you never named). The response body is discarded and
+  capped at 1 MiB.
+- Only `http`/`https` targets are dialed; the URL is re-validated at delivery
+  time, not just at submission.
+- Deliveries happen on their own goroutine and stop if the session is deleted or
+  the server shuts down. A callback can therefore be lost — treat it as a hint
+  to go look, not as the source of truth. `GET /api/sessions/{id}` (with the
+  browser credential) always is.
+
+### Trust note
+
+`callback_url` is **operator-trusted input**: it is deliberately allowed to
+point at private/internal addresses, because automation endpoints legitimately
+live on a tailnet or on localhost. There is no IP-range blocklist. Anyone who
+can call the Automation API can therefore make Moa issue a POST to an internal
+address — which is why the automation token is a production credential (see
+[Security model](#security-model)). The `callback_secret` is stored in plain
+text in the local session file; use one dedicated to this callback.

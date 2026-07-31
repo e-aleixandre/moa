@@ -100,8 +100,9 @@ type AutomationRunRequest struct {
 	// IdempotencyKey deduplicates retries: webhooks redeliver, and a redelivery
 	// must not spawn a second session.
 	IdempotencyKey string `json:"idempotency_key"`
-	// CallbackURL/CallbackSecret are validated and stored now; delivering the
-	// callback when the run goes quiescent lands in a future release.
+	// CallbackURL/CallbackSecret configure the outbound completion callback:
+	// where to POST when the run settles, and the optional HMAC secret the
+	// receiver verifies it with (see callback.go).
 	CallbackURL    string `json:"callback_url"`
 	CallbackSecret string `json:"callback_secret"`
 }
@@ -121,8 +122,9 @@ var errAutomationInvalidCallback = errors.New("callback_url must be an absolute 
 // with an empty index would silently execute a redelivered webhook twice.
 var ErrAutomationIndexUnavailable = errors.New("idempotency index unavailable")
 
-// validateCallbackURL keeps the stored target to what the future callback
-// sender is willing to POST to: an absolute http(s) URL with a host.
+// validateCallbackURL keeps the stored target to what the callback sender is
+// willing to POST to: an absolute http(s) URL with a host. It is applied again
+// at delivery time (see callback.go), since metadata outlives this check.
 func validateCallbackURL(raw string) error {
 	if raw == "" {
 		return nil
