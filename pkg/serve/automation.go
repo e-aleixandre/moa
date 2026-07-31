@@ -105,6 +105,9 @@ type AutomationRunRequest struct {
 	// receiver verifies it with (see callback.go).
 	CallbackURL    string `json:"callback_url"`
 	CallbackSecret string `json:"callback_secret"`
+	// MCPServers attaches session-scoped MCP servers to the run, so the agent
+	// can call the caller's own tools. URL-based only — see AutomationMCPServer.
+	MCPServers []AutomationMCPServer `json:"mcp_servers"`
 }
 
 // AutomationRunResponse identifies the session the run landed in.
@@ -116,6 +119,11 @@ type AutomationRunResponse struct {
 }
 
 var errAutomationInvalidCallback = errors.New("callback_url must be an absolute http or https URL")
+
+// ErrAutomationInvalidMCP reports a per-run MCP server the request may not ask
+// for (currently: a name an operator-configured server already owns). It is a
+// 400: the caller has to pick another name, retrying changes nothing.
+var ErrAutomationInvalidMCP = errors.New("invalid mcp_servers")
 
 // ErrAutomationIndexUnavailable reports that the idempotency index could not be
 // rebuilt from disk. Keyed requests are refused while it holds: answering them
@@ -164,6 +172,12 @@ func validateAutomationRun(req AutomationRunRequest) string {
 	if err := validateCallbackURL(req.CallbackURL); err != nil {
 		return err.Error()
 	}
+	// Shape-level MCP validation (url-only, limits). The name-collision check
+	// needs the target cwd's configured servers and happens in
+	// CreateAutomationRun.
+	if msg := validateAutomationMCPServers(req.MCPServers, nil); msg != "" {
+		return msg
+	}
 	return ""
 }
 
@@ -200,7 +214,7 @@ func handleAutomationRun(mgr *Manager) http.HandlerFunc {
 
 		sessionID, created, err := mgr.CreateAutomationRun(req)
 		if err != nil {
-			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) {
+			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) || errors.Is(err, ErrAutomationInvalidMCP) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -369,12 +383,27 @@ func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID strin
 		meta[session.MetaCallbackSecret] = req.CallbackSecret
 	}
 
+	// Per-run MCP servers: reject a name an operator-configured server already
+	// owns (never silently override it), then carry them both into the session
+	// being built and into its metadata, so a resume reconnects them.
+	cwd := req.CWD
+	if cwd == "" {
+		cwd = m.workspaceRoot
+	}
+	if msg := validateAutomationMCPServers(req.MCPServers, m.configuredMCPServers(cwd)); msg != "" {
+		return "", false, fmt.Errorf("%w: %s", ErrAutomationInvalidMCP, msg)
+	}
+	if len(req.MCPServers) > 0 {
+		meta[session.MetaMCPServers] = automationMCPMeta(req.MCPServers)
+	}
+
 	sess, err := m.CreateSession(CreateOpts{
-		Model:     req.Model,
-		Title:     req.Title,
-		CWD:       req.CWD,
-		Origin:    origin,
-		extraMeta: meta,
+		Model:           req.Model,
+		Title:           req.Title,
+		CWD:             req.CWD,
+		Origin:          origin,
+		extraMeta:       meta,
+		extraMCPServers: automationMCPConfigs(req.MCPServers),
 	})
 	if err != nil {
 		return "", false, err

@@ -54,6 +54,14 @@ type SessionConfig struct {
 	// Ignored when MoaCfg is nil (bootstrap resolves provenance from disk).
 	MCPDisableSources *core.MCPDisableSources
 
+	// ExtraMCPServers are session-scoped MCP servers merged on top of the
+	// configured ones. They come from the caller (the Automation API attaches
+	// per-run servers this way), live and die with the session, and are never
+	// written to any config file. A name already taken by a configured server is
+	// the caller's responsibility to reject: the merge would silently override
+	// operator config.
+	ExtraMCPServers map[string]core.MCPServer
+
 	// Context for MCP servers and subagent async jobs. Required.
 	Ctx context.Context
 
@@ -387,6 +395,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		} else {
 			untrustedMCP = true
 		}
+	}
+	// Caller-supplied, session-scoped servers. They are explicitly trusted by
+	// whoever passed them (they never come from a file on disk), so they do not
+	// participate in the .mcp.json trust gate.
+	if len(cfg.ExtraMCPServers) > 0 {
+		moaCfg.MCPServers = core.MergeMCPServers(moaCfg.MCPServers, cfg.ExtraMCPServers)
 	}
 	var mcpMgr *mcp.Manager
 	var mcpController *mcp.Controller

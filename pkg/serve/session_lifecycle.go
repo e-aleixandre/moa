@@ -35,6 +35,11 @@ type CreateOpts struct {
 	// bookkeeping such as the idempotency key and callback target). Not part of
 	// the public JSON body — automation handlers set it.
 	extraMeta map[string]any
+	// extraMCPServers are session-scoped MCP servers to start alongside the
+	// configured ones (the Automation API's per-run servers). Like extraMeta,
+	// not part of the public JSON body: they are implicitly trusted, so only
+	// internal callers that already carry operator authority may set them.
+	extraMCPServers map[string]core.MCPServer
 }
 
 // CreateSession creates a new agent session.
@@ -84,8 +89,8 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	id := persisted.ID
 
 	var bopts *buildOpts
-	if titleSource != "" {
-		bopts = &buildOpts{titleSource: titleSource}
+	if titleSource != "" || len(opts.extraMCPServers) > 0 {
+		bopts = &buildOpts{titleSource: titleSource, extraMCPServers: opts.extraMCPServers}
 	}
 	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
@@ -139,6 +144,11 @@ type buildOpts struct {
 	initialEntries  []session.Entry
 	initialLeafID   string
 	initialMetadata map[string]any
+
+	// extraMCPServers are session-scoped MCP servers merged on top of the
+	// configured ones (see CreateOpts.extraMCPServers). On resume they are
+	// rebuilt from the persisted metadata.
+	extraMCPServers map[string]core.MCPServer
 }
 
 // buildManagedSession creates an in-memory managed session with full runtime.
@@ -183,6 +193,11 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// Forward-declare for closures.
 	var sess *ManagedSession
 
+	var extraMCPServers map[string]core.MCPServer
+	if opts != nil {
+		extraMCPServers = opts.extraMCPServers
+	}
+
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
 		CWD:                cwd,
 		Model:              model,
@@ -190,6 +205,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ProviderFactory:    m.providerFactory,
 		MoaCfg:             &moaCfg,
 		MCPDisableSources:  mcpSources,
+		ExtraMCPServers:    extraMCPServers,
 		Ctx:                sessionCtx,
 		EnableAskUser:      true,
 		BeforeWrite:        cpStore.Capture,
@@ -726,6 +742,10 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		initialLeafID:          saved.LeafID,
 		initialMetadata:        saved.Metadata,
 		titleSource:            saved.TitleSource,
+		// Per-run MCP servers are session-scoped: they only exist in this
+		// session's metadata, so a resume has to bring them back or the agent
+		// silently loses the tools the automation caller attached.
+		extraMCPServers: mcpServersFromMeta(saved.Metadata),
 	})
 	if err != nil {
 		cleanup()

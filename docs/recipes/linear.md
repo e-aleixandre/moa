@@ -98,7 +98,38 @@ Notes on the choices above:
   approve the agent's writes and shell commands. See
   [what this means for security](../automation.md#what-this-means-for-security).
 
-## 3. Optional: give the agent Linear hands
+## 3. Optional: let the agent close the issue itself
+
+The relay above closes the loop *after* the run, from the callback. If you would
+rather the agent report business state at the moment it decides the work is done,
+expose that as a tool: add an MCP endpoint to your relay and attach it to the
+run.
+
+```jsonc
+// in the POST /api/automation/runs body
+"mcp_servers": [
+  {
+    "name": "linear_relay",
+    "url": "https://relay.your-tailnet.example/mcp",
+    "headers": { "Authorization": "Bearer <relay-token>" }
+  }
+]
+```
+
+Have that endpoint expose one or two narrow tools — `mark_task_done(id, note)`,
+`post_comment(id, body)` — and the agent can call them mid-run, with the issue ID
+you put in the prompt.
+
+Keep the callback anyway. The two say different things: the tool call is the
+**agent asserting** it finished (precise, but only as reliable as its judgment),
+while the callback is **Moa observing** that the run ended, failed or is waiting
+— including the runs where the agent never called your tool. Use the tool for
+business state and the callback as the safety net. See
+[Bring your own tools (MCP)](../automation.md#bring-your-own-tools-mcp) for the
+limits and the trust stance (these servers are implicitly trusted, and their
+headers are stored in the session file).
+
+## 4. Optional: give the agent Linear hands
 
 The recipe above only needs the relay to touch Linear. If you want the *agent*
 to interact with Linear itself mid-run (read linked issues, update estimates),

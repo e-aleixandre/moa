@@ -102,6 +102,11 @@ const (
 	MetaIdempotencyKey = "idempotency_key"
 	MetaCallbackURL    = "callback_url"
 	MetaCallbackSecret = "callback_secret"
+	// MetaMCPServers holds the per-run MCP servers an automation caller attached
+	// to the session (a list of {name, url, headers}). They are session-scoped —
+	// never written to any config file — and are replayed on resume so the
+	// session reconnects them.
+	MetaMCPServers = "mcp_servers"
 	// MetaAutomationCreated marks a session the Automation API created itself.
 	// Unlike MetaOrigin — a free-form label any creator may pass — it is written
 	// on exactly one code path, so it is the authority check for the scoped
@@ -118,7 +123,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:
