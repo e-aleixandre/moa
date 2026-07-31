@@ -383,3 +383,99 @@ test('sendMessage keeps its own msg_id when the server honored it', async () => 
   expect(sentMsgId).toBeTruthy();
   expect(sentMsgId.startsWith('c-')).toBe(true);
 });
+
+test('sendMessage turns its optimistic message into a chip when the server queued it', async () => {
+  // Local state said idle, but a run (or a queued item) was there by the time
+  // the server decided: the response says "steer". The optimistic message is
+  // fiction — it must become the confirmed chip, not a phantom message that
+  // disappears on reload.
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [],
+        runTokensUp: 700, runTokensDown: 120, runStartedAtMs: 555,
+      },
+    },
+  });
+  apiResponse = { action: 'steer', steer_id: 'srv-steer-1' };
+
+  const action = await sendMessage('s1', 'hola', []);
+
+  const s1 = store.get().sessions.s1;
+  expect(action).toBe('steer');
+  expect(s1.messages).toHaveLength(0);
+  expect(s1.pendingSteers).toHaveLength(1);
+  expect(s1.pendingSteers[0]).toMatchObject({ id: 'srv-steer-1', text: 'hola', confirmed: true });
+  // The optimistic "fresh run" patch is undone: no run started for us.
+  expect(s1.runTokensUp).toBe(700);
+  expect(s1.runTokensDown).toBe(120);
+  expect(s1.runStartedAtMs).toBe(555);
+});
+
+test('sendMessage drops the queued chip when the steer was already delivered before the response', async () => {
+  // The Steered event can beat the /send response: it moved the message into
+  // the transcript, which is the authoritative removal — do not resurrect it.
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = { action: 'steer', steer_id: 'srv-steer-2' };
+  const { updateSession } = await import('./store.js');
+
+  const pending = sendMessage('s1', 'hola', []);
+  const cur = store.get().sessions.s1;
+  updateSession('s1', {
+    messages: [
+      ...cur.messages,
+      { role: 'user', _msg_id: 'm-1', _steer_id: 'srv-steer-2', content: [{ type: 'text', text: 'hola' }] },
+    ],
+  });
+  await pending;
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.pendingSteers).toBeNull();
+  expect(s1.messages).toHaveLength(1);
+  expect(s1.messages[0]._steer_id).toBe('srv-steer-2');
+});
+
+test('sendMessage turns its optimistic chip into a message when the server started a run', async () => {
+  // Local state said running, but the run had ended: the response says "send".
+  // The chip is fiction — show the message under the effective msg_id instead.
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = { action: 'send', msg_id: 'srv-msg-3' };
+
+  const action = await sendMessage('s1', 'hola', []);
+
+  const s1 = store.get().sessions.s1;
+  expect(action).toBe('send');
+  expect(s1.pendingSteers).toBeNull();
+  expect(s1.messages).toHaveLength(1);
+  expect(s1.messages[0]).toMatchObject({ role: 'user', _msg_id: 'srv-msg-3' });
+  expect(s1.messages[0].content).toEqual([{ type: 'text', text: 'hola' }]);
+});
+
+test('sendMessage drops the chip without doubling the message when the broadcast won the race', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = { action: 'send', msg_id: 'srv-msg-4' };
+  const { updateSession } = await import('./store.js');
+
+  const pending = sendMessage('s1', 'hola', []);
+  updateSession('s1', {
+    messages: [{ role: 'user', _msg_id: 'srv-msg-4', content: [{ type: 'text', text: 'hola' }] }],
+  });
+  await pending;
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.pendingSteers).toBeNull();
+  expect(s1.messages).toHaveLength(1);
+  expect(s1.messages[0]._msg_id).toBe('srv-msg-4');
+});

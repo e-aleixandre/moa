@@ -283,6 +283,71 @@ function attachmentToContent(a) {
   return { type: 'document', mime_type: a.mime, filename: a.name };
 }
 
+// adoptMessageRail reconciles the local view with a response that says the
+// message started a run (action "send"), whichever rail we optimistically put
+// it on.
+//   - We predicted a run: adopt the effective msg_id (the server re-mints one
+//     that is malformed or already used), or drop our echo when the
+//     authoritative broadcast already landed under that ID (it can beat this
+//     response).
+//   - We predicted a queued chip (the run we saw had already ended): the chip
+//     is fiction — drop it and show the message instead.
+function adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer, content }) {
+  const cur = store.get().sessions[id];
+  if (!cur) return;
+  const messages = cur.messages || [];
+  const already = messages.some((m) => m._msg_id === effMsgId);
+  const patch = {};
+  if (optimisticMsg) {
+    if (effMsgId === msgId) return;
+    patch.messages = already
+      ? messages.filter((m) => m._msg_id !== msgId)
+      : messages.map((m) => (m._msg_id === msgId ? { ...m, _msg_id: effMsgId } : m));
+  } else {
+    const kept = (cur.pendingSteers || []).filter((s) => s !== optimisticSteer);
+    patch.pendingSteers = kept.length > 0 ? kept : null;
+    if (!already) patch.messages = [...messages, { role: 'user', _msg_id: effMsgId, content }];
+  }
+  updateSession(id, patch);
+}
+
+// adoptSteerRail reconciles the local view with a response that says the
+// message was queued (action "steer"), whichever rail we optimistically put it
+// on. When we predicted a run (our snapshot said idle, but the session was busy
+// or had a queued item by the time the server decided), the optimistic message
+// is fiction: drop it and show the confirmed chip instead — unless a Steered
+// event already delivered the chip, which is the authoritative removal.
+function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun }) {
+  const cur = store.get().sessions[id];
+  if (!cur) return;
+  const steers = cur.pendingSteers || [];
+  const patch = {};
+  if (optimisticMsg) {
+    patch.messages = (cur.messages || []).filter((m) => m !== optimisticMsg);
+    // No run started for this message, so undo the "fresh run" part of the
+    // optimistic patch: restore the tally and the start time of the run that
+    // is actually in flight. The session itself stays "running" — the server
+    // only queues when a run is in flight or one is about to be pumped, and a
+    // later state_change corrects it either way.
+    patch.runStartedAtMs = prevRun.runStartedAtMs ?? cur.runStartedAtMs ?? null;
+    patch.runTokensUp = prevRun.runTokensUp;
+    patch.runTokensDown = prevRun.runTokensDown;
+  }
+  const delivered = (cur.messages || []).some((m) => m._steer_id === effSteerId);
+  const existing = steers.find((s) => s.id === effSteerId);
+  if (!delivered) {
+    const chip = { ...(existing || { id: effSteerId, text }), confirmed: true };
+    if (!existing && images > 0) chip.images = images;
+    patch.pendingSteers = existing
+      ? steers.map((s) => (s === existing ? chip : s))
+      : [...steers, chip];
+  } else if (existing) {
+    const kept = steers.filter((s) => s !== existing);
+    patch.pendingSteers = kept.length > 0 ? kept : null;
+  }
+  updateSession(id, patch);
+}
+
 export async function sendMessage(id, text, attachments = []) {
   const state = store.get();
   const sess = state.sessions[id];
@@ -291,22 +356,27 @@ export async function sendMessage(id, text, attachments = []) {
   const isIdle = sess.state === 'idle' || sess.state === 'error';
   let optimisticMsg = null;
   let optimisticSteer = null;
-  let steerId = '';
-  let msgId = '';
+  // Mint BOTH identities up front and send both: the local state we predict
+  // from is a stale copy, and only the server knows (atomically) whether this
+  // message starts a run or joins the queue. It picks the identity for the rail
+  // it actually used and reports it back, so either outcome lands under an ID
+  // this client already knows.
+  const steerId = newSteerId();
+  const msgId = newSteerId();
   // Remember the live per-run token tally so a rejected send can restore it
   // (the optimistic patch below resets it to start the new run at zero).
   const prevTokensUp = sess.runTokensUp;
   const prevTokensDown = sess.runTokensDown;
+  const prevRunStartedAtMs = sess.runStartedAtMs;
   if (isIdle) {
     // Attachment blocks first, text last — matches the order the server sends
     // to the agent (see Manager.Send).
     const content = attachments.map(attachmentToContent);
     if (text) content.push({ type: 'text', text });
-    // Mint the message ID here so the optimistic echo already carries the
-    // identity the server will append the message under: the authoritative
-    // user_message broadcast (which also reaches other tabs and API clients)
-    // then dedups against this echo instead of duplicating it.
-    msgId = newSteerId();
+    // The optimistic echo carries the identity the server will append the
+    // message under: the authoritative user_message broadcast (which also
+    // reaches other tabs and API clients) then dedups against this echo
+    // instead of duplicating it.
     optimisticMsg = { role: 'user', _msg_id: msgId, content };
     updateSession(id, {
       messages: [...sess.messages, optimisticMsg],
@@ -323,12 +393,11 @@ export async function sendMessage(id, text, attachments = []) {
   } else {
     const current = store.get().sessions[id];
     const steers = current?.pendingSteers || [];
-    // Mint the steer ID on the client so the optimistic chip has its
-    // authoritative identity immediately — there is no id == null window. The
-    // same ID is sent to the server (steer_id) and echoed on the Steered event,
-    // so reconnect snapshots and cross-device events reconcile by identity, not
-    // by text (closes the double-send and cancel-vs-in-flight races).
-    steerId = newSteerId();
+    // The optimistic chip carries its authoritative identity immediately —
+    // there is no id == null window. The same ID is sent to the server
+    // (steer_id) and echoed on the Steered event, so reconnect snapshots and
+    // cross-device events reconcile by identity, not by text (closes the
+    // double-send and cancel-vs-in-flight races).
     optimisticSteer = { id: steerId, text };
     const imageCount = attachments.filter((a) => a.isImage).length;
     if (imageCount > 0) optimisticSteer.images = imageCount;
@@ -339,10 +408,16 @@ export async function sendMessage(id, text, attachments = []) {
     const res = await api('POST', `/api/sessions/${id}/send`, {
       text,
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
-      steer_id: steerId || undefined,
-      msg_id: msgId || undefined,
+      steer_id: steerId,
+      msg_id: msgId,
     }, { timeoutMs: 0 });
-    if (optimisticMsg && Array.isArray(res?.attachments) && res.attachments.length > 0) {
+    // The response is authoritative about WHICH rail took the message: our
+    // local prediction can be wrong in both directions (a run started between
+    // our snapshot and the request, or the run we thought was live had ended).
+    const action = res?.action === 'steer' ? 'steer' : 'send';
+    const effMsgId = res?.msg_id || msgId;
+    const effSteerId = res?.steer_id || steerId;
+    if (action === 'send' && optimisticMsg && Array.isArray(res?.attachments) && res.attachments.length > 0) {
       const cur = store.get().sessions[id];
       // Swap optimistic attachment blocks for durable descriptors only when
       // the server returned one descriptor for every attachment in order.
@@ -371,42 +446,22 @@ export async function sendMessage(id, text, attachments = []) {
         });
       }
     }
-    // Reconcile the optimistic echo with the identity the server actually
-    // accepted. The server re-mints a msg_id that is malformed or already used
-    // in this session's history, so ours is not guaranteed to be the effective
-    // one; without adopting the server's, the authoritative user_message
-    // broadcast would not dedup against our echo and the message would double.
-    // If the broadcast already landed under the effective ID (it can beat this
-    // response), our echo is the redundant copy — drop it instead.
-    if (msgId && res?.msg_id && res.msg_id !== msgId) {
-      const cur = store.get().sessions[id];
-      if (cur?.messages) {
-        const already = cur.messages.some((m) => m._msg_id === res.msg_id);
-        updateSession(id, {
-          messages: already
-            ? cur.messages.filter((m) => m._msg_id !== msgId)
-            : cur.messages.map((m) => (m._msg_id === msgId ? { ...m, _msg_id: res.msg_id } : m)),
-        });
-      }
+    if (action === 'send') {
+      // Content for the case where we had no optimistic message (we predicted a
+      // chip): rebuild the blocks the same way the idle path does.
+      const content = attachments.map(attachmentToContent);
+      if (text) content.push({ type: 'text', text });
+      adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer, content });
+    } else {
+      adoptSteerRail(id, {
+        optimisticMsg,
+        effSteerId,
+        text,
+        images: attachments.filter((a) => a.isImage).length,
+        prevRun: { runStartedAtMs: prevRunStartedAtMs, runTokensUp: prevTokensUp, runTokensDown: prevTokensDown },
+      });
     }
-    // Mark the chip confirmed now that the server accepted it: from here on it
-    // is part of the authoritative queue, so a reconnect snapshot that omits it
-    // means "delivered/cancelled" (drop it) rather than "in flight" (keep it).
-    // Reconcile by ID: if a concurrent authoritative event already removed the
-    // chip (a Steered delivery, or another device's steers_canceled), that
-    // removal is the truth — do NOT re-add it. Resurrecting here would show a
-    // steer that was actually delivered or cancelled, which is exactly the
-    // phantom this whole change removes.
-    if (steerId) {
-      const cur = store.get().sessions[id];
-      const list = cur?.pendingSteers;
-      if (list && list.some((s) => s.id === steerId)) {
-        updateSession(id, {
-          pendingSteers: list.map((s) => (s.id === steerId ? { ...s, confirmed: true } : s)),
-        });
-      }
-    }
-    return res?.action || 'send';
+    return action;
   } catch (e) {
     // Roll back the optimistic echo so a rejected send (e.g. 400 on a bad
     // attachment) doesn't leave a phantom message stuck in "running". Remove
