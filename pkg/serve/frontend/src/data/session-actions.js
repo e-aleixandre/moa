@@ -351,7 +351,7 @@ function adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer,
 // or had a queued item by the time the server decided), the optimistic message
 // is fiction: drop it and show the confirmed chip instead — unless a Steered
 // event already delivered the chip, which is the authoritative removal.
-function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun, prevRunEpoch }) {
+function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRunStartedAtMs, prevRunEpoch }) {
   const cur = store.get().sessions[id];
   if (!cur) return;
   const steers = cur.pendingSteers || [];
@@ -359,21 +359,25 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun, 
   if (optimisticMsg) {
     patch.messages = (cur.messages || []).filter((m) => m !== optimisticMsg);
     // No run started for this message, so undo the "fresh run" part of the
-    // optimistic patch: restore the tally and the start time of the run that
-    // is actually in flight. The session itself stays "running" — the server
-    // only queues when a run is in flight or one is about to be pumped, and a
-    // later state_change corrects it either way.
+    // optimistic patch: restore the start time of the run that is actually in
+    // flight. The session itself stays "running" — the server only queues when
+    // a run is in flight or one is about to be pumped, and a later state_change
+    // corrects it either way.
     //
     // Only if no WS event wrote the per-run fields while the POST was in
     // flight: a real run (this session's or another client's) may have started
-    // meanwhile, and restoring the pre-send figures on top of it would replace
-    // live state with stale state. The epoch catches that even when the new
-    // run's tally still reads 0/0, which comparing values cannot.
+    // meanwhile, and restoring the pre-send timestamp on top of it would
+    // replace live state with stale state.
     if ((cur.runEpoch || 0) === prevRunEpoch) {
-      patch.runStartedAtMs = prevRun.runStartedAtMs ?? cur.runStartedAtMs ?? null;
-      patch.runTokensUp = prevRun.runTokensUp;
-      patch.runTokensDown = prevRun.runTokensDown;
+      patch.runStartedAtMs = prevRunStartedAtMs ?? cur.runStartedAtMs ?? null;
     }
+    // The token tally is deliberately NOT restored: the server answering
+    // "steer" means a run this client didn't know about is in flight, so the
+    // pre-send figures belong to an older, finished run. Even the epoch guard
+    // can't tell them apart when the POST resolves before the state_change
+    // frame for that run arrives. Leaving the optimistic 0/0 is the honest
+    // approximation ("run in progress, tally unknown yet") and the next
+    // run_tokens event — frequent while a run is active — writes the truth.
   }
   const delivered = (cur.messages || []).some((m) => m._steer_id === effSteerId);
   const existing = steers.find((s) => s.id === effSteerId);
@@ -490,7 +494,7 @@ export async function sendMessage(id, text, attachments = []) {
         effSteerId,
         text,
         images: attachments.filter((a) => a.isImage).length,
-        prevRun: { runStartedAtMs: prevRunStartedAtMs, runTokensUp: prevTokensUp, runTokensDown: prevTokensDown },
+        prevRunStartedAtMs,
         prevRunEpoch,
       });
     }

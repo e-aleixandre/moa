@@ -407,9 +407,11 @@ test('sendMessage turns its optimistic message into a chip when the server queue
   expect(s1.messages).toHaveLength(0);
   expect(s1.pendingSteers).toHaveLength(1);
   expect(s1.pendingSteers[0]).toMatchObject({ id: 'srv-steer-1', text: 'hola', confirmed: true });
-  // The optimistic "fresh run" patch is undone: no run started for us.
-  expect(s1.runTokensUp).toBe(700);
-  expect(s1.runTokensDown).toBe(120);
+  // The optimistic "fresh run" patch is undone for the start time, but the
+  // tally is left at 0/0: a run we didn't know about is in flight and 700/120
+  // belongs to an older, finished run.
+  expect(s1.runTokensUp).toBe(0);
+  expect(s1.runTokensDown).toBe(0);
   expect(s1.runStartedAtMs).toBe(555);
 });
 
@@ -540,8 +542,8 @@ test('sendMessage keeps the adopted chip-to-message blocks local when the descri
 
 test('sendMessage does not overwrite a live token tally when the server queued the message', async () => {
   // We predicted a run and zeroed the tally; the server queued instead. Real
-  // run_tokens for the run actually in flight landed while the POST was open —
-  // restoring the pre-send figures on top of them would show stale counts.
+  // run_tokens for the run actually in flight landed while the POST was open:
+  // they must survive untouched.
   setState({
     sessions: {
       s1: {
@@ -564,8 +566,8 @@ test('sendMessage does not overwrite a live token tally when the server queued t
 
 test('sendMessage does not restore the previous run when a new run started during the POST', async () => {
   // The new run's counters are still 0/0, exactly what our optimistic patch
-  // left behind: comparing values cannot tell them apart, so the restore must
-  // key off "a WS event wrote the per-run fields" instead.
+  // left behind: comparing values cannot tell them apart, so the runStartedAtMs
+  // restore must key off "a WS event wrote the per-run fields" instead.
   setState({
     sessions: {
       s1: {
@@ -584,5 +586,37 @@ test('sendMessage does not restore the previous run when a new run started durin
   expect(s1.runTokensUp).toBe(0);
   expect(s1.runTokensDown).toBe(0);
   expect(s1.runStartedAtMs).not.toBe(555);
+  expect(s1.pendingSteers).toHaveLength(1);
+});
+
+test('sendMessage leaves the tally to the run in flight when the response beats its state_change', async () => {
+  // Worst case: another client already started a run, our snapshot still says
+  // idle, and the POST resolves BEFORE that run's state_change frame arrives —
+  // so the epoch guard sees no change. Restoring 700/120 here would show the
+  // previous run's totals, and the late state_change wouldn't reset them
+  // (it sees us already "running"). The tally must stay 0/0 until run_tokens.
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [],
+        runTokensUp: 700, runTokensDown: 120, runStartedAtMs: 555,
+      },
+    },
+  });
+  apiResponse = { action: 'steer', steer_id: 'srv-steer-5' };
+
+  await sendMessage('s1', 'hola', []);
+
+  let s1 = store.get().sessions.s1;
+  expect(s1.runTokensUp).toBe(0);
+  expect(s1.runTokensDown).toBe(0);
+
+  // The delayed frames for the run that was already in flight.
+  handleWsStateChange('s1', { state: 'running' });
+  handleWsRunTokens('s1', { up: 2400, down: 610 });
+
+  s1 = store.get().sessions.s1;
+  expect(s1.runTokensUp).toBe(2400);
+  expect(s1.runTokensDown).toBe(610);
   expect(s1.pendingSteers).toHaveLength(1);
 });
