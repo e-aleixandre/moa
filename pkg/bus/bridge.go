@@ -50,6 +50,7 @@ type AgentController interface {
 	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
+	SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
 	AppendMessage(msg core.AgentMessage) error
 	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
 	LoadState(msgs []core.AgentMessage, compactionEpoch int) error

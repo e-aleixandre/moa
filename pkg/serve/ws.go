@@ -230,6 +230,15 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.Steered:
 		return Event{Type: "steer", Data: SteerData{ID: e.ID, MsgID: e.MsgID, Text: e.Text}}, true
+	case bus.UserMessageAppended:
+		data := UserMessageData{MsgID: e.MsgID, Text: truncateHistoryString(e.Text)}
+		if len(e.Content) > 0 {
+			// Reuse the history projection so inline attachment payloads and
+			// oversized text are bounded exactly as on reconnect.
+			sanitized, _ := sanitizeHistoryMessage(core.WrapMessage(core.NewUserMessageWithContent(e.Content)))
+			data.Content = sanitized.Content
+		}
+		return Event{Type: "user_message", Data: data}, true
 	case bus.CommandQueued:
 		return Event{Type: "command_queued", Data: CommandQueuedData{ID: e.ID, Raw: e.Raw}}, true
 	case bus.CommandDequeued:

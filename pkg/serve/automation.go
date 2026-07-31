@@ -335,7 +335,7 @@ func (a *automationIndex) forget(sessionID string) {
 // sendFirstPrompt delivers the automation run's first prompt. Indirected so
 // tests can simulate a delivery failure.
 var sendFirstPrompt = func(m *Manager, sessionID, prompt string) error {
-	_, _, _, err := m.Send(sessionID, prompt, nil, "")
+	_, _, _, err := m.Send(sessionID, prompt, nil, "", "")
 	return err
 }
 

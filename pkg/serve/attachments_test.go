@@ -241,7 +241,7 @@ func TestSendRollsBackStoredAttachmentWhenIdleEnqueueRejected(t *testing.T) {
 	// A closed bus makes SendPromptWithContent reject after attachment ingestion.
 	sess.runtime.Close()
 	image := pngBytes(64)
-	_, _, _, err = mgr.Send(sess.ID, "image", []Attachment{{Name: "image.png", Mime: "image/png", Data: b64(image)}}, "")
+	_, _, _, err = mgr.Send(sess.ID, "image", []Attachment{{Name: "image.png", Mime: "image/png", Data: b64(image)}}, "", "")
 	if !errors.Is(err, bus.ErrClosed) {
 		t.Fatalf("Send error = %v, want bus.ErrClosed", err)
 	}
@@ -266,7 +266,7 @@ func TestSendRollsBackStoredAttachmentWhenSteerEnqueueRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := mgr.Send(sess.ID, "first", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "first", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 2*time.Second, "running", func() bool {
@@ -274,7 +274,7 @@ func TestSendRollsBackStoredAttachmentWhenSteerEnqueueRejected(t *testing.T) {
 	})
 	queueFull := false
 	for i := 0; i < 64; i++ {
-		_, _, _, err := mgr.Send(sess.ID, "queued", nil, "")
+		_, _, _, err := mgr.Send(sess.ID, "queued", nil, "", "")
 		if errors.Is(err, bus.ErrSteerQueueFull) {
 			queueFull = true
 			break
@@ -288,7 +288,7 @@ func TestSendRollsBackStoredAttachmentWhenSteerEnqueueRejected(t *testing.T) {
 	}
 
 	image := pngBytes(64)
-	_, _, _, err = mgr.Send(sess.ID, "image", []Attachment{{Name: "image.png", Mime: "image/png", Data: b64(image)}}, "")
+	_, _, _, err = mgr.Send(sess.ID, "image", []Attachment{{Name: "image.png", Mime: "image/png", Data: b64(image)}}, "", "")
 	if !errors.Is(err, bus.ErrSteerQueueFull) {
 		t.Fatalf("Send error = %v, want bus.ErrSteerQueueFull", err)
 	}
@@ -642,7 +642,7 @@ func TestRunErrorReleasesQueuedImageAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if action, _, _, err := mgr.Send(sess.ID, "first", nil, ""); err != nil || action != "send" {
+	if action, _, _, err := mgr.Send(sess.ID, "first", nil, "", ""); err != nil || action != "send" {
 		t.Fatalf("first send = (%q, %v), want (send, nil)", action, err)
 	}
 	pollUntil(t, 2*time.Second, "running", func() bool {
@@ -651,7 +651,7 @@ func TestRunErrorReleasesQueuedImageAttachment(t *testing.T) {
 
 	action, _, descriptors, err := mgr.Send(sess.ID, "image steer", []Attachment{{
 		Name: "queued.png", Mime: "image/png", Data: b64(pngBytes(64)),
-	}}, "")
+	}}, "", "")
 	if err != nil || action != "steer" || len(descriptors) != 1 {
 		t.Fatalf("image steer = (%q, %+v, %v), want one queued image", action, descriptors, err)
 	}

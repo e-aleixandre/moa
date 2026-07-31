@@ -252,6 +252,26 @@ type ContextUpdated struct {
 	Percent   int
 }
 
+// UserMessageAppended is published when a user prompt is accepted and enters
+// the conversation as a new run (SendPrompt / SendPromptWithContent), so every
+// connected client renders it live instead of waiting for a reload. Mid-run
+// messages are NOT reported here: they travel the queue rail and are announced
+// by Steered on delivery. Internal prompts (goal loop, auto-verify, subagent /
+// bash notifications) carry a Custom source and are excluded too — they already
+// have their own live representation.
+//
+// Text carries a plain-text prompt; Content carries the full block list of a
+// structured send (attachments plus text). Exactly one of them is populated.
+// MsgID is the stable identifier of the message that lands in history, so
+// clients dedup it against an optimistic echo or a reconnect snapshot.
+type UserMessageAppended struct {
+	SessionID string
+	RunGen    uint64
+	MsgID     string
+	Text      string
+	Content   []core.Content
+}
+
 // MCPChanged is published when a session's MCP servers change: a server
 // connects, exits, is restarted, or is enabled/disabled. It carries the rolled
 // up counts for the status-line indicator so clients can recolor without a

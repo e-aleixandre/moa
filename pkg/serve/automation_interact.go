@@ -196,7 +196,7 @@ func handleAutomationReply(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "text too large", http.StatusBadRequest)
 			return
 		}
-		action, steerID, _, err := mgr.Send(sess.ID, body.Text, nil, "")
+		action, steerID, _, err := mgr.Send(sess.ID, body.Text, nil, "", "")
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)

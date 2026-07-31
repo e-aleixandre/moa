@@ -243,6 +243,17 @@ type SteerData struct {
 	Text  string `json:"text"`
 }
 
+// UserMessageData is sent when a user prompt starts a new run, so every
+// connected client (not just the one that issued it) renders the message live.
+// Content carries the message's blocks for a structured send (attachments +
+// text); Text carries a plain-text prompt. Clients dedup by MsgID against their
+// own optimistic echo and against the reconnect snapshot.
+type UserMessageData struct {
+	MsgID   string         `json:"msg_id,omitempty"`
+	Text    string         `json:"text,omitempty"`
+	Content []core.Content `json:"content,omitempty"`
+}
+
 // CommandQueuedData is sent when a slash command is enqueued as a barrier in the
 // unified queue rail (issued while the session was busy). The client renders a
 // queued command chip keyed by ID, distinct from a queued message chip.

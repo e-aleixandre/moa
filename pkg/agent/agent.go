@@ -495,6 +495,14 @@ func (a *Agent) SendPrepareCompact(ctx context.Context, prompt string, slot *ses
 // Before returning, SendWithContent waits for all accepted in-flight events to be
 // processed by subscribers (up to DrainTimeout). Dropped events are not waited on.
 func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error) {
+	return a.SendWithContentMsgID(ctx, content, "")
+}
+
+// SendWithContentMsgID is SendWithContent with a caller-supplied MsgID for the
+// user message, letting the caller announce this prompt live under an ID shared
+// with the message that lands in state — so clients dedup it against their
+// optimistic echo and against reconnect snapshots. Mirrors SendWithMsgID.
+func (a *Agent) SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
 	cc := core.CloneContent(content)
 	// The SendPromptWithContent handler reserved these native bytes in the
 	// inflight ledger before this run's goroutine started (see
@@ -507,8 +515,11 @@ func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
-		a.state.Messages = append(a.state.Messages,
-			core.WrapMessage(core.NewUserMessageWithContent(cc)))
+		msg := core.WrapMessage(core.NewUserMessageWithContent(cc))
+		if msgID != "" {
+			msg.MsgID = msgID
+		}
+		a.state.Messages = append(a.state.Messages, msg)
 		a.steers.subInflight(n) // under a.mu, atomic with the append
 		appended = true
 	})

@@ -426,6 +426,13 @@ func (f *fakeAgent) SendWithContent(ctx context.Context, content []core.Content)
 	return f.messages, f.sendErr
 }
 
+func (f *fakeAgent) SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
+	f.mu.Lock()
+	f.sendMsgID = msgID
+	f.mu.Unlock()
+	return f.SendWithContent(ctx, content)
+}
+
 // Thread-safe assertion helpers.
 
 func (f *fakeAgent) wasSendCalled() bool {
@@ -468,6 +475,12 @@ func (f *fakeAgent) getSendPrompt() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.sendPrompt
+}
+
+func (f *fakeAgent) getSendMsgID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sendMsgID
 }
 
 // ---------------------------------------------------------------------------
@@ -2224,6 +2237,89 @@ func TestHandler_SendPromptWithContent(t *testing.T) {
 	if re.FinalText != "image analyzed" {
 		t.Fatalf("FinalText = %q", re.FinalText)
 	}
+}
+
+func TestHandler_SendPrompt_AnnouncesUserMessage(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	got := make(chan UserMessageAppended, 4)
+	b.Subscribe(func(e UserMessageAppended) { got <- e })
+	gotRunEnded := make(chan RunEnded, 1)
+	b.Subscribe(func(e RunEnded) { gotRunEnded <- e })
+
+	if err := b.Execute(SendPrompt{Text: "hola desde el móvil"}); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := drainChan(got, b, t)
+	if ev.Text != "hola desde el móvil" {
+		t.Fatalf("Text = %q", ev.Text)
+	}
+	if ev.MsgID == "" {
+		t.Fatal("MsgID is empty; clients cannot dedup the message")
+	}
+	// The announced ID must be the one the message lands in history with.
+	// The run goroutine calls the agent asynchronously, so wait for it to end.
+	waitForRunEnded(t, gotRunEnded, b)
+	if fa.getSendMsgID() != ev.MsgID {
+		t.Fatalf("agent MsgID = %q, announced %q", fa.getSendMsgID(), ev.MsgID)
+	}
+}
+
+func TestHandler_SendPromptWithContent_AnnouncesUserMessage(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	got := make(chan UserMessageAppended, 4)
+	b.Subscribe(func(e UserMessageAppended) { got <- e })
+
+	content := []core.Content{{Type: "image", Text: "base64data"}, core.TextContent("mira")}
+	if err := b.Execute(SendPromptWithContent{Content: content, MsgID: "client-1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := drainChan(got, b, t)
+	if ev.MsgID != "client-1" {
+		t.Fatalf("MsgID = %q, want the client-minted ID", ev.MsgID)
+	}
+	if len(ev.Content) != 2 {
+		t.Fatalf("Content = %+v, want the full block list", ev.Content)
+	}
+}
+
+func TestHandler_SendPrompt_NoAnnounceOnRejectedOrInternal(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	got := make(chan UserMessageAppended, 4)
+	b.Subscribe(func(e UserMessageAppended) { got <- e })
+	gotRunEnded := make(chan RunEnded, 1)
+	b.Subscribe(func(e RunEnded) { gotRunEnded <- e })
+
+	// Internal producer: no user-visible message to announce.
+	if err := b.Execute(SendPrompt{Text: "verify", Custom: map[string]any{"source": "goal"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForRunEnded(t, gotRunEnded, b) // settle before forcing the state below
+	expectNone(got, b, t)
+
+	// Rejected prompt: the session never accepted it, so announcing would
+	// leave a phantom message on every client.
+	sctx.State.ForceState(StateRunning)
+	if err := b.Execute(SendPrompt{Text: "too late"}); err == nil {
+		t.Fatal("expected a rejected send while running")
+	}
+	expectNone(got, b, t)
 }
 
 // ===========================================================================

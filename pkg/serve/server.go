@@ -428,6 +428,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			Text        string       `json:"text"`
 			Attachments []Attachment `json:"attachments"`
 			SteerID     string       `json:"steer_id"`
+			MsgID       string       `json:"msg_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -438,7 +439,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		sessionID := r.PathValue("id")
-		action, steerID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID)
+		action, steerID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)

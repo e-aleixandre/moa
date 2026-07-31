@@ -621,15 +621,38 @@ func RegisterHandlers(sctx *SessionContext) {
 				sctx.cancelGoalVerify()
 			}
 		}
-		return startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
+		// Pre-mint the user message's ID so the prompt can be announced live
+		// (UserMessageAppended) under the same identity it lands in history
+		// with. Prompts carrying Custom metadata are internal producers
+		// (goal/auto-verify/schedule) or notifications (subagent/bash) with
+		// their own rendering, so they keep the plain path and are not
+		// announced.
+		msgID := cmd.MsgID
+		if cmd.Custom == nil && msgID == "" {
+			msgID = core.NewMsgID()
+		}
+		if err := startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
 			}
-			if cmd.MsgID != "" {
-				return sctx.Agent.SendWithMsgID(ctx, cmd.Text, cmd.MsgID)
+			if msgID != "" {
+				return sctx.Agent.SendWithMsgID(ctx, cmd.Text, msgID)
 			}
 			return sctx.Agent.Send(ctx, cmd.Text)
-		})
+		}); err != nil {
+			return err
+		}
+		// Announce only after the run was accepted: a rejected prompt never
+		// enters the conversation and must not leave a phantom message.
+		if cmd.Custom == nil {
+			sctx.Bus.Publish(UserMessageAppended{
+				SessionID: sctx.SessionID,
+				RunGen:    sctx.RunGenAtomic.Load(),
+				MsgID:     msgID,
+				Text:      cmd.Text,
+			})
+		}
+		return nil
 	})
 
 	b.OnCommand(func(cmd SendPromptWithContent) error {
@@ -663,12 +686,23 @@ func RegisterHandlers(sctx *SessionContext) {
 		// the send never runs); if startRun itself fails, release it here.
 		nativeBytes := core.NativeDocBytes(cmd.Content)
 		sctx.Agent.ReserveNativeDocBytes(nativeBytes)
+		msgID := cmd.MsgID
+		if msgID == "" {
+			msgID = core.NewMsgID()
+		}
 		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
-			return sctx.Agent.SendWithContent(ctx, cmd.Content)
+			return sctx.Agent.SendWithContentMsgID(ctx, cmd.Content, msgID)
 		}); err != nil {
 			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)
 			return err
 		}
+		// Announced only once the run is accepted (see SendPrompt).
+		sctx.Bus.Publish(UserMessageAppended{
+			SessionID: sctx.SessionID,
+			RunGen:    sctx.RunGenAtomic.Load(),
+			MsgID:     msgID,
+			Content:   cmd.Content,
+		})
 		return nil
 	})
 

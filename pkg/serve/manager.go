@@ -624,7 +624,11 @@ func (m *Manager) loadConfig(cwd string) core.MoaConfig {
 // double-send and cancel-vs-in-flight races). When empty (e.g. CLI), the
 // handler mints one. Returns the action taken ("send" or "steer") and the ID
 // the message was queued under so the caller can reconcile by ID.
-func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string) (action, id string, descriptors []attachment.Descriptor, err error) {
+// msgID plays the same role for a direct send: the client mints it for its
+// optimistic echo, and the user message enters the conversation under it, so
+// the UserMessageAppended broadcast dedups against that echo instead of
+// doubling the message on the sending client.
+func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID string) (action, id string, descriptors []attachment.Descriptor, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", "", nil, ErrNotFound
@@ -707,7 +711,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
 	if len(atts) == 0 {
-		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, MsgID: msgID}); err != nil {
 			return "", "", nil, err
 		}
 		return "send", "", nil, nil
@@ -728,7 +732,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID string
 	if text != "" {
 		content = append(content, core.TextContent(text))
 	}
-	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{Content: content}); err != nil {
+	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{Content: content, MsgID: msgID}); err != nil {
 		// The message never entered the conversation — roll back any files
 		// written for it so they don't orphan and count against the quota.
 		for _, p := range writtenFiles {

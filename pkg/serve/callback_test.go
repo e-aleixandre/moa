@@ -114,7 +114,7 @@ func TestCallbackDeliveredOnRunDone(t *testing.T) {
 	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("all green")))
 	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
 
-	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	got := rc.waitForCallbacks(t, 1)[0]
@@ -161,7 +161,7 @@ func TestCallbackDeliveredOnRunFailed(t *testing.T) {
 	mgr := newTestManager(t, ctx, newMockProvider(errorHandler(errors.New("provider exploded"))))
 	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
 
-	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	got := rc.waitForCallbacks(t, 1)[0]
@@ -283,7 +283,7 @@ func TestCallbackDonePayloadHasNoPending(t *testing.T) {
 	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("all green")))
 	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
 
-	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := rc.waitForCallbacks(t, 1)[0]; got.Pending != nil {
@@ -354,7 +354,7 @@ func TestCallbackSignatureIsVerifiable(t *testing.T) {
 	const secret = "s3cret"
 	sess := newCallbackSession(t, mgr, rc.srv.URL, secret)
 
-	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	rc.waitForCallbacks(t, 1)
@@ -525,7 +525,7 @@ func TestNoCallbackForOrdinarySession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := mgr.Send(sess.ID, "hi", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "hi", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 5*time.Second, "run finished", func() bool { return sessState(sess) == StateIdle })
@@ -558,7 +558,7 @@ func TestCallbackWiredOnResume(t *testing.T) {
 	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("resumed reply")))
 	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
 	id := sess.ID
-	if _, _, _, err := mgr.Send(id, "first", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(id, "first", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	rc.waitForCallbacks(t, 1)
@@ -573,7 +573,7 @@ func TestCallbackWiredOnResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := mgr.Send(id, "second", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(id, "second", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	all := rc.waitForCallbacks(t, 2)
@@ -587,7 +587,7 @@ func TestCallbackSummaryFallsBackToTranscript(t *testing.T) {
 	defer cancel()
 	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("transcript text")))
 	sess := newCallbackSession(t, mgr, "", "")
-	if _, _, _, err := mgr.Send(sess.ID, "hi", nil, ""); err != nil {
+	if _, _, _, err := mgr.Send(sess.ID, "hi", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 5*time.Second, "run finished", func() bool { return sessState(sess) == StateIdle })

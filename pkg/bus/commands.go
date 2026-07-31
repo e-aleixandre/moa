@@ -42,6 +42,11 @@ type SendPrompt struct {
 type SendPromptWithContent struct {
 	SessionID string
 	Content   []core.Content
+	// MsgID, when set, is used as the user message's stable identifier instead
+	// of an auto-minted one, so the live announcement of this prompt
+	// (UserMessageAppended) shares an identity with the caller's optimistic
+	// echo and with reconnect snapshots. Mirrors SendPrompt.MsgID.
+	MsgID string
 }
 
 // SteerAgent injects a steering message into a running agent.

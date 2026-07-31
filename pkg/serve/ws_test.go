@@ -227,6 +227,48 @@ func TestWsEventFromBus_CommandDequeued(t *testing.T) {
 	}
 }
 
+func TestWsEventFromBus_UserMessageAppended(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.UserMessageAppended{SessionID: "s1", MsgID: "m1", Text: "hola"})
+	if !ok || ev.Type != "user_message" {
+		t.Fatalf("Type = %q ok=%v, want user_message", ev.Type, ok)
+	}
+	data, ok := ev.Data.(UserMessageData)
+	if !ok {
+		t.Fatalf("Data type = %T, want UserMessageData", ev.Data)
+	}
+	if data.MsgID != "m1" || data.Text != "hola" || len(data.Content) != 0 {
+		t.Fatalf("Data = %+v, want text-only message m1", data)
+	}
+}
+
+func TestWsEventFromBus_UserMessageAppended_DropsInlineAttachment(t *testing.T) {
+	// A structured send travels as content blocks, but a whole inline image
+	// must not be pushed to a phone: the history projection strips it.
+	ev, ok := wsEventFromBus(bus.UserMessageAppended{
+		SessionID: "s1", MsgID: "m2",
+		Content: []core.Content{
+			core.ImageContent(strings.Repeat("a", historyContentMaxBytes+1), "image/png"),
+			core.TextContent("mira esto"),
+		},
+	})
+	if !ok || ev.Type != "user_message" {
+		t.Fatalf("Type = %q ok=%v, want user_message", ev.Type, ok)
+	}
+	data, ok := ev.Data.(UserMessageData)
+	if !ok {
+		t.Fatalf("Data type = %T, want UserMessageData", ev.Data)
+	}
+	if len(data.Content) != 2 {
+		t.Fatalf("Content = %+v, want two blocks", data.Content)
+	}
+	if data.Content[0].Data != "" {
+		t.Fatalf("oversized inline image data was not stripped")
+	}
+	if data.Content[1].Text != "mira esto" {
+		t.Fatalf("text block = %q, want %q", data.Content[1].Text, "mira esto")
+	}
+}
+
 func TestCountImageContent(t *testing.T) {
 	got := countImageContent([]core.Content{
 		core.TextContent("hi"),
