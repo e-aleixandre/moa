@@ -116,6 +116,29 @@ func (sp *servePersister) saveTitle(title, source string) {
 	}
 }
 
+// recordIdempotencyKey writes the Automation API key into the session metadata
+// and saves synchronously. It is called only after the run's first prompt was
+// accepted, so a session that never got one is never resolvable by key. The key
+// also joins the preserved set, so it survives the snapshot rebuilds that
+// reconstruct Metadata from scratch (same treatment as origin).
+func (sp *servePersister) recordIdempotencyKey(key string) error {
+	if key == "" {
+		return nil
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.persisted == nil || sp.store == nil {
+		return nil
+	}
+	sp.persisted.SetIdempotencyKey(key)
+	if sp.preserved == nil {
+		sp.preserved = make(map[string]any, 1)
+	}
+	sp.preserved[session.MetaIdempotencyKey] = key
+	snapshot := *sp.persisted
+	return sp.store.Save(&snapshot)
+}
+
 // setArchived persists an archive/unarchive toggle out-of-band, preserving
 // Updated (archive is presentation-only and must not reorder session lists).
 func (sp *servePersister) setArchived(archived bool) error {

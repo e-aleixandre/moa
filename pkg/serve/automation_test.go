@@ -364,10 +364,11 @@ func TestBearerTokenEqual(t *testing.T) {
 	}
 }
 
-// A failed first Send must not leave a durable session behind: the create is
-// rolled back so the caller's retry starts clean (and a restart rebuilding the
-// index from disk cannot resolve the key to a promptless session).
-func TestAutomationRunRollsBackWhenSendFails(t *testing.T) {
+// A failed first Send commits nothing: the session may survive, but it carries
+// no idempotency key (neither on disk nor in the index), so the caller's retry
+// starts a clean run in a fresh session — and a restart rebuilding the index
+// from disk cannot resolve the key to the promptless one either.
+func TestAutomationRunCommitsNoKeyWhenSendFails(t *testing.T) {
 	srv, mgr := newAutomationTestServer(t, testAutomationToken)
 	var failedID string
 	orig := sendFirstPrompt
@@ -386,11 +387,12 @@ func TestAutomationRunRollsBackWhenSendFails(t *testing.T) {
 	if failedID == "" {
 		t.Fatal("send was never attempted")
 	}
-	if _, ok := mgr.Get(failedID); ok {
-		t.Error("session still active after a failed send")
-	}
-	if _, _, err := session.FindSession(mgr.sessionBaseDir, failedID); err == nil {
-		t.Error("session still persisted after a failed send")
+	// The session is allowed to remain (nothing is rolled back), but it must be
+	// keyless: no metadata key, no index entry.
+	if saved, _, err := session.FindSession(mgr.sessionBaseDir, failedID); err == nil {
+		if key, _ := saved.Metadata[session.MetaIdempotencyKey].(string); key != "" {
+			t.Errorf("promptless session carries idempotency key %q", key)
+		}
 	}
 	if _, ok := mgr.automation.lookup("issue-99"); ok {
 		t.Error("idempotency key indexed for a run that never got its prompt")
@@ -406,6 +408,46 @@ func TestAutomationRunRollsBackWhenSendFails(t *testing.T) {
 	run := decodeRun(t, retry)
 	if run.SessionID == failedID || !run.Created {
 		t.Fatalf("retry did not create a fresh session: %#v", run)
+	}
+}
+
+// The key is written after the send, and the persistence reactor rebuilds
+// Metadata from scratch on every snapshot, so it must survive a save cycle the
+// same way origin does — otherwise deduplication would silently stop working
+// after the first turn.
+func TestAutomationKeySurvivesSnapshot(t *testing.T) {
+	srv, mgr := newAutomationTestServer(t, testAutomationToken)
+	resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken,
+		`{"prompt":"hello","idempotency_key":"durable-1"}`, false)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	run := decodeRun(t, resp)
+
+	// Right after the call the key is already on disk.
+	saved, _, err := session.FindSession(mgr.sessionBaseDir, run.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key, _ := saved.Metadata[session.MetaIdempotencyKey].(string); key != "durable-1" {
+		t.Fatalf("persisted key = %q, want durable-1", key)
+	}
+
+	// And it is still there once the run's snapshot lands.
+	pollUntil(t, 5*time.Second, "idempotency key survives the snapshot", func() bool {
+		saved, _, err := session.FindSession(mgr.sessionBaseDir, run.SessionID)
+		if err != nil || len(saved.Entries) == 0 {
+			return false
+		}
+		key, _ := saved.Metadata[session.MetaIdempotencyKey].(string)
+		return key == "durable-1"
+	})
+
+	// A rebuilt index (as after a restart) resolves the key to the same session.
+	idx := newAutomationIndex(mgr.sessionBaseDir)
+	if id, ok := idx.lookup("durable-1"); !ok || id != run.SessionID {
+		t.Fatalf("rebuilt index lookup = %q, %v; want %q, true", id, ok, run.SessionID)
 	}
 }
 

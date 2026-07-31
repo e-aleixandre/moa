@@ -108,9 +108,10 @@ session that key already created:
 - Any repeat with the same key → `200 OK`, `"created": false`, the **same**
   `session_id`, and the prompt is **not** sent again.
 
-The key is stored in the session's metadata, and the index is rebuilt from disk
-at startup, so deduplication survives a restart. Deleting the session releases
-its key: a later retry then starts a fresh run.
+The key is stored in the session's metadata **once the first prompt has been
+accepted**, and the index is rebuilt from disk at startup, so deduplication
+survives a restart. Deleting the session releases its key: a later retry then
+starts a fresh run.
 
 Without a key, every call creates a new session.
 
@@ -122,15 +123,18 @@ recovers without a restart. Requests without a key are never blocked by this.
 
 ### Atomicity limits
 
-Creating the session and sending the prompt are two steps, not a transaction:
+Creating the session and sending the prompt are two steps, not a transaction.
+The key is committed only **after** a successful send, never rolled back:
 
-- If the send fails, the just-created session is deleted again and the call
-  returns `500`. Nothing is indexed, nothing is persisted, and your retry — with
-  the same key — starts a clean run.
-- If Moa **crashes** in the narrow window between the create and the send, a
-  promptless session can survive on disk, and its idempotency key will resolve
-  to it after the restart. This is a known, accepted limitation; delete that
-  session to release the key.
+- If the send fails, the call returns `500` and no key is recorded — neither on
+  disk nor in the index. The created session may remain, but it is inert: it has
+  no prompt and answers no key, so your retry (same key) starts a clean run in a
+  new session. Delete the leftover session whenever you like.
+- If Moa **crashes**, or the metadata write fails, right after a successful
+  send, the run is real but its key may not have reached disk. The call still
+  returns `201` and repeats are deduplicated in the running process; after a
+  restart, a redelivered webhook with that key could start a second run. This is
+  standard at-least-once delivery — make your integrations tolerant of it.
 
 ## Origin
 

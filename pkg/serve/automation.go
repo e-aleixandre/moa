@@ -316,7 +316,7 @@ func (a *automationIndex) forget(sessionID string) {
 }
 
 // sendFirstPrompt delivers the automation run's first prompt. Indirected so
-// tests can simulate a delivery failure and assert the rollback.
+// tests can simulate a delivery failure.
 var sendFirstPrompt = func(m *Manager, sessionID, prompt string) error {
 	_, _, _, err := m.Send(sessionID, prompt, nil, "")
 	return err
@@ -327,14 +327,15 @@ var sendFirstPrompt = func(m *Manager, sessionID, prompt string) error {
 // repeated idempotency key resolves to the existing session without creating a
 // duplicate or re-sending the prompt.
 //
-// The whole check-create-record sequence runs under automationMu so two
+// The whole check-create-send-record sequence runs under automationMu so two
 // simultaneous retries of the same webhook cannot both pass the check, and so a
 // concurrent Delete cannot drop the index entry we are about to write.
 //
-// Atomicity is best effort, not transactional: if the first Send fails the
-// freshly created session is deleted again, so a retry starts clean. A crash
-// landing exactly between the create and the send can still leave a promptless
-// session behind (documented limitation).
+// The key is committed after success, never rolled back: it is written to the
+// session metadata (and indexed) only once the first prompt was accepted. A
+// failed send therefore leaves an inert, keyless session — nothing deletes a
+// session another client may already be using, and neither a retry in this
+// process nor an index rebuilt after a restart can resolve the key to it.
 func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID string, created bool, err error) {
 	m.automationMu.Lock()
 	defer m.automationMu.Unlock()
@@ -354,10 +355,9 @@ func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID strin
 	if origin == "" {
 		origin = automationOriginDefault
 	}
+	// The idempotency key is deliberately NOT written here: only a run whose
+	// prompt was accepted may answer that key.
 	meta := map[string]any{}
-	if req.IdempotencyKey != "" {
-		meta[session.MetaIdempotencyKey] = req.IdempotencyKey
-	}
 	if req.CallbackURL != "" {
 		meta[session.MetaCallbackURL] = req.CallbackURL
 	}
@@ -376,13 +376,23 @@ func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID strin
 		return "", false, err
 	}
 	if err := sendFirstPrompt(m, sess.ID, req.Prompt); err != nil {
-		// Roll the create back: a session that never received its prompt must not
-		// survive on disk, and must not be resolvable by this idempotency key
-		// after a restart rebuilds the index from metadata.
-		if delErr := m.deleteSession(sess.ID); delErr != nil {
-			slog.Warn("automation run: rolling back promptless session failed", "session", sess.ID, "error", delErr)
-		}
+		// Nothing to undo: the session keeps no key, so it is inert bookkeeping
+		// the caller can delete, and the retry creates a fresh run. Deleting it
+		// here would be worse — it is already visible to other endpoints.
 		return "", false, fmt.Errorf("automation run: %w", err)
+	}
+	if req.IdempotencyKey != "" {
+		if sess.persister != nil {
+			if err := sess.persister.recordIdempotencyKey(req.IdempotencyKey); err != nil {
+				// At-least-once degradation: the run did start, so we still answer
+				// 201 and dedupe in this process, but after a restart the rebuilt
+				// index won't know this key and a redelivery could duplicate it.
+				slog.Error("automation run: persisting the idempotency key failed; deduplication will not survive a restart",
+					"session", sess.ID, "error", err)
+			}
+		} else {
+			slog.Error("automation run: session has no persister; idempotency key not durable", "session", sess.ID)
+		}
 	}
 	m.automation.put(req.IdempotencyKey, sess.ID)
 	return sess.ID, true, nil

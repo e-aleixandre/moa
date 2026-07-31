@@ -96,7 +96,9 @@ const (
 	MetaAllowedPaths   = "allowed_paths"
 	MetaCompactAt      = "compact_at"
 	MetaOrigin         = "origin"
-	// Automation bookkeeping, written at creation by the Automation API.
+	// Automation bookkeeping written by the Automation API. The callback fields
+	// are set at creation; the idempotency key is only written once the run's
+	// first prompt was accepted (see SetIdempotencyKey).
 	MetaIdempotencyKey = "idempotency_key"
 	MetaCallbackURL    = "callback_url"
 	MetaCallbackSecret = "callback_secret"
@@ -135,6 +137,19 @@ func (s *Session) Origin() string {
 		return origin
 	}
 	return OriginUser
+}
+
+// SetIdempotencyKey records the Automation API key this session answers. It is
+// written only after the run's first prompt was accepted, so a session that
+// never received one stays unreachable by key. An empty key is not stored.
+func (s *Session) SetIdempotencyKey(key string) {
+	if key == "" {
+		return
+	}
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]any)
+	}
+	s.Metadata[MetaIdempotencyKey] = key
 }
 
 // PreservedMetadata extracts the creation-time keys that survive snapshots.
