@@ -62,7 +62,7 @@ futuros clientes deben usar los campos aditivos `action` y `target`.
 
 Pulse actúa directamente contra las rutas genéricas de Moa: enviar o dirigir un
 mensaje, responder un `ask_user`, decidir un permiso, crear, retomar, cancelar
-o archivar sesiones. No existe `prepare → review → confirm`: la conversación de
+o cerrar sesiones. No existe `prepare → review → confirm`: la conversación de
 voz es el contexto de confianza. El modelo solo pregunta cuando el destino es
 realmente ambiguo.
 

@@ -76,8 +76,6 @@ Open with `moa --resume`:
 - `Enter` — open selected
 - `Ctrl+N` — new session
 - `Ctrl+D` — delete selected session (press twice to confirm)
-- `Ctrl+A` — archive/unarchive selected session
-- `Ctrl+V` — toggle visibility of archived sessions
 - `Esc` — exit the browser
 - Type to filter by title/id
 

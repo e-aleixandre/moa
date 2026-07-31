@@ -5,6 +5,38 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-07-31
+
+### Changed
+
+- Archiving is gone. Closing a session now unloads it from memory and leaves the
+  conversation on disk as a saved session: still listed, still searchable, and
+  resumable with nothing lost. Archiving instead hid a session from the lists,
+  and the mobile drawer's search never looked at archived ones (the desktop
+  palette did) — so closing a conversation from the phone could make it vanish
+  with no way back. Delete remains the only destructive action, and sessions
+  carrying the legacy flag come back on their own. `POST /api/sessions/{id}/archive`
+  is replaced by `POST /api/sessions/{id}/close`, and the TUI drops its archive
+  (`ctrl+a`) and show-archived (`ctrl+v`) bindings.
+- Closing is refused with 409 while the session is still working — a run, a
+  pending permission, or background subagents and bash jobs whose output the
+  teardown would kill. The web client surfaces that as a toast instead of
+  failing silently.
+
+### Fixed
+
+- An image whose extension lied about its format no longer poisons a
+  conversation permanently. A GIF saved as `.png` made every later turn replay a
+  tool result with a mismatched media type, which the provider rejected with a
+  hard 400 — the session could only be salvaged by branching the entry away. The
+  type is now read from the file's magic bytes, and a mislabelled declaration is
+  corrected again on the way to the provider, which also heals histories that
+  were already persisted wrong.
+- The installed PWA no longer asks for microphone permission on every open. iOS
+  binds the grant to the installed web app's identity, and a launch that is not
+  recognised as one keeps the grant in memory only; the capability metas are back
+  and the manifest now declares an explicit id so that identity survives updates.
+
 ## [0.21.1] - 2026-07-31
 
 ### Fixed
