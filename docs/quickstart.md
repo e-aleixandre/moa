@@ -24,6 +24,17 @@ Grab the archive for your platform from
 [GitHub Releases](https://github.com/e-aleixandre/moa/releases/latest), verify it
 against `checksums.txt`, extract it, and put `moa` somewhere on your `PATH`.
 
+### go install
+
+```bash
+go install github.com/e-aleixandre/moa/cmd/agent@latest
+```
+
+Note the binary lands as `agent` (the main package's directory name); rename or
+alias it to `moa`. Prebuilt releases and the install script are the recommended
+path. Only works for releases newer than v0.18 (older tags predate the current
+module path).
+
 ### Keeping it up to date
 
 ```bash
