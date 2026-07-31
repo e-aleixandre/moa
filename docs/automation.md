@@ -130,11 +130,15 @@ The key is committed only **after** a successful send, never rolled back:
   disk nor in the index. The created session may remain, but it is inert: it has
   no prompt and answers no key, so your retry (same key) starts a clean run in a
   new session. Delete the leftover session whenever you like.
-- If Moa **crashes**, or the metadata write fails, right after a successful
-  send, the run is real but its key may not have reached disk. The call still
-  returns `201` and repeats are deduplicated in the running process; after a
-  restart, a redelivered webhook with that key could start a second run. This is
-  standard at-least-once delivery — make your integrations tolerant of it.
+- If the metadata write fails right after a successful send, the run is real
+  but its key never reached disk. The call still returns `201` and repeats are
+  deduplicated in the running process; after a restart, a redelivered webhook
+  with that key could start a second run.
+- If Moa **crashes** between the send and the key reaching disk, the caller
+  gets no response at all, and a retry after restart will start a second run.
+
+Both are standard at-least-once delivery — make your integrations tolerant
+of it.
 
 ## Origin
 
