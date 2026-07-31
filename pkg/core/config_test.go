@@ -805,3 +805,66 @@ func TestMergeConfigs_STTModel_ProjectOverride(t *testing.T) {
 		t.Errorf("empty project value: got %q, want gpt-transcribe", got)
 	}
 }
+
+func TestMCPServerValidate(t *testing.T) {
+	cases := []struct {
+		name    string
+		server  MCPServer
+		wantErr bool
+	}{
+		{"stdio", MCPServer{Command: "mcp-sqlite"}, false},
+		{"https url", MCPServer{URL: "https://tools.example.com/mcp"}, false},
+		{"http url", MCPServer{URL: "http://127.0.0.1:9000/mcp"}, false},
+		{"both transports", MCPServer{Command: "x", URL: "https://a/b"}, true},
+		{"neither transport", MCPServer{}, true},
+		{"non-http scheme", MCPServer{URL: "file:///etc/passwd"}, true},
+		{"ws scheme", MCPServer{URL: "ws://example.com/mcp"}, true},
+		{"relative url", MCPServer{URL: "/mcp"}, true},
+		{"no host", MCPServer{URL: "https://"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.server.Validate()
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("Validate() = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadMCPFile_URLServer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".mcp.json")
+	if err := os.WriteFile(path, []byte(`{
+		"mcpServers": {
+			"relay": {
+				"url": "https://relay.example.com/mcp",
+				"headers": {"Authorization": "Bearer t"}
+			}
+		}
+	}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	servers, err := LoadMCPFile(path)
+	if err != nil {
+		t.Fatalf("LoadMCPFile: %v", err)
+	}
+	relay := servers["relay"]
+	if !relay.IsRemote() || relay.URL != "https://relay.example.com/mcp" {
+		t.Fatalf("relay = %+v", relay)
+	}
+	if relay.Headers["Authorization"] != "Bearer t" {
+		t.Fatalf("relay.Headers = %v", relay.Headers)
+	}
+}
+
+func TestLoadMCPFile_RejectsAmbiguousTransport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".mcp.json")
+	if err := os.WriteFile(path, []byte(`{
+		"mcpServers": {"x": {"command": "foo", "url": "https://a/b"}}
+	}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := LoadMCPFile(path); err == nil {
+		t.Fatal("expected an error for a server with both command and url")
+	}
+}

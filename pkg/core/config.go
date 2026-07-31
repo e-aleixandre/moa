@@ -2,9 +2,12 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -285,11 +288,63 @@ func GetSubagentMaxRunDuration(cfg MoaConfig) time.Duration {
 	return d
 }
 
-// MCPServer defines an MCP tool server connection (stdio transport).
+// MCPServer defines an MCP tool server connection. A server is EITHER
+// command-based (stdio: a local subprocess) OR url-based (streamable HTTP: a
+// remote endpoint). Setting both, or neither, is a configuration error.
 type MCPServer struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
+	// URL is the streamable-HTTP endpoint of a remote MCP server. Only http and
+	// https are accepted. It is an outbound connection to an endpoint the
+	// operator configured, so it carries the same trust as the rest of the file.
+	URL string `json:"url"`
+	// Headers are extra HTTP headers sent on every request to URL (typically
+	// Authorization). Ignored for command-based servers.
+	Headers map[string]string `json:"headers"`
+}
+
+// IsRemote reports whether the server is reached over HTTP rather than spawned
+// as a subprocess.
+func (s MCPServer) IsRemote() bool { return s.URL != "" }
+
+// Validate checks that the entry describes exactly one transport, and that a
+// remote one points at an absolute http(s) URL.
+func (s MCPServer) Validate() error {
+	if s.Command != "" && s.URL != "" {
+		return errors.New(`set either "command" or "url", not both`)
+	}
+	if s.Command == "" && s.URL == "" {
+		return errors.New(`missing "command" or "url"`)
+	}
+	if s.URL == "" {
+		return nil
+	}
+	u, err := url.Parse(s.URL)
+	if err != nil {
+		return fmt.Errorf("invalid url: %v", err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("url must be an absolute http or https URL")
+	}
+	return nil
+}
+
+// ValidateMCPServers checks every entry of a server map, reporting the first
+// offending name (in name order, so the message is stable) so the user can fix
+// the file.
+func ValidateMCPServers(servers map[string]MCPServer) error {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := servers[name].Validate(); err != nil {
+			return fmt.Errorf("mcp server %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // PermissionsConfig controls tool execution approval.
@@ -535,7 +590,9 @@ type mcpFileFormat struct {
 }
 
 // LoadMCPFile reads a .mcp.json file. Returns nil map if file doesn't exist.
-// Returns error for parse failures so callers can warn the user.
+// Returns error for parse failures — and for entries that don't describe
+// exactly one valid transport — so callers can warn the user instead of
+// silently starting a half-defined server.
 func LoadMCPFile(path string) (map[string]MCPServer, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -543,6 +600,9 @@ func LoadMCPFile(path string) (map[string]MCPServer, error) {
 	}
 	var f mcpFileFormat
 	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
+	}
+	if err := ValidateMCPServers(f.MCPServers); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
 	}
 	return f.MCPServers, nil

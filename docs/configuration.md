@@ -120,6 +120,39 @@ Moa also loads `.mcp.json` files (Claude Code-compatible format):
 - `~/.config/moa/.mcp.json` — always loaded
 - `<cwd>/.mcp.json` — loaded only when the path is trusted
 
+#### Transports: local command or remote URL
+
+A server entry declares **exactly one** transport:
+
+- `command` (+ optional `args`, `env`) — stdio: Moa spawns the server as a local
+  subprocess.
+- `url` (+ optional `headers`) — streamable HTTP: Moa connects to a remote
+  endpoint. Only `http` and `https` are accepted.
+
+```json
+{
+  "mcpServers": {
+    "local": { "command": "uvx", "args": ["my-mcp-server"] },
+    "relay": {
+      "url": "https://relay.example.com/mcp",
+      "headers": { "Authorization": "Bearer ..." }
+    }
+  }
+}
+```
+
+Setting both `command` and `url` — or neither — is a configuration error and the
+file is rejected. `headers` are sent on every request to that endpoint, so it is
+where credentials go; they are stored in plain text in the config file like any
+other key there.
+
+A remote server has no process to supervise: it shows up in the MCP panel like
+any other server, and enable/disable/restart just drop and re-dial the
+connection. If the connection is lost the server is reported as exited and can be
+restarted. The endpoint is an outbound connection to an address **you**
+configured — Moa applies no network policy beyond the scheme check, exactly as
+with automation `callback_url`s.
+
 ## Project directory: `.moa/`
 
 Project-specific files live in `<cwd>/.moa/`:

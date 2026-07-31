@@ -229,31 +229,47 @@ func (m *Manager) dialServer(ctx context.Context, name string, cfg core.MCPServe
 	return sess
 }
 
-// connect starts the subprocess, performs the handshake, discovers tools, and
-// arms the exit watcher. On success the session is left in StateReady. The
-// caller owns the serverSession; connect takes its lock internally.
+// connect starts the server (subprocess for a command-based one, nothing to
+// start for a remote one), performs the handshake, discovers tools, and arms
+// the exit watcher. On success the session is left in StateReady. The caller
+// owns the serverSession; connect takes its lock internally.
 func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCPServer) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	startCtx, cancel := context.WithTimeout(ctx, serverStartTimeout)
 	defer cancel()
 
-	cmd := exec.Command(cfg.Command, cfg.Args...)
-	if m.cwd != "" {
-		cmd.Dir = m.cwd
-	}
-	if len(cfg.Env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range cfg.Env {
-			cmd.Env = append(cmd.Env, k+"="+v)
+	// A remote server has no process: cmd stays nil and every teardown path
+	// (killProcGroup, Close, the exit watcher) tolerates that, so the whole
+	// lifecycle collapses to closing the client session.
+	var cmd *exec.Cmd
+	var transport sdkmcp.Transport
+	if cfg.IsRemote() {
+		transport = &sdkmcp.StreamableClientTransport{
+			Endpoint:   cfg.URL,
+			HTTPClient: remoteHTTPClient(cfg.Headers),
 		}
+	} else {
+		cmd = exec.Command(cfg.Command, cfg.Args...)
+		if m.cwd != "" {
+			cmd.Dir = m.cwd
+		}
+		if len(cfg.Env) > 0 {
+			cmd.Env = os.Environ()
+			for k, v := range cfg.Env {
+				cmd.Env = append(cmd.Env, k+"="+v)
+			}
+		}
+		setProcGroup(cmd)
+		transport = &sdkmcp.CommandTransport{Command: cmd}
 	}
-	setProcGroup(cmd)
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{
 		Name:    "moa",
 		Version: "0.1.0",
 	}, nil)
 
-	transport := &sdkmcp.CommandTransport{Command: cmd}
 	session, err := client.Connect(startCtx, transport, nil)
 	if err != nil {
 		killProcGroup(cmd)
@@ -294,17 +310,17 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 	gen := sess.gen
 	sess.mu.Unlock()
 
-	m.watchExit(sess, session, cmd, gen)
+	m.watchExit(sess, session, cmd, gen, cfg.IsRemote())
 	return nil
 }
 
 // watchExit blocks (in a goroutine) until the connection dies, then marks the
 // server exited — unless a newer generation already replaced it.
-func (m *Manager) watchExit(sess *serverSession, session *sdkmcp.ClientSession, cmd *exec.Cmd, gen uint64) {
+func (m *Manager) watchExit(sess *serverSession, session *sdkmcp.ClientSession, cmd *exec.Cmd, gen uint64, remote bool) {
 	go func() {
 		_ = session.Wait()
 		// Reap any grandchildren the SDK's Close left behind (or that outlived a
-		// crash of the direct child).
+		// crash of the direct child). A no-op for a remote server.
 		killProcGroup(cmd)
 
 		sess.mu.Lock()
@@ -315,6 +331,9 @@ func (m *Manager) watchExit(sess *serverSession, session *sdkmcp.ClientSession, 
 		}
 		sess.state = StateExited
 		sess.err = "server process exited"
+		if remote {
+			sess.err = "connection to the remote server was lost"
+		}
 		sess.tools = nil
 		sess.changedAt = time.Now()
 		st := sess.statusLocked()
@@ -398,11 +417,6 @@ var ErrRestartUnsupported = errors.New("restarting a single MCP server is not su
 // (still restartable). Tool names may differ across generations, so the caller
 // should re-sync its tool registry from Tools() afterwards.
 func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus, error) {
-	if !procGroupSupported {
-		// Refuse rather than orphan: without process-group cleanup, tearing the
-		// old tree down before re-dialing cannot be guaranteed (see proc_windows.go).
-		return ServerStatus{}, ErrRestartUnsupported
-	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -413,6 +427,13 @@ func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus,
 	m.mu.Unlock()
 	if !ok || !hasCfg {
 		return ServerStatus{}, ErrUnknownServer
+	}
+	if !procGroupSupported && !cfg.IsRemote() {
+		// Refuse rather than orphan: without process-group cleanup, tearing the
+		// old tree down before re-dialing cannot be guaranteed (see
+		// proc_windows.go). A remote server owns no process, so nothing can be
+		// orphaned and the restriction does not apply to it.
+		return ServerStatus{}, ErrRestartUnsupported
 	}
 
 	// Hold the per-server lifecycle lock across the ENTIRE transition (state

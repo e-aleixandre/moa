@@ -21,10 +21,11 @@ func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-// killProcGroup force-kills the entire process group. Safe to call even if the
-// main process already exited (the kill just fails silently).
+// killProcGroup force-kills the entire process group. Safe to call with a nil
+// cmd (a remote server has no process) or after the main process already exited
+// (the kill just fails silently).
 func killProcGroup(cmd *exec.Cmd) {
-	if cmd.Process == nil {
+	if cmd == nil || cmd.Process == nil {
 		return
 	}
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
