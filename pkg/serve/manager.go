@@ -47,6 +47,11 @@ type ManagedSession struct {
 	// Origin is who created the session ("user" for a human, or a caller-chosen
 	// label for automation). Mirrors session.Session metadata.
 	Origin string `json:"origin"`
+	// automationCreated is true only for sessions the Automation API created
+	// itself (see automationCreatedMeta). Unlike Origin, which is a free-form
+	// label any creator may pass, it is what authorizes the automation token to
+	// interact with the session.
+	automationCreated bool
 
 	// pathPolicy is the runtime-mutable path access policy shared with the
 	// session's tools; attachments-to-disk add the session's attachment dir

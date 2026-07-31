@@ -201,6 +201,11 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// by a cross-site form) but stays under the Host check below.
 	automationRoutes := http.NewServeMux()
 	automationRoutes.HandleFunc("POST /api/automation/runs", handleAutomationRun(manager))
+	// Interaction endpoints, scoped to sessions the Automation API created
+	// (see automationCreatedMeta): anything else answers 404.
+	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/reply", handleAutomationReply(manager))
+	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/ask-response", handleAutomationAskResponse(manager))
+	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/permission", handleAutomationPermission(manager))
 	handler = automationMiddleware(o.automationToken, bodyTimeoutMiddleware(automationRoutes), handler)
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.

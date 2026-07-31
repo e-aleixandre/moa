@@ -13,7 +13,8 @@ Linear issue comment ◀──API call── relay ◀──────callback
 **What Moa provides:** session creation from a prompt, idempotent retries, a
 signed completion callback with a summary, and the normal mobile supervision —
 if the agent needs a permission or asks a question, you get the usual push and
-can answer from your phone while the callback reports `needs_input`.
+can answer from your phone, while the callback reports `needs_input` **and what
+it is blocked on**, so the relay can also relay the question back into Linear.
 
 **What the relay must do:** verify Linear's webhook signature, build a safe
 prompt, call the Automation API, and turn the callback into a Linear comment.
@@ -85,9 +86,17 @@ Notes on the choices above:
   [security model](../automation.md#security-model).
 - **`cwd` is least-privilege**: point each run at the repository it concerns,
   not at your whole workspace.
-- **`needs_input`** callbacks are worth surfacing too (comment "the agent has a
-  question"); the owner answers from the Moa UI, and a later callback closes
-  the loop.
+- **`needs_input`** callbacks carry a `pending` object with the question (or the
+  permission and its summary) and its request ID. The relay can post that as an
+  issue comment and feed a human's comment reply straight back:
+  `POST /api/automation/sessions/{id}/ask-response` with the pending ID and the
+  answers, or `/reply` for plain conversation. Answering from the Moa UI still
+  works, and a later callback closes the loop either way.
+
+  Relaying **permissions** (`/permission`) is possible too, and is a decision to
+  make deliberately: it gives whoever can comment on the issue the authority to
+  approve the agent's writes and shell commands. See
+  [what this means for security](../automation.md#what-this-means-for-security).
 
 ## 3. Optional: give the agent Linear hands
 

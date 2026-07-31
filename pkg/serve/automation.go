@@ -358,8 +358,10 @@ func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID strin
 		origin = automationOriginDefault
 	}
 	// The idempotency key is deliberately NOT written here: only a run whose
-	// prompt was accepted may answer that key.
-	meta := map[string]any{}
+	// prompt was accepted may answer that key. The automation marker is: it
+	// records who created the session, which is true from this moment and is
+	// what the interaction endpoints check.
+	meta := map[string]any{session.MetaAutomationCreated: true}
 	if req.CallbackURL != "" {
 		meta[session.MetaCallbackURL] = req.CallbackURL
 	}

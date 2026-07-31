@@ -92,6 +92,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		return nil, err
 	}
 	sess.Origin = persisted.Origin()
+	sess.automationCreated = automationCreatedMeta(opts.extraMeta)
 	// Wire the outbound completion callback before the session is reachable, so
 	// the very first run cannot end before the subscription exists. A no-op
 	// unless the caller supplied a callback_url.
@@ -719,6 +720,7 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		return nil, fmt.Errorf("resume: %w", err)
 	}
 	sess.Origin = saved.Origin()
+	sess.automationCreated = automationCreatedMeta(saved.Metadata)
 
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {

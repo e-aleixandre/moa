@@ -102,6 +102,11 @@ const (
 	MetaIdempotencyKey = "idempotency_key"
 	MetaCallbackURL    = "callback_url"
 	MetaCallbackSecret = "callback_secret"
+	// MetaAutomationCreated marks a session the Automation API created itself.
+	// Unlike MetaOrigin — a free-form label any creator may pass — it is written
+	// on exactly one code path, so it is the authority check for the scoped
+	// automation interaction endpoints.
+	MetaAutomationCreated = "automation_created"
 )
 
 // OriginUser is the implicit origin of a session created by a human through
@@ -113,7 +118,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:

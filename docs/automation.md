@@ -44,8 +44,10 @@ Authorization: Bearer <automation-token>
   as everywhere else, so a named host still needs `--allowed-hosts`.
 - The two surfaces do not overlap: the automation token grants access to
   `/api/automation/…` and nothing else, and a browser cookie or a paired Pulse
-  device cannot call the automation routes. Permission decisions, cancel and
-  shell stay with the human, on the UI they already use.
+  device cannot call the automation routes. Within `/api/automation/…`, the
+  token only reaches sessions the Automation API itself created (see
+  [Interacting with a run](#interacting-with-a-run)); your own sessions, cancel
+  and shell stay with the human, on the UI they already use.
 
 ## `POST /api/automation/runs`
 
@@ -183,10 +185,113 @@ this callback, not one reused elsewhere, and rotate it independently.
 ## Permissions and unattended runs
 
 An automated session inherits the normal permission configuration. If the agent
-needs a decision (a permission prompt or `ask_user`), the run waits and the usual
-attention push reaches your phone, where you decide as always. Because the
+needs a decision (a permission prompt or `ask_user`), the run waits, the usual
+attention push reaches your phone, and the `needs_input` callback tells the
+caller what it is blocked on. Either of you can answer: you from the UI, the
+caller through the [interaction endpoints](#interacting-with-a-run). Because the
 prompt came from outside (see [Security model](#security-model)), configure those
 permissions at least as tightly as you would for a session you drive yourself.
+
+## Interacting with a run
+
+A run that stops to ask something is not stuck waiting for a human specifically.
+The automation token can continue the conversation and answer the pending
+question or permission — but **only on sessions the Automation API created**
+(see [Scope](#scope-and-authority) below).
+
+### `POST /api/automation/sessions/{id}/reply`
+
+Send a user message into the session. Same semantics as the message box in the
+web client: if the agent is running, the text is queued as a steer; if it is
+idle, it starts a new run. Attachments are not supported.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `text` | yes | The message, max 256 KiB (same cap as `prompt`) |
+
+```bash
+curl -sS http://127.0.0.1:8080/api/automation/sessions/$SESSION/reply \
+  -H "Authorization: Bearer $MOA_AUTOMATION_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Yes, use the staging database."}'
+```
+
+Response `202 Accepted`: `{"action": "run" | "steer", "steer_id": "…"}`.
+
+### `POST /api/automation/sessions/{id}/ask-response`
+
+Answer a pending `ask_user` prompt — the one a `needs_input` callback described
+under `pending.kind: "question"`.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | The pending request ID from `pending.id`, max 128 bytes |
+| `answers` | yes | One answer per question, in order; max 32 answers of 8 KiB each |
+
+```bash
+curl -sS http://127.0.0.1:8080/api/automation/sessions/$SESSION/ask-response \
+  -H "Authorization: Bearer $MOA_AUTOMATION_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"id": "ask_01H…", "answers": ["yes"]}'
+```
+
+Response `204 No Content`.
+
+### `POST /api/automation/sessions/{id}/permission`
+
+Approve or deny a pending permission request — `pending.kind: "permission"`.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | The pending request ID from `pending.id`, max 128 bytes |
+| `approved` | yes | `true` to allow this call, `false` to deny it |
+| `feedback` | no | Text passed back to the agent with a denial, max 4 KiB |
+| `allow` | no | Glob pattern to also allow for the rest of the session (the request's own `allow_pattern`), max 512 bytes |
+
+```bash
+curl -sS http://127.0.0.1:8080/api/automation/sessions/$SESSION/permission \
+  -H "Authorization: Bearer $MOA_AUTOMATION_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"id": "perm_01H…", "approved": false, "feedback": "do not touch production"}'
+```
+
+Response `204 No Content`. Editing the persistent permission *rules* is not
+exposed here: that is configuration, and it stays on the human's UI.
+
+### Scope and authority
+
+All three endpoints answer `404` unless the session was created by `POST
+/api/automation/runs`. A session you started yourself is `404` for the
+automation token, and so is an ID that does not exist — **the same response for
+both**, so the token cannot use these routes to discover which sessions exist.
+
+The marker is written by the run endpoint into the session's metadata
+(`automation_created`), not derived from `origin`: `origin` is a free-form label
+any client may pass to the ordinary create endpoint, so a browser could
+otherwise mint a session that calls itself automation. Sessions created by the
+Automation API before that marker existed are still recognized by the
+bookkeeping only that path writes (`callback_url`, `idempotency_key`).
+
+Other errors: `400` for a malformed body, a missing/oversized field, or a
+request ID that is not pending (it may have been answered already, from the UI
+or by an earlier call); `401` for a missing or wrong bearer token; `409` when
+the session is being loaded from disk by another request (retry); `503` when a
+reply cannot be queued.
+
+### What this means for security
+
+Be clear-eyed about what you are enabling. These endpoints hand the automation
+caller **the same authority the human has** over these sessions' questions and
+permissions. If you wire them to an external system — a chat bot, an issue
+tracker's comment stream, another agent — **its security becomes your security
+boundary**: whoever can make that system emit an approval can approve an agent's
+file write or shell command on your machine. Moa does not police what answers
+come back, does not judge whether an approval is sensible, and cannot tell an
+owner's comment from anybody else's.
+
+This is a documented stance, not an enforced one. If you want destructive steps
+to stay behind a person, do not relay permission requests: relay only
+`ask-response`/`reply`, or nothing, and answer permissions from the Moa UI.
 
 ## Callbacks
 
@@ -201,7 +306,7 @@ A callback is sent when:
 |--------|------|
 | `done` | The run finished without error **and** the session went quiescent (no subagent or background bash work still pending, which could start another run) |
 | `failed` | The run ended with an error — sent immediately |
-| `needs_input` | The run is blocked on a permission prompt or `ask_user`, i.e. a human is now in the loop. Sent **at most once per run**, however many times the agent asks; the eventual `done`/`failed` is still sent afterwards |
+| `needs_input` | The run is blocked on a permission prompt or `ask_user`, i.e. somebody has to answer. Sent **at most once per run**, however many times the agent asks; the eventual `done`/`failed` is still sent afterwards |
 
 Payload:
 
@@ -224,6 +329,56 @@ Payload:
   /api/automation/runs`; join it to the base URL your integration uses.
 - `error` is present only for `status: "failed"`, and carries the run error
   truncated the same way.
+- `pending` is present only for `status: "needs_input"`, and describes what the
+  run is blocked on — see below.
+
+### The `pending` object
+
+A `needs_input` callback carries the interaction itself, so the caller can act
+on it (via the [interaction endpoints](#interacting-with-a-run)) instead of only
+knowing that somebody must. Its `id` is what those endpoints take.
+
+For an `ask_user` prompt:
+
+```json
+{
+  "session_id": "s_01H…",
+  "status": "needs_input",
+  "title": "Fix the failing test in pkg/serve",
+  "summary": "",
+  "url": "/?session=s_01H…",
+  "pending": {
+    "kind": "question",
+    "id": "ask_01H…",
+    "questions": [
+      {"question": "Which database should I point the fix at?",
+       "options": ["staging", "production"]}
+    ]
+  },
+  "timestamp": "2026-07-31T12:00:00Z"
+}
+```
+
+For a permission request:
+
+```json
+{
+  "pending": {
+    "kind": "permission",
+    "id": "perm_01H…",
+    "tool": "bash",
+    "summary": "rm -rf ./build"
+  }
+}
+```
+
+`summary` is the same human-readable line the prompts show (the command for
+`bash`, the path for the file tools, a `key=value` rendering otherwise),
+truncated to 500 bytes like every other free-text field. Question and option
+texts are truncated the same way. Only the **first** blocking request of a run
+is reported — a run that asks again after you answer does not send a second
+`needs_input`; `GET /api/sessions/{id}` (with the browser credential) is the
+source of truth for what is pending right now.
 
 ### Signature
 
