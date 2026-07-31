@@ -2,7 +2,7 @@ version: 2
 
 builds:
   - id: moa
-    main: ./cmd/agent
+    main: ./cmd/moa
     binary: moa
     env:
       - CGO_ENABLED=0

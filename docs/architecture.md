@@ -6,7 +6,7 @@
 
 | Package | Role |
 |---------|------|
-| `cmd/agent/` | CLI entrypoint, flag parsing, runtime wiring |
+| `cmd/moa/` | CLI entrypoint, flag parsing, runtime wiring |
 | `pkg/agent/` | Agent loop, state machine, steering, budget enforcement |
 | `pkg/bus/` | Typed event bus — commands, queries, events between components |
 | `pkg/core/` | Shared abstractions: provider, message, tool, config, models |

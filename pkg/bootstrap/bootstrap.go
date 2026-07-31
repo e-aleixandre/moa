@@ -1,7 +1,7 @@
 // Package bootstrap wires up a complete agent session: tool registry, MCP,
 // permissions, subagents, plan mode, skills, verify, and system prompt.
 //
-// Both the CLI (cmd/agent) and the HTTP server (pkg/serve) call BuildSession
+// Both the CLI (cmd/moa) and the HTTP server (pkg/serve) call BuildSession
 // to avoid duplicating the 14-step setup sequence.
 package bootstrap
 
@@ -101,7 +101,7 @@ type SessionConfig struct {
 	// OnSubagentStart/OnSubagentEvent/OnSubagentUsage/OnSubagentEnd are the
 	// rich, per-child streaming sinks (subagent.Config.OnChildStart/
 	// OnChildEvent/OnChildUsage/OnChildEnd). The caller wires these into its
-	// own bus (see cmd/agent's preBus, pkg/serve's session_lifecycle closure)
+	// own bus (see cmd/moa's preBus, pkg/serve's session_lifecycle closure)
 	// since bootstrap has no bus reference of its own. All optional (nil =
 	// no-op).
 	OnSubagentStart func(jobID, task, model, thinking, originToolCallID string, async bool, startedAt time.Time, accentIndex int)

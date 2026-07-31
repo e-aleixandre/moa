@@ -27,13 +27,11 @@ against `checksums.txt`, extract it, and put `moa` somewhere on your `PATH`.
 ### go install
 
 ```bash
-go install github.com/e-aleixandre/moa/cmd/agent@latest
+go install github.com/e-aleixandre/moa/cmd/moa@latest
 ```
 
-Note the binary lands as `agent` (the main package's directory name); rename or
-alias it to `moa`. Prebuilt releases and the install script are the recommended
-path. Only works for releases newer than v0.18 (older tags predate the current
-module path).
+Builds from source, so you need Go 1.25+. Only works for releases newer than
+v0.18 (older tags predate the current module path).
 
 ### Keeping it up to date
 

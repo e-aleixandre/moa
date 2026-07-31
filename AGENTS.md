@@ -26,7 +26,7 @@ la otra atrás: eso genera divergencia y deuda.
 - Frontend: `cd pkg/serve/frontend && node esbuild.mjs` (en la VM `dev` no hay npm/make: `bun esbuild.mjs`).
   El output va embebido en `pkg/serve/static/` (via `//go:embed`), así que **rebuild del frontend antes de compilar el binario** si tocas el frontend.
 - Formatea con `gofmt` los ficheros que crees/edites. (Aviso: algunos ficheros del repo ya vienen
-  gofmt-unclean de antes —p. ej. `pkg/tui/app.go`, `cmd/agent/main.go`—; no los reformatees en bloque
+  gofmt-unclean de antes —p. ej. `pkg/tui/app.go`, `cmd/moa/main.go`—; no los reformatees en bloque
   dentro de un cambio de feature, mete ruido en el review.)
 
 ## Convenciones
