@@ -28,6 +28,17 @@ const automationOriginDefault = "automation"
 // rejected rather than turned into a session.
 const maxAutomationPromptBytes = 256 << 10
 
+// Per-field byte limits. The body as a whole is already capped, but a single
+// oversized field is still harmful on its own: a 1 MiB title pollutes every
+// session list, and the other fields are identifiers, not payloads.
+const (
+	maxAutomationTitleBytes          = 200
+	maxAutomationOriginBytes         = 64
+	maxAutomationIdempotencyKeyBytes = 256
+	maxAutomationCallbackURLBytes    = 2048
+	maxAutomationCallbackSecretBytes = 256
+)
+
 // WithAutomationToken enables the Automation API with its own shared secret,
 // separate from the browser token. An empty token leaves the automation routes
 // disabled entirely (they answer 404), so the API is fail-closed even on
@@ -105,6 +116,11 @@ type AutomationRunResponse struct {
 
 var errAutomationInvalidCallback = errors.New("callback_url must be an absolute http or https URL")
 
+// ErrAutomationIndexUnavailable reports that the idempotency index could not be
+// rebuilt from disk. Keyed requests are refused while it holds: answering them
+// with an empty index would silently execute a redelivered webhook twice.
+var ErrAutomationIndexUnavailable = errors.New("idempotency index unavailable")
+
 // validateCallbackURL keeps the stored target to what the future callback
 // sender is willing to POST to: an absolute http(s) URL with a host.
 func validateCallbackURL(raw string) error {
@@ -121,19 +137,41 @@ func validateCallbackURL(raw string) error {
 	return nil
 }
 
-// sessionWebURL builds the address a human can open to continue the session,
-// derived from the request's own Host so it is reachable by whoever called us
-// (the web client selects a session with ?session=<id>; see sw.js).
-func sessionWebURL(r *http.Request, sessionID string) string {
-	path := "/?session=" + url.QueryEscape(sessionID)
-	if r.Host == "" {
-		return path
+// validateAutomationRun applies the per-field limits and cross-field rules. It
+// returns a message suitable for a 400 body, or "" when the request is fine.
+func validateAutomationRun(req AutomationRunRequest) string {
+	limits := []struct {
+		name  string
+		value string
+		max   int
+	}{
+		{"title", req.Title, maxAutomationTitleBytes},
+		{"origin", req.Origin, maxAutomationOriginBytes},
+		{"idempotency_key", req.IdempotencyKey, maxAutomationIdempotencyKeyBytes},
+		{"callback_url", req.CallbackURL, maxAutomationCallbackURLBytes},
+		{"callback_secret", req.CallbackSecret, maxAutomationCallbackSecretBytes},
 	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
+	for _, l := range limits {
+		if len(l.value) > l.max {
+			return fmt.Sprintf("%s too long (max %d bytes)", l.name, l.max)
+		}
 	}
-	return scheme + "://" + r.Host + path
+	if req.CallbackSecret != "" && req.CallbackURL == "" {
+		return "callback_secret requires callback_url"
+	}
+	if err := validateCallbackURL(req.CallbackURL); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// sessionWebURL is the path a human can open to continue the session, relative
+// to wherever the caller reaches Moa (the web client selects a session with
+// ?session=<id>; see sw.js). It is deliberately relative: behind a
+// TLS-terminating proxy the request's own scheme/Host describe the proxy hop,
+// not the address the caller used.
+func sessionWebURL(sessionID string) string {
+	return "/?session=" + url.QueryEscape(sessionID)
 }
 
 func handleAutomationRun(mgr *Manager) http.HandlerFunc {
@@ -153,8 +191,8 @@ func handleAutomationRun(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "prompt too large", http.StatusBadRequest)
 			return
 		}
-		if err := validateCallbackURL(req.CallbackURL); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if msg := validateAutomationRun(req); msg != "" {
+			http.Error(w, msg, http.StatusBadRequest)
 			return
 		}
 
@@ -162,6 +200,13 @@ func handleAutomationRun(mgr *Manager) http.HandlerFunc {
 		if err != nil {
 			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if errors.Is(err, ErrAutomationIndexUnavailable) {
+				// Retryable: we cannot promise deduplication right now, and
+				// running the prompt anyway could duplicate a redelivery.
+				w.Header().Set("Retry-After", "5")
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -173,7 +218,7 @@ func handleAutomationRun(mgr *Manager) http.HandlerFunc {
 		}
 		writeJSON(w, status, AutomationRunResponse{
 			SessionID: sessionID,
-			URL:       sessionWebURL(r, sessionID),
+			URL:       sessionWebURL(sessionID),
 			Created:   created,
 		})
 	}
@@ -183,21 +228,52 @@ func handleAutomationRun(mgr *Manager) http.HandlerFunc {
 // built once from persisted session metadata and kept up to date by
 // CreateAutomationRun, so a retried webhook resolves to the same session even
 // across a restart.
+//
+// The rebuild is fail-closed: while it has not succeeded, keyed runs are
+// refused (ErrAutomationIndexUnavailable) instead of silently losing
+// deduplication, and the next keyed request retries it.
 type automationIndex struct {
-	mu   sync.Mutex
-	keys map[string]string
+	baseDir string
+	mu      sync.Mutex
+	keys    map[string]string
+	ready   bool
 }
 
 func newAutomationIndex(baseDir string) *automationIndex {
-	idx := &automationIndex{keys: make(map[string]string)}
-	summaries, err := session.ListAll(baseDir)
-	if err != nil {
-		// A missing index only costs deduplication; automation still works.
+	idx := &automationIndex{baseDir: baseDir, keys: make(map[string]string)}
+	if err := idx.rebuild(); err != nil {
 		slog.Warn("automation idempotency index unavailable", "error", err)
-		return idx
 	}
-	idx.load(summaries)
 	return idx
+}
+
+// rebuild reloads the key→session map from persisted metadata. Partial results
+// are kept even when ListAll also reports an error (one unreadable project
+// store must not erase the keys of the others), but the index is only marked
+// ready on a clean pass.
+func (a *automationIndex) rebuild() error {
+	summaries, err := session.ListAll(a.baseDir)
+	a.load(summaries)
+	a.mu.Lock()
+	a.ready = err == nil
+	a.mu.Unlock()
+	return err
+}
+
+// ensureReady returns nil once the index reflects disk. A previously failed
+// rebuild is retried here, so a transient filesystem problem recovers on the
+// next keyed request without a restart.
+func (a *automationIndex) ensureReady() error {
+	a.mu.Lock()
+	ready := a.ready
+	a.mu.Unlock()
+	if ready {
+		return nil
+	}
+	if err := a.rebuild(); err != nil {
+		return fmt.Errorf("%w: %v", ErrAutomationIndexUnavailable, err)
+	}
+	return nil
 }
 
 func (a *automationIndex) load(summaries []session.Summary) {
@@ -239,17 +315,37 @@ func (a *automationIndex) forget(sessionID string) {
 	}
 }
 
+// sendFirstPrompt delivers the automation run's first prompt. Indirected so
+// tests can simulate a delivery failure and assert the rollback.
+var sendFirstPrompt = func(m *Manager, sessionID, prompt string) error {
+	_, _, _, err := m.Send(sessionID, prompt, nil, "")
+	return err
+}
+
 // CreateAutomationRun creates a session for an external caller and sends it the
 // first prompt. It returns the session ID and whether it was created now; a
 // repeated idempotency key resolves to the existing session without creating a
 // duplicate or re-sending the prompt.
 //
 // The whole check-create-record sequence runs under automationMu so two
-// simultaneous retries of the same webhook cannot both pass the check.
+// simultaneous retries of the same webhook cannot both pass the check, and so a
+// concurrent Delete cannot drop the index entry we are about to write.
+//
+// Atomicity is best effort, not transactional: if the first Send fails the
+// freshly created session is deleted again, so a retry starts clean. A crash
+// landing exactly between the create and the send can still leave a promptless
+// session behind (documented limitation).
 func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID string, created bool, err error) {
 	m.automationMu.Lock()
 	defer m.automationMu.Unlock()
 
+	if req.IdempotencyKey != "" {
+		// Fail closed: without a trustworthy index a redelivered webhook would
+		// run twice. Unkeyed callers never asked for deduplication.
+		if err := m.automation.ensureReady(); err != nil {
+			return "", false, err
+		}
+	}
 	if id, ok := m.automation.lookup(req.IdempotencyKey); ok {
 		return id, false, nil
 	}
@@ -279,7 +375,13 @@ func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID strin
 	if err != nil {
 		return "", false, err
 	}
-	if _, _, _, err := m.Send(sess.ID, req.Prompt, nil, ""); err != nil {
+	if err := sendFirstPrompt(m, sess.ID, req.Prompt); err != nil {
+		// Roll the create back: a session that never received its prompt must not
+		// survive on disk, and must not be resolvable by this idempotency key
+		// after a restart rebuilds the index from metadata.
+		if delErr := m.deleteSession(sess.ID); delErr != nil {
+			slog.Warn("automation run: rolling back promptless session failed", "session", sess.ID, "error", delErr)
+		}
 		return "", false, fmt.Errorf("automation run: %w", err)
 	}
 	m.automation.put(req.IdempotencyKey, sess.ID)

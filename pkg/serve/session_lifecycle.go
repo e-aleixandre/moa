@@ -535,7 +535,19 @@ var (
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.
+//
+// It runs under automationMu (the same guard as CreateAutomationRun's
+// check-create-send-register sequence) so a delete cannot interleave with a run
+// creation and leave an idempotency key pointing at a session that is already
+// gone. Lock order is automationMu → m.mu, as in CreateAutomationRun.
 func (m *Manager) Delete(id string) error {
+	m.automationMu.Lock()
+	defer m.automationMu.Unlock()
+	return m.deleteSession(id)
+}
+
+// deleteSession is Delete's body. Callers must hold automationMu.
+func (m *Manager) deleteSession(id string) error {
 	if m.automation != nil {
 		// A deleted session must not keep answering an idempotency key: the next
 		// retry should create a fresh run rather than resolve to a gone session.

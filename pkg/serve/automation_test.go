@@ -3,8 +3,12 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -163,8 +167,8 @@ func TestAutomationRunCreatesSessionAndSendsPrompt(t *testing.T) {
 	if run.SessionID == "" || !run.Created {
 		t.Fatalf("unexpected response: %#v", run)
 	}
-	if !strings.HasSuffix(run.URL, "/?session="+run.SessionID) {
-		t.Fatalf("url = %q, want a web URL for the session", run.URL)
+	if run.URL != "/?session="+run.SessionID {
+		t.Fatalf("url = %q, want a relative session path", run.URL)
 	}
 
 	sess, ok := mgr.Get(run.SessionID)
@@ -224,6 +228,7 @@ func TestAutomationRunDefaultsOriginToAutomation(t *testing.T) {
 }
 
 func TestAutomationRunValidation(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
 	tests := []struct {
 		name string
 		body string
@@ -235,6 +240,12 @@ func TestAutomationRunValidation(t *testing.T) {
 		{"callback scheme ftp", `{"prompt":"hi","callback_url":"ftp://example.com/x"}`},
 		{"callback relative", `{"prompt":"hi","callback_url":"/relative"}`},
 		{"callback without host", `{"prompt":"hi","callback_url":"http://"}`},
+		{"callback secret without url", `{"prompt":"hi","callback_secret":"s3cret"}`},
+		{"title too long", `{"prompt":"hi","title":"` + long(maxAutomationTitleBytes+1) + `"}`},
+		{"origin too long", `{"prompt":"hi","origin":"` + long(maxAutomationOriginBytes+1) + `"}`},
+		{"idempotency key too long", `{"prompt":"hi","idempotency_key":"` + long(maxAutomationIdempotencyKeyBytes+1) + `"}`},
+		{"callback url too long", `{"prompt":"hi","callback_url":"https://example.com/` + long(maxAutomationCallbackURLBytes) + `"}`},
+		{"callback secret too long", `{"prompt":"hi","callback_url":"https://example.com/x","callback_secret":"` + long(maxAutomationCallbackSecretBytes+1) + `"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -350,5 +361,146 @@ func TestBearerTokenEqual(t *testing.T) {
 				t.Errorf("bearerTokenEqual(%q, %q) = %v, want %v", tt.header, tt.token, got, tt.want)
 			}
 		})
+	}
+}
+
+// A failed first Send must not leave a durable session behind: the create is
+// rolled back so the caller's retry starts clean (and a restart rebuilding the
+// index from disk cannot resolve the key to a promptless session).
+func TestAutomationRunRollsBackWhenSendFails(t *testing.T) {
+	srv, mgr := newAutomationTestServer(t, testAutomationToken)
+	var failedID string
+	orig := sendFirstPrompt
+	sendFirstPrompt = func(m *Manager, sessionID, prompt string) error {
+		failedID = sessionID
+		return errors.New("boom")
+	}
+	t.Cleanup(func() { sendFirstPrompt = orig })
+
+	body := `{"prompt":"do it","idempotency_key":"issue-99"}`
+	resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken, body, false)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if failedID == "" {
+		t.Fatal("send was never attempted")
+	}
+	if _, ok := mgr.Get(failedID); ok {
+		t.Error("session still active after a failed send")
+	}
+	if _, _, err := session.FindSession(mgr.sessionBaseDir, failedID); err == nil {
+		t.Error("session still persisted after a failed send")
+	}
+	if _, ok := mgr.automation.lookup("issue-99"); ok {
+		t.Error("idempotency key indexed for a run that never got its prompt")
+	}
+
+	// The retry works and produces a different, real session.
+	sendFirstPrompt = orig
+	retry := automationReq(t, srv, "/api/automation/runs", testAutomationToken, body, false)
+	defer retry.Body.Close() //nolint:errcheck
+	if retry.StatusCode != http.StatusCreated {
+		t.Fatalf("retry status = %d, want 201", retry.StatusCode)
+	}
+	run := decodeRun(t, retry)
+	if run.SessionID == failedID || !run.Created {
+		t.Fatalf("retry did not create a fresh session: %#v", run)
+	}
+}
+
+// Fail closed: while the index could not be rebuilt from disk, a keyed request
+// is refused as retryable instead of silently losing deduplication. Unkeyed
+// requests are unaffected, and a later successful rebuild unblocks keys.
+func TestAutomationIndexRebuildFailureFailsClosed(t *testing.T) {
+	srv, mgr := newAutomationTestServer(t, testAutomationToken)
+	// A regular file is not a session base dir, so every rebuild errors.
+	broken := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(broken, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	idx := newAutomationIndex(broken)
+	if idx.ready {
+		t.Fatal("index reported ready despite a failing rebuild")
+	}
+	mgr.automation = idx
+
+	keyed := automationReq(t, srv, "/api/automation/runs", testAutomationToken,
+		`{"prompt":"hi","idempotency_key":"k1"}`, false)
+	defer keyed.Body.Close() //nolint:errcheck
+	if keyed.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("keyed status = %d, want 503", keyed.StatusCode)
+	}
+
+	unkeyed := automationReq(t, srv, "/api/automation/runs", testAutomationToken, `{"prompt":"hi"}`, false)
+	defer unkeyed.Body.Close() //nolint:errcheck
+	if unkeyed.StatusCode != http.StatusCreated {
+		t.Fatalf("unkeyed status = %d, want 201", unkeyed.StatusCode)
+	}
+
+	// Point the index at a readable directory: the next keyed request retries
+	// the rebuild lazily and succeeds.
+	idx.baseDir = mgr.sessionBaseDir
+	retried := automationReq(t, srv, "/api/automation/runs", testAutomationToken,
+		`{"prompt":"hi","idempotency_key":"k1"}`, false)
+	defer retried.Body.Close() //nolint:errcheck
+	if retried.StatusCode != http.StatusCreated {
+		t.Fatalf("keyed status after recovery = %d, want 201", retried.StatusCode)
+	}
+	if _, ok := idx.lookup("k1"); !ok {
+		t.Error("key missing from the recovered index")
+	}
+}
+
+// A partial ListAll (some project stores unreadable) keeps the keys it could
+// read, but does not mark the index ready.
+func TestAutomationIndexRebuildKeepsPartialResults(t *testing.T) {
+	base := t.TempDir()
+	good := filepath.Join(base, "good")
+	if err := os.MkdirAll(good, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := &automationIndex{baseDir: base, keys: map[string]string{}}
+	store.load([]session.Summary{{ID: "s1", Metadata: map[string]any{session.MetaIdempotencyKey: "k1"}}})
+	if err := os.Mkdir(filepath.Join(base, "unreadable"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(base, "unreadable"), 0o755) })
+	if err := store.rebuild(); err == nil {
+		t.Fatal("rebuild over an unreadable store returned no error")
+	}
+	if _, ok := store.lookup("k1"); !ok {
+		t.Error("partial rebuild dropped previously known keys")
+	}
+	if store.ready {
+		t.Error("index marked ready after a partial rebuild")
+	}
+}
+
+// Delete and CreateAutomationRun must not interleave: a key registered by a run
+// cannot be forgotten by a delete that started before the run finished.
+func TestAutomationDeleteDoesNotRaceRunCreation(t *testing.T) {
+	srv, mgr := newAutomationTestServer(t, testAutomationToken)
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		key := "race-" + strconv.Itoa(i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken,
+				`{"prompt":"race","idempotency_key":"`+key+`"}`, false)
+			defer resp.Body.Close() //nolint:errcheck
+			var out AutomationRunResponse
+			_ = json.NewDecoder(resp.Body).Decode(&out)
+			if out.SessionID != "" {
+				_ = mgr.Delete(out.SessionID)
+			}
+		}()
+	}
+	wg.Wait()
+	for i := 0; i < 4; i++ {
+		if id, ok := mgr.automation.lookup("race-" + strconv.Itoa(i)); ok {
+			t.Errorf("key race-%d still maps to deleted session %q", i, id)
+		}
 	}
 }
