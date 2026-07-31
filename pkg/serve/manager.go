@@ -44,6 +44,9 @@ type ManagedSession struct {
 	ID      string    `json:"id"`
 	CWD     string    `json:"cwd"`
 	Created time.Time `json:"created"`
+	// Origin is who created the session ("user" for a human, or a caller-chosen
+	// label for automation). Mirrors session.Session metadata.
+	Origin string `json:"origin"`
 
 	// pathPolicy is the runtime-mutable path access policy shared with the
 	// session's tools; attachments-to-disk add the session's attachment dir
@@ -189,6 +192,7 @@ type SessionInfo struct {
 	CWD          string       `json:"cwd"`
 	Created      time.Time    `json:"created"`
 	Updated      time.Time    `json:"updated"`
+	Origin       string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
 	Error        string       `json:"error,omitempty"`
 	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
@@ -312,6 +316,7 @@ func (s *ManagedSession) info() SessionInfo {
 		CWD:            s.CWD,
 		Created:        s.Created,
 		Updated:        s.Updated,
+		Origin:         nonUserOrigin(s.Origin),
 		Error:          stateErr,
 		UntrustedMCP:   s.infra.UntrustedMCP,
 		MCP:            mcpSummary,
@@ -342,6 +347,15 @@ func (s *ManagedSession) info() SessionInfo {
 		info.RunStartedAt = runStartedAt
 	}
 	return info
+}
+
+// nonUserOrigin normalizes an origin for the API: a plain user session carries
+// no origin field, so clients only ever see a value worth showing.
+func nonUserOrigin(origin string) string {
+	if origin == "" || origin == session.OriginUser {
+		return ""
+	}
+	return origin
 }
 
 // sessionInfo uses attention as the single owner of live activity, avoiding a
@@ -764,6 +778,7 @@ func (m *Manager) List() []SessionInfo {
 		}
 		model, _ := sum.Metadata["model"].(string)
 		cwd, _ := sum.Metadata["cwd"].(string)
+		origin, _ := sum.Metadata[session.MetaOrigin].(string)
 		list = append(list, SessionInfo{
 			ID:       sum.ID,
 			Title:    sum.Title,
@@ -771,6 +786,7 @@ func (m *Manager) List() []SessionInfo {
 			State:    StateSaved,
 			Model:    model,
 			CWD:      cwd,
+			Origin:   nonUserOrigin(origin),
 			Created:  sum.Created,
 			Updated:  sum.Updated,
 		})

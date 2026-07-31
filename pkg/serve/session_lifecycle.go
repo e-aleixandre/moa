@@ -28,6 +28,13 @@ type CreateOpts struct {
 	Model string `json:"model"`
 	Title string `json:"title"`
 	CWD   string `json:"cwd"`
+	// Origin records who created the session ("user" when empty). Free-form so
+	// automation callers can label their integration, e.g. "linear-webhook".
+	Origin string `json:"origin"`
+	// extraMeta carries additional creation-time metadata (automation
+	// bookkeeping such as the idempotency key and callback target). Not part of
+	// the public JSON body — automation handlers set it.
+	extraMeta map[string]any
 }
 
 // CreateSession creates a new agent session.
@@ -67,6 +74,13 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	persisted := store.Create()
 	persisted.Title = opts.Title
 	persisted.TitleSource = titleSource
+	persisted.SetOrigin(opts.Origin)
+	for k, v := range opts.extraMeta {
+		if persisted.Metadata == nil {
+			persisted.Metadata = make(map[string]any)
+		}
+		persisted.Metadata[k] = v
+	}
 	id := persisted.ID
 
 	var bopts *buildOpts
@@ -77,6 +91,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	sess.Origin = persisted.Origin()
 
 	// Persist before exposing the session. A successful create must not turn
 	// into an invisible ephemeral conversation on the next restart.
@@ -676,6 +691,7 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		cleanup()
 		return nil, fmt.Errorf("resume: %w", err)
 	}
+	sess.Origin = saved.Origin()
 
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {
