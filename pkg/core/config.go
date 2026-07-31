@@ -101,6 +101,7 @@ type MoaConfig struct {
 	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
 	STTLanguage            string               `json:"stt_language,omitempty"`                  // Speech-to-text language as ISO-639-1 (e.g. "es", "en"). Empty = "en"; "auto" lets the model detect.
 	STTModel               string               `json:"stt_model,omitempty"`                     // Speech-to-text model id. Empty = "gpt-transcribe".
+	STTVocabulary          []string             `json:"stt_vocabulary,omitempty"`                // Words the transcriber tends to get wrong (names, jargon). Keep it short: long lists hurt accuracy.
 	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`            // Max turns per subagent run. 0 = use package default.
 	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"`     // Max subagent run duration as Go duration string. Empty = use package default.
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
@@ -197,6 +198,65 @@ func GetSTTModel(cfg MoaConfig) string {
 		return model
 	}
 	return DefaultSTTModel
+}
+
+// sttVocabularyLimit caps how many terms reach the provider.
+//
+// This is a quality ceiling, not an API one. Every vendor that offers custom
+// vocabulary warns that long lists make transcription WORSE — the model starts
+// forcing your terms onto words that merely sound similar, and it can also
+// disturb punctuation and language detection. Deepgram recommends 20-50 terms;
+// we take the top of that range and keep the first ones, since people write the
+// words that actually fail first.
+const sttVocabularyLimit = 50
+
+// BuildSTTPrompt turns a configured vocabulary into the provider's prompt hint.
+//
+// The prompt is a hint, not a substitution: it biases spelling toward these
+// words without forcing them. We send it as a plain comma-separated list, the
+// shape OpenAI documents for "a list of correct spellings".
+//
+// It deliberately uses "prompt" rather than the newer "keywords" field: whisper-1
+// rejects keywords outright, and the model is user-configurable, so a vocabulary
+// that only works on some models would be a trap. Both produce the same result
+// in practice.
+//
+// Terms are trimmed, blank ones dropped, and duplicates removed case-insensitively
+// (keeping the first spelling, which is the one the user cared to write).
+func BuildSTTPrompt(vocabulary []string) string {
+	if len(vocabulary) == 0 {
+		return ""
+	}
+	terms := make([]string, 0, len(vocabulary))
+	seen := make(map[string]bool, len(vocabulary))
+	for _, term := range vocabulary {
+		term = strings.TrimSpace(term)
+		// Newlines would break the multipart field, and a comma inside a term
+		// would read as two terms; both are user typos, so normalize to spaces.
+		term = strings.Map(func(r rune) rune {
+			if r == '\n' || r == '\r' || r == ',' {
+				return ' '
+			}
+			return r
+		}, term)
+		term = strings.Join(strings.Fields(term), " ")
+		if term == "" {
+			continue
+		}
+		key := strings.ToLower(term)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		terms = append(terms, term)
+		if len(terms) == sttVocabularyLimit {
+			break
+		}
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	return strings.Join(terms, ", ")
 }
 
 // GetMaxRunDuration parses MaxRunDurationStr into a time.Duration.
@@ -307,6 +367,19 @@ func mergeScalar[T comparable](base, override T) T {
 	return base
 }
 
+// concat joins two slices into a new one. Unlike append(base, override...) it
+// can never write into base's spare capacity, so a merged config cannot corrupt
+// the config it was merged from.
+func concat[T any](base, override []T) []T {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	out := make([]T, 0, len(base)+len(override))
+	out = append(out, base...)
+	out = append(out, override...)
+	return out
+}
+
 func mergeConfigs(base, override MoaConfig) MoaConfig {
 	merged := MoaConfig{
 		DisableSandbox: base.DisableSandbox || override.DisableSandbox,
@@ -335,6 +408,10 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		CacheTTL:           mergeScalar(base.CacheTTL, override.CacheTTL),
 		STTLanguage:        mergeScalar(base.STTLanguage, override.STTLanguage),
 		STTModel:           mergeScalar(base.STTModel, override.STTModel),
+		// Vocabulary accumulates instead of replacing: a project adds its own
+		// jargon on top of the names you set globally, rather than erasing them.
+		// Concatenated into a fresh slice so neither input is ever aliased.
+		STTVocabulary: concat(base.STTVocabulary, override.STTVocabulary),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {

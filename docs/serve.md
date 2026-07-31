@@ -49,6 +49,10 @@ On desktop, you can split panes horizontally or vertically, switch focus by keyb
 
 Requires `moa --login openai-transcribe`. Browser microphone access usually needs HTTPS, so it works best on localhost, Tailscale, or behind your own HTTPS setup.
 
+If it keeps mangling a name or a piece of jargon, add that word to
+[`stt_vocabulary`](configuration.md#features). The model and the language hint
+are configurable there too.
+
 ## Attachments
 
 The composer accepts file attachments (paperclip icon, drag-and-drop, or paste). How each file is handled depends on its type:
