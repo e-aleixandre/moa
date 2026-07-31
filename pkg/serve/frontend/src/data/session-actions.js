@@ -371,6 +371,24 @@ export async function sendMessage(id, text, attachments = []) {
         });
       }
     }
+    // Reconcile the optimistic echo with the identity the server actually
+    // accepted. The server re-mints a msg_id that is malformed or already used
+    // in this session's history, so ours is not guaranteed to be the effective
+    // one; without adopting the server's, the authoritative user_message
+    // broadcast would not dedup against our echo and the message would double.
+    // If the broadcast already landed under the effective ID (it can beat this
+    // response), our echo is the redundant copy — drop it instead.
+    if (msgId && res?.msg_id && res.msg_id !== msgId) {
+      const cur = store.get().sessions[id];
+      if (cur?.messages) {
+        const already = cur.messages.some((m) => m._msg_id === res.msg_id);
+        updateSession(id, {
+          messages: already
+            ? cur.messages.filter((m) => m._msg_id !== msgId)
+            : cur.messages.map((m) => (m._msg_id === msgId ? { ...m, _msg_id: res.msg_id } : m)),
+        });
+      }
+    }
     // Mark the chip confirmed now that the server accepted it: from here on it
     // is part of the authoritative queue, so a reconnect snapshot that omits it
     // means "delivered/cancelled" (drop it) rather than "in flight" (keep it).

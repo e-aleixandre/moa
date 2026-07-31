@@ -175,6 +175,16 @@ type GetPermissionDecisionSnapshot struct{ SessionID string }
 // Handler returns: []core.AgentMessage
 type GetDisplayMessages struct{ SessionID string }
 
+// MsgIDInUse reports whether a message with this ID is already part of the
+// session's history. Ingress paths that accept a client-supplied message ID use
+// it to refuse an identity that is already taken: reusing a historical ID would
+// make every client dedup the new message away and hide it until a reload.
+// Handler returns: bool
+type MsgIDInUse struct {
+	SessionID string
+	MsgID     string
+}
+
 // GetBranchPoints returns branch points for the branch picker UI.
 // Handler returns: []BranchPoint
 type GetBranchPoints struct{ SessionID string }

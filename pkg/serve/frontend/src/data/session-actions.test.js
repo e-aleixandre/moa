@@ -326,3 +326,60 @@ test('sendMessage keeps mixed optimistic attachments intact when the descriptor 
   expect(content[1].attachment_id).toBeUndefined();
   expect(content[2]).toEqual({ type: 'text', text: 'review both' });
 });
+
+test('sendMessage adopts the server-minted msg_id when the server re-minted ours', async () => {
+  // The server refuses a msg_id that is malformed or already used in this
+  // session's history and mints a fresh one. Without adopting it, the
+  // authoritative user_message broadcast would not dedup against our optimistic
+  // echo and the message would render twice.
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = { action: 'send', msg_id: 'server-minted-1' };
+
+  await sendMessage('s1', 'hola', []);
+
+  const messages = store.get().sessions.s1.messages;
+  expect(messages.length).toBe(1);
+  expect(messages[0]._msg_id).toBe('server-minted-1');
+});
+
+test('sendMessage drops its optimistic echo when the broadcast already landed under the effective id', async () => {
+  // The user_message broadcast can beat the /send response. It inserted the
+  // message under the effective ID, so our echo is now the duplicate.
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = { action: 'send', msg_id: 'server-minted-2' };
+  const { updateSession } = await import('./store.js');
+
+  const pending = sendMessage('s1', 'hola', []);
+  // Simulate the broadcast arriving before the response resolves.
+  const cur = store.get().sessions.s1;
+  updateSession('s1', {
+    messages: [...cur.messages, { role: 'user', _msg_id: 'server-minted-2', content: [{ type: 'text', text: 'hola' }] }],
+  });
+  await pending;
+
+  const messages = store.get().sessions.s1.messages;
+  expect(messages.length).toBe(1);
+  expect(messages[0]._msg_id).toBe('server-minted-2');
+});
+
+test('sendMessage keeps its own msg_id when the server honored it', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  let sentMsgId = null;
+  apiResponse = { action: 'send' };
+  await sendMessage('s1', 'hola', []);
+  sentMsgId = store.get().sessions.s1.messages[0]._msg_id;
+  expect(sentMsgId).toBeTruthy();
+  expect(sentMsgId.startsWith('c-')).toBe(true);
+});

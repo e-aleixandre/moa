@@ -1363,3 +1363,114 @@ func TestExecCommand_NotFound(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+// ===========================================================================
+// Client-supplied msg_id — validation, uniqueness and re-minting
+// ===========================================================================
+
+// sendAndWaitIdle performs a direct send and waits for the run to settle, so
+// the message is in history before the next assertion reads it.
+func sendAndWaitIdle(t *testing.T, mgr *Manager, sess *ManagedSession, text, msgID string) string {
+	t.Helper()
+	action, id, _, err := mgr.Send(sess.ID, text, nil, "", msgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != "send" {
+		t.Fatalf("action = %q, want send", action)
+	}
+	pollUntil(t, 5*time.Second, "run settles", func() bool { return sessState(sess) == StateIdle })
+	return id
+}
+
+func historyMsgIDs(sess *ManagedSession) []string {
+	msgs, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](sess.runtime.Bus, bus.GetDisplayMessages{})
+	ids := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == "user" {
+			ids = append(ids, m.MsgID)
+		}
+	}
+	return ids
+}
+
+func TestSend_ClientMsgID_HonoredWhenValidAndFree(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := sendAndWaitIdle(t, mgr, sess, "hola", "c-abc_123")
+	if got != "c-abc_123" {
+		t.Fatalf("effective msg ID = %q, want the client-supplied one", got)
+	}
+	if ids := historyMsgIDs(sess); len(ids) != 1 || ids[0] != "c-abc_123" {
+		t.Fatalf("history user msg IDs = %v, want [c-abc_123]", ids)
+	}
+}
+
+func TestSend_ClientMsgID_RemintedWhenInvalidOrHuge(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for _, tc := range []struct {
+		name  string
+		msgID string
+	}{
+		{"too long", strings.Repeat("a", 65)},
+		{"gigantic", strings.Repeat("z", 100_000)},
+		{"illegal characters", "c-abc/../etc"},
+		{"whitespace and newlines", "id with\nnewline"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply")))
+			sess, err := mgr.CreateSession(CreateOpts{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := sendAndWaitIdle(t, mgr, sess, "hola", tc.msgID)
+			if got == tc.msgID {
+				t.Fatal("a malformed client msg_id was accepted verbatim")
+			}
+			if !clientIDPattern.MatchString(got) {
+				t.Fatalf("re-minted msg ID %q does not satisfy the ID shape", got)
+			}
+			// The prompt must still have reached the conversation: rejecting the
+			// ID must never cost the message.
+			ids := historyMsgIDs(sess)
+			if len(ids) != 1 || ids[0] != got {
+				t.Fatalf("history user msg IDs = %v, want [%s]", ids, got)
+			}
+		})
+	}
+}
+
+func TestSend_ClientMsgID_RemintedWhenAlreadyInHistory(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply"), simpleResponseHandler("reply2")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := sendAndWaitIdle(t, mgr, sess, "primero", "c-reused")
+	if first != "c-reused" {
+		t.Fatalf("first msg ID = %q, want c-reused", first)
+	}
+
+	// Replaying the same ID must not make the second message invisible: every
+	// client dedups by ID, so reusing one would suppress the new message
+	// everywhere. The server re-mints instead, and the prompt still lands.
+	second := sendAndWaitIdle(t, mgr, sess, "segundo", "c-reused")
+	if second == "c-reused" {
+		t.Fatal("a msg_id already present in history was reused")
+	}
+	ids := historyMsgIDs(sess)
+	if len(ids) != 2 || ids[0] != first || ids[1] != second {
+		t.Fatalf("history user msg IDs = %v, want [%s %s]", ids, first, second)
+	}
+}

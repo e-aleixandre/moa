@@ -1494,3 +1494,53 @@ func TestArchiveEndpoint(t *testing.T) {
 		t.Fatalf("unknown session: expected 404, got %d", r3.StatusCode)
 	}
 }
+
+// TestHandleSend_ReturnsEffectiveMsgID checks the /send response carries the
+// identity the message was actually accepted under. The sending client needs it
+// to reconcile its optimistic echo when the server re-minted a msg_id it could
+// not honor — without it, the authoritative user_message broadcast would not
+// dedup and the message would render twice.
+func TestHandleSend_ReturnsEffectiveMsgID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply"), simpleResponseHandler("reply2")))
+	httpSrv := httptest.NewServer(NewServer(mgr))
+	defer httpSrv.Close()
+	sess, _ := mgr.CreateSession(CreateOpts{})
+
+	send := func(body string) (string, string) {
+		t.Helper()
+		resp := apiReq(t, httpSrv, "POST", "/api/sessions/"+sess.ID+"/send", body)
+		defer resp.Body.Close() //nolint:errcheck
+		if resp.StatusCode != 202 {
+			t.Fatalf("status = %d, want 202", resp.StatusCode)
+		}
+		var got struct {
+			Action  string `json:"action"`
+			MsgID   string `json:"msg_id"`
+			SteerID string `json:"steer_id"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Action != "send" {
+			t.Fatalf("action = %q, want send", got.Action)
+		}
+		pollUntil(t, 5*time.Second, "run settles", func() bool { return sessState(sess) == StateIdle })
+		return got.MsgID, got.SteerID
+	}
+
+	msgID, steerID := send(`{"text":"hola","msg_id":"c-valid_1"}`)
+	if msgID != "c-valid_1" {
+		t.Fatalf("msg_id = %q, want the client-supplied one", msgID)
+	}
+	if steerID != "" {
+		t.Fatalf("steer_id = %q, want empty for a direct send", steerID)
+	}
+
+	// Same ID again: re-minted, and the response tells the client which one won.
+	reused, _ := send(`{"text":"otra vez","msg_id":"c-valid_1"}`)
+	if reused == "" || reused == "c-valid_1" {
+		t.Fatalf("msg_id = %q, want a freshly minted ID", reused)
+	}
+}

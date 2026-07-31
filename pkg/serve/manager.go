@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -246,6 +247,31 @@ type SessionInfo struct {
 const (
 	maxTitleLength = 80 // auto-generated session title cap
 )
+
+// clientIDPattern bounds a client-supplied identifier (msg_id) to the shape the
+// server itself mints: hex, or the "c-<uuid>" the SPA produces. Anything else —
+// unbounded length, control characters, JSON-hostile payloads — is rejected and
+// re-minted, since the ID is echoed to every connected client.
+var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// effectiveMsgID resolves the message ID a direct send lands under. A client may
+// supply one so its optimistic echo already carries the identity the message
+// enters history with. That ID is untrusted: a malformed or oversized one is
+// unsafe to rebroadcast, and one that already exists in this session's history
+// would make every client's dedup swallow the new message, hiding it until a
+// reload. In both cases the server mints a fresh ID instead of rejecting the
+// send — the prompt must reach the agent regardless — and returns it so the
+// caller can reconcile its optimistic message with the effective identity.
+func effectiveMsgID(sess *ManagedSession, msgID string) string {
+	if msgID == "" || !clientIDPattern.MatchString(msgID) {
+		return core.NewMsgID()
+	}
+	inUse, err := bus.QueryTyped[bus.MsgIDInUse, bool](sess.runtime.Bus, bus.MsgIDInUse{MsgID: msgID})
+	if err != nil || inUse {
+		return core.NewMsgID()
+	}
+	return msgID
+}
 
 // History returns a copy of the session's conversation messages.
 func (s *ManagedSession) History() []core.AgentMessage {
@@ -622,12 +648,18 @@ func (m *Manager) loadConfig(cwd string) core.MoaConfig {
 // message: the client shows its optimistic chip under that same ID, so there is
 // no window where a chip lacks an authoritative identity (closes the
 // double-send and cancel-vs-in-flight races). When empty (e.g. CLI), the
-// handler mints one. Returns the action taken ("send" or "steer") and the ID
-// the message was queued under so the caller can reconcile by ID.
+// handler mints one.
 // msgID plays the same role for a direct send: the client mints it for its
 // optimistic echo, and the user message enters the conversation under it, so
 // the UserMessageAppended broadcast dedups against that echo instead of
-// doubling the message on the sending client.
+// doubling the message on the sending client. A malformed or already-used msgID
+// is replaced by a server-minted one rather than rejected (see validClientID):
+// the prompt must reach the agent either way.
+//
+// Returns the action taken ("send" or "steer") and the effective ID the message
+// was accepted under — the chip ID for a steer, the message ID for a direct
+// send — so the caller can reconcile its optimistic view by identity even when
+// the server re-minted it.
 func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID string) (action, id string, descriptors []attachment.Descriptor, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
@@ -710,11 +742,14 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	}
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
+	// Resolve the message identity ONCE for both direct-send paths: the client's
+	// ID when it is well-formed and free, a server-minted one otherwise.
+	msgID = effectiveMsgID(sess, msgID)
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, MsgID: msgID}); err != nil {
 			return "", "", nil, err
 		}
-		return "send", "", nil, nil
+		return "send", msgID, nil, nil
 	}
 
 	// Serialize attachment processing per session so the per-session on-disk
@@ -741,7 +776,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 		m.releaseAttachmentRefs(sessionID, descriptors)
 		return "", "", nil, err
 	}
-	return "send", "", descriptors, nil
+	return "send", msgID, descriptors, nil
 }
 
 func (m *Manager) releaseAttachmentRefs(sessionID string, descriptors []attachment.Descriptor) {

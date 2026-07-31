@@ -196,7 +196,7 @@ func handleAutomationReply(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "text too large", http.StatusBadRequest)
 			return
 		}
-		action, steerID, _, err := mgr.Send(sess.ID, body.Text, nil, "", "")
+		action, acceptedID, _, err := mgr.Send(sess.ID, body.Text, nil, "", "")
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -205,10 +205,15 @@ func handleAutomationReply(mgr *Manager) http.HandlerFunc {
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
-			writeJSON(w, http.StatusAccepted, map[string]any{
-				"action":   action,
-				"steer_id": steerID,
-			})
+			resp := map[string]any{"action": action}
+			// A steer is accepted under a chip ID, a direct send under a message
+			// ID — never conflate them (see handleSend).
+			if action == "steer" {
+				resp["steer_id"] = acceptedID
+			} else {
+				resp["msg_id"] = acceptedID
+			}
+			writeJSON(w, http.StatusAccepted, resp)
 		}
 	}
 }

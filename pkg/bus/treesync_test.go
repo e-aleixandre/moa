@@ -146,3 +146,75 @@ func TestDisplayMessages_NoDuplicateAfterSync(t *testing.T) {
 		t.Fatalf("display messages = %d, want 2 (no duplication after sync)", len(got))
 	}
 }
+
+func msgWithID(role, text, id string) core.AgentMessage {
+	m := msg(role, text)
+	m.MsgID = id
+	return m
+}
+
+// TestMsgIDInUse covers the query the serve layer uses to refuse a
+// client-supplied message ID that is already taken. It must see BOTH the synced
+// tree history and the in-flight turn: those are exactly the messages clients
+// dedup against, so an ID present in either would swallow a new message.
+func TestMsgIDInUse(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{msgWithID("user", "hi", "m-synced"), msgWithID("assistant", "hello", "m-a")}
+	fa.mu.Unlock()
+	b.Publish(RunEnded{SessionID: "test-session"})
+	b.Drain(time.Second)
+
+	// In-flight turn: on the agent, not yet in the tree.
+	fa.mu.Lock()
+	fa.messages = append(fa.messages, msgWithID("user", "second", "m-inflight"))
+	fa.mu.Unlock()
+
+	for _, tc := range []struct {
+		id   string
+		want bool
+	}{
+		{"m-synced", true},
+		{"m-inflight", true},
+		{"m-free", false},
+		{"", false},
+	} {
+		got, err := QueryTyped[MsgIDInUse, bool](b, MsgIDInUse{MsgID: tc.id})
+		if err != nil {
+			t.Fatalf("query %q failed: %v", tc.id, err)
+		}
+		if got != tc.want {
+			t.Fatalf("MsgIDInUse(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}
+
+// TestMsgIDInUse_WithoutTreeSyncer exercises the fallback path (no syncer
+// registered): the agent's own messages are still the source of truth.
+func TestMsgIDInUse_WithoutTreeSyncer(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{msgWithID("user", "hi", "m-1")}
+	fa.mu.Unlock()
+
+	if got, _ := QueryTyped[MsgIDInUse, bool](b, MsgIDInUse{MsgID: "m-1"}); !got {
+		t.Fatal("MsgIDInUse(m-1) = false, want true")
+	}
+	if got, _ := QueryTyped[MsgIDInUse, bool](b, MsgIDInUse{MsgID: "m-2"}); got {
+		t.Fatal("MsgIDInUse(m-2) = true, want false")
+	}
+}

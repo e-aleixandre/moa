@@ -439,7 +439,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		sessionID := r.PathValue("id")
-		action, steerID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID)
+		action, acceptedID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -453,8 +453,19 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			resp := struct {
 				Action      string          `json:"action"`
 				SteerID     string          `json:"steer_id,omitempty"`
+				MsgID       string          `json:"msg_id,omitempty"`
 				Attachments []AttachmentDTO `json:"attachments"`
-			}{Action: action, SteerID: steerID, Attachments: make([]AttachmentDTO, 0, len(descriptors))}
+			}{Action: action, Attachments: make([]AttachmentDTO, 0, len(descriptors))}
+			// The accepted identity is a chip ID for a steer and a message ID
+			// for a direct send. Echo it under the right name: a client-supplied
+			// msg_id that was malformed or already taken was re-minted server
+			// side, and the sender needs the effective one to reconcile its
+			// optimistic message (otherwise the broadcast would double it).
+			if action == "steer" {
+				resp.SteerID = acceptedID
+			} else {
+				resp.MsgID = acceptedID
+			}
 			for _, d := range descriptors {
 				resp.Attachments = append(resp.Attachments, attachmentDTO(sessionID, d))
 			}
