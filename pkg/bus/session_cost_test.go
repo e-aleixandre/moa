@@ -40,19 +40,19 @@ func TestSessionCost_AccumulatesRunAndSubagents(t *testing.T) {
 		t.Fatalf("session cost = %v, want 0.15", total)
 	}
 
-	// The last published update should carry the running total.
+	// The last published update should carry the running total. Delivery to the
+	// subscriber is asynchronous, so wait for the expected total instead of
+	// assuming everything already arrived (a non-blocking drain flaked on slow
+	// CI machines).
 	var last SessionCostUpdated
-	drained := false
-	for !drained {
+	deadline := time.After(2 * time.Second)
+	for !approxEqual(last.TotalUSD, 0.15) {
 		select {
 		case e := <-got:
 			last = e
-		default:
-			drained = true
+		case <-deadline:
+			t.Fatalf("last SessionCostUpdated.TotalUSD = %v, want 0.15", last.TotalUSD)
 		}
-	}
-	if !approxEqual(last.TotalUSD, 0.15) {
-		t.Fatalf("last SessionCostUpdated.TotalUSD = %v, want 0.15", last.TotalUSD)
 	}
 }
 
