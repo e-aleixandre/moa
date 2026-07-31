@@ -196,3 +196,71 @@ func TestImageDimensions_JPEGWithVeryLateSOF(t *testing.T) {
 		t.Fatalf("got %dx%d, want 40x9001 (the guarded paths must not cap the scan)", w, h)
 	}
 }
+
+func TestImageMimeFromBytes(t *testing.T) {
+	gif := append([]byte("GIF89a"), make([]byte, 20)...)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 20)...)
+	webp := append(append([]byte("RIFF"), []byte{0, 0, 0, 0}...), []byte("WEBPVP8 ")...)
+	cases := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"gif", gif, "image/gif"},
+		{"png", png, "image/png"},
+		{"jpeg", jpegOfSize(t, 4, 4), "image/jpeg"},
+		{"webp", webp, "image/webp"},
+		{"unknown", []byte("not an image at all"), ""},
+		{"short", []byte("GI"), ""},
+		// "GIF" alone is a prefix, not a signature: the version bytes are part
+		// of the magic, so an arbitrary payload starting with it is not a GIF.
+		{"gif prefix only", []byte("GIFT for you, not an image"), ""},
+	}
+	for _, c := range cases {
+		if got := ImageMimeFromBytes(c.data); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A block recorded with the wrong media type (a GIF read from a .png) is what
+// Anthropic rejects with a hard 400; the correction must win over the label.
+func TestCorrectImageMime(t *testing.T) {
+	gif := base64.StdEncoding.EncodeToString(append([]byte("GIF89a"), make([]byte, 4096)...))
+	if got := CorrectImageMime(gif, "image/png"); got != "image/gif" {
+		t.Errorf("mislabeled GIF: got %q, want image/gif", got)
+	}
+	jpg := base64.StdEncoding.EncodeToString(jpegOfSize(t, 10, 10))
+	if got := CorrectImageMime(jpg, "image/jpeg"); got != "image/jpeg" {
+		t.Errorf("honest JPEG: got %q", got)
+	}
+	// Unrecognized payloads keep the declared type rather than being guessed at.
+	if got := CorrectImageMime(base64.StdEncoding.EncodeToString([]byte("mystery bytes")), "image/png"); got != "image/png" {
+		t.Errorf("unknown format: got %q, want the declared type", got)
+	}
+	if got := CorrectImageMime("!!not base64!!", "image/png"); got != "image/png" {
+		t.Errorf("undecodable payload: got %q, want the declared type", got)
+	}
+}
+
+// Standard base64 tolerates CR/LF, so a line-wrapped payload must still be
+// recognized: failing to decode here would leave a poisoned history declaring
+// the wrong media type forever.
+func TestCorrectImageMime_LineWrappedPayload(t *testing.T) {
+	raw := base64.StdEncoding.EncodeToString(append([]byte("GIF89a"), make([]byte, 256)...))
+	wrapped := ""
+	for i := 0; i < len(raw); i += 4 {
+		end := i + 4
+		if end > len(raw) {
+			end = len(raw)
+		}
+		wrapped += raw[i:end] + "\r\n"
+	}
+	if got := CorrectImageMime(wrapped, "image/png"); got != "image/gif" {
+		t.Errorf("wrapped GIF: got %q, want image/gif", got)
+	}
+	// Newlines landing mid-quantum are the case an index cut would break.
+	if got := CorrectImageMime(raw[:2]+"\n"+raw[2:], "image/png"); got != "image/gif" {
+		t.Errorf("GIF with a newline inside the first quantum: got %q, want image/gif", got)
+	}
+}

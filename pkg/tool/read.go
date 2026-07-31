@@ -159,6 +159,13 @@ func readImage(path, mimeType string) (core.Result, error) {
 	if mimeType == "" {
 		mimeType = mime.TypeByExtension(filepath.Ext(path))
 	}
+	// The type so far comes from the extension, which lies often enough (a GIF
+	// saved as .png). Anthropic rejects a mismatch between the declared media
+	// type and the bytes with a hard 400, and history is replayed every turn,
+	// so trust the magic bytes over the name.
+	if actual := core.ImageMimeFromBytes(data); actual != "" {
+		mimeType = actual
+	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
 	return core.Result{

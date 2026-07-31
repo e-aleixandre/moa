@@ -62,3 +62,26 @@ func TestRead_ImageExceedingMaxDimension(t *testing.T) {
 		}
 	}
 }
+
+// The image type is derived from the extension, which lies often enough (a GIF
+// saved as .png). Anthropic 400s on the mismatch and history is replayed every
+// turn, so the recorded type must come from the bytes.
+func TestRead_ImageMimeFollowsBytesNotExtension(t *testing.T) {
+	tmp := t.TempDir()
+	gif := append([]byte("GIF89a"), make([]byte, 128)...)
+	if err := os.WriteFile(filepath.Join(tmp, "actually.png"), gif, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{"path": "actually.png"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result: %+v", result.Content)
+	}
+	if got := result.Content[0].MimeType; got != "image/gif" {
+		t.Fatalf("mime: got %q, want image/gif", got)
+	}
+}

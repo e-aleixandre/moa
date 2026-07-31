@@ -233,10 +233,14 @@ func convertUserContent(blocks []core.Content, supportsDocuments bool) []map[str
 				"text": b.Text,
 			})
 		case "image":
+			// The recorded media type can disagree with the bytes (e.g. a GIF
+			// read from a .png). Declare what the bytes actually are: history
+			// is portable across providers, and a data URL that lies about its
+			// type is what Anthropic rejects outright.
 			parts = append(parts, map[string]any{
 				"type":      "input_image",
 				"detail":    "auto",
-				"image_url": "data:" + b.MimeType + ";base64," + b.Data,
+				"image_url": "data:" + core.CorrectImageMime(b.Data, b.MimeType) + ";base64," + b.Data,
 			})
 		case "document":
 			if !supportsDocuments {

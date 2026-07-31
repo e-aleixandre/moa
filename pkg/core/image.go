@@ -179,6 +179,60 @@ func ImageExceedsMaxDimension(b64 string) (width, height int, exceeds bool) {
 	return w, h, w > MaxImageDimension || h > MaxImageDimension
 }
 
+// imageMagicBytes is how much of an image is needed to recognize its format
+// from the magic bytes. WebP needs the 12-byte RIFF header; the rest need less.
+const imageMagicBytes = 12
+
+// ImageMimeFromBytes reports the media type implied by an image's magic bytes,
+// or "" when the format isn't one providers accept inline. Only the formats in
+// that set are recognized, so an unknown payload is left for the caller to
+// handle rather than guessed at.
+func ImageMimeFromBytes(data []byte) string {
+	switch {
+	case len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n":
+		return "image/png"
+	case len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a"):
+		return "image/gif"
+	case len(data) >= 2 && data[0] == 0xff && data[1] == 0xd8:
+		return "image/jpeg"
+	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		return "image/webp"
+	}
+	return ""
+}
+
+// CorrectImageMime returns the media type to declare for a base64 image
+// payload: the one the bytes actually are, falling back to the declared one
+// when the format isn't recognized.
+//
+// A mislabeled image (e.g. a GIF saved as .png, which the read tool types from
+// the extension) is rejected by Anthropic with a hard 400 naming the mismatch.
+// History is replayed every turn, so one such block makes the whole
+// conversation unsendable — hence the correction sits at the provider edge too,
+// where it also un-poisons sessions that already recorded the wrong type.
+func CorrectImageMime(b64, declared string) string {
+	// Take the prefix a character at a time, skipping the CR/LF that standard
+	// base64 tolerates: cutting the raw string by index could land mid-quantum
+	// on a line-wrapped payload, fail to decode, and leave a poisoned history
+	// declaring the wrong type forever.
+	want := (imageMagicBytes/3 + 1) * 4
+	head := make([]byte, 0, want)
+	for i := 0; i < len(b64) && len(head) < want; i++ {
+		if c := b64[i]; c != '\r' && c != '\n' {
+			head = append(head, c)
+		}
+	}
+	head = head[:len(head)-len(head)%4]
+	decoded, err := base64.StdEncoding.DecodeString(string(head))
+	if err != nil {
+		return declared
+	}
+	if actual := ImageMimeFromBytes(decoded); actual != "" {
+		return actual
+	}
+	return declared
+}
+
 // decodePrefix measures the image from the first `limit` bytes of a base64
 // payload. ok reports whether a size was actually read.
 func decodePrefix(b64 string, limit int) (width, height int, ok bool) {

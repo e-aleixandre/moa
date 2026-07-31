@@ -64,3 +64,18 @@ func TestConvertContentBlocks_UndecodableImagePassedThrough(t *testing.T) {
 		t.Fatalf("undecodable image must pass through, got %v", block["type"])
 	}
 }
+
+// An image already recorded with the wrong media type (a GIF read from a .png)
+// is rejected by Anthropic with a hard 400. History is replayed every turn, so
+// the conversion has to declare what the bytes are, not what the block claims.
+func TestConvertContentBlocks_MislabeledImageMediaTypeCorrected(t *testing.T) {
+	gif := base64.StdEncoding.EncodeToString(append([]byte("GIF89a"), make([]byte, 512)...))
+	blocks := convertContentBlocks([]core.Content{core.ImageContent(gif, "image/png")}, nil)
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	source := blocks[0].(map[string]any)["source"].(map[string]any)
+	if source["media_type"] != "image/gif" {
+		t.Fatalf("media_type: got %v, want image/gif", source["media_type"])
+	}
+}

@@ -336,8 +336,13 @@ func convertContentBlocks(blocks []core.Content, retire *imageRetirer) []any {
 			result = append(result, map[string]any{
 				"type": "image",
 				"source": map[string]any{
-					"type":       "base64",
-					"media_type": b.MimeType,
+					"type": "base64",
+					// Anthropic rejects a media type that disagrees with the
+					// bytes, and history is replayed every turn, so one image
+					// recorded with the wrong type (e.g. a GIF read from a
+					// .png) would 400 the session forever. Declare what the
+					// bytes actually are.
+					"media_type": core.CorrectImageMime(b.Data, b.MimeType),
 					"data":       b.Data,
 				},
 			})
