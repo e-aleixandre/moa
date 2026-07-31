@@ -210,6 +210,108 @@ func TestCallbackNeedsInputFiresOncePerRun(t *testing.T) {
 	}
 }
 
+// A needs_input callback carries what the run is blocked on, so the caller can
+// answer it through the scoped interaction endpoints.
+func TestCallbackNeedsInputCarriesPendingAsk(t *testing.T) {
+	rc := newCallbackReceiver(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("hi")))
+	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
+
+	sess.runtime.Bus.Publish(bus.AskUserRequested{SessionID: sess.ID, ID: "a1", Questions: []bus.AskQuestion{
+		{Text: "Ship it?", Options: []string{"yes", "no"}},
+		{Text: "Which branch?"},
+	}})
+	got := rc.waitForCallbacks(t, 1)[0]
+	if got.Status != callbackStatusNeedsInput {
+		t.Fatalf("status = %q, want needs_input", got.Status)
+	}
+	if got.Pending == nil {
+		t.Fatal("needs_input callback carries no pending object")
+	}
+	if got.Pending.Kind != pendingKindQuestion || got.Pending.ID != "a1" {
+		t.Fatalf("pending = %+v, want a question with id a1", got.Pending)
+	}
+	if len(got.Pending.Questions) != 2 {
+		t.Fatalf("questions = %+v, want 2", got.Pending.Questions)
+	}
+	if got.Pending.Questions[0].Text != "Ship it?" ||
+		len(got.Pending.Questions[0].Options) != 2 ||
+		got.Pending.Questions[0].Options[0] != "yes" {
+		t.Errorf("first question = %+v, want the event's question and options", got.Pending.Questions[0])
+	}
+	if got.Pending.Tool != "" || got.Pending.Summary != "" {
+		t.Errorf("question pending carries permission fields: %+v", got.Pending)
+	}
+}
+
+func TestCallbackNeedsInputCarriesPendingPermission(t *testing.T) {
+	rc := newCallbackReceiver(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("hi")))
+	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
+
+	sess.runtime.Bus.Publish(bus.PermissionRequested{
+		SessionID: sess.ID, ID: "p1", ToolName: "bash",
+		Args: map[string]any{"command": "rm -rf /tmp/x"},
+	})
+	got := rc.waitForCallbacks(t, 1)[0]
+	if got.Pending == nil {
+		t.Fatal("needs_input callback carries no pending object")
+	}
+	if got.Pending.Kind != pendingKindPermission || got.Pending.ID != "p1" {
+		t.Fatalf("pending = %+v, want a permission with id p1", got.Pending)
+	}
+	if got.Pending.Tool != "bash" {
+		t.Errorf("tool = %q, want bash", got.Pending.Tool)
+	}
+	if got.Pending.Summary != "rm -rf /tmp/x" {
+		t.Errorf("summary = %q, want the command", got.Pending.Summary)
+	}
+	if len(got.Pending.Questions) != 0 {
+		t.Errorf("permission pending carries questions: %+v", got.Pending.Questions)
+	}
+}
+
+// done/failed payloads are unchanged: no pending object.
+func TestCallbackDonePayloadHasNoPending(t *testing.T) {
+	rc := newCallbackReceiver(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("all green")))
+	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
+
+	if _, _, _, err := mgr.Send(sess.ID, "do it", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := rc.waitForCallbacks(t, 1)[0]; got.Pending != nil {
+		t.Fatalf("done payload carries pending: %+v", got.Pending)
+	}
+}
+
+func TestPermissionArgsSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		tool string
+		args map[string]any
+		want string
+	}{
+		{"bash command", "bash", map[string]any{"command": "go test ./..."}, "go test ./..."},
+		{"file path", "write", map[string]any{"path": "/tmp/x", "content": "y"}, "/tmp/x"},
+		{"fallback is deterministic", "fetch_content", map[string]any{"url": "https://x", "raw": true}, "raw=true url=https://x"},
+		{"no args", "noop", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := permissionArgsSummary(tt.tool, tt.args); got != tt.want {
+				t.Fatalf("summary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // The per-run guard is exact because every trigger is handled by a single
 // SubscribeAll subscriber, in publication order: a RunStarted published between
 // two blocking events resets the guard exactly there, no earlier and no later.
@@ -386,7 +488,7 @@ func TestCallbackFailureLogHidesCredentials(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(orig) })
 
-	deliverAutomationCallback(sess, callbackTarget{url: url}, callbackStatusDone, "", "")
+	deliverAutomationCallback(sess, callbackTarget{url: url}, callbackStatusDone, "", "", nil)
 
 	logged := buf.String()
 	if !strings.Contains(logged, "automation callback delivery failed") {

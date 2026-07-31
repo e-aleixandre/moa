@@ -19,6 +19,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // Callback statuses. They describe the run, not the session: a session can
@@ -62,8 +63,29 @@ type AutomationCallback struct {
 	Summary   string `json:"summary"`
 	URL       string `json:"url"`
 	Error     string `json:"error,omitempty"`
-	Timestamp string `json:"timestamp"` // RFC3339
+	// Pending describes what the run is blocked on. Only set for needs_input,
+	// so a machine caller can answer it through the scoped interaction
+	// endpoints instead of only learning that a human is needed.
+	Pending   *CallbackPending `json:"pending,omitempty"`
+	Timestamp string           `json:"timestamp"` // RFC3339
 }
+
+// CallbackPending is the interaction a needs_input callback is blocked on. It
+// mirrors the bus event that raised it: a question carries its questions, a
+// permission carries the tool and a human-readable summary of its arguments.
+type CallbackPending struct {
+	Kind      string            `json:"kind"` // question | permission
+	ID        string            `json:"id"`
+	Questions []bus.AskQuestion `json:"questions,omitempty"`
+	Tool      string            `json:"tool,omitempty"`
+	Summary   string            `json:"summary,omitempty"`
+}
+
+// pendingKind values carried by CallbackPending.
+const (
+	pendingKindQuestion   = "question"
+	pendingKindPermission = "permission"
+)
 
 // callbackTarget is the delivery configuration read from session metadata.
 type callbackTarget struct {
@@ -87,9 +109,10 @@ type callbackTarget struct {
 //     quiescent (no background subagent/bash work that could still push another
 //     run), so we don't report completion in the middle of an autonomous chain.
 //   - RunEnded with Err != nil → "failed", immediately: the run is over.
-//   - PermissionRequested / AskUserRequested → "needs_input", at most once per
-//     run (a run can ask many times; the caller only needs to learn that a human
-//     is now in the loop). A later RunEnded still delivers done/failed.
+//   - PermissionRequested / AskUserRequested → "needs_input", carrying the
+//     pending interaction, at most once per run (a run can ask many times; the
+//     caller only needs to learn that somebody has to answer). A later RunEnded
+//     still delivers done/failed.
 //
 // All four triggers are handled by ONE SubscribeAll subscriber: it sees events
 // in publication order on a single goroutine, which is what makes the
@@ -124,24 +147,26 @@ func (m *Manager) subscribeAutomationCallback(sess *ManagedSession, meta map[str
 	var needsInputSent bool
 
 	b := sess.runtime.Bus
-	needsInput := func() {
+	needsInput := func(pending *CallbackPending) {
 		if needsInputSent {
 			return
 		}
 		needsInputSent = true
-		go deliverAutomationCallback(sess, cb, callbackStatusNeedsInput, "", "")
+		go deliverAutomationCallback(sess, cb, callbackStatusNeedsInput, "", "", pending)
 	}
 
 	sess.pushUnsubs = append(sess.pushUnsubs, b.SubscribeAll(func(event any) {
 		switch e := event.(type) {
 		case bus.RunStarted:
 			needsInputSent = false
-		case bus.PermissionRequested, bus.AskUserRequested:
-			needsInput()
+		case bus.PermissionRequested:
+			needsInput(permissionPending(e))
+		case bus.AskUserRequested:
+			needsInput(askPending(e))
 		case bus.RunEnded:
 			lastRunGen.Store(e.RunGen)
 			if e.Err != nil {
-				go deliverAutomationCallback(sess, cb, callbackStatusFailed, e.Err.Error(), e.FinalText)
+				go deliverAutomationCallback(sess, cb, callbackStatusFailed, e.Err.Error(), e.FinalText, nil)
 				return
 			}
 			go func() {
@@ -153,7 +178,7 @@ func (m *Manager) subscribeAutomationCallback(sess *ManagedSession, meta map[str
 				if lastRunGen.Load() != e.RunGen {
 					return // superseded by a newer run, which reports for itself
 				}
-				deliverAutomationCallback(sess, cb, callbackStatusDone, "", e.FinalText)
+				deliverAutomationCallback(sess, cb, callbackStatusDone, "", e.FinalText, nil)
 			}()
 		}
 	}))
@@ -161,7 +186,7 @@ func (m *Manager) subscribeAutomationCallback(sess *ManagedSession, meta map[str
 
 // deliverAutomationCallback builds the payload and POSTs it with retries. It is
 // always called on its own goroutine.
-func deliverAutomationCallback(sess *ManagedSession, cb callbackTarget, status, errText, finalText string) {
+func deliverAutomationCallback(sess *ManagedSession, cb callbackTarget, status, errText, finalText string, pending *CallbackPending) {
 	if sess.deleted.Load() || sess.infra.sessionCtx.Err() != nil {
 		// Deleted session or a server already shutting down: nothing left to
 		// speak for, and the delivery could not complete anyway.
@@ -174,6 +199,7 @@ func deliverAutomationCallback(sess *ManagedSession, cb callbackTarget, status, 
 		Summary:   callbackSummary(sess, finalText),
 		URL:       sessionWebURL(sess.ID),
 		Error:     truncateSummary(errText),
+		Pending:   pending,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	// The session context bounds the retry loop: a deleted session or a server
@@ -187,6 +213,49 @@ func deliverAutomationCallback(sess *ManagedSession, cb callbackTarget, status, 
 			"session", sess.ID, "status", status,
 			"destination", sanitizeCallbackURL(cb.url), "error", err)
 	}
+}
+
+// askPending describes a blocking ask_user prompt for the callback payload. It
+// mirrors the bus event: the request ID plus its questions and their offered
+// options, each truncated like every other free-text field in the payload.
+func askPending(e bus.AskUserRequested) *CallbackPending {
+	questions := make([]bus.AskQuestion, 0, len(e.Questions))
+	for _, q := range e.Questions {
+		trimmed := bus.AskQuestion{Text: truncateSummary(q.Text)}
+		for _, opt := range q.Options {
+			trimmed.Options = append(trimmed.Options, truncateSummary(opt))
+		}
+		questions = append(questions, trimmed)
+	}
+	return &CallbackPending{Kind: pendingKindQuestion, ID: e.ID, Questions: questions}
+}
+
+// permissionPending describes a blocking permission request: the tool and a
+// human-readable summary of what it wants to do.
+func permissionPending(e bus.PermissionRequested) *CallbackPending {
+	return &CallbackPending{
+		Kind:    pendingKindPermission,
+		ID:      e.ID,
+		Tool:    e.ToolName,
+		Summary: truncateSummary(permissionArgsSummary(e.ToolName, e.Args)),
+	}
+}
+
+// permissionArgsSummary renders the most relevant argument of a permission
+// request, the same way the TUI prompt picks it (command for bash, path for the
+// file tools), falling back to a deterministic key=value rendering.
+func permissionArgsSummary(toolName string, args map[string]any) string {
+	switch toolName {
+	case "bash":
+		if cmd, ok := args["command"].(string); ok {
+			return cmd
+		}
+	case "write", "edit", "read":
+		if path, ok := args["path"].(string); ok {
+			return path
+		}
+	}
+	return tool.SummarizeArgs(args)
 }
 
 // callbackSummary returns a short, honest hint of what happened. It uses the
