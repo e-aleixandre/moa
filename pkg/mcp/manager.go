@@ -21,6 +21,14 @@ import (
 
 const serverStartTimeout = 15 * time.Second
 
+// remoteToolCallTimeout caps a tool call against a REMOTE server when the
+// caller's context carries no deadline. A local stdio server dies with its
+// process, so a hung call there resolves itself; a remote peer can accept the
+// request and never answer, which would block the agent run forever. The cap is
+// deliberately generous — legitimate remote tools may do slow work — it exists
+// only so a dead endpoint cannot wedge a session permanently.
+var remoteToolCallTimeout = 10 * time.Minute
+
 // ToolPrefix is the namespace prefix for MCP tool names ("mcp__<server>__<tool>").
 // Exported so other packages can detect MCP tools without hardcoding the prefix.
 const ToolPrefix = "mcp__"
@@ -103,11 +111,14 @@ type serverSession struct {
 	// mu without blocking on a 15s dial.
 	lifecycle sync.Mutex
 
-	mu        sync.Mutex
-	cmd       *exec.Cmd
-	client    *sdkmcp.Client
-	session   *sdkmcp.ClientSession
-	state     ServerState
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	client  *sdkmcp.Client
+	session *sdkmcp.ClientSession
+	state   ServerState
+	// remote records the transport of the last connect, so a tool call can tell
+	// a remote peer (which may hang indefinitely) from a local subprocess.
+	remote    bool
 	err       string
 	tools     []toolInfo
 	startedAt time.Time
@@ -300,6 +311,7 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 	sess.cmd = cmd
 	sess.client = client
 	sess.session = session
+	sess.remote = cfg.IsRemote()
 	sess.tools = tools
 	sess.state = StateReady
 	sess.err = ""
@@ -739,9 +751,15 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 			sess.mu.Lock()
 			session := sess.session
 			state := sess.state
+			remote := sess.remote
 			sess.mu.Unlock()
 			if session == nil {
 				return core.ErrorResult(fmt.Sprintf("MCP server %s is %s", sess.name, state)), nil
+			}
+			if _, hasDeadline := ctx.Deadline(); remote && !hasDeadline {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, remoteToolCallTimeout)
+				defer cancel()
 			}
 			// ClientSession.CallTool is concurrency-safe (jsonrpc2 uses
 			// internal locking for writes, request IDs for response routing).

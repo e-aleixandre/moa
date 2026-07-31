@@ -142,9 +142,15 @@ A server entry declares **exactly one** transport:
 ```
 
 Setting both `command` and `url` — or neither — is a configuration error and the
-file is rejected. `headers` are sent on every request to that endpoint, so it is
+file is rejected. `headers` are the **only** supported authentication mechanism
+for a remote server: they are sent on every request to that endpoint, so it is
 where credentials go; they are stored in plain text in the config file like any
-other key there.
+other key there. Credentials embedded in the URL itself
+(`https://user:pass@host/mcp`) are rejected — the URL is shown in the MCP panel
+and written to logs, so it is not a place for secrets.
+
+Redirects are never followed: `headers` would be re-sent to whatever origin a
+`30x` points at, so a redirecting endpoint fails the request instead.
 
 A remote server has no process to supervise: it shows up in the MCP panel like
 any other server, and enable/disable/restart just drop and re-dial the

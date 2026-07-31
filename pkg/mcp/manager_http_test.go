@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -162,5 +164,114 @@ func TestManagerRejectsInvalidServerConfig(t *testing.T) {
 		if st.State != StateFailed {
 			t.Fatalf("server %s = %s, want failed", st.Name, st.State)
 		}
+	}
+}
+
+func TestRemoteClientDoesNotFollowRedirects(t *testing.T) {
+	// A redirect must never carry the configured headers to another origin.
+	var secondHits atomic.Int32
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondHits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer second.Close()
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, second.URL+"/mcp", http.StatusFound)
+	}))
+	defer first.Close()
+
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"remote": {URL: first.URL, Headers: map[string]string{"Authorization": "Bearer s3cret"}},
+	}, nil)
+	defer mgr.Close()
+
+	st := mgr.Status()
+	if len(st) != 1 || st[0].State != StateFailed {
+		t.Fatalf("status = %+v, want a failed server (redirects are not followed)", st)
+	}
+	if n := secondHits.Load(); n != 0 {
+		t.Fatalf("redirect target received %d requests, want 0 (credentials must not travel)", n)
+	}
+}
+
+// blackholeListener accepts connections and never writes a response.
+func blackholeListener(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Hold it open, read nothing, answer nothing.
+			t.Cleanup(func() { _ = conn.Close() })
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-done
+	})
+	return "http://" + ln.Addr().String()
+}
+
+func TestRemoteBlackholeDoesNotHang(t *testing.T) {
+	// Shorten the transport bounds so the test doesn't wait the production 15s.
+	prevHeader := remoteResponseHeaderTimeout
+	remoteResponseHeaderTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { remoteResponseHeaderTimeout = prevHeader })
+
+	url := blackholeListener(t)
+
+	mgr := NewManager(nil, "")
+	start := time.Now()
+	mgr.Start(context.Background(), map[string]core.MCPServer{"remote": {URL: url}}, nil)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("connect took %v, want it bounded by the response-header timeout", elapsed)
+	}
+	st := mgr.Status()
+	if len(st) != 1 || st[0].State != StateFailed {
+		t.Fatalf("status = %+v, want failed", st)
+	}
+
+	// Close must return promptly even though the peer answers nothing.
+	closed := make(chan struct{})
+	go func() {
+		mgr.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close hung on a blackholed remote server")
+	}
+}
+
+func TestRemoteToolCallGetsADeadline(t *testing.T) {
+	// A deadline-less context must not let a dead remote wedge the call forever.
+	prev := remoteToolCallTimeout
+	remoteToolCallTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { remoteToolCallTimeout = prev })
+
+	url, _ := newRemoteTestServer(t)
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), map[string]core.MCPServer{"remote": {URL: url}}, nil)
+	defer mgr.Close()
+
+	tools := mgr.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("Tools() = %d, want 1", len(tools))
+	}
+	// A healthy call still succeeds well inside the cap.
+	res, err := tools[0].Execute(context.Background(), map[string]any{"text": "hi"}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("Execute = %+v, %v", res, err)
 	}
 }

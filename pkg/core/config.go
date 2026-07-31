@@ -327,6 +327,12 @@ func (s MCPServer) Validate() error {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return errors.New("url must be an absolute http or https URL")
 	}
+	if u.User != nil {
+		// Userinfo would travel in every log line and metadata dump that shows
+		// the endpoint. Credentials belong in headers, which are treated as
+		// secrets.
+		return errors.New("credentials in URL not allowed; use headers")
+	}
 	return nil
 }
 

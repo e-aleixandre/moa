@@ -821,12 +821,17 @@ func TestMCPServerValidate(t *testing.T) {
 		{"ws scheme", MCPServer{URL: "ws://example.com/mcp"}, true},
 		{"relative url", MCPServer{URL: "/mcp"}, true},
 		{"no host", MCPServer{URL: "https://"}, true},
+		{"userinfo credentials", MCPServer{URL: "https://user:pass@a/b"}, true},
+		{"userinfo without password", MCPServer{URL: "https://user@a/b"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.server.Validate()
 			if tc.wantErr != (err != nil) {
 				t.Fatalf("Validate() = %v, wantErr %v", err, tc.wantErr)
+			}
+			if strings.HasPrefix(tc.name, "userinfo") && !strings.Contains(err.Error(), "use headers") {
+				t.Fatalf("Validate() = %v, want it to point at headers", err)
 			}
 		})
 	}
