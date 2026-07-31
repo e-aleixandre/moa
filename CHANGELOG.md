@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Installing Moa no longer means building it: a
+  `curl -fsSL https://letmoa.run/install.sh | sh` one-liner and a Homebrew tap
+  (`brew install e-aleixandre/tap/moa`) join the prebuilt release archives. The
+  install script verifies the download's checksum, installs to `/usr/local/bin`
+  or `~/.local/bin`, and never invokes `sudo`.
+- `moa update` updates Moa in place: it downloads the release archive for your
+  platform, verifies its SHA-256 against the release checksums, and replaces the
+  binary. `moa update --check` reports what would happen without downloading
+  anything. It deliberately never restarts anything — it reports the old and new
+  version and leaves the restart to you — and it refuses to overwrite binaries
+  owned by Homebrew or Nix, pointing at the package manager instead.
+- `moa --help` now lists the subcommands (`serve`, `update`, `version`) before
+  the flags, which the flag defaults alone would never mention.
+
+### Fixed
+
+- The update check queried a repository that does not exist (`ealeixandre/moa`
+  instead of `e-aleixandre/moa`), so release builds could never discover a newer
+  version. The same typo is fixed in the README's clone URL.
+
 ### Changed
 
 - Speech-to-text now uses `gpt-transcribe` instead of `whisper-1`: on the same

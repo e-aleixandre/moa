@@ -1,12 +1,46 @@
 # Quickstart
 
+## Install
+
+### Install script (Linux, macOS)
+
+```bash
+curl -fsSL https://letmoa.run/install.sh | sh
+```
+
+Installs the latest release into `/usr/local/bin` if it is writable, otherwise
+`~/.local/bin`. Override with `MOA_INSTALL_DIR`, or pin a version with
+`MOA_VERSION=v0.18.1`. The script never uses `sudo`.
+
+### Homebrew (macOS, Linux)
+
+```bash
+brew install e-aleixandre/tap/moa
+```
+
+### Manual download
+
+Grab the archive for your platform from
+[GitHub Releases](https://github.com/e-aleixandre/moa/releases/latest), verify it
+against `checksums.txt`, extract it, and put `moa` somewhere on your `PATH`.
+
+### Keeping it up to date
+
+```bash
+moa update --check   # report the available version
+moa update           # download, verify, and replace the binary
+```
+
+Binaries installed by Homebrew or Nix are left to their package manager: `moa
+update` refuses to touch them and tells you the command to run instead. Updates
+never restart anything — restart Moa yourself afterwards.
+
 ## Requirements
 
-- Go 1.25+
-- Node.js/npm (only to build the embedded web UI frontend via `make build`)
 - A provider login: either an API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) or an interactive OAuth login (see [Authenticate](#authenticate)) — at least one of Anthropic or OpenAI
+- To build from source instead of installing a release: Go 1.25+ and Node.js/npm (the latter only to build the embedded web UI frontend via `make build`)
 
-## Build
+## Build from source
 
 ```bash
 make fe-install   # first time only: install frontend deps

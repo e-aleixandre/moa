@@ -26,9 +26,27 @@ into a dated version section in [CHANGELOG.md](../CHANGELOG.md).
 ## Update checks and privacy
 
 Release builds make a best-effort request to GitHub's public
-`ealeixandre/moa` latest-release endpoint. The request is timeout-bounded,
+`e-aleixandre/moa` latest-release endpoint. The request is timeout-bounded,
 cached locally for six hours, and uses an ETag on cache refresh; no usage or
 installation telemetry is sent. Disable it with `"update_check": false` in
 Moa config or `MOA_NO_UPDATE_CHECK=1`. Update notices only link to the release;
 they never download, install, or restart Moa.
 
+Installing an update is always an explicit act: `moa update` downloads the
+release archive, verifies its SHA-256 against the release `checksums.txt`,
+replaces the binary, and stops there — it never restarts anything. Because it
+serves an explicit request it ignores `MOA_NO_UPDATE_CHECK`, and it refuses to
+touch binaries owned by Homebrew or Nix.
+
+## Distribution channels
+
+Releases are published by GoReleaser (`.goreleaser.yml`) from a stable SemVer
+tag: per-platform archives plus `checksums.txt` on the GitHub release, and a
+Homebrew formula pushed to the `e-aleixandre/homebrew-tap` repository. The tap
+push needs a `TAP_GITHUB_TOKEN` secret with write access to that repository;
+without it the release still succeeds and only the tap update is skipped.
+
+[`scripts/install.sh`](../scripts/install.sh) is the `curl | sh` installer
+served from `https://letmoa.run/install.sh`. It resolves the latest tag from the
+GitHub API, verifies the archive checksum, and installs to `/usr/local/bin` or
+`~/.local/bin` — never with `sudo`.
