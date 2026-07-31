@@ -226,7 +226,7 @@ under `pending.kind: "question"`.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `id` | yes | The pending request ID from `pending.id`, max 128 bytes |
-| `answers` | yes | One answer per question, in order; max 32 answers of 8 KiB each |
+| `answers` | yes | One answer per question, in order; max 32 answers of 8 KiB each (`ask_user` refuses to create a prompt with more than 32 questions, so every prompt is answerable in one request) |
 
 ```bash
 curl -sS http://127.0.0.1:8080/api/automation/sessions/$SESSION/ask-response \
@@ -272,11 +272,28 @@ otherwise mint a session that calls itself automation. Sessions created by the
 Automation API before that marker existed are still recognized by the
 bookkeeping only that path writes (`callback_url`, `idempotency_key`).
 
-Other errors: `400` for a malformed body, a missing/oversized field, or a
-request ID that is not pending (it may have been answered already, from the UI
-or by an earlier call); `401` for a missing or wrong bearer token; `409` when
-the session is being loaded from disk by another request (retry); `503` when a
-reply cannot be queued.
+#### Live sessions vs saved sessions
+
+`ask-response` and `permission` only work on a session that is **currently
+loaded**. A pending question or permission request lives in the session's
+in-memory runtime — the tool call is blocked waiting on it — so a session that
+is only on disk (after a restart, say) has nothing pending by construction.
+These two endpoints therefore never load a session from disk: on a saved-only
+session they answer `400 no pending interaction`, the same class of answer as a
+request ID that is no longer pending.
+
+`reply` does resume a saved session, because sending a message to one is
+meaningful: it starts a new run. That resume is bounded — it builds a whole
+runtime (provider, MCP servers) — so if 32 sessions are already resident the
+endpoint answers `503` instead of loading another one. Retry once some sessions
+have been closed.
+
+Other errors: `400` for a malformed body, a missing/oversized field, a request
+ID that is not pending (it may have been answered already, from the UI or by an
+earlier call), or an `ask-response`/`permission` on a session that is not
+loaded; `401` for a missing or wrong bearer token; `409` when the session is
+being loaded from disk by another request (retry); `503` when a reply cannot be
+queued, or when too many sessions are already loaded to resume another one.
 
 ### What this means for security
 

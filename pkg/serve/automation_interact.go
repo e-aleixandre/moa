@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
@@ -19,8 +20,18 @@ const (
 	maxAutomationFeedbackBytes  = 4 << 10
 	maxAutomationAllowBytes     = 512
 	maxAutomationAnswerBytes    = 8 << 10
-	maxAutomationAnswers        = 32
+	// maxAutomationAnswers mirrors the cap ask_user applies when it creates a
+	// prompt, so every answerable prompt fits in one request.
+	maxAutomationAnswers = askuser.MaxQuestions
 )
+
+// maxAutomationLoadedSessions bounds how many sessions may be resident when a
+// reply resumes one from disk. Resuming builds a whole runtime (provider, MCP
+// servers, watchers), so an automation caller looping over saved session IDs
+// would otherwise be an amplification lever. The cap is generous for real use:
+// it only refuses to grow the resident set further, never touches sessions
+// that are already loaded.
+const maxAutomationLoadedSessions = 32
 
 // automationCreatedMeta reports whether session metadata proves the session was
 // created by CreateAutomationRun, which is what authorizes the automation token
@@ -49,15 +60,27 @@ func automationCreatedMeta(meta map[string]any) bool {
 	return key != ""
 }
 
-// automationSession resolves a session the automation token may interact with.
-// Anything else — an unknown ID, or a session a human created — is reported as
-// ErrNotFound, the same answer for both, so the token cannot probe which
-// sessions exist.
+// ErrAutomationNotLive reports that the session exists and belongs to the
+// automation token, but is not currently loaded — so it cannot have a pending
+// interaction to answer.
+var ErrAutomationNotLive = errors.New("session is not loaded")
+
+// ErrAutomationTooManySessions reports that resuming a saved session would push
+// the resident set past maxAutomationLoadedSessions.
+var ErrAutomationTooManySessions = errors.New("too many loaded sessions")
+
+// automationLiveSession resolves a session the automation token may interact
+// with WITHOUT ever loading it from disk. An unknown ID, or a session a human
+// created, is reported as ErrNotFound — the same answer for both, so the token
+// cannot probe which sessions exist. A session that exists on disk and is
+// automation-created but is not resident is ErrAutomationNotLive.
 //
-// A session that is only on disk (after a restart, say) is resumed, but only
-// after its persisted metadata proved it is automation-created: the check comes
-// first so the token cannot make the server load a session it may not talk to.
-func (m *Manager) automationSession(id string) (*ManagedSession, error) {
+// The ask/permission endpoints use this: a pending ask_user prompt or
+// permission request only lives in the in-memory runtime of a live session (the
+// tool call is blocked on a channel), so a saved-only session has nothing to
+// answer. Resuming for it would build a full runtime for a request that can
+// only fail.
+func (m *Manager) automationLiveSession(id string) (*ManagedSession, error) {
 	if sess, ok := m.Get(id); ok {
 		if !sess.automationCreated {
 			return nil, ErrNotFound
@@ -68,7 +91,24 @@ func (m *Manager) automationSession(id string) (*ManagedSession, error) {
 	if err != nil || !automationCreatedMeta(saved.Metadata) {
 		return nil, ErrNotFound
 	}
-	sess, err := m.ResumeSession(id)
+	return nil, ErrAutomationNotLive
+}
+
+// automationSession resolves a session for /reply, which may legitimately talk
+// to a saved session (sending a message starts a new run). A session that is
+// only on disk is resumed, but only after its persisted metadata proved it is
+// automation-created — the check comes first so the token cannot make the
+// server load a session it may not talk to — and only while the resident set is
+// below maxAutomationLoadedSessions.
+func (m *Manager) automationSession(id string) (*ManagedSession, error) {
+	sess, err := m.automationLiveSession(id)
+	if !errors.Is(err, ErrAutomationNotLive) {
+		return sess, err
+	}
+	if m.loadedSessionCount() >= maxAutomationLoadedSessions {
+		return nil, ErrAutomationTooManySessions
+	}
+	sess, err = m.ResumeSession(id)
 	if err != nil {
 		if errors.Is(err, session.ErrNotFound) {
 			return nil, ErrNotFound
@@ -81,21 +121,55 @@ func (m *Manager) automationSession(id string) (*ManagedSession, error) {
 	return sess, nil
 }
 
-// automationSessionOr404 resolves the session or writes the response for the
-// caller. It returns nil when it already answered.
-func automationSessionOr404(w http.ResponseWriter, mgr *Manager, id string) *ManagedSession {
-	sess, err := mgr.automationSession(id)
+// loadedSessionCount reports how many sessions are resident, counting the ones
+// currently being resumed so concurrent requests cannot race past the cap.
+func (m *Manager) loadedSessionCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.sessions) + len(m.resuming)
+}
+
+// writeAutomationSessionError writes the response for a session-resolution
+// failure.
+func writeAutomationSessionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		http.Error(w, "not found", http.StatusNotFound)
+	case errors.Is(err, ErrAutomationNotLive):
+		// Same class as answering a request ID that is no longer pending, which
+		// already answers 400: there is nothing to answer, and retrying will not
+		// change that.
+		http.Error(w, "no pending interaction: the session is not running", http.StatusBadRequest)
+	case errors.Is(err, ErrAutomationTooManySessions):
+		http.Error(w, "too many loaded sessions; retry later", http.StatusServiceUnavailable)
 	case errors.Is(err, ErrBusy):
 		http.Error(w, "session already resuming", http.StatusConflict)
-	case err != nil:
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 	default:
-		return sess
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-	return nil
+}
+
+// automationSessionOr404 resolves the session for /reply (resuming a saved one
+// when needed) or writes the response for the caller. It returns nil when it
+// already answered.
+func automationSessionOr404(w http.ResponseWriter, mgr *Manager, id string) *ManagedSession {
+	sess, err := mgr.automationSession(id)
+	if err != nil {
+		writeAutomationSessionError(w, err)
+		return nil
+	}
+	return sess
+}
+
+// automationLiveSessionOrError resolves a live session for the ask/permission
+// endpoints, never resuming, or writes the response itself.
+func automationLiveSessionOrError(w http.ResponseWriter, mgr *Manager, id string) *ManagedSession {
+	sess, err := mgr.automationLiveSession(id)
+	if err != nil {
+		writeAutomationSessionError(w, err)
+		return nil
+	}
+	return sess
 }
 
 // decodeAutomationBody decodes a capped JSON body, answering 400 itself.
@@ -150,10 +224,11 @@ func handleAutomationReply(mgr *Manager) http.HandlerFunc {
 }
 
 // handleAutomationAskResponse answers a pending ask_user prompt, mirroring the
-// browser endpoint's body.
+// browser endpoint's body. A pending prompt only exists on a live session, so
+// this never loads one from disk.
 func handleAutomationAskResponse(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess := automationSessionOr404(w, mgr, r.PathValue("id"))
+		sess := automationLiveSessionOrError(w, mgr, r.PathValue("id"))
 		if sess == nil {
 			return
 		}
@@ -185,16 +260,19 @@ func handleAutomationAskResponse(mgr *Manager) http.HandlerFunc {
 // handleAutomationPermission approves or denies a pending permission request,
 // mirroring the browser endpoint's decision body. Editing permanent permission
 // rules (the browser's add_rule action) is not mirrored: that is configuration,
-// not an answer to this request.
+// not an answer to this request. Like ask-response, it only talks to a live
+// session: a pending request cannot exist on one that is merely saved.
 func handleAutomationPermission(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess := automationSessionOr404(w, mgr, r.PathValue("id"))
+		sess := automationLiveSessionOrError(w, mgr, r.PathValue("id"))
 		if sess == nil {
 			return
 		}
 		var body struct {
-			ID       string `json:"id"`
-			Approved bool   `json:"approved"`
+			ID string `json:"id"`
+			// Approved is a pointer so an omitted field is an explicit error
+			// rather than a silent denial.
+			Approved *bool  `json:"approved"`
 			Feedback string `json:"feedback"`
 			Allow    string `json:"allow"`
 		}
@@ -203,6 +281,10 @@ func handleAutomationPermission(mgr *Manager) http.HandlerFunc {
 		}
 		if body.ID == "" {
 			http.Error(w, "permission request ID is required", http.StatusBadRequest)
+			return
+		}
+		if body.Approved == nil {
+			http.Error(w, "approved is required (true or false)", http.StatusBadRequest)
 			return
 		}
 		if msg := validateAutomationInteraction(body.ID, nil); msg != "" {
@@ -219,7 +301,7 @@ func handleAutomationPermission(mgr *Manager) http.HandlerFunc {
 		}
 		if err := sess.runtime.Bus.Execute(bus.ResolvePermission{
 			PermissionID: body.ID,
-			Approved:     body.Approved,
+			Approved:     *body.Approved,
 			Feedback:     body.Feedback,
 			AllowPattern: body.Allow,
 		}); err != nil {
