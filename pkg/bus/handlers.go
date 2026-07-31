@@ -67,6 +67,13 @@ func RegisterHandlers(sctx *SessionContext) {
 	b.Subscribe(func(e BashJobStarted) { sctx.trackBackgroundEvent(e) })
 	b.Subscribe(func(e BashJobSettled) { sctx.trackBackgroundEvent(e) })
 
+	// A message ID is claimed only while its send is in flight. The
+	// announcement is published from the append point, so by the time it
+	// arrives the message is in history and history alone keeps the ID taken:
+	// drop the claim, otherwise the claim map would grow for the whole life of
+	// the session (see reserveMsgID).
+	b.Subscribe(func(e UserMessageAppended) { sctx.releaseMsgID(e.MsgID) })
+
 	// -------------------------------------------------------------------
 	// Commands
 	// -------------------------------------------------------------------

@@ -15,6 +15,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/checkpoint"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
@@ -3082,5 +3083,93 @@ func TestHandler_SendPrompt_ConcurrentSameMsgID(t *testing.T) {
 	}
 	if inHistory != 1 {
 		t.Fatalf("history holds %d messages under c-dup, want 1", inHistory)
+	}
+}
+
+// A message the user branched away from still exists in the tree, one /branch
+// away from being on screen again. Uniqueness must therefore be checked against
+// the whole tree, not the current branch's projection: reusing that ID would
+// give the client two different messages under one identity as soon as it
+// navigates back.
+func TestHandler_SendPrompt_MsgIDTakenOnAnotherBranch(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	fa.announceToBus(b, "test-session")
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{msgWithID("user", "hi", "m-1"), msgWithID("assistant", "hello", "m-2")}
+	fa.mu.Unlock()
+	b.Publish(RunEnded{SessionID: "test-session"})
+	b.Drain(time.Second)
+
+	// Branch back to the first message: m-2 leaves the current path but stays
+	// in the tree.
+	if err := b.Execute(BranchTo{EntryID: "m-1"}); err != nil {
+		t.Fatalf("BranchTo: %v", err)
+	}
+	b.Drain(time.Second)
+	for _, m := range sctx.treeSyncer.DisplayMessages() {
+		if m.MsgID == "m-2" {
+			t.Fatal("m-2 is still on the current branch; the test would not exercise branch-away")
+		}
+	}
+
+	gotRunEnded := make(chan RunEnded, 1)
+	b.Subscribe(func(e RunEnded) { gotRunEnded <- e })
+	accepted := "m-2"
+	if err := b.Execute(SendPrompt{Text: "again", MsgID: "m-2", AcceptedMsgID: &accepted}); err != nil {
+		t.Fatal(err)
+	}
+	if accepted == "m-2" {
+		t.Fatal("accepted an ID that another branch of the tree already holds")
+	}
+	waitForRunEnded(t, gotRunEnded, b)
+}
+
+// A claim exists only while the send is in flight: once the message is in
+// history, history is what keeps the ID taken. Otherwise the claim map would
+// grow for the whole life of the session, and its contents would be lost on
+// restart anyway.
+func TestHandler_SendPrompt_ClaimReleasedOnceAppended(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	fa.announceToBus(b, "test-session")
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	gotRunEnded := make(chan RunEnded, 8)
+	b.Subscribe(func(e RunEnded) { gotRunEnded <- e })
+
+	for i := range 5 {
+		id := fmt.Sprintf("c-%d", i)
+		accepted := ""
+		if err := b.Execute(SendPrompt{Text: "hola", MsgID: id, AcceptedMsgID: &accepted}); err != nil {
+			t.Fatalf("send %d: %v", i, err)
+		}
+		if accepted != id {
+			t.Fatalf("send %d accepted %q, want the client ID %q", i, accepted, id)
+		}
+		waitForRunEnded(t, gotRunEnded, b)
+	}
+	b.Drain(time.Second)
+
+	if n := sctx.reservedMsgIDCount(); n != 0 {
+		t.Fatalf("claims still held after every message landed: %d", n)
+	}
+	// The IDs are still taken — now by history, which is what survives a
+	// restart.
+	for i := range 5 {
+		id := fmt.Sprintf("c-%d", i)
+		if inUse, _ := QueryTyped[MsgIDInUse, bool](b, MsgIDInUse{MsgID: id}); !inUse {
+			t.Fatalf("MsgIDInUse(%s) = false, want true (the message is in history)", id)
+		}
 	}
 }

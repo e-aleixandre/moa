@@ -168,6 +168,33 @@ func (t *Tree) validBranchTargetLocked(entryID string) error {
 	return nil
 }
 
+// HasMsgID reports whether any entry in the tree — on ANY branch, not just the
+// current path — carries a message with this ID. Uniqueness of a message
+// identity is a property of the whole tree: branching away from a message does
+// not delete it, and a client can navigate back to that branch, so an ID reused
+// on another branch would collide there.
+func (t *Tree) HasMsgID(msgID string) bool {
+	if msgID == "" {
+		return false
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	// Entry IDs are the message IDs for message entries (see Append), so the
+	// index answers this in O(1); fall back to a scan for entries whose message
+	// ID differs from the entry ID (e.g. legacy or non-message entries).
+	if idx, ok := t.index[msgID]; ok {
+		if t.entries[idx].Type == EntryMessage {
+			return true
+		}
+	}
+	for _, e := range t.entries {
+		if e.Type == EntryMessage && e.Message.MsgID == msgID {
+			return true
+		}
+	}
+	return false
+}
+
 // Clear resets the tree to empty state.
 func (t *Tree) Clear() {
 	t.mu.Lock()

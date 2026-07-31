@@ -102,6 +102,30 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	return out
 }
 
+// HasMsgID reports whether this ID belongs to a message that exists anywhere in
+// the session tree (any branch, not just the current path) or in the in-flight
+// turn not synced to the tree yet. Unlike DisplayMessages, which projects the
+// current branch, this is the uniqueness domain for message identities: a
+// message the current branch does not show is still reachable by branching back
+// to it, so its ID is taken.
+func (ts *TreeSyncer) HasMsgID(msgID string) bool {
+	if msgID == "" {
+		return false
+	}
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	if ts.tree.HasMsgID(msgID) {
+		return true
+	}
+	for _, msg := range ts.sctx.Agent.Messages() {
+		if msg.MsgID == msgID {
+			return true
+		}
+	}
+	return false
+}
+
 // syncMessages appends any new agent messages to the tree since the last sync.
 func (ts *TreeSyncer) syncMessages() {
 	ts.mu.Lock()

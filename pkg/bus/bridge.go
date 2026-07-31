@@ -239,11 +239,16 @@ type SessionContext struct {
 // see it free and both persist under it — deduped live, doubled after a reload.
 // Holding msgIDMu across check-and-claim is what makes the identity unique.
 //
-// A claim is kept for the life of the session: an ID a client was told its
-// message landed under must stay unusable even across a clear or a branch that
-// empties history, since clients still hold that message. Only a send that
-// never started releases its claim (releaseMsgID), so a rejected send doesn't
-// burn the client's ID.
+// The guarantee: an accepted ID is unique against everything in the session
+// tree at acceptance time (all branches, not just the current one) plus the
+// in-flight claims — sends already accepted whose message has not been appended
+// yet. An ID whose message no longer exists anywhere in the tree may be reused
+// harmlessly: there is no message left for a client to confuse it with, which
+// is the only real threat (the SPA dedups by ID against messages it holds).
+// That is why claims are transitory — taken here, dropped once the message is
+// in the tree (releaseMsgID from the append announcement) or once the send is
+// known never to have started. The map therefore holds only in-flight sends,
+// and after a restart nothing needs rebuilding: the tree already is the truth.
 func (sctx *SessionContext) reserveMsgID(msgID string) string {
 	sctx.msgIDMu.Lock()
 	defer sctx.msgIDMu.Unlock()
@@ -264,9 +269,10 @@ func (sctx *SessionContext) reserveMsgID(msgID string) string {
 	return fresh
 }
 
-// releaseMsgID drops a claim taken by reserveMsgID. Only for a send that never
-// reached history (rejected before the run started): a delivered message keeps
-// its claim forever, since clients hold it under that identity.
+// releaseMsgID drops a claim taken by reserveMsgID. Called both when the send
+// never reached history (rejected before the run started) and when its message
+// did land there: from then on the history itself, not the claim, is what makes
+// the ID taken, so keeping the claim would only grow the map forever.
 func (sctx *SessionContext) releaseMsgID(msgID string) {
 	if msgID == "" {
 		return
@@ -274,6 +280,15 @@ func (sctx *SessionContext) releaseMsgID(msgID string) {
 	sctx.msgIDMu.Lock()
 	delete(sctx.reservedMsgID, msgID)
 	sctx.msgIDMu.Unlock()
+}
+
+// reservedMsgIDCount reports how many claims are currently held. Only in-flight
+// sends should be counted: tests assert the map stays bounded instead of
+// growing for the life of the session.
+func (sctx *SessionContext) reservedMsgIDCount() int {
+	sctx.msgIDMu.Lock()
+	defer sctx.msgIDMu.Unlock()
+	return len(sctx.reservedMsgID)
 }
 
 // msgIDReserved reports whether an ID was already claimed by an accepted send.
@@ -286,25 +301,20 @@ func (sctx *SessionContext) msgIDReserved(msgID string) bool {
 	return ok
 }
 
-// msgIDInHistory scans the display projection — the same history clients dedup
-// against — for a message carrying this ID.
+// msgIDInHistory reports whether a message with this ID exists anywhere in the
+// session: any branch of the tree plus the in-flight turn not synced yet. The
+// current branch's projection is not enough — a message the user branched away
+// from still exists and is one /branch away from being on screen again.
 func (sctx *SessionContext) msgIDInHistory(msgID string) bool {
 	if msgID == "" {
 		return false
 	}
 	if sctx.treeSyncer != nil {
-		for _, m := range sctx.treeSyncer.DisplayMessages() {
-			if m.MsgID == msgID {
-				return true
-			}
-		}
-		return false
+		return sctx.treeSyncer.HasMsgID(msgID)
 	}
 	if sctx.Tree != nil {
-		for _, m := range sctx.Tree.AllMessages() {
-			if m.MsgID == msgID {
-				return true
-			}
+		if sctx.Tree.HasMsgID(msgID) {
+			return true
 		}
 	}
 	for _, m := range sctx.Agent.Messages() {
