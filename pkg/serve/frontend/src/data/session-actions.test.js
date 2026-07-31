@@ -479,3 +479,85 @@ test('sendMessage drops the chip without doubling the message when the broadcast
   expect(s1.messages).toHaveLength(1);
   expect(s1.messages[0]._msg_id).toBe('srv-msg-4');
 });
+
+test('sendMessage adopts durable descriptors when the chip prediction lost to a run', async () => {
+  // We predicted a chip (local state said running) but the server started a run
+  // and stored the attachments. The adopted message must carry the durable
+  // descriptors: rebuilding local blocks would render "not available on this
+  // device", and the user_message broadcast dedups by msg_id so it never
+  // repairs them.
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = {
+    action: 'send',
+    msg_id: 'srv-msg-5',
+    attachments: [
+      { id: 'att_image', kind: 'image', mime: 'image/png', size: 123, name: 'screen.png', url: '/api/sessions/s1/attachments/att_image' },
+      { id: 'att_file', kind: 'file', mime: 'application/pdf', size: 456, name: 'report.pdf', url: '/api/sessions/s1/attachments/att_file' },
+    ],
+  };
+
+  await sendMessage('s1', 'review both', [
+    { name: 'screen.png', mime: 'image/png', data: 'AAAA', isImage: true },
+    { name: 'report.pdf', mime: 'application/pdf', data: 'BBBB', isImage: false },
+  ]);
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.pendingSteers).toBeNull();
+  expect(s1.messages).toHaveLength(1);
+  expect(s1.messages[0].content).toEqual([
+    { type: 'image', attachment_id: 'att_image', attachment_size: 123, mime_type: 'image/png', filename: 'screen.png' },
+    { type: 'document', attachment_id: 'att_file', attachment_size: 456, mime_type: 'application/pdf', filename: 'report.pdf' },
+    { type: 'text', text: 'review both' },
+  ]);
+});
+
+test('sendMessage keeps the adopted chip-to-message blocks local when the descriptor count is partial', async () => {
+  setState({
+    sessions: {
+      s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] },
+    },
+  });
+  apiResponse = {
+    action: 'send',
+    msg_id: 'srv-msg-6',
+    attachments: [{ id: 'att_image', kind: 'image', mime: 'image/png', size: 123, name: 'screen.png', url: '/api/sessions/s1/attachments/att_image' }],
+  };
+
+  await sendMessage('s1', 'review both', [
+    { name: 'screen.png', mime: 'image/png', data: 'AAAA', isImage: true },
+    { name: 'report.pdf', mime: 'application/pdf', data: 'BBBB', isImage: false },
+  ]);
+
+  const content = store.get().sessions.s1.messages[0].content;
+  expect(content[0]).toEqual({ type: 'image', data: 'AAAA', mime_type: 'image/png' });
+  expect(content[1]).toEqual({ type: 'document', mime_type: 'application/pdf', filename: 'report.pdf' });
+});
+
+test('sendMessage does not overwrite a live token tally when the server queued the message', async () => {
+  // We predicted a run and zeroed the tally; the server queued instead. Real
+  // run_tokens for the run actually in flight landed while the POST was open —
+  // restoring the pre-send figures on top of them would show stale counts.
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [],
+        runTokensUp: 700, runTokensDown: 120, runStartedAtMs: 555,
+      },
+    },
+  });
+  apiResponse = { action: 'steer', steer_id: 'srv-steer-3' };
+  const { updateSession } = await import('./store.js');
+
+  const pending = sendMessage('s1', 'hola', []);
+  updateSession('s1', { runTokensUp: 1500, runTokensDown: 300 });
+  await pending;
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.runTokensUp).toBe(1500);
+  expect(s1.runTokensDown).toBe(300);
+  expect(s1.pendingSteers).toHaveLength(1);
+});

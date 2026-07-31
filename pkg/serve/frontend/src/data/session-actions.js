@@ -283,6 +283,36 @@ function attachmentToContent(a) {
   return { type: 'document', mime_type: a.mime, filename: a.name };
 }
 
+// isOptimisticAttachmentBlock recognises the content blocks that carry a local
+// (not yet durable) attachment: inline image data or a file chip.
+function isOptimisticAttachmentBlock(block) {
+  return (block.type === 'image' && block.data) || block.type === 'document';
+}
+
+// durableAttachmentContent rewrites `content`, swapping the optimistic
+// attachment blocks for the durable descriptors the server stored. It returns
+// null (leave the local view alone) unless the server returned exactly one
+// descriptor per optimistic attachment: pairing a partial response by position
+// could assign a descriptor to the wrong block, so we stay conservative and let
+// a reload reconcile instead.
+function durableAttachmentContent(content, attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) return null;
+  const optimistic = content.filter(isOptimisticAttachmentBlock);
+  if (attachments.length !== optimistic.length) return null;
+  let index = 0;
+  return content.map((block) => {
+    if (!isOptimisticAttachmentBlock(block)) return block;
+    const attachment = attachments[index++];
+    return {
+      type: attachment.kind === 'file' ? 'document' : 'image',
+      attachment_id: attachment.id,
+      attachment_size: attachment.size,
+      mime_type: attachment.mime,
+      filename: attachment.name,
+    };
+  });
+}
+
 // adoptMessageRail reconciles the local view with a response that says the
 // message started a run (action "send"), whichever rail we optimistically put
 // it on.
@@ -317,7 +347,7 @@ function adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer,
 // or had a queued item by the time the server decided), the optimistic message
 // is fiction: drop it and show the confirmed chip instead — unless a Steered
 // event already delivered the chip, which is the authoritative removal.
-function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun }) {
+function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun, optimisticRun }) {
   const cur = store.get().sessions[id];
   if (!cur) return;
   const steers = cur.pendingSteers || [];
@@ -330,8 +360,15 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun }
     // only queues when a run is in flight or one is about to be pumped, and a
     // later state_change corrects it either way.
     patch.runStartedAtMs = prevRun.runStartedAtMs ?? cur.runStartedAtMs ?? null;
-    patch.runTokensUp = prevRun.runTokensUp;
-    patch.runTokensDown = prevRun.runTokensDown;
+    // Only if nobody touched the tally meanwhile: real run_tokens/state_change
+    // events (this run, or another client's) can land while the POST is in
+    // flight, and restoring the pre-send figures on top of them would replace a
+    // live tally with a stale one.
+    if (Object.is(cur.runTokensUp, optimisticRun.runTokensUp)
+      && Object.is(cur.runTokensDown, optimisticRun.runTokensDown)) {
+      patch.runTokensUp = prevRun.runTokensUp;
+      patch.runTokensDown = prevRun.runTokensDown;
+    }
   }
   const delivered = (cur.messages || []).some((m) => m._steer_id === effSteerId);
   const existing = steers.find((s) => s.id === effSteerId);
@@ -417,28 +454,10 @@ export async function sendMessage(id, text, attachments = []) {
     const action = res?.action === 'steer' ? 'steer' : 'send';
     const effMsgId = res?.msg_id || msgId;
     const effSteerId = res?.steer_id || steerId;
-    if (action === 'send' && optimisticMsg && Array.isArray(res?.attachments) && res.attachments.length > 0) {
+    if (action === 'send' && optimisticMsg) {
       const cur = store.get().sessions[id];
-      // Swap optimistic attachment blocks for durable descriptors only when
-      // the server returned one descriptor for every attachment in order.
-      // Pairing a partial response by position could assign a later descriptor
-      // to the wrong chip, so leave the optimistic view intact until reload.
-      const optimisticAttachments = optimisticMsg.content.filter((b) => (
-        (b.type === 'image' && b.data) || b.type === 'document'
-      ));
-      if (cur?.messages?.includes(optimisticMsg) && res.attachments.length === optimisticAttachments.length) {
-        let attachmentIndex = 0;
-        const content = optimisticMsg.content.map((block) => {
-          if (!((block.type === 'image' && block.data) || block.type === 'document')) return block;
-          const attachment = res.attachments[attachmentIndex++];
-          return {
-            type: attachment.kind === 'file' ? 'document' : 'image',
-            attachment_id: attachment.id,
-            attachment_size: attachment.size,
-            mime_type: attachment.mime,
-            filename: attachment.name,
-          };
-        });
+      const content = durableAttachmentContent(optimisticMsg.content, res?.attachments);
+      if (content && cur?.messages?.includes(optimisticMsg)) {
         updateSession(id, {
           messages: cur.messages.map((message) => (
             message === optimisticMsg ? { ...optimisticMsg, content } : message
@@ -448,9 +467,13 @@ export async function sendMessage(id, text, attachments = []) {
     }
     if (action === 'send') {
       // Content for the case where we had no optimistic message (we predicted a
-      // chip): rebuild the blocks the same way the idle path does.
-      const content = attachments.map(attachmentToContent);
-      if (text) content.push({ type: 'text', text });
+      // chip): rebuild the blocks the same way the idle path does, then swap in
+      // the durable descriptors — the server stored the attachments, so the
+      // adopted message must point at them instead of carrying local blocks
+      // that render as unavailable on this device.
+      const local = attachments.map(attachmentToContent);
+      if (text) local.push({ type: 'text', text });
+      const content = (!optimisticMsg && durableAttachmentContent(local, res?.attachments)) || local;
       adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer, content });
     } else {
       adoptSteerRail(id, {
@@ -459,6 +482,9 @@ export async function sendMessage(id, text, attachments = []) {
         text,
         images: attachments.filter((a) => a.isImage).length,
         prevRun: { runStartedAtMs: prevRunStartedAtMs, runTokensUp: prevTokensUp, runTokensDown: prevTokensDown },
+        // What the optimistic patch left in the tally, so the restore can tell
+        // "untouched" from "real events landed during the POST".
+        optimisticRun: { runTokensUp: 0, runTokensDown: 0 },
       });
     }
     return action;
