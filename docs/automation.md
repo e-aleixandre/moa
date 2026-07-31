@@ -8,7 +8,8 @@ push notifications as one you started yourself, and you can open it on your
 phone and keep talking mid-run.
 
 Concrete integrations (Linear, GitHub, Jira…) are recipes written on top of this
-contract, not features of the core.
+contract, not features of the core. See [Recipe: Linear → Moa](recipes/linear.md)
+for a worked example.
 
 ## Enabling it
 
