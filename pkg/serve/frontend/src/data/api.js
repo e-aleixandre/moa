@@ -14,6 +14,7 @@ import {
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalVerify, handleWsGoalEnd,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer, handleWsSteersCanceled,
+  handleWsUserMessage,
   handleWsMcpChange,
   handleWsCommandQueued, handleWsCommandDequeued,
   handleWsSessionCost,
@@ -265,6 +266,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'goal_end':
       handleWsGoalEnd(sessionId, evt.data);
+      break;
+    case 'user_message':
+      handleWsUserMessage(sessionId, evt.data);
       break;
     case 'steer':
       handleWsSteer(sessionId, evt.data);

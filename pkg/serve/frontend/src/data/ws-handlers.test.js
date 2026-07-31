@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage } from './ws-handlers.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -327,6 +327,43 @@ test('handleWsSteer dedups the injected user message by MsgID', () => {
   const sess = store.get().sessions.s1;
   expect(sess.messages).toHaveLength(1);
   expect(sess.pendingSteers).toBeNull();
+});
+
+test('handleWsUserMessage appends a prompt sent from another client', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+
+  handleWsUserMessage('s1', { msg_id: 'm1', text: 'dictado desde el móvil' });
+
+  const messages = store.get().sessions.s1.messages;
+  expect(messages).toHaveLength(1);
+  expect(messages[0].role).toBe('user');
+  expect(messages[0]._msg_id).toBe('m1');
+  expect(messages[0].content).toEqual([{ type: 'text', text: 'dictado desde el móvil' }]);
+});
+
+test('handleWsUserMessage dedups against the optimistic echo by MsgID', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [
+    { role: 'user', _msg_id: 'm1', content: [{ type: 'text', text: 'ya pintado' }] },
+  ] } } });
+
+  handleWsUserMessage('s1', { msg_id: 'm1', text: 'ya pintado' });
+
+  expect(store.get().sessions.s1.messages).toHaveLength(1);
+});
+
+test('handleWsUserMessage keeps the content blocks of a send with attachments', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+
+  const content = [
+    { type: 'image', attachment_id: 'a1', mime_type: 'image/png' },
+    { type: 'text', text: 'mira esto' },
+  ];
+  handleWsUserMessage('s1', { msg_id: 'm2', content });
+
+  expect(store.get().sessions.s1.messages[0].content).toEqual(content);
 });
 
 test('handleWsSteersCanceled clears the shared queue on every client', () => {

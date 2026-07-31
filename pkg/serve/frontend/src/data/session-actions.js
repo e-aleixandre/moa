@@ -16,7 +16,9 @@ let pollTimer = null;
 // chip has an authoritative identity from the moment it appears — no window
 // where it must be reconciled by text. crypto.randomUUID is available in the
 // secure contexts this app runs in (localhost / Tailscale HTTPS); the fallback
-// keeps it working if that ever changes.
+// keeps it working if that ever changes. The same mechanism mints the message
+// ID of an optimistic user message (see sendMessage), which the server reuses
+// for the message it appends, so the user_message broadcast dedups against it.
 export function newSteerId() {
   try {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return 'c-' + crypto.randomUUID();
@@ -290,6 +292,7 @@ export async function sendMessage(id, text, attachments = []) {
   let optimisticMsg = null;
   let optimisticSteer = null;
   let steerId = '';
+  let msgId = '';
   // Remember the live per-run token tally so a rejected send can restore it
   // (the optimistic patch below resets it to start the new run at zero).
   const prevTokensUp = sess.runTokensUp;
@@ -299,7 +302,12 @@ export async function sendMessage(id, text, attachments = []) {
     // to the agent (see Manager.Send).
     const content = attachments.map(attachmentToContent);
     if (text) content.push({ type: 'text', text });
-    optimisticMsg = { role: 'user', content };
+    // Mint the message ID here so the optimistic echo already carries the
+    // identity the server will append the message under: the authoritative
+    // user_message broadcast (which also reaches other tabs and API clients)
+    // then dedups against this echo instead of duplicating it.
+    msgId = newSteerId();
+    optimisticMsg = { role: 'user', _msg_id: msgId, content };
     updateSession(id, {
       messages: [...sess.messages, optimisticMsg],
       state: 'running',
@@ -332,6 +340,7 @@ export async function sendMessage(id, text, attachments = []) {
       text,
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
       steer_id: steerId || undefined,
+      msg_id: msgId || undefined,
     }, { timeoutMs: 0 });
     if (optimisticMsg && Array.isArray(res?.attachments) && res.attachments.length > 0) {
       const cur = store.get().sessions[id];

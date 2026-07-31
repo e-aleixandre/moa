@@ -1369,6 +1369,23 @@ export function handleWsRunEnd(id) {
   }
 }
 
+// handleWsUserMessage renders a user prompt that started a new run on EVERY
+// client, not just the one that issued it (another tab, or an external API
+// client such as the voice app). Dedup is by MsgID, which the server shares
+// with the message it appends to history: the sending tab already painted it
+// optimistically under the same ID, and a reconnect snapshot may already
+// contain it too.
+export function handleWsUserMessage(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data) return;
+  if (data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id)) return;
+  const content = Array.isArray(data.content) && data.content.length > 0
+    ? data.content
+    : [{ type: 'text', text: data.text || '' }];
+  const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content };
+  updateSession(id, { messages: [...sess.messages, userMsg] });
+}
+
 export function handleWsSteer(id, data) {
   const sess = store.get().sessions[id];
   if (!sess) return;
