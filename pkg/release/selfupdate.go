@@ -132,8 +132,8 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "Updated moa %s → %s at %s.\n", current, latest, target)
-	fmt.Fprintf(out, "Restart moa for the new version to take effect (however you run it: terminal, systemd, ...).\n")
+	_, _ = fmt.Fprintf(out, "Updated moa %s → %s at %s.\n", current, latest, target)
+	_, _ = fmt.Fprintf(out, "Restart moa for the new version to take effect (however you run it: terminal, systemd, ...).\n")
 	return nil
 }
 

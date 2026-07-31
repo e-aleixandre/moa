@@ -216,7 +216,7 @@ func updateServer(t *testing.T, tag string, assets map[string][]byte) *httptest.
 		name := filepath.Base(r.URL.Path)
 		switch {
 		case r.URL.Path == "/api/latest":
-			fmt.Fprintf(w, `{"tag_name":%q}`, tag)
+			_, _ = fmt.Fprintf(w, `{"tag_name":%q}`, tag)
 		case name == "checksums.txt":
 			_, _ = w.Write(sums)
 		default:
