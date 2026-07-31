@@ -743,9 +743,22 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	// reported back through AcceptedMsgID.
 	msgID = sanitizeClientMsgID(msgID)
 	accepted := msgID
+	// The queue rail can fill between the check above and the bus accepting the
+	// prompt; the handler then converts it into a steer and reports the chip ID
+	// through AcceptedSteerID. Hand it the client's chip identity so its
+	// optimistic chip (if any) and the Steered event agree, and report the
+	// action the prompt was ACTUALLY accepted under — reporting a chip ID as a
+	// msg_id makes the client reconcile the wrong rail.
+	acceptedSteer := ""
 	if len(atts) == 0 {
-		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, MsgID: msgID, AcceptedMsgID: &accepted}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
+			Text: text, MsgID: msgID, AcceptedMsgID: &accepted,
+			SteerID: steerID, AcceptedSteerID: &acceptedSteer,
+		}); err != nil {
 			return "", "", nil, err
+		}
+		if acceptedSteer != "" {
+			return "steer", acceptedSteer, nil, nil
 		}
 		return "send", accepted, nil, nil
 	}
@@ -765,7 +778,10 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	if text != "" {
 		content = append(content, core.TextContent(text))
 	}
-	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{Content: content, MsgID: msgID, AcceptedMsgID: &accepted}); err != nil {
+	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{
+		Content: content, MsgID: msgID, AcceptedMsgID: &accepted,
+		SteerID: steerID, AcceptedSteerID: &acceptedSteer,
+	}); err != nil {
 		// The message never entered the conversation — roll back any files
 		// written for it so they don't orphan and count against the quota.
 		for _, p := range writtenFiles {
@@ -773,6 +789,9 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 		}
 		m.releaseAttachmentRefs(sessionID, descriptors)
 		return "", "", nil, err
+	}
+	if acceptedSteer != "" {
+		return "steer", acceptedSteer, descriptors, nil
 	}
 	return "send", accepted, descriptors, nil
 }

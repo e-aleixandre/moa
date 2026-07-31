@@ -2379,6 +2379,109 @@ func TestHandler_SendPrompt_NoAnnounceOnRejectedOrInternal(t *testing.T) {
 	expectNone(got, b, t)
 }
 
+// A prompt that arrives with a non-empty queue rail is converted into a queued
+// steer. The two rails have distinct identities, so it must be reported on the
+// STEER rail: reporting a chip ID as a message ID makes the caller reconcile
+// the wrong rail (chip dropped, phantom message kept).
+func TestHandler_SendPrompt_QueuedReportsSteerRail(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{steerQueue: []core.SteerItem{{ID: "ahead", Text: "first"}}}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.State.ForceState(StateRunning) // keep the pump from draining the rail
+	RegisterHandlers(sctx)
+
+	acceptedMsg, acceptedSteer := "c-msg", ""
+	if err := b.Execute(SendPrompt{
+		Text: "hola", MsgID: "c-msg", AcceptedMsgID: &acceptedMsg,
+		SteerID: "c-steer", AcceptedSteerID: &acceptedSteer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if acceptedSteer != "c-steer" {
+		t.Fatalf("accepted steer ID = %q, want the client-supplied chip ID", acceptedSteer)
+	}
+	if acceptedMsg != "" {
+		t.Fatalf("accepted msg ID = %q, want empty: the prompt was queued, not sent", acceptedMsg)
+	}
+	q := fa.PendingSteers()
+	if len(q) != 2 || q[1].ID != "c-steer" || q[1].Text != "hola" {
+		t.Fatalf("queue = %+v, want the prompt queued under its chip ID", q)
+	}
+}
+
+// Same conversion for a content send: the queued chip must carry the text of
+// the content blocks, or the Steered event (and every chip rendering it) shows
+// an empty message.
+func TestHandler_SendPromptWithContent_QueuedKeepsTextAndSteerRail(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{steerQueue: []core.SteerItem{{ID: "ahead", Text: "first"}}}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.State.ForceState(StateRunning)
+	RegisterHandlers(sctx)
+
+	acceptedMsg, acceptedSteer := "c-msg", ""
+	content := []core.Content{{Type: "image", Data: "base64data"}, core.TextContent("mira esto")}
+	if err := b.Execute(SendPromptWithContent{
+		Content: content, MsgID: "c-msg", AcceptedMsgID: &acceptedMsg,
+		SteerID: "c-steer", AcceptedSteerID: &acceptedSteer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if acceptedSteer != "c-steer" || acceptedMsg != "" {
+		t.Fatalf("accepted (msg=%q, steer=%q), want the steer rail only", acceptedMsg, acceptedSteer)
+	}
+	q := fa.PendingSteers()
+	if len(q) != 2 {
+		t.Fatalf("queue = %+v, want the content send queued", q)
+	}
+	if q[1].Text != "mira esto" {
+		t.Fatalf("queued Text = %q, want the text of the content blocks", q[1].Text)
+	}
+	if len(q[1].Content) != 2 {
+		t.Fatalf("queued Content = %+v, want the full block list", q[1].Content)
+	}
+}
+
+// The queued content send's Steered event must carry that text end to end: the
+// pump publishes Steered from the item, and clients render data.text only.
+func TestHandler_SendPromptWithContent_QueuedSteeredCarriesText(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{steerQueue: []core.SteerItem{{ID: "ahead", Text: "first"}}}
+	sctx := newTestSessionContextWithState(b, fa)
+	sctx.State.ForceState(StateRunning)
+	RegisterHandlers(sctx)
+
+	got := make(chan Steered, 4)
+	b.Subscribe(func(e Steered) { got <- e })
+
+	content := []core.Content{{Type: "image", Data: "base64data"}, core.TextContent("mira esto")}
+	if err := b.Execute(SendPromptWithContent{Content: content, SteerID: "c-steer"}); err != nil {
+		t.Fatal(err)
+	}
+	// Let the pump drain the rail now that the fake run is over.
+	sctx.State.ForceState(StateIdle)
+	requestPump(sctx)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-got:
+			if ev.ID != "c-steer" {
+				continue
+			}
+			if ev.Text != "mira esto" {
+				t.Fatalf("Steered.Text = %q, want the queued content's text", ev.Text)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no Steered event for the queued content send")
+		}
+	}
+}
+
 // ===========================================================================
 // ClearSession — state-aware
 // ===========================================================================

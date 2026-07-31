@@ -43,6 +43,15 @@ type SendPrompt struct {
 	// direct-send path (a queued prompt becomes a steer and is identified by its
 	// chip ID instead).
 	AcceptedMsgID *string
+	// SteerID, when set, is the identity to use if the prompt cannot start a run
+	// (the queue rail is not empty) and is converted into a queued steer. It
+	// never lands in AcceptedMsgID: the two rails have distinct identities.
+	SteerID string
+	// AcceptedSteerID, when non-nil, receives the chip ID the prompt was queued
+	// under when it was converted into a steer. Exactly one of AcceptedMsgID /
+	// AcceptedSteerID is written per accepted prompt, so a caller learns the
+	// effective action ("send" vs "steer") from which one came back non-empty.
+	AcceptedSteerID *string
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).
@@ -57,6 +66,10 @@ type SendPromptWithContent struct {
 	MsgID string
 	// AcceptedMsgID mirrors SendPrompt.AcceptedMsgID.
 	AcceptedMsgID *string
+	// SteerID mirrors SendPrompt.SteerID.
+	SteerID string
+	// AcceptedSteerID mirrors SendPrompt.AcceptedSteerID.
+	AcceptedSteerID *string
 }
 
 // SteerAgent injects a steering message into a running agent.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1523,6 +1524,86 @@ func TestSend_ConcurrentSameClientMsgID(t *testing.T) {
 	for i, act := range actions {
 		if act == "send" && accepted[i] == "" {
 			t.Fatalf("send %d was accepted without an effective msg ID", i)
+		}
+	}
+}
+
+// Concurrent POSTs to an idle session: some start the run, the rest are
+// converted into queued steers — possibly inside the bus handler, after
+// Manager.Send already classified them as direct sends (the queue rail can
+// fill in between). Whatever happens, the response must describe the rail the
+// message ACTUALLY landed on: a "send" answers with a msg_id that really
+// identifies a message in history, a "steer" answers with a chip ID and no
+// msg_id. Announcing a chip ID as a msg_id makes the client reconcile the wrong
+// rail: the chip is dropped and the message renders as a phantom that vanishes
+// on reload.
+func TestSendHTTP_RaceReportsTheRailItLandedOn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(
+		delayedResponseHandler(150*time.Millisecond, "reply"),
+		delayedResponseHandler(150*time.Millisecond, "reply2"),
+		delayedResponseHandler(150*time.Millisecond, "reply3"),
+	))
+	srv := httptest.NewServer(NewServer(mgr))
+	defer srv.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const senders = 4
+	var start, done sync.WaitGroup
+	start.Add(1)
+	type sendResp struct {
+		Action  string `json:"action"`
+		SteerID string `json:"steer_id"`
+		MsgID   string `json:"msg_id"`
+	}
+	out := make([]sendResp, senders)
+	for i := range out {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/send",
+				sendBody(t, fmt.Sprintf("msg %d", i), nil))
+			defer resp.Body.Close() //nolint:errcheck
+			if resp.StatusCode != 202 {
+				return
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&out[i])
+		}()
+	}
+	start.Done()
+	done.Wait()
+	pollUntil(t, 10*time.Second, "runs settle", func() bool { return sessState(sess) == StateIdle })
+
+	inHistory := map[string]bool{}
+	for _, id := range historyMsgIDs(sess) {
+		inHistory[id] = true
+	}
+	for i, r := range out {
+		switch r.Action {
+		case "send":
+			if r.SteerID != "" {
+				t.Fatalf("send %d answered with both a msg_id and a steer_id (%+v)", i, r)
+			}
+			if !inHistory[r.MsgID] {
+				t.Fatalf("send %d answered msg_id %q, which identifies no message in history", i, r.MsgID)
+			}
+		case "steer":
+			if r.MsgID != "" {
+				t.Fatalf("steer %d answered with a msg_id (%+v): a chip is not a message", i, r)
+			}
+			if r.SteerID == "" {
+				t.Fatalf("steer %d answered without a chip ID", i)
+			}
+		case "":
+			// Rejected (e.g. lost the run slot): nothing to assert.
+		default:
+			t.Fatalf("send %d answered an unknown action %q", i, r.Action)
 		}
 	}
 }

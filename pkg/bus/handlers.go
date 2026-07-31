@@ -601,18 +601,21 @@ func RegisterHandlers(sctx *SessionContext) {
 		// machinery the queue is waiting on, not new user turns, and steering
 		// them would strip their Custom source.
 		if !isInternalPromptSource(cmd.Custom) && sctx.Agent.QueueLen() > 0 {
-			id := cmd.MsgID
+			id := cmd.SteerID
 			if id == "" {
 				id = core.NewSteerID()
 			}
 			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text}) {
 				return ErrSteerQueueFull
 			}
-			// Report the identity the message was accepted under: here it is a
-			// queued chip's ID, not a message ID, but it is still what the
-			// caller must reconcile its optimistic entry against.
+			// Report the identity on the STEER rail: a chip ID must never be
+			// reported as a message ID, or the caller reconciles the wrong rail
+			// (the chip would be dropped and a phantom message kept).
+			if cmd.AcceptedSteerID != nil {
+				*cmd.AcceptedSteerID = id
+			}
 			if cmd.AcceptedMsgID != nil {
-				*cmd.AcceptedMsgID = id
+				*cmd.AcceptedMsgID = ""
 			}
 			// Always kick the pump after enqueuing: this closes the orphan-steer
 			// race where the pump drained the queue empty between our QueueLen
@@ -676,8 +679,21 @@ func RegisterHandlers(sctx *SessionContext) {
 		// jumping ahead. Content sends are always user-initiated, so no source
 		// exemption applies.
 		if sctx.Agent.QueueLen() > 0 {
-			if !sctx.Agent.Steer(core.SteerItem{ID: core.NewSteerID(), Content: cmd.Content}) {
+			id := cmd.SteerID
+			if id == "" {
+				id = core.NewSteerID()
+			}
+			// Carry the plain text alongside the content blocks: the Steered
+			// event (and every client rendering it) shows Text, so a queued
+			// send with attachments would otherwise surface as an empty chip.
+			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content}) {
 				return ErrSteerQueueFull
+			}
+			if cmd.AcceptedSteerID != nil {
+				*cmd.AcceptedSteerID = id
+			}
+			if cmd.AcceptedMsgID != nil {
+				*cmd.AcceptedMsgID = ""
 			}
 			requestPump(sctx) // close the orphan-steer race (see SendPrompt)
 			return nil
@@ -2286,8 +2302,15 @@ func rescaleCompactAt(sctx *SessionContext, oldWindow, newWindow int) (int, bool
 
 // messageText extracts the concatenated text content from an AgentMessage.
 func messageText(msg core.AgentMessage) string {
+	return contentText(msg.Content)
+}
+
+// contentText extracts the concatenated text blocks of a content payload. Used
+// to give a content-bearing steer a renderable Text: clients render the chip
+// and the Steered event from Text, not from the blocks.
+func contentText(content []core.Content) string {
 	var parts []string
-	for _, c := range msg.Content {
+	for _, c := range content {
 		if c.Type == "text" && c.Text != "" {
 			parts = append(parts, c.Text)
 		}
