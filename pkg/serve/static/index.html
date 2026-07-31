@@ -6,17 +6,23 @@
   <!-- --base, matching the conversation surface: this paints the iOS status-bar
        area in the installed PWA, and --crust showed as a darker band there. -->
   <meta name="theme-color" content="#1e1e2e">
-  <!-- Home Screen web app chrome is driven entirely by manifest.webmanifest
-       (display:standalone) — the modern iOS 16.4+ path. The legacy meta opt-ins
-       are deliberately absent:
-       - apple-mobile-web-app-capable / mobile-web-app-capable: redundant once the
-         manifest declares standalone.
-       - apple-mobile-web-app-status-bar-style=black-translucent: deprecated by
-         WebKit and part of the geometry that made iOS 26 standalone drop the
-         status-bar height twice, leaving a native strip below the webview on an
-         iPhone 17 Pro (viewport came back 402x812 = 402x(874-62)). theme-color
-         colors the status bar without requesting the deprecated translucent mode.
-       See WebKit bugs 313800 / 300445 for the underlying iOS 26 shell regression. -->
+  <!-- Home Screen web app chrome comes from manifest.webmanifest
+       (display:standalone), the modern iOS 16.4+ path. The capability metas are
+       kept as a redundant opt-in: on iOS the microphone grant is bound to the
+       installed web app's identity, and a launch that falls back to a
+       browser-style view re-prompts on every open (WebKit only keeps getUserMedia
+       grants in memory outside the web app container — bug 280394). They do not
+       affect the viewport.
+
+       Still deliberately absent:
+       apple-mobile-web-app-status-bar-style=black-translucent — deprecated by
+       WebKit and the actual cause of the iOS 26 geometry bug that made the
+       standalone shell subtract the status-bar height twice, leaving a native
+       strip below the webview on an iPhone 17 Pro (viewport came back
+       402x812 = 402x(874-62)). theme-color colors the status bar instead.
+       See WebKit bugs 313800 / 300445. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moa">
   <title>moa</title>
   <link rel="manifest" href="/manifest.webmanifest">
