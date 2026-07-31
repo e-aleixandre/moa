@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/permission"
 )
 
 func newTestApprovalManager(t *testing.T) (*ApprovalManager, EventBus) {

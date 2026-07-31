@@ -16,7 +16,7 @@ import (
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 const maxFetchBytes = 5 * 1024 * 1024 // 5 MB

@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/ealeixandre/moa/pkg/auth"
+	"github.com/e-aleixandre/moa/pkg/auth"
 )
 
 // handleLogin performs provider-specific login.

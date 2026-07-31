@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 )
 
 func NewSessionCheckpoint(slot *sessioncheckpoint.Slot) core.Tool {

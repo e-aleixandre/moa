@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // TestConsumeStream_CancelledTurnWithLateDoneIsNotSuccess pins M18: when the

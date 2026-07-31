@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // ScriptDef defines a user-provided script tool loaded from JSON.

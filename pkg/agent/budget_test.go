@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // testPricing returns pricing where 1000 input + 500 output tokens cost $0.02.

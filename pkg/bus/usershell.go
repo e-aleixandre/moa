@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // UserShellTimeout bounds how long a "!" / "!!" shell escape may run before

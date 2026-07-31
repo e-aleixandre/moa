@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // ErrSteerQueueFull is returned by the SteerAgent command when the agent's

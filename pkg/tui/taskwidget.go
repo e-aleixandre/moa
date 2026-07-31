@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 const taskWidgetMaxLines = 6

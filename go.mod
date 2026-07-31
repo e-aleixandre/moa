@@ -1,4 +1,4 @@
-module github.com/ealeixandre/moa
+module github.com/e-aleixandre/moa
 
 go 1.25.0
 

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 )
 
 func newPrepareTest(t *testing.T, fa *fakeAgent) (*LocalBus, *SessionContext, <-chan RunEnded) {

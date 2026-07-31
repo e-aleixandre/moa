@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/schedule"
+	"github.com/e-aleixandre/moa/pkg/schedule"
 )
 
 func TestSchedulerDeliversIdleScheduleWithCustomMetadata(t *testing.T) {

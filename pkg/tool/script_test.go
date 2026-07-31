@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func TestLoadScriptTools_ValidJSON(t *testing.T) {

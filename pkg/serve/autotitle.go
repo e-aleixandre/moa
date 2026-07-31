@@ -4,10 +4,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/autotitle"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/autotitle"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // subscribeAutoTitle generates a concise session title (via a cheap LLM call)

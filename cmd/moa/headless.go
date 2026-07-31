@@ -5,9 +5,9 @@ import (
 	"os"
 	"sync/atomic"
 
-	"github.com/ealeixandre/moa/pkg/ansi"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/ansi"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // subscribeHeadlessAll subscribes to all bus events for headless text output.

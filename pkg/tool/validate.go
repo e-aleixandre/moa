@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // ValidateParams validates tool call arguments against the tool's JSON Schema.

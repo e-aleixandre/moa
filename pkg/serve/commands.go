@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/goal"
-	"github.com/ealeixandre/moa/pkg/schedule"
-	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/verify"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/schedule"
+	"github.com/e-aleixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/verify"
 )
 
 // commandHandler executes a slash command for a session.

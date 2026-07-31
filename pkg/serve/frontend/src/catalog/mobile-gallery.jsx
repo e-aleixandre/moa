@@ -45,7 +45,7 @@ const EDIT_DIFF = `@@ -262,6 +262,7 @@
    return c.stream(ch)`;
 
 const BASH_OUTPUT = `$ go test -race -count=50 -run TestResume ./pkg/serve/
-ok  github.com/ealeixandre/moa/pkg/serve  3.912s
+ok  github.com/e-aleixandre/moa/pkg/serve  3.912s
 50/50 runs passed · no data races detected`;
 
 const CODE_SAMPLE = `// subscribe BEFORE snapshot

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // Controller coordinates one session's MCP manager, its tool registry, and the

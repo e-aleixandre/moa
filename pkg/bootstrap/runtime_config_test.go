@@ -3,11 +3,11 @@ package bootstrap
 import (
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/askuser"
-	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/planmode"
-	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/askuser"
+	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/planmode"
+	"github.com/e-aleixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 func TestRuntimeConfig_CommonFields(t *testing.T) {

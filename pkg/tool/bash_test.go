@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // newStateCfg builds a persistent-shell ToolConfig rooted at a fresh temp dir

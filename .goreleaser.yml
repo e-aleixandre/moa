@@ -2,7 +2,7 @@ version: 2
 
 builds:
   - id: moa
-    main: ./cmd/agent
+    main: ./cmd/moa
     binary: moa
     env:
       - CGO_ENABLED=0
@@ -30,6 +30,30 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
+
+brews:
+  # `brews` (formulas) rather than `homebrew_casks`: casks are macOS-only, and
+  # this tap is advertised for Linux too. GoReleaser marks `brews` deprecated
+  # and prints a warning, but still publishes; revisit if it is ever removed.
+  - name: moa
+    ids:
+      - default
+    repository:
+      owner: e-aleixandre
+      name: homebrew-tap
+      token: '{{ index .Env "TAP_GITHUB_TOKEN" }}'
+    # The tap lives in another repository and needs its own token. When that
+    # secret is absent the release still succeeds and only the tap update is
+    # skipped. `index .Env` (rather than `.Env.TAP_GITHUB_TOKEN`) keeps the
+    # template working when the variable is not set at all, e.g. a local run.
+    skip_upload: '{{ if index .Env "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    homepage: "https://letmoa.run"
+    description: "Self-hosted coding agent you can steer from anywhere"
+    license: "MIT"
+    install: |
+      bin.install "moa"
+    test: |
+      system "#{bin}/moa", "version"
 
 changelog:
   sort: asc

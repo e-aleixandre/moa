@@ -3,7 +3,7 @@ package extension
 import (
 	"context"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // --- Hook handler types (each has appropriate return type) ---

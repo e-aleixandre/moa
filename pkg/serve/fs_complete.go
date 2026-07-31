@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // fsCompleteResponse is the JSON body returned by handleFSComplete.

@@ -121,24 +121,33 @@ you use.
 
 ## Quick start
 
-Prebuilt binaries are available from
-[GitHub Releases](https://github.com/ealeixandre/moa/releases/latest). To build from source,
+Install the latest release:
+
+```bash
+curl -fsSL https://letmoa.run/install.sh | sh
+# or with Homebrew:
+brew install e-aleixandre/tap/moa
+```
+
+Prebuilt binaries are also available from
+[GitHub Releases](https://github.com/e-aleixandre/moa/releases/latest), and `moa update`
+replaces an installed binary with the latest release. To build from source,
 you need Go 1.25+ and Node.js/npm for the embedded web frontends:
 
 ```bash
-git clone https://github.com/ealeixandre/moa.git
+git clone https://github.com/e-aleixandre/moa.git
 cd moa
 
 make fe-install
 make build
-# → ./bin/moa
+# → ./bin/moa  (put it in your PATH, or use ./bin/moa in the commands below)
 ```
 
 Authenticate with an existing subscription:
 
 ```bash
-./bin/moa --login anthropic   # Claude Pro/Max OAuth
-./bin/moa --login openai      # ChatGPT Plus/Pro OAuth, or choose an API key
+moa --login anthropic   # Claude Pro/Max OAuth
+moa --login openai      # ChatGPT Plus/Pro OAuth, or choose an API key
 ```
 
 Or provide an API key directly:
@@ -152,7 +161,7 @@ export OPENAI_API_KEY="..."
 Start the web UI:
 
 ```bash
-./bin/moa serve
+moa serve
 # → http://127.0.0.1:8080
 ```
 

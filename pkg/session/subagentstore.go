@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // SubagentTranscript is the persisted record of one subagent's sub-conversation.

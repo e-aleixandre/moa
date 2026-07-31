@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // streamWriter feeds command output into a headTailBuffer and streams the bytes

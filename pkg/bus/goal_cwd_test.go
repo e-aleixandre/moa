@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/goal"
 )
 
 func TestEnterGoalResolvesRelativeStatePathPerSessionCWD(t *testing.T) {

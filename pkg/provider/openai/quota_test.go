@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // Real 429 body captured live from chatgpt.com/backend-api/codex/responses when

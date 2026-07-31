@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/provider/retry"
-	"github.com/ealeixandre/moa/pkg/provider/sseutil"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/provider/retry"
+	"github.com/e-aleixandre/moa/pkg/provider/sseutil"
 )
 
 const (

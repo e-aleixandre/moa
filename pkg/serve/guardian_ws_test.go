@@ -13,8 +13,8 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // existing Serve WebSocket transport
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // existing Serve WebSocket transport
 
-	"github.com/ealeixandre/moa/pkg/attention"
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/attention"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 func dialGuardian(t *testing.T, server *httptest.Server, credential string) *websocket.Conn { //nolint:staticcheck // existing Serve WebSocket transport

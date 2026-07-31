@@ -29,6 +29,27 @@ moa version   # or: moa --version, moa -v
 
 Prints the version, commit, and build date.
 
+## Update subcommand
+
+```bash
+moa update           # download, verify, and install the latest release
+moa update --check   # only report current vs latest, install nothing
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--check` | false | Report whether an update is available without installing it |
+
+Downloads the release archive for your platform, verifies its SHA-256 against
+the release `checksums.txt`, and replaces the running binary in place. It never
+restarts anything: restart Moa yourself afterwards.
+
+Binaries installed through Homebrew or Nix are refused with a pointer to the
+package manager (`brew upgrade moa`). If the binary's directory is not writable,
+the command fails with a clear message rather than escalating privileges.
+Unlike the passive update notice, `moa update` ignores `MOA_NO_UPDATE_CHECK`:
+it is an explicit request.
+
 ## Serve subcommand
 
 ```bash

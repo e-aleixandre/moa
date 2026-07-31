@@ -17,18 +17,18 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ealeixandre/moa/pkg/auth"
-	"github.com/ealeixandre/moa/pkg/bootstrap"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/checkpoint"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/mcp"
-	promptpkg "github.com/ealeixandre/moa/pkg/prompt"
-	"github.com/ealeixandre/moa/pkg/provider/openai"
-	"github.com/ealeixandre/moa/pkg/release"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/tool"
-	"github.com/ealeixandre/moa/pkg/tui"
+	"github.com/e-aleixandre/moa/pkg/auth"
+	"github.com/e-aleixandre/moa/pkg/bootstrap"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/checkpoint"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/mcp"
+	promptpkg "github.com/e-aleixandre/moa/pkg/prompt"
+	"github.com/e-aleixandre/moa/pkg/provider/openai"
+	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/tui"
 )
 
 // Set by goreleaser ldflags.
@@ -66,12 +66,26 @@ func (r *resumeFlag) Set(value string) error {
 
 func (r *resumeFlag) IsBoolFlag() bool { return true }
 
+// printUsage lists the subcommands before the flag defaults, which
+// flag.PrintDefaults alone would never mention.
+func printUsage() {
+	out := flag.CommandLine.Output()
+	fmt.Fprint(out, "Usage: moa [flags]\n       moa <command> [flags]\n\nCommands:\n"+
+		"  serve      Run the web UI server\n"+
+		"  update     Update moa to the latest release (--check to only report)\n"+
+		"  version    Print version, commit, and build date\n\nFlags:\n")
+	flag.PrintDefaults()
+}
+
 func main() {
 	// Dispatch subcommands before flag.Parse() (which owns the default flagset).
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "serve":
 			runServe(os.Args[2:])
+			return
+		case "update":
+			runUpdate(os.Args[2:])
 			return
 		case "version", "--version", "-v":
 			fmt.Printf("moa %s\n", (release.Info{Version: version, Commit: commit, Date: date}).String())
@@ -111,6 +125,7 @@ func main() {
 	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	cpuprofile := flag.String("cpuprofile", "", "Write CPU profile to file")
+	flag.Usage = printUsage
 	flag.Parse()
 
 	if *cpuprofile != "" {

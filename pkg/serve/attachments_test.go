@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/attachment"
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/attachment"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 func b64(data []byte) string { return base64.StdEncoding.EncodeToString(data) }

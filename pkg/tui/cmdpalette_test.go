@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/goal"
 )
 
 func TestCmdPalette_ActivatesOnSlash(t *testing.T) {

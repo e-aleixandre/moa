@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 // loop.go — the single owner goroutine. All mutable state lives here as locals;

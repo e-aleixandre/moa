@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
 )
 
 // requestPump asks the queue pump to run, coalescing concurrent requests into a

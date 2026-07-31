@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/ealeixandre/moa/pkg/core"
+import "github.com/e-aleixandre/moa/pkg/core"
 
 // AgentState holds the mutable state during an agent run.
 type AgentState struct {

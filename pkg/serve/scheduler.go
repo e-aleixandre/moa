@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/schedule"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/schedule"
 )
 
 // schedulerService owns the schedule store and its delivery loop. All store

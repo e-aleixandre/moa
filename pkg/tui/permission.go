@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/permission"
 )
 
 // permOption is one choice in the permission prompt.

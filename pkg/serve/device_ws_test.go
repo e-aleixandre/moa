@@ -12,7 +12,7 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // device websocket lifecycle coverage
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // device websocket lifecycle coverage
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 type storedDeviceCredential struct {

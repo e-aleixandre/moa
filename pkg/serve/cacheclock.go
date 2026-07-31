@@ -3,8 +3,8 @@ package serve
 import (
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // subscribeCacheClock records when each run finishes so the UI can tell whether

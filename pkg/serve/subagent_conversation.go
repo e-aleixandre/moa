@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/session"
-	"github.com/ealeixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/subagent"
 )
 
 // SubagentSummary describes a subagent available to an owner-authorized

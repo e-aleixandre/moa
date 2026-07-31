@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func newPatchTool(t *testing.T, dir string, ft *FileTracker) core.Tool {

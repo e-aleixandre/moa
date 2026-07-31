@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // Mode controls how tool permissions are evaluated.

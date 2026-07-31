@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	githubLatestURL = "https://api.github.com/repos/ealeixandre/moa/releases/latest"
+	githubLatestURL = "https://api.github.com/repos/e-aleixandre/moa/releases/latest"
 	// CheckInterval bounds both persistent-cache freshness and UI refreshes.
 	// It deliberately keeps GitHub traffic low for short-lived TUI processes.
 	CheckInterval  = 6 * time.Hour
@@ -228,20 +228,43 @@ func (c *Checker) Check(ctx context.Context) (Result, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	cache, err := c.refresh(ctx, false)
+	return compareResult(result, current, cache.Latest), err
+}
+
+// LatestVersion returns the newest stable release, always asking GitHub. It
+// bypasses both the cache interval and MOA_NO_UPDATE_CHECK because it serves
+// an explicit user request (`moa update`) rather than the passive check.
+func (c *Checker) LatestVersion(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cache, err := c.refresh(ctx, true)
+	if err != nil {
+		return "", err
+	}
+	if cache.Latest == "" {
+		return "", errors.New("release check: no stable release found")
+	}
+	return cache.Latest, nil
+}
+
+// refresh returns the newest known release, querying GitHub when the cached
+// value is stale or when force bypasses the interval. The cache is returned
+// even alongside an error so callers can fall back to a stale answer.
+func (c *Checker) refresh(ctx context.Context, force bool) (diskCache, error) {
 	now := c.Now
 	if now == nil {
 		now = time.Now
 	}
 	cache := c.readCache()
-	cached := compareResult(result, current, cache.Latest)
-	if cache.Latest != "" && now().Sub(cache.Checked) < CheckInterval {
-		return cached, nil
+	if !force && cache.Latest != "" && now().Sub(cache.Checked) < CheckInterval {
+		return cache, nil
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, c.url(), nil)
 	if err != nil {
-		return result, err
+		return diskCache{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "moa/"+c.Info.DisplayVersion())
@@ -254,16 +277,16 @@ func (c *Checker) Check(ctx context.Context) (Result, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return cached, err
+		return cache, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotModified && cache.Latest != "" {
 		cache.Checked = now()
 		c.writeCache(cache)
-		return compareResult(result, current, cache.Latest), nil
+		return cache, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return cached, fmt.Errorf("release check: %s", resp.Status)
+		return cache, fmt.Errorf("release check: %s", resp.Status)
 	}
 	var payload struct {
 		TagName    string `json:"tag_name"`
@@ -271,15 +294,15 @@ func (c *Checker) Check(ctx context.Context) (Result, error) {
 		Draft      bool   `json:"draft"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
-		return cached, err
+		return cache, err
 	}
 	latest, valid := ParseSemver(payload.TagName)
 	if !valid || latest.Pre != "" || payload.Prerelease || payload.Draft {
-		return cached, errors.New("release check: invalid stable release")
+		return cache, errors.New("release check: invalid stable release")
 	}
 	cache = diskCache{Latest: "v" + strings.TrimPrefix(payload.TagName, "v"), ETag: resp.Header.Get("ETag"), Checked: now()}
 	c.writeCache(cache)
-	return compareResult(result, current, cache.Latest), nil
+	return cache, nil
 }
 
 func (c *Checker) url() string {

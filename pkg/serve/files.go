@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/ealeixandre/moa/pkg/files"
+	"github.com/e-aleixandre/moa/pkg/files"
 )
 
 // handleListFiles returns file entries for a session's CWD, filtered by query.

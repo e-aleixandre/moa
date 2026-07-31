@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 const braveSearchURL = "https://api.search.brave.com/res/v1/web/search"

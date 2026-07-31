@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func queryRunTokens(t *testing.T, b EventBus) RunTokens {

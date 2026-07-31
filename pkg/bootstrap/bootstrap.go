@@ -1,7 +1,7 @@
 // Package bootstrap wires up a complete agent session: tool registry, MCP,
 // permissions, subagents, plan mode, skills, verify, and system prompt.
 //
-// Both the CLI (cmd/agent) and the HTTP server (pkg/serve) call BuildSession
+// Both the CLI (cmd/moa) and the HTTP server (pkg/serve) call BuildSession
 // to avoid duplicating the 14-step setup sequence.
 package bootstrap
 
@@ -15,21 +15,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/agent"
-	"github.com/ealeixandre/moa/pkg/askuser"
-	agentcontext "github.com/ealeixandre/moa/pkg/context"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/goal"
-	"github.com/ealeixandre/moa/pkg/mcp"
-	"github.com/ealeixandre/moa/pkg/memory"
-	"github.com/ealeixandre/moa/pkg/permission"
-	"github.com/ealeixandre/moa/pkg/planmode"
-	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
-	"github.com/ealeixandre/moa/pkg/skill"
-	"github.com/ealeixandre/moa/pkg/subagent"
-	"github.com/ealeixandre/moa/pkg/tasks"
-	"github.com/ealeixandre/moa/pkg/tool"
-	"github.com/ealeixandre/moa/pkg/verify"
+	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/askuser"
+	agentcontext "github.com/e-aleixandre/moa/pkg/context"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/memory"
+	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/planmode"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/skill"
+	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/verify"
 )
 
 // Default review thinking level for plan mode (shared between CLI and serve).
@@ -101,7 +101,7 @@ type SessionConfig struct {
 	// OnSubagentStart/OnSubagentEvent/OnSubagentUsage/OnSubagentEnd are the
 	// rich, per-child streaming sinks (subagent.Config.OnChildStart/
 	// OnChildEvent/OnChildUsage/OnChildEnd). The caller wires these into its
-	// own bus (see cmd/agent's preBus, pkg/serve's session_lifecycle closure)
+	// own bus (see cmd/moa's preBus, pkg/serve's session_lifecycle closure)
 	// since bootstrap has no bus reference of its own. All optional (nil =
 	// no-op).
 	OnSubagentStart func(jobID, task, model, thinking, originToolCallID string, async bool, startedAt time.Time, accentIndex int)

@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/compaction"
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/extension"
-	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
-	"github.com/ealeixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/compaction"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/extension"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // BudgetExceededError is returned when a run's accumulated cost exceeds MaxBudget.

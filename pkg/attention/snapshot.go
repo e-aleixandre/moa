@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 // snapshot.go — per-session aggregated state owned by Service.loop.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // MigrateV1ToV2 converts a v1 session (flat Messages) to v2 (entry-based tree).

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
-	"github.com/ealeixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func writeVerifyConfig(t *testing.T, dir, body string) {

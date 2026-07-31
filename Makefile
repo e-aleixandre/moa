@@ -6,10 +6,10 @@ BIN := bin/moa
 # ─── Go ────────────────────────────────────────────────────
 
 build: fe
-	go build -o $(BIN) ./cmd/agent
+	go build -o $(BIN) ./cmd/moa
 
 build-linux: fe
-	GOOS=linux GOARCH=amd64 go build -o bin/moa-linux-amd64 ./cmd/agent
+	GOOS=linux GOARCH=amd64 go build -o bin/moa-linux-amd64 ./cmd/moa
 
 test:
 	go test -race -count=1 ./...

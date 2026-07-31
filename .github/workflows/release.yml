@@ -62,3 +62,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Publishing to the Homebrew tap needs a token for that other
+          # repository. An unconfigured secret renders as an empty string, which
+          # is what .goreleaser.yml's skip_upload template checks for: the
+          # release then succeeds with only the tap update skipped.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

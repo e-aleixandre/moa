@@ -10,7 +10,7 @@ import (
 	"nhooyr.io/websocket"        //nolint:staticcheck // keep Serve WebSocket transport consistent
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // keep Serve WebSocket transport consistent
 
-	"github.com/ealeixandre/moa/pkg/attention"
+	"github.com/e-aleixandre/moa/pkg/attention"
 )
 
 const guardianSinkBuffer = 32

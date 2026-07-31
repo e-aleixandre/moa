@@ -18,7 +18,7 @@ mkdir -p tmp/evidence
 if [[ ! -x "$BIN" ]]; then
   echo "gpt55-review: building moa binary..."
   ( cd pkg/serve/frontend && PATH="$HOME/.bun/bin:$PATH" bun esbuild.mjs >/dev/null 2>&1 ) || true
-  go build -o "$BIN" ./cmd/agent
+  go build -o "$BIN" ./cmd/moa
 fi
 
 DIFF="$(git diff "${BASE}"..HEAD -- ':(exclude)pkg/serve/static' ':(exclude)pkg/serve/frontend/node_modules')"

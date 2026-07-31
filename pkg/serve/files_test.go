@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ealeixandre/moa/pkg/files"
+	"github.com/e-aleixandre/moa/pkg/files"
 )
 
 func TestHandleListFiles_OK(t *testing.T) {

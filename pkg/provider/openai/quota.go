@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // usageLimitBody is the JSON returned by chatgpt.com/backend-api on a 429 when

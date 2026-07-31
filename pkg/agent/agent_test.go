@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/extension"
-	"github.com/ealeixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/extension"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 )
 
 // --- MockProvider ---

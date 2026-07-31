@@ -12,8 +12,8 @@ package bus
 import (
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/core"
-	"github.com/ealeixandre/moa/pkg/tasks"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 // ---------------------------------------------------------------------------

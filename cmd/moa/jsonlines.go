@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ealeixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
 // jsonLineWriter emits agent events as JSON-lines to stdout.

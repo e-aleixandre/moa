@@ -11,8 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ealeixandre/moa/pkg/askuser"
-	"github.com/ealeixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/askuser"
+	"github.com/e-aleixandre/moa/pkg/permission"
 )
 
 var (

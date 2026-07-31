@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/ealeixandre/moa/pkg/ansi"
+	"github.com/e-aleixandre/moa/pkg/ansi"
 )
 
 // assistantPadChars is the left padding added to assistant text by layouts.
