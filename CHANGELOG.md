@@ -5,6 +5,42 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-07-31
+
+### Added
+
+- Moa can now be driven by other systems, not just by a person in front of it.
+  A new Automation API (`docs/automation.md`) lets an external service — a CI
+  job, an issue tracker webhook, a cron script — start an agent session with a
+  single authenticated HTTP request and follow it to completion:
+  - `POST /api/automation/runs` starts a run behind a dedicated bearer token
+    (`--automation-token` / `MOA_AUTOMATION_TOKEN`); without the token the
+    routes do not exist. Idempotency keys make webhook retries safe.
+  - When the run finishes — or the moment it blocks on a question or a
+    permission — Moa posts a signed callback (`done` / `failed` /
+    `needs_input`) to the caller's URL, carrying a summary, a link to the
+    session, and the pending question when there is one.
+  - The caller can answer back through endpoints scoped to the sessions its
+    token created: send a follow-up message, answer an `ask_user` prompt, or
+    resolve a permission request. Machine permission decisions are a
+    deliberate, documented handover of authority — whoever wires them up owns
+    that risk.
+  - A run can bring its own tools: `mcp_servers` attaches remote MCP servers
+    (URL-only, never local commands) for the life of the session, so an
+    integration can expose e.g. `mark_task_done` to the agent instead of
+    inferring business state from run completion.
+  Automation-created sessions are ordinary sessions — same runtime, same
+  permissions, fully usable from the web UI and TUI — distinguished only by an
+  origin tag shown in the session lists of both frontends. Integrations stay
+  out of core by design: vendor-specific glue is a recipe
+  (`docs/recipes/linear.md` shows a complete Linear integration in ~40 lines
+  of relay), not a connector.
+- MCP servers can now be remote: a `.mcp.json` entry may declare a `url`
+  (streamable HTTP transport, with optional auth headers) instead of a local
+  `command`. Credentials never follow cross-origin redirects, connections are
+  time-bounded so a dead endpoint cannot wedge a session, and header values are
+  validated against injection.
+
 ## [0.19.0] - 2026-07-31
 
 ### Added
