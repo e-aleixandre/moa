@@ -143,6 +143,85 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 	return json.Marshal(ar)
 }
 
+// manyImageThreshold is the number of image blocks in a single request above
+// which Anthropic drops the per-side size cap from MaxImageDimension to
+// manyImageMaxDimension. Requests at or below it may carry full-size images.
+const manyImageThreshold = 20
+
+// manyImageMaxDimension is the per-side cap that applies once a request carries
+// more than manyImageThreshold images. It is not enforced by measuring: any
+// image can breach it, so retirement is by age, not by size.
+const manyImageMaxDimension = 2000
+
+// imageRetireBatch is how many images are retired at a time. Retiring exactly
+// the overflow would change the retired set on every new image and invalidate
+// the prompt cache each turn; rounding up to a batch keeps the request bytes
+// stable until the count crosses the next boundary, and history is append-only,
+// so between crossings the cached prefix survives.
+const imageRetireBatch = 8
+
+// imageRetirer tracks how many of the oldest image blocks still have to be
+// swapped for a text note. Conversion walks messages in chronological order, so
+// "the next image encountered" is always the oldest one left.
+//
+// A nil retirer retires nothing, which is the <= manyImageThreshold case.
+type imageRetirer struct {
+	remaining int
+}
+
+// newImageRetirer counts the image blocks the request would put on the wire and
+// decides how many of the oldest to retire.
+//
+// Anthropic applies a stricter 2000 px per-side cap once a request carries more
+// than 20 images, and rejects the whole request with a 400 when any image
+// breaches it. History is replayed every turn, so one 1170x2532 screenshot in a
+// long session poisons every following turn permanently. Retiring the oldest
+// images brings the count back to the threshold, which restores the full-size
+// allowance for the ones that are left; it also un-poisons a conversation that
+// is already stuck, on its next turn, with no user action.
+//
+// Only images count here. Documents do not count toward the threshold on the
+// direct API, which is the only one moa talks to; Bedrock and Vertex do count
+// them, so this is the place to adjust if either is ever supported.
+func newImageRetirer(msgs []core.Message) *imageRetirer {
+	count := 0
+	for _, msg := range msgs {
+		// Assistant content never carries images (convertAssistantContent
+		// drops them), and unknown roles are skipped entirely.
+		if msg.Role != "user" && msg.Role != "tool_result" {
+			continue
+		}
+		for _, b := range msg.Content {
+			if b.Type != "image" {
+				continue
+			}
+			// Images above MaxImageDimension are replaced by a note further
+			// down, so they never reach the wire as image blocks and must not
+			// inflate the count.
+			if _, _, tooBig := core.ImageExceedsMaxDimension(b.Data); tooBig {
+				continue
+			}
+			count++
+		}
+	}
+	if count <= manyImageThreshold {
+		return nil
+	}
+	overflow := count - manyImageThreshold
+	batches := (overflow + imageRetireBatch - 1) / imageRetireBatch
+	return &imageRetirer{remaining: batches * imageRetireBatch}
+}
+
+// takeOldest reports whether the image block being converted is one of the
+// oldest ones scheduled for retirement, consuming one slot when it is.
+func (r *imageRetirer) takeOldest() bool {
+	if r == nil || r.remaining <= 0 {
+		return false
+	}
+	r.remaining--
+	return true
+}
+
 // convertMessages maps core.Message slice to Anthropic API format.
 //
 // Mapping:
@@ -155,8 +234,12 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 func convertMessages(msgs []core.Message, isOAuth bool) []map[string]any {
 	var result []map[string]any
 
+	// Message order is chronological, so conversion order is age order: the
+	// retirer hands out its slots to the oldest images first.
+	retire := newImageRetirer(msgs)
+
 	for _, msg := range msgs {
-		apiMsg := convertMessage(msg, isOAuth)
+		apiMsg := convertMessage(msg, isOAuth, retire)
 		if apiMsg == nil {
 			continue
 		}
@@ -179,12 +262,12 @@ func convertMessages(msgs []core.Message, isOAuth bool) []map[string]any {
 }
 
 // convertMessage maps a single core.Message to Anthropic API format.
-func convertMessage(msg core.Message, isOAuth bool) map[string]any {
+func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer) map[string]any {
 	switch msg.Role {
 	case "user":
 		return map[string]any{
 			"role":    "user",
-			"content": convertContentBlocks(msg.Content),
+			"content": convertContentBlocks(msg.Content, retire),
 		}
 
 	case "assistant":
@@ -203,7 +286,7 @@ func convertMessage(msg core.Message, isOAuth bool) map[string]any {
 			block["is_error"] = true
 		}
 		if len(msg.Content) > 0 {
-			block["content"] = convertContentBlocks(msg.Content)
+			block["content"] = convertContentBlocks(msg.Content, retire)
 		}
 		return map[string]any{
 			"role":    "user",
@@ -216,7 +299,8 @@ func convertMessage(msg core.Message, isOAuth bool) map[string]any {
 }
 
 // convertContentBlocks converts core.Content slices to Anthropic content blocks.
-func convertContentBlocks(blocks []core.Content) []any {
+// retire may be nil, meaning no image is old enough to be retired.
+func convertContentBlocks(blocks []core.Content, retire *imageRetirer) []any {
 	result := make([]any, 0, len(blocks))
 	for _, b := range blocks {
 		switch b.Type {
@@ -230,11 +314,22 @@ func convertContentBlocks(blocks []core.Content) []any {
 			// hard 400, because history is replayed each turn. Substitute a note
 			// so an already-poisoned conversation stays usable; the read tool
 			// rejects such images up front for anything recorded from now on.
-			if w, h, tooBig := core.ImageExceedsMaxDimension(b.Data); tooBig {
+			w, h, tooBig := core.ImageExceedsMaxDimension(b.Data)
+			if tooBig {
 				result = append(result, map[string]any{
 					"type": "text",
 					"text": fmt.Sprintf("[image omitted: %dx%d px exceeds the %d px per-side limit; "+
 						"resize or split it and read it again]", w, h, core.MaxImageDimension),
+				})
+				continue
+			}
+			// Too many images in one request: the oldest ones step aside so the
+			// newest keep their full resolution. Retirement is by age, not by
+			// size, so the note says nothing about the limit being breached.
+			if retire.takeOldest() {
+				result = append(result, map[string]any{
+					"type": "text",
+					"text": retiredImageNote(w, h),
 				})
 				continue
 			}
@@ -258,6 +353,22 @@ func convertContentBlocks(blocks []core.Content) []any {
 		}
 	}
 	return result
+}
+
+// retiredImageNote is the text block that stands in for a retired image. The
+// size is included when it could be read, since it tells the model what it is
+// missing. Dimensions of 0x0 mean the header was unreadable, not a tiny image.
+func retiredImageNote(w, h int) string {
+	if w > 0 && h > 0 {
+		return fmt.Sprintf("[image omitted: this %dx%d px image was retired because the conversation "+
+			"holds more than %d images, which caps every image at %d px per side; "+
+			"read the file again if you still need it]",
+			w, h, manyImageThreshold, manyImageMaxDimension)
+	}
+	return fmt.Sprintf("[image omitted: an older image was retired because the conversation "+
+		"holds more than %d images, which caps every image at %d px per side; "+
+		"read the file again if you still need it]",
+		manyImageThreshold, manyImageMaxDimension)
 }
 
 // convertAssistantContent converts assistant message content including tool calls and thinking.

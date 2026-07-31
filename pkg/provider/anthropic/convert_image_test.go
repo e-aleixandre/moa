@@ -23,7 +23,7 @@ func jpegB64(t *testing.T, w, h int) string {
 func TestConvertContentBlocks_Image(t *testing.T) {
 	blocks := convertContentBlocks([]core.Content{
 		core.ImageContent(jpegB64(t, 100, 200), "image/jpeg"),
-	})
+	}, nil)
 	if len(blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(blocks))
 	}
@@ -39,7 +39,7 @@ func TestConvertContentBlocks_OversizedImageReplacedByNote(t *testing.T) {
 	blocks := convertContentBlocks([]core.Content{
 		core.TextContent("before"),
 		core.ImageContent(jpegB64(t, 100, core.MaxImageDimension+1), "image/jpeg"),
-	})
+	}, nil)
 	if len(blocks) != 2 {
 		t.Fatalf("expected 2 blocks, got %d", len(blocks))
 	}
@@ -58,7 +58,7 @@ func TestConvertContentBlocks_OversizedImageReplacedByNote(t *testing.T) {
 func TestConvertContentBlocks_UndecodableImagePassedThrough(t *testing.T) {
 	blocks := convertContentBlocks([]core.Content{
 		core.ImageContent("ZGF0YQ==", "image/png"),
-	})
+	}, nil)
 	block := blocks[0].(map[string]any)
 	if block["type"] != "image" {
 		t.Fatalf("undecodable image must pass through, got %v", block["type"])

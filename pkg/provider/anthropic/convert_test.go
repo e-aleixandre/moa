@@ -736,7 +736,7 @@ func TestConvertAssistantContent_RedactedThinking(t *testing.T) {
 func TestConvertContentBlocks_Document(t *testing.T) {
 	blocks := convertContentBlocks([]core.Content{
 		core.DocumentContent("ZGF0YQ==", "application/pdf", "report.pdf"),
-	})
+	}, nil)
 
 	if len(blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(blocks))
