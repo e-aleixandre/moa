@@ -385,6 +385,15 @@ function mergeSteers(snapshot, local) {
   return merged.length > 0 ? merged : null;
 }
 
+// runEpoch counts the WS writes that touch the live per-run fields (state,
+// runStartedAtMs, runTokensUp/Down). sendMessage snapshots it before its
+// optimistic patch so a send that turned out to be a steer can tell "nothing
+// happened during the POST" from "a real run's events landed meanwhile" —
+// values alone can't, a brand new run reports 0/0 too.
+function nextRunEpoch(id) {
+  return (store.get().sessions[id]?.runEpoch || 0) + 1;
+}
+
 export function handleWsInit(id, data) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
@@ -439,6 +448,7 @@ export function handleWsInit(id, data) {
     // reconnect replaces stale local totals even when the run is already idle.
     runTokensUp: data.run_tokens_up || 0,
     runTokensDown: data.run_tokens_down || 0,
+    runEpoch: nextRunEpoch(id),
     subagents: {
       ...(keptLocal || {}),
       ...initBashJobs(data.bash_jobs, initSubagents(data.subagents)),
@@ -650,7 +660,7 @@ export function handleWsMessageEnd(id, fullText, msgId = '') {
 }
 
 export function handleWsRunTokens(id, data) {
-  updateSession(id, { runTokensUp: data.up || 0, runTokensDown: data.down || 0 });
+  updateSession(id, { runTokensUp: data.up || 0, runTokensDown: data.down || 0, runEpoch: nextRunEpoch(id) });
 }
 
 export function handleWsToolCallStart(id, data) {
@@ -828,7 +838,7 @@ export function handleWsStateChange(id, data) {
   const state = store.get();
   const prev = state.sessions[id];
   const wasRunning = prev && (prev.state === 'running' || prev.state === 'permission');
-  const patch = { state: data.state, error: data.error || null };
+  const patch = { state: data.state, error: data.error || null, runEpoch: nextRunEpoch(id) };
   // Anchor the activity-indicator elapsed counter when a run begins. Only on
   // the transition into a running state, and only if not already set (a reconnect
   // snapshot may have seeded the authoritative server timestamp).

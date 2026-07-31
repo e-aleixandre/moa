@@ -17,6 +17,7 @@ mock.module('./api.js', () => ({
 
 const { store, setState } = await import('./store.js');
 const { loadSessions, openPersistedSubagent, sendMessage } = await import('./session-actions.js');
+const { handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
 beforeEach(() => {
   setState({ sessions: {}, tileTree: null, activeSession: null });
@@ -550,14 +551,38 @@ test('sendMessage does not overwrite a live token tally when the server queued t
     },
   });
   apiResponse = { action: 'steer', steer_id: 'srv-steer-3' };
-  const { updateSession } = await import('./store.js');
 
   const pending = sendMessage('s1', 'hola', []);
-  updateSession('s1', { runTokensUp: 1500, runTokensDown: 300 });
+  handleWsRunTokens('s1', { up: 1500, down: 300 });
   await pending;
 
   const s1 = store.get().sessions.s1;
   expect(s1.runTokensUp).toBe(1500);
   expect(s1.runTokensDown).toBe(300);
+  expect(s1.pendingSteers).toHaveLength(1);
+});
+
+test('sendMessage does not restore the previous run when a new run started during the POST', async () => {
+  // The new run's counters are still 0/0, exactly what our optimistic patch
+  // left behind: comparing values cannot tell them apart, so the restore must
+  // key off "a WS event wrote the per-run fields" instead.
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [],
+        runTokensUp: 700, runTokensDown: 120, runStartedAtMs: 555,
+      },
+    },
+  });
+  apiResponse = { action: 'steer', steer_id: 'srv-steer-4' };
+
+  const pending = sendMessage('s1', 'hola', []);
+  handleWsStateChange('s1', { state: 'running' });
+  await pending;
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.runTokensUp).toBe(0);
+  expect(s1.runTokensDown).toBe(0);
+  expect(s1.runStartedAtMs).not.toBe(555);
   expect(s1.pendingSteers).toHaveLength(1);
 });

@@ -121,6 +121,10 @@ export async function loadSessions() {
         runStartedAtMs: existing ? existing.runStartedAtMs : null,
         runTokensUp: existing ? existing.runTokensUp : undefined,
         runTokensDown: existing ? existing.runTokensDown : undefined,
+        // Client-only counter of WS writes to the live per-run fields (see
+        // nextRunEpoch in ws-handlers): a poll must not rewind it or an
+        // in-flight send would misread "nothing happened meanwhile".
+        runEpoch: existing ? existing.runEpoch : 0,
         tasks: existing ? existing.tasks : [],
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
@@ -347,7 +351,7 @@ function adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer,
 // or had a queued item by the time the server decided), the optimistic message
 // is fiction: drop it and show the confirmed chip instead — unless a Steered
 // event already delivered the chip, which is the authoritative removal.
-function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun, optimisticRun }) {
+function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun, prevRunEpoch }) {
   const cur = store.get().sessions[id];
   if (!cur) return;
   const steers = cur.pendingSteers || [];
@@ -359,13 +363,14 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRun, 
     // is actually in flight. The session itself stays "running" — the server
     // only queues when a run is in flight or one is about to be pumped, and a
     // later state_change corrects it either way.
-    patch.runStartedAtMs = prevRun.runStartedAtMs ?? cur.runStartedAtMs ?? null;
-    // Only if nobody touched the tally meanwhile: real run_tokens/state_change
-    // events (this run, or another client's) can land while the POST is in
-    // flight, and restoring the pre-send figures on top of them would replace a
-    // live tally with a stale one.
-    if (Object.is(cur.runTokensUp, optimisticRun.runTokensUp)
-      && Object.is(cur.runTokensDown, optimisticRun.runTokensDown)) {
+    //
+    // Only if no WS event wrote the per-run fields while the POST was in
+    // flight: a real run (this session's or another client's) may have started
+    // meanwhile, and restoring the pre-send figures on top of it would replace
+    // live state with stale state. The epoch catches that even when the new
+    // run's tally still reads 0/0, which comparing values cannot.
+    if ((cur.runEpoch || 0) === prevRunEpoch) {
+      patch.runStartedAtMs = prevRun.runStartedAtMs ?? cur.runStartedAtMs ?? null;
       patch.runTokensUp = prevRun.runTokensUp;
       patch.runTokensDown = prevRun.runTokensDown;
     }
@@ -405,6 +410,10 @@ export async function sendMessage(id, text, attachments = []) {
   const prevTokensUp = sess.runTokensUp;
   const prevTokensDown = sess.runTokensDown;
   const prevRunStartedAtMs = sess.runStartedAtMs;
+  // Snapshot taken BEFORE the optimistic patch below (which is local, so it
+  // doesn't bump the epoch): any change by the time the response lands means a
+  // WS event owns the per-run fields now.
+  const prevRunEpoch = sess.runEpoch || 0;
   if (isIdle) {
     // Attachment blocks first, text last — matches the order the server sends
     // to the agent (see Manager.Send).
@@ -482,9 +491,7 @@ export async function sendMessage(id, text, attachments = []) {
         text,
         images: attachments.filter((a) => a.isImage).length,
         prevRun: { runStartedAtMs: prevRunStartedAtMs, runTokensUp: prevTokensUp, runTokensDown: prevTokensDown },
-        // What the optimistic patch left in the tally, so the restore can tell
-        // "untouched" from "real events landed during the POST".
-        optimisticRun: { runTokensUp: 0, runTokensDown: 0 },
+        prevRunEpoch,
       });
     }
     return action;
