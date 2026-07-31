@@ -106,6 +106,16 @@ policies and use Moa's permission and path controls for the level of access you 
 - **Bring your own workflow.** Add MCP servers, custom script tools, verification commands,
   reusable skills, and project instructions through `AGENTS.md`.
 
+<p align="center">
+  <img
+    src="docs/assets/readme-subagent-detail.png"
+    alt="Inspecting a delegated subagent's own conversation, tool calls, and result"
+    width="1050"
+  />
+  <br/>
+  <em>Delegated work stays inspectable: each subagent has its own conversation, tools, and result.</em>
+</p>
+
 For the complete capability reference, see the
 [Overview](docs/overview.md), [Tools](docs/tools.md), and
 [Configuration](docs/configuration.md) documentation.
