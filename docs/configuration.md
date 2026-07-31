@@ -138,6 +138,7 @@ Project-specific files live in `<cwd>/.moa/`:
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)) |
 | `MOA_CONFIG_DIR` | Overrides where the auth/credential store lives (default `~/.config/moa`). Useful for containers or custom deployments |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
+| `MOA_AUTOMATION_TOKEN` | Shared secret enabling the inbound [Automation API](./automation.md); equivalent to `--automation-token`. Separate from `MOA_SERVE_TOKEN` |
 | `MOA_NO_UPDATE_CHECK=1` | Disables the best-effort GitHub release check for this process |
 | `MOA_ATTACHMENTS_DIR` | Base directory for `moa serve` attachment storage (default `/tmp/moa`); detailed in [Web UI](./serve.md) |
 

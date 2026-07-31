@@ -62,6 +62,7 @@ moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet] [--token <secret>] [
 | `--port` | `8080` | HTTP port |
 | `--model` | `sonnet` | Default model for new sessions |
 | `--token` | | Shared secret for opt-in auth (or `MOA_SERVE_TOKEN`). When set, requests need a valid session cookie or `?token=<secret>` |
+| `--automation-token` | | Shared secret enabling the [Automation API](./automation.md) (or `MOA_AUTOMATION_TOKEN`), presented as `Authorization: Bearer <secret>`. Separate from `--token`; without it those routes do not exist |
 | `--allowed-hosts` | | Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost/IP literals always allowed; e.g. a Tailscale MagicDNS name) |
 
 See [Web UI](./serve.md) for details.

@@ -136,6 +136,14 @@ separate restricted product surface. The exceptions are pairing administration:
 only the network/token owner can create pairings, list paired devices or revoke
 a device. An already paired device cannot extend its own authority.
 
+Inbound automation (webhooks, cron, CI) uses a **separate** shared secret,
+`--automation-token` / `MOA_AUTOMATION_TOKEN`, presented as
+`Authorization: Bearer <secret>`. It only opens `POST /api/automation/runs`;
+neither the owner token nor a paired device can call that route, and the
+automation token grants nothing else. Without the token configured the
+automation routes do not exist (404), even on localhost. See
+[Automation API](automation.md).
+
 ## Attention queue and permission decisions
 
 `GET /api/attention` returns an informational, cross-session snapshot of

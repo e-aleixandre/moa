@@ -438,6 +438,12 @@ type Manager struct {
 	// between read and rename. It also serializes the fan-out to open sessions so
 	// two concurrent toggles don't interleave reconciles.
 	mcpConfigMu sync.Mutex
+
+	// automation indexes Automation API idempotency keys; automationMu makes
+	// check-create-record atomic so two retries of the same webhook cannot both
+	// create a session.
+	automation   *automationIndex
+	automationMu sync.Mutex
 }
 
 // ManagerConfig configures a Manager.
@@ -544,6 +550,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		conversationKey:  conversationKey,
 		version:          release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
+	m.automation = newAutomationIndex(cfg.SessionBaseDir)
 	if cfg.UpdateCheckEnabled && cfg.UpdateChecker != nil {
 		go func() {
 			check := func() {

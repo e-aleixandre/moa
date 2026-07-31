@@ -536,6 +536,11 @@ var (
 
 // Delete aborts any running agent, closes resources, and removes the session.
 func (m *Manager) Delete(id string) error {
+	if m.automation != nil {
+		// A deleted session must not keep answering an idempotency key: the next
+		// retry should create a fresh run rather than resolve to a gone session.
+		m.automation.forget(id)
+	}
 	m.mu.Lock()
 	if _, resuming := m.resuming[id]; resuming {
 		m.mu.Unlock()
