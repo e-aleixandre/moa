@@ -35,13 +35,14 @@ var staticFS embed.FS
 
 // serverOptions holds optional hardening configuration for NewServer.
 type serverOptions struct {
-	allowedHosts []string
-	token        string
-	secureCookie bool
-	devicePath   string
-	deviceAuth   bool
-	realtimeKey  RealtimeAPIKeyFunc
-	realtimeHTTP *http.Client
+	allowedHosts    []string
+	token           string
+	automationToken string
+	secureCookie    bool
+	devicePath      string
+	deviceAuth      bool
+	realtimeKey     RealtimeAPIKeyFunc
+	realtimeHTTP    *http.Client
 }
 
 // RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
@@ -195,6 +196,17 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 		// individually revocable while sharing the generic owner API.
 		handler = networkOwnerMiddleware(devices, handler)
 	}
+	// The Automation API is a separate surface with its own bearer token: it
+	// bypasses browser auth and the CSRF header (a bearer header cannot be sent
+	// by a cross-site form) but stays under the Host check below.
+	automationRoutes := http.NewServeMux()
+	automationRoutes.HandleFunc("POST /api/automation/runs", handleAutomationRun(manager))
+	// Interaction endpoints, scoped to sessions the Automation API created
+	// (see automationCreatedMeta): anything else answers 404.
+	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/reply", handleAutomationReply(manager))
+	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/ask-response", handleAutomationAskResponse(manager))
+	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/permission", handleAutomationPermission(manager))
+	handler = automationMiddleware(o.automationToken, bodyTimeoutMiddleware(automationRoutes), handler)
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
 	return pulseNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler))

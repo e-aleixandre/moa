@@ -28,6 +28,18 @@ type CreateOpts struct {
 	Model string `json:"model"`
 	Title string `json:"title"`
 	CWD   string `json:"cwd"`
+	// Origin records who created the session ("user" when empty). Free-form so
+	// automation callers can label their integration, e.g. "linear-webhook".
+	Origin string `json:"origin"`
+	// extraMeta carries additional creation-time metadata (automation
+	// bookkeeping such as the idempotency key and callback target). Not part of
+	// the public JSON body — automation handlers set it.
+	extraMeta map[string]any
+	// extraMCPServers are session-scoped MCP servers to start alongside the
+	// configured ones (the Automation API's per-run servers). Like extraMeta,
+	// not part of the public JSON body: they are implicitly trusted, so only
+	// internal callers that already carry operator authority may set them.
+	extraMCPServers map[string]core.MCPServer
 }
 
 // CreateSession creates a new agent session.
@@ -67,16 +79,29 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	persisted := store.Create()
 	persisted.Title = opts.Title
 	persisted.TitleSource = titleSource
+	persisted.SetOrigin(opts.Origin)
+	for k, v := range opts.extraMeta {
+		if persisted.Metadata == nil {
+			persisted.Metadata = make(map[string]any)
+		}
+		persisted.Metadata[k] = v
+	}
 	id := persisted.ID
 
 	var bopts *buildOpts
-	if titleSource != "" {
-		bopts = &buildOpts{titleSource: titleSource}
+	if titleSource != "" || len(opts.extraMCPServers) > 0 {
+		bopts = &buildOpts{titleSource: titleSource, extraMCPServers: opts.extraMCPServers}
 	}
 	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
 		return nil, err
 	}
+	sess.Origin = persisted.Origin()
+	sess.automationCreated = automationCreatedMeta(opts.extraMeta)
+	// Wire the outbound completion callback before the session is reachable, so
+	// the very first run cannot end before the subscription exists. A no-op
+	// unless the caller supplied a callback_url.
+	m.subscribeAutomationCallback(sess, opts.extraMeta)
 
 	// Persist before exposing the session. A successful create must not turn
 	// into an invisible ephemeral conversation on the next restart.
@@ -119,6 +144,11 @@ type buildOpts struct {
 	initialEntries  []session.Entry
 	initialLeafID   string
 	initialMetadata map[string]any
+
+	// extraMCPServers are session-scoped MCP servers merged on top of the
+	// configured ones (see CreateOpts.extraMCPServers). On resume they are
+	// rebuilt from the persisted metadata.
+	extraMCPServers map[string]core.MCPServer
 }
 
 // buildManagedSession creates an in-memory managed session with full runtime.
@@ -163,6 +193,11 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// Forward-declare for closures.
 	var sess *ManagedSession
 
+	var extraMCPServers map[string]core.MCPServer
+	if opts != nil {
+		extraMCPServers = opts.extraMCPServers
+	}
+
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
 		CWD:                cwd,
 		Model:              model,
@@ -170,6 +205,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ProviderFactory:    m.providerFactory,
 		MoaCfg:             &moaCfg,
 		MCPDisableSources:  mcpSources,
+		ExtraMCPServers:    extraMCPServers,
 		Ctx:                sessionCtx,
 		EnableAskUser:      true,
 		BeforeWrite:        cpStore.Capture,
@@ -459,6 +495,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 	m.subscribeCacheClock(sess)
 	m.subscribeAttention(sess)
+	// A resumed automation session carries its callback target in the persisted
+	// metadata, so the loop keeps closing across a restart. Freshly created ones
+	// are wired by CreateSession, which holds the creation-time metadata.
+	if opts != nil {
+		m.subscribeAutomationCallback(sess, opts.initialMetadata)
+	}
 
 	return sess, nil
 }
@@ -520,7 +562,24 @@ var (
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.
+//
+// It runs under automationMu (the same guard as CreateAutomationRun's
+// check-create-send-register sequence) so a delete cannot interleave with a run
+// creation and leave an idempotency key pointing at a session that is already
+// gone. Lock order is automationMu → m.mu, as in CreateAutomationRun.
 func (m *Manager) Delete(id string) error {
+	m.automationMu.Lock()
+	defer m.automationMu.Unlock()
+	return m.deleteSession(id)
+}
+
+// deleteSession is Delete's body. Callers must hold automationMu.
+func (m *Manager) deleteSession(id string) error {
+	if m.automation != nil {
+		// A deleted session must not keep answering an idempotency key: the next
+		// retry should create a fresh run rather than resolve to a gone session.
+		m.automation.forget(id)
+	}
 	m.mu.Lock()
 	if _, resuming := m.resuming[id]; resuming {
 		m.mu.Unlock()
@@ -631,6 +690,14 @@ func reapStaleAttachments() {
 
 // ResumeSession loads a saved session from disk and creates a full runtime.
 func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
+	return m.resumeSession(id, 0)
+}
+
+// resumeSession is ResumeSession with an optional cap: when maxLoaded > 0 the
+// reservation is refused if the resident set (loaded + resuming) has already
+// reached it. The check happens inside the same critical section as the
+// reservation so concurrent callers cannot race past the cap.
+func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, error) {
 	// Reserve the ID without exposing a nil placeholder to readers.
 	m.mu.Lock()
 	if _, ok := m.sessions[id]; ok {
@@ -640,6 +707,10 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	if _, ok := m.resuming[id]; ok {
 		m.mu.Unlock()
 		return nil, ErrBusy
+	}
+	if maxLoaded > 0 && len(m.sessions)+len(m.resuming) >= maxLoaded {
+		m.mu.Unlock()
+		return nil, ErrAutomationTooManySessions
 	}
 	m.resuming[id] = struct{}{}
 	m.mu.Unlock()
@@ -671,11 +742,20 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 		initialLeafID:          saved.LeafID,
 		initialMetadata:        saved.Metadata,
 		titleSource:            saved.TitleSource,
+		// Per-run MCP servers are session-scoped: they only exist in this
+		// session's metadata, so a resume has to bring them back or the agent
+		// silently loses the tools the automation caller attached. A name the
+		// operator has since configured is dropped, not merged on top: the
+		// merge order would otherwise let a stale per-run server override
+		// operator config, which the API refuses at creation time.
+		extraMCPServers: mcpServersFromMeta(saved.Metadata, m.configuredMCPServers(cwd)),
 	})
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("resume: %w", err)
 	}
+	sess.Origin = saved.Origin()
+	sess.automationCreated = automationCreatedMeta(saved.Metadata)
 
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {
@@ -781,6 +861,12 @@ func (m *Manager) Shutdown() {
 			slog.Warn("shutdown flush failed", "session", s.ID, "error", err)
 		}
 		s.flushLiveSubagentTranscripts()
+		// Cancel the session context once the flush has captured everything:
+		// events drained by the Close below (an async RunEnded, say) can still
+		// reach subscribers that spawn work of their own — the automation
+		// callback waits for quiescence and then POSTs. The cancelled context is
+		// what makes that work give up instead of outliving the shutdown.
+		s.infra.sessionCancel()
 		// Close the runtime after flushing: this drains the bus's async
 		// persistence reactor (Bus.Close waits for subscriber goroutines to
 		// finish their queued events) so no delayed save can still be writing

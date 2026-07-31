@@ -11,6 +11,23 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
+// Limits on a single ask_user call. They exist because the answers come back
+// through a UI or, for automation sessions, through an HTTP endpoint that caps
+// the answer array: a prompt with more questions than the answer cap could
+// never be answered by a machine caller. Bounding the text keeps one prompt
+// from being a payload dump.
+const (
+	// MaxQuestions is the largest batch a single ask_user call may contain.
+	// The Automation API's answer cap mirrors it.
+	MaxQuestions = 32
+	// MaxQuestionBytes bounds a single question's text.
+	MaxQuestionBytes = 4 << 10
+	// MaxOptions bounds the predefined choices offered for one question.
+	MaxOptions = 32
+	// MaxOptionBytes bounds a single predefined choice.
+	MaxOptionBytes = 1 << 10
+)
+
 // Question describes a single question with optional predefined choices.
 type Question struct {
 	Text    string   `json:"question"`
@@ -48,7 +65,7 @@ func NewTool(b *Bridge) core.Tool {
 			"properties": {
 				"questions": {
 					"type": "array",
-					"description": "One or more questions to ask the user",
+					"description": "One or more questions to ask the user (max 32)",
 					"items": {
 						"type": "object",
 						"properties": {
@@ -102,6 +119,9 @@ func parseQuestions(params map[string]any) ([]Question, error) {
 	if !ok || len(arr) == 0 {
 		return nil, fmt.Errorf("questions must be a non-empty array")
 	}
+	if len(arr) > MaxQuestions {
+		return nil, fmt.Errorf("too many questions, max %d", MaxQuestions)
+	}
 
 	questions := make([]Question, 0, len(arr))
 	for _, item := range arr {
@@ -113,12 +133,23 @@ func parseQuestions(params map[string]any) ([]Question, error) {
 		if text == "" {
 			return nil, fmt.Errorf("each question must have a non-empty 'question' field")
 		}
+		if len(text) > MaxQuestionBytes {
+			return nil, fmt.Errorf("question too long, max %d bytes", MaxQuestionBytes)
+		}
 		q := Question{Text: text}
 		if opts, ok := m["options"].([]any); ok {
+			if len(opts) > MaxOptions {
+				return nil, fmt.Errorf("too many options for one question, max %d", MaxOptions)
+			}
 			for _, o := range opts {
-				if s, ok := o.(string); ok && s != "" {
-					q.Options = append(q.Options, s)
+				s, ok := o.(string)
+				if !ok || s == "" {
+					continue
 				}
+				if len(s) > MaxOptionBytes {
+					return nil, fmt.Errorf("option too long, max %d bytes", MaxOptionBytes)
+				}
+				q.Options = append(q.Options, s)
 			}
 		}
 		questions = append(questions, q)

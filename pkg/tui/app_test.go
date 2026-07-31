@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -2446,5 +2447,66 @@ func TestPermissionDenyDumpsQueueToInput(t *testing.T) {
 	got := rm.input.textarea.Value()
 	if got != "/compact\nthen this" {
 		t.Fatalf("input after permission-deny dump = %q, want %q", got, "/compact\nthen this")
+	}
+}
+
+func TestSessionBrowser_OriginTagShownForNonUserSessions(t *testing.T) {
+	b := newSessionBrowser()
+	b.Open()
+	b.SetSummaries([]session.Summary{
+		{ID: "aaa111", Title: "webhook run", Updated: time.Now(),
+			Metadata: map[string]any{"origin": "automation"}},
+		{ID: "bbb222", Title: "my session", Updated: time.Now(),
+			Metadata: map[string]any{"origin": "user"}},
+	})
+
+	view := b.View(100, 40)
+	if !strings.Contains(view, "[automation]") {
+		t.Fatal("origin tag missing for automation session")
+	}
+	if strings.Contains(view, "[user]") {
+		t.Fatal("user origin should not render a tag")
+	}
+}
+
+func TestSessionBrowser_OriginTagSanitizedAndCapped(t *testing.T) {
+	b := newSessionBrowser()
+	b.Open()
+	hostile := "evil\x1b[2J\nlabel" + strings.Repeat("x", 64)
+	b.SetSummaries([]session.Summary{
+		{ID: "aaa111", Title: "hostile origin", Updated: time.Now(),
+			Metadata: map[string]any{"origin": hostile}},
+		// Non-string origin must not panic or render.
+		{ID: "bbb222", Title: "weird origin", Updated: time.Now(),
+			Metadata: map[string]any{"origin": 42}},
+	})
+
+	view := b.View(100, 40)
+	if strings.Contains(view, "\x1b[2J") {
+		t.Fatal("escape sequence leaked into the browser view")
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > 100 {
+			t.Fatalf("row overflows requested width: %d > 100", w)
+		}
+	}
+	// The tag itself is capped: the 64 trailing x's cannot all be present.
+	if strings.Contains(view, strings.Repeat("x", 20)) {
+		t.Fatal("origin tag was not width-capped")
+	}
+}
+
+func TestSanitizeSessionLabel(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"automation", "automation"},
+		{"linear\nwebhook", "linear webhook"},
+		{"tab\tsep", "tab sep"},
+		{"esc\x1b[31mred\x1b[0m", "escred"},
+		{"\x1b]0;title\x07bell", "bell"},
+	}
+	for _, c := range cases {
+		if got := sanitizeSessionLabel(c.in); got != c.want {
+			t.Errorf("sanitizeSessionLabel(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

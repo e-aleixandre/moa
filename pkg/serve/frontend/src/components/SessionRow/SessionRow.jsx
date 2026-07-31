@@ -27,6 +27,8 @@ const STATE_LABEL_SUFFIX = {
 //   brief — one line of live status under the title. Renderable, not just text,
 //           so a caller can bold a lead-in (<><b>Needs you: </b>…</>)
 //   path  — the session's working directory, the last and quietest line
+//   origin — who started the session when it wasn't you ("automation", or the
+//           label the caller passed). Omitted for ordinary user sessions.
 export function SessionRow({
   title,
   state = "idle",
@@ -37,6 +39,7 @@ export function SessionRow({
   age,
   pane,
   when,
+  origin,
   brief,
   path,
   onClick,
@@ -58,7 +61,7 @@ export function SessionRow({
     onClose?.(event);
   };
 
-  const hitLabel = `${title}${pane ? `, pane ${pane}` : ""}${STATE_LABEL_SUFFIX[state] ?? ""}`;
+  const hitLabel = `${title}${origin ? `, started by ${origin}` : ""}${pane ? `, pane ${pane}` : ""}${STATE_LABEL_SUFFIX[state] ?? ""}`;
 
   return (
     <span class={classes} {...rest}>
@@ -74,6 +77,7 @@ export function SessionRow({
             <span class="r1">
               <StateDot state={state} size={8} />
               <span class="title" aria-hidden="true">{title}</span>
+              {origin && <span class="origin" aria-hidden="true">{origin}</span>}
               {pane && <span class="pane" aria-hidden="true">{pane}</span>}
               {unseen && <span class="unseen" aria-hidden="true" />}
               {when && <span class="when" aria-hidden="true">{when}</span>}

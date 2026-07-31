@@ -158,7 +158,7 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
 // `onClose` X is deliberately not used, because lifecycle here is a menu
 // (close/reopen/delete), not a single dismiss.
 function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession, onDeleteSession }) {
-  const { id, title, state, when, last, needsLabel, path, unseen } = session;
+  const { id, title, state, when, last, needsLabel, path, unseen, origin } = session;
   const brief = last
     ? needsLabel
       ? <><b class="sdcard-needs-label">{needsLabel} </b>{last}</>
@@ -173,6 +173,7 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
         active={session.active}
         unseen={unseen}
         when={when}
+        origin={origin}
         brief={brief}
         path={path}
         onClick={() => onSelect?.(id)}

@@ -29,12 +29,17 @@ func runServe(args []string) {
 	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
 	allowedHosts := fs.String("allowed-hosts", "", "Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost and IP literals are always allowed; e.g. a Tailscale MagicDNS name)")
 	tokenFlag := fs.String("token", "", "Shared secret for opt-in auth. When set, requests must present a valid session cookie or ?token=<secret> in the URL (which sets the cookie). Overrides MOA_SERVE_TOKEN.")
+	automationTokenFlag := fs.String("automation-token", "", "Shared secret enabling the Automation API (POST /api/automation/runs), presented as 'Authorization: Bearer <secret>'. Separate from --token; without it the automation routes do not exist. Overrides MOA_AUTOMATION_TOKEN.")
 	_ = fs.Parse(args)
 
 	// Token: flag wins over env.
 	token := *tokenFlag
 	if token == "" {
 		token = os.Getenv("MOA_SERVE_TOKEN")
+	}
+	automationToken := *automationTokenFlag
+	if automationToken == "" {
+		automationToken = os.Getenv("MOA_AUTOMATION_TOKEN")
 	}
 
 	if *host != "127.0.0.1" && *host != "localhost" && *host != "::1" {
@@ -104,6 +109,7 @@ func runServe(args []string) {
 	srv := serve.NewServer(mgr,
 		serve.WithAllowedHosts(splitCSV(*allowedHosts)),
 		serve.WithAuthToken(token, false),
+		serve.WithAutomationToken(automationToken),
 		serve.WithDeviceAuthentication(),
 		serve.WithRealtimeClientSecretBroker(func() (string, bool) {
 			// Priority:

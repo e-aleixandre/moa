@@ -271,6 +271,26 @@
   background: transparent;
 }
 
+/* origin — optional quiet badge naming who started the session when it wasn't
+   you ("automation", "linear-webhook"…). Same badge shape as .pane but always
+   neutral: it is information, not a call to action. Width-capped so a long
+   caller label can never push the age off a narrow phone row. */
+.session-row.variant-card .origin {
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  color: var(--overlay1);
+  flex: none;
+  max-width: 7em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  line-height: 15px;
+  letter-spacing: 0.05em;
+}
+
 .session-row.variant-card .unseen {
   width: 6px;
   height: 6px;

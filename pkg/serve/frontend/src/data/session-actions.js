@@ -75,6 +75,10 @@ export async function loadSessions() {
         cacheExpiresAt: cacheExpiresAtMs(info.cache_expires_at),
         error: wsOwns ? existing.error : (info.error || null),
         untrustedMcp: info.untrusted_mcp || false,
+        // Who created the session: server-owned, omitted for ordinary user
+        // sessions (see the Automation API's origin metadata). No WS event
+        // tracks it, so the poll is the only source.
+        origin: info.origin || '',
         // MCP health summary (poll-driven server truth): {total, ready,
         // unhealthy} or null when the session has no MCP servers. Not WS-owned —
         // it reflects the manager's live state, refreshed on each poll.

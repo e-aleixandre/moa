@@ -121,6 +121,7 @@ function drawerSessions(sessions, activeId) {
       unseen: !!s.unseen,
       active: s.id === activeId,
       saved: s.state === "saved",
+      origin: s.origin || undefined,
     };
   };
   return {

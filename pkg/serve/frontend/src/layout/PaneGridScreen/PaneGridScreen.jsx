@@ -42,11 +42,12 @@ function spineSessions(sessions, paneOf) {
       unseen: !!s.unseen,
       meta: relAge(s.updated),
       pane: paneOf.get(s.id) || undefined,
+      origin: s.origin || undefined,
     }));
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated) }));
+    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined }));
   return { active, saved };
 }
 

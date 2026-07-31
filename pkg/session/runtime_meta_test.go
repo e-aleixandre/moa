@@ -84,3 +84,96 @@ func TestSetPathMetadata_PreservesRuntime(t *testing.T) {
 		t.Errorf("scope = %q, want unrestricted", scope)
 	}
 }
+
+func TestSetOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		want   string
+	}{
+		{"empty defaults to user", "", OriginUser},
+		{"explicit user", "user", "user"},
+		{"automation", "automation", "automation"},
+		{"caller label", "linear-webhook", "linear-webhook"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Session{}
+			s.SetOrigin(tt.origin)
+			if got := s.Origin(); got != tt.want {
+				t.Errorf("Origin() = %q, want %q", got, tt.want)
+			}
+			if tt.origin == "" && s.Metadata != nil {
+				if _, ok := s.Metadata[MetaOrigin]; ok {
+					t.Error("empty origin should not be persisted")
+				}
+			}
+		})
+	}
+}
+
+func TestOrigin_NilMetadata(t *testing.T) {
+	s := &Session{}
+	if got := s.Origin(); got != OriginUser {
+		t.Errorf("Origin() = %q, want %q", got, OriginUser)
+	}
+}
+
+func TestSetOrigin_PreservesRuntime(t *testing.T) {
+	s := &Session{}
+	s.SetRuntimeMetadata("model", "/cwd", "yolo", "high")
+	s.SetOrigin("automation")
+
+	model, _, _, _ := s.RuntimeMeta()
+	if model != "model" {
+		t.Error("SetOrigin should not overwrite runtime metadata")
+	}
+	if s.Origin() != "automation" {
+		t.Errorf("origin = %q, want automation", s.Origin())
+	}
+}
+
+func TestPreservedMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		meta map[string]any
+		want map[string]any
+	}{
+		{"none", map[string]any{"model": "m"}, nil},
+		{
+			"origin and automation keys",
+			map[string]any{"model": "m", MetaOrigin: "automation", MetaIdempotencyKey: "k1"},
+			map[string]any{MetaOrigin: "automation", MetaIdempotencyKey: "k1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PreservedMetadata(tt.meta)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Errorf("key %q = %v, want %v", k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyPreservedMetadata(t *testing.T) {
+	// A rebuilt metadata map (as collectMetadata produces) regains the
+	// creation-time keys, and never loses a value the runtime already set.
+	rebuilt := map[string]any{"model": "m2", MetaOrigin: "runtime"}
+	got := ApplyPreservedMetadata(rebuilt, map[string]any{MetaOrigin: "automation", MetaCallbackURL: "https://x/y"})
+	if got[MetaOrigin] != "runtime" {
+		t.Errorf("origin = %v, want runtime (existing value wins)", got[MetaOrigin])
+	}
+	if got[MetaCallbackURL] != "https://x/y" {
+		t.Errorf("callback_url = %v, want https://x/y", got[MetaCallbackURL])
+	}
+
+	if out := ApplyPreservedMetadata(nil, nil); out != nil {
+		t.Errorf("nil in, nil out expected, got %v", out)
+	}
+}

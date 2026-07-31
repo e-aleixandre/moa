@@ -95,7 +95,106 @@ const (
 	MetaPathScope      = "path_scope"
 	MetaAllowedPaths   = "allowed_paths"
 	MetaCompactAt      = "compact_at"
+	MetaOrigin         = "origin"
+	// Automation bookkeeping written by the Automation API. The callback fields
+	// are set at creation; the idempotency key is only written once the run's
+	// first prompt was accepted (see SetIdempotencyKey).
+	MetaIdempotencyKey = "idempotency_key"
+	MetaCallbackURL    = "callback_url"
+	MetaCallbackSecret = "callback_secret"
+	// MetaMCPServers holds the per-run MCP servers an automation caller attached
+	// to the session (a list of {name, url, headers}). They are session-scoped —
+	// never written to any config file — and are replayed on resume so the
+	// session reconnects them.
+	MetaMCPServers = "mcp_servers"
+	// MetaAutomationCreated marks a session the Automation API created itself.
+	// Unlike MetaOrigin — a free-form label any creator may pass — it is written
+	// on exactly one code path, so it is the authority check for the scoped
+	// automation interaction endpoints.
+	MetaAutomationCreated = "automation_created"
 )
+
+// OriginUser is the implicit origin of a session created by a human through
+// the TUI or the web client. Sessions persisted before origins existed carry no
+// key and are treated as user-originated.
+const OriginUser = "user"
+
+// preservedMetadataKeys are creation-time metadata keys the session runtime
+// does not know about. The persistence reactor rebuilds Metadata from scratch
+// on every snapshot, so persisters must carry these forward or they would be
+// dropped on the first save after creation.
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers}
+
+// SetOrigin records who created the session (e.g. "user", "automation", or a
+// caller-chosen label such as "linear-webhook"). An empty origin is not stored:
+// missing means user.
+func (s *Session) SetOrigin(origin string) {
+	if origin == "" {
+		return
+	}
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]any)
+	}
+	s.Metadata[MetaOrigin] = origin
+}
+
+// Origin returns the persisted origin, defaulting to OriginUser when absent.
+func (s *Session) Origin() string {
+	if s.Metadata == nil {
+		return OriginUser
+	}
+	if origin, _ := s.Metadata[MetaOrigin].(string); origin != "" {
+		return origin
+	}
+	return OriginUser
+}
+
+// SetIdempotencyKey records the Automation API key this session answers. It is
+// written only after the run's first prompt was accepted, so a session that
+// never received one stays unreachable by key. An empty key is not stored.
+func (s *Session) SetIdempotencyKey(key string) {
+	if key == "" {
+		return
+	}
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]any)
+	}
+	s.Metadata[MetaIdempotencyKey] = key
+}
+
+// PreservedMetadata extracts the creation-time keys that survive snapshots.
+// Returns nil when none are present.
+func PreservedMetadata(meta map[string]any) map[string]any {
+	var out map[string]any
+	for _, key := range preservedMetadataKeys {
+		v, ok := meta[key]
+		if !ok {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(preservedMetadataKeys))
+		}
+		out[key] = v
+	}
+	return out
+}
+
+// ApplyPreservedMetadata copies preserved creation-time keys into a freshly
+// built metadata map, without overwriting values the runtime already set.
+func ApplyPreservedMetadata(meta, preserved map[string]any) map[string]any {
+	if len(preserved) == 0 {
+		return meta
+	}
+	if meta == nil {
+		meta = make(map[string]any, len(preserved))
+	}
+	for k, v := range preserved {
+		if _, exists := meta[k]; !exists {
+			meta[k] = v
+		}
+	}
+	return meta
+}
 
 // CompactAtMeta returns the persisted soft compaction threshold in tokens, or 0
 // when none was set (the default window-based behavior). Metadata round-trips

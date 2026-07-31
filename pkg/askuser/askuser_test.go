@@ -147,6 +147,83 @@ func TestAskUser_EmptyQuestionText(t *testing.T) {
 	}
 }
 
+// A batch bigger than MaxQuestions is rejected where the prompt is created, so
+// it can never reach a UI (or the Automation API's 32-answer cap) unanswerable.
+func TestAskUser_TooManyQuestions(t *testing.T) {
+	bridge := NewBridge()
+	tool := NewTool(bridge)
+
+	questions := make([]any, MaxQuestions+1)
+	for i := range questions {
+		questions[i] = map[string]any{"question": "q"}
+	}
+	result, err := tool.Execute(context.Background(), map[string]any{"questions": questions}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for too many questions")
+	}
+	if !strings.Contains(result.Content[0].Text, "too many questions") {
+		t.Fatalf("error = %q, want it to mention the cap", result.Content[0].Text)
+	}
+}
+
+// Exactly MaxQuestions still works: the cap is inclusive.
+func TestAskUser_MaxQuestionsAccepted(t *testing.T) {
+	bridge := NewBridge()
+	tool := NewTool(bridge)
+
+	questions := make([]any, MaxQuestions)
+	answers := make([]string, MaxQuestions)
+	for i := range questions {
+		questions[i] = map[string]any{"question": "q"}
+		answers[i] = "a"
+	}
+	go func() {
+		p := <-bridge.Prompts()
+		p.Response <- answers
+	}()
+	result, err := tool.Execute(context.Background(), map[string]any{"questions": questions}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %v", result.Content)
+	}
+}
+
+func TestAskUser_OversizedTextRejected(t *testing.T) {
+	bridge := NewBridge()
+	tool := NewTool(bridge)
+
+	tests := []struct {
+		name   string
+		params map[string]any
+	}{
+		{"question text", map[string]any{"questions": []any{
+			map[string]any{"question": strings.Repeat("x", MaxQuestionBytes+1)},
+		}}},
+		{"option text", map[string]any{"questions": []any{
+			map[string]any{"question": "q", "options": []any{strings.Repeat("x", MaxOptionBytes+1)}},
+		}}},
+		{"too many options", map[string]any{"questions": []any{
+			map[string]any{"question": "q", "options": make([]any, MaxOptions+1)},
+		}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tool.Execute(context.Background(), tt.params, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.IsError {
+				t.Fatal("expected an error result")
+			}
+		})
+	}
+}
+
 func TestAskUser_CancelledBeforeSend(t *testing.T) {
 	bridge := NewBridge()
 	tool := NewTool(bridge)

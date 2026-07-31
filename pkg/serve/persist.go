@@ -17,6 +17,11 @@ type servePersister struct {
 	store     *session.FileStore
 	titleFn   func() string // returns current session title under lock
 	deleted   bool
+	// preserved holds creation-time metadata the runtime knows nothing about
+	// (origin, automation bookkeeping). collectMetadata rebuilds the map from
+	// scratch on every snapshot, so without this the keys would vanish on the
+	// first save after creation.
+	preserved map[string]any
 }
 
 func newServePersister(persisted *session.Session, store *session.FileStore, titleFn func() string) *servePersister {
@@ -24,6 +29,7 @@ func newServePersister(persisted *session.Session, store *session.FileStore, tit
 		persisted: persisted,
 		store:     store,
 		titleFn:   titleFn,
+		preserved: session.PreservedMetadata(persisted.Metadata),
 	}
 }
 
@@ -39,7 +45,7 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 	sp.persisted.Messages = make([]core.AgentMessage, len(messages))
 	copy(sp.persisted.Messages, messages)
 	sp.persisted.CompactionEpoch = epoch
-	sp.persisted.Metadata = metadata
+	sp.persisted.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 
 	snapshot := *sp.persisted
 	store := sp.store
@@ -72,7 +78,7 @@ func (sp *servePersister) SnapshotTree(entries []session.Entry, leafID string, m
 	sp.persisted.Entries = make([]session.Entry, len(entries))
 	copy(sp.persisted.Entries, entries)
 	sp.persisted.LeafID = leafID
-	sp.persisted.Metadata = metadata
+	sp.persisted.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 	// Clear v1 fields
 	sp.persisted.Messages = nil
 	sp.persisted.CompactionEpoch = 0
@@ -108,6 +114,29 @@ func (sp *servePersister) saveTitle(title, source string) {
 	if err := sp.store.Save(&snapshot); err != nil {
 		slog.Warn("session title save failed", "error", err)
 	}
+}
+
+// recordIdempotencyKey writes the Automation API key into the session metadata
+// and saves synchronously. It is called only after the run's first prompt was
+// accepted, so a session that never got one is never resolvable by key. The key
+// also joins the preserved set, so it survives the snapshot rebuilds that
+// reconstruct Metadata from scratch (same treatment as origin).
+func (sp *servePersister) recordIdempotencyKey(key string) error {
+	if key == "" {
+		return nil
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.persisted == nil || sp.store == nil {
+		return nil
+	}
+	sp.persisted.SetIdempotencyKey(key)
+	if sp.preserved == nil {
+		sp.preserved = make(map[string]any, 1)
+	}
+	sp.preserved[session.MetaIdempotencyKey] = key
+	snapshot := *sp.persisted
+	return sp.store.Save(&snapshot)
 }
 
 // setArchived persists an archive/unarchive toggle out-of-band, preserving
