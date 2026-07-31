@@ -99,16 +99,14 @@ func (m *Manager) automationLiveSession(id string) (*ManagedSession, error) {
 // only on disk is resumed, but only after its persisted metadata proved it is
 // automation-created — the check comes first so the token cannot make the
 // server load a session it may not talk to — and only while the resident set is
-// below maxAutomationLoadedSessions.
+// below maxAutomationLoadedSessions (enforced atomically with the resume
+// reservation, so concurrent replies cannot race past the cap).
 func (m *Manager) automationSession(id string) (*ManagedSession, error) {
 	sess, err := m.automationLiveSession(id)
 	if !errors.Is(err, ErrAutomationNotLive) {
 		return sess, err
 	}
-	if m.loadedSessionCount() >= maxAutomationLoadedSessions {
-		return nil, ErrAutomationTooManySessions
-	}
-	sess, err = m.ResumeSession(id)
+	sess, err = m.resumeSession(id, maxAutomationLoadedSessions)
 	if err != nil {
 		if errors.Is(err, session.ErrNotFound) {
 			return nil, ErrNotFound
@@ -119,14 +117,6 @@ func (m *Manager) automationSession(id string) (*ManagedSession, error) {
 		return nil, ErrNotFound
 	}
 	return sess, nil
-}
-
-// loadedSessionCount reports how many sessions are resident, counting the ones
-// currently being resumed so concurrent requests cannot race past the cap.
-func (m *Manager) loadedSessionCount() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.sessions) + len(m.resuming)
 }
 
 // writeAutomationSessionError writes the response for a session-resolution

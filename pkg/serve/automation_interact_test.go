@@ -327,7 +327,12 @@ func TestAutomationReplyRespectsLoadedSessionCap(t *testing.T) {
 	unloadSession(t, mgr, id)
 
 	// Fill the resident set up to the cap with ordinary sessions.
-	for mgr.loadedSessionCount() < maxAutomationLoadedSessions {
+	loadedCount := func() int {
+		mgr.mu.RLock()
+		defer mgr.mu.RUnlock()
+		return len(mgr.sessions) + len(mgr.resuming)
+	}
+	for loadedCount() < maxAutomationLoadedSessions {
 		if _, err := mgr.CreateSession(CreateOpts{}); err != nil {
 			t.Fatal(err)
 		}
@@ -419,5 +424,66 @@ func TestAutomationCreatedFallbacks(t *testing.T) {
 				t.Fatalf("automationCreatedMeta(%v) = %v, want %v", tt.meta, got, tt.want)
 			}
 		})
+	}
+}
+
+// Concurrent replies to different saved sessions cannot race past the resident
+// cap: the check is atomic with the resume reservation. (Regression for the
+// TOCTOU found in review: count-then-reserve used to be two critical sections.)
+func TestAutomationReplyCapAdmissionIsAtomic(t *testing.T) {
+	srv, mgr := automationInteractServer(t, core.MoaConfig{DisableSandbox: true})
+
+	// Two saved automation sessions, both unloaded.
+	ids := make([]string, 2)
+	for i := range ids {
+		ids[i] = startAutomationRun(t, mgr, "hello")
+		sess, _ := mgr.Get(ids[i])
+		pollUntil(t, 5*time.Second, "run finished", func() bool { return sessState(sess) == StateIdle })
+		unloadSession(t, mgr, ids[i])
+	}
+
+	// Fill the resident set to one below the cap: only one slot left.
+	loadedCount := func() int {
+		mgr.mu.RLock()
+		defer mgr.mu.RUnlock()
+		return len(mgr.sessions) + len(mgr.resuming)
+	}
+	for loadedCount() < maxAutomationLoadedSessions-1 {
+		if _, err := mgr.CreateSession(CreateOpts{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Race both replies for the single remaining slot.
+	results := make(chan int, len(ids))
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			resp := automationReq(t, srv, "/api/automation/sessions/"+id+"/reply", testAutomationToken, `{"text":"hi"}`, false)
+			defer resp.Body.Close() //nolint:errcheck
+			results <- resp.StatusCode
+		}(id)
+	}
+	wg.Wait()
+	close(results)
+
+	var accepted, refused int
+	for code := range results {
+		switch code {
+		case http.StatusAccepted:
+			accepted++
+		case http.StatusServiceUnavailable:
+			refused++
+		default:
+			t.Fatalf("unexpected status %d", code)
+		}
+	}
+	if accepted != 1 || refused != 1 {
+		t.Fatalf("accepted=%d refused=%d, want exactly one of each", accepted, refused)
+	}
+	if got := loadedCount(); got > maxAutomationLoadedSessions {
+		t.Fatalf("resident set %d exceeds cap %d", got, maxAutomationLoadedSessions)
 	}
 }

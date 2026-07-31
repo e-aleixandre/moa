@@ -674,6 +674,14 @@ func reapStaleAttachments() {
 
 // ResumeSession loads a saved session from disk and creates a full runtime.
 func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
+	return m.resumeSession(id, 0)
+}
+
+// resumeSession is ResumeSession with an optional cap: when maxLoaded > 0 the
+// reservation is refused if the resident set (loaded + resuming) has already
+// reached it. The check happens inside the same critical section as the
+// reservation so concurrent callers cannot race past the cap.
+func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, error) {
 	// Reserve the ID without exposing a nil placeholder to readers.
 	m.mu.Lock()
 	if _, ok := m.sessions[id]; ok {
@@ -683,6 +691,10 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 	if _, ok := m.resuming[id]; ok {
 		m.mu.Unlock()
 		return nil, ErrBusy
+	}
+	if maxLoaded > 0 && len(m.sessions)+len(m.resuming) >= maxLoaded {
+		m.mu.Unlock()
+		return nil, ErrAutomationTooManySessions
 	}
 	m.resuming[id] = struct{}{}
 	m.mu.Unlock()
