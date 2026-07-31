@@ -5,11 +5,11 @@ type AgentEvent struct {
 	Type string
 
 	// Populated per type:
-	Message        AgentMessage       // message_start, message_end
+	Message        AgentMessage       // message_start, message_end, user_message
 	AssistantEvent *AssistantEvent    // message_update (streaming deltas)
-	Text           string             // steer
+	Text           string             // steer, user_message (plain-text prompt)
 	SteerID        string             // steer
-	MsgID          string             // steer (MsgID of the injected user message, for client dedup)
+	MsgID          string             // steer, user_message (MsgID of the user message, for client dedup)
 	AttachmentIDs  []string           // steers_canceled
 	ToolCallID     string             // tool_execution_*
 	ToolName       string             // tool_execution_*
@@ -37,6 +37,11 @@ const (
 	AgentEventToolExecEnd    = "tool_execution_end"
 
 	AgentEventSteer = "steer" // a steering message was injected mid-run
+	// AgentEventUserMessage reports a user prompt that just entered the
+	// conversation as the first message of a new run, emitted at the append
+	// point (under the state lock) so the fact is already true in history when
+	// subscribers see it. Mid-run injections keep using AgentEventSteer.
+	AgentEventUserMessage = "user_message"
 	// AgentEventSteersCanceled reports queued steers dropped after a failed run.
 	AgentEventSteersCanceled = "steers_canceled"
 

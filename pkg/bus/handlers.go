@@ -621,12 +621,12 @@ func RegisterHandlers(sctx *SessionContext) {
 				sctx.cancelGoalVerify()
 			}
 		}
-		// Pre-mint the user message's ID so the prompt can be announced live
-		// (UserMessageAppended) under the same identity it lands in history
-		// with. Prompts carrying Custom metadata are internal producers
-		// (goal/auto-verify/schedule) or notifications (subagent/bash) with
-		// their own rendering, so they keep the plain path and are not
-		// announced.
+		// Pre-mint the user message's ID so the prompt is announced live
+		// (UserMessageAppended, emitted by the agent when the message actually
+		// lands in history) under the same identity clients dedup by. Prompts
+		// carrying Custom metadata are internal producers (goal/auto-verify/
+		// schedule) or notifications (subagent/bash) with their own rendering, so
+		// they keep the plain path and are not announced.
 		msgID := cmd.MsgID
 		if cmd.Custom == nil && msgID == "" {
 			msgID = core.NewMsgID()
@@ -641,16 +641,6 @@ func RegisterHandlers(sctx *SessionContext) {
 			return sctx.Agent.Send(ctx, cmd.Text)
 		}); err != nil {
 			return err
-		}
-		// Announce only after the run was accepted: a rejected prompt never
-		// enters the conversation and must not leave a phantom message.
-		if cmd.Custom == nil {
-			sctx.Bus.Publish(UserMessageAppended{
-				SessionID: sctx.SessionID,
-				RunGen:    sctx.RunGenAtomic.Load(),
-				MsgID:     msgID,
-				Text:      cmd.Text,
-			})
 		}
 		return nil
 	})
@@ -691,18 +681,11 @@ func RegisterHandlers(sctx *SessionContext) {
 			msgID = core.NewMsgID()
 		}
 		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
-			return sctx.Agent.SendWithContentMsgID(ctx, cmd.Content, msgID)
+			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID)
 		}); err != nil {
 			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)
 			return err
 		}
-		// Announced only once the run is accepted (see SendPrompt).
-		sctx.Bus.Publish(UserMessageAppended{
-			SessionID: sctx.SessionID,
-			RunGen:    sctx.RunGenAtomic.Load(),
-			MsgID:     msgID,
-			Content:   cmd.Content,
-		})
 		return nil
 	})
 
@@ -1144,6 +1127,36 @@ func RegisterHandlers(sctx *SessionContext) {
 			}
 		}
 		return sctx.Agent.Messages(), nil
+	})
+
+	b.OnQuery(func(q MsgIDInUse) (bool, error) {
+		if q.MsgID == "" {
+			return false, nil
+		}
+		// Scan the display projection: it is the same history clients dedup
+		// against (tree entries plus the in-flight turn), so an ID it already
+		// contains is exactly one that would swallow a new message.
+		if sctx.treeSyncer != nil {
+			for _, m := range sctx.treeSyncer.DisplayMessages() {
+				if m.MsgID == q.MsgID {
+					return true, nil
+				}
+			}
+			return false, nil
+		}
+		if sctx.Tree != nil {
+			for _, m := range sctx.Tree.AllMessages() {
+				if m.MsgID == q.MsgID {
+					return true, nil
+				}
+			}
+		}
+		for _, m := range sctx.Agent.Messages() {
+			if m.MsgID == q.MsgID {
+				return true, nil
+			}
+		}
+		return false, nil
 	})
 
 	b.OnQuery(func(q GetBranchPoints) ([]BranchPoint, error) {

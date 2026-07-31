@@ -439,16 +439,44 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 // letting the caller correlate a later event (e.g. a Steered announcement for a
 // batch of queued steers folded into this one prompt) with the message that
 // lands in state — so reconnect snapshots dedup it by that shared MsgID.
+//
+// It also announces the prompt (AgentEventUserMessage) from the append point,
+// so subscribers only learn about it once it is genuinely in history — see
+// announceUserMessage.
 func (a *Agent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
-	return a.execute(ctx, func() {
+	var appended *core.AgentMessage
+	msgs, err := a.executeAnnounced(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
 		msg := core.WrapMessage(core.NewUserMessage(prompt))
 		if msgID != "" {
 			msg.MsgID = msgID
+		} else {
+			msg.EnsureMsgID()
 		}
 		a.state.Messages = append(a.state.Messages, msg)
+		appended = &msg
+	}, func() {
+		a.announceUserMessage(*appended, prompt)
+	})
+	return msgs, err
+}
+
+// announceUserMessage emits AgentEventUserMessage for a prompt that just landed
+// in history. Emitted from the announce hook of executeWithOptions, i.e. after
+// prepare appended the message but before the run's own events, so a client
+// never sees run activity ahead of the message that started it, and a reconnect
+// snapshot taken after this point already contains the message (the event and
+// the snapshot can overlap, never both miss it — clients dedup by MsgID).
+// text carries the plain-text prompt for a text-only send; for a structured
+// send it stays empty and the blocks travel in Message.
+func (a *Agent) announceUserMessage(msg core.AgentMessage, text string) {
+	a.emitter.Emit(core.AgentEvent{
+		Type:    core.AgentEventUserMessage,
+		Message: msg,
+		MsgID:   msg.MsgID,
+		Text:    text,
 	})
 }
 
@@ -484,7 +512,7 @@ func (a *Agent) SendPrepareCompact(ctx context.Context, prompt string, slot *ses
 		msg := core.WrapMessage(core.NewUserMessage(prompt))
 		msg.Custom = map[string]any{"source": "prepare_compact", "internal": true}
 		a.state.Messages = append(a.state.Messages, msg)
-	}, overlay, extraPrompt, true)
+	}, nil, overlay, extraPrompt, true)
 }
 
 // SendWithContent appends a user message with mixed content blocks (text + images)
@@ -503,6 +531,17 @@ func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]
 // with the message that lands in state — so clients dedup it against their
 // optimistic echo and against reconnect snapshots. Mirrors SendWithMsgID.
 func (a *Agent) SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
+	return a.sendWithContentMsgID(ctx, content, msgID, false)
+}
+
+// SendWithContentAnnounced is SendWithContentMsgID that also announces the
+// prompt (AgentEventUserMessage) from the append point. Only the user-initiated
+// ingress paths announce: internal producers render themselves.
+func (a *Agent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
+	return a.sendWithContentMsgID(ctx, content, msgID, true)
+}
+
+func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content, msgID string, announce bool) ([]core.AgentMessage, error) {
 	cc := core.CloneContent(content)
 	// The SendPromptWithContent handler reserved these native bytes in the
 	// inflight ledger before this run's goroutine started (see
@@ -511,17 +550,25 @@ func (a *Agent) SendWithContentMsgID(ctx context.Context, content []core.Content
 	// the run proceeds), or release it if the send never happened.
 	n := core.NativeDocBytes(cc)
 	appended := false
-	msgs, err := a.execute(ctx, func() {
+	var appendedMsg core.AgentMessage
+	msgs, err := a.executeAnnounced(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
 		msg := core.WrapMessage(core.NewUserMessageWithContent(cc))
 		if msgID != "" {
 			msg.MsgID = msgID
+		} else {
+			msg.EnsureMsgID()
 		}
 		a.state.Messages = append(a.state.Messages, msg)
 		a.steers.subInflight(n) // under a.mu, atomic with the append
 		appended = true
+		appendedMsg = msg
+	}, func() {
+		if announce {
+			a.announceUserMessage(appendedMsg, "")
+		}
 	})
 	if !appended {
 		a.steers.subInflight(n) // send never started; release the reservation
@@ -1210,10 +1257,21 @@ func ensureMsgIDs(msgs []core.AgentMessage) {
 // atomically with the "not running" check. This prevents races where concurrent
 // callers could mutate state before getting the "already running" error.
 func (a *Agent) execute(ctx context.Context, prepare func()) ([]core.AgentMessage, error) {
-	return a.executeWithOptions(ctx, prepare, a.tools, "", false)
+	return a.executeWithOptions(ctx, prepare, nil, a.tools, "", false)
 }
 
-func (a *Agent) executeWithOptions(ctx context.Context, prepare func(), tools *core.Registry, extraPrompt string, allowCheckpoint bool) ([]core.AgentMessage, error) {
+// executeAnnounced is execute with an announce hook: a callback invoked right
+// after prepare committed its state mutation and released a.mu, but before the
+// run's own events are emitted. Entry points that append a user message use it
+// to publish that message only once it is genuinely in history — an announcement
+// made before the append could be missed by a client that snapshots the history
+// in between (the snapshot would predate the append while its sequence cut
+// already covers the event), losing the message until a reload.
+func (a *Agent) executeAnnounced(ctx context.Context, prepare, announce func()) ([]core.AgentMessage, error) {
+	return a.executeWithOptions(ctx, prepare, announce, a.tools, "", false)
+}
+
+func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func(), tools *core.Registry, extraPrompt string, allowCheckpoint bool) ([]core.AgentMessage, error) {
 	a.mu.Lock()
 	if a.cancel != nil {
 		a.mu.Unlock()
@@ -1244,6 +1302,14 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare func(), tools *c
 	}
 	cancel := a.cancel
 	a.mu.Unlock()
+
+	// The user message appended by prepare (if any) is now visible to every
+	// reader of the agent's state, so announcing it here can no longer race a
+	// concurrent history snapshot; and it precedes the run's own events, so
+	// clients never render run activity ahead of the message that started it.
+	if announce != nil {
+		announce()
+	}
 
 	defer func() {
 		cancel()

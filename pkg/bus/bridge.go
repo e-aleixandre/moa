@@ -51,6 +51,10 @@ type AgentController interface {
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
 	SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
+	// SendWithContentAnnounced is SendWithContentMsgID that also announces the
+	// appended user message (core.AgentEventUserMessage) from the append point,
+	// so the announcement can never race a concurrent history snapshot.
+	SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
 	AppendMessage(msg core.AgentMessage) error
 	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
 	LoadState(msgs []core.AgentMessage, compactionEpoch int) error
@@ -727,6 +731,15 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventSteer:
 		return []any{Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}}
+
+	case core.AgentEventUserMessage:
+		ev := UserMessageAppended{SessionID: sid, RunGen: gen, MsgID: e.MsgID, Text: e.Text}
+		// A structured send carries its blocks; a plain-text prompt travels in
+		// Text alone, so clients render exactly one shape per message.
+		if e.Text == "" {
+			ev.Content = e.Message.Content
+		}
+		return []any{ev}
 
 	case core.AgentEventCompactionStart:
 		return []any{CompactionStarted{SessionID: sid, RunGen: gen}}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -367,5 +368,130 @@ func TestEmitter_ConcurrentEmitDrain(t *testing.T) {
 	got := totalProcessed.Load()
 	if got < 1 || got > 500 {
 		t.Fatalf("unexpected event count: %d (expected 1..500)", got)
+	}
+}
+
+// TestSendWithMsgID_AnnouncesAfterAppend pins the invariant that closes the
+// reconnect race: when a subscriber sees user_message, the message is ALREADY
+// in the agent's state. A client that snapshots history on that signal always
+// finds it, so the message can never be lost between an early announcement and
+// a later append (the snapshot would predate the append while its sequence cut
+// already covered the event).
+func TestSendWithMsgID_AnnouncesAfterAppend(t *testing.T) {
+	ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+
+	type seen struct {
+		msgID     string
+		inHistory bool
+	}
+	announced := make(chan seen, 1)
+	unsub := ag.Subscribe(func(e core.AgentEvent) {
+		if e.Type != core.AgentEventUserMessage {
+			return
+		}
+		// Read history exactly as a reconnecting client's snapshot would.
+		found := false
+		for _, m := range ag.Messages() {
+			if m.MsgID == e.MsgID {
+				found = true
+			}
+		}
+		select {
+		case announced <- seen{msgID: e.MsgID, inHistory: found}:
+		default:
+		}
+	})
+	defer unsub()
+
+	if _, err := ag.SendWithMsgID(context.Background(), "hola", "c-fixed"); err != nil {
+		t.Fatal(err)
+	}
+	ag.Drain(2 * time.Second)
+
+	select {
+	case got := <-announced:
+		if got.msgID != "c-fixed" {
+			t.Fatalf("announced MsgID = %q, want c-fixed", got.msgID)
+		}
+		if !got.inHistory {
+			t.Fatal("user_message was announced before the message was in history")
+		}
+	default:
+		t.Fatal("no user_message event was emitted")
+	}
+}
+
+// TestSendWithMsgID_AnnouncesBeforeRunEvents pins the ordering half: the
+// message that starts a run is announced before any of that run's own events,
+// so a client never renders run activity above the prompt that caused it.
+func TestSendWithMsgID_AnnouncesBeforeRunEvents(t *testing.T) {
+	ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+
+	var mu sync.Mutex
+	var order []string
+	unsub := ag.Subscribe(func(e core.AgentEvent) {
+		switch e.Type {
+		case core.AgentEventUserMessage, core.AgentEventStart, core.AgentEventMessageStart:
+			mu.Lock()
+			order = append(order, e.Type)
+			mu.Unlock()
+		}
+	})
+	defer unsub()
+
+	if _, err := ag.SendWithMsgID(context.Background(), "hola", ""); err != nil {
+		t.Fatal(err)
+	}
+	ag.Drain(2 * time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) == 0 || order[0] != core.AgentEventUserMessage {
+		t.Fatalf("event order = %v, want user_message first", order)
+	}
+}
+
+// TestSendWithContentAnnounced_OnlyAnnouncesWhenAsked separates the two content
+// entry points: the plain one is used by internal producers that render
+// themselves and must stay silent.
+func TestSendWithContentAnnounced_OnlyAnnouncesWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		send       func(*Agent) error
+		wantEvents int
+	}{
+		{"announced", func(a *Agent) error {
+			_, err := a.SendWithContentAnnounced(context.Background(), []core.Content{core.TextContent("mira")}, "c-content")
+			return err
+		}, 1},
+		{"plain", func(a *Agent) error {
+			_, err := a.SendWithContentMsgID(context.Background(), []core.Content{core.TextContent("mira")}, "c-content")
+			return err
+		}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := newTestAgent(NewMockProvider(simpleTextResponse("ok")))
+			var count atomic.Int32
+			var gotMsgID atomic.Value
+			unsub := ag.Subscribe(func(e core.AgentEvent) {
+				if e.Type == core.AgentEventUserMessage {
+					count.Add(1)
+					gotMsgID.Store(e.MsgID)
+				}
+			})
+			defer unsub()
+
+			if err := tc.send(ag); err != nil {
+				t.Fatal(err)
+			}
+			ag.Drain(2 * time.Second)
+
+			if int(count.Load()) != tc.wantEvents {
+				t.Fatalf("user_message events = %d, want %d", count.Load(), tc.wantEvents)
+			}
+			if tc.wantEvents > 0 && gotMsgID.Load() != "c-content" {
+				t.Fatalf("announced MsgID = %v, want c-content", gotMsgID.Load())
+			}
+		})
 	}
 }

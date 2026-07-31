@@ -61,10 +61,14 @@ type fakeAgent struct {
 	sendHook    func()
 	sendContent []core.Content
 	sendMsgID   string
-	steerQueue  []core.SteerItem
-	steerFull   bool             // when true, Steer rejects (queue full)
-	sentItems   []core.SteerItem // items delivered via SendItems (pump tests)
-	inflight    int64            // reserved native bytes (Reserve/Release)
+	// announce, when set, is invoked by the announcing send entry points with
+	// the message they appended, standing in for the real agent's
+	// core.AgentEventUserMessage emission (which reaches the bus via Bridge).
+	announce   func(msgID string, text string, content []core.Content)
+	steerQueue []core.SteerItem
+	steerFull  bool             // when true, Steer rejects (queue full)
+	sentItems  []core.SteerItem // items delivered via SendItems (pump tests)
+	inflight   int64            // reserved native bytes (Reserve/Release)
 
 	// appendBusy > 0 makes AppendMessage fail (simulating a live run) and
 	// decrements once per call, so a deferred append can succeed on retry.
@@ -338,7 +342,11 @@ func (f *fakeAgent) SendPrepareCompact(ctx context.Context, prompt string, _ *se
 func (f *fakeAgent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
 	f.mu.Lock()
 	f.sendMsgID = msgID
+	announce := f.announce
 	f.mu.Unlock()
+	if announce != nil {
+		announce(msgID, prompt, nil)
+	}
 	return f.Send(ctx, prompt)
 }
 
@@ -431,6 +439,27 @@ func (f *fakeAgent) SendWithContentMsgID(ctx context.Context, content []core.Con
 	f.sendMsgID = msgID
 	f.mu.Unlock()
 	return f.SendWithContent(ctx, content)
+}
+
+func (f *fakeAgent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
+	f.mu.Lock()
+	announce := f.announce
+	f.mu.Unlock()
+	if announce != nil {
+		announce(msgID, "", content)
+	}
+	return f.SendWithContentMsgID(ctx, content, msgID)
+}
+
+// announceToBus wires the fake's announce hook to publish the same bus event
+// the real agent produces through Bridge, so handler tests observe the live
+// announcement without a real agent.
+func (f *fakeAgent) announceToBus(b EventBus, sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.announce = func(msgID, text string, content []core.Content) {
+		b.Publish(UserMessageAppended{SessionID: sessionID, MsgID: msgID, Text: text, Content: content})
+	}
 }
 
 // Thread-safe assertion helpers.
@@ -2243,6 +2272,7 @@ func TestHandler_SendPrompt_AnnouncesUserMessage(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
+	fa.announceToBus(b, "test-session")
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
 
@@ -2274,6 +2304,7 @@ func TestHandler_SendPromptWithContent_AnnouncesUserMessage(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
+	fa.announceToBus(b, "test-session")
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
 
@@ -2298,6 +2329,7 @@ func TestHandler_SendPrompt_NoAnnounceOnRejectedOrInternal(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
+	fa.announceToBus(b, "test-session")
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
 

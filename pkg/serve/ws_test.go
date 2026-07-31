@@ -566,3 +566,67 @@ func TestEnrichEditToolStart(t *testing.T) {
 		}
 	})
 }
+
+// TestUserMessage_AnnouncedOnlyOnceInHistory is the regression guard for the
+// reconnect race. A client that connects around a send takes an init snapshot
+// paired with a sequence cut and then streams only events above that cut. If
+// the user_message announcement were published BEFORE the message reached
+// history — as it was when the bus handler published it right after spawning
+// the run goroutine — a snapshot taken in that window would miss the message
+// while its cut already covered the event: neither path delivers it and the
+// message is lost until a reload.
+//
+// The announcement now comes from the append point, which makes the invariant
+// directly checkable: at the instant the event is published, the very query
+// buildInitData uses for the snapshot already returns the message.
+func TestUserMessage_AnnouncedOnlyOnceInHistory(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(300*time.Millisecond, "reply")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const msgID = "c-race_1"
+	type observation struct {
+		count     int
+		inHistory bool
+	}
+	obs := make(chan observation, 4)
+	unsub := sess.runtime.Bus.Subscribe(func(e bus.UserMessageAppended) {
+		if e.MsgID != msgID {
+			return
+		}
+		// Read history exactly as a reconnecting client's snapshot does.
+		found := 0
+		for _, m := range buildInitData(sess, bus.StreamingAggregate{}).Messages {
+			if m.MsgID == msgID {
+				found++
+			}
+		}
+		obs <- observation{count: found, inHistory: found > 0}
+	})
+	defer unsub()
+
+	if _, _, _, err := mgr.Send(sess.ID, "carrera", nil, "", msgID); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "run settles", func() bool { return sessState(sess) == StateIdle })
+	sess.runtime.Bus.Drain(2 * time.Second)
+
+	select {
+	case got := <-obs:
+		if !got.inHistory {
+			t.Fatal("user_message was announced before the message was in history: a snapshot taken here would lose it")
+		}
+		if got.count != 1 {
+			t.Fatalf("snapshot contains the message %d times, want exactly 1", got.count)
+		}
+	default:
+		t.Fatal("the send was never announced on the bus")
+	}
+	if len(obs) != 0 {
+		t.Fatalf("the send was announced %d extra times", len(obs))
+	}
+}
