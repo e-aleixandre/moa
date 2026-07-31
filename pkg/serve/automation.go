@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
 
@@ -386,11 +387,20 @@ func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID strin
 	// Per-run MCP servers: reject a name an operator-configured server already
 	// owns (never silently override it), then carry them both into the session
 	// being built and into its metadata, so a resume reconnects them.
+	//
+	// The cwd is canonicalized FIRST, exactly as CreateSession will: validating
+	// against the raw path could consult a different directory's config than the
+	// one the session ends up running in, so the checked set and the merged set
+	// would not be the same set.
 	cwd := req.CWD
 	if cwd == "" {
 		cwd = m.workspaceRoot
 	}
-	if msg := validateAutomationMCPServers(req.MCPServers, m.configuredMCPServers(cwd)); msg != "" {
+	canonicalCWD, err := core.CanonicalizePath(cwd)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: %v", ErrInvalidCWD, err)
+	}
+	if msg := validateAutomationMCPServers(req.MCPServers, m.configuredMCPServers(canonicalCWD)); msg != "" {
 		return "", false, fmt.Errorf("%w: %s", ErrAutomationInvalidMCP, msg)
 	}
 	if len(req.MCPServers) > 0 {
@@ -400,7 +410,7 @@ func (m *Manager) CreateAutomationRun(req AutomationRunRequest) (sessionID strin
 	sess, err := m.CreateSession(CreateOpts{
 		Model:           req.Model,
 		Title:           req.Title,
-		CWD:             req.CWD,
+		CWD:             canonicalCWD,
 		Origin:          origin,
 		extraMeta:       meta,
 		extraMCPServers: automationMCPConfigs(req.MCPServers),

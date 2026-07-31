@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -308,7 +310,7 @@ func TestMCPServersFromMetaRejectsCommandEntries(t *testing.T) {
 		map[string]any{"name": "bad scheme", "url": "file:///etc/passwd"},
 		map[string]any{"name": "no url"},
 	}}
-	got := mcpServersFromMeta(meta)
+	got := mcpServersFromMeta(meta, nil)
 	if len(got) != 1 {
 		t.Fatalf("got %d servers, want only the valid one: %v", len(got), got)
 	}
@@ -333,9 +335,245 @@ func TestAutomationMCPMetaRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		t.Fatal(err)
 	}
-	got := mcpServersFromMeta(meta)
+	got := mcpServersFromMeta(meta, nil)
 	want := core.MCPServer{URL: "https://relay.example.com/mcp", Headers: map[string]string{"Authorization": "Bearer t"}}
 	if len(got) != 1 || got["relay"].URL != want.URL || got["relay"].Headers["Authorization"] != "Bearer t" {
 		t.Fatalf("round-tripped = %+v, want %+v", got, want)
+	}
+}
+
+func TestAutomationMCPCommandAliasVariants(t *testing.T) {
+	relayURL := newRelayMCPServer(t)
+	srv, mgr := newAutomationTestServer(t, testAutomationToken)
+
+	// Go's JSON decoder matches field names case-insensitively, and a JSON null
+	// still fills the RawMessage — both must hit the url-only rule.
+	rejected := []struct {
+		name string
+		body string
+	}{
+		{"null command", `{"prompt":"p","mcp_servers":[{"name":"evil","url":"https://a/b","command":null}]}`},
+		{"capitalized Command", `{"prompt":"p","mcp_servers":[{"name":"evil","url":"https://a/b","Command":"/bin/sh"}]}`},
+		{"upper COMMAND", `{"prompt":"p","mcp_servers":[{"name":"evil","url":"https://a/b","COMMAND":"/bin/sh"}]}`},
+	}
+	for _, tt := range rejected {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken, tt.body, false)
+			defer resp.Body.Close() //nolint:errcheck
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			if body := readBody(t, resp); !strings.Contains(body, "url-based") {
+				t.Fatalf("body = %q", body)
+			}
+		})
+	}
+
+	// An unknown alias is not a command field: it is ignored, and the server
+	// that gets built is url-only.
+	t.Run("unknown alias is ignored and harmless", func(t *testing.T) {
+		body := fmt.Sprintf(`{"prompt":"p","mcp_servers":[{"name":"relay","url":%q,"cmd":"/bin/sh"}]}`, relayURL)
+		resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken, body, false)
+		defer resp.Body.Close() //nolint:errcheck
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("status = %d (%s), want 201", resp.StatusCode, readBody(t, resp))
+		}
+		run := decodeRun(t, resp)
+		sess, ok := mgr.Get(run.SessionID)
+		if !ok {
+			t.Fatal("session not found")
+		}
+		status := sess.infra.mcpMgr.Status()
+		if len(status) != 1 || status[0].Name != "relay" || status[0].State != mcp.StateReady {
+			t.Fatalf("MCP status = %+v, want one ready url-based relay", status)
+		}
+	})
+}
+
+func TestAutomationMCPHeaderValueControlCharsRejected(t *testing.T) {
+	srv, _ := newAutomationTestServer(t, testAutomationToken)
+
+	for _, body := range []string{
+		`{"prompt":"p","mcp_servers":[{"name":"relay","url":"https://a/b","headers":{"Authorization":"Bearer x\r\nX-Evil: 1"}}]}`,
+		`{"prompt":"p","mcp_servers":[{"name":"relay","url":"https://a/b","headers":{"Authorization":"Bearer x\nfoo"}}]}`,
+		`{"prompt":"p","mcp_servers":[{"name":"relay","url":"https://a/b","headers":{"Authorization":"Bearer \u0000x"}}]}`,
+	} {
+		resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken, body, false)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("status = %d for %s, want 400", resp.StatusCode, body)
+		}
+		if got := readBody(t, resp); !strings.Contains(got, "invalid header value") {
+			t.Fatalf("body = %q", got)
+		}
+		resp.Body.Close() //nolint:errcheck
+	}
+}
+
+func TestAutomationMCPURLUserinfoRejected(t *testing.T) {
+	srv, _ := newAutomationTestServer(t, testAutomationToken)
+
+	resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken,
+		`{"prompt":"p","mcp_servers":[{"name":"relay","url":"https://user:pass@a/b"}]}`, false)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if body := readBody(t, resp); !strings.Contains(body, "use headers") {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestMCPServersFromMetaAppliesFullValidator(t *testing.T) {
+	// A hand-edited session file must not restore what the API would refuse.
+	manyEntries := []any{}
+	for i := 0; i <= maxAutomationMCPServers; i++ {
+		manyEntries = append(manyEntries, map[string]any{
+			"name": fmt.Sprintf("s%d", i), "url": fmt.Sprintf("https://a/%d", i),
+		})
+	}
+	cases := []struct {
+		name string
+		meta map[string]any
+	}{
+		{"over the server cap", map[string]any{session.MetaMCPServers: manyEntries}},
+		{"overlong url", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://example.com/" + strings.Repeat("p", maxAutomationMCPURLBytes)},
+		}}},
+		{"too many headers", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://a/b", "headers": func() map[string]any {
+				h := map[string]any{}
+				for i := 0; i <= maxAutomationMCPHeaders; i++ {
+					h[fmt.Sprintf("H%d", i)] = "v"
+				}
+				return h
+			}()},
+		}}},
+		{"oversized headers", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://a/b", "headers": map[string]any{
+				"Authorization": strings.Repeat("v", maxAutomationMCPHeaderBytes+1),
+			}},
+		}}},
+		{"invalid header name", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://a/b", "headers": map[string]any{"Bad Header": "v"}},
+		}}},
+		{"control chars in header value", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://a/b", "headers": map[string]any{"Authorization": "x\r\nX-Evil: 1"}},
+		}}},
+		{"userinfo in url", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://user:pass@a/b"},
+		}}},
+		{"overlong name", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": strings.Repeat("a", maxAutomationMCPNameBytes+1), "url": "https://a/b"},
+		}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mcpServersFromMeta(tc.meta, nil)
+			if tc.name == "over the server cap" {
+				if len(got) != maxAutomationMCPServers {
+					t.Fatalf("got %d servers, want the cap %d", len(got), maxAutomationMCPServers)
+				}
+				return
+			}
+			if len(got) != 0 {
+				t.Fatalf("got %v, want nothing started", got)
+			}
+		})
+	}
+}
+
+func TestMCPServersFromMetaDropsConfiguredCollisions(t *testing.T) {
+	// The operator configured "relay" after the session was created: their
+	// server must win, and the stale per-run entry must not be restored.
+	meta := map[string]any{session.MetaMCPServers: []any{
+		map[string]any{"name": "relay", "url": "https://stale.example.com/mcp"},
+		map[string]any{"name": "other", "url": "https://other.example.com/mcp"},
+	}}
+	configured := map[string]core.MCPServer{"relay": {Command: "true"}}
+	got := mcpServersFromMeta(meta, configured)
+	if _, ok := got["relay"]; ok {
+		t.Fatalf("per-run relay overrode the configured one: %+v", got)
+	}
+	if got["other"].URL != "https://other.example.com/mcp" {
+		t.Fatalf("non-colliding server lost: %+v", got)
+	}
+}
+
+func TestAutomationResumeConfiguredServerWinsOverPerRun(t *testing.T) {
+	relayURL := newRelayMCPServer(t)
+	srv, mgr := newAutomationTestServer(t, testAutomationToken)
+
+	body := fmt.Sprintf(`{"prompt":"work","mcp_servers":[{"name":"relay","url":%q}]}`, relayURL)
+	resp := automationReq(t, srv, "/api/automation/runs", testAutomationToken, body, false)
+	defer resp.Body.Close() //nolint:errcheck
+	run := decodeRun(t, resp)
+
+	sess, ok := mgr.Get(run.SessionID)
+	if !ok {
+		t.Fatal("session not found")
+	}
+	pollUntil(t, 5*time.Second, "automation run finished", func() bool {
+		return sessState(sess) == StateIdle
+	})
+	unloadSession(t, mgr, run.SessionID)
+	sess.infra.mcpMgr.Close()
+	sess.infra.sessionCancel()
+
+	// The operator now configures a server of the same name.
+	mgr.configLoader = func(string) core.MoaConfig {
+		return core.MoaConfig{
+			DisableSandbox: true,
+			MCPServers:     map[string]core.MCPServer{"relay": {Command: "definitely-not-real-zzz"}},
+		}
+	}
+
+	resumed, err := mgr.ResumeSession(run.SessionID)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	status := resumed.infra.mcpMgr.Status()
+	if len(status) != 1 || status[0].Name != "relay" {
+		t.Fatalf("resumed MCP status = %+v, want a single relay", status)
+	}
+	// The configured (command-based, bogus) server was used, so it failed —
+	// which is exactly the proof the per-run URL entry did not override it.
+	if status[0].State != mcp.StateFailed {
+		t.Fatalf("relay state = %s, want the configured command-based server to have been used (failed)", status[0].State)
+	}
+}
+
+func TestCreateAutomationRunCanonicalizesCWDBeforeCollisionCheck(t *testing.T) {
+	// A symlinked cwd must be resolved BEFORE the collision check, so the
+	// validated config is the config the session actually runs with.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newMockProvider(simpleResponseHandler("hi"))
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := core.CanonicalizePath(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var seen []string
+	mgr := newTestManagerWithRoot(t, ctx, prov, real)
+	base := mgr.configLoader
+	mgr.configLoader = func(cwd string) core.MoaConfig {
+		seen = append(seen, cwd)
+		return base(cwd)
+	}
+
+	if _, _, err := mgr.CreateAutomationRun(AutomationRunRequest{
+		Prompt:     "p",
+		CWD:        link,
+		MCPServers: []AutomationMCPServer{{Name: "relay", URL: "https://a/b"}},
+	}); err != nil {
+		t.Fatalf("CreateAutomationRun: %v", err)
+	}
+	if len(seen) == 0 || seen[0] != resolved {
+		t.Fatalf("collision check consulted %v, want the resolved path %q first", seen, resolved)
 	}
 }

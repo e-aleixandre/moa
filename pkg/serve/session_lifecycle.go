@@ -744,8 +744,11 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		titleSource:            saved.TitleSource,
 		// Per-run MCP servers are session-scoped: they only exist in this
 		// session's metadata, so a resume has to bring them back or the agent
-		// silently loses the tools the automation caller attached.
-		extraMCPServers: mcpServersFromMeta(saved.Metadata),
+		// silently loses the tools the automation caller attached. A name the
+		// operator has since configured is dropped, not merged on top: the
+		// merge order would otherwise let a stale per-run server override
+		// operator config, which the API refuses at creation time.
+		extraMCPServers: mcpServersFromMeta(saved.Metadata, m.configuredMCPServers(cwd)),
 	})
 	if err != nil {
 		cleanup()

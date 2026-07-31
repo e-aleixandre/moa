@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -94,12 +95,28 @@ func validateAutomationMCPHeaders(s AutomationMCPServer) string {
 		if len(k) > maxAutomationMCPHeaderName || !validMCPToken(k) {
 			return fmt.Sprintf("mcp_servers %q: invalid header name", s.Name)
 		}
+		if !validHeaderValue(v) {
+			return fmt.Sprintf("mcp_servers %q: invalid header value", s.Name)
+		}
 		total += len(k) + len(v)
 	}
 	if total > maxAutomationMCPHeaderBytes {
 		return fmt.Sprintf("mcp_servers %q: headers too large (max %d bytes combined)", s.Name, maxAutomationMCPHeaderBytes)
 	}
 	return ""
+}
+
+// validHeaderValue rejects control characters in a header value. CR/LF would be
+// header injection; the rest cannot appear in a valid field value and would
+// only surface much later as an opaque net/http error at connect time instead
+// of the documented 400.
+func validHeaderValue(v string) bool {
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // validMCPToken keeps server names to what tool naming carries unambiguously
@@ -153,9 +170,16 @@ func automationMCPMeta(servers []AutomationMCPServer) any {
 
 // mcpServersFromMeta rebuilds the per-run servers of a resumed session. It is
 // forgiving about shape (metadata round-trips through JSON) but strict about
-// content: an entry that no longer validates is skipped rather than started, so
-// a hand-edited session file cannot turn a per-run server into a local command.
-func mcpServersFromMeta(meta map[string]any) map[string]core.MCPServer {
+// content: every entry goes through the SAME validator the request path uses,
+// so a hand-edited session file cannot restore what the API would have refused
+// (a local command, more servers than the cap, oversized urls or headers). An
+// entry that fails is skipped with a warning rather than failing the resume,
+// which would strand the session.
+//
+// configured is the set of servers currently defined for the session's cwd: a
+// persisted extra whose name now collides with one of them is dropped, so
+// operator config always wins over a stale per-run server.
+func mcpServersFromMeta(meta map[string]any, configured map[string]core.MCPServer) map[string]core.MCPServer {
 	raw, ok := meta[session.MetaMCPServers].([]any)
 	if !ok || len(raw) == 0 {
 		return nil
@@ -170,24 +194,33 @@ func mcpServersFromMeta(meta map[string]any) map[string]core.MCPServer {
 		// local-process keys was hand-written into the file. Skip it entirely
 		// rather than quietly honoring the url half of a record somebody edited.
 		if _, ok := entry["command"]; ok {
+			slog.Warn("resume: skipping per-run MCP server with a command key", "server", entry["name"])
 			continue
 		}
 		if _, ok := entry["args"]; ok {
+			slog.Warn("resume: skipping per-run MCP server with an args key", "server", entry["name"])
 			continue
 		}
 		if _, ok := entry["env"]; ok {
+			slog.Warn("resume: skipping per-run MCP server with an env key", "server", entry["name"])
 			continue
 		}
-		name, _ := entry["name"].(string)
-		endpoint, _ := entry["url"].(string)
-		if !validMCPToken(name) || len(name) > maxAutomationMCPNameBytes {
+		srv := AutomationMCPServer{Headers: headersFromMeta(entry["headers"])}
+		srv.Name, _ = entry["name"].(string)
+		srv.URL, _ = entry["url"].(string)
+		if len(out) >= maxAutomationMCPServers {
+			slog.Warn("resume: ignoring per-run MCP server beyond the cap",
+				"server", srv.Name, "max", maxAutomationMCPServers)
 			continue
 		}
-		srv := core.MCPServer{URL: endpoint, Headers: headersFromMeta(entry["headers"])}
-		if srv.Validate() != nil {
+		if msg := validateAutomationMCPServers([]AutomationMCPServer{srv}, configured); msg != "" {
+			slog.Warn("resume: skipping invalid per-run MCP server", "server", srv.Name, "reason", msg)
 			continue
 		}
-		out[name] = srv
+		if _, dup := out[srv.Name]; dup {
+			continue
+		}
+		out[srv.Name] = core.MCPServer{URL: srv.URL, Headers: srv.Headers}
 	}
 	if len(out) == 0 {
 		return nil
@@ -203,8 +236,11 @@ func headersFromMeta(v any) map[string]string {
 	out := make(map[string]string, len(raw))
 	for k, val := range raw {
 		s, ok := val.(string)
-		if !ok || !validMCPToken(k) {
-			continue
+		if !ok {
+			// A non-string value is a shape the writer never produces; keep the
+			// key so the validator rejects the entry instead of silently
+			// starting a server with a header dropped.
+			s = fmt.Sprint(val)
 		}
 		out[k] = s
 	}

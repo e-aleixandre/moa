@@ -346,7 +346,10 @@ Limits, each a `400`:
 | Servers per run | 4 |
 | `name` | ≤ 64 bytes, letters/digits/`-`/`_` only, unique within the request |
 | `url` | ≤ 2048 bytes, absolute `http` or `https` |
-| `headers` | ≤ 8 entries, ≤ 4 KiB for names + values combined; names use the same charset as `name` |
+| `headers` | ≤ 8 entries, ≤ 4 KiB for names + values combined; names use the same charset as `name`, values may not contain control characters |
+
+Credentials in the URL itself (`https://user:pass@host/mcp`) are rejected too:
+`headers` are the only place for them.
 
 A `name` that an operator-configured server already uses is rejected with `400`
 rather than resolved: a caller must never be able to shadow your config by
@@ -355,8 +358,11 @@ picking its name.
 These servers are **session-scoped**. They are never written to `.mcp.json` or
 any config file, they exist only for that session, and they disappear when it is
 deleted. Their specs (URLs and headers) are stored in the session's metadata so a
-session that gets unloaded and later resumed reconnects them — which means
-**header credentials are stored unencrypted** in the local session file (mode
+session that gets unloaded and later resumed reconnects them — every entry is
+re-validated on resume with the same rules, and one that no longer passes (or
+whose name an operator has configured in the meantime) is dropped with a warning
+rather than started. Storing them means **header credentials are stored
+unencrypted** in the local session file (mode
 `0600`), exactly like `callback_secret`. Use a token dedicated to this
 integration and rotate it independently.
 
