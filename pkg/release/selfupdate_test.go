@@ -269,7 +269,7 @@ func TestUpdateRejectsTamperedArchive(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch filepath.Base(r.URL.Path) {
 		case "latest":
-			fmt.Fprint(w, `{"tag_name":"v1.1.0"}`)
+			_, _ = fmt.Fprint(w, `{"tag_name":"v1.1.0"}`)
 		case "checksums.txt":
 			_, _ = w.Write(sums)
 		default:
@@ -342,7 +342,7 @@ func TestLatestVersionIgnoresCacheIntervalAndOptOut(t *testing.T) {
 	calls := 0
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		fmt.Fprint(w, `{"tag_name":"v2.0.0"}`)
+		_, _ = fmt.Fprint(w, `{"tag_name":"v2.0.0"}`)
 	}))
 	defer s.Close()
 	t.Setenv("MOA_NO_UPDATE_CHECK", "1")

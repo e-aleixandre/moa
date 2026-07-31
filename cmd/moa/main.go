@@ -70,7 +70,7 @@ func (r *resumeFlag) IsBoolFlag() bool { return true }
 // flag.PrintDefaults alone would never mention.
 func printUsage() {
 	out := flag.CommandLine.Output()
-	fmt.Fprint(out, "Usage: moa [flags]\n       moa <command> [flags]\n\nCommands:\n"+
+	_, _ = fmt.Fprint(out, "Usage: moa [flags]\n       moa <command> [flags]\n\nCommands:\n"+
 		"  serve      Run the web UI server\n"+
 		"  update     Update moa to the latest release (--check to only report)\n"+
 		"  version    Print version, commit, and build date\n\nFlags:\n")

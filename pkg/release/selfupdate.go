@@ -92,11 +92,11 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 	current := opts.Info.DisplayVersion()
 
 	if cur, ok := ParseSemver(opts.Info.Version); ok && cur.Compare(latestVer) >= 0 {
-		fmt.Fprintf(out, "moa %s is already the latest release.\n", current)
+		_, _ = fmt.Fprintf(out, "moa %s is already the latest release.\n", current)
 		return nil
 	}
 	if opts.CheckOnly {
-		fmt.Fprintf(out, "moa %s → %s available.\nRun `moa update` to install it.\n", current, latest)
+		_, _ = fmt.Fprintf(out, "moa %s → %s available.\nRun `moa update` to install it.\n", current, latest)
 		return nil
 	}
 
@@ -112,7 +112,7 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 	name := archiveName(version, goos, goarch)
 	assetBase := strings.TrimSuffix(base, "/") + "/" + latest
 
-	fmt.Fprintf(out, "Downloading %s...\n", name)
+	_, _ = fmt.Fprintf(out, "Downloading %s...\n", name)
 	archive, err := download(ctx, client, assetBase+"/"+name)
 	if err != nil {
 		return fmt.Errorf("downloading %s: %w", name, err)
