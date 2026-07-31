@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-07-31
+
+### Added
+
+- User messages sent to a session through the API now appear live in every
+  connected web client. Until now the SPA only painted its own messages with a
+  local optimistic update, so a message sent from another tab or an external
+  client (e.g. a voice companion steering a session) was invisible until the
+  page was reloaded. A new `UserMessageAppended` bus event — emitted only once
+  the message is truly part of the session history, so a reconnecting client
+  can never miss it — is broadcast over the WebSocket and deduplicated by
+  message ID in the frontend. Queued steers gained the same
+  announce-after-append guarantee. Client-supplied message IDs are validated
+  and re-minted when they would collide with anything in the session tree.
+
 ## [0.20.0] - 2026-07-31
 
 ### Added
