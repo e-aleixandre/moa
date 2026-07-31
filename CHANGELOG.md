@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-07-31
+
+### Fixed
+
+- Sending a message to a busy session no longer paints a phantom message. When
+  the web client's local snapshot lagged behind (it believed the session was
+  idle while the server was already running or had queued work), the message
+  was drawn as a normal sent message while the server actually queued it as a
+  steer — leaving a ghost that the agent seemed to ignore and that vanished on
+  reload. The `/send` response now names the rail the message really landed on
+  (send vs. steer) and the client adopts it as the truth, swapping its
+  optimistic view to the confirmed chip (or vice versa) with attachments and
+  the live token tally preserved.
+
 ## [0.21.0] - 2026-07-31
 
 ### Added
