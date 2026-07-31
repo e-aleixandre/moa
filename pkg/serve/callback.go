@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync/atomic"
 	"time"
 
@@ -39,9 +41,16 @@ const maxCallbackResponseBytes = 1 << 20
 // detail lives in the session; the callback carries a hint plus a link.
 const maxCallbackSummaryBytes = 500
 
-// callbackBackoff is the wait before each retry: three attempts total.
-// Overridden in tests.
+// summaryEllipsis marks a truncated field. Its bytes count against the cap.
+const summaryEllipsis = "…"
+
+// callbackBackoff is the wait before each retry: three attempts total, so only
+// the first two waits are ever used. Overridden in tests.
 var callbackBackoff = []time.Duration{time.Second, 5 * time.Second, 25 * time.Second}
+
+// errCallbackRedirect marks a refused redirect: a permanent configuration
+// problem, never retried (see newCallbackClient).
+var errCallbackRedirect = errors.New("callback redirect refused")
 
 // AutomationCallback is the JSON body POSTed to an automation session's
 // callback_url. It is deliberately small: a status, a hint of what happened and
@@ -82,6 +91,13 @@ type callbackTarget struct {
 //     run (a run can ask many times; the caller only needs to learn that a human
 //     is now in the loop). A later RunEnded still delivers done/failed.
 //
+// All four triggers are handled by ONE SubscribeAll subscriber: it sees events
+// in publication order on a single goroutine, which is what makes the
+// once-per-run guard exact. Separate typed subscriptions would each run on
+// their own goroutine, so a late RunStarted could clear the guard after a
+// needs_input was already delivered (double fire), or a stale blocking event
+// from the previous run could fire against the new run's reset guard.
+//
 // Delivery is best-effort and always happens on its own goroutine: it never
 // blocks the bus, the run, or shutdown.
 func (m *Manager) subscribeAutomationCallback(sess *ManagedSession, meta map[string]any) {
@@ -103,25 +119,26 @@ func (m *Manager) subscribeAutomationCallback(sess *ManagedSession, meta map[str
 	// newer run delivers its own callback.
 	var lastRunGen atomic.Uint64
 	// needsInputSent is cleared at the start of every run, so a run that asks
-	// five times still produces one needs_input callback. RunStarted and the
-	// blocking events arrive on separate subscriber goroutines (as in
-	// subscribePush), so the reset is atomic; in practice a run starts well
-	// before it can ask for anything, and the worst case is one extra callback.
-	var needsInputSent atomic.Bool
+	// five times still produces one needs_input callback. Only ever touched from
+	// the single subscriber goroutine below, in publication order.
+	var needsInputSent bool
 
 	b := sess.runtime.Bus
 	needsInput := func() {
-		if needsInputSent.Swap(true) {
+		if needsInputSent {
 			return
 		}
+		needsInputSent = true
 		go deliverAutomationCallback(sess, cb, callbackStatusNeedsInput, "", "")
 	}
 
-	sess.pushUnsubs = append(sess.pushUnsubs,
-		b.Subscribe(func(bus.RunStarted) { needsInputSent.Store(false) }),
-		b.Subscribe(func(bus.PermissionRequested) { needsInput() }),
-		b.Subscribe(func(bus.AskUserRequested) { needsInput() }),
-		b.Subscribe(func(e bus.RunEnded) {
+	sess.pushUnsubs = append(sess.pushUnsubs, b.SubscribeAll(func(event any) {
+		switch e := event.(type) {
+		case bus.RunStarted:
+			needsInputSent = false
+		case bus.PermissionRequested, bus.AskUserRequested:
+			needsInput()
+		case bus.RunEnded:
 			lastRunGen.Store(e.RunGen)
 			if e.Err != nil {
 				go deliverAutomationCallback(sess, cb, callbackStatusFailed, e.Err.Error(), e.FinalText)
@@ -138,8 +155,8 @@ func (m *Manager) subscribeAutomationCallback(sess *ManagedSession, meta map[str
 				}
 				deliverAutomationCallback(sess, cb, callbackStatusDone, "", e.FinalText)
 			}()
-		}),
-	)
+		}
+	}))
 }
 
 // deliverAutomationCallback builds the payload and POSTs it with retries. It is
@@ -163,8 +180,12 @@ func deliverAutomationCallback(sess *ManagedSession, cb callbackTarget, status, 
 	// shutdown stops the waiting instead of holding a goroutine. In-flight
 	// attempts are cut with it — the callback is best-effort by contract.
 	if err := postAutomationCallback(sess.infra.sessionCtx, cb, payload); err != nil {
+		// Never log the callback URL itself, nor an error string that embeds it:
+		// it may carry credentials in its userinfo or query (see
+		// sanitizeCallbackURL / sanitizeCallbackError).
 		slog.Warn("automation callback delivery failed",
-			"session", sess.ID, "status", status, "url", cb.url, "error", err)
+			"session", sess.ID, "status", status,
+			"destination", sanitizeCallbackURL(cb.url), "error", err)
 	}
 }
 
@@ -208,14 +229,38 @@ func truncateSummary(s string) string {
 	if len(s) <= maxCallbackSummaryBytes {
 		return s
 	}
-	cut := maxCallbackSummaryBytes
+	// Reserve room for the marker so the result never exceeds the documented cap.
+	cut := maxCallbackSummaryBytes - len(summaryEllipsis)
 	for cut > 0 && !utf8Start(s[cut]) {
 		cut--
 	}
-	return s[:cut] + "…"
+	return s[:cut] + summaryEllipsis
 }
 
 func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
+
+// sanitizeCallbackURL reduces a callback target to what is safe to log: scheme
+// and host (with port). Userinfo, path and query — any of which can carry a
+// credential — are dropped.
+func sanitizeCallbackURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "invalid-url"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// sanitizeCallbackError strips the callback URL out of a transport error: the
+// net/http client wraps failures in *url.Error, whose message embeds the full
+// URL (userinfo and query included). Only the inner error — a dial/TLS failure
+// or our redirect sentinel — is kept, so errors.Is still works on it.
+func sanitizeCallbackError(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Err != nil {
+		return fmt.Errorf("%s %s: %w", uerr.Op, sanitizeCallbackURL(uerr.URL), uerr.Err)
+	}
+	return err
+}
 
 // newCallbackClient builds the delivery client: no redirects (a 30x could point
 // the signed payload somewhere the operator never named) and a per-attempt
@@ -226,7 +271,7 @@ func newCallbackClient() *http.Client {
 	return &http.Client{
 		Timeout: callbackTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return fmt.Errorf("callback redirect refused")
+			return errCallbackRedirect
 		},
 	}
 }
@@ -281,9 +326,12 @@ func deliverCallbackOnce(ctx context.Context, client *http.Client, cb callbackTa
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		// A refused redirect is a permanent configuration problem, but it is
-		// indistinguishable enough from a transient failure that retrying it
-		// costs only two extra requests to a target the operator named.
+		err = sanitizeCallbackError(err)
+		if errors.Is(err, errCallbackRedirect) {
+			// A refused redirect is a permanent configuration problem: retrying
+			// would POST the signed payload to the redirector two more times.
+			return false, err
+		}
 		return true, err
 	}
 	defer resp.Body.Close() //nolint:errcheck

@@ -250,8 +250,8 @@ Without a `callback_secret` no signature header is sent.
 
 Best-effort, never blocking the session:
 
-- 3 attempts, backing off 1s → 5s → 25s, then the delivery is dropped with a
-  warning in the server log.
+- Three attempts total: the first, then retries after 1s and 5s. After that the
+  delivery is dropped with a warning in the server log.
 - Network errors and `408`/`429`/`5xx` are retried; any other non-2xx is treated
   as a permanent refusal and not retried.
 - 10s timeout per attempt. Redirects are **not** followed (a `30x` could send a

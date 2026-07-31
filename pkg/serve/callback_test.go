@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -8,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,10 +184,6 @@ func TestCallbackNeedsInputFiresOncePerRun(t *testing.T) {
 
 	b := sess.runtime.Bus
 	b.Publish(bus.RunStarted{SessionID: sess.ID, RunGen: 1})
-	// RunStarted (which clears the per-run guard) and the permission events are
-	// handled on independent subscriber goroutines; drain so the test drives a
-	// realistic order instead of racing them.
-	b.Drain(2 * time.Second)
 	b.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p1", ToolName: "bash"})
 	b.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p2", ToolName: "bash"})
 	b.Publish(bus.AskUserRequested{SessionID: sess.ID, ID: "a1"})
@@ -204,11 +203,44 @@ func TestCallbackNeedsInputFiresOncePerRun(t *testing.T) {
 		t.Fatalf("second callback = %+v, want done/'done now'", all[1])
 	}
 	b.Publish(bus.RunStarted{SessionID: sess.ID, RunGen: 2})
-	b.Drain(2 * time.Second)
 	b.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p3", ToolName: "bash"})
 	all = rc.waitForCallbacks(t, 3)
 	if all[2].Status != callbackStatusNeedsInput {
 		t.Fatalf("third callback = %+v, want needs_input for the new run", all[2])
+	}
+}
+
+// The per-run guard is exact because every trigger is handled by a single
+// SubscribeAll subscriber, in publication order: a RunStarted published between
+// two blocking events resets the guard exactly there, no earlier and no later.
+// With separate typed subscriptions this sequence could deliver one or three
+// callbacks depending on goroutine scheduling.
+func TestCallbackNeedsInputRespectsPublicationOrder(t *testing.T) {
+	rc := newCallbackReceiver(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("hi")))
+	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
+
+	b := sess.runtime.Bus
+	b.Publish(bus.RunStarted{SessionID: sess.ID, RunGen: 1})
+	b.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p1", ToolName: "bash"})
+	b.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p2", ToolName: "bash"})
+	// A RunStarted that lands after a delivered needs_input opens the guard for
+	// the new run only — it must not resurrect the previous run's events.
+	b.Publish(bus.RunStarted{SessionID: sess.ID, RunGen: 2})
+	b.Publish(bus.AskUserRequested{SessionID: sess.ID, ID: "a1"})
+	b.Publish(bus.AskUserRequested{SessionID: sess.ID, ID: "a2"})
+
+	rc.waitForCallbacks(t, 2)
+	b.Drain(2 * time.Second)
+	if n := rc.count(); n != 2 {
+		t.Fatalf("needs_input delivered %d times, want exactly 2 (one per run)", n)
+	}
+	for i, cbk := range rc.all() {
+		if cbk.Status != callbackStatusNeedsInput {
+			t.Errorf("callback %d status = %q, want needs_input", i, cbk.Status)
+		}
 	}
 }
 
@@ -278,16 +310,95 @@ func TestCallbackDoesNotRetryClientError(t *testing.T) {
 func TestCallbackDoesNotFollowRedirects(t *testing.T) {
 	fastCallbackBackoff(t)
 	final := newCallbackReceiver(t)
+	var redirects atomic.Int32
 	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirects.Add(1)
 		http.Redirect(w, r, final.srv.URL, http.StatusTemporaryRedirect)
 	}))
 	defer redirector.Close()
 
-	if err := postAutomationCallback(context.Background(), callbackTarget{url: redirector.URL}, AutomationCallback{}); err == nil {
+	err := postAutomationCallback(context.Background(), callbackTarget{url: redirector.URL}, AutomationCallback{})
+	if err == nil {
 		t.Fatal("a redirect was followed")
+	}
+	if !errors.Is(err, errCallbackRedirect) {
+		t.Errorf("error = %v, want the redirect sentinel", err)
 	}
 	if n := final.count(); n != 0 {
 		t.Fatalf("redirect target received %d deliveries, want 0", n)
+	}
+	// A refused redirect is permanent: retrying would re-POST the signed payload
+	// to the redirector.
+	if n := redirects.Load(); n != 1 {
+		t.Fatalf("redirector received %d requests, want 1", n)
+	}
+}
+
+// Shutdown must not leave a delivery goroutine behind: a RunEnded drained while
+// the runtime closes spawns a WaitQuiescent waiter, which only gives up because
+// Shutdown cancels the session context.
+func TestCallbackDoesNotOutliveShutdown(t *testing.T) {
+	rc := newCallbackReceiver(t)
+	ctx, cancel := context.WithCancel(context.Background()) // still live during Shutdown
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("hi")))
+	sess := newCallbackSession(t, mgr, rc.srv.URL, "")
+
+	b := sess.runtime.Bus
+	// A background bash job keeps the session non-quiescent, so the "done"
+	// waiter is still parked when Shutdown runs.
+	b.Publish(bus.BashJobStarted{SessionID: sess.ID, JobID: "b1", Command: "sleep"})
+	b.Publish(bus.RunEnded{SessionID: sess.ID, RunGen: 1, FinalText: "finished"})
+
+	mgr.Shutdown()
+
+	if err := sess.infra.sessionCtx.Err(); err == nil {
+		t.Fatal("Shutdown left the session context live")
+	}
+	time.Sleep(100 * time.Millisecond) // let any stray delivery land
+	if n := rc.count(); n != 0 {
+		t.Fatalf("received %d callbacks after Shutdown, want 0", n)
+	}
+}
+
+// The delivery log must never carry the callback URL: it can embed credentials
+// in its userinfo or query, and *url.Error stringifies the whole URL.
+func TestCallbackFailureLogHidesCredentials(t *testing.T) {
+	fastCallbackBackoff(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("hi")))
+
+	// A closed server gives a stable "connection refused" from a real dial.
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	host := strings.TrimPrefix(dead.URL, "http://")
+	dead.Close()
+	const (
+		user  = "automation-user"
+		pass  = "sup3rs3cret"
+		token = "qtok3n"
+	)
+	url := "http://" + user + ":" + pass + "@" + host + "/hooks/moa?token=" + token
+	sess := newCallbackSession(t, mgr, url, "")
+
+	var buf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+
+	deliverAutomationCallback(sess, callbackTarget{url: url}, callbackStatusDone, "", "")
+
+	logged := buf.String()
+	if !strings.Contains(logged, "automation callback delivery failed") {
+		t.Fatalf("delivery failure was not logged: %q", logged)
+	}
+	for _, secret := range []string{user, pass, token, "/hooks/moa"} {
+		if strings.Contains(logged, secret) {
+			t.Errorf("log leaked %q: %s", secret, logged)
+		}
+	}
+	if !strings.Contains(logged, host) {
+		t.Errorf("log lost the sanitized destination %q: %s", host, logged)
 	}
 }
 
@@ -393,8 +504,8 @@ func TestTruncateSummary(t *testing.T) {
 	}
 	long := strings.Repeat("é", maxCallbackSummaryBytes) // 2 bytes per rune
 	got := truncateSummary(long)
-	if len(got) > maxCallbackSummaryBytes+len("…") {
-		t.Errorf("truncated length = %d, want <= %d", len(got), maxCallbackSummaryBytes+len("…"))
+	if len(got) > maxCallbackSummaryBytes {
+		t.Errorf("truncated length = %d, want <= %d", len(got), maxCallbackSummaryBytes)
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Error("truncated summary lost its ellipsis marker")

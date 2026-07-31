@@ -824,6 +824,12 @@ func (m *Manager) Shutdown() {
 			slog.Warn("shutdown flush failed", "session", s.ID, "error", err)
 		}
 		s.flushLiveSubagentTranscripts()
+		// Cancel the session context once the flush has captured everything:
+		// events drained by the Close below (an async RunEnded, say) can still
+		// reach subscribers that spawn work of their own — the automation
+		// callback waits for quiescence and then POSTs. The cancelled context is
+		// what makes that work give up instead of outliving the shutdown.
+		s.infra.sessionCancel()
 		// Close the runtime after flushing: this drains the bus's async
 		// persistence reactor (Bus.Close waits for subscriber goroutines to
 		// finish their queued events) so no delayed save can still be writing
