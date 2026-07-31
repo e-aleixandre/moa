@@ -261,10 +261,12 @@ func TestRemoteToolCallGetsADeadline(t *testing.T) {
 	t.Cleanup(func() { remoteToolCallTimeout = prev })
 
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "staller", Version: "0.1"}, nil)
+	entered := make(chan struct{})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "stall",
 		Description: "Never returns until cancelled",
 	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, input struct{}) (*sdkmcp.CallToolResult, any, error) {
+		close(entered)
 		<-ctx.Done() // simulate a dead remote: the result never comes
 		return nil, nil, ctx.Err()
 	})
@@ -283,10 +285,18 @@ func TestRemoteToolCallGetsADeadline(t *testing.T) {
 	start := time.Now()
 	res, err := tools[0].Execute(context.Background(), map[string]any{}, nil)
 	elapsed := time.Since(start)
+	select {
+	case <-entered:
+		// The handler genuinely stalled: the failure below is the deadline.
+	default:
+		t.Fatalf("tool handler never ran; Execute failed for an unrelated reason: %+v, %v", res, err)
+	}
 	if err == nil && !res.IsError {
 		t.Fatalf("Execute succeeded (%+v), want a deadline failure", res)
 	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("stalled call returned after %v, want it bounded by the remote cap", elapsed)
+	// Bounded by the shortened cap (plus generous slack for CI scheduling),
+	// far below any other timeout in play.
+	if elapsed < remoteToolCallTimeout || elapsed > 3*time.Second {
+		t.Fatalf("stalled call returned after %v, want ~%v (the remote cap)", elapsed, remoteToolCallTimeout)
 	}
 }
