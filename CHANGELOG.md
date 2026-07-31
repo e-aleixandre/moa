@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.19.0] - 2026-07-31
 
 ### Added
 
@@ -22,14 +22,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   owned by Homebrew or Nix, pointing at the package manager instead.
 - `moa --help` now lists the subcommands (`serve`, `update`, `version`) before
   the flags, which the flag defaults alone would never mention.
+- `stt_vocabulary` teaches the voice transcriber your words. Speech-to-text
+  reliably mangles exactly the words you most need it to get right (proper
+  nouns, project jargon: "goreleaser" heard as "go release"), so the config key
+  takes a short list of correct spellings and biases transcription toward them.
+  It starts empty on purpose: a vocabulary is a hint, and somebody else's terms
+  would push the model to hear their words in your audio.
 
 ### Fixed
 
+- Long sessions with many screenshots could become permanently unsendable on
+  Anthropic. The API enforces a stricter 2000 px per-side image cap once a
+  request carries more than 20 images, so the moment image 21 entered the live
+  context, any earlier image over 2000 px (a phone screenshot, say) made every
+  turn fail with a hard 400. Moa now retires the oldest images past the
+  threshold, substituting a note inviting the model to read the file again if
+  needed; the newest images stay at full resolution, where the strict cap does
+  not apply. Retirement happens in batches so the prompt cache survives, and
+  previously poisoned sessions recover on their own next turn.
 - The update check queried a repository that does not exist (`ealeixandre/moa`
   instead of `e-aleixandre/moa`), so release builds could never discover a newer
   version. The same typo is fixed in the README's clone URL.
 
 ### Changed
+
+- The Go module path is now `github.com/e-aleixandre/moa`, matching where the
+  repository actually lives; the old path (no hyphen in the user name) was
+  unresolvable, which among other things made `go install` impossible. The main
+  package moved from `cmd/agent` to `cmd/moa` accordingly, so
+  `go install github.com/e-aleixandre/moa/cmd/moa@latest` produces a binary
+  named `moa`. Forks and open PRs need the same mechanical rename.
 
 - Speech-to-text now uses `gpt-transcribe` instead of `whisper-1`: on the same
   Spanish dictation it was faster, 25% cheaper per minute, and got the technical
