@@ -130,13 +130,6 @@ export async function loadSessions() {
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
         unseen: existing ? existing.unseen : false,
-        // archived is server-owned (no WS event tracks it), so the poll is
-        // always the source of truth here — unlike wsOwns fields above, we
-        // don't prefer the optimistic `existing` value. An in-flight optimistic
-        // archiveSession/unarchiveSession update gets briefly overwritten by a
-        // stale poll only if the poll started before the archive call
-        // resolved; the next poll (≤3s desktop / ≤15s mobile) self-corrects.
-        archived: info.archived || false,
         // Server-owned session brief (cheap LLM status summary): attempting /
         // progress prose + freshness stamp. No WS event tracks it, so the poll
         // is the source of truth. Preserve the prior value when the poll omits
@@ -247,31 +240,39 @@ export async function deleteSession(id) {
   afterVisibilityChange();
 }
 
-// archiveSession "closes" a session: unlike deleteSession it doesn't remove
-// the session from the store, it just flips `archived`, which hides it from
-// the TabBar/overview. It still needs to drop the session from wherever it's
-// currently visible (tile/activeSession), mirroring deleteSession, so the UI
-// doesn't keep showing a closed session as if it were open.
-export async function archiveSession(id, archived = true) {
-  await api('POST', `/api/sessions/${id}/archive`, { archived });
+// closeSession "closes" a session: unlike deleteSession it keeps the
+// conversation on disk — the server just unloads it from memory, so it lists as
+// `saved` and reopens with resumeSession, losing nothing. It still has to drop
+// the session from wherever it is currently visible (tile/activeSession),
+// mirroring deleteSession, so the UI doesn't keep showing a closed session as
+// if it were live.
+//
+// The server refuses (409) while the session is still working — a run, a
+// pending permission, or background subagents/bash jobs whose output closing
+// would kill. Surface that as a toast instead of failing silently: the user
+// needs to know the session is still open, and what to do about it.
+export async function closeSession(id) {
+  try {
+    await api('POST', `/api/sessions/${id}/close`);
+  } catch (e) {
+    const busy = String(e.message || e).startsWith('409');
+    addToast({
+      title: busy ? 'Session is still working' : 'Could not close session',
+      detail: busy
+        ? 'Cancel the run (or wait for background work to finish) before closing it.'
+        : String(e.message || e),
+      type: busy ? 'attention' : 'error',
+    });
+    throw e;
+  }
   // Reflect immediately so the UI updates without waiting for the next poll
   // (which can lag up to ~15s on mobile). The server already committed above.
-  updateSession(id, { archived });
-  if (!archived) return;
+  updateSession(id, { state: 'saved' });
   const state = store.get();
   const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;
   setState({ tileTree, activeSession });
   afterVisibilityChange();
-}
-
-// unarchiveSession reopens a closed session. The server also auto-unarchives
-// on send/resume, but reopening from the palette can assign an already-loaded
-// session straight into a tile without going through send/resume, so we flip
-// the flag explicitly here too.
-export async function unarchiveSession(id) {
-  await api('POST', `/api/sessions/${id}/archive`, { archived: false });
-  updateSession(id, { archived: false });
 }
 
 export async function cancelBashJob(sessionId, jobId) {

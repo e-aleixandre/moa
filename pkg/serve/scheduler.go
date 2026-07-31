@@ -89,23 +89,33 @@ func (s *schedulerService) deliverDue(m *Manager, now time.Time) {
 		if !ok || sess.runtime.State.Current() != bus.StateIdle {
 			continue
 		}
+		// Same lifecycle barrier the /send path takes: a schedule must not start
+		// a run into a runtime that a concurrent close is tearing down.
+		sess.lifecycle.RLock()
+		if sess.closing.Load() {
+			sess.lifecycle.RUnlock()
+			continue
+		}
 		// Prompt persistence is the source of truth for exactly-once recovery.
 		// If a previous process accepted the prompt but crashed before marking
 		// this record delivered, do not ask the agent to perform it twice.
 		if scheduleOccurrenceExists(sess.History(), record.OccurrenceID) {
+			sess.lifecycle.RUnlock()
 			if err := s.markDelivered(record.ID, now); err != nil {
 				slog.Error("recover schedule delivery", "schedule", record.ID, "error", err)
 			}
 			continue
 		}
-		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
+		err := sess.runtime.Bus.Execute(bus.SendPrompt{
 			Text: record.Text,
 			Custom: map[string]any{
 				"source":        "schedule",
 				"schedule_id":   record.ID,
 				"occurrence_id": record.OccurrenceID,
 			},
-		}); err != nil {
+		})
+		sess.lifecycle.RUnlock()
+		if err != nil {
 			continue
 		}
 		if err := s.markDelivered(record.ID, now); err != nil {

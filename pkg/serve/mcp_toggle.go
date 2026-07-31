@@ -119,6 +119,11 @@ func (s *ManagedSession) mcpApplyPolicy(scope core.MCPDisableScope, server strin
 func (s *ManagedSession) mcpReconcileNow() (applied, hasCtrl bool) {
 	s.mcpLifecycleMu.Lock()
 	defer s.mcpLifecycleMu.Unlock()
+	// A close was admitted: the MCP manager is being torn down, so report "no
+	// controller" and let the deferred worker retire instead of spinning.
+	if s.closing.Load() {
+		return false, false
+	}
 	s.mu.Lock()
 	ctrl := s.infra.mcpController
 	ctx := s.infra.sessionCtx
@@ -217,6 +222,13 @@ func (m *Manager) ToggleMCPServer(anchor *ManagedSession, params mcpDisableParam
 	// can't lose a config update or interleave reconciles.
 	m.mcpConfigMu.Lock()
 	defer m.mcpConfigMu.Unlock()
+
+	// A session being closed is having its MCP manager torn down: mutating its
+	// live tool set now is at best wasted work. Sessions already dropped from
+	// the manager are invisible to the fan-out, so only the anchor needs this.
+	if anchor.closing.Load() {
+		return mcpToggleResult{}, ErrNotFound
+	}
 
 	// Persist project/global scope before touching runtime, so a persistence
 	// failure leaves the desired policy untouched (500, nothing applied).

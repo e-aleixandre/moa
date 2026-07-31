@@ -606,6 +606,13 @@ func (m *Manager) deleteSession(id string) error {
 	}
 	delete(m.sessions, id)
 	m.mu.Unlock()
+	// Mark closing and drain the runtime's users before tearing it down, so a
+	// /send or /command already holding this pointer can't start a run into a
+	// runtime that is going away. Delete does NOT refuse a busy session (unlike
+	// close: the conversation is being destroyed either way), it only waits for
+	// the in-flight request to return. Taken outside m.mu, as in CloseSession.
+	sess.closing.Store(true)
+	sess.drainLifecycleUsers()
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {
 		sess.persister.markDeleted()
@@ -651,6 +658,142 @@ func (m *Manager) deleteSession(id string) error {
 			slog.Warn("release session attachments", "session", id, "error", err)
 		}
 	}
+	return nil
+}
+
+// drainLifecycleUsers blocks until every in-flight request that may be using
+// this session's runtime (a send, a command, a scheduled delivery) has
+// returned, and — since `closing` is already set — guarantees no new one
+// starts. Callers use it as a barrier before tearing the runtime down.
+func (s *ManagedSession) drainLifecycleUsers() {
+	s.lifecycle.Lock()
+	s.lifecycle.Unlock() //nolint:staticcheck // SA2001: the empty section IS the barrier
+}
+
+// CloseSession unloads an active session from memory, leaving it on disk where
+// it lists as "saved" and can be reopened with ResumeSession.
+//
+// This is what "close" means to a user: the conversation stops occupying a live
+// runtime (agent, MCP connections, bridges) but stays in the list and loses
+// nothing. Closing a session that is already only on disk is a no-op, so the
+// action is idempotent from any client.
+//
+// Refused with ErrBusy unless the session is fully quiescent: not running, not
+// awaiting a permission decision, and with no background work (async subagents,
+// bash jobs, verifiers) still in flight. StateIdle alone is not enough — closing
+// cancels the session context, which would kill that work and lose its output.
+//
+// Concurrency. The close is admitted under the state lock (DoIfQuiescent), which
+// is the same lock a run-start takes, so a /send cannot slip between the check
+// and the teardown: either it starts a run first (and the close is refused), or
+// it finds the session already marked closing. The ID stays reserved in
+// m.resuming until the teardown finishes, so a concurrent ResumeSession cannot
+// build a second runtime from disk while the old one is still flushing.
+//
+// Runs under automationMu like Delete, so a close cannot interleave with the
+// automation check-create-send-register sequence. Lock order: automationMu → m.mu.
+func (m *Manager) CloseSession(id string) error {
+	m.automationMu.Lock()
+	defer m.automationMu.Unlock()
+
+	m.mu.Lock()
+	if _, resuming := m.resuming[id]; resuming {
+		m.mu.Unlock()
+		return ErrBusy
+	}
+	sess, ok := m.sessions[id]
+	if !ok || sess == nil {
+		m.mu.Unlock()
+		// Not loaded. Report whether it exists at all, so a stale client that
+		// closes a deleted session gets a 404 instead of a silent success.
+		if _, _, err := session.FindSessionReadOnly(m.sessionBaseDir, id); err != nil {
+			if errors.Is(err, session.ErrNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+		return nil
+	}
+	m.mu.Unlock()
+
+	// Drain the users of this runtime before deciding anything. Taking the
+	// lifecycle write lock waits for in-flight sends and locks out new ones, so
+	// the quiescence check below cannot be invalidated by a run starting right
+	// after it. Acquired OUTSIDE m.mu: senders hold it while doing bus work, so
+	// holding m.mu across it would stall every unrelated session.
+	sess.lifecycle.Lock()
+	defer sess.lifecycle.Unlock()
+
+	// A RunEnded fan-out schedules the automatic reactors asynchronously, so a
+	// close arriving right after a turn could observe "no background work" just
+	// before auto-verify or a goal verifier marks itself active. Drain the
+	// accepted publication batch first, the same way WaitQuiescent does, so the
+	// quiescence check below sees that work.
+	sess.runtime.Bus.Drain(2 * time.Second)
+
+	m.mu.Lock()
+	// Re-check under the lock: a concurrent close or delete may have won while
+	// this one waited for the lifecycle lock.
+	if _, resuming := m.resuming[id]; resuming {
+		m.mu.Unlock()
+		return ErrBusy
+	}
+	if cur, still := m.sessions[id]; !still || cur != sess {
+		m.mu.Unlock()
+		return nil // already closed or deleted by someone else
+	}
+	// Admit the close atomically against run-start, and hold the ID reserved
+	// (m.resuming doubles as the lifecycle barrier) so ResumeSession waits for
+	// the teardown instead of racing it.
+	admitted := sess.runtime.DoIfQuiescent(func() {
+		sess.closing.Store(true)
+		delete(m.sessions, id)
+		m.resuming[id] = struct{}{}
+	})
+	m.mu.Unlock()
+	if !admitted {
+		return ErrBusy
+	}
+	defer func() {
+		m.mu.Lock()
+		delete(m.resuming, id)
+		m.mu.Unlock()
+	}()
+
+	// An automation idempotency key must not resolve to a session that is no
+	// longer loaded: the interaction endpoints refuse to resume saved sessions,
+	// so a retry should start a fresh run instead of hitting a dead reference.
+	if m.automation != nil {
+		m.automation.forget(id)
+	}
+
+	// Flush before tearing anything down: the final turn must be on disk before
+	// the runtime that holds it goes away. Subagent transcripts are captured the
+	// same way Shutdown does it, before the context cancellation below can kill
+	// a still-live child.
+	if err := sess.runtime.Flush(); err != nil {
+		slog.Warn("close session: flush", "session", id, "error", err)
+	}
+	sess.flushLiveSubagentTranscripts()
+
+	// Same teardown order as delete — push subscribers first so events drained
+	// during shutdown can't notify for a session that is no longer live, then
+	// MCP, then the session context, then the runtime.
+	for _, unsub := range sess.pushUnsubs {
+		unsub()
+	}
+	if sess.infra.mcpMgr != nil {
+		sess.infra.mcpMgr.Close()
+	}
+	sess.infra.sessionCancel()
+	// Close drains the bus's async persistence reactor, so no delayed save can
+	// still be writing when the deferred unreserve lets a resume rebuild this
+	// session from the same files.
+	sess.runtime.Close()
+
+	// Attachments are NOT released here: unlike delete, the conversation still
+	// exists and must render its images when reopened.
+	m.invalidateSavedCache()
 	return nil
 }
 
@@ -802,17 +945,6 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 
 	// 6. Finalize.
 	sess.Created = saved.Created
-	// Resuming an archived session implicitly unarchives it (see design
-	// decision: archiving is presentation-only, and reopening a session is
-	// explicit user intent to work on it again). The in-memory session never
-	// carries Archived=true; persist the unarchive on disk if needed.
-	sess.Archived = false
-	if saved.Archived {
-		if err := store.SetArchived(id, false); err != nil {
-			slog.Warn("resume: failed to unarchive session", "id", id, "error", err)
-		}
-		m.invalidateSavedCache()
-	}
 	m.mu.Lock()
 	delete(m.resuming, id)
 	m.sessions[id] = sess
@@ -996,6 +1128,12 @@ func (s *ManagedSession) RestartMCPServer(name string) (mcp.ServerStatus, error)
 	// the guard (finding: restart must not respawn a now-disabled server).
 	s.mcpLifecycleMu.Lock()
 	defer s.mcpLifecycleMu.Unlock()
+
+	// A session being closed is having its MCP manager torn down; respawning a
+	// server into it would leave a process nobody owns.
+	if s.closing.Load() {
+		return mcp.ServerStatus{}, ErrNotFound
+	}
 
 	s.mu.Lock()
 	ctrl := s.infra.mcpController

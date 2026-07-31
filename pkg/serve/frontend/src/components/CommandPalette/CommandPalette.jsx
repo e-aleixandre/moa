@@ -8,7 +8,7 @@ import { closePalette } from "../../data/palette.js";
 import { openPulsePairing } from "../../data/pulse-pairing-panel.js";
 import { fuzzyMatch, fuzzyMatchIndices } from "../../data/fuzzy.js";
 import {
-  createSession, resumeSession, unarchiveSession,
+  createSession, resumeSession,
 } from "../../data/session-actions.js";
 import { assignToTile, openSession } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
@@ -285,8 +285,8 @@ export function CommandPalette({
     return () => { cancelled = true; clearTimeout(timer); };
   }, [open, step, exploreDir]);
 
-  // ── Actions catalogue (context-aware). CORE set only; NICE-TO-HAVE presets/
-  // archive left as TODO (spec §3).
+  // ── Actions catalogue (context-aware). CORE set only; NICE-TO-HAVE presets
+  // left as TODO (spec §3).
   const actions = useMemo(() => {
     const list = [];
     list.push({
@@ -325,8 +325,8 @@ export function CommandPalette({
     const q = query.toLowerCase().trim();
     const out = [];
 
-    // Sessions (MRU). No query → recent, non-archived, capped. Query → fuzzy
-    // over every session (incl. archived), no cap.
+    // Sessions (MRU). No query → recent, capped. Query → fuzzy over every
+    // session, no cap.
     const all = Object.values(state.sessions).sort((a, b) => (b.updated || 0) - (a.updated || 0));
     const sessRows = [];
     for (const sess of all) {
@@ -337,7 +337,6 @@ export function CommandPalette({
         const hay = `${title} ${sess.model || ""} ${cwdLabel} ${cwd}`.toLowerCase();
         if (!fuzzyMatch(q, hay)) continue;
       } else {
-        if (sess.archived) continue;
         if (!isRecentSession(sess)) continue;
       }
       sessRows.push({
@@ -349,7 +348,6 @@ export function CommandPalette({
         cwdLabel,
         when: relativeWhen(sess.updated),
         paneN: paneOf(state.tileTree, sess.id),
-        archived: !!sess.archived,
         saved: sess.state === "saved",
       });
     }
@@ -456,10 +454,7 @@ export function CommandPalette({
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     const id = item.id;
-    if (item.archived) {
-      try { await unarchiveSession(id); } catch (e) { console.error("Unarchive failed:", e); }
-    }
-    // Saved / archived sessions auto-resume once visible (afterVisibilityChange,
+    // Saved sessions auto-resume once visible (afterVisibilityChange,
     // already ported) — assigning/opening is enough; resumeSession is only used
     // for the explicit conversation-open path so the reader gets immediate focus.
     try {
@@ -638,7 +633,6 @@ export function CommandPalette({
           {!isMobile && it.live && (
             <span class={`live${it.live.tone ? " " + it.live.tone : ""}`}>{it.live.text}</span>
           )}
-          {it.archived && <span class="badge archived">archived</span>}
           {it.paneN && <span class="badge pane">P{it.paneN}</span>}
           <span class="cwd">{it.cwdLabel}</span>
           {it.when && <span class="when">{it.when}</span>}

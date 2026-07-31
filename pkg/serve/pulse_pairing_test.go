@@ -177,9 +177,6 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 			t.Fatalf("device generic read %s = %d, want 200: %s", path, got.Code, got.Body.String())
 		}
 	}
-	if got := pairingRequest(handler, http.MethodPost, "/api/sessions/"+sess.ID+"/archive", `{"archived":true}`, nil, credential.Credential); got.Code != http.StatusOK {
-		t.Fatalf("device generic archive = %d, want 200: %s", got.Code, got.Body.String())
-	}
 	if got := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, nil, credential.Credential); got.Code != http.StatusForbidden {
 		t.Fatalf("device pairing administration = %d, want 403: %s", got.Code, got.Body.String())
 	}
@@ -206,6 +203,10 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	}
 	if event.Type != "init" {
 		t.Fatalf("device session WS event = %q", event.Type)
+	}
+
+	if got := pairingRequest(handler, http.MethodPost, "/api/sessions/"+sess.ID+"/close", "", nil, credential.Credential); got.Code != http.StatusOK {
+		t.Fatalf("device generic close = %d, want 200: %s", got.Code, got.Body.String())
 	}
 
 	revokeRec := pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+credential.DeviceID+"/revoke", `{}`, owner, "")

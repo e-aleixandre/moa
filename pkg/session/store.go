@@ -143,22 +143,6 @@ func (s *FileStore) writeLocked(sess *Session) error {
 	return nil
 }
 
-// SetArchived toggles the archived flag on a session, preserving Updated so
-// archiving does not reorder session lists (archive is presentation-only).
-func (s *FileStore) SetArchived(id string, archived bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, err := s.loadLocked(id)
-	if err != nil {
-		return err
-	}
-	if sess.Archived == archived {
-		return nil
-	}
-	sess.Archived = archived
-	return s.writeLocked(sess)
-}
-
 // Load reads a session by ID.
 // Returns ErrNotFound (wrapped) if the session does not exist.
 func (s *FileStore) Load(id string) (*Session, error) {
@@ -393,10 +377,6 @@ func decodeSummaryPrefix(r io.Reader) (Summary, bool) {
 			}
 		case "title_source":
 			if err := dec.Decode(&sum.TitleSource); err != nil {
-				return Summary{}, false
-			}
-		case "archived":
-			if err := dec.Decode(&sum.Archived); err != nil {
 				return Summary{}, false
 			}
 		case "metadata":

@@ -49,10 +49,9 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 
 	snapshot := *sp.persisted
 	store := sp.store
-	// Save under the lock so it serializes with setArchived/saveTitle: otherwise
-	// a concurrent setArchived (which preserves Updated) could land between the
-	// copy above and the Save below, and this Save — carrying a stale Archived
-	// and a bumped Updated — would clobber it. The persistence reactor is
+	// Save under the lock so it serializes with saveTitle: otherwise a
+	// concurrent out-of-band write could land between the copy above and the
+	// Save below, and this Save would clobber it. The persistence reactor is
 	// single-threaded, so the only contenders for this lock are the rare
 	// out-of-band writers, making the in-lock I/O cost negligible.
 	err := store.Save(&snapshot)
@@ -137,18 +136,6 @@ func (sp *servePersister) recordIdempotencyKey(key string) error {
 	sp.preserved[session.MetaIdempotencyKey] = key
 	snapshot := *sp.persisted
 	return sp.store.Save(&snapshot)
-}
-
-// setArchived persists an archive/unarchive toggle out-of-band, preserving
-// Updated (archive is presentation-only and must not reorder session lists).
-func (sp *servePersister) setArchived(archived bool) error {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	if sp.deleted || sp.persisted == nil || sp.store == nil {
-		return nil
-	}
-	sp.persisted.Archived = archived
-	return sp.store.SetArchived(sp.persisted.ID, archived)
 }
 
 // markDeleted prevents future Snapshot calls from writing to disk.

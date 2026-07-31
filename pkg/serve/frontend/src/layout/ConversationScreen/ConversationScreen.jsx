@@ -23,7 +23,7 @@ import { activityPhase, activityText, formatElapsed } from "../../data/util/acti
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
-import { configureSession, archiveSession, unarchiveSession, openPersistedSubagent, rewindToMessage } from "../../data/session-actions.js";
+import { configureSession, closeSession, openPersistedSubagent, rewindToMessage } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
@@ -38,7 +38,7 @@ import "./ConversationScreen.css";
 
 
 // spineSessions splits the store's sessions into the Spine's ACTIVE and SAVED
-// lists. Active = not 'saved' and not archived, ordered by `updated` desc.
+// lists. Active = not 'saved', ordered by `updated` desc.
 // Saved = state 'saved'. Titles fall back to "Untitled" for a not-yet-titled session.
 // still renders. `meta` is a coarse relative age placeholder derived from
 // `updated` (full relative-time formatting is a later polish, kept simple here).
@@ -55,7 +55,7 @@ function relAge(updated) {
 }
 
 function spineSessions(sessions) {
-  const all = Object.values(sessions).filter((s) => !s.archived);
+  const all = Object.values(sessions);
   const active = all
     .filter((s) => s.state !== "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
@@ -316,13 +316,14 @@ export function ConversationScreen({ version }) {
         <Button
           variant="ghost"
           size="sm"
-          className="session-settings-archive"
+          className="session-settings-close"
           onClick={() => {
-            const action = session.archived ? unarchiveSession(session.id) : archiveSession(session.id);
-            Promise.resolve(action).finally(() => setSettingsOpen(false));
+            // closeSession toasts on refusal (409 while the session still
+            // works); swallow the rejection here so it isn't an unhandled one.
+            closeSession(session.id).catch(() => {}).finally(() => setSettingsOpen(false));
           }}
         >
-          {session.archived ? "Reopen session" : "Close session"}
+          Close session
         </Button>
       </div>
     );

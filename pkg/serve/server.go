@@ -113,7 +113,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", handleConversationMessages(manager))
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
-	mux.HandleFunc("POST /api/sessions/{id}/archive", handleArchiveSession(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/close", handleCloseSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/steers/cancel", handleCancelSteers(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
@@ -393,31 +393,25 @@ func handleDeleteSession(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-func handleArchiveSession(mgr *Manager) http.HandlerFunc {
+// handleCloseSession unloads a session from memory, leaving it on disk. This is
+// the "close" of the UI: the conversation stays in the list as saved and can be
+// reopened, unlike DELETE which is irreversible.
+func handleCloseSession(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limitBody(w, r, maxJSONBodySize)
-		var body struct {
-			Archived *bool `json:"archived"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid JSON", http.StatusBadRequest)
-			return
-		}
-		if body.Archived == nil {
-			http.Error(w, "missing 'archived' field", http.StatusBadRequest)
-			return
-		}
-		id := r.PathValue("id")
-		err := mgr.ArchiveSession(id, *body.Archived)
+		err := mgr.CloseSession(r.PathValue("id"))
 		if errors.Is(err, session.ErrNotFound) || errors.Is(err, ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, ErrBusy) {
+			http.Error(w, "session is busy; cancel the run before closing it", http.StatusConflict)
 			return
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "archived": *body.Archived})
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 

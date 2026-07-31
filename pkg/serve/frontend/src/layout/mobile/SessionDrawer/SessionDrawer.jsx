@@ -42,7 +42,8 @@ function DrawerVersion({ version }) {
 // SessionCardMenu — the per-card ⋯ overflow (TELEMETRY-SETTINGS-REDESIGN §3.3).
 // Session lifecycle (close / reopen / delete) is list management, not a
 // conversation setting, so it lives here on the card rather than inside the
-// chat view. Close archives; Reopen resumes a saved session; Delete is
+// chat view. Close unloads the session (it stays in the list as saved);
+// Reopen resumes a saved session; Delete is
 // irreversible so it takes a deliberate second
 // tap to confirm. Self-contained: owns its open state, click-outside and
 // Escape, and stops taps from bubbling to the card's own select handler.

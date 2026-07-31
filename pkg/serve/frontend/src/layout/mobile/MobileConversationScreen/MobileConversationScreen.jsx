@@ -6,7 +6,7 @@ import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
-import { openPersistedSubagent, archiveSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
+import { openPersistedSubagent, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
@@ -91,7 +91,6 @@ function sessionBrief(sess) {
 function aggregateAttention(sessions, activeId) {
   return Object.values(sessions).filter(
     (s) =>
-      !s.archived &&
       s.id !== activeId &&
       (s.pendingPerm || s.pendingAsk || s.state === "permission" || s.state === "error")
   ).length;
@@ -101,7 +100,7 @@ function aggregateAttention(sessions, activeId) {
 // saved — kept apart rather than concatenated because the drawer labels them
 // separately, exactly as the desktop Spine does.
 function drawerSessions(sessions, activeId) {
-  const all = Object.values(sessions).filter((s) => !s.archived);
+  const all = Object.values(sessions);
   const active = all
     .filter((s) => s.state !== "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
@@ -152,7 +151,7 @@ function drawerProjects(sessions) {
 // trimmed to what the compact row shows.
 function recentSavedSessions(sessions, limit = 3) {
   return Object.values(sessions)
-    .filter((s) => !s.archived && s.state === "saved")
+    .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
     .slice(0, limit)
     .map((s) => ({
@@ -381,7 +380,7 @@ export function MobileConversationScreen({ version = null }) {
         onCreate={onCreate}
         onSettings={onSettingsFromDrawer}
         version={version}
-        onCloseSession={(id) => archiveSession(id)}
+        onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
         onReopenSession={(id) => resumeSession(id)}
         onDeleteSession={(id) => deleteSession(id)}
       />

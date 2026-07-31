@@ -98,6 +98,14 @@ func (m *Manager) ExecCommand(sessionID, rawCommand, id string) (*CommandResult,
 	if !ok {
 		return nil, ErrNotFound
 	}
+	// Same lifecycle barrier as Send: some commands (/compact, /goal…) start or
+	// occupy a run, so they must not interleave with a close tearing the runtime
+	// down. Held for the whole body; `closing` is then a stable read.
+	sess.lifecycle.RLock()
+	defer sess.lifecycle.RUnlock()
+	if sess.closing.Load() {
+		return nil, ErrNotFound
+	}
 
 	parts := strings.Fields(rawCommand)
 	if len(parts) == 0 {

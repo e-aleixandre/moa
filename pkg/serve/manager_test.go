@@ -839,7 +839,124 @@ func TestAutoSave_AfterRun(t *testing.T) {
 	}
 }
 
-func TestArchiveSession_ActiveSession(t *testing.T) {
+// Closing a session unloads its runtime but must never lose the conversation:
+// it stays in the list as "saved" and reopens with everything intact.
+func TestCloseSession_UnloadsButKeepsSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prov := newMockProvider(simpleResponseHandler("reply"))
+	mgr := newTestManager(t, ctx, prov)
+
+	sess, err := mgr.CreateSession(CreateOpts{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := sess.ID
+	if _, _, _, err := mgr.Send(id, "remember this", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "state idle", func() bool {
+		return sessState(sess) == StateIdle
+	})
+
+	if err := mgr.CloseSession(id); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+	if _, ok := mgr.Get(id); ok {
+		t.Fatal("expected the session to be unloaded from memory")
+	}
+
+	var found bool
+	for _, si := range mgr.List() {
+		if si.ID == id {
+			found = true
+			if si.State != StateSaved {
+				t.Errorf("closed session state = %q, want %q", si.State, StateSaved)
+			}
+			if si.Title != "test" {
+				t.Errorf("closed session title = %q, want \"test\"", si.Title)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("a closed session must stay in List() — closing is not deleting")
+	}
+
+	// It reopens as a live session again, with the conversation intact: the
+	// whole promise of close-vs-delete is that nothing is lost.
+	reopened, err := mgr.ResumeSession(id)
+	if err != nil {
+		t.Fatalf("ResumeSession after close: %v", err)
+	}
+	if _, ok := mgr.Get(id); !ok {
+		t.Fatal("expected the session to be loaded again after resume")
+	}
+	msgs, _ := bus.QueryTyped[bus.GetMessages, []core.AgentMessage](reopened.runtime.Bus, bus.GetMessages{})
+	var sawPrompt bool
+	for _, msg := range msgs {
+		for _, c := range msg.Content {
+			if c.Type == "text" && strings.Contains(c.Text, "remember this") {
+				sawPrompt = true
+			}
+		}
+	}
+	if !sawPrompt {
+		t.Fatalf("the conversation must survive a close/reopen; got %d messages", len(msgs))
+	}
+}
+
+// Closing is refused while the session is still working: the teardown cancels
+// the session context, which would kill an in-flight run or the background work
+// (async subagents, bash jobs) whose output the user is waiting for.
+func TestCloseSession_RefusedWhileNotQuiescent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	release := make(chan struct{})
+	prov := newMockProvider(func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return simpleResponse("reply"), nil
+	})
+	mgr := newTestManager(t, ctx, prov)
+
+	sess, err := mgr.CreateSession(CreateOpts{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "hello", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "state running", func() bool {
+		return sessState(sess) == StateRunning
+	})
+
+	if err := mgr.CloseSession(sess.ID); !errors.Is(err, ErrBusy) {
+		t.Errorf("CloseSession during a run: got %v, want ErrBusy", err)
+	}
+	if _, ok := mgr.Get(sess.ID); !ok {
+		t.Fatal("a refused close must leave the session loaded")
+	}
+
+	close(release)
+	pollUntil(t, 5*time.Second, "state idle", func() bool {
+		return sessState(sess) == StateIdle
+	})
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatalf("CloseSession once idle: %v", err)
+	}
+}
+
+// Closing a session that is only on disk is a no-op, so any client can close
+// idempotently; a session that does not exist at all is still a 404.
+// A /send racing a close must not start a run into a runtime being torn down:
+// either the send wins (and the close is refused as busy) or the close wins
+// (and the send reports the session as gone). Never a run on a dead runtime.
+func TestCloseSession_RacesSend(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -851,74 +968,58 @@ func TestArchiveSession_ActiveSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if info := sess.info(); info.Archived {
-		t.Fatal("expected new session to be unarchived")
-	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var sendErr, closeErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, _, _, sendErr = mgr.Send(sess.ID, "hello", nil, "", "")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		closeErr = mgr.CloseSession(sess.ID)
+	}()
+	close(start)
+	wg.Wait()
 
-	if err := mgr.ArchiveSession(sess.ID, true); err != nil {
-		t.Fatalf("ArchiveSession(true): %v", err)
-	}
-	if info := sess.info(); !info.Archived {
-		t.Fatal("expected session to be archived after ArchiveSession(true)")
-	}
-
-	var found bool
-	for _, si := range mgr.List() {
-		if si.ID == sess.ID {
-			found = true
-			if !si.Archived {
-				t.Error("expected List() entry to report Archived = true")
-			}
+	// Exactly one of the two outcomes, never a send accepted into a closed
+	// session: a successful send means the close was refused or never applied.
+	if sendErr == nil && closeErr == nil {
+		if _, ok := mgr.Get(sess.ID); !ok {
+			t.Fatal("send succeeded but the session was closed under it")
 		}
 	}
-	if !found {
-		t.Fatal("session missing from List()")
+	if sendErr != nil && !errors.Is(sendErr, ErrNotFound) {
+		t.Errorf("send lost the race: got %v, want ErrNotFound", sendErr)
 	}
-
-	if err := mgr.ArchiveSession(sess.ID, false); err != nil {
-		t.Fatalf("ArchiveSession(false): %v", err)
-	}
-	if info := sess.info(); info.Archived {
-		t.Fatal("expected session to be unarchived after ArchiveSession(false)")
+	if closeErr != nil && !errors.Is(closeErr, ErrBusy) {
+		t.Errorf("close lost the race: got %v, want ErrBusy", closeErr)
 	}
 }
 
-func TestArchiveSession_NotFound(t *testing.T) {
+func TestCloseSession_NotLoadedAndNotFound(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	prov := newMockProvider()
 	mgr := newTestManager(t, ctx, prov)
 
-	err := mgr.ArchiveSession("does-not-exist", true)
-	if !errors.Is(err, session.ErrNotFound) {
-		t.Errorf("ArchiveSession on missing session: got %v, want session.ErrNotFound", err)
-	}
-}
-
-func TestSend_UnarchivesSession(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	prov := newMockProvider(simpleResponseHandler("reply"))
-	mgr := newTestManager(t, ctx, prov)
-
 	sess, err := mgr.CreateSession(CreateOpts{Title: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := mgr.ArchiveSession(sess.ID, true); err != nil {
-		t.Fatalf("ArchiveSession(true): %v", err)
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatalf("first CloseSession: %v", err)
 	}
-	if info := sess.info(); !info.Archived {
-		t.Fatal("expected session to be archived before Send")
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatalf("closing an already-closed session should be a no-op: %v", err)
 	}
 
-	if _, _, _, err := mgr.Send(sess.ID, "hello", nil, "", ""); err != nil {
-		t.Fatal(err)
-	}
-	if info := sess.info(); info.Archived {
-		t.Error("expected Send to auto-unarchive the session")
+	if err := mgr.CloseSession("does-not-exist"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("CloseSession on a missing session: got %v, want ErrNotFound", err)
 	}
 }
 

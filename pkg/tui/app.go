@@ -767,17 +767,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case sessionArchivedMsg:
-		if msg.Err != nil {
-			m.sessionBrowser.previewErr = "archive failed: " + msg.Err.Error()
-			return m, nil
-		}
-		m.sessionBrowser.SetArchivedLocal(msg.ID, msg.Archived)
-		if id := m.sessionBrowser.SelectedID(); id != "" {
-			return m, m.loadSessionPreview(id)
-		}
-		return m, nil
-
 	case sessionSavedMsg:
 		return m, nil
 

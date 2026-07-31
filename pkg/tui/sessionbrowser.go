@@ -47,10 +47,6 @@ type sessionBrowser struct {
 	// when no delete is in flight. Set by a first delete keypress, cleared by
 	// confirming (enter) or any other navigation/filter key.
 	confirmDelete string
-	// showArchived toggles whether archived ("closed") sessions appear in the
-	// list. Off by default so closed sessions stay out of the way; ctrl+v
-	// reveals them (rendered with an "[archived]" tag).
-	showArchived bool
 }
 
 func newSessionBrowser() sessionBrowser {
@@ -70,7 +66,6 @@ func (b *sessionBrowser) Open() {
 	b.loadErr = ""
 	b.previewErr = ""
 	b.confirmDelete = ""
-	b.showArchived = false
 }
 
 func (b *sessionBrowser) Close() {
@@ -103,30 +98,6 @@ func (b *sessionBrowser) RemoveSummary(id string) {
 		b.preview = nil
 		b.previewID = ""
 	}
-}
-
-// ToggleArchived flips whether archived sessions are shown, then rebuilds the
-// visible list. Cursor/scroll reset because the visible set changes.
-func (b *sessionBrowser) ToggleArchived() {
-	b.confirmDelete = ""
-	b.showArchived = !b.showArchived
-	b.cursor = 0
-	b.scroll = 0
-	b.rebuildMatches()
-}
-
-// SetArchivedLocal updates a session's archived flag in the in-memory list
-// after a successful store write, so the browser reflects the change without a
-// full reload.
-func (b *sessionBrowser) SetArchivedLocal(id string, archived bool) {
-	b.confirmDelete = ""
-	for i := range b.summaries {
-		if b.summaries[i].ID == id {
-			b.summaries[i].Archived = archived
-			break
-		}
-	}
-	b.rebuildMatches()
 }
 
 func (b *sessionBrowser) SetLoadError(err error) {
@@ -219,9 +190,6 @@ func (b *sessionBrowser) rebuildMatches() {
 	needle := strings.ToLower(strings.TrimSpace(b.filter))
 	b.matches = b.matches[:0]
 	for i, sum := range b.summaries {
-		if sum.Archived && !b.showArchived {
-			continue
-		}
 		// With no filter, hide sessions older than the recent window to keep the
 		// list scannable; typing a filter searches everything so old sessions
 		// stay findable. (Parity with the web session lists.)
@@ -290,10 +258,6 @@ func (b sessionBrowser) View(width, height int) string {
 				cursor = "▸ "
 			}
 			metaText := sessionWhen(sum.Updated) + " · " + shortSessionID(sum.ID)
-			archTag := ""
-			if sum.Archived {
-				archTag = " [archived]"
-			}
 			// Origin tag: name who started the session when it wasn't the user
 			// ("automation", "linear-webhook"…). Parity with the web badge. The
 			// label is caller-supplied, so it is sanitized to single-line plain
@@ -302,7 +266,7 @@ func (b sessionBrowser) View(width, height int) string {
 			if origin, _ := sum.Metadata[session.MetaOrigin].(string); origin != "" && origin != session.OriginUser {
 				originTag = " [" + truncateDisplay(sanitizeSessionLabel(origin), maxOriginTagWidth) + "]"
 			}
-			titleWidth := innerWidth - len(cursor) - len(metaText) - len(archTag) - lipgloss.Width(originTag) - 2
+			titleWidth := innerWidth - len(cursor) - len(metaText) - lipgloss.Width(originTag) - 2
 			if titleWidth < 10 {
 				titleWidth = 10
 			}
@@ -311,9 +275,6 @@ func (b sessionBrowser) View(width, height int) string {
 			line := fmt.Sprintf("%s%s  %s", cursor, meta, title)
 			if originTag != "" {
 				line += pickerDimStyle.Render(originTag)
-			}
-			if archTag != "" {
-				line += pickerDimStyle.Render(archTag)
 			}
 			if b.scroll+row == b.cursor {
 				line = pickerSelectedStyle.Render(line)
@@ -330,11 +291,7 @@ func (b sessionBrowser) View(width, height int) string {
 	if b.confirmDelete != "" {
 		lines = append(lines, pickerSelectedStyle.Render("Delete this session? ctrl+d again to confirm · any other key to cancel"))
 	} else {
-		help := "↑↓ navigate · type to filter · enter open · ctrl+n new · ctrl+d delete · ctrl+a archive · ctrl+v archived · esc exit"
-		if b.showArchived {
-			help += " (showing archived)"
-		}
-		lines = append(lines, pickerDimStyle.Render(help))
+		lines = append(lines, pickerDimStyle.Render("↑↓ navigate · type to filter · enter open · ctrl+n new · ctrl+d delete · esc exit"))
 	}
 
 	return pickerBorderStyle.Width(innerWidth).Render(strings.Join(lines, "\n"))

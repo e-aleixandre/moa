@@ -67,7 +67,6 @@ type ManagedSession struct {
 	mu          sync.Mutex
 	Title       string
 	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
-	Archived    bool   // closed-but-kept (presentation-only); see session.Session.Archived
 	Updated     time.Time
 	// briefAttempting/briefProgress are the cheap LLM-generated status prose
 	// (what the session is attempting, how it's going) surfaced to voice/mobile
@@ -122,8 +121,20 @@ type ManagedSession struct {
 	// Web Push: live count of WebSocket clients watching this session (gates
 	// non-blocking notifications), a "deleted" guard against late pushes, and
 	// the bus unsubscribe funcs registered by subscribePush.
-	wsConns    atomic.Int32
-	deleted    atomic.Bool
+	wsConns atomic.Int32
+	deleted atomic.Bool
+	// closing marks a session whose runtime is being torn down by CloseSession.
+	// Set atomically with respect to run-start (under the state lock) so a /send
+	// admitted just before cannot begin a run into a runtime that is going away,
+	// and stays set: the session is dropped from the manager, never reused.
+	closing atomic.Bool
+	// lifecycle guards the window in which a request may USE the runtime.
+	// Operations that can start a run (Send) hold it for read across their whole
+	// body; CloseSession takes it for write before admitting the close, so it
+	// waits for in-flight senders and no new one can slip between the quiescence
+	// check and the teardown. Checking `closing` alone is not enough: the check
+	// and the run-start are two steps, and this is what makes them one.
+	lifecycle  sync.RWMutex
 	autoTitled atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
 	// briefGen serializes brief regeneration (see brief.go): briefPending marks
 	// a coalesced regeneration request; briefRunning is the one-flight guard so
@@ -190,7 +201,6 @@ type MCPSummary struct {
 type SessionInfo struct {
 	ID           string       `json:"id"`
 	Title        string       `json:"title"`
-	Archived     bool         `json:"archived,omitempty"`
 	State        SessionState `json:"state"`
 	Model        string       `json:"model"`
 	Provider     string       `json:"provider"`
@@ -334,7 +344,6 @@ func (s *ManagedSession) info() SessionInfo {
 	info := SessionInfo{
 		ID:             s.ID,
 		Title:          s.Title,
-		Archived:       s.Archived,
 		State:          SessionState(state),
 		Model:          modelDisplayName(model),
 		Provider:       model.Provider,
@@ -660,14 +669,16 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	if !ok {
 		return "", "", nil, ErrNotFound
 	}
-
-	sess.mu.Lock()
-	archived := sess.Archived
-	sess.mu.Unlock()
-	if archived {
-		if err := m.ArchiveSession(sessionID, false); err != nil {
-			slog.Warn("failed to auto-unarchive session on send", "session", sessionID, "error", err)
-		}
+	// Hold the lifecycle read lock for the whole send: a close cannot be
+	// admitted while this runs, so the quiescence check it makes and the run
+	// this may start cannot interleave. `closing` is then a stable read.
+	sess.lifecycle.RLock()
+	defer sess.lifecycle.RUnlock()
+	// A close won the race: the runtime is gone (or going). The session is no
+	// longer in the manager, so this reads as "not found" — which is what a
+	// client that raced a close sees.
+	if sess.closing.Load() {
+		return "", "", nil, ErrNotFound
 	}
 
 	state := sess.runtime.State.Current()
@@ -848,15 +859,14 @@ func (m *Manager) List() []SessionInfo {
 		cwd, _ := sum.Metadata["cwd"].(string)
 		origin, _ := sum.Metadata[session.MetaOrigin].(string)
 		list = append(list, SessionInfo{
-			ID:       sum.ID,
-			Title:    sum.Title,
-			Archived: sum.Archived,
-			State:    StateSaved,
-			Model:    model,
-			CWD:      cwd,
-			Origin:   nonUserOrigin(origin),
-			Created:  sum.Created,
-			Updated:  sum.Updated,
+			ID:      sum.ID,
+			Title:   sum.Title,
+			State:   StateSaved,
+			Model:   model,
+			CWD:     cwd,
+			Origin:  nonUserOrigin(origin),
+			Created: sum.Created,
+			Updated: sum.Updated,
 		})
 	}
 
@@ -884,34 +894,6 @@ func (m *Manager) invalidateSavedCache() {
 	m.savedCacheMu.Lock()
 	m.savedCache = nil
 	m.savedCacheMu.Unlock()
-}
-
-// ArchiveSession sets or clears the archived flag on a session, whether it is
-// currently active in memory or only saved on disk. Archiving is
-// presentation-only: it never unloads an active session or touches Updated.
-func (m *Manager) ArchiveSession(id string, archived bool) error {
-	if sess, ok := m.Get(id); ok {
-		sess.mu.Lock()
-		sess.Archived = archived
-		sess.mu.Unlock()
-		if sess.persister != nil {
-			if err := sess.persister.setArchived(archived); err != nil {
-				return err
-			}
-		}
-		m.invalidateSavedCache()
-		return nil
-	}
-
-	_, store, err := session.FindSession(m.sessionBaseDir, id)
-	if err != nil {
-		return err
-	}
-	if err := store.SetArchived(id, archived); err != nil {
-		return err
-	}
-	m.invalidateSavedCache()
-	return nil
 }
 
 // Get returns a managed session by ID.

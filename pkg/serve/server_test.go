@@ -1454,7 +1454,7 @@ func TestPromoteSubagentEndpoint(t *testing.T) {
 	resp.Body.Close() //nolint:errcheck
 }
 
-func TestArchiveEndpoint(t *testing.T) {
+func TestCloseEndpoint(t *testing.T) {
 	srv, _, cancel := newTestServer(t)
 	defer cancel()
 
@@ -1466,32 +1466,35 @@ func TestArchiveEndpoint(t *testing.T) {
 	var info SessionInfo
 	_ = json.NewDecoder(resp.Body).Decode(&info)
 
-	// Missing "archived" field → 400 (must not silently unarchive).
-	r1 := apiReq(t, srv, "POST", "/api/sessions/"+info.ID+"/archive", `{}`)
+	r1 := apiReq(t, srv, "POST", "/api/sessions/"+info.ID+"/close", "")
 	defer r1.Body.Close() //nolint:errcheck
-	if r1.StatusCode != http.StatusBadRequest {
-		t.Fatalf("empty body: expected 400, got %d", r1.StatusCode)
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("close: expected 200, got %d", r1.StatusCode)
 	}
 
-	// Archive it.
-	r2 := apiReq(t, srv, "POST", "/api/sessions/"+info.ID+"/archive", `{"archived":true}`)
-	defer r2.Body.Close() //nolint:errcheck
-	if r2.StatusCode != http.StatusOK {
-		t.Fatalf("archive: expected 200, got %d", r2.StatusCode)
+	// Closing unloads but keeps the session: it must still be listed, as saved.
+	l := apiReq(t, srv, "GET", "/api/sessions", "")
+	defer l.Body.Close() //nolint:errcheck
+	var listed []SessionInfo
+	_ = json.NewDecoder(l.Body).Decode(&listed)
+	var found bool
+	for _, si := range listed {
+		if si.ID == info.ID {
+			found = true
+			if si.State != StateSaved {
+				t.Errorf("closed session state = %q, want %q", si.State, StateSaved)
+			}
+		}
 	}
-	g := apiReq(t, srv, "GET", "/api/sessions/"+info.ID, "")
-	defer g.Body.Close() //nolint:errcheck
-	var got SessionInfo
-	_ = json.NewDecoder(g.Body).Decode(&got)
-	if !got.Archived {
-		t.Fatal("expected session to report Archived=true after archive")
+	if !found {
+		t.Fatal("a closed session must stay listed — closing is not deleting")
 	}
 
 	// Unknown session → 404.
-	r3 := apiReq(t, srv, "POST", "/api/sessions/nonexistent/archive", `{"archived":true}`)
-	defer r3.Body.Close() //nolint:errcheck
-	if r3.StatusCode != http.StatusNotFound {
-		t.Fatalf("unknown session: expected 404, got %d", r3.StatusCode)
+	r2 := apiReq(t, srv, "POST", "/api/sessions/nonexistent/close", "")
+	defer r2.Body.Close() //nolint:errcheck
+	if r2.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown session: expected 404, got %d", r2.StatusCode)
 	}
 }
 

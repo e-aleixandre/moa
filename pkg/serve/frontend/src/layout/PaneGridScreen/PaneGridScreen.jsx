@@ -31,7 +31,7 @@ function relAge(updated) {
 }
 
 function spineSessions(sessions, paneOf) {
-  const all = Object.values(sessions).filter((s) => !s.archived);
+  const all = Object.values(sessions);
   const active = all
     .filter((s) => s.state !== "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
