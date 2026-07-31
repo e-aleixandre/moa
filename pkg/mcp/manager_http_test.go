@@ -260,18 +260,33 @@ func TestRemoteToolCallGetsADeadline(t *testing.T) {
 	remoteToolCallTimeout = 300 * time.Millisecond
 	t.Cleanup(func() { remoteToolCallTimeout = prev })
 
-	url, _ := newRemoteTestServer(t)
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "staller", Version: "0.1"}, nil)
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "stall",
+		Description: "Never returns until cancelled",
+	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, input struct{}) (*sdkmcp.CallToolResult, any, error) {
+		<-ctx.Done() // simulate a dead remote: the result never comes
+		return nil, nil, ctx.Err()
+	})
+	handler := sdkmcp.NewStreamableHTTPHandler(func(r *http.Request) *sdkmcp.Server { return server }, nil)
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{"remote": {URL: url}}, nil)
+	mgr.Start(context.Background(), map[string]core.MCPServer{"remote": {URL: httpServer.URL}}, nil)
 	defer mgr.Close()
 
 	tools := mgr.Tools()
 	if len(tools) != 1 {
 		t.Fatalf("Tools() = %d, want 1", len(tools))
 	}
-	// A healthy call still succeeds well inside the cap.
-	res, err := tools[0].Execute(context.Background(), map[string]any{"text": "hi"}, nil)
-	if err != nil || res.IsError {
-		t.Fatalf("Execute = %+v, %v", res, err)
+	start := time.Now()
+	res, err := tools[0].Execute(context.Background(), map[string]any{}, nil)
+	elapsed := time.Since(start)
+	if err == nil && !res.IsError {
+		t.Fatalf("Execute succeeded (%+v), want a deadline failure", res)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("stalled call returned after %v, want it bounded by the remote cap", elapsed)
 	}
 }

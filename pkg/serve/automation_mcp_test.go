@@ -303,20 +303,16 @@ func TestAutomationMCPNameCollisionRejected(t *testing.T) {
 
 func TestMCPServersFromMetaRejectsCommandEntries(t *testing.T) {
 	// A hand-edited session file must not be able to smuggle a local command
-	// back in through the resume path.
+	// back in through the resume path. One tampered entry drops the whole list:
+	// automationMCPMeta never writes these shapes, so the file was edited.
 	meta := map[string]any{session.MetaMCPServers: []any{
 		map[string]any{"name": "ok", "url": "https://a/b"},
 		map[string]any{"name": "evil", "url": "https://c/d", "command": "/bin/sh"},
 		map[string]any{"name": "bad scheme", "url": "file:///etc/passwd"},
 		map[string]any{"name": "no url"},
 	}}
-	got := mcpServersFromMeta(meta, nil)
-	if len(got) != 1 {
-		t.Fatalf("got %d servers, want only the valid one: %v", len(got), got)
-	}
-	srv, ok := got["ok"]
-	if !ok || srv.Command != "" || srv.URL != "https://a/b" {
-		t.Fatalf("rebuilt server = %+v", got)
+	if got := mcpServersFromMeta(meta, nil); got != nil {
+		t.Fatalf("got %v, want the whole tampered list dropped", got)
 	}
 }
 
@@ -436,6 +432,16 @@ func TestMCPServersFromMetaAppliesFullValidator(t *testing.T) {
 		meta map[string]any
 	}{
 		{"over the server cap", map[string]any{session.MetaMCPServers: manyEntries}},
+		{"duplicate names", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://a/b"},
+			map[string]any{"name": "relay", "url": "https://c/d"},
+		}}},
+		{"non-string header value", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://a/b", "headers": map[string]any{"Authorization": 123}},
+		}}},
+		{"unknown alias key", map[string]any{session.MetaMCPServers: []any{
+			map[string]any{"name": "relay", "url": "https://a/b", "cmd": "/bin/sh"},
+		}}},
 		{"overlong url", map[string]any{session.MetaMCPServers: []any{
 			map[string]any{"name": "relay", "url": "https://example.com/" + strings.Repeat("p", maxAutomationMCPURLBytes)},
 		}}},
@@ -468,14 +474,7 @@ func TestMCPServersFromMetaAppliesFullValidator(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := mcpServersFromMeta(tc.meta, nil)
-			if tc.name == "over the server cap" {
-				if len(got) != maxAutomationMCPServers {
-					t.Fatalf("got %d servers, want the cap %d", len(got), maxAutomationMCPServers)
-				}
-				return
-			}
-			if len(got) != 0 {
+			if got := mcpServersFromMeta(tc.meta, nil); got != nil {
 				t.Fatalf("got %v, want nothing started", got)
 			}
 		})

@@ -168,86 +168,95 @@ func automationMCPMeta(servers []AutomationMCPServer) any {
 	return out
 }
 
-// mcpServersFromMeta rebuilds the per-run servers of a resumed session. It is
-// forgiving about shape (metadata round-trips through JSON) but strict about
-// content: every entry goes through the SAME validator the request path uses,
-// so a hand-edited session file cannot restore what the API would have refused
-// (a local command, more servers than the cap, oversized urls or headers). An
-// entry that fails is skipped with a warning rather than failing the resume,
-// which would strand the session.
+// mcpServersFromMeta rebuilds the per-run servers of a resumed session,
+// mirroring the request path exactly: the persisted list is re-parsed into the
+// same shape and run through the SAME whole-list validator, and any deviation
+// the API would have refused — a local command, an unknown key, a non-string
+// value, duplicates, more servers than the cap, oversized urls or headers —
+// drops the ENTIRE list with a warning. automationMCPMeta only ever writes
+// lists the API accepted, so a failing list was edited by hand; salvaging
+// entries from a tampered file is not worth the ambiguity. The session itself
+// still resumes, just without its per-run servers.
 //
-// configured is the set of servers currently defined for the session's cwd: a
-// persisted extra whose name now collides with one of them is dropped, so
-// operator config always wins over a stale per-run server.
+// The one non-tampering case is configured: a persisted extra whose name now
+// collides with a server the operator configured after the session was created.
+// Only that entry is dropped — operator config wins over a stale per-run
+// server.
 func mcpServersFromMeta(meta map[string]any, configured map[string]core.MCPServer) map[string]core.MCPServer {
 	raw, ok := meta[session.MetaMCPServers].([]any)
 	if !ok || len(raw) == 0 {
 		return nil
 	}
-	out := make(map[string]core.MCPServer)
+	servers := make([]AutomationMCPServer, 0, len(raw))
 	for _, item := range raw {
-		entry, ok := item.(map[string]any)
+		srv, ok := automationMCPServerFromMeta(item)
 		if !ok {
-			continue
+			slog.Warn("resume: dropping all per-run MCP servers: malformed entry in session file")
+			return nil
 		}
-		// A per-run server is url-only by construction, so an entry carrying
-		// local-process keys was hand-written into the file. Skip it entirely
-		// rather than quietly honoring the url half of a record somebody edited.
-		if _, ok := entry["command"]; ok {
-			slog.Warn("resume: skipping per-run MCP server with a command key", "server", entry["name"])
-			continue
-		}
-		if _, ok := entry["args"]; ok {
-			slog.Warn("resume: skipping per-run MCP server with an args key", "server", entry["name"])
-			continue
-		}
-		if _, ok := entry["env"]; ok {
-			slog.Warn("resume: skipping per-run MCP server with an env key", "server", entry["name"])
-			continue
-		}
-		srv := AutomationMCPServer{Headers: headersFromMeta(entry["headers"])}
-		srv.Name, _ = entry["name"].(string)
-		srv.URL, _ = entry["url"].(string)
-		if len(out) >= maxAutomationMCPServers {
-			slog.Warn("resume: ignoring per-run MCP server beyond the cap",
-				"server", srv.Name, "max", maxAutomationMCPServers)
-			continue
-		}
-		if msg := validateAutomationMCPServers([]AutomationMCPServer{srv}, configured); msg != "" {
-			slog.Warn("resume: skipping invalid per-run MCP server", "server", srv.Name, "reason", msg)
-			continue
-		}
-		if _, dup := out[srv.Name]; dup {
-			continue
-		}
-		out[srv.Name] = core.MCPServer{URL: srv.URL, Headers: srv.Headers}
+		servers = append(servers, srv)
 	}
-	if len(out) == 0 {
+	kept := servers[:0]
+	for _, s := range servers {
+		if _, taken := configured[s.Name]; taken {
+			slog.Warn("resume: configured MCP server wins over stale per-run server", "server", s.Name)
+			continue
+		}
+		kept = append(kept, s)
+	}
+	if len(kept) == 0 {
 		return nil
+	}
+	if msg := validateAutomationMCPServers(kept, nil); msg != "" {
+		slog.Warn("resume: dropping all per-run MCP servers", "reason", msg)
+		return nil
+	}
+	out := make(map[string]core.MCPServer, len(kept))
+	for _, s := range kept {
+		out[s.Name] = core.MCPServer{URL: s.URL, Headers: s.Headers}
 	}
 	return out
 }
 
-func headersFromMeta(v any) map[string]string {
-	raw, ok := v.(map[string]any)
-	if !ok || len(raw) == 0 {
-		return nil
+// automationMCPServerFromMeta re-parses one persisted per-run server entry with
+// the strictness of the request decoder: automationMCPMeta writes exactly
+// name/url and optionally headers (all strings), so any other key — command,
+// args, env, an alias — or any other value type means the entry was hand
+// written and is refused outright.
+func automationMCPServerFromMeta(item any) (AutomationMCPServer, bool) {
+	entry, ok := item.(map[string]any)
+	if !ok {
+		return AutomationMCPServer{}, false
 	}
-	out := make(map[string]string, len(raw))
-	for k, val := range raw {
-		s, ok := val.(string)
-		if !ok {
-			// A non-string value is a shape the writer never produces; keep the
-			// key so the validator rejects the entry instead of silently
-			// starting a server with a header dropped.
-			s = fmt.Sprint(val)
+	var srv AutomationMCPServer
+	for k, v := range entry {
+		switch k {
+		case "name":
+			if srv.Name, ok = v.(string); !ok {
+				return AutomationMCPServer{}, false
+			}
+		case "url":
+			if srv.URL, ok = v.(string); !ok {
+				return AutomationMCPServer{}, false
+			}
+		case "headers":
+			raw, ok := v.(map[string]any)
+			if !ok {
+				return AutomationMCPServer{}, false
+			}
+			srv.Headers = make(map[string]string, len(raw))
+			for hk, hv := range raw {
+				s, ok := hv.(string)
+				if !ok {
+					return AutomationMCPServer{}, false
+				}
+				srv.Headers[hk] = s
+			}
+		default:
+			return AutomationMCPServer{}, false
 		}
-		out[k] = s
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return srv, true
 }
 
 // configuredMCPServers lists the MCP servers already defined for a working
