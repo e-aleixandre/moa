@@ -288,13 +288,22 @@ func (b sessionBrowser) View(width, height int) string {
 			if sum.Archived {
 				archTag = " [archived]"
 			}
-			titleWidth := innerWidth - len(cursor) - len(metaText) - len(archTag) - 2
+			// Origin tag: name who started the session when it wasn't the user
+			// ("automation", "linear-webhook"…). Parity with the web badge.
+			originTag := ""
+			if origin, _ := sum.Metadata[session.MetaOrigin].(string); origin != "" && origin != session.OriginUser {
+				originTag = " [" + origin + "]"
+			}
+			titleWidth := innerWidth - len(cursor) - len(metaText) - len(archTag) - len(originTag) - 2
 			if titleWidth < 10 {
 				titleWidth = 10
 			}
 			meta := pickerDimStyle.Render(metaText)
 			title := truncateLine(sessionTitle(sum), titleWidth)
 			line := fmt.Sprintf("%s%s  %s", cursor, meta, title)
+			if originTag != "" {
+				line += pickerDimStyle.Render(originTag)
+			}
 			if archTag != "" {
 				line += pickerDimStyle.Render(archTag)
 			}

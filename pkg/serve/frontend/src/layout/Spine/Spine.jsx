@@ -88,6 +88,7 @@ export function Spine({
               unseen={s.unseen}
               meta={s.meta}
               pane={s.pane}
+              origin={s.origin}
               onClick={() => onSelectSession?.(s.id)}
             />
           ))}
@@ -102,6 +103,7 @@ export function Spine({
               title={s.title}
               state="saved"
               meta={s.meta}
+              origin={s.origin}
               onClick={() => onSelectSession?.(s.id)}
             />
           ))}
