@@ -171,30 +171,35 @@ func launchQueuedSteers(sctx *SessionContext, items []core.SteerItem) {
 	if len(items) == 0 {
 		return
 	}
-	// Pre-mint a stable MsgID per item so we can announce each chip immediately,
-	// without waiting for the run goroutine. The message lands in state under
-	// the same ID, so a reconnect snapshot dedups it by identity.
+	// Pre-mint a stable MsgID per item so each chip is announced under the
+	// identity the message lands in state with (reconnect snapshots dedup by
+	// it). The announcement itself is deferred to the append point: publishing
+	// it here, before the run goroutine appends, leaves a window where a
+	// reconnecting client snapshots history without the item while its sequence
+	// cut already covers the event — the steer would vanish until a reload.
 	msgIDs := make([]string, len(items))
 	for i := range items {
 		msgIDs[i] = core.NewMsgID()
 	}
+	announce := func() {
+		gen := sctx.RunGenAtomic.Load()
+		for i, it := range items {
+			if it.Internal {
+				continue // internal steers have suppressed delivery events
+			}
+			sctx.Bus.Publish(Steered{
+				SessionID: sctx.SessionID,
+				RunGen:    gen,
+				ID:        it.ID,
+				MsgID:     msgIDs[i],
+				Text:      it.Text,
+			})
+		}
+	}
 	launchRun(sctx, items[0].Text, func(ctx context.Context) ([]core.AgentMessage, error) {
-		msgs, _, e := sctx.Agent.SendItems(ctx, items, msgIDs)
+		msgs, _, e := sctx.Agent.SendItems(ctx, items, msgIDs, announce)
 		return msgs, e
 	})
-	gen := sctx.RunGenAtomic.Load()
-	for i, it := range items {
-		if it.Internal {
-			continue // internal steers have suppressed delivery events
-		}
-		sctx.Bus.Publish(Steered{
-			SessionID: sctx.SessionID,
-			RunGen:    gen,
-			ID:        it.ID,
-			MsgID:     msgIDs[i],
-			Text:      it.Text,
-		})
-	}
 }
 
 // isInternalPromptSource reports whether a SendPrompt was issued by internal

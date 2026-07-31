@@ -38,7 +38,7 @@ type AgentController interface {
 	PushSteersFront(items []core.SteerItem)
 	PeekQueueHead() (core.SteerItem, bool)
 	PopQueueBarrier(id string) bool
-	SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string) ([]core.AgentMessage, []string, error)
+	SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func()) ([]core.AgentMessage, []string, error)
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
@@ -220,6 +220,99 @@ type SessionContext struct {
 	pumpMu     sync.Mutex
 	pumpActive bool
 	pumpRerun  bool
+
+	// msgIDMu guards reserveMsgID: it makes "is this ID free?" atomic with
+	// "this ID is now taken", closing the window between a caller's uniqueness
+	// check and the append that makes the ID visible in history. See
+	// reserveMsgID.
+	msgIDMu       sync.Mutex
+	reservedMsgID map[string]struct{}
+}
+
+// reserveMsgID returns the message ID a send must land under, claiming it for
+// this session. A client-supplied ID is honored only when it is well-formed to
+// the caller AND neither already in history nor already claimed; otherwise a
+// fresh one is minted.
+//
+// Checking history alone is not enough: the append happens asynchronously in
+// the run goroutine, so two concurrent sends carrying the same ID would both
+// see it free and both persist under it — deduped live, doubled after a reload.
+// Holding msgIDMu across check-and-claim is what makes the identity unique.
+//
+// A claim is kept for the life of the session: an ID a client was told its
+// message landed under must stay unusable even across a clear or a branch that
+// empties history, since clients still hold that message. Only a send that
+// never started releases its claim (releaseMsgID), so a rejected send doesn't
+// burn the client's ID.
+func (sctx *SessionContext) reserveMsgID(msgID string) string {
+	sctx.msgIDMu.Lock()
+	defer sctx.msgIDMu.Unlock()
+	if sctx.reservedMsgID == nil {
+		sctx.reservedMsgID = make(map[string]struct{})
+	}
+	if msgID != "" {
+		_, claimed := sctx.reservedMsgID[msgID]
+		if !claimed && !sctx.msgIDInHistory(msgID) {
+			sctx.reservedMsgID[msgID] = struct{}{}
+			return msgID
+		}
+	}
+	// Minted IDs are random, so a collision here would mean a repeat of
+	// core.NewMsgID; claim it anyway to keep the map the single authority.
+	fresh := core.NewMsgID()
+	sctx.reservedMsgID[fresh] = struct{}{}
+	return fresh
+}
+
+// releaseMsgID drops a claim taken by reserveMsgID. Only for a send that never
+// reached history (rejected before the run started): a delivered message keeps
+// its claim forever, since clients hold it under that identity.
+func (sctx *SessionContext) releaseMsgID(msgID string) {
+	if msgID == "" {
+		return
+	}
+	sctx.msgIDMu.Lock()
+	delete(sctx.reservedMsgID, msgID)
+	sctx.msgIDMu.Unlock()
+}
+
+// msgIDReserved reports whether an ID was already claimed by an accepted send.
+// Backs the MsgIDInUse query, so a caller probing uniqueness before it reaches
+// the send path already sees claims whose message is not in history yet.
+func (sctx *SessionContext) msgIDReserved(msgID string) bool {
+	sctx.msgIDMu.Lock()
+	defer sctx.msgIDMu.Unlock()
+	_, ok := sctx.reservedMsgID[msgID]
+	return ok
+}
+
+// msgIDInHistory scans the display projection — the same history clients dedup
+// against — for a message carrying this ID.
+func (sctx *SessionContext) msgIDInHistory(msgID string) bool {
+	if msgID == "" {
+		return false
+	}
+	if sctx.treeSyncer != nil {
+		for _, m := range sctx.treeSyncer.DisplayMessages() {
+			if m.MsgID == msgID {
+				return true
+			}
+		}
+		return false
+	}
+	if sctx.Tree != nil {
+		for _, m := range sctx.Tree.AllMessages() {
+			if m.MsgID == msgID {
+				return true
+			}
+		}
+	}
+	for _, m := range sctx.Agent.Messages() {
+		if m.MsgID == msgID {
+			return true
+		}
+	}
+	return false
 }
 
 type runStats struct {

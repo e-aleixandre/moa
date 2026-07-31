@@ -64,7 +64,11 @@ type fakeAgent struct {
 	// announce, when set, is invoked by the announcing send entry points with
 	// the message they appended, standing in for the real agent's
 	// core.AgentEventUserMessage emission (which reaches the bus via Bridge).
-	announce   func(msgID string, text string, content []core.Content)
+	announce func(msgID string, text string, content []core.Content)
+	// appendGate, when set, blocks an announcing send until the channel is
+	// closed, holding open the window between accepting the send and its
+	// message becoming visible in history.
+	appendGate chan struct{}
 	steerQueue []core.SteerItem
 	steerFull  bool             // when true, Steer rejects (queue full)
 	sentItems  []core.SteerItem // items delivered via SendItems (pump tests)
@@ -151,12 +155,12 @@ func (f *fakeAgent) PopQueueBarrier(id string) bool {
 	return true
 }
 
-// SendItems records the delivered items and returns synthetic MsgIDs, letting
-// pump tests assert which steers started a fresh run without exercising a real
-// agent loop.
-func (f *fakeAgent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string) ([]core.AgentMessage, []string, error) {
+// SendItems records the delivered items and appends one user message per item
+// (as the real agent does) before invoking announce, letting pump tests assert
+// both which steers started a fresh run and that the announcement can never be
+// observed ahead of the append.
+func (f *fakeAgent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func()) ([]core.AgentMessage, []string, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	ids := make([]string, len(items))
 	for i, it := range items {
 		if i < len(msgIDs) && msgIDs[i] != "" {
@@ -165,6 +169,13 @@ func (f *fakeAgent) SendItems(ctx context.Context, items []core.SteerItem, msgID
 			ids[i] = "msg-" + it.ID
 		}
 		f.sentItems = append(f.sentItems, it)
+		m := core.WrapMessage(core.NewUserMessage(it.Text))
+		m.MsgID = ids[i]
+		f.messages = append(f.messages, m)
+	}
+	f.mu.Unlock()
+	if announce != nil {
+		announce()
 	}
 	return nil, ids, nil
 }
@@ -343,7 +354,20 @@ func (f *fakeAgent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]
 	f.mu.Lock()
 	f.sendMsgID = msgID
 	announce := f.announce
+	gate := f.appendGate
 	f.mu.Unlock()
+	if gate != nil {
+		// Hold the append open so a test can keep the window between accepting
+		// a send and its message reaching history wide open on purpose.
+		<-gate
+	}
+	if msgID != "" {
+		m := core.WrapMessage(core.NewUserMessage(prompt))
+		m.MsgID = msgID
+		f.mu.Lock()
+		f.messages = append(f.messages, m)
+		f.mu.Unlock()
+	}
 	if announce != nil {
 		announce(msgID, prompt, nil)
 	}
@@ -2950,5 +2974,113 @@ func TestRestoreFlow_InvalidThinking_Error(t *testing.T) {
 	err := b.Execute(SetThinking{Level: "invalid"})
 	if err == nil {
 		t.Error("expected error for invalid thinking level")
+	}
+}
+
+// ===========================================================================
+// msg_id uniqueness — the claim must be atomic with accepting the run
+// ===========================================================================
+
+// A client-supplied msg_id is claimed the instant the send is accepted, not
+// when its message reaches history: the append happens later, in the run
+// goroutine, so a uniqueness check made against history alone would still
+// report the ID as free. The query must already see the claim, otherwise a
+// second send would be confirmed under an identity it is about to lose.
+func TestHandler_SendPrompt_MsgIDClaimedBeforeAppend(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{appendGate: make(chan struct{})}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	accepted := "c-dup"
+	if err := b.Execute(SendPrompt{Text: "hola", MsgID: "c-dup", AcceptedMsgID: &accepted}); err != nil {
+		t.Fatal(err)
+	}
+	if accepted != "c-dup" {
+		t.Fatalf("accepted msg ID = %q, want the client-supplied one", accepted)
+	}
+	// The run is parked before the append: history cannot know the ID yet.
+	if msgs := fa.Messages(); len(msgs) != 0 {
+		t.Fatalf("history is not empty yet: %+v", msgs)
+	}
+	if inUse, _ := QueryTyped[MsgIDInUse, bool](b, MsgIDInUse{MsgID: "c-dup"}); !inUse {
+		t.Fatal("MsgIDInUse(c-dup) = false while a send accepted under it has not appended yet")
+	}
+	close(fa.appendGate)
+}
+
+// Two sends carrying the SAME client msg_id, racing on purpose: both goroutines
+// wait on one barrier, and the fake agent parks every append behind a gate, so
+// their claims overlap exactly the window a history-only check leaves open.
+// Exactly one may keep the ID; the others must be re-minted, and history must
+// end up with a single message under it — a duplicate is deduped live but
+// reappears doubled after a reload.
+func TestHandler_SendPrompt_ConcurrentSameMsgID(t *testing.T) {
+	const senders = 8
+	b := NewLocalBus()
+	defer b.Close()
+	// Park every append: while the gate is shut, no send's message is visible in
+	// history, which is precisely the state a history-only uniqueness check
+	// misreads as "the ID is free".
+	fa := &fakeAgent{appendGate: make(chan struct{})}
+	// No state machine: every send is accepted, so all claims genuinely race
+	// instead of being serialized by the run slot.
+	sctx := newTestSessionContext(b, fa)
+	RegisterHandlers(sctx)
+
+	var start sync.WaitGroup
+	start.Add(1)
+	var done sync.WaitGroup
+	accepted := make([]string, senders)
+	errs := make([]error, senders)
+	for i := range senders {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			errs[i] = b.Execute(SendPrompt{Text: "hola", MsgID: "c-dup", AcceptedMsgID: &accepted[i]})
+		}()
+	}
+	start.Done()
+	done.Wait()
+	// Every send has been accepted (and answered with an ID) with nothing in
+	// history yet. Only now let the appends through, then wait for all of them.
+	close(fa.appendGate)
+	deadline := time.After(2 * time.Second)
+	for len(fa.Messages()) < senders {
+		select {
+		case <-deadline:
+			t.Fatalf("only %d of %d messages reached history", len(fa.Messages()), senders)
+		case <-time.After(time.Millisecond):
+		}
+	}
+	b.Drain(2 * time.Second)
+
+	seen := map[string]int{}
+	for i, id := range accepted {
+		if errs[i] != nil {
+			t.Fatalf("send %d failed: %v", i, errs[i])
+		}
+		if id == "" {
+			t.Fatalf("send %d was accepted without an ID", i)
+		}
+		seen[id]++
+	}
+	if len(seen) != senders {
+		t.Fatalf("accepted IDs collide: %v", seen)
+	}
+	if seen["c-dup"] != 1 {
+		t.Fatalf("the client ID was handed to %d sends, want exactly 1", seen["c-dup"])
+	}
+
+	inHistory := 0
+	for _, m := range fa.Messages() {
+		if m.MsgID == "c-dup" {
+			inHistory++
+		}
+	}
+	if inHistory != 1 {
+		t.Fatalf("history holds %d messages under c-dup, want 1", inHistory)
 	}
 }

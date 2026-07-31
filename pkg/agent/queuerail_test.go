@@ -188,7 +188,7 @@ func TestSendItems_PerItemMessagesWithContent(t *testing.T) {
 		{ID: "s1", Text: "plain"},
 		{ID: "s2", Content: []core.Content{core.TextContent("with"), core.ImageContent("AAAA", "image/png")}},
 	}
-	msgs, msgIDs, err := ag.SendItems(context.Background(), items, nil)
+	msgs, msgIDs, err := ag.SendItems(context.Background(), items, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestQueueOwnsContent_NoAliasing(t *testing.T) {
 			core.ToolCallContent("tc", "edit", args),
 		}
 		item := core.SteerItem{ID: "s1", Content: content}
-		msgs, _, err := ag.SendItems(context.Background(), []core.SteerItem{item}, nil)
+		msgs, _, err := ag.SendItems(context.Background(), []core.SteerItem{item}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -291,6 +291,44 @@ func TestQueueOwnsContent_NoAliasing(t *testing.T) {
 	})
 }
 
+// SendItems announces its items only once they are in history: a client that
+// snapshots history the instant it sees the announcement always finds them.
+// Announcing before the append would leave a window where a reconnect
+// snapshots history without the steer while its sequence cut already covers the
+// announcement — the steer would vanish until a reload.
+func TestSendItems_AnnouncesAfterAppend(t *testing.T) {
+	provider := NewMockProvider(simpleTextResponse("ok"))
+	ag := newTestAgent(provider)
+
+	items := []core.SteerItem{{ID: "s1", Text: "primero"}, {ID: "s2", Text: "segundo"}}
+	var inHistory []string
+	announced := false
+	msgs, msgIDs, err := ag.SendItems(context.Background(), items, []string{"m-1", "m-2"}, func() {
+		announced = true
+		// Read history exactly as a reconnecting client's snapshot would.
+		for _, m := range ag.Messages() {
+			if m.Role == "user" {
+				inHistory = append(inHistory, m.MsgID)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !announced {
+		t.Fatal("the announce hook was never invoked")
+	}
+	if !eq(inHistory, []string{"m-1", "m-2"}) {
+		t.Fatalf("history at announce time = %v, want [m-1 m-2]", inHistory)
+	}
+	if !eq(msgIDs, []string{"m-1", "m-2"}) {
+		t.Fatalf("msgIDs = %v, want [m-1 m-2]", msgIDs)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("expected 2 user messages plus the reply, got %v", roles(msgs))
+	}
+}
+
 // A barrier accidentally passed to SendItems is a command, not a message, and
 // must never be injected into the conversation.
 func TestSendItems_SkipsBarriers(t *testing.T) {
@@ -301,7 +339,7 @@ func TestSendItems_SkipsBarriers(t *testing.T) {
 		{ID: "s1", Text: "real"},
 		barrier("c1", "/compact"),
 	}
-	msgs, msgIDs, err := ag.SendItems(context.Background(), items, nil)
+	msgs, msgIDs, err := ag.SendItems(context.Background(), items, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

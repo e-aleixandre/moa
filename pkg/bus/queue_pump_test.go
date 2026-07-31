@@ -364,3 +364,55 @@ func TestPump_StrictOrderUnderRace(t *testing.T) {
 		b.Close()
 	}
 }
+
+// A client reconnecting the instant it sees a Steered event must find that
+// steer in the history snapshot it then fetches. The announcement is published
+// from the agent's post-append hook precisely so the two can overlap but never
+// both miss it; announcing before the append (as launchQueuedSteers used to)
+// left a window where a reconnect cut covered the event while the snapshot
+// still predated the message — the steer vanished until a reload.
+//
+// The subscriber below IS that reconnect: it reads the display history the
+// moment the event arrives, with no sleeps.
+func TestPump_SteeredAnnouncedOnlyAfterAppend(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	type snapshot struct {
+		msgID     string
+		inHistory bool
+	}
+	seen := make(chan snapshot, 4)
+	b.Subscribe(func(e Steered) {
+		found := false
+		msgs, _ := QueryTyped[GetDisplayMessages, []core.AgentMessage](b, GetDisplayMessages{})
+		for _, m := range msgs {
+			if m.MsgID == e.MsgID {
+				found = true
+			}
+		}
+		seen <- snapshot{msgID: e.MsgID, inHistory: found}
+	})
+
+	// A barrier followed by a steer: the pump executes the barrier, then starts
+	// a fresh run for the trailing steer via SendItems.
+	fa.Steer(core.SteerItem{ID: "c1", Text: "/compact", Command: "/compact"})
+	fa.Steer(core.SteerItem{ID: "s1", Text: "y ahora esto"})
+
+	requestPump(sctx)
+
+	select {
+	case got := <-seen:
+		if got.msgID == "" {
+			t.Fatal("Steered carried an empty MsgID")
+		}
+		if !got.inHistory {
+			t.Fatal("a client reconnecting on Steered would not find the steer in history")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the trailing steer was never announced")
+	}
+}

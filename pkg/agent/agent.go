@@ -587,7 +587,12 @@ func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content
 // known MsgID without waiting for the run — clients dedup by MsgID on reconnect.
 // The returned MsgIDs are the effective ones in item order. Barrier items are
 // commands, never messages, and are skipped defensively.
-func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string) ([]core.AgentMessage, []string, error) {
+//
+// announce, when non-nil, is invoked once the items are genuinely in history and
+// before the run's own events — the same guarantee SendWithMsgID gives a direct
+// prompt, so an announcement can never race a concurrent history snapshot (a
+// reconnect between the two would lose the steer until a reload).
+func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func()) ([]core.AgentMessage, []string, error) {
 	// Take ownership of each item's Content so a caller mutating its slices
 	// after the call can't race the provider reading a.state.Messages.
 	type owned struct {
@@ -607,7 +612,7 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 	}
 	outIDs := make([]string, len(list))
 	appended := false
-	msgs, err := a.execute(ctx, func() {
+	msgs, err := a.executeAnnounced(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
@@ -626,6 +631,10 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 		// atomic with the appends that made them visible.
 		a.steers.settle(items)
 		appended = true
+	}, func() {
+		if announce != nil {
+			announce()
+		}
 	})
 	// If execute() bailed before prepare ran (e.g. a run was already in flight),
 	// the items were drained (inflight-counted) but never appended; settle them

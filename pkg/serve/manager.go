@@ -254,21 +254,16 @@ const (
 // re-minted, since the ID is echoed to every connected client.
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// effectiveMsgID resolves the message ID a direct send lands under. A client may
-// supply one so its optimistic echo already carries the identity the message
-// enters history with. That ID is untrusted: a malformed or oversized one is
-// unsafe to rebroadcast, and one that already exists in this session's history
-// would make every client's dedup swallow the new message, hiding it until a
-// reload. In both cases the server mints a fresh ID instead of rejecting the
-// send — the prompt must reach the agent regardless — and returns it so the
-// caller can reconcile its optimistic message with the effective identity.
-func effectiveMsgID(sess *ManagedSession, msgID string) string {
-	if msgID == "" || !clientIDPattern.MatchString(msgID) {
-		return core.NewMsgID()
-	}
-	inUse, err := bus.QueryTyped[bus.MsgIDInUse, bool](sess.runtime.Bus, bus.MsgIDInUse{MsgID: msgID})
-	if err != nil || inUse {
-		return core.NewMsgID()
+// sanitizeClientMsgID returns a client-supplied message ID when it is safe to
+// use verbatim, and "" when the caller must be given a server-minted one. It
+// only judges shape: an unbounded or JSON-hostile ID is unsafe to rebroadcast
+// to every viewer. Uniqueness is NOT decided here — a check made now could not
+// be atomic with the append that takes the ID, so the bus claims the identity
+// at the point it accepts the run (bus.SendPrompt.AcceptedMsgID) and reports
+// the effective one back.
+func sanitizeClientMsgID(msgID string) string {
+	if !clientIDPattern.MatchString(msgID) {
+		return ""
 	}
 	return msgID
 }
@@ -743,13 +738,16 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
 	// Resolve the message identity ONCE for both direct-send paths: the client's
-	// ID when it is well-formed and free, a server-minted one otherwise.
-	msgID = effectiveMsgID(sess, msgID)
+	// ID when it is well-formed, discarded otherwise. Whether it is actually
+	// free is decided by the bus handler, atomically with accepting the run, and
+	// reported back through AcceptedMsgID.
+	msgID = sanitizeClientMsgID(msgID)
+	accepted := msgID
 	if len(atts) == 0 {
-		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, MsgID: msgID}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, MsgID: msgID, AcceptedMsgID: &accepted}); err != nil {
 			return "", "", nil, err
 		}
-		return "send", msgID, nil, nil
+		return "send", accepted, nil, nil
 	}
 
 	// Serialize attachment processing per session so the per-session on-disk
@@ -767,7 +765,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	if text != "" {
 		content = append(content, core.TextContent(text))
 	}
-	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{Content: content, MsgID: msgID}); err != nil {
+	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{Content: content, MsgID: msgID, AcceptedMsgID: &accepted}); err != nil {
 		// The message never entered the conversation — roll back any files
 		// written for it so they don't orphan and count against the quota.
 		for _, p := range writtenFiles {
@@ -776,7 +774,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 		m.releaseAttachmentRefs(sessionID, descriptors)
 		return "", "", nil, err
 	}
-	return "send", msgID, descriptors, nil
+	return "send", accepted, descriptors, nil
 }
 
 func (m *Manager) releaseAttachmentRefs(sessionID string, descriptors []attachment.Descriptor) {

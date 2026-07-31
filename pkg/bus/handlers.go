@@ -601,6 +601,12 @@ func RegisterHandlers(sctx *SessionContext) {
 			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text}) {
 				return ErrSteerQueueFull
 			}
+			// Report the identity the message was accepted under: here it is a
+			// queued chip's ID, not a message ID, but it is still what the
+			// caller must reconcile its optimistic entry against.
+			if cmd.AcceptedMsgID != nil {
+				*cmd.AcceptedMsgID = id
+			}
 			// Always kick the pump after enqueuing: this closes the orphan-steer
 			// race where the pump drained the queue empty between our QueueLen
 			// read and this Steer. A coalesced pump pass guarantees our steer is
@@ -627,9 +633,17 @@ func RegisterHandlers(sctx *SessionContext) {
 		// carrying Custom metadata are internal producers (goal/auto-verify/
 		// schedule) or notifications (subagent/bash) with their own rendering, so
 		// they keep the plain path and are not announced.
+		//
+		// The claim happens HERE, at the point the run is accepted, not in the
+		// caller: only an atomic check-and-claim keeps two concurrent sends with
+		// the same client-supplied ID from both landing under it (see
+		// reserveMsgID). The effective ID goes back through AcceptedMsgID.
 		msgID := cmd.MsgID
-		if cmd.Custom == nil && msgID == "" {
-			msgID = core.NewMsgID()
+		if cmd.Custom == nil {
+			msgID = sctx.reserveMsgID(msgID)
+			if cmd.AcceptedMsgID != nil {
+				*cmd.AcceptedMsgID = msgID
+			}
 		}
 		if err := startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
@@ -640,6 +654,11 @@ func RegisterHandlers(sctx *SessionContext) {
 			}
 			return sctx.Agent.Send(ctx, cmd.Text)
 		}); err != nil {
+			// The prompt never ran, so its ID was never shown as delivered:
+			// give it back rather than burning it for the session.
+			if cmd.Custom == nil {
+				sctx.releaseMsgID(msgID)
+			}
 			return err
 		}
 		return nil
@@ -676,14 +695,17 @@ func RegisterHandlers(sctx *SessionContext) {
 		// the send never runs); if startRun itself fails, release it here.
 		nativeBytes := core.NativeDocBytes(cmd.Content)
 		sctx.Agent.ReserveNativeDocBytes(nativeBytes)
-		msgID := cmd.MsgID
-		if msgID == "" {
-			msgID = core.NewMsgID()
+		// Claim the message identity atomically with accepting the run — see
+		// the SendPrompt handler.
+		msgID := sctx.reserveMsgID(cmd.MsgID)
+		if cmd.AcceptedMsgID != nil {
+			*cmd.AcceptedMsgID = msgID
 		}
 		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
 			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID)
 		}); err != nil {
 			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)
+			sctx.releaseMsgID(msgID)
 			return err
 		}
 		return nil
@@ -1135,28 +1157,15 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 		// Scan the display projection: it is the same history clients dedup
 		// against (tree entries plus the in-flight turn), so an ID it already
-		// contains is exactly one that would swallow a new message.
-		if sctx.treeSyncer != nil {
-			for _, m := range sctx.treeSyncer.DisplayMessages() {
-				if m.MsgID == q.MsgID {
-					return true, nil
-				}
-			}
-			return false, nil
+		// contains is exactly one that would swallow a new message. Also
+		// consider IDs claimed by an accepted send whose message has not been
+		// appended yet — the answer is advisory (the send path re-checks under
+		// the reservation lock), but reporting a claimed ID as free would let a
+		// caller confirm an identity it is about to lose.
+		if sctx.msgIDReserved(q.MsgID) {
+			return true, nil
 		}
-		if sctx.Tree != nil {
-			for _, m := range sctx.Tree.AllMessages() {
-				if m.MsgID == q.MsgID {
-					return true, nil
-				}
-			}
-		}
-		for _, m := range sctx.Agent.Messages() {
-			if m.MsgID == q.MsgID {
-				return true, nil
-			}
-		}
-		return false, nil
+		return sctx.msgIDInHistory(q.MsgID), nil
 	})
 
 	b.OnQuery(func(q GetBranchPoints) ([]BranchPoint, error) {

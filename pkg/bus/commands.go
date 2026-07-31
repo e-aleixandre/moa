@@ -34,8 +34,15 @@ type SendPrompt struct {
 	// MsgID, when set, is used as the user message's stable identifier instead
 	// of an auto-minted one, so a caller that later announces this prompt can
 	// reference it by a shared MsgID for reconnect dedup. Ignored when Custom is
-	// set.
+	// set. It is honored only if free: the handler claims the identity atomically
+	// and re-mints a taken one, reporting the effective ID in AcceptedMsgID.
 	MsgID string
+	// AcceptedMsgID, when non-nil, receives the message ID the prompt was
+	// actually accepted under, so a caller that supplied MsgID learns whether it
+	// was re-minted and can reconcile its optimistic echo. Only written for the
+	// direct-send path (a queued prompt becomes a steer and is identified by its
+	// chip ID instead).
+	AcceptedMsgID *string
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).
@@ -45,8 +52,11 @@ type SendPromptWithContent struct {
 	// MsgID, when set, is used as the user message's stable identifier instead
 	// of an auto-minted one, so the live announcement of this prompt
 	// (UserMessageAppended) shares an identity with the caller's optimistic
-	// echo and with reconnect snapshots. Mirrors SendPrompt.MsgID.
+	// echo and with reconnect snapshots. Mirrors SendPrompt.MsgID, including the
+	// atomic claim and re-mint.
 	MsgID string
+	// AcceptedMsgID mirrors SendPrompt.AcceptedMsgID.
+	AcceptedMsgID *string
 }
 
 // SteerAgent injects a steering message into a running agent.

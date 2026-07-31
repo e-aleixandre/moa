@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1472,5 +1473,56 @@ func TestSend_ClientMsgID_RemintedWhenAlreadyInHistory(t *testing.T) {
 	ids := historyMsgIDs(sess)
 	if len(ids) != 2 || ids[0] != first || ids[1] != second {
 		t.Fatalf("history user msg IDs = %v, want [%s %s]", ids, first, second)
+	}
+}
+
+// Two POSTs racing with the same client msg_id on one idle session. Whatever
+// each one ends up doing (starting the run, being queued as a steer, or losing
+// the run slot), the session must never end up with two messages sharing that
+// identity: clients dedup by it, so the duplicate is invisible until a reload
+// and then shows twice. The barrier makes both requests enter Send together.
+func TestSend_ConcurrentSameClientMsgID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(
+		simpleResponseHandler("reply"), simpleResponseHandler("reply2")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var start, done sync.WaitGroup
+	start.Add(1)
+	accepted := make([]string, 2)
+	actions := make([]string, 2)
+	for i := range accepted {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			// An error is a legitimate outcome for the loser of the race (e.g.
+			// it lost the run slot); a duplicated identity is not.
+			actions[i], accepted[i], _, _ = mgr.Send(sess.ID, "hola", nil, "", "c-race")
+		}()
+	}
+	start.Done()
+	done.Wait()
+	pollUntil(t, 5*time.Second, "runs settle", func() bool { return sessState(sess) == StateIdle })
+
+	dupes := 0
+	for _, id := range historyMsgIDs(sess) {
+		if id == "c-race" {
+			dupes++
+		}
+	}
+	if dupes > 1 {
+		t.Fatalf("history holds %d messages under c-race, want at most 1", dupes)
+	}
+	// Whoever was accepted for a direct send must have been told the identity
+	// its message actually landed under.
+	for i, act := range actions {
+		if act == "send" && accepted[i] == "" {
+			t.Fatalf("send %d was accepted without an effective msg ID", i)
+		}
 	}
 }
