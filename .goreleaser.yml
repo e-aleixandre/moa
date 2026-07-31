@@ -41,11 +41,14 @@ brews:
     repository:
       owner: e-aleixandre
       name: homebrew-tap
-      token: '{{ index .Env "TAP_GITHUB_TOKEN" }}'
+      # The token field only accepts the exact `{{ .Env.VAR }}` form (no
+      # `index`, no interpolation); the workflow always sets the variable,
+      # empty when the secret is absent, so the dotted form never fails there.
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     # The tap lives in another repository and needs its own token. When that
     # secret is absent the release still succeeds and only the tap update is
-    # skipped. `index .Env` (rather than `.Env.TAP_GITHUB_TOKEN`) keeps the
-    # template working when the variable is not set at all, e.g. a local run.
+    # skipped. `index .Env` keeps skip_upload working when the variable is not
+    # set at all, e.g. a local run.
     skip_upload: '{{ if index .Env "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
     homepage: "https://letmoa.run"
     description: "Self-hosted coding agent you can steer from anywhere"
