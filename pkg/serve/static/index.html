@@ -7,12 +7,12 @@
        area in the installed PWA, and --crust showed as a darker band there. -->
   <meta name="theme-color" content="#1e1e2e">
   <!-- Home Screen web app chrome comes from manifest.webmanifest
-       (display:standalone), the modern iOS 16.4+ path. The capability metas are
-       kept as a redundant opt-in: on iOS the microphone grant is bound to the
-       installed web app's identity, and a launch that falls back to a
-       browser-style view re-prompts on every open (WebKit only keeps getUserMedia
-       grants in memory outside the web app container — bug 280394). They do not
-       affect the viewport.
+       (display:standalone), the modern iOS 16.4+ path; since iOS 26 any site
+       added to the Home Screen opens as a web app by default. The capability
+       metas are kept only as a redundant opt-in for older iOS and other
+       browsers — they do not affect the viewport, and they do NOT make WebKit
+       remember a microphone grant (bug 280394 is still open: Home Screen web
+       apps have no persistent getUserMedia permission at all).
 
        Still deliberately absent:
        apple-mobile-web-app-status-bar-style=black-translucent — deprecated by
