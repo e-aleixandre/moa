@@ -189,12 +189,15 @@ export function activityPhase(session) {
 // the working phase it returns a steady "Working"; callers that have the session
 // (MobileComposer, StatusStrip) prefer activityAction(session) to name the tool
 // in flight and fall back to a rotating verb only between tools.
-export function activityLabel(phase) {
+//
+// session is optional and only refines the verifying phase, which can be either
+// an automatic post-edit run or a manual /verify aimed at another repository.
+export function activityLabel(phase, session = null) {
   switch (phase) {
     case 'compacting':
       return 'Compacting context';
     case 'verifying':
-      return 'Running auto-verify';
+      return verifyLabel(session);
     case 'waiting':
       return 'Waiting for you';
     case 'thinking':
@@ -235,6 +238,18 @@ export function activityText(session, nowMs = Date.now()) {
   if (phase === null) return null;
   const text = phase === 'working'
     ? activityAction(session) || workingVerb(session, nowMs)
-    : activityLabel(phase);
+    : activityLabel(phase, session);
   return withEllipsis(text, phase);
+}
+
+// A verify aimed at another checkout says which one: during multi-repo work the
+// interesting part is which repository is being checked, and "auto-verify" would
+// be a lie for a run the user started.
+function verifyLabel(session) {
+  const dir = session?.verifyDir;
+  if (dir) {
+    const name = String(dir).replace(/\/+$/, '').split('/').pop();
+    return name ? `Verifying ${name}` : 'Verifying';
+  }
+  return session?.verifyManual ? 'Verifying' : 'Running auto-verify';
 }

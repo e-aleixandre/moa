@@ -1665,12 +1665,18 @@ export function handleWsGoalEnd(id, data) {
   markUnseen(id);
 }
 
-export function handleWsAutoVerifyStart(id) {
-  updateSession(id, { autoVerifying: true });
+export function handleWsAutoVerifyStart(id, data) {
+  // The directory only travels with a manual /verify aimed at another
+  // repository; auto-verify always runs in the session's own.
+  updateSession(id, {
+    autoVerifying: true,
+    verifyDir: data?.dir || null,
+    verifyManual: Boolean(data?.manual),
+  });
 }
 
 export function handleWsAutoVerifyEnd(id, data) {
-  updateSession(id, { autoVerifying: false });
+  updateSession(id, { autoVerifying: false, verifyDir: null, verifyManual: false });
 }
 
 export function handleWsCompactionStart(id) {

@@ -187,3 +187,21 @@ test('liveVerb is case-insensitive', () => {
   expect(liveVerb('Read')).toBe('Reading');
   expect(liveVerb('BASH')).toBe('Running');
 });
+
+test('a verify names the repository when it targets another checkout', () => {
+  // Multi-repo work: the interesting part is which checkout is being verified.
+  expect(activityLabel('verifying', { verifyDir: '/home/me/dev/other-repo', verifyManual: true }))
+    .toBe('Verifying other-repo');
+  expect(activityLabel('verifying', { verifyDir: '/home/me/dev/other-repo/', verifyManual: true }))
+    .toBe('Verifying other-repo');
+});
+
+test('a manual verify of the session directory is not called auto-verify', () => {
+  expect(activityLabel('verifying', { verifyManual: true })).toBe('Verifying');
+});
+
+test('an automatic post-edit verify keeps its label', () => {
+  expect(activityLabel('verifying', { verifyManual: false })).toBe('Running auto-verify');
+  // No session at all (older callers) must not change behaviour.
+  expect(activityLabel('verifying')).toBe('Running auto-verify');
+});

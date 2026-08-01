@@ -19,7 +19,7 @@ Type `/` to open the command palette, or type a command directly:
 | `/undo` | Revert files written/edited by the last agent turn (not bash, MCP, or subagent changes); skips any file changed since then to avoid clobbering it |
 | `/branch` | Rewind to an earlier point and start a new conversation branch (alias `/back`) |
 | `/mcp` | View MCP servers and enable/disable them |
-| `/verify` | Run project verification checks |
+| `/verify [dir]` | Run project verification checks — in `dir` to verify another repository or worktree |
 | `/prompt <name>` | Insert a prompt template |
 | `/rename <title>` | Rename the current session (marks the title manual so auto-titling won't overwrite it) |
 | `/compact` | Force context compaction |

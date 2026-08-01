@@ -133,7 +133,7 @@ func actualToolNames(t *testing.T) map[string]bool {
 	if err := reg.Register(tasks.NewTool(tasks.NewStore())); err != nil {
 		t.Fatalf("register tasks: %v", err)
 	}
-	if err := reg.Register(verify.NewTool(workspace)); err != nil {
+	if err := reg.Register(verify.NewTool(workspace, nil)); err != nil {
 		t.Fatalf("register verify: %v", err)
 	}
 	if err := reg.Register(skill.NewTool([]skill.Skill{{Name: "example"}})); err != nil {

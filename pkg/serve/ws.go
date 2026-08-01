@@ -254,7 +254,9 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.SteersCanceled:
 		return Event{Type: "steers_canceled"}, true
 	case bus.AutoVerifyStarted:
-		return Event{Type: "auto_verify_start"}, true
+		return Event{Type: "auto_verify_start", Data: map[string]any{
+			"dir": e.Dir, "manual": e.Manual,
+		}}, true
 	case bus.AutoVerifyEnded:
 		data := map[string]any{"all_pass": e.AllPass, "summary": e.Summary}
 		if e.Err != nil {

@@ -247,7 +247,7 @@ func executeBarrier(sctx *SessionContext, raw string) error {
 	case "goal":
 		return executeQueuedGoal(sctx, rest)
 	case "verify":
-		return sctx.Bus.Execute(RunManualVerify{SessionID: sctx.SessionID})
+		return sctx.Bus.Execute(RunManualVerify{SessionID: sctx.SessionID, Dir: strings.TrimSpace(rest)})
 	}
 	return nil
 }

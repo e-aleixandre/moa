@@ -324,15 +324,16 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// session, not just one opened inside this repo.
 	core.RegisterOrLog(toolReg, moadocs.NewTool())
 
-	// 4. Verify tool.
+	// 4. Verify tool. Registered even when the session's own directory has no
+	// config: in multi-repo work the code being changed often lives in another
+	// worktree, and the tool can target it with cwd. Without this the tool
+	// would be missing from exactly the sessions that need it most.
 	verifyCfg, verifyErr := verify.LoadConfig(cfg.CWD)
 	if verifyErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: invalid .moa/verify.json in %s: %v\n", cfg.CWD, verifyErr)
 	}
 	hasVerify := verifyCfg != nil
-	if hasVerify {
-		core.RegisterOrLog(toolReg, verify.NewTool(cfg.CWD))
-	}
+	core.RegisterOrLog(toolReg, verify.NewTool(cfg.CWD, pathPolicy))
 
 	// 5. AGENTS.md.
 	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, "")

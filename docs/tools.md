@@ -33,7 +33,7 @@ Conditionally registered:
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | TUI or web UI is active (not headless) |
-| `verify` | `.moa/verify.json` exists |
+| `verify` | always |
 | `load_skill` | At least one skill is discovered in `.moa/skills/` or `~/.config/moa/skills/` |
 
 ## Tool selection guidance
@@ -223,4 +223,29 @@ Define project checks in `.moa/verify.json`:
 }
 ```
 
-Run with `/verify` in the TUI, or automatically after changes if `auto_verify` is enabled in config.
+Run with `/verify`, or automatically after changes if `auto_verify` is enabled in config.
+
+### Verifying another repository or worktree
+
+Checks run in the session's working directory by default. When a session's work
+spans several checkouts — the conversation starts in one repository and the code
+being changed lives in another worktree — point verify at the other directory
+instead of editing `.moa/verify.json` to reach across:
+
+```
+/verify ../other-worktree
+```
+
+The agent can do the same through the tool's `cwd` parameter. Relative paths
+resolve against the session directory, and the target's own `.moa/verify.json`
+is the one that runs.
+
+The directory must be one the session is allowed to touch: running a
+`.moa/verify.json` means running the shell commands inside it, so the sandbox
+applies here as it does everywhere else. If it is refused, allow it with
+`/path add <dir>`. Sessions running unrestricted (YOLO) can target any
+directory.
+
+The `verify` tool is available even when the session's own directory has no
+`.moa/verify.json` — otherwise it would be missing from exactly the multi-repo
+sessions that need it. Called with nothing to run, it says so.

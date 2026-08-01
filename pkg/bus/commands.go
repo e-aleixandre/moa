@@ -210,7 +210,15 @@ type PrepareCompactSession struct{ SessionID string }
 // is in flight, ErrVerifyRunning when one is already running, or a check
 // failure). The serve/TUI /verify commands are routed through it in a later
 // commit so both frontends share this state-occupying implementation.
-type RunManualVerify struct{ SessionID string }
+//
+// Dir carries the optional directory of `/verify <dir>`; empty means the
+// session's own. It has to travel with the command because a /verify typed
+// mid-run is queued as raw text and replayed here — dropping the directory
+// would silently verify the wrong repository.
+type RunManualVerify struct {
+	SessionID string
+	Dir       string
+}
 
 // UndoLastChange pops the last checkpoint and restores files.
 type UndoLastChange struct{ SessionID string }

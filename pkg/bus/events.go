@@ -618,9 +618,14 @@ type CommandExecuted struct {
 // Auto-verify
 // ---------------------------------------------------------------------------
 
-// AutoVerifyStarted is published when auto-verify begins after an edit run.
+// AutoVerifyStarted is published when verification begins: automatically after
+// an edit run, or manually via /verify. Dir names the directory being verified
+// when it is not the session's own, so a multi-repo run says which checkout it
+// is checking instead of leaving the user guessing.
 type AutoVerifyStarted struct {
 	SessionID string
+	Dir       string // empty when verifying the session's own directory
+	Manual    bool   // true for /verify, false for auto-verify after an edit
 }
 
 // AutoVerifyEnded is published when auto-verify completes.
