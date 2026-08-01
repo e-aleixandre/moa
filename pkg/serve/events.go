@@ -236,11 +236,15 @@ func pctOf(frac float64) int {
 	return int(frac*100 + 0.5)
 }
 
-// SteerData is sent when the user steers a running agent.
+// SteerData is sent when the user steers a running agent. Content carries the
+// injected message's blocks when the steer had attachments, so clients render
+// the thumbnails live instead of only after a reload; a text-only steer travels
+// in Text alone.
 type SteerData struct {
-	ID    string `json:"id,omitempty"`
-	MsgID string `json:"msg_id,omitempty"`
-	Text  string `json:"text"`
+	ID      string         `json:"id,omitempty"`
+	MsgID   string         `json:"msg_id,omitempty"`
+	Text    string         `json:"text"`
+	Content []core.Content `json:"content,omitempty"`
 }
 
 // UserMessageData is sent when a user prompt starts a new run, so every

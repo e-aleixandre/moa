@@ -269,6 +269,72 @@ func TestWsEventFromBus_UserMessageAppended_DropsInlineAttachment(t *testing.T) 
 	}
 }
 
+func TestWsEventFromBus_Steered_DropsInlineAttachment(t *testing.T) {
+	// A steer delivered with attachments carries its blocks so the message
+	// renders live with its thumbnail, but the inline payload must be bounded
+	// by the same history projection as a normal user message.
+	ev, ok := wsEventFromBus(bus.Steered{
+		SessionID: "s1", ID: "st1", MsgID: "m3", Text: "mira esto",
+		Content: []core.Content{
+			core.ImageContent(strings.Repeat("a", historyContentMaxBytes+1), "image/png"),
+			core.TextContent("mira esto"),
+		},
+	})
+	if !ok || ev.Type != "steer" {
+		t.Fatalf("Type = %q ok=%v, want steer", ev.Type, ok)
+	}
+	data, ok := ev.Data.(SteerData)
+	if !ok {
+		t.Fatalf("Data type = %T, want SteerData", ev.Data)
+	}
+	if data.ID != "st1" || data.MsgID != "m3" || data.Text != "mira esto" {
+		t.Fatalf("Data = %+v", data)
+	}
+	if len(data.Content) != 2 {
+		t.Fatalf("Content = %+v, want two blocks", data.Content)
+	}
+	if data.Content[0].Data != "" {
+		t.Fatalf("oversized inline image data was not stripped")
+	}
+	if data.Content[1].Text != "mira esto" {
+		t.Fatalf("text block = %q, want %q", data.Content[1].Text, "mira esto")
+	}
+}
+
+// A steer's own text is bounded like a user message's: a huge prompt sent with
+// an attachment must not ride along uncapped just because Content is projected.
+func TestWsEventFromBus_Steered_TruncatesOversizedText(t *testing.T) {
+	huge := strings.Repeat("x", 4*historyContentMaxBytes)
+	ev, ok := wsEventFromBus(bus.Steered{
+		SessionID: "s1", ID: "st3", MsgID: "m5", Text: huge,
+		Content: []core.Content{core.ImageContent("aW1n", "image/png")},
+	})
+	if !ok {
+		t.Fatal("expected a steer event")
+	}
+	data := ev.Data.(SteerData)
+	if len(data.Text) >= len(huge) {
+		t.Fatalf("steer text = %d bytes, want it truncated below the original %d", len(data.Text), len(huge))
+	}
+	if !strings.Contains(data.Text, "truncated on this device") {
+		t.Fatalf("truncated steer text lost its marker: %q", data.Text[max(0, len(data.Text)-60):])
+	}
+}
+
+func TestWsEventFromBus_Steered_TextOnly(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.Steered{SessionID: "s1", ID: "st2", MsgID: "m4", Text: "sigue"})
+	if !ok || ev.Type != "steer" {
+		t.Fatalf("Type = %q ok=%v, want steer", ev.Type, ok)
+	}
+	data, ok := ev.Data.(SteerData)
+	if !ok {
+		t.Fatalf("Data type = %T, want SteerData", ev.Data)
+	}
+	if data.Text != "sigue" || len(data.Content) != 0 {
+		t.Fatalf("Data = %+v, want text-only steer", data)
+	}
+}
+
 func TestCountImageContent(t *testing.T) {
 	got := countImageContent([]core.Content{
 		core.TextContent("hi"),

@@ -167,12 +167,17 @@ type CompactionEnded struct {
 // ---------------------------------------------------------------------------
 
 // Steered is published when a steering message is injected into the agent.
+// Content carries the injected message's blocks when the steer had attachments
+// (Text always holds its plain text, which is what text-only consumers render);
+// without it a queued message with an image would appear live as bare text and
+// only grow its thumbnail after a reload.
 type Steered struct {
 	SessionID string
 	RunGen    uint64
 	ID        string
 	MsgID     string
 	Text      string
+	Content   []core.Content
 }
 
 // SteersCanceled is published when all queued (not yet delivered) steers are

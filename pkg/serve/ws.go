@@ -229,7 +229,15 @@ func wsEventFromBus(event any) (Event, bool) {
 			Command: e.Command, Messages: messages, HistoryTruncated: truncated,
 		}}, true
 	case bus.Steered:
-		return Event{Type: "steer", Data: SteerData{ID: e.ID, MsgID: e.MsgID, Text: e.Text}}, true
+		data := SteerData{ID: e.ID, MsgID: e.MsgID, Text: truncateHistoryString(e.Text)}
+		if len(e.Content) > 0 {
+			// Same history projection as UserMessageAppended, so an attached
+			// image travels bounded (inline payloads stripped to references)
+			// instead of blowing up the frame.
+			sanitized, _ := sanitizeHistoryMessage(core.WrapMessage(core.NewUserMessageWithContent(e.Content)))
+			data.Content = sanitized.Content
+		}
+		return Event{Type: "steer", Data: data}, true
 	case bus.UserMessageAppended:
 		data := UserMessageData{MsgID: e.MsgID, Text: truncateHistoryString(e.Text)}
 		if len(e.Content) > 0 {

@@ -329,6 +329,23 @@ test('handleWsSteer dedups the injected user message by MsgID', () => {
   expect(sess.pendingSteers).toBeNull();
 });
 
+test('handleWsSteer keeps the content blocks of a queued send with attachments', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], pendingSteers: [{ id: 'q1', text: 'mira esto' }] } } });
+
+  const content = [
+    { type: 'image', attachment_id: 'a1', mime_type: 'image/png' },
+    { type: 'text', text: 'mira esto' },
+  ];
+  handleWsSteer('s1', { id: 'q1', msg_id: 'm9', text: 'mira esto', content });
+
+  const sess = store.get().sessions.s1;
+  expect(sess.messages).toHaveLength(1);
+  expect(sess.messages[0].content).toEqual(content);
+  expect(sess.messages[0]._steer_id).toBe('q1');
+  expect(sess.pendingSteers).toBeNull();
+});
+
 test('handleWsUserMessage appends a prompt sent from another client', () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });

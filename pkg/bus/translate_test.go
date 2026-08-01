@@ -93,6 +93,34 @@ func TestTranslateAgentEvent_ParityWithBridge(t *testing.T) {
 			in:   core.AgentEvent{Type: core.AgentEventSteer, SteerID: "st1", Text: "steer msg"},
 			want: []any{Steered{SessionID: sid, RunGen: gen, ID: "st1", Text: "steer msg"}},
 		},
+		{
+			// A steer with attachments must publish its blocks so clients paint
+			// the thumbnails live, not only after a reload.
+			name: "steer_with_attachment",
+			in: core.AgentEvent{
+				Type: core.AgentEventSteer, SteerID: "st2", MsgID: "m2", Text: "mira esto",
+				Message: core.WrapMessage(core.NewUserMessageWithContent([]core.Content{
+					{Type: "image", Data: "aW1n", MimeType: "image/png"},
+					{Type: "text", Text: "mira esto"},
+				})),
+			},
+			want: []any{Steered{
+				SessionID: sid, RunGen: gen, ID: "st2", MsgID: "m2", Text: "mira esto",
+				Content: []core.Content{
+					{Type: "image", Data: "aW1n", MimeType: "image/png"},
+					{Type: "text", Text: "mira esto"},
+				},
+			}},
+		},
+		{
+			// Text-only steers keep their old shape: no redundant blocks on the wire.
+			name: "steer_text_only",
+			in: core.AgentEvent{
+				Type: core.AgentEventSteer, SteerID: "st3", Text: "plain",
+				Message: core.WrapMessage(core.NewUserMessage("plain")),
+			},
+			want: []any{Steered{SessionID: sid, RunGen: gen, ID: "st3", Text: "plain"}},
+		},
 	}
 
 	for _, tc := range cases {

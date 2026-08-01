@@ -1414,7 +1414,13 @@ export function handleWsSteer(id, data) {
   const already = data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id);
   const patch = { pendingSteers: steers.length > 0 ? steers : null };
   if (!already) {
-    const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content: [{ type: 'text', text: data.text }] };
+    // A steer with attachments arrives with its blocks (same projection as
+    // user_message), so the delivered message shows its thumbnails live; a
+    // text-only steer only carries text.
+    const content = Array.isArray(data.content) && data.content.length > 0
+      ? data.content
+      : [{ type: 'text', text: data.text }];
+    const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content };
     patch.messages = [...sess.messages, userMsg];
   }
   updateSession(id, patch);

@@ -833,7 +833,15 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return events
 
 	case core.AgentEventSteer:
-		return []any{Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}}
+		ev := Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}
+		// A steer always carries its plain text, but one with attachments was
+		// injected as content blocks: publish them too so clients render the
+		// thumbnails live instead of only after a reload. Text-only steers keep
+		// travelling as Text alone, so their shape is unchanged.
+		if hasNonTextContent(e.Message.Content) {
+			ev.Content = e.Message.Content
+		}
+		return []any{ev}
 
 	case core.AgentEventUserMessage:
 		ev := UserMessageAppended{SessionID: sid, RunGen: gen, MsgID: e.MsgID, Text: e.Text}
@@ -857,4 +865,17 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		}}
 	}
 	return nil
+}
+
+// hasNonTextContent reports whether a message carries blocks that plain text
+// can't express (images, documents). Used to decide when a steer must publish
+// its full content: a text-only steer is fully described by its Text, so
+// shipping its blocks would just fatten every WS frame for nothing.
+func hasNonTextContent(content []core.Content) bool {
+	for _, c := range content {
+		if c.Type != "text" {
+			return true
+		}
+	}
+	return false
 }

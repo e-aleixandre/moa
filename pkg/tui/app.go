@@ -1565,6 +1565,25 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 			m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, e.Text))
 		} else {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
+			// A steer queued with an image now carries its blocks, so the
+			// delivered message gets the same attachment marker as an idle send
+			// (see startAgentRun) instead of appearing as bare text.
+			for _, c := range e.Content {
+				if c.Type == "image" {
+					// Durable attachments (sent from the web) travel as a
+					// reference with no inline Data, so size comes from
+					// AttachmentSize; only an inline payload is measured from
+					// its base64 length, as core.NativeDocBytes does.
+					size := c.AttachmentSize
+					if size == 0 {
+						size = int64(len(c.Data) * 3 / 4)
+					}
+					m.s.blocks = append(m.s.blocks, messageBlock{
+						Type: "status",
+						Raw:  fmt.Sprintf("📎 Image attached (%d KB, %s)", size/1024, c.MimeType),
+					})
+				}
+			}
 		}
 		m.s.viewportDirty = true
 
