@@ -18,10 +18,12 @@ Type `/` to open the command palette, or type a command directly:
 | `/tasks [done\|reset\|show]` | View or manage implementation tasks |
 | `/undo` | Revert files written/edited by the last agent turn (not bash, MCP, or subagent changes); skips any file changed since then to avoid clobbering it |
 | `/branch` | Rewind to an earlier point and start a new conversation branch (alias `/back`) |
+| `/mcp` | View MCP servers and enable/disable them |
 | `/verify` | Run project verification checks |
 | `/prompt <name>` | Insert a prompt template |
 | `/rename <title>` | Rename the current session (marks the title manual so auto-titling won't overwrite it) |
 | `/compact` | Force context compaction |
+| `/prepare-compact` | Write a handoff note, then compact context |
 | `/voice` | Toggle voice recording |
 | `/settings` | Open settings menu |
 | `/clear` | Clear conversation, start fresh session |

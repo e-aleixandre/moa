@@ -112,6 +112,7 @@ global config and a project's jargon in its `.moa/config.json`:
 | Field | Type | Description |
 |-------|------|-------------|
 | `mcp_servers` | map | MCP server definitions (see example above) |
+| `disabled_mcp_servers` | []string | Server names vetoed at this config level: the server stays configured but is never started |
 | `trusted_mcp_paths` | []string | Project dirs whose `.mcp.json` is trusted. **Global-only.** |
 | `trusted_project_paths` | []string | Project dirs whose `.moa/config.json` and `.moa/tools/*` are auto-loaded without a trust prompt. **Global-only.** |
 
