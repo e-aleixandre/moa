@@ -363,3 +363,13 @@ func TestSafePath_ActionableError(t *testing.T) {
 		t.Errorf("error should suggest parent dir /foo/bar: %s", msg)
 	}
 }
+
+// A nil *PathPolicy reaches IsAllowed through interfaces that hold an optional
+// policy (pkg/verify's PathChecker). A typed nil in an interface is not == nil,
+// so the nil check has to live on the method.
+func TestPathPolicy_NilReceiverAllows(t *testing.T) {
+	var p *PathPolicy
+	if !p.IsAllowed("/anywhere") {
+		t.Fatal("a nil policy means no policy configured, which allows everything")
+	}
+}

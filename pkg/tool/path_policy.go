@@ -39,7 +39,15 @@ func NewPathPolicy(root string, allowed []string, unrestricted bool) *PathPolicy
 
 // IsAllowed checks whether realPath (already symlink-resolved) is permitted.
 // It checks workspace root containment, then allowed paths.
+//
+// A nil policy means no policy was configured, and allows everything — so
+// callers holding an optional *PathPolicy can pass it straight through,
+// including when it is wrapped in an interface, where a nil check at the call
+// site would not catch it.
 func (p *PathPolicy) IsAllowed(realPath string) bool {
+	if p == nil {
+		return true
+	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
