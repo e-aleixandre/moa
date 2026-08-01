@@ -134,16 +134,30 @@ test('workingVerb rotates deterministically from the run start', () => {
 test('activityText follows the resolution order', () => {
   // idle → nothing
   expect(activityText({ state: 'idle' })).toBe(null);
-  // working with a tool → the synthesized action
-  expect(activityText(running('edit', {}))).toBe('Editing code');
-  expect(activityText(running('bash', { command: 'go test ./...' }))).toBe('Running tests');
+  // working with a tool → the synthesized action, ellipsized (work in progress)
+  expect(activityText(running('edit', {}))).toBe('Editing code…');
+  expect(activityText(running('bash', { command: 'go test ./...' }))).toBe('Running tests…');
   // working between tools → rotating verb anchored to the run start
-  expect(activityText({ state: 'running', runStartedAtMs: 10000, messages: [] }, 18000)).toBe('Noodling');
+  expect(activityText({ state: 'running', runStartedAtMs: 10000, messages: [] }, 18000)).toBe('Noodling…');
   // special phases keep fixed copy, ignoring any tool
-  expect(activityText({ state: 'running', thinkingText: 'x' })).toBe('Thinking');
+  expect(activityText({ state: 'running', thinkingText: 'x' })).toBe('Thinking…');
+  expect(activityText({ state: 'running', compacting: true })).toBe('Compacting context…');
+  expect(activityText({ state: 'running', autoVerifying: true })).toBe('Running auto-verify…');
+});
+
+// The ellipsis is a PROGRESS claim, so it is attached only where something is
+// actually happening. Waiting parks the run on a human: no motion, no ellipsis.
+test('activityText withholds the ellipsis while waiting on the user', () => {
   expect(activityText({ state: 'permission' })).toBe('Waiting for you');
-  expect(activityText({ state: 'running', compacting: true })).toBe('Compacting context');
-  expect(activityText({ state: 'running', autoVerifying: true })).toBe('Running auto-verify');
+  expect(activityText({ state: 'running', pendingAsk: { id: 'a' } })).toBe('Waiting for you');
+});
+
+// The tables stay punctuation-free: the ellipsis is added by the presentation
+// layer (activityText), never baked into the data.
+test('the activity data tables carry no ellipsis', () => {
+  for (const verb of WORKING_VERBS) expect(verb.endsWith('…')).toBe(false);
+  expect(activityAction(running('grep', {}))).toBe('Searching the code');
+  expect(activityLabel('thinking')).toBe('Thinking');
 });
 
 // ── liveVerb (live-row verb table, RUNNING-TOOL-SPEC-FABLE.md §2) ──────────

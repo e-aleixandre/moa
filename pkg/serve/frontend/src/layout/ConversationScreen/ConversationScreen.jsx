@@ -6,6 +6,7 @@ import { LiveDock } from "../LiveDock/LiveDock.jsx";
 import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
+import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
@@ -19,7 +20,7 @@ import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
-import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
+import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
@@ -74,29 +75,6 @@ function spineSessions(sessions) {
   return { active, saved };
 }
 
-// currentActivity derives the StatusStrip's activity label from the shared
-// activityText resolver: the synthesized action while the agent works (e.g.
-// "Running tests", "Editing code"), the fixed phase copy for special phases,
-// with an elapsed timer appended while running; nothing when idle. The task
-// title is deliberately NOT shown here — task progress lives in the N/M tasks
-// pill. `nowMs` is the ticking clock (see ConversationScreen's interval) so the
-// timer advances on its own — its origin is always the server-stamped
-// runStartedAtMs, never a client Date.now() start.
-function currentActivity(session, nowMs) {
-  const label = activityText(session, nowMs);
-  if (!label) return undefined;
-  const phase = activityPhase(session);
-  const runStartedAtMs = session.runStartedAtMs || 0;
-  // Show the timer only for the running phases, not the momentary
-  // compacting/verifying/waiting states where an age counter reads oddly.
-  const showTimer = runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
-  if (showTimer) {
-    const elapsedText = formatElapsed(Math.max(0, nowMs - runStartedAtMs));
-    return elapsedText ? `${label} · ${elapsedText}` : label;
-  }
-  return label;
-}
-
 function fmtSpend(costUSD) {
   if (!costUSD || costUSD <= 0) return undefined;
   return fmtCost(costUSD);
@@ -112,9 +90,10 @@ export function ConversationScreen({ version }) {
   const loaded = state.sessionsLoaded;
 
   // Activity clock: while the focused session shows live activity, tick once a
-  // second so the StatusStrip's elapsed timer advances on its own. The timer
-  // origin is the server-stamped runStartedAtMs (read in currentActivity), not
-  // this clock — the clock only supplies "now".
+  // second so the NowLine's elapsed timer advances on its own. The timer origin
+  // is the server-stamped runStartedAtMs (read inside NowLine), not this clock —
+  // the clock only supplies "now", and NowLine reuses it instead of starting a
+  // second interval for the same tick.
   const activityActive = activityPhase(session) !== null;
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -394,13 +373,18 @@ export function ConversationScreen({ version }) {
                 onOpen={(id) => openPersistedSubagent(session.id, id)}
               />
             )}
+            {/* The activity now-line sits ABOVE the input, as on mobile: what
+                is happening NOW belongs next to where you'd interrupt it, while
+                the strip below keeps the standing telemetry (context, cost,
+                permissions, MCP, tokens). flex:none, so it pushes the stream up
+                instead of overlaying the composer. */}
+            <NowLine session={session} nowMs={nowMs} />
             <Composer key={session.id} sessionId={session.id} session={session} />
             <div class="status-strip-anchor" ref={usageAnchorRef}>
               <StatusStrip
                 ctxPercent={session.contextPercent}
                 tokensUp={session.runTokensUp}
                 tokensDown={session.runTokensDown}
-                task={currentActivity(session, nowMs)}
                 spend={fmtSpend(session.costUSD)}
                 session={session}
                 usage={state.usage}

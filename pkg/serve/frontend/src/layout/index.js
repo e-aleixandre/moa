@@ -6,6 +6,7 @@ export { LiveDock } from "./LiveDock/LiveDock.jsx";
 export { SubagentView } from "./SubagentView/SubagentView.jsx";
 export { Composer } from "./Composer/Composer.jsx";
 export { StatusStrip } from "./StatusStrip/StatusStrip.jsx";
+export { NowLine } from "./NowLine/NowLine.jsx";
 export { ConversationScreen } from "./ConversationScreen/ConversationScreen.jsx";
 export { GridToolbar } from "./GridToolbar/GridToolbar.jsx";
 export { Pane } from "./Pane/Pane.jsx";

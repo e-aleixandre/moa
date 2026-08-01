@@ -108,7 +108,8 @@ test('a running subagent surfaces a gerund for its in-flight tool as the now-lin
   ];
   const session = { id: 's1', messages: [], subagents: { j1: sub({ messages }) } };
   const v = subagentView(session, 'j1');
-  expect(v.action).toBe('Reading files');
+  // ellipsized by activityText: the child is working right now
+  expect(v.action).toBe('Reading files…');
   expect(v.elapsed).toBeUndefined(); // no startedAtMs → segment omitted
 });
 

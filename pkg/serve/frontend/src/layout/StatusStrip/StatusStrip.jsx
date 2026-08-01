@@ -11,9 +11,12 @@ import { activityPhase } from "../../data/util/activity.js";
 // panel, NOT the whole accounting dump.
 //
 // Level 1 (this line): the context ring + session cost (leading the line, same
-// side as the mobile line), per-run tokens, the permission chip, the current
-// task, and the modes that are currently ACTIVE (plan/goal/tasks) plus the
-// on-extra alert.
+// side as the mobile line), per-run tokens, the permission chip, and the modes
+// that are currently ACTIVE (plan/goal/tasks) plus the on-extra alert. The
+// foreground run's ACTIVITY is not here: it lives in the NowLine above the
+// composer, in both densities. `task` survives for the consumers whose subject
+// is NOT the focused run — the subagent strip (a child's activity, which can be
+// live while the parent sits idle, hence `taskLive`), the panes and the catalog.
 // Level 2 (the full accounting: cost breakdown, tokens, detailed context, plan
 // windows, extra) lives in the UsagePanel, opened by tapping the cost segment.
 //

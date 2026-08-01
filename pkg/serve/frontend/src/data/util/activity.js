@@ -206,15 +206,35 @@ export function activityLabel(phase) {
   }
 }
 
+// IN_PROGRESS_PHASES are the phases where something is actually happening right
+// now, and therefore the only ones that earn a trailing ellipsis (see
+// withEllipsis). 'waiting' is deliberately absent: the run is parked on a human,
+// so "Waiting for you…" would claim a progress that does not exist — the same
+// reason the now-line drops the shimmer and the elapsed timer while waiting.
+const IN_PROGRESS_PHASES = new Set(['working', 'thinking', 'compacting', 'verifying']);
+
+// withEllipsis is the PRESENTATION step that turns a bare phrase into the
+// in-progress reading the product wants ("Untangling…", "Searching the code…").
+// It lives here, at the resolver, so the data tables (WORKING_VERBS,
+// TOOL_ACTIONS, BASH_INTENTS) stay punctuation-free and reusable elsewhere.
+// Always the single U+2026 character, never three periods.
+function withEllipsis(text, phase) {
+  if (!text || !IN_PROGRESS_PHASES.has(phase)) return text;
+  return text.endsWith('…') ? text : `${text}…`;
+}
+
 // activityText resolves the full activity phrase for a session, following the
 // SPEC order: special phases keep their fixed copy; the working phase names the
 // in-flight tool via activityAction and falls back to a rotating verb between tools;
-// idle (null phase) returns null so the segment hides. This is the single
-// source both the mobile status line and the desktop status strip consume, so
+// idle (null phase) returns null so the segment hides. Phrases for phases where
+// work is actually happening get a trailing ellipsis (withEllipsis). This is the
+// single source both the mobile status line and the desktop now-line consume, so
 // they never diverge. It never returns the task title or a raw tool call.
 export function activityText(session, nowMs = Date.now()) {
   const phase = activityPhase(session);
   if (phase === null) return null;
-  if (phase === 'working') return activityAction(session) || workingVerb(session, nowMs);
-  return activityLabel(phase);
+  const text = phase === 'working'
+    ? activityAction(session) || workingVerb(session, nowMs)
+    : activityLabel(phase);
+  return withEllipsis(text, phase);
 }

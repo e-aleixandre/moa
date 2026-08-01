@@ -1,0 +1,114 @@
+/* NowLine (desktop) — the activity now-line, a flex sibling (flex:none) of the
+   Stream and the Composer, placed directly above the composer. Because the
+   stream is the flexible child, the now-line's mere presence REDUCES the
+   stream's height: it pushes the transcript up instead of overlaying it, and it
+   never covers or click-blocks the composer below. Absent when idle (the
+   component returns null → removed from flow), so the layout shift is one line
+   at most, never a jump over the input.
+
+   It shares the mobile line's JSX but not its rules: here it must align with the
+   desktop column (the 844px composer/StatusStrip measure, same --space-8 gutter)
+   instead of the mobile screen's edge padding. Deliberately NOT a header or a
+   rail: no fill, no box, no border — it reads as the last, living line of the
+   conversation. */
+.nowline {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* same measure + gutter as .composer-wrap, so the dot sits on the composer's
+     left edge rather than floating in the page */
+  max-width: 844px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 0 var(--space-8) var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  overflow: hidden;
+  animation: nowline-in 0.2s var(--ease);
+}
+
+@keyframes nowline-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.nowline-act {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--subtext0);
+}
+
+.nowline-act::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--sky);
+  flex: none;
+}
+
+/* the activity phrase — overflow-safe, with the exact work-shimmer sweep the
+   StatusStrip / SubagentView use. Long actions truncate with an ellipsis rather
+   than clipping mid-glyph or reflowing the composer. */
+.nowline-act .txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nowline-act .txt.is-live {
+  background: linear-gradient(
+    90deg,
+    var(--subtext0) 0%,
+    var(--subtext0) 35%,
+    var(--sky) 50%,
+    var(--subtext0) 65%,
+    var(--subtext0) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+  animation: work-shimmer 2.5s ease-in-out infinite;
+}
+
+/* elapsed timer — the honest progress signal (formatElapsed: "12s", "1m03s").
+   flex:none, tabular, quiet; never truncates. */
+.nowline-elapsed {
+  flex: none;
+  color: var(--overlay0);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* waiting / permission — the run is parked on you, so nothing is progressing:
+   the shimmer stops (motion would imply work), the dot goes amber (the same
+   attention hue as state-dot.permission), and there is no elapsed counter. */
+.nowline.is-waiting .nowline-act {
+  color: var(--yellow);
+}
+.nowline.is-waiting .nowline-act::before {
+  background: var(--yellow);
+}
+
+/* reduced motion — kill the shimmer AND the reveal slide; the now-line still
+   appears/disappears, just statically (parity with the app's handling of
+   .work.is-live). */
+@media (prefers-reduced-motion: reduce) {
+  .nowline {
+    animation: none;
+  }
+  .nowline-act .txt.is-live {
+    animation: none;
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--subtext0);
+  }
+}
