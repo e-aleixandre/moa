@@ -1,5 +1,6 @@
 import { build, context } from "esbuild";
-import { copyFileSync, mkdirSync } from "fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
 
 const watch = process.argv.includes("--watch");
 const outdir = "../static";
@@ -27,9 +28,27 @@ const copyStatic = {
       for (const f of staticAssets) {
         copyFileSync(`src/${f}`, `${outdir}/${f}`);
       }
+      stampBuildID();
     });
   },
 };
+
+// The bundle ships under fixed names, so nothing in a served response tells a
+// client whether its code is still the code the server has. stampBuildID
+// derives one id from the built output and writes it twice: into the bundle
+// itself (so a running client knows which build it is) and into build-id.txt
+// (which the server reports on /api/version). Same build, same id — a mismatch
+// means the page is stale. Digesting the output makes it reproducible and
+// independent of release tooling: a self-built binary carries no version.
+function stampBuildID() {
+  const js = readFileSync(`${outdir}/app.js`);
+  const css = readFileSync(`${outdir}/app.css`);
+  const id = createHash("sha256").update(js).update(css).digest("hex").slice(0, 12);
+  writeFileSync(`${outdir}/build-id.txt`, `${id}\n`);
+  // Appended rather than injected via `define`, which would feed back into the
+  // digest it is derived from.
+  writeFileSync(`${outdir}/app.js`, `${js}\nglobalThis.__MOA_BUILD_ID__=${JSON.stringify(id)};\n`);
+}
 
 const config = {
   entryPoints: ["src/app.jsx"],

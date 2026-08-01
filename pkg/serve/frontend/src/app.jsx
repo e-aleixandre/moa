@@ -17,6 +17,8 @@ import {
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
+import { adoptBuild } from "./data/stale-build.js";
+import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
 import {
   setMobile, autoFillTiles, autoSelectMobile, openSession,
@@ -133,6 +135,20 @@ function GalleryNav({ current }) {
 // conversation ⇄ grid hop flips it in place via the router (data/router.js)
 // with no full-page reload; consumers read state.view reactively.
 
+// checkBuild reacts to a /api/version response: reload when the page is running
+// a bundle the server has replaced, and fall back to telling the user when even
+// a cache-busting reload came back stale (on iOS only closing the app from the
+// app switcher clears its memory cache).
+function checkBuild(result) {
+  adoptBuild(result, {
+    onStale: () => addToast({
+      title: "New version available",
+      detail: "Close moa from the app switcher and open it again",
+      type: "info",
+    }),
+  });
+}
+
 // useBootstrap wires the app to the data engine: session loading, polling,
 // version, mobile breakpoint, and foreground/background lifecycle. Ported from
 // the old SPA's App (pkg/serve/frontend/src/app.jsx).
@@ -170,10 +186,16 @@ function useBootstrap() {
   }, []);
 
   // Version poll: state changes at most once per six-hour server cache window;
-  // retry 60s on failure, refresh every 6h.
+  // retry 60s on failure, refresh every 6h. The same response also carries the
+  // build id of the bundle the server is serving, which is checked on every
+  // poll — a client running superseded code should not have to wait six hours
+  // (see data/stale-build.js).
   useEffect(() => {
     let retry;
-    const refresh = () => getVersion().then(setVersion).catch(() => {
+    const refresh = () => getVersion().then((v) => {
+      setVersion(v);
+      checkBuild(v);
+    }).catch(() => {
       retry = setTimeout(refresh, 60 * 1000);
     });
     refresh();
@@ -230,6 +252,10 @@ function useBootstrap() {
         // Also restarts the usage timer, and refreshes immediately so the
         // status line is not showing a number from before the app was hidden.
         startUsagePolling();
+        // Returning to a backgrounded PWA is when a user expects to see the
+        // interface that was deployed meanwhile, and on iOS it is the only
+        // moment an installed app re-reads anything at all.
+        getVersion().then(checkBuild).catch(() => {});
       } else {
         stopPolling();
         // Without this the usage timer kept polling every minute in the

@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The web app no longer keeps running an old interface after an update. The
+  assets ship under fixed names and were served with no validator and no cache
+  directive, so a browser was free to reuse the copy it first saw — an installed
+  iOS PWA, which has its own cache container and no reload affordance, could
+  stay on a superseded interface until the icon was deleted and added again.
+  Assets are now served with a content `ETag` and `Cache-Control: no-cache`, so
+  an unchanged bundle still costs only a 304 while a new one is picked up.
+- The web app also checks for itself: `/api/version` reports the id of the
+  bundle the server is serving, and a page running a superseded one reloads past
+  the cache — on load, on the version poll, and when an installed app returns to
+  the foreground. If even that comes back stale, it says so instead of looping,
+  since on iOS only closing the app from the app switcher clears its memory
+  cache.
+
 ## [0.22.0] - 2026-07-31
 
 ### Changed

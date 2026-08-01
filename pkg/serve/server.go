@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -104,8 +102,10 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 
 	mux := http.NewServeMux()
 
+	static := newStaticServer()
+
 	mux.HandleFunc("GET /api/models", handleListModels())
-	mux.HandleFunc("GET /api/version", handleVersion(manager))
+	mux.HandleFunc("GET /api/version", handleVersion(manager, static.buildID))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
 	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
@@ -148,20 +148,10 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
 
-	var staticHandler http.Handler
-	if dir := os.Getenv("MOA_SERVE_STATIC_DIR"); dir != "" {
-		staticHandler = http.FileServer(http.Dir(dir))
-	} else {
-		sub, err := fs.Sub(staticFS, "static")
-		if err != nil {
-			panic("serve: embedded static filesystem missing 'static' subtree: " + err.Error())
-		}
-		staticHandler = http.FileServer(http.FS(sub))
-	}
-	mux.Handle("GET /", staticHandler)
+	mux.Handle("GET /", static.handler)
 	// The manifest needs its own content type; everything else the file server
 	// types correctly from its extension.
-	mux.Handle("GET /manifest.webmanifest", withManifestType(staticHandler))
+	mux.Handle("GET /manifest.webmanifest", withManifestType(static.handler))
 
 	var devices *deviceStore
 	if o.token != "" || o.deviceAuth {
@@ -225,9 +215,14 @@ func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func handleVersion(mgr *Manager) http.HandlerFunc {
+func handleVersion(mgr *Manager, buildID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, mgr.Version())
+		// The bundle id must not be cached: it is the signal a client polls to
+		// learn that the code it is running is no longer the code being served.
+		w.Header().Set("Cache-Control", "no-store")
+		result := mgr.Version()
+		result.BuildID = buildID
+		writeJSON(w, http.StatusOK, result)
 	}
 }
 

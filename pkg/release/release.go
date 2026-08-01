@@ -183,6 +183,11 @@ type Result struct {
 	Current         string `json:"current"`
 	Latest          string `json:"latest,omitempty"`
 	UpdateAvailable bool   `json:"update_available"`
+	// BuildID identifies the frontend bundle the server is serving. It is set
+	// by the web layer, not by the release check: a self-built binary reports
+	// the same Current ("dev") across deploys, so only the bundle's own id can
+	// tell a running client that its code is stale.
+	BuildID string `json:"build_id,omitempty"`
 }
 
 type diskCache struct {
