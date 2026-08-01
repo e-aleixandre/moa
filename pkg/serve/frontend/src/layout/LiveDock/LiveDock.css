@@ -225,6 +225,13 @@ button.ld-row-main {
   color: var(--sky);
 }
 
+/* A bash row carries no fanout identity, so its open affordance doesn't borrow
+   the subagents' hue on hover — it stays the neutral blue the dock gives bash,
+   keeping "which kind is this" readable even mid-interaction. */
+.ld-row.bash .ld-row-main:hover .ld-open-chev {
+  color: var(--blue);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ld-dot,
   .ld-spot {

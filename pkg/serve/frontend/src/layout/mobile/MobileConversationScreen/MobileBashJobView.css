@@ -1,0 +1,197 @@
+/* MobileBashJobView — full-screen push over the mobile conversation, wearing
+   the same chrome as MobileSubagentView's header (light bar, way back,
+   identity) so the two things the dock opens arrive the same way. Below it,
+   only the command and the log: a process has nothing to steer and none of the
+   session's telemetry, so neither composer nor status line is worn here. */
+.mbj {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  background: var(--base);
+  animation: mbj-push-in 250ms ease-out;
+}
+
+@keyframes mbj-push-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mbj { animation: none; }
+}
+
+.mbj-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) var(--space-2) 4px;
+  min-height: 44px;
+}
+
+.mbj-ident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mbj-ident > svg {
+  color: var(--blue);
+  align-self: center;
+  flex: none;
+}
+
+.mbj-kind {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.mbj-name {
+  font-family: var(--mono);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+
+/* 44px hit-area for the back chevron, same as the subagent push. */
+.mbj-back {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  color: var(--subtext0);
+  flex: none;
+  padding: 0;
+}
+
+.mbj-status,
+.mbj-stop {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.mbj-status.running { color: var(--blue); }
+.mbj-status.completed { color: var(--green); }
+.mbj-status.failed { color: var(--red); }
+.mbj-status.cancelled { color: var(--overlay1); }
+
+/* The stop button is the only control on the screen and it kills work, so it
+   gets a full 44px touch target rather than the header's text metrics. */
+.mbj-stop {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  margin-right: var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--surface0));
+  background: transparent;
+  color: var(--red);
+  font-weight: var(--weight-semibold);
+}
+
+.mbj-stop.armed {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  border-color: var(--red);
+}
+
+.mbj-cmd {
+  flex: none;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  /* Bounded so a here-doc can't eat the screen the output needs. */
+  max-height: 28vh;
+  overflow: auto;
+}
+
+.mbj-cmd-label {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  color: var(--blue);
+  margin-bottom: var(--space-1);
+}
+
+.mbj-cmd-body {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mbj-cmd-cwd {
+  margin-top: var(--space-1);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  word-break: break-all;
+}
+
+.mbj-outcome {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-3));
+  border-top: 1px solid var(--surface0);
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+}
+
+.mbj-outcome.completed {
+  border-top-color: color-mix(in srgb, var(--green) 35%, var(--surface0));
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+
+.mbj-outcome.failed {
+  border-top-color: color-mix(in srgb, var(--red) 35%, var(--surface0));
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+
+.mbj-outcome.cancelled {
+  background: color-mix(in srgb, var(--overlay0) 6%, transparent);
+}
+
+.mbj-outcome.completed b { color: var(--green); }
+.mbj-outcome.failed b { color: var(--red); }
+.mbj-outcome.cancelled b { color: var(--overlay1); }
+.mbj-outcome.failed > svg { color: var(--red); }
+
+.mbj-outcome-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.mbj-outcome-back {
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--surface0);
+  background: var(--surface0);
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}

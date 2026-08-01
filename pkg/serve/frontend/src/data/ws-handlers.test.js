@@ -4,6 +4,7 @@ import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
 import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
+import { bashJobView } from './bash-job-view-model.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -852,6 +853,49 @@ test('handleWsInit prefers the server copy when the viewed job is still live', (
   handleWsInit('s1', { messages: [], subagents: [{ job_id: 'sa-1', status: 'running', task: 'fresh' }] });
 
   expect(store.get().sessions.s1.subagents['sa-1'].task).toBe('fresh');
+});
+
+test('handleWsInit keeps the finished bash job being read in its detail view', () => {
+  // A reconnect (mobile screen sleep) happens constantly while watching a long
+  // job. Once the job ends the server stops listing it, and dropping its entry
+  // would eject the reader back to the conversation mid-read.
+  setState({ sessions: { s1: { id: 's1', messages: [], viewingBashJob: 'bash-1',
+    subagents: { 'bash-1': { jobId: 'bash-1', kind: 'bash', status: 'completed', task: 'go test ./...', messages: [] } } } } });
+
+  handleWsInit('s1', { messages: [], subagents: [], bash_jobs: [] });
+
+  expect(store.get().sessions.s1.subagents['bash-1']).toBeTruthy();
+});
+
+test('handleWsInit rebuilds a live bash job being read from the snapshot output', () => {
+  // The accumulated output travels in the snapshot, so the detail view repaints
+  // itself after a reconnect without any special casing in the component.
+  setState({ sessions: { s1: { id: 's1', messages: [], viewingBashJob: 'bash-1',
+    subagents: { 'bash-1': { jobId: 'bash-1', kind: 'bash', status: 'running', task: 'go test ./...', messages: [] } } } } });
+
+  handleWsInit('s1', {
+    messages: [],
+    bash_jobs: [{ job_id: 'bash-1', command: 'go test ./...', cwd: '/work', status: 'running', output: 'compiling\n' }],
+  });
+
+  const view = bashJobView(store.get().sessions.s1, 'bash-1');
+  expect(view.command).toBe('go test ./...');
+  expect(view.lines).toEqual(['compiling']);
+  expect(view.canCancel).toBe(true);
+});
+
+test('a bash job ending while it is being read settles terminal instead of vanishing', () => {
+  seedSession('s1');
+  handleWsBashJobStart('s1', { job_id: 'bash-1', command: 'go test ./...', cwd: '/work', status: 'running' });
+  setState({ sessions: { ...store.get().sessions, s1: { ...store.get().sessions.s1, viewingBashJob: 'bash-1' } } });
+
+  handleWsBashJobEnd('s1', { job_id: 'bash-1', status: 'failed', output: 'FAIL\n' });
+
+  const view = bashJobView(store.get().sessions.s1, 'bash-1');
+  expect(view.terminal).toBe(true);
+  expect(view.outcome).toBe('failed');
+  expect(view.canCancel).toBe(false);
+  expect(view.lines).toEqual(['FAIL']);
 });
 
 // ── live tool calls in the init snapshot ──────────────────────────────────

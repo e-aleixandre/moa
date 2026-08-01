@@ -4,6 +4,7 @@ import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
 import { SubagentView } from "../SubagentView/SubagentView.jsx";
+import { BashJobView } from "../BashJobView/BashJobView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
@@ -24,7 +25,7 @@ import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
-import { configureSession, closeSession, openPersistedSubagent, rewindToMessage } from "../../data/session-actions.js";
+import { configureSession, closeSession, openPersistedSubagent, openBashJob, rewindToMessage } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
@@ -274,6 +275,10 @@ export function ConversationScreen({ version }) {
     // still exist in the session (the view itself rebounds to null via onBack if
     // it was pruned).
     const viewingSub = session.viewingSubagent;
+    // Same slot for a background bash job's read-only view (the dock's other
+    // openable row). The two are mutually exclusive by construction (opening
+    // one clears the other), and the subagent wins any residual tie.
+    const viewingBash = !viewingSub && session.viewingBashJob;
 
     const modelPopover = modelOpen && (
       <div class="head-popover">
@@ -343,6 +348,13 @@ export function ConversationScreen({ version }) {
             jobId={viewingSub}
             onBack={() => updateSession(session.id, { viewingSubagent: null })}
           />
+        ) : viewingBash ? (
+          <BashJobView
+            key={viewingBash}
+            session={session}
+            jobId={viewingBash}
+            onBack={() => updateSession(session.id, { viewingBashJob: null })}
+          />
         ) : (
           <>
             <Stream
@@ -370,7 +382,9 @@ export function ConversationScreen({ version }) {
                 agents={liveAgents}
                 open={!!session.dockOpen}
                 onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-                onOpen={(id) => openPersistedSubagent(session.id, id)}
+                onOpen={(id, kind) => (kind === "bash"
+                  ? openBashJob(session.id, id)
+                  : openPersistedSubagent(session.id, id))}
               />
             )}
             {/* The activity now-line sits ABOVE the input, as on mobile: what

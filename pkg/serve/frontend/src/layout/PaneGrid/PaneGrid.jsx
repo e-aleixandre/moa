@@ -15,7 +15,7 @@ import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { openPersistedSubagent } from "../../data/session-actions.js";
+import { openPersistedSubagent, openBashJob } from "../../data/session-actions.js";
 import { modelAccent } from "../../data/selectors.js";
 import { shortModel, shortPath, sessionDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
@@ -267,8 +267,12 @@ function ConnectedPane({ node, state, tileIndex }) {
           agents={liveAgents}
           open={!!session.dockOpen}
           onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-          onOpen={async (jobId) => {
-            await openPersistedSubagent(session.id, jobId);
+          onOpen={async (jobId, kind) => {
+            // A pane is too small for either detail view, so opening a dock row
+            // from the grid also leaves the grid for the full conversation
+            // screen (where the view has room), same as before for subagents.
+            if (kind === "bash") openBashJob(session.id, jobId);
+            else await openPersistedSubagent(session.id, jobId);
             navigate(null, { session: session.id });
           }}
         />

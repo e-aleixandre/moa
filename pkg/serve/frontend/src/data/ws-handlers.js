@@ -411,6 +411,15 @@ export function handleWsInit(id, data) {
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
     ? { [viewing]: prev.subagents[viewing] }
     : null;
+  // Same protection for a background bash being read in the BashJobView: once
+  // the job ends the server may drop it from the bash_jobs snapshot, and
+  // wiping its entry would eject the reader mid-read (a reconnect happens on
+  // every mobile screen sleep, precisely while watching a long job).
+  const viewingBash = prev.viewingBashJob;
+  const keptBash = viewingBash && prev.subagents && prev.subagents[viewingBash]
+    && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
+    ? { [viewingBash]: prev.subagents[viewingBash] }
+    : null;
   updateSession(id, {
     messages: withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools),
     historyTruncated: !!data.history_truncated,
@@ -451,6 +460,7 @@ export function handleWsInit(id, data) {
     runEpoch: nextRunEpoch(id),
     subagents: {
       ...(keptLocal || {}),
+      ...(keptBash || {}),
       ...initBashJobs(data.bash_jobs, initSubagents(data.subagents)),
     },
     // subagentCount is otherwise live-only (WS subagent_count events). If an

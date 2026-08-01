@@ -1,0 +1,55 @@
+/* BashJobLog — the full-height output pane of a bash job's detail view. Same
+   crust/mono logtail skin as BackgroundJob's inline peek (it IS the same log,
+   read closer), but scrollable and stretched: this surface exists to read the
+   whole output, not to glance at its tail. */
+.bashlog {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--crust);
+  border-top: 1px solid var(--surface0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--subtext0);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* pre-wrap, not pre: on a phone a long line has nowhere to go horizontally,
+   and losing the end of every line is worse than a soft wrap. */
+.bashlog .bashlog-ln {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bashlog .bashlog-ln.waiting {
+  color: var(--overlay0);
+  font-style: italic;
+}
+
+/* The head of a very long output is dropped before render (MAX_LINES); say so
+   instead of silently showing a truncated log. */
+.bashlog .bashlog-elided {
+  color: var(--overlay0);
+  font-style: italic;
+  margin-bottom: var(--space-2);
+}
+
+.bashlog .bashlog-cursor::after {
+  content: "▌";
+  color: var(--teal);
+  animation: bashlog-cursor-blink 1s steps(2) infinite;
+}
+
+@keyframes bashlog-cursor-blink {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bashlog .bashlog-cursor::after {
+    animation: none;
+    opacity: 0.6;
+  }
+}
