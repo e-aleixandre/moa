@@ -12,7 +12,7 @@ import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel, nextThinkingLevel } from "../../data/selectors.js";
+import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { openSession } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
@@ -350,7 +350,6 @@ export function ConversationScreen({ version }) {
           onNotifications={() => setNotifOpen((v) => !v)}
           onSessionSettings={() => setSettingsOpen((v) => !v)}
           onModelClick={() => setModelOpen((v) => !v)}
-          onModelMeterClick={() => configureSession(session.id, { thinking: nextThinkingLevel(thinking) })}
           modelPopover={modelPopover}
           settingsPopover={settingsPopover}
           notifPopover={notifPopover}
