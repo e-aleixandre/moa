@@ -396,11 +396,11 @@ func (r *wsReactor) cleanup() {
 }
 
 // buildInitData constructs the WS init payload from bus queries. The streaming
-// aggregate is passed in (captured atomically with the sequence cut by the
-// caller via SnapshotStreamingWithCut) rather than queried here, so an
-// accumulative streamed delta can't be both seeded into the snapshot and
-// replayed live after the cut.
-func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitData {
+// aggregate and the live tool calls are passed in (captured atomically with the
+// sequence cut by the caller via SnapshotInFlightWithCut) rather than queried
+// here, so in-flight state can't be both seeded into the snapshot and replayed
+// live after the cut.
+func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
@@ -444,6 +444,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 		Compacting:        compacting,
 		StreamingText:     truncateHistoryString(streaming.Text),
 		StreamingThinking: truncateHistoryString(streaming.Thinking),
+		LiveTools:         liveToolInitData(liveTools),
 	}
 
 	// Anchor the client's elapsed counter to the server-side run-start time so
@@ -530,6 +531,54 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate) InitD
 	}
 
 	return data
+}
+
+// liveToolInitData projects the bus registry of in-flight tool calls into the
+// snapshot payload, bounding what travels: only the args map is unbounded in
+// principle (a write carries a whole file), so it is dropped wholesale when its
+// encoding exceeds the same per-content budget the history projection uses.
+// Dropping args still leaves the tool NAME, which is what the live row needs to
+// stop saying "Calling"; shipping a megabyte of file body to a phone to render
+// one line would not.
+func liveToolInitData(calls []bus.LiveToolCall) []LiveToolInitData {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]LiveToolInitData, 0, len(calls))
+	for _, c := range calls {
+		if c.ToolCallID == "" {
+			continue
+		}
+		d := LiveToolInitData{
+			ToolCallID: c.ToolCallID,
+			ToolName:   c.ToolName,
+			Args:       boundedLiveToolArgs(c.Args),
+			Status:     c.Phase,
+		}
+		if !c.StartedAt.IsZero() {
+			d.StartedAtMs = c.StartedAt.UnixMilli()
+		}
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// boundedLiveToolArgs returns the args map only when it is small enough to be
+// worth sending; oversized (or unserializable) args are replaced by a marker so
+// the client renders the row without a stale/huge object. Mirrors
+// boundedHistoryMap, which does the same for historic tool-call arguments.
+func boundedLiveToolArgs(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil || len(encoded) > historyContentMaxBytes {
+		return map[string]any{"_truncated": true}
+	}
+	return args
 }
 
 // limitInitHistory returns a bounded, recent display tail. It also removes

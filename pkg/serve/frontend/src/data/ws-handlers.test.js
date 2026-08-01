@@ -2,7 +2,8 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd } from './ws-handlers.js';
+import { liveVerb } from './util/activity.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -851,4 +852,77 @@ test('handleWsInit prefers the server copy when the viewed job is still live', (
   handleWsInit('s1', { messages: [], subagents: [{ job_id: 'sa-1', status: 'running', task: 'fresh' }] });
 
   expect(store.get().sessions.s1.subagents['sa-1'].task).toBe('fresh');
+});
+
+// ── live tool calls in the init snapshot ──────────────────────────────────
+// Regression for "switch conversation and come back → the live row degrades to
+// a generic 'Calling'": a tool call still generating args or still executing is
+// in no message history, so the snapshot carries it separately.
+
+test('handleWsInit rebuilds a live row for a tool that is still executing', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    live_tools: [{
+      tool_call_id: 'tc1', tool_name: 'bash', args: { command: 'go test ./...' },
+      status: 'running', started_at_ms: 1_700_000_000_000,
+    }],
+  });
+  const rows = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(rows).toHaveLength(1);
+  // The real tool name is what keeps liveVerb off its 'Calling' fallback.
+  expect(rows[0]).toMatchObject({
+    tool_call_id: 'tc1', tool_name: 'bash', status: 'running',
+    args: { command: 'go test ./...' }, startedAt: 1_700_000_000_000,
+  });
+  expect(liveVerb(rows[0].tool_name)).toBe('Running');
+});
+
+test('handleWsInit restores a tool call whose arguments are still streaming', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    live_tools: [{ tool_call_id: 'tc1', tool_name: 'edit', args: { path: 'pkg/serve/ws.go' }, status: 'generating' }],
+  });
+  const [row] = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(row).toMatchObject({ tool_name: 'edit', status: 'generating', args: { path: 'pkg/serve/ws.go' } });
+  expect(liveVerb(row.tool_name)).toBe('Editing');
+});
+
+test('handleWsInit does not duplicate a live tool already present in history', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [{
+      role: 'assistant',
+      content: [{ type: 'tool_call', tool_call_id: 'tc1', tool_name: 'bash', arguments: { command: 'sleep 120' } }],
+    }],
+    live_tools: [{ tool_call_id: 'tc1', tool_name: 'bash', args: { command: 'sleep 120' }, status: 'running', started_at_ms: 42 }],
+  });
+  const rows = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(rows).toHaveLength(1);
+  // The registry is authoritative for the live phase and the start anchor.
+  expect(rows[0]).toMatchObject({ tool_call_id: 'tc1', status: 'running', startedAt: 42 });
+});
+
+test('a live event arriving after the snapshot updates the restored row instead of duplicating it', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    live_tools: [{ tool_call_id: 'tc1', tool_name: 'edit', args: { path: 'a.go' }, status: 'generating', started_at_ms: 7 }],
+  });
+  handleWsToolStart('s1', { tool_call_id: 'tc1', tool_name: 'edit', args: { path: 'a.go', oldText: 'x' } });
+  const rows = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ status: 'running', args: { path: 'a.go', oldText: 'x' }, startedAt: 7 });
+
+  handleWsToolEnd('s1', { tool_call_id: 'tc1', tool_name: 'edit', result: 'ok', is_error: false });
+  const after = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(after).toHaveLength(1);
+  expect(after[0].status).toBe('done');
+});
+
+test('handleWsInit without live tools leaves history untouched', () => {
+  seedSession('s1');
+  handleWsInit('s1', { messages: [], subagents: [] });
+  expect(store.get().sessions.s1.messages).toHaveLength(0);
 });

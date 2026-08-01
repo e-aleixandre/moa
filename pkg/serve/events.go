@@ -40,6 +40,7 @@ type InitData struct {
 	Compacting        bool                `json:"compacting,omitempty"`
 	StreamingText     string              `json:"streaming_text,omitempty"`
 	StreamingThinking string              `json:"streaming_thinking,omitempty"`
+	LiveTools         []LiveToolInitData  `json:"live_tools,omitempty"`
 	RunTokensUp       int                 `json:"run_tokens_up"`
 	RunTokensDown     int                 `json:"run_tokens_down"`
 	RunStartedAtMs    int64               `json:"run_started_at_ms,omitempty"`
@@ -63,6 +64,31 @@ type PendingSteerData struct {
 	Text    string `json:"text"`
 	Command bool   `json:"command,omitempty"`
 	Images  int    `json:"images,omitempty"`
+}
+
+// LiveToolInitData is one tool call that is still generating its arguments or
+// still executing when the snapshot is taken. Such a call may not be in the
+// message history yet — it is written there only when its assistant message
+// closes, its result only when the tool ends — so without this a client that
+// switches away and back mid-call rebuilds a row it cannot name and falls back
+// to a generic "Calling", or (for a long bash) loses the row entirely. When the
+// message did close, the call IS in history but still lacks its result, phase
+// and start anchor; withLiveTools patches that row instead of duplicating it.
+//
+// Shape mirrors ToolStartData on purpose: the client reconstructs the row with
+// the same reducer path a live tool_call_start/tool_start would have taken, and
+// dedups by ToolCallID so a live event arriving after the snapshot updates the
+// restored row instead of duplicating it.
+type LiveToolInitData struct {
+	ToolCallID string         `json:"tool_call_id"`
+	ToolName   string         `json:"tool_name"`
+	Args       map[string]any `json:"args,omitempty"`
+	// Status is "generating" (arguments still streaming) or "running".
+	Status string `json:"status"`
+	// StartedAtMs is when the call first appeared, epoch milliseconds (same
+	// encoding as RunStartedAtMs), so the row's elapsed timer resumes instead
+	// of restarting at zero.
+	StartedAtMs int64 `json:"started_at_ms,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients

@@ -66,7 +66,7 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 		return len(sess.subagents.Snapshot()) == 1
 	})
 
-	data := buildInitData(sess, bus.StreamingAggregate{})
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
 	if len(data.Subagents) != 1 {
 		t.Fatalf("Subagents = %+v, want one job", data.Subagents)
 	}
@@ -186,7 +186,7 @@ func TestBuildInitData_IncludesRunTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := buildInitData(sess, bus.StreamingAggregate{})
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
 	if data.RunTokensUp != 0 || data.RunTokensDown != 0 {
 		t.Fatalf("initial run tokens = up=%d down=%d, want zero", data.RunTokensUp, data.RunTokensDown)
 	}
@@ -666,7 +666,7 @@ func TestUserMessage_AnnouncedOnlyOnceInHistory(t *testing.T) {
 		}
 		// Read history exactly as a reconnecting client's snapshot does.
 		found := 0
-		for _, m := range buildInitData(sess, bus.StreamingAggregate{}).Messages {
+		for _, m := range buildInitData(sess, bus.StreamingAggregate{}, nil).Messages {
 			if m.MsgID == msgID {
 				found++
 			}
@@ -694,5 +694,71 @@ func TestUserMessage_AnnouncedOnlyOnceInHistory(t *testing.T) {
 	}
 	if len(obs) != 0 {
 		t.Fatalf("the send was announced %d extra times", len(obs))
+	}
+}
+
+// The snapshot must name the tool calls that are still generating arguments or
+// still executing: they are in no message history yet, so without them the
+// client rebuilds a nameless "Calling" row after switching conversations.
+func TestLiveToolInitDataProjectsPhaseAndAnchor(t *testing.T) {
+	startedAt := time.UnixMilli(1_700_000_000_000)
+	got := liveToolInitData([]bus.LiveToolCall{
+		{ToolCallID: "tc1", ToolName: "edit", Args: map[string]any{"path": "pkg/serve/ws.go"}, Phase: bus.LiveToolPhaseGenerating, StartedAt: startedAt},
+		{ToolCallID: "tc2", ToolName: "bash", Args: map[string]any{"command": "go test ./..."}, Phase: bus.LiveToolPhaseRunning, StartedAt: startedAt},
+		// An entry without an ID can't be reconciled by the client; drop it.
+		{ToolName: "read", Phase: bus.LiveToolPhaseRunning},
+	})
+	if len(got) != 2 {
+		t.Fatalf("live tools = %+v, want two projected calls", got)
+	}
+	if got[0].ToolName != "edit" || got[0].Status != bus.LiveToolPhaseGenerating || got[0].Args["path"] != "pkg/serve/ws.go" {
+		t.Fatalf("generating call = %+v", got[0])
+	}
+	if got[0].StartedAtMs != startedAt.UnixMilli() {
+		t.Fatalf("StartedAtMs = %d, want %d", got[0].StartedAtMs, startedAt.UnixMilli())
+	}
+	if got[1].ToolName != "bash" || got[1].Status != bus.LiveToolPhaseRunning {
+		t.Fatalf("running call = %+v", got[1])
+	}
+	if liveToolInitData(nil) != nil {
+		t.Fatal("empty registry should project to nil, not an empty array")
+	}
+}
+
+// A live `write` can carry a whole file in its arguments. The name is what the
+// row needs; the payload must not be pushed to a phone on every reconnect.
+func TestLiveToolInitDataBoundsHugeArguments(t *testing.T) {
+	got := liveToolInitData([]bus.LiveToolCall{{
+		ToolCallID: "tc1", ToolName: "write", Phase: bus.LiveToolPhaseRunning,
+		Args: map[string]any{"content": strings.Repeat("x", historyContentMaxBytes+1)},
+	}})
+	if len(got) != 1 {
+		t.Fatalf("live tools = %+v, want one", got)
+	}
+	if got[0].ToolName != "write" {
+		t.Fatalf("tool name lost while bounding args: %+v", got[0])
+	}
+	if got[0].Args["_truncated"] != true {
+		t.Fatalf("oversized args = %#v, want truncation marker", got[0].Args)
+	}
+	if _, ok := got[0].Args["content"]; ok {
+		t.Fatal("oversized argument payload still travels in the snapshot")
+	}
+}
+
+func TestBuildInitDataCarriesLiveTools(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, []bus.LiveToolCall{
+		{ToolCallID: "tc1", ToolName: "bash", Phase: bus.LiveToolPhaseRunning, StartedAt: time.Now()},
+	})
+	if len(data.LiveTools) != 1 || data.LiveTools[0].ToolName != "bash" {
+		t.Fatalf("InitData.LiveTools = %+v, want the live bash call", data.LiveTools)
 	}
 }

@@ -412,7 +412,7 @@ export function handleWsInit(id, data) {
     ? { [viewing]: prev.subagents[viewing] }
     : null;
   updateSession(id, {
-    messages: normalizeHistory(data.messages || [], data.subagents),
+    messages: withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools),
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
     contextPercent: data.context_percent ?? -1,
@@ -469,6 +469,52 @@ export function handleWsInit(id, data) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
+}
+
+// withLiveTools appends the tool calls that were in flight when the snapshot
+// was cut. Such a call is in no message history yet — a tool call is written to
+// history when its assistant message closes, its result when the tool ends — so
+// a client that switches conversations and comes back would otherwise rebuild a
+// row it can't name (liveVerb falls back to 'Calling') or lose it entirely for
+// a long-running bash.
+//
+// Deduped by tool_call_id against the rebuilt history AND against itself, so a
+// snapshot that overlaps history never doubles a row. Live events landing after
+// the snapshot reconcile the same way: handleWsToolCallStart/handleWsToolStart
+// look the ID up and patch the existing row instead of appending a second one.
+function withLiveTools(messages, liveTools) {
+  if (!Array.isArray(liveTools) || liveTools.length === 0) return messages;
+  const byId = new Map();
+  for (const t of liveTools) {
+    if (t && t.tool_call_id && !byId.has(t.tool_call_id)) byId.set(t.tool_call_id, t);
+  }
+  // A call whose assistant message already closed IS in history (as a tool_call
+  // with no result yet), so patch that row rather than appending a twin: it
+  // gains the server's start anchor, and its phase comes from the authoritative
+  // registry instead of history's "no result ⇒ running" guess.
+  const out = messages.map(m => {
+    if (!m || m._type !== 'tool_start') return m;
+    const t = byId.get(m.tool_call_id);
+    if (!t) return m;
+    byId.delete(m.tool_call_id);
+    return { ...m, ...liveToolRow(t), tool_name: t.tool_name || m.tool_name, args: t.args || m.args };
+  });
+  for (const t of byId.values()) out.push(liveToolRow(t));
+  return out;
+}
+
+function liveToolRow(t) {
+  return {
+    _type: 'tool_start',
+    tool_call_id: t.tool_call_id,
+    tool_name: t.tool_name || '',
+    args: t.args || {},
+    status: t.status === 'generating' ? 'generating' : 'running',
+    result: null,
+    // Server-anchored so the row's elapsed timer resumes from the real start
+    // instead of restarting at the moment this pane reconnected.
+    startedAt: t.started_at_ms || Date.now(),
+  };
 }
 
 // initSubagents builds the session.subagents map from a WS init snapshot

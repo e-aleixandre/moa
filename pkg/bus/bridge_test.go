@@ -878,7 +878,8 @@ func TestBridgeEvent_StreamingSnapshotCutIsAtomic(t *testing.T) {
 		// cut outrun the text for some sample.
 		var samples int
 		for {
-			text, _, _, cut := sctx.SnapshotStreamingWithCut()
+			agg, _, cut := sctx.SnapshotInFlightWithCut()
+			text := agg.Text
 			k := int(cut) - int(l0) - 1
 			if k >= 0 && k <= nDeltas {
 				if text != cumulative[k] {
