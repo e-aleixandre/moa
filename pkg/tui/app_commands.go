@@ -255,6 +255,13 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Send empty answers (one per question) so the tool doesn't hang.
 		emptyAnswers := make([]string, len(m.askPrompt.questions))
 		m.askPrompt.Cancel()
+		// Cancelling the question also drops a recording started for it:
+		// otherwise the mic keeps capturing for a prompt nobody will answer,
+		// and the next Ctrl+R would stop that ghost take instead of starting
+		// a fresh dictation into the composer.
+		if m.voice.askID == askID {
+			m.voice.reset()
+		}
 		if err := m.runtime.Bus.Execute(bus.ResolveAskUser{
 			AskID:   askID,
 			Answers: emptyAnswers,

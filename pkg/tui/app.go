@@ -849,7 +849,13 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.askPrompt.active {
-		return m.handleAskKey(msg)
+		// Ctrl+R (voice) is let through: a question is exactly where a long
+		// answer is worth dictating, and the prompt otherwise swallows every
+		// key. The transcript lands in the question's own buffer — see
+		// handleVoiceResult.
+		if msg.Type != tea.KeyCtrlR {
+			return m.handleAskKey(msg)
+		}
 	}
 
 	if m.permPrompt.active {

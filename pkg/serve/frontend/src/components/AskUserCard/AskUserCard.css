@@ -105,6 +105,9 @@
   border-radius: var(--radius-sm);
   color: var(--text);
   font-family: var(--font);
+  /* 16px minimum: anything smaller makes iOS zoom the page in when the field
+     takes focus. Same token the composer uses. */
+  font-size: var(--text-input);
   padding: var(--space-2) var(--space-3);
   outline: none;
 }
@@ -142,4 +145,100 @@
 .ask .ask-free-submit:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* --- Push-to-talk on the answer button ------------------------------------
+   The submit button doubles as the mic (tap = send, hold = record), so these
+   states mirror the composer's send button. Same visual language, because it
+   is the same gesture. */
+
+.ask .ask-free-send-wrap {
+  position: relative;
+  display: flex;
+}
+
+/* A gesture button must not let the browser scroll or long-press-select from
+   under the finger, or a hold-to-record turns into a page drag. */
+.ask .ask-free-submit.gesture {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Empty field: the button is a mic, not a send — quieter, since there is
+   nothing to send yet. */
+.ask .ask-free-submit.mic-mode {
+  background: var(--surface0);
+  color: var(--subtext0);
+}
+.ask .ask-free-submit.mic-mode:hover {
+  background: var(--surface1);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.ask .ask-free-submit.recording {
+  background: linear-gradient(135deg, var(--red), color-mix(in srgb, var(--red) 55%, var(--crust)));
+  color: var(--crust);
+  animation: ask-mic-pulse 1.5s ease-in-out infinite;
+}
+.ask .ask-free-submit.recording:hover {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--red) 35%, transparent);
+}
+/* Locked (hands-free): solid and still, showing a stop square. */
+.ask .ask-free-submit.recording.locked {
+  animation: none;
+  background: var(--red);
+}
+
+@keyframes ask-mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.ask .ask-free-submit.transcribing {
+  background: var(--surface0);
+  color: var(--mauve);
+  box-shadow: none;
+}
+.ask .ask-free-submit .spin {
+  animation: ask-spin 1.2s linear infinite;
+}
+@keyframes ask-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ask .ask-voice-lock-hint {
+  position: absolute;
+  /* Anchored to the button's right edge rather than centred on it: the card's
+     button sits close to the viewport edge on a phone, where a centred hint
+     would overflow. */
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface0);
+  color: var(--subtext1);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--crust) 60%, transparent);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 20;
+  animation: ask-hint-bob 1.2s ease-in-out infinite;
+}
+@keyframes ask-hint-bob {
+  0%, 100% { transform: translateY(0); opacity: 0.9; }
+  50% { transform: translateY(-3px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask .ask-free-submit.recording { animation: none; }
+  .ask .ask-free-submit .spin { animation: none; }
+  .ask .ask-voice-lock-hint { animation: none; }
 }

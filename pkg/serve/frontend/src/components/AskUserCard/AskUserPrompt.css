@@ -139,3 +139,15 @@
   color: var(--green);
   font-size: var(--text-sm);
 }
+
+/* A failed recording (mic denied, no device, transcription error) reports here
+   rather than through a toast: the question is what the user is looking at. */
+.ask-user-prompt-voice-error {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--surface0));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  color: var(--red);
+  font-size: var(--text-xs);
+}

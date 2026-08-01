@@ -93,6 +93,10 @@ In `ask` or `auto` mode, tool calls prompt for approval:
 
 Requires `openai-transcribe` login and `sox` (macOS) or `arecord` (Linux) installed. Toggle with `Ctrl+R` or `/voice`.
 
+`Ctrl+R` also works while an agent question is open, where the transcript fills
+the question's answer instead of the composer. Speech is appended to what the
+answer already contains, and dictating over a highlighted option replaces it.
+
 If it keeps mangling a name or a piece of jargon, add that word to
 [`stt_vocabulary`](configuration.md#features). The model and the language hint
 are configurable there too.

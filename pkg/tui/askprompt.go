@@ -130,6 +130,22 @@ func (a *askPrompt) TypeRune(r rune) {
 	a.cursor = a.optionCount() // move to custom input
 }
 
+// Dictate appends transcribed speech to the free-text buffer and moves the
+// cursor there, discarding a highlighted option: reaching for the mic after
+// selecting one means the spoken words are the real answer. Appending (rather
+// than replacing) lets a long answer be dictated in several passes.
+func (a *askPrompt) Dictate(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if a.customBuf != "" && !strings.HasSuffix(a.customBuf, " ") {
+		a.customBuf += " "
+	}
+	a.customBuf += text
+	a.cursor = a.optionCount() // move to custom input
+}
+
 // Backspace removes the last character from the free-text buffer.
 func (a *askPrompt) Backspace() {
 	if len(a.customBuf) > 0 {
@@ -141,7 +157,7 @@ func (a *askPrompt) Backspace() {
 }
 
 // View renders the ask prompt.
-func (a *askPrompt) View(width int, theme Theme) string {
+func (a *askPrompt) View(width int, theme Theme, voiceAvailable bool) string {
 	if !a.active || a.current >= len(a.questions) {
 		return ""
 	}
@@ -199,6 +215,11 @@ func (a *askPrompt) View(width int, theme Theme) string {
 
 	lines = append(lines, "")
 	hint := "Enter confirm · Shift+Tab back · Esc skip"
+	// Dictation is only worth advertising where it actually works; the prompt
+	// otherwise swallows every key, so nobody would guess Ctrl+R still does.
+	if voiceAvailable {
+		hint += " · Ctrl+R dictate"
+	}
 	lines = append(lines, dim.Render("  "+hint))
 
 	content := strings.Join(lines, "\n")
