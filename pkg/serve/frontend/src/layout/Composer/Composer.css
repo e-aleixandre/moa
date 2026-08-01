@@ -191,6 +191,15 @@
   flex: none;
 }
 
+/* "the queued message carries an image". The preview span keeps its
+   ellipsis truncation, so the icon stays inline (not a flex child) and is
+   nudged onto the text baseline by hand; the trailing margin replaces the
+   space the old literal glyph carried with it. */
+.composer-wrap .queue-note span .lucide {
+  vertical-align: -2px;
+  margin-right: var(--space-1);
+}
+
 /* --- Slash command / /goal-flag suggestion popup --- */
 /* Anchored above the composer (position: relative, set above), same treatment
    as FileSuggestions.css so the two popups (mutually exclusive) read as one
