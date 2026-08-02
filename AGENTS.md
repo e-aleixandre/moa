@@ -36,11 +36,14 @@ código, igual que la regla de paridad:
   o no se publica (el sync lo avisa por consola).
 - Enlaces relativos entre docs (`./serve.md`, `../CHANGELOG.md`) e imágenes en
   `docs/assets/`: el sync los reescribe solo. Escríbelos como se leen bien en GitHub.
+- Los PRs normales de feature/fix **no modifican `CHANGELOG.md`**. El changelog se
+  cura al preparar una release, revisando todos los commits desde el tag anterior y
+  escribiendo una única sección fechada y coherente.
 
 ## Build / test / deploy
 
 - Backend: `go build ./...` · `go vet ./...` · `go test ./...` (usa `-race` en paquetes con concurrencia).
-- Frontend: `cd pkg/serve/frontend && node esbuild.mjs` (en la VM `dev` no hay npm/make: `bun esbuild.mjs`).
+- Frontend: `cd pkg/serve/frontend && node esbuild.mjs --prune` (en la VM `dev` no hay npm/make: `bun esbuild.mjs --prune`).
   El output va embebido en `pkg/serve/static/` (via `//go:embed`), así que **rebuild del frontend antes de compilar el binario** si tocas el frontend.
 - Formatea con `gofmt` los ficheros que crees/edites. (Aviso: algunos ficheros del repo ya vienen
   gofmt-unclean de antes —p. ej. `pkg/tui/app.go`, `cmd/moa/main.go`—; no los reformatees en bloque

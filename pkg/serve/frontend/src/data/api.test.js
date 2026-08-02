@@ -1,6 +1,22 @@
 import { test, expect } from 'bun:test';
 
-const { api } = await import('./api.js?timeout-test');
+const { api, getVersion } = await import('./api.js?timeout-test');
+
+test('getVersion bypasses the HTTP cache', async () => {
+  const originalFetch = globalThis.fetch;
+  let options;
+  globalThis.fetch = (_, nextOptions) => {
+    options = nextOptions;
+    return Promise.resolve(new Response('{"current":"dev"}'));
+  };
+
+  try {
+    await getVersion();
+    expect(options.cache).toBe('no-store');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test('api aborts a request that exceeds its timeout', async () => {
   const originalFetch = globalThis.fetch;

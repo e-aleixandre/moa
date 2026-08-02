@@ -22,6 +22,8 @@ lint: vet
 
 clean:
 	rm -rf bin/
+	rm -rf pkg/serve/static/build
+	rm -f pkg/serve/static.publish.lock*
 	rm -f pkg/serve/static/app.js pkg/serve/static/app.css
 
 run: build

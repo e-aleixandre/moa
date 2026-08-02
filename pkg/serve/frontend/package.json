@@ -2,7 +2,7 @@
   "name": "moa-frontend",
   "private": true,
   "scripts": {
-    "build": "node esbuild.mjs",
+    "build": "node esbuild.mjs --prune",
     "watch": "node esbuild.mjs --watch"
   },
   "dependencies": {
