@@ -500,6 +500,110 @@ func ListAll(baseDir string) ([]Summary, error) {
 	return all, errors.Join(errs...)
 }
 
+// CWDScan is what ScanCWDs could learn about where sessions ran.
+type CWDScan struct {
+	// CWDs holds the distinct working directories, newest session first.
+	CWDs []string
+	// Unreadable counts the session files that could not be decoded at all:
+	// truncated or corrupt JSON, a shape the header decoder does not
+	// recognize, a file that would not open. It is kept apart from NoCWD
+	// because it is the only half that can change: such a file may decode on
+	// the next run, so a caller that needs the full picture has a reason to
+	// look again.
+	Unreadable int
+	// NoCWD counts the sessions that decoded fine and simply never recorded a
+	// working directory — written by a moa old enough not to store one.
+	// Re-reading them produces the same answer forever, so a caller deciding
+	// whether to retry must not mistake this for evidence it could recover.
+	NoCWD int
+}
+
+// Unmappable is the number of sessions that could not say which directory they
+// ran in, for either reason.
+func (s CWDScan) Unmappable() int { return s.Unreadable + s.NoCWD }
+
+// ScanCWDs reports the working directories recorded across every
+// project-scoped store under baseDir, reading only each session's header.
+//
+// It exists next to ListAll rather than on top of it because it must never
+// fall back to a full read: ListAll's readSummary retries a file it could not
+// stream by loading all of it, which for a damaged multi-megabyte transcript
+// means reading the whole thing to answer a question about its first hundred
+// bytes. A caller that only wants the header treats such a file as unreadable
+// and says so — that is what Unreadable is for. ListAll keeps its fallback,
+// since a session list that silently dropped recoverable sessions would be a
+// regression for every other caller.
+func ScanCWDs(baseDir string) (CWDScan, error) {
+	if baseDir == "" {
+		var err error
+		baseDir, err = defaultBaseDir()
+		if err != nil {
+			return CWDScan{}, err
+		}
+	}
+	dirs, err := os.ReadDir(baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return CWDScan{}, nil
+		}
+		return CWDScan{}, err
+	}
+
+	type dated struct {
+		cwd     string
+		updated time.Time
+	}
+	var found []dated
+	var scan CWDScan
+	var errs []error
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		storeDir := filepath.Join(baseDir, d.Name())
+		files, err := os.ReadDir(storeDir)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", d.Name(), err))
+			continue
+		}
+		for _, e := range files {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(storeDir, e.Name())
+			f, err := os.Open(path)
+			if err != nil {
+				scan.Unreadable++
+				errs = append(errs, fmt.Errorf("%s: %w", path, err))
+				continue
+			}
+			sum, ok := decodeSummaryPrefix(f)
+			_ = f.Close()
+			if !ok {
+				scan.Unreadable++
+				continue
+			}
+			cwd, _ := sum.Metadata[MetaCWD].(string)
+			if cwd == "" {
+				scan.NoCWD++
+				continue
+			}
+			found = append(found, dated{cwd: cwd, updated: sum.Updated})
+		}
+	}
+
+	sort.SliceStable(found, func(i, j int) bool { return found[i].updated.After(found[j].updated) })
+	seen := make(map[string]bool, len(found))
+	for _, f := range found {
+		if seen[f.cwd] {
+			continue
+		}
+		seen[f.cwd] = true
+		scan.CWDs = append(scan.CWDs, f.cwd)
+	}
+	return scan, errors.Join(errs...)
+}
+
 // FindSession searches all project stores under baseDir for a session by ID.
 // Returns the session, the store it was found in, and any error.
 func FindSession(baseDir, id string) (*Session, *FileStore, error) {

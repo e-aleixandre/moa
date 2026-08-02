@@ -147,6 +147,34 @@ func TestCodebaseKey_NoGitFallsBackToPath(t *testing.T) {
 	}
 }
 
+func TestRepoCodebaseKey_AnswersOnlyInsideARepository(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	newTestRepo(t, repo)
+
+	key, ok := RepoCodebaseKey(repo)
+	if !ok || key != CodebaseKey(repo) {
+		t.Fatalf("inside a repository it must agree with CodebaseKey: got %q ok=%v", key, ok)
+	}
+	sub := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := RepoCodebaseKey(sub); !ok || got != key {
+		t.Errorf("a subdirectory belongs to the same repository: got %q ok=%v", got, ok)
+	}
+
+	// The point of the function: no fallback. Callers using a directory as
+	// evidence about who owns something need "nobody" to be an answer, or
+	// every path on the filesystem names an owner.
+	if got, ok := RepoCodebaseKey(base); ok {
+		t.Errorf("a directory in no repository must report no key, got %q", got)
+	}
+	if got, ok := RepoCodebaseKey(filepath.Join(base, "does-not-exist")); ok {
+		t.Errorf("a directory that does not exist must report no key, got %q", got)
+	}
+}
+
 func TestCodebaseKey_MissingDirStillAnswers(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "gone")
 

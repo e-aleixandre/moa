@@ -358,6 +358,10 @@ func TestManagerConfigLoaderIsUsedForSessionBuild(t *testing.T) {
 	defer cancel()
 
 	dir := t.TempDir()
+	// This is the one manager test that builds a real session, and a session
+	// build reads — and migrates — memory from the moa config directory. Point
+	// it at a scratch one so the suite cannot touch the developer's own facts.
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	var loadedCWD string
 	loadedCfg := core.MoaConfig{
 		CacheTTL: "1h",

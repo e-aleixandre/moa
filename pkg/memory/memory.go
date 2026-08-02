@@ -2,18 +2,19 @@
 // typed, single-fact files with a lightweight frontmatter header.
 //
 // Facts live in two scopes:
-//   - global  (~/.config/moa/global/memory/<slug>.md)      — user, feedback
-//   - project (~/.config/moa/projects/<hash>/memory/<slug>.md) — project, reference
+//   - global  (~/.config/moa/global/memory/<slug>.md)        — user, feedback
+//   - project (~/.config/moa/codebases/<key>/memory/<slug>.md) — project, reference
 //
-// where <hash> is SHA256(CanonicalizePath(workspaceRoot))[:16]. Only the index
-// (one line per fact) is injected into the prompt; full bodies are read on
-// demand. The index is derived from the files at load — moa never writes a
-// MEMORY.md of its own.
+// where <key> is core.CodebaseKey(workspaceRoot): the identity of the
+// repository the workspace belongs to, so every git worktree of one repo reads
+// and writes the same facts and deleting a worktree no longer orphans what was
+// learned in it. Only the index (one line per fact) is injected into the
+// prompt; full bodies are read on demand. The index is derived from the files
+// at load — moa never writes a MEMORY.md of its own.
 package memory
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"bytes"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -98,19 +99,32 @@ func (m Memory) ID() string { return m.Scope.String() + "/" + m.Name }
 
 // Store manages the global and project memory directories for one workspace.
 type Store struct {
-	globalDir   string // ~/.config/moa/global/memory
-	projectDir  string // ~/.config/moa/projects/<hash>/memory
-	projectRoot string // ~/.config/moa/projects/<hash> — holds the v1 MEMORY.md
+	globalDir    string // ~/.config/moa/global/memory
+	projectDir   string // ~/.config/moa/codebases/<key>/memory
+	codebaseRoot string // ~/.config/moa/codebases/<key>
+	configDir    string // ~/.config/moa
+	codebaseKey  string
+	// legacyProjectRoot is ~/.config/moa/projects/<ProjectHash>: where project
+	// memory lived while a project was identified by its path, and where the v1
+	// MEMORY.md was left. Only the migrations in migrate_codebase.go and
+	// MigrateV1IfNeeded look at it; nothing reads facts from there at runtime.
+	legacyProjectRoot string
 }
 
 // New builds a Store. configDir is the moa config root (~/.config/moa);
 // workspaceRoot selects the project scope.
+//
+// It does not migrate anything: call Migrate for that, once, at startup.
 func New(configDir, workspaceRoot string) *Store {
-	projectRoot := filepath.Join(configDir, "projects", projectHash(workspaceRoot))
+	key := core.CodebaseKey(workspaceRoot)
+	codebaseRoot := filepath.Join(configDir, "codebases", key)
 	return &Store{
-		globalDir:   filepath.Join(configDir, "global", "memory"),
-		projectDir:  filepath.Join(projectRoot, "memory"),
-		projectRoot: projectRoot,
+		globalDir:         filepath.Join(configDir, "global", "memory"),
+		projectDir:        filepath.Join(codebaseRoot, "memory"),
+		codebaseRoot:      codebaseRoot,
+		configDir:         configDir,
+		codebaseKey:       key,
+		legacyProjectRoot: filepath.Join(configDir, "projects", core.ProjectHash(workspaceRoot)),
 	}
 }
 
@@ -269,12 +283,32 @@ func (s *Store) Delete(id string) error {
 	return err
 }
 
+// v1FactName is the fact a flat v1 MEMORY.md becomes. The codebase migration
+// wraps sibling worktrees' flat files under the same name and the same bytes,
+// so whichever migration runs first the other finds its work already done.
+const v1FactName = "notas-legado-v1"
+
+func v1Fact(body string) Memory {
+	return Memory{
+		Name:        v1FactName,
+		Description: "notas migradas de la memoria v1, pendientes de curar",
+		Type:        TypeProject,
+		Body:        body,
+		Scope:       ScopeProject,
+	}
+}
+
 // MigrateV1IfNeeded wraps a flat v1 MEMORY.md into a single legacy fact, then
 // retires the flat file. Idempotent even across partial failures: the flat file
 // is only renamed after the fact is safely written, so an interrupted run
 // simply retries next time (D6).
+//
+// The flat file is looked for under the path-keyed project directory because
+// that is the only place v1 ever wrote it; the fact it becomes is written to
+// the current (codebase-keyed) directory like any other. It must therefore run
+// after the codebase migration — see Migrate.
 func (s *Store) MigrateV1IfNeeded() error {
-	v1Path := filepath.Join(s.projectRoot, "MEMORY.md")
+	v1Path := filepath.Join(s.legacyProjectRoot, "MEMORY.md")
 	data, err := os.ReadFile(v1Path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -288,20 +322,50 @@ func (s *Store) MigrateV1IfNeeded() error {
 		return os.Rename(v1Path, bak) // empty v1: just retire it
 	}
 
-	legacy := Memory{
-		Name:        "notas-legado-v1",
-		Description: "notas migradas de la memoria v1, pendientes de curar",
-		Type:        TypeProject,
-		Body:        string(data),
-		Scope:       ScopeProject,
-	}
+	legacy := v1Fact(string(data))
 	if err := os.MkdirAll(s.projectDir, 0o700); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(filepath.Join(s.projectDir, legacy.Name+".md"), serialize(legacy)); err != nil {
-		return err
+	// The codebase migration may already have wrapped this very file, under
+	// this name or a suffixed one if something else claimed it. Writing again
+	// would either duplicate the notes or overwrite a fact that is not this
+	// one, so only write when nothing of it is here yet.
+	if !s.holdsV1Notes(serialize(legacy)) {
+		if err := writeFileAtomic(filepath.Join(s.projectDir, legacy.Name+".md"), serialize(legacy)); err != nil {
+			return err
+		}
 	}
 	return os.Rename(v1Path, bak)
+}
+
+// holdsV1Notes reports whether these exact bytes are already filed under the
+// v1 fact's name or one of the "-N" names a merge would have moved it to.
+func (s *Store) holdsV1Notes(want []byte) bool {
+	entries, err := os.ReadDir(s.projectDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := strings.TrimSuffix(e.Name(), ".md")
+		if name != v1FactName && !strings.HasPrefix(name, v1FactName+"-") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(s.projectDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if bytes.Equal(bytes.TrimSpace(data), bytes.TrimSpace(want)) {
+			return true
+		}
+		// A suffixed copy carries a rewritten `name:` line, so compare bodies
+		// too: the notes are what must not be duplicated, not the header.
+		if m, err := parseFact(data); err == nil {
+			if w, err := parseFact(want); err == nil && m.Body == w.Body {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolve maps an ID to a file path and scope. A scope-qualified ID resolves
@@ -453,14 +517,64 @@ func serialize(m Memory) []byte {
 	return []byte(sb.String())
 }
 
+// writeFileAtomic replaces path with data, and is durable rather than merely
+// atomic: the rename makes the new contents visible in one step to other
+// processes, but only the fsyncs make them survive a power loss. Both matter
+// for the same reason — a fact the user asked moa to remember has no other
+// copy, and a crash that leaves a directory entry pointing at unwritten blocks
+// turns it into an empty file.
+//
+// The temporary file is uniquely named. A fixed "<fact>.tmp" was survivable
+// while a project directory belonged to one working directory; now that every
+// worktree of a repository shares it, two sessions writing the same fact would
+// interleave into one temp file and rename each other's half-written bytes
+// into place.
 func writeFileAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return fmt.Errorf("writing memory: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeds
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing memory: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing memory: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing memory: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing memory: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("saving memory: %w", err)
+	}
+	// The rename itself is a directory change, and it is no more durable than
+	// the data was: without this, a crash can leave the old name, no name, or
+	// the new one.
+	return syncDir(dir)
+}
+
+// syncDir flushes a directory's own entries. A failure is reported but does
+// not undo the rename: the file is in place, it is just not guaranteed to
+// still be there after a power cut, and removing it would be strictly worse.
+func syncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("saving memory: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Sync(); err != nil {
+		// Some filesystems refuse fsync on a directory (and lose nothing by
+		// it). Not a reason to fail a write that already landed.
+		slog.Debug("memory: cannot flush directory", "dir", dir, "error", err)
 	}
 	return nil
 }
@@ -468,14 +582,4 @@ func writeFileAtomic(path string, data []byte) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// projectHash returns a 16-char hex hash of the canonical workspace path.
-func projectHash(workspaceRoot string) string {
-	canonical, err := core.CanonicalizePath(workspaceRoot)
-	if err != nil {
-		canonical = filepath.Clean(workspaceRoot)
-	}
-	h := sha256.Sum256([]byte(canonical))
-	return hex.EncodeToString(h[:8])
 }

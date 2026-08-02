@@ -53,6 +53,24 @@ func CodebaseKey(dir string) string {
 	return hashKey(canonical)
 }
 
+// RepoCodebaseKey is CodebaseKey restricted to directories git recognizes as
+// part of a repository: it reports no key at all instead of falling back to
+// the path hash.
+//
+// The distinction matters to anything that uses a directory as *evidence*
+// about who owns something rather than as the workspace it was asked about.
+// The fallback is the right answer for "which key does this workspace use" —
+// it always answers, and unrelated paths get unrelated keys — but as evidence
+// it is worthless: it would name an owner for every path on the filesystem,
+// including ones no workspace will ever open.
+func RepoCodebaseKey(dir string) (string, bool) {
+	root := gitCodebaseRoot(dir)
+	if root == "" {
+		return "", false
+	}
+	return hashKey(root), true
+}
+
 // hashKey mirrors ProjectHash's output shape (16 hex chars) so directories
 // named after either function look alike on disk.
 func hashKey(s string) string {
