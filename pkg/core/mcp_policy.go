@@ -1,7 +1,6 @@
 package core
 
 import (
-	"path/filepath"
 	"sort"
 )
 
@@ -28,12 +27,13 @@ const (
 type MCPDisableSources struct {
 	// Global lists names vetoed by the global config.
 	Global []string
-	// Project lists names vetoed by the project config. It is populated only
-	// when ProjectTrusted is true; an untrusted project's preference is never
-	// silently applied.
+	// Project lists names this user vetoed for this workspace. It comes from
+	// their own project state, not from <cwd>/.moa/config.json: switching a
+	// server off is a preference, while the project file declares which servers
+	// exist and is meant to be committed.
 	Project []string
 	// ProjectTrusted reports whether <cwd>/.moa/config.json is trusted, i.e.
-	// whether the project scope is writable/applicable at all.
+	// whether the project's own MCP definitions are loaded at all.
 	ProjectTrusted bool
 }
 
@@ -56,9 +56,11 @@ func LoadMoaConfigResolved(cwd string) LoadedMoaConfig {
 		Global:         dedupeStrings(global.DisabledMCPServers),
 		ProjectTrusted: IsProjectPathTrusted(global, cwd),
 	}
-	if sources.ProjectTrusted {
-		project := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
-		sources.Project = dedupeStrings(project.DisabledMCPServers)
+	// The project veto is the user's own, so it applies whether or not the
+	// project is trusted: trust governs reading the project's files, and this
+	// preference no longer lives in one.
+	if state, err := LoadProjectState(cwd); err == nil {
+		sources.Project = dedupeStrings(state.DisabledMCPServers)
 	}
 
 	return LoadedMoaConfig{

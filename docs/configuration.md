@@ -7,6 +7,11 @@ Moa loads config from two levels, merged together:
 
 CLI flags override both at runtime. Project config extends global config; some fields are global-only (noted below).
 
+Both files describe *what you configured*. What moa decides on its own while
+you work — the approvals you granted with "always allow", the MCP servers you
+switched off for a project — is kept separately, in
+[your project state](#your-project-state), and never written into the project.
+
 ## Example
 
 ```json
@@ -170,6 +175,40 @@ Project-specific files live in `<cwd>/.moa/`:
 | `verify.json` | Verification commands for the `verify` tool |
 | `tools/*.json` | Custom [script tools](./tools.md#custom-script-tools) |
 | `prompts/` | Project prompt templates (override global `~/.config/moa/prompts/`) |
+
+## Your project state
+
+`~/.config/moa/projects/<hash>/state.json` holds what moa records about a
+project **on your behalf**, kept out of the repository:
+
+| Field | Written when |
+|-------|--------------|
+| `permission_allow` | You approve a tool call with "always allow" |
+| `disabled_mcp_servers` | You switch a server off with the `project` scope |
+
+The split follows who the decision belongs to. `.moa/config.json` describes the
+project — which MCP servers it uses, what its limits are — and is meant to be
+committed and shared. Approving a command on your machine is not that: it used
+to be appended to the project's config file, so a click produced a diff nobody
+wanted to commit, and it followed the repository to everyone who cloned it.
+
+This also keeps moa from writing into the checkout at all during a normal
+session, which is what previously made a shared checkout unusable: the file was
+created with private permissions, so whoever approved something first owned it.
+
+Consequences worth knowing:
+
+- A `project`-scoped MCP veto is now yours alone; it no longer travels with the
+  repository. To keep a server out of a project for everybody, don't declare it
+  in `.moa/config.json`.
+- The `project` scope no longer requires trusting the project, because nothing
+  is written there. Trust still governs whether the project's own config,
+  script tools and `.mcp.json` are loaded.
+- `allow` patterns already present in a `.moa/config.json` keep working. Moa
+  cannot tell a deliberate team policy from a leftover click, so nothing is
+  migrated or removed — move them yourself if you want them gone.
+- The state is per workspace path, hashed the same way [memory](./tools.md#memory)
+  scopes its project facts. Moving a checkout starts a fresh state.
 
 ## Environment variables
 

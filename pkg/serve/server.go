@@ -880,8 +880,6 @@ func handleMCPToggle(mgr *Manager) http.HandlerFunc {
 		res, err := mgr.ToggleMCPServer(sess, mcpDisableParams{Scope: scope, Disabled: body.Disabled}, server)
 		if err != nil {
 			switch {
-			case errors.Is(err, ErrProjectUntrusted):
-				http.Error(w, "project config is untrusted; trust it before writing project scope", http.StatusConflict)
 			case errors.Is(err, ErrScopeInvalid):
 				http.Error(w, "scope must be one of session, project, global", http.StatusBadRequest)
 			default:

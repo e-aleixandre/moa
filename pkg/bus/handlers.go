@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -813,15 +812,14 @@ func RegisterHandlers(sctx *SessionContext) {
 		if err := sctx.Approvals.ResolvePermission(cmd.PermissionID, cmd.Approved, cmd.Feedback, cmd.AllowPattern); err != nil {
 			return err
 		}
-		// Persist "always allow" patterns to project config so they survive a
-		// restart. The Gate already applied the pattern in memory; this is
-		// best-effort — a save failure must not fail the resolution.
+		// Persist "always allow" patterns so they survive a restart. They are
+		// this user's decision, not the project's definition, so they go to the
+		// user's project state instead of <cwd>/.moa/config.json — which is
+		// committed, shared, and was being modified by a click. Best-effort: the
+		// Gate already applied the pattern in memory, and a save failure must not
+		// fail the resolution.
 		if pattern := strings.TrimSpace(cmd.AllowPattern); pattern != "" && sctx.CWD != "" {
-			if err := core.SaveProjectConfig(sctx.CWD, func(c *core.MoaConfig) {
-				if !slices.Contains(c.Permissions.Allow, pattern) {
-					c.Permissions.Allow = append(c.Permissions.Allow, pattern)
-				}
-			}); err != nil {
+			if err := core.AddProjectAllowPattern(sctx.CWD, pattern); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to persist allow pattern %q: %v\n", pattern, err)
 			}
 		}

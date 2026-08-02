@@ -366,6 +366,14 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// calls, but the gate still enforces hard-coded prompt-injection exceptions.
 	allow := append([]string(nil), moaCfg.Permissions.Allow...)
 	allow = append(allow, cfg.ExtraAllowPatterns...)
+	// "Always allow" approvals are this user's, not the project's, so they are
+	// stored outside the repository and merged in here. Deny still wins over
+	// them, exactly as it does for the patterns declared in config.
+	if projectState, err := core.LoadProjectState(cfg.CWD); err != nil {
+		slog.Warn("project state: cannot read saved approvals", "error", err)
+	} else {
+		allow = append(allow, projectState.PermissionAllow...)
+	}
 	permCfg := permission.Config{
 		Allow:    allow,
 		Deny:     moaCfg.Permissions.Deny,

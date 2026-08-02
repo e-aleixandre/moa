@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -245,21 +247,42 @@ func TestMCPBroadScopeRequiresConfirm(t *testing.T) {
 	}
 }
 
-// TestMCPProjectUntrustedRefused: project scope with an untrusted project is
-// refused with a reason, controller untouched.
-func TestMCPProjectUntrustedRefused(t *testing.T) {
+// TestMCPProjectScopeWorksWithoutTrustingTheProject: a project-scoped veto is
+// the user's own preference, stored with their config rather than in the
+// repository, so an untrusted project no longer blocks it — there is nothing
+// about the project being trusted left to check.
+func TestMCPProjectScopeWorksWithoutTrustingTheProject(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	f := &fakeMCPControl{servers: mcpStatuses()}
 	m := newMCPTestModel(f)
+	m.cwd = t.TempDir()
 	m.mcpPicker.Open(f.Status(), false) // projectTrusted=false
 	m.mcpPicker.CycleScope()            // PROJECT
 
+	// The first toggle stages a confirmation, as it does for the global scope.
 	model, cmd := m.mcpPickerToggle()
 	m = model.(appModel)
-	if cmd != nil || len(f.scopeCalls) != 0 {
-		t.Fatal("untrusted project toggle must not act on the controller")
+	if m.mcpPicker.pendingConfirm.name == "" || cmd != nil {
+		t.Fatal("project scope should stage a confirmation, not be refused")
 	}
-	if !strings.Contains(m.mcpPicker.status, "not trusted") {
-		t.Fatalf("status = %q, want a not-trusted reason", m.mcpPicker.status)
+	model, cmd = m.handleMCPPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = model.(appModel)
+
+	if cmd == nil {
+		t.Fatal("a project-scoped veto should act even without project trust")
+	}
+	if strings.Contains(m.mcpPicker.status, "not trusted") {
+		t.Fatalf("status = %q, should not mention trust", m.mcpPicker.status)
+	}
+	st, err := core.LoadProjectState(m.cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.DisabledMCPServers) == 0 {
+		t.Error("the veto should be saved in the user's project state")
+	}
+	if _, err := os.Stat(filepath.Join(m.cwd, ".moa", "config.json")); !os.IsNotExist(err) {
+		t.Errorf("the project must not be written to, stat err = %v", err)
 	}
 }
 

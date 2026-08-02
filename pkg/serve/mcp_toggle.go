@@ -11,9 +11,6 @@ import (
 var (
 	// ErrScopeInvalid is returned for a scope that isn't session/project/global.
 	ErrScopeInvalid = errors.New("invalid scope")
-	// ErrProjectUntrusted is returned when a project-scope write is requested for
-	// a session whose project config path isn't trusted (409).
-	ErrProjectUntrusted = errors.New("project config is untrusted")
 )
 
 // scopeAvailability describes whether a scope can be written for a session, and
@@ -25,28 +22,15 @@ type scopeAvailability struct {
 }
 
 // mcpAvailableScopes reports, for this session, which disable scopes are
-// writable. Session and global are always writable; project depends on whether
-// <cwd>/.moa/config.json is trusted (an untrusted project must be trusted first,
-// same gate that governs whether its config is applied at all).
+// writable. All three are: the veto is the user's own preference, stored with
+// their config rather than in the repository, so there is nothing about the
+// project that can make it unwritable.
 func (s *ManagedSession) mcpAvailableScopes() map[string]scopeAvailability {
-	out := map[string]scopeAvailability{
+	return map[string]scopeAvailability{
 		"session": {Writable: true},
 		"global":  {Writable: true},
+		"project": {Writable: true},
 	}
-	if s.mcpProjectTrusted() {
-		out["project"] = scopeAvailability{Writable: true}
-	} else {
-		out["project"] = scopeAvailability{Writable: false, Reason: "project_config_untrusted"}
-	}
-	return out
-}
-
-// mcpProjectTrusted reports whether this session's project moa config is trusted,
-// i.e. whether the project disable scope is writable and applicable.
-func (s *ManagedSession) mcpProjectTrusted() bool {
-	// The global config carries the trusted-project allowlist; resolve against
-	// this session's cwd.
-	return core.IsProjectPathTrusted(core.LoadGlobalConfig(), s.CWD)
 }
 
 // mcpToggleResult is the outcome of a toggle fan-out: how many open sessions had
@@ -240,12 +224,10 @@ func (m *Manager) ToggleMCPServer(anchor *ManagedSession, params mcpDisableParam
 			return mcpToggleResult{}, err
 		}
 	case core.MCPScopeProject:
-		if !anchor.mcpProjectTrusted() {
-			return mcpToggleResult{}, ErrProjectUntrusted
-		}
-		if err := core.SaveProjectConfig(anchor.CWD, func(c *core.MoaConfig) {
-			core.SetMCPServerDisabled(c, server, params.Disabled)
-		}); err != nil {
+		// No trust gate: this is the user's own preference for this workspace,
+		// stored with their config rather than in the repository, so there is
+		// nothing about the project being trusted to check.
+		if err := core.SetProjectMCPServerDisabled(anchor.CWD, server, params.Disabled); err != nil {
 			return mcpToggleResult{}, err
 		}
 	case core.MCPScopeSession:

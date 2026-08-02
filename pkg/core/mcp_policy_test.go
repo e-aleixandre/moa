@@ -118,6 +118,7 @@ func TestNewMCPDisablePolicy_SessionStartsEmpty(t *testing.T) {
 func TestLoadMoaConfigResolved_Provenance(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
 	cwd := t.TempDir()
 
 	// Global config: disables "playwright" and trusts the project cwd.
@@ -125,10 +126,10 @@ func TestLoadMoaConfigResolved_Provenance(t *testing.T) {
 		DisabledMCPServers:  []string{"playwright"},
 		TrustedProjectPaths: []string{cwd},
 	})
-	// Project config: disables "postgres".
-	writeConfigJSON(t, filepath.Join(cwd, ".moa", "config.json"), MoaConfig{
-		DisabledMCPServers: []string{"postgres"},
-	})
+	// This user's own veto for this workspace.
+	if err := SetProjectMCPServerDisabled(cwd, "postgres", true); err != nil {
+		t.Fatal(err)
+	}
 
 	loaded := LoadMoaConfigResolved(cwd)
 	if !loaded.MCPDisabled.ProjectTrusted {
@@ -142,25 +143,50 @@ func TestLoadMoaConfigResolved_Provenance(t *testing.T) {
 	}
 }
 
-func TestLoadMoaConfigResolved_UntrustedProjectIgnored(t *testing.T) {
+// A veto written inside the project is no longer a thing moa reads: turning a
+// server off is a preference, and a repository that could declare one would be
+// deciding for whoever cloned it.
+func TestLoadMoaConfigResolved_ProjectFileVetoIsNotRead(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
 	cwd := t.TempDir()
 
-	// Global config does NOT trust the project cwd.
 	writeConfigJSON(t, filepath.Join(home, ".config", "moa", "config.json"), MoaConfig{
-		DisabledMCPServers: []string{"playwright"},
+		TrustedProjectPaths: []string{cwd},
 	})
 	writeConfigJSON(t, filepath.Join(cwd, ".moa", "config.json"), MoaConfig{
 		DisabledMCPServers: []string{"postgres"},
 	})
 
 	loaded := LoadMoaConfigResolved(cwd)
+	if len(loaded.MCPDisabled.Project) != 0 {
+		t.Fatalf("a veto in the project file must not apply, got %v", loaded.MCPDisabled.Project)
+	}
+}
+
+// Trust governs whether the project's own files are read. The user's veto is
+// not one of them, so it applies either way.
+func TestLoadMoaConfigResolved_UntrustedProjectStillHonorsTheUsersVeto(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
+	cwd := t.TempDir()
+
+	// Global config does NOT trust the project cwd.
+	writeConfigJSON(t, filepath.Join(home, ".config", "moa", "config.json"), MoaConfig{
+		DisabledMCPServers: []string{"playwright"},
+	})
+	if err := SetProjectMCPServerDisabled(cwd, "postgres", true); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadMoaConfigResolved(cwd)
 	if loaded.MCPDisabled.ProjectTrusted {
 		t.Fatal("project should NOT be trusted")
 	}
-	if len(loaded.MCPDisabled.Project) != 0 {
-		t.Fatalf("untrusted project preference must be ignored, got %v", loaded.MCPDisabled.Project)
+	if !reflect.DeepEqual(loaded.MCPDisabled.Project, []string{"postgres"}) {
+		t.Fatalf("the user's own veto should still apply, got %v", loaded.MCPDisabled.Project)
 	}
 	if !reflect.DeepEqual(loaded.MCPDisabled.Global, []string{"playwright"}) {
 		t.Fatalf("global provenance = %v", loaded.MCPDisabled.Global)

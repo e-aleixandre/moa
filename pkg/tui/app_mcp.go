@@ -170,18 +170,13 @@ func (m appModel) handleMCPPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // mcpPickerToggle flips the selected server's veto in the visible scope. Broad
 // scopes (project/global) require a one-time y/N confirmation; session scope
-// applies immediately. A project scope that isn't trusted is refused.
+// applies immediately.
 func (m appModel) mcpPickerToggle() (tea.Model, tea.Cmd) {
 	st, ok := m.mcpPicker.selected()
 	if !ok {
 		return m, nil
 	}
 	scope := m.mcpPicker.scope
-	if scope == core.MCPScopeProject && !m.mcpPicker.projectTrusted {
-		m.mcpPicker.status = "Project config is not trusted; trust it first."
-		m.updateViewport()
-		return m, nil
-	}
 	nextDisabled := !scopeVetoes(st, scope)
 
 	if (scope == core.MCPScopeProject || scope == core.MCPScopeGlobal) && !m.mcpPicker.confirmed[scope] {
@@ -198,13 +193,23 @@ func (m appModel) mcpPickerToggle() (tea.Model, tea.Cmd) {
 // bus.MCPChanged; mcpActionResultMsg clears the busy state and reports the
 // honest outcome. A persist failure aborts before touching controller memory.
 func (m appModel) applyMCPToggle(scope core.MCPDisableScope, name string, disabled bool) (tea.Model, tea.Cmd) {
-	if scope == core.MCPScopeProject || scope == core.MCPScopeGlobal {
-		save := core.SaveGlobalConfig
-		if scope == core.MCPScopeProject {
-			cwd := m.cwd
-			save = func(update func(*core.MoaConfig)) error { return core.SaveProjectConfig(cwd, update) }
+	var persist func() error
+	switch scope {
+	case core.MCPScopeGlobal:
+		persist = func() error {
+			return core.SaveGlobalConfig(func(c *core.MoaConfig) {
+				core.SetMCPServerDisabled(c, name, disabled)
+			})
 		}
-		if err := save(func(c *core.MoaConfig) { core.SetMCPServerDisabled(c, name, disabled) }); err != nil {
+	case core.MCPScopeProject:
+		// The project veto is this user's preference for this workspace, so it
+		// is stored with their config instead of in <cwd>/.moa/config.json,
+		// which belongs to the repository.
+		cwd := m.cwd
+		persist = func() error { return core.SetProjectMCPServerDisabled(cwd, name, disabled) }
+	}
+	if persist != nil {
+		if err := persist(); err != nil {
 			m.mcpPicker.status = "Could not save preference: " + err.Error()
 			m.updateViewport()
 			return m, nil

@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -2690,11 +2689,10 @@ func TestHandler_ResolvePermission_PersistsAllow(t *testing.T) {
 	fa := &fakeAgent{}
 	sctx := newTestSessionContextWithState(b, fa)
 	sctx.CWD = t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	am := NewApprovalManager(b, sctx.State, "test-session")
 	sctx.Approvals = am
 	RegisterHandlers(sctx)
-
-	cfgPath := filepath.Join(sctx.CWD, ".moa", "config.json")
 
 	resolve := func(id, allow string) {
 		respCh := make(chan permission.Response, 1)
@@ -2710,17 +2708,19 @@ func TestHandler_ResolvePermission_PersistsAllow(t *testing.T) {
 		<-respCh
 	}
 
-	// First resolve with an allow pattern persists it to the project config file.
-	// (Read the file directly, not via LoadMoaConfig: the C1 trust gate would not
-	// merge this untrusted temp dir's config — persistence is what we assert here.)
+	// The approval is the user's, so it is persisted with their config and never
+	// inside the project — which is committed and shared.
 	resolve("p1", "Bash(git:*)")
-	if allow := loadProjectAllow(t, cfgPath); !contains(allow, "Bash(git:*)") {
+	if allow := loadProjectAllow(t, sctx.CWD); !contains(allow, "Bash(git:*)") {
 		t.Fatalf("Permissions.Allow = %v, want to contain Bash(git:*)", allow)
+	}
+	if _, err := os.Stat(filepath.Join(sctx.CWD, ".moa", "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("approving must not write into the project, stat err = %v", err)
 	}
 
 	// Resolving again with the same pattern does not duplicate it.
 	resolve("p2", "Bash(git:*)")
-	allow := loadProjectAllow(t, cfgPath)
+	allow := loadProjectAllow(t, sctx.CWD)
 	if n := countOccurrences(allow, "Bash(git:*)"); n != 1 {
 		t.Fatalf("Bash(git:*) appears %d times, want 1: %v", n, allow)
 	}
@@ -2773,18 +2773,14 @@ func countOccurrences(s []string, v string) int {
 	return n
 }
 
-// loadProjectAllow reads the raw project config allow list (no global merge).
-func loadProjectAllow(t *testing.T, cfgPath string) []string {
+// loadProjectAllow reads the allow patterns saved in the user's project state.
+func loadProjectAllow(t *testing.T, cwd string) []string {
 	t.Helper()
-	data, err := os.ReadFile(cfgPath)
+	st, err := core.LoadProjectState(cwd)
 	if err != nil {
-		t.Fatalf("read config: %v", err)
+		t.Fatalf("load project state: %v", err)
 	}
-	var cfg core.MoaConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("unmarshal config: %v", err)
-	}
-	return cfg.Permissions.Allow
+	return st.PermissionAllow
 }
 
 func TestHandler_ResolveAskUser(t *testing.T) {
