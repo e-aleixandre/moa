@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 var placeholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
@@ -26,8 +28,8 @@ func Discover(cwd string) []Template {
 	templates := make(map[string]Template)
 
 	// Global templates (lower priority).
-	if home, err := os.UserHomeDir(); err == nil {
-		scanTemplateDir(filepath.Join(home, ".config", "moa", "prompts"), templates)
+	if dir := core.ConfigSubdir("prompts"); dir != "" {
+		scanTemplateDir(dir, templates)
 	}
 
 	// Project templates (higher priority — overwrites global by name).

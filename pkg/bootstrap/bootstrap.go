@@ -343,11 +343,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	var memStore *memory.Store
 	var memoryIndex string
 	if core.IsMemoryEnabled(moaCfg) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			slog.Warn("memory: cannot determine home directory", "error", err)
+		if dir := core.ConfigDir(); dir == "" {
+			slog.Warn("memory: cannot determine config directory")
 		} else {
-			memStore = memory.New(filepath.Join(home, ".config", "moa"), cfg.CWD)
+			memStore = memory.New(dir, cfg.CWD)
 			if err := memStore.MigrateV1IfNeeded(); err != nil {
 				slog.Warn("memory: v1 migration failed", "error", err)
 			}
@@ -524,10 +523,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// 11. Plan mode.
 	planSessionDir := cfg.PlanSessionDir
 	if planSessionDir == "" {
-		home, homeErr := os.UserHomeDir()
-		if homeErr == nil {
-			planSessionDir = filepath.Join(home, ".config", "moa")
-		} else {
+		planSessionDir = core.ConfigDir()
+		if planSessionDir == "" {
 			planSessionDir = cfg.CWD // last resort
 		}
 	}

@@ -25,6 +25,10 @@ func nopFactory(core.Model) (core.Provider, error) {
 
 func minimalConfig(t *testing.T) SessionConfig {
 	t.Helper()
+	// BuildSession reads global config, AGENTS.md and memory, and memory's v1
+	// migration writes. Point it at a scratch directory so the suite cannot
+	// read or modify the developer's real ~/.config/moa.
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	return SessionConfig{
 		CWD:             t.TempDir(),
 		Model:           core.Model{ID: "test-model", Name: "test"},

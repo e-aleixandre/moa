@@ -20,6 +20,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 const (
@@ -107,14 +109,11 @@ func New(baseDir string) (*Store, error) {
 // DefaultBaseDir resolves the production attachments root. MOA_CONFIG_DIR is
 // honored for container and custom deployments.
 func DefaultBaseDir() (string, error) {
-	if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "attachments", "v1"), nil
+	dir := core.ConfigSubdir("attachments", "v1")
+	if dir == "" {
+		return "", errors.New("attachment: cannot resolve config directory")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "moa", "attachments", "v1"), nil
+	return dir, nil
 }
 
 // Put stores raw bytes, deduplicating by their SHA-256 hash. It creates an

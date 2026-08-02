@@ -68,7 +68,7 @@ The composer accepts file attachments (paperclip icon, drag-and-drop, or paste).
 - **Images** (`jpeg/png/gif/webp`) are sent to the model natively as vision input. Large photos are downscaled in the browser before upload. The server validates the file's magic bytes against the declared type — a binary mislabeled as an image is saved to disk instead of being forwarded to the provider.
 - **PDFs** are sent to the model natively as a `document` block **when the active provider supports it AND the bytes are actually a PDF** (`%PDF-` magic; Anthropic always supports documents, OpenAI on the API-key path). If the active provider does not support native documents — the PDF exceeds the size limit, or the content isn't a real PDF — it is saved to disk as a fallback (see below) and the agent is told where to find it. Because Moa is provider-agnostic and you can switch models mid-conversation, this decision is made per message against whichever provider is active at send time; a `document` already in the history is degraded to a text note if you later switch to a provider that can't accept it.
 - **Small UTF-8 text** (≤256 KiB: `.txt/.md/.csv/.json`, source code, etc.) is inlined directly into the message, wrapped in an `<attachment>` marker.
-- **Everything else** (`.xlsx/.docx/.zip`, binaries, and text larger than 256 KiB) is **saved to disk** under `/tmp/moa/<session-id>/`, and that directory is added to the session's path allowlist so the agent can process the file with its own tools (`bash`, `read_file`, etc.). Moa itself does not parse Office/archive formats — the agent decides how, on demand.
+- **Everything else** (`.xlsx/.docx/.zip`, binaries, and text larger than 256 KiB) is **saved to disk** under `/tmp/moa-<uid>/<session-id>/`, and that directory is added to the session's path allowlist so the agent can process the file with its own tools (`bash`, `read_file`, etc.). Moa itself does not parse Office/archive formats — the agent decides how, on demand.
 
 In the conversation history, each attachment is tagged so you can tell which path it took: **enviado al modelo** (native image/PDF), a collapsible inline chip, or **guardado en disco** (with the on-disk path).
 
@@ -89,7 +89,7 @@ review any external resources the page references before it loads.
 
 ### Files saved to disk are ephemeral
 
-- They live under `/tmp/moa/<session-id>/` and are **deleted when you delete the session**.
+- They live under `/tmp/moa-<uid>/<session-id>/` and are **deleted when you delete the session**.
 - They may **disappear if the server restarts** (`/tmp` is not durable). Resuming an old session does not restore them.
 - "Attaching" a spreadsheet does **not** mean the model has read it — the agent must open it explicitly (e.g. via `bash`). Attached files are untrusted user data; the agent is told to treat them with care.
 
@@ -99,7 +99,7 @@ review any external resources the page references before it loads.
 - **32 MB** per file; **64 MB** decoded total per message; **200 MB** on-disk per session.
 - Native binary content (images, plus any natively-forwarded documents) is additionally capped at **48 MB cumulative across the session's history** (`maxSessionNativeDocBytes`), because native blocks are re-sent to the model every turn; individual images are capped at **5 MB** decoded. Content beyond the cumulative budget falls back to disk instead.
 - Files that exceed the client-side cap are rejected before upload. Raising these limits would require changing the transport (currently base64-in-JSON), which is out of scope.
-- The base directory can be overridden with the `MOA_ATTACHMENTS_DIR` environment variable (default `/tmp/moa`).
+- The base directory can be overridden with the `MOA_ATTACHMENTS_DIR` environment variable. It defaults to `/tmp/moa-<uid>`: the directory is created `0700` and moa refuses one owned by another account, so keying it by user is what lets two accounts on the same machine both stage attachments.
 
 ## Queued commands and mid-run messages
 

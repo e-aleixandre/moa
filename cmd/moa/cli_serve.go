@@ -82,7 +82,9 @@ func runServe(args []string) {
 
 	// Web Push (optional): VAPID keys + subscription store live in the moa
 	// config dir. Any failure degrades gracefully — serve runs without push.
-	pushStore, pushDispatcher := buildPush(filepath.Dir(auth.DefaultStorePath()))
+	// An unresolvable config dir disables push instead of dropping key files
+	// into whatever directory serve happened to be started from.
+	pushStore, pushDispatcher := buildPush(core.ConfigDir())
 
 	mgr := serve.NewManager(ctx, serve.ManagerConfig{
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
@@ -186,6 +188,10 @@ const pushSubscriber = "moa@ourown.studio"
 // the config dir and returns a store + dispatcher. On any error it logs and
 // returns (nil, nil) so serve keeps running without Web Push.
 func buildPush(cfgDir string) (*push.Store, *push.Dispatcher) {
+	if cfgDir == "" {
+		fmt.Fprintln(os.Stderr, "⚠️  Web Push disabled: cannot resolve the moa config directory")
+		return nil, nil
+	}
 	vapid, err := push.LoadOrGenerateVAPID(filepath.Join(cfgDir, "vapid.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠️  Web Push disabled: %v\n", err)

@@ -396,11 +396,7 @@ func LoadMoaConfig(cwd string) MoaConfig {
 }
 
 func globalConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "moa", "config.json")
+	return ConfigSubdir("config.json")
 }
 
 func loadConfigFile(path string) MoaConfig {

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // nowFunc is the clock used for timestamps. Tests can override it.
@@ -452,11 +454,11 @@ func scopeKey(cwd string) string {
 
 // defaultBaseDir returns the default sessions root directory.
 func defaultBaseDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	dir := core.ConfigSubdir("sessions")
+	if dir == "" {
+		return "", errors.New("cannot resolve config directory")
 	}
-	return filepath.Join(home, ".config", "moa", "sessions"), nil
+	return dir, nil
 }
 
 // ListAll returns summaries from all project-scoped stores under baseDir.

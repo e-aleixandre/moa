@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 const skillFile = "SKILL.md"
@@ -47,8 +49,8 @@ func Discover(cwd string) []Skill {
 	skills := make(map[string]Skill)
 
 	// Global skills (lower priority).
-	if home, err := os.UserHomeDir(); err == nil {
-		scanDir(filepath.Join(home, ".config", "moa", "skills"), skills)
+	if dir := core.ConfigSubdir("skills"); dir != "" {
+		scanDir(dir, skills)
 	}
 
 	// Project skills (higher priority — overwrites global by name).

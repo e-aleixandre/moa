@@ -803,7 +803,15 @@ func (m *Manager) CloseSession(id string) error {
 // base dir is a symlink it is refused (never followed) to avoid deleting
 // through it.
 func reapStaleAttachments() {
-	base := attachmentsBaseDir()
+	reapStaleAttachmentsIn(attachmentsBaseDir())
+	// Sweep the pre-per-user default too: after the switch nothing else would
+	// ever look at it again, leaving whatever was uploaded there on disk.
+	if legacy := legacyAttachmentsBaseDir(); legacy != "" {
+		reapStaleAttachmentsIn(legacy)
+	}
+}
+
+func reapStaleAttachmentsIn(base string) {
 	if info, err := os.Lstat(base); err != nil || info.Mode()&os.ModeSymlink != 0 {
 		return // missing, unreadable, or a symlink we won't follow
 	}
@@ -826,7 +834,7 @@ func reapStaleAttachments() {
 		if time.Since(info.ModTime()) > maxAge {
 			// Route through the symlink-safe remover (validates id + refuses to
 			// follow a symlinked base/session dir) instead of a raw RemoveAll.
-			_ = removeSessionAttachDir(entry.Name())
+			_ = removeSessionAttachDirIn(base, entry.Name())
 		}
 	}
 }

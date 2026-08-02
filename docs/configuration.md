@@ -176,11 +176,59 @@ Project-specific files live in `<cwd>/.moa/`:
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)) |
-| `MOA_CONFIG_DIR` | Overrides where the auth/credential store lives (default `~/.config/moa`). Useful for containers or custom deployments |
+| `MOA_CONFIG_DIR` | Moves everything moa stores about itself (default `~/.config/moa`): `config.json`, credentials, sessions, skills, prompts, memory, attachments. See [Running two instances](#running-two-instances) |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 | `MOA_AUTOMATION_TOKEN` | Shared secret enabling the inbound [Automation API](./automation.md); equivalent to `--automation-token`. Separate from `MOA_SERVE_TOKEN` |
 | `MOA_NO_UPDATE_CHECK=1` | Disables the best-effort GitHub release check for this process |
-| `MOA_ATTACHMENTS_DIR` | Base directory for `moa serve` attachment storage (default `/tmp/moa`); detailed in [Web UI](./serve.md) |
+| `MOA_ATTACHMENTS_DIR` | Base directory for `moa serve` attachment staging (default `/tmp/moa-<uid>`); detailed in [Web UI](./serve.md) |
+
+## Running two instances
+
+Everything moa keeps about itself lives in one directory, `~/.config/moa` by
+default. `MOA_CONFIG_DIR` moves all of it — config, credentials, sessions,
+skills, prompts, memory, attachments — so two instances can run on one machine
+without sharing anything:
+
+```bash
+MOA_CONFIG_DIR=~/.config/moa-work moa serve --port 8081
+```
+
+Each instance keeps its own API keys, model defaults, MCP servers and history.
+The one thing outside it is the temporary staging area for web-UI attachments,
+shared per user account and overridable with `MOA_ATTACHMENTS_DIR`.
+
+The variable points moa at a *different* directory; it does not move what is
+already in the old one. A fresh `MOA_CONFIG_DIR` therefore starts empty — no
+credentials, no history, no skills — and the previous state stays untouched in
+`~/.config/moa`. Copy across whatever you want to keep:
+
+```bash
+cp ~/.config/moa/auth.json ~/.config/moa-work/
+```
+
+If you were already setting `MOA_CONFIG_DIR` before moa 0.24, note that it used
+to move only part of the state: credentials and attachments followed it, while
+`config.json`, sessions, skills and prompts stayed in the home directory. Now
+that all of it moves together, that leftover state is no longer read — move the
+files you still want into the override directory.
+
+### Two people on one machine
+
+Give each person a Unix account instead. Separate accounts already separate
+everything above, and the isolation is enforced by the operating system rather
+than by moa: one account cannot read the other's credentials even if moa has a
+bug.
+
+Give each account its own checkout as well. A single checkout shared through
+group permissions does not currently work: moa writes `<project>/.moa/` with
+private permissions, so whoever triggers the first write owns it and the other
+account can no longer read the project's `verify.json`, skills or prompts.
+
+Moa is a single-user tool by design. It has no notion of who is asking: no
+per-user permissions, no ownership on sessions, no way to scope what one
+person's agent may touch. Sharing one moa between two people means sharing one
+identity and one set of credentials, so keep the accounts separate rather than
+expecting moa to tell them apart.
 
 ## `AGENTS.md`
 

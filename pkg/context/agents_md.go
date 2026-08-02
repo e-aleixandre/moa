@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 const agentsMDFile = "AGENTS.md"
@@ -19,11 +21,7 @@ const agentsMDFile = "AGENTS.md"
 // Duplicate paths are deduplicated.
 func LoadAgentsMD(cwd, agentHome string) (string, error) {
 	if agentHome == "" {
-		if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
-			agentHome = dir
-		} else if home, err := os.UserHomeDir(); err == nil {
-			agentHome = filepath.Join(home, ".config", "moa")
-		}
+		agentHome = core.ConfigDir()
 	}
 
 	seen := make(map[string]bool)

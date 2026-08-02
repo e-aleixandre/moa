@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -14,13 +15,32 @@ import (
 var sessionIDPattern = regexp.MustCompile(`^[a-f0-9]{8,64}$`)
 
 // attachmentsBaseDir returns the base directory under which per-session
-// attachment directories are created. It honors MOA_ATTACHMENTS_DIR when
-// set, defaulting to /tmp/moa otherwise.
+// attachment directories are created. It honors MOA_ATTACHMENTS_DIR when set.
+//
+// The default is per-user ("/tmp/moa-<uid>") rather than a shared "/tmp/moa".
+// The base is created 0700 and ensureBaseDir refuses a directory owned by
+// somebody else, so on a machine with two accounts running moa the second one
+// found the first one's directory and failed outright instead of storing
+// attachments. Keying by uid gives each account its own base while keeping the
+// ownership check meaningful.
 func attachmentsBaseDir() string {
 	if dir := os.Getenv("MOA_ATTACHMENTS_DIR"); dir != "" {
 		return dir
 	}
-	return "/tmp/moa"
+	return filepath.Join(os.TempDir(), "moa-"+strconv.Itoa(os.Getuid()))
+}
+
+// legacyAttachmentsBaseDir is the pre-per-user default. It is still swept by
+// the reaper so attachments written before the switch are not orphaned on
+// disk forever — they can hold whatever the user uploaded. Returns "" when
+// the current base already is that directory (an explicit override), so the
+// sweep never runs twice over the same tree.
+func legacyAttachmentsBaseDir() string {
+	legacy := filepath.Join(os.TempDir(), "moa")
+	if legacy == attachmentsBaseDir() {
+		return ""
+	}
+	return legacy
 }
 
 // sessionAttachDir validates id and returns the path of its attachment
@@ -112,9 +132,17 @@ func ensureSessionAttachDir(id string) (string, error) {
 // nothing to remove. This is the ONLY sanctioned way to delete an attachment
 // dir; callers must not os.RemoveAll a client-influenced path directly.
 func removeSessionAttachDir(id string) error {
+	return removeSessionAttachDirIn(attachmentsBaseDir(), id)
+}
+
+// removeSessionAttachDirIn is removeSessionAttachDir against an explicit base,
+// so the reaper can also clean the pre-per-user directory.
+func removeSessionAttachDirIn(base string, id string) error {
+	if !sessionIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid session id: %q", id)
+	}
 	// Base dir must exist and not be a symlink (never delete through a symlink
 	// that could point outside our tree).
-	base := attachmentsBaseDir()
 	if bi, err := os.Lstat(base); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -123,10 +151,7 @@ func removeSessionAttachDir(id string) error {
 	} else if bi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("attachments base dir %q is a symlink; refusing to remove", base)
 	}
-	dir, err := sessionAttachDir(id)
-	if err != nil {
-		return err
-	}
+	dir := filepath.Join(base, id)
 	info, err := os.Lstat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 const (
@@ -210,16 +212,7 @@ type Checker struct {
 // NewChecker creates a checker using ~/.config/moa/update.json (or
 // MOA_CONFIG_DIR) as its shared persistent cache.
 func NewChecker(info Info) *Checker {
-	dir := os.Getenv("MOA_CONFIG_DIR")
-	if dir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, ".config", "moa")
-		}
-	}
-	cachePath := ""
-	if dir != "" {
-		cachePath = filepath.Join(dir, "update.json")
-	}
+	cachePath := core.ConfigSubdir("update.json")
 	return &Checker{Info: info, Client: &http.Client{Timeout: requestTimeout}, URL: githubLatestURL, CachePath: cachePath, Now: time.Now}
 }
 

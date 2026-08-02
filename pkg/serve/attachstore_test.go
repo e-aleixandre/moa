@@ -3,8 +3,10 @@ package serve
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -191,5 +193,65 @@ func TestEnsureSessionAttachDir_Creates(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Errorf("expected %q to be a directory", dir)
+	}
+}
+
+// The default base used to be a shared "/tmp/moa". Since it is created 0700
+// and ensureBaseDir rejects a directory owned by somebody else, a second
+// account running moa on the same machine hit the first account's directory
+// and could not store attachments at all.
+func TestAttachmentsBaseDir_IsPerUser(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", "")
+
+	base := attachmentsBaseDir()
+	if base == filepath.Join(os.TempDir(), "moa") {
+		t.Fatal("default base is shared between accounts on the same machine")
+	}
+	if !strings.Contains(base, strconv.Itoa(os.Getuid())) {
+		t.Errorf("default base %q should be keyed by uid", base)
+	}
+}
+
+func TestAttachmentsBaseDir_OverrideStillWins(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", "/tmp/somewhere-else")
+	if got := attachmentsBaseDir(); got != "/tmp/somewhere-else" {
+		t.Errorf("got %q, want the override", got)
+	}
+}
+
+// Moving the default base to a per-user directory would have orphaned whatever
+// the previous default still held: nothing else ever looks there again.
+func TestReapSweepsTheLegacyBaseDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("MOA_ATTACHMENTS_DIR", "")
+
+	legacy := legacyAttachmentsBaseDir()
+	if legacy == "" {
+		t.Fatal("legacy base should be swept when the current base differs")
+	}
+	id := "0123456789abcdef"
+	old := filepath.Join(legacy, id)
+	if err := os.MkdirAll(old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(old, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	reapStaleAttachments()
+
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("stale attachments left in the legacy base dir %q", old)
+	}
+}
+
+// An explicit override that happens to be the legacy path must not be swept
+// twice, and must not be treated as somebody else's leftovers.
+func TestLegacyBaseDir_EmptyWhenItIsTheCurrentBase(t *testing.T) {
+	t.Setenv("MOA_ATTACHMENTS_DIR", filepath.Join(os.TempDir(), "moa"))
+	if got := legacyAttachmentsBaseDir(); got != "" {
+		t.Errorf("legacy base = %q, want empty when it is the current base", got)
 	}
 }

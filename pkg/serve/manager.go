@@ -522,10 +522,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	if schedulePath == "" {
 		baseDir := cfg.SessionBaseDir
 		if baseDir == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				baseDir = filepath.Join(home, ".config", "moa", "sessions")
-			} else {
-				slog.Warn("schedule storage disabled: cannot resolve home directory", "error", err)
+			baseDir = core.ConfigSubdir("sessions")
+			if baseDir == "" {
+				slog.Warn("schedule storage disabled: cannot resolve config directory")
 			}
 		}
 		if baseDir != "" {

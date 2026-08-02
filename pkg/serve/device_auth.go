@@ -19,6 +19,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 const (
@@ -160,14 +162,7 @@ type deviceCredentialResult struct {
 }
 
 func defaultDeviceStorePath() string {
-	if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "devices.json")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "moa", "devices.json")
+	return core.ConfigSubdir("devices.json")
 }
 
 func openDeviceStore(path string) (*deviceStore, error) {

@@ -12,16 +12,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // Credential represents a stored credential for a provider.
 type Credential struct {
-	Type      string `json:"type"`                        // "api_key" or "oauth"
-	Key       string `json:"key,omitempty"`                // API key (type=api_key)
-	Access    string `json:"access,omitempty"`             // OAuth access token (type=oauth)
-	Refresh   string `json:"refresh,omitempty"`            // OAuth refresh token (type=oauth)
-	Expires   int64  `json:"expires,omitempty"`            // OAuth token expiry (unix ms) (type=oauth)
-	AccountID string `json:"account_id,omitempty"`         // Provider-specific account ID (e.g., OpenAI chatgpt_account_id)
+	Type      string `json:"type"`                 // "api_key" or "oauth"
+	Key       string `json:"key,omitempty"`        // API key (type=api_key)
+	Access    string `json:"access,omitempty"`     // OAuth access token (type=oauth)
+	Refresh   string `json:"refresh,omitempty"`    // OAuth refresh token (type=oauth)
+	Expires   int64  `json:"expires,omitempty"`    // OAuth token expiry (unix ms) (type=oauth)
+	AccountID string `json:"account_id,omitempty"` // Provider-specific account ID (e.g., OpenAI chatgpt_account_id)
 }
 
 // IsOAuthToken returns true if the given key looks like an OAuth token
@@ -50,20 +52,24 @@ type Store struct {
 
 // configDir returns the directory for storing credentials.
 // Honors MOA_CONFIG_DIR env var for container/custom deployments.
+//
+// Returns "" when it cannot be resolved. Writing credentials relative to the
+// current directory — the previous behaviour — drops an auth.json inside
+// whatever repository the user happened to be in, where it can be committed or
+// shared; failing to authenticate is the safer outcome, and MOA_CONFIG_DIR or
+// an API key in the environment both still work.
 func configDir() string {
-	if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
-		return dir
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return filepath.Join(home, ".config", "moa")
+	return core.ConfigDir()
 }
 
-// DefaultStorePath returns the default path for the auth store.
+// DefaultStorePath returns the default path for the auth store, or "" when no
+// config directory can be resolved.
 func DefaultStorePath() string {
-	return filepath.Join(configDir(), "auth.json")
+	dir := configDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "auth.json")
 }
 
 // NewStore creates or loads a credential store.
