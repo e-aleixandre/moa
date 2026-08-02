@@ -79,6 +79,61 @@ func LoadConfig(cwd string) (*Config, error) {
 	return &cfg, nil
 }
 
+// PathChecker reports whether a directory may be used as a verify working
+// directory. *tool.PathPolicy satisfies it; taking the interface keeps
+// pkg/verify from depending on pkg/tool.
+type PathChecker interface {
+	IsAllowed(realPath string) bool
+}
+
+// ResolveWorkDir resolves an optional working-directory override against the
+// session's CWD.
+//
+// An empty dir keeps the session CWD. A relative dir resolves against it. The
+// result must exist, be a directory, and pass allowed: running a
+// .moa/verify.json means running the shell commands it contains, so accepting
+// any directory would turn verify into a way out of the sandbox. In
+// unrestricted (YOLO) mode the policy allows everything, so this only
+// constrains sessions that asked to be constrained.
+func ResolveWorkDir(sessionCWD, dir string, allowed PathChecker) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		return sessionCWD, nil
+	}
+	target := dir
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(sessionCWD, target)
+	}
+	real, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", fmt.Errorf("verify: cwd %q: %w", dir, err)
+	}
+	info, err := os.Stat(real)
+	if err != nil {
+		return "", fmt.Errorf("verify: cwd %q: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("verify: cwd %q is not a directory", dir)
+	}
+	if allowed != nil && !allowed.IsAllowed(real) {
+		return "", fmt.Errorf("verify: cwd %q is outside the allowed paths — run `/path add %s` first", dir, real)
+	}
+	// The directory being allowed does not make its config allowed: .moa or
+	// verify.json can be symlinks pointing out of the sandbox, which would let
+	// commands from an unapproved location run. Check where the file really
+	// lives, not where it appears to. A missing config is fine — LoadConfig
+	// reports that far more usefully than a path error would.
+	if allowed != nil {
+		if cfgPath, err := filepath.EvalSymlinks(filepath.Join(real, ".moa", "verify.json")); err == nil {
+			if !allowed.IsAllowed(cfgPath) {
+				return "", fmt.Errorf(
+					"verify: %s resolves to %s, outside the allowed paths — refusing to run commands from there",
+					filepath.Join(dir, ".moa", "verify.json"), cfgPath)
+			}
+		}
+	}
+	return real, nil
+}
+
 // CheckResult holds the outcome of a single check execution.
 type CheckResult struct {
 	Name     string

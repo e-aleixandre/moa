@@ -28,7 +28,7 @@ func TestTool_AllPass(t *testing.T) {
 		{Name: "b", Command: "echo ok"},
 	}})
 
-	tool := NewTool(dir)
+	tool := NewTool(dir, nil)
 	result, err := tool.Execute(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -52,7 +52,7 @@ func TestTool_SomeFail(t *testing.T) {
 		{Name: "fail", Command: "exit 1"},
 	}})
 
-	tool := NewTool(dir)
+	tool := NewTool(dir, nil)
 	result, err := tool.Execute(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -74,7 +74,7 @@ func TestTool_FilterChecks(t *testing.T) {
 		{Name: "lint", Command: "echo lint"},
 	}})
 
-	tool := NewTool(dir)
+	tool := NewTool(dir, nil)
 	params := map[string]any{
 		"checks": []any{"build", "lint"},
 	}
@@ -107,7 +107,7 @@ func TestTool_InvalidFilter(t *testing.T) {
 		{Name: "build", Command: "echo ok"},
 	}})
 
-	tool := NewTool(dir)
+	tool := NewTool(dir, nil)
 	params := map[string]any{
 		"checks": []any{"nonexistent"},
 	}
@@ -128,7 +128,7 @@ func TestTool_InvalidFilter(t *testing.T) {
 }
 
 func TestTool_NoConfig(t *testing.T) {
-	tool := NewTool(t.TempDir())
+	tool := NewTool(t.TempDir(), nil)
 	result, err := tool.Execute(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

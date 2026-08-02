@@ -4,8 +4,10 @@ export { Stream } from "./Stream/Stream.jsx";
 export { AgentTray } from "./AgentTray/AgentTray.jsx";
 export { LiveDock } from "./LiveDock/LiveDock.jsx";
 export { SubagentView } from "./SubagentView/SubagentView.jsx";
+export { BashJobView } from "./BashJobView/BashJobView.jsx";
 export { Composer } from "./Composer/Composer.jsx";
 export { StatusStrip } from "./StatusStrip/StatusStrip.jsx";
+export { NowLine } from "./NowLine/NowLine.jsx";
 export { ConversationScreen } from "./ConversationScreen/ConversationScreen.jsx";
 export { GridToolbar } from "./GridToolbar/GridToolbar.jsx";
 export { Pane } from "./Pane/Pane.jsx";
@@ -18,5 +20,6 @@ export { MobileConversationScreen } from "./mobile/MobileConversationScreen/Mobi
 export { MobileStream } from "./mobile/MobileConversationScreen/MobileStream.jsx";
 export { MobileNowLine } from "./mobile/MobileConversationScreen/MobileNowLine.jsx";
 export { MobileSubagentView } from "./mobile/MobileConversationScreen/MobileSubagentView.jsx";
+export { MobileBashJobView } from "./mobile/MobileConversationScreen/MobileBashJobView.jsx";
 export { SessionDrawer } from "./mobile/SessionDrawer/SessionDrawer.jsx";
 export { RewindTimeline } from "./RewindTimeline/RewindTimeline.jsx";

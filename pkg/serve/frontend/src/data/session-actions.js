@@ -102,6 +102,9 @@ export async function loadSessions() {
         // carry them over or the agent tray vanishes on every poll tick.
         subagents: existing ? existing.subagents : {},
         viewingSubagent: existing ? existing.viewingSubagent : null,
+        // viewingBashJob is the read-only counterpart (a background command's
+        // detail view); client UI-only too, so it survives a poll the same way.
+        viewingBashJob: existing ? existing.viewingBashJob : null,
         // dockOpen is the LiveDock's per-session open/closed preference (client
         // UI-only, no server field): preserved across polls exactly like
         // viewingSubagent, so switching sessions and back doesn't reset it.
@@ -275,8 +278,37 @@ export async function closeSession(id) {
   afterVisibilityChange();
 }
 
+// cancelBashJob asks the server to stop a background command. The kill is
+// echoed over the WebSocket (bash_job_end with status cancelled), which flips
+// the job's status in the store, so there is nothing optimistic to write here.
+// A refusal (the job already ended between the tap and the POST → 404) is
+// surfaced as a toast rather than silently: the button was live, so the user
+// expects an answer.
 export async function cancelBashJob(sessionId, jobId) {
-  return api('POST', `/api/sessions/${sessionId}/bash-jobs/${jobId}/cancel`);
+  try {
+    return await api('POST', `/api/sessions/${sessionId}/bash-jobs/${jobId}/cancel`);
+  } catch (e) {
+    addToast({
+      sessionId,
+      title: 'Could not stop the job',
+      detail: String(e.message || e).startsWith('404')
+        ? 'It already finished.'
+        : String(e.message || e),
+      type: 'attention',
+    });
+    throw e;
+  }
+}
+
+// openBashJob opens a background bash job's read-only detail view (command,
+// live output, stop). Unlike openPersistedSubagent there is no disk fallback:
+// a bash job has no persisted transcript endpoint, and once it ends its output
+// lands inline in the conversation as a card — so this only opens jobs still
+// present in the store (i.e. the ones the LiveDock lists).
+export function openBashJob(id, jobId) {
+  const sess = store.get().sessions[id];
+  if (!sess || !sess.subagents || !sess.subagents[jobId]) return;
+  updateSession(id, { viewingBashJob: jobId, viewingSubagent: null });
 }
 
 // attachmentToContent builds the local content needed for the immediate
@@ -573,7 +605,7 @@ export async function openPersistedSubagent(id, jobId) {
   if (!sess) return;
   // If we still have it live in memory, just open it.
   if (sess.subagents && sess.subagents[jobId]) {
-    updateSession(id, { viewingSubagent: jobId });
+    updateSession(id, { viewingSubagent: jobId, viewingBashJob: null });
     return;
   }
   const t = await api('GET', `/api/sessions/${id}/subagents/${jobId}`);
@@ -602,7 +634,9 @@ export async function openPersistedSubagent(id, jobId) {
     usage,
     contextPercent: t.context_percent == null ? -1 : t.context_percent,
   };
-  updateSession(id, { subagents: subs, viewingSubagent: jobId });
+  // Clearing viewingBashJob keeps the two detail views mutually exclusive:
+  // only one thing is being looked at, whichever was opened last.
+  updateSession(id, { subagents: subs, viewingSubagent: jobId, viewingBashJob: null });
 }
 
 export async function resolvePermission(sessionId, permId, approved, opts = {}) {

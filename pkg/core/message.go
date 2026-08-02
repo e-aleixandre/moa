@@ -114,6 +114,14 @@ func CloneContent(in []Content) []Content {
 	return out
 }
 
+// CloneArgs deep-copies a tool call's JSON-shaped arguments. Exported for
+// callers outside core that hold on to an args map the agent keeps mutating
+// (pkg/bus's live-tool registry), where a shallow copy would still share the
+// nested maps and slices.
+func CloneArgs(m map[string]any) map[string]any {
+	return cloneArgs(m)
+}
+
 func cloneArgs(m map[string]any) map[string]any {
 	if m == nil {
 		return nil

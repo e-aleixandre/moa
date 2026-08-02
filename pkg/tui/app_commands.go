@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -67,6 +68,10 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	if rest, ok := cutCommand(cmd, "compact"); ok {
 		return m.handleCompactCommand(rest)
+	}
+
+	if rest, ok := cutCommand(cmd, "verify"); ok {
+		return m.handleVerifyCommand(rest)
 	}
 
 	switch cmd {
@@ -146,33 +151,6 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "plan":
 		return m.handlePlanCommand()
-
-	case "verify":
-		if err := bus.RequireManualVerifyAllowed(m.runtime.Bus); err != nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
-			m.updateViewport()
-			return m, nil
-		}
-		if m.s.running {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: "Cannot verify while agent is running",
-			})
-			return m, nil
-		}
-		m.s.running = true
-		m.input.SetEnabled(false)
-		m.status.SetText("running verify checks...")
-		cwd := m.cwd
-		ctx, cancel := context.WithCancel(m.baseCtx)
-		m.verifyCancel = cancel
-		return m, func() tea.Msg {
-			defer cancel()
-			result, err := verify.Execute(ctx, cwd)
-			if err != nil {
-				return verifyResultMsg{Err: err}
-			}
-			return verifyResultMsg{Result: &result}
-		}
 
 	case "settings":
 		return m.openSettingsMenu()
@@ -255,6 +233,13 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Send empty answers (one per question) so the tool doesn't hang.
 		emptyAnswers := make([]string, len(m.askPrompt.questions))
 		m.askPrompt.Cancel()
+		// Cancelling the question also drops a recording started for it:
+		// otherwise the mic keeps capturing for a prompt nobody will answer,
+		// and the next Ctrl+R would stop that ghost take instead of starting
+		// a fresh dictation into the composer.
+		if m.voice.askID == askID {
+			m.voice.reset()
+		}
 		if err := m.runtime.Bus.Execute(bus.ResolveAskUser{
 			AskID:   askID,
 			Answers: emptyAnswers,
@@ -1262,6 +1247,50 @@ func (m appModel) handleCompactCommand(focus string) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		err := b.Execute(bus.CompactSession{Focus: strings.TrimSpace(focus)})
 		return compactResultMsg{Err: err}
+	}
+}
+
+// handleVerifyCommand runs the project's checks. `/verify <dir>` runs the
+// checks of another repository or worktree instead — the common shape of
+// multi-repo work, where the session starts in one checkout and the code being
+// changed lives in another.
+func (m appModel) handleVerifyCommand(dir string) (tea.Model, tea.Cmd) {
+	if err := bus.RequireManualVerifyAllowed(m.runtime.Bus); err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+		m.updateViewport()
+		return m, nil
+	}
+	if m.s.running {
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Cannot verify while agent is running",
+		})
+		return m, nil
+	}
+	cwd, err := verify.ResolveWorkDir(m.cwd, dir, m.runtime.Context().PathPolicy)
+	if err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+		m.updateViewport()
+		return m, nil
+	}
+	m.s.running = true
+	m.input.SetEnabled(false)
+	// Compare resolved paths: ResolveWorkDir canonicalizes, so a session CWD
+	// holding a symlink would otherwise read as a different directory.
+	sessionReal, symErr := filepath.EvalSymlinks(m.cwd)
+	if symErr == nil && cwd == sessionReal {
+		m.status.SetText("running verify checks...")
+	} else {
+		m.status.SetText("running verify checks in " + filepath.Base(cwd) + "...")
+	}
+	ctx, cancel := context.WithCancel(m.baseCtx)
+	m.verifyCancel = cancel
+	return m, func() tea.Msg {
+		defer cancel()
+		result, err := verify.Execute(ctx, cwd)
+		if err != nil {
+			return verifyResultMsg{Err: err}
+		}
+		return verifyResultMsg{Result: &result}
 	}
 }
 

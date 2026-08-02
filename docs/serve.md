@@ -49,6 +49,14 @@ On desktop, you can split panes horizontally or vertically, switch focus by keyb
 
 Requires `moa --login openai-transcribe`. Browser microphone access usually needs HTTPS, so it works best on localhost, Tailscale, or behind your own HTTPS setup.
 
+Hold the send button to record, release to transcribe, or slide up while holding
+to keep recording hands-free. `⌘.` / `Alt+.` does the same from the keyboard.
+
+Agent questions (`ask_user`) take dictation the same way: hold their answer
+button, or use the shortcut while the question is on screen. Speech is appended
+to whatever the answer already contains, so a long reply can be dictated in
+several passes; dictating over a chosen option replaces it.
+
 If it keeps mangling a name or a piece of jargon, add that word to
 [`stt_vocabulary`](configuration.md#features). The model and the language hint
 are configurable there too.

@@ -218,7 +218,7 @@ func TestOwnedBashCompletionDoesNotStartRootNotificationRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	init := buildInitData(sess, bus.StreamingAggregate{})
+	init := buildInitData(sess, bus.StreamingAggregate{}, nil)
 	if len(init.BashJobs) != 1 || init.BashJobs[0].OwnerAgentID != "child-1" {
 		t.Fatalf("bash init snapshot = %+v", init.BashJobs)
 	}

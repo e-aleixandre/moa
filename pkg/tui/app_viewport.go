@@ -98,7 +98,7 @@ func (m *appModel) buildBottomChrome() string {
 			parts = append(parts, pv)
 		}
 	} else if m.askPrompt.active {
-		if av := m.askPrompt.View(m.width, ActiveTheme); av != "" {
+		if av := m.askPrompt.View(m.width, ActiveTheme, m.voice.available()); av != "" {
 			parts = append(parts, av)
 		}
 	} else if m.picker.active {

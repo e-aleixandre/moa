@@ -22,6 +22,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/memory"
+	"github.com/e-aleixandre/moa/pkg/moadocs"
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
@@ -317,15 +318,22 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	taskStore := tasks.NewStore()
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
 
-	// 4. Verify tool.
+	// 3b. moa's own documentation, embedded in the binary. Always available:
+	// someone who installed the binary has no copy of the repository, and
+	// questions about how to configure or integrate moa can come up in any
+	// session, not just one opened inside this repo.
+	core.RegisterOrLog(toolReg, moadocs.NewTool())
+
+	// 4. Verify tool. Registered even when the session's own directory has no
+	// config: in multi-repo work the code being changed often lives in another
+	// worktree, and the tool can target it with cwd. Without this the tool
+	// would be missing from exactly the sessions that need it most.
 	verifyCfg, verifyErr := verify.LoadConfig(cfg.CWD)
 	if verifyErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: invalid .moa/verify.json in %s: %v\n", cfg.CWD, verifyErr)
 	}
 	hasVerify := verifyCfg != nil
-	if hasVerify {
-		core.RegisterOrLog(toolReg, verify.NewTool(cfg.CWD))
-	}
+	core.RegisterOrLog(toolReg, verify.NewTool(cfg.CWD, pathPolicy))
 
 	// 5. AGENTS.md.
 	agentsMD, _ := agentcontext.LoadAgentsMD(cfg.CWD, "")

@@ -167,12 +167,17 @@ type CompactionEnded struct {
 // ---------------------------------------------------------------------------
 
 // Steered is published when a steering message is injected into the agent.
+// Content carries the injected message's blocks when the steer had attachments
+// (Text always holds its plain text, which is what text-only consumers render);
+// without it a queued message with an image would appear live as bare text and
+// only grow its thumbnail after a reload.
 type Steered struct {
 	SessionID string
 	RunGen    uint64
 	ID        string
 	MsgID     string
 	Text      string
+	Content   []core.Content
 }
 
 // SteersCanceled is published when all queued (not yet delivered) steers are
@@ -613,9 +618,14 @@ type CommandExecuted struct {
 // Auto-verify
 // ---------------------------------------------------------------------------
 
-// AutoVerifyStarted is published when auto-verify begins after an edit run.
+// AutoVerifyStarted is published when verification begins: automatically after
+// an edit run, or manually via /verify. Dir names the directory being verified
+// when it is not the session's own, so a multi-repo run says which checkout it
+// is checking instead of leaving the user guessing.
 type AutoVerifyStarted struct {
 	SessionID string
+	Dir       string // empty when verifying the session's own directory
+	Manual    bool   // true for /verify, false for auto-verify after an edit
 }
 
 // AutoVerifyEnded is published when auto-verify completes.

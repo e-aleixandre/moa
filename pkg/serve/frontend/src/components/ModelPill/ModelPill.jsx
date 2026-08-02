@@ -5,13 +5,9 @@ import "./ModelPill.css";
 // default) embedded. `accent` tints the model name (sol=lavender,
 // fable=peach, terra=teal… any valid color token).
 //
-// Desktop-only shortcut (MODEL-SELECTOR-ALT-SPEC-FABLE §2, §6.2): when
-// `onMeterClick` is passed, the pill splits into two click targets — the name
-// opens the Model & thinking popover (`onClick`), the meter zone cycles the
-// thinking level in place (off→low→medium→high→xhigh→off) without opening
-// anything. Mobile never passes `onMeterClick` (that half would be <44px, and
-// the split gesture isn't offered there per the spec) so it keeps the single
-// whole-pill button that opens the sheet.
+// The whole pill is a single button that opens the Model & thinking selector,
+// on desktop and mobile alike: a button nested inside another button reads as
+// an accident, so the meter is a status indicator, never its own click target.
 export function ModelPill({
   model,
   level = "off",
@@ -20,7 +16,6 @@ export function ModelPill({
   hot = false,
   readOnly = false,
   onClick,
-  onMeterClick,
   ...rest
 }) {
   // xhigh always renders "hot" (peach) on the persistent pill meter, even when
@@ -38,25 +33,6 @@ export function ModelPill({
           {model}
         </span>
         <ThinkingMeter variant={variant} level={level} hot={isHot} label={`Thinking: ${level}`} />
-      </span>
-    );
-  }
-  if (onMeterClick) {
-    return (
-      <span class="model-pill model-pill--split" {...rest}>
-        <button type="button" class="m-name-btn" onClick={onClick}>
-          <span class="m-name" style={{ color: `var(--${accent})` }}>
-            {model}
-          </span>
-        </button>
-        <button
-          type="button"
-          class="m-meter-btn"
-          onClick={onMeterClick}
-          title={`Thinking: ${level} — click to cycle`}
-        >
-          <ThinkingMeter variant={variant} level={level} hot={isHot} label={`Thinking: ${level}`} />
-        </button>
       </span>
     );
   }

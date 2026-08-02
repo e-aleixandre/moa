@@ -219,8 +219,8 @@ See [TUI Usage](docs/tui.md) and the [CLI Reference](docs/cli.md).
 
 ## Documentation
 
-For installation details, configuration, tool behavior, limits, and security guidance, see the
-full documentation in `docs/`:
+The docs are published, searchable, at **[letmoa.run/docs](https://letmoa.run/docs/)**. They are
+the same markdown that lives in `docs/` here, so either place works:
 
 | Document | Reference |
 |---|---|

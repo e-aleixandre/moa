@@ -20,6 +20,7 @@ export { DiffBlock, parseUnifiedDiff } from "./DiffBlock/DiffBlock.jsx";
 export { FanoutBlock } from "./FanoutBlock/FanoutBlock.jsx";
 export { DelegationBlock } from "./DelegationBlock/DelegationBlock.jsx";
 export { BackgroundJob } from "./BackgroundJob/BackgroundJob.jsx";
+export { BashJobLog } from "./BashJobLog/BashJobLog.jsx";
 export { StreamingSkeleton, TypingDots } from "./StreamingSkeleton/StreamingSkeleton.jsx";
 export { ToolTicker } from "./ToolTicker/ToolTicker.jsx";
 export { FileSuggestions } from "./FileSuggestions/FileSuggestions.jsx";

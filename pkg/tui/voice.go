@@ -40,6 +40,11 @@ type voiceRecorder struct {
 	cancel      context.CancelFunc // cancels the recording process
 	tmpFile     string             // path to temp audio file
 	done        chan struct{}      // closed when the recorder process has exited (WAV finalized)
+	// askID is the agent question that was on screen when recording started, or
+	// "" for a normal composer dictation. Transcription is slow enough that the
+	// prompt can be answered or replaced meanwhile; the transcript then belongs
+	// to nothing, and must not be typed into whatever question came next.
+	askID string
 }
 
 // available returns true if voice input can be used (transcriber + recording tool).
@@ -207,6 +212,9 @@ func (v *voiceRecorder) reset() {
 		os.Remove(v.tmpFile) //nolint:errcheck
 		v.tmpFile = ""
 	}
+	// Forget which question owned this take, so a later composer dictation is
+	// not mistaken for an answer to a question that is already gone.
+	v.askID = ""
 	v.state = voiceIdle
 }
 
@@ -230,7 +238,13 @@ func (m appModel) handleVoiceToggle() (tea.Model, tea.Cmd) {
 		// Already transcribing, ignore.
 		return m, nil
 	default:
-		// Start recording — kick the spinner so it animates.
+		// Start recording — kick the spinner so it animates. Remember which
+		// question (if any) asked for this, so a slow transcription can't land
+		// in a different one.
+		m.voice.askID = ""
+		if m.askPrompt.active {
+			m.voice.askID = m.askPrompt.askID
+		}
 		m.status.SetText("recording — Ctrl+R to stop")
 		return m, tea.Batch(m.voice.startRecording(m.baseCtx), m.status.spinner.Tick)
 	}
@@ -239,12 +253,33 @@ func (m appModel) handleVoiceToggle() (tea.Model, tea.Cmd) {
 // handleVoiceResult processes the transcription result.
 func (m appModel) handleVoiceResult(msg voiceResultMsg) (tea.Model, tea.Cmd) {
 	m.voice.state = voiceIdle
+	// Every exit path below is the end of this take, so clear the question
+	// stamp here: leaving it set would make the next composer dictation look
+	// like an answer to a question that is no longer on screen.
+	askID := m.voice.askID
+	m.voice.askID = ""
+
 	if msg.Err != nil {
 		m.status.SetText("voice: " + msg.Err.Error())
 		return m, nil
 	}
 	if msg.Text == "" {
 		m.status.SetText("voice: no speech detected")
+		return m, nil
+	}
+
+	// A live question owns the keyboard, so the answer it is waiting for is
+	// where dictation belongs — not the composer behind it. The recording is
+	// stamped with the question that started it: if that one was answered or
+	// replaced while the audio was being transcribed, the text belongs to
+	// nothing and is dropped rather than typed into a different question.
+	if askID != "" {
+		if m.askPrompt.active && m.askPrompt.askID == askID {
+			m.askPrompt.Dictate(msg.Text)
+			m.status.SetText("")
+		} else {
+			m.status.SetText("voice: the question was answered — transcript discarded")
+		}
 		return m, nil
 	}
 

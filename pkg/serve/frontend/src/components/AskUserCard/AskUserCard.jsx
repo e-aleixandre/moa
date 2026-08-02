@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "preact/hooks";
-import { Users, ArrowUp } from "lucide-preact";
+import { Users, ArrowUp, Mic, Square, Loader2, ChevronUp } from "lucide-preact";
 import "./AskUserCard.css";
 
 const isTextEntryTarget = (el) => {
@@ -14,6 +14,11 @@ const isTextEntryTarget = (el) => {
 // becomes controlled when `onFreeChange` is passed: then every keystroke is
 // reported up so a stateful container (AskUserPrompt) can persist the answer
 // per question and restore it when navigating back.
+//
+// `voice` is the optional push-to-talk wiring from useVoiceGesture (handlers +
+// recording/transcribing/locked/showSlideHint). Passing it turns the submit
+// button into the same hold-to-talk control the composer uses; omitting it
+// leaves a plain submit, which is what the gallery renders.
 export function AskUserCard({
   question,
   options = [],
@@ -21,6 +26,7 @@ export function AskUserCard({
   onSubmitFree,
   freeValue,
   onFreeChange,
+  voice = null,
   placeholder = "Or answer in your own words…",
   ...rest
 }) {
@@ -75,15 +81,66 @@ export function AskUserCard({
       <form class="ask-free" onSubmit={submitFree}>
         <input
           type="text"
-          placeholder={placeholder}
+          placeholder={voice?.supported ? "Answer in your own words, or hold to talk…" : placeholder}
           aria-label="Answer in your own words"
           value={free}
           onInput={(e) => setFree(e.currentTarget.value)}
         />
-        <button type="submit" class="ask-free-submit" aria-label="Send answer">
-          <ArrowUp size={15} />
-        </button>
+        {voice?.supported ? renderVoiceSubmit(voice, free) : (
+          <button type="submit" class="ask-free-submit" aria-label="Send answer">
+            <ArrowUp size={15} />
+          </button>
+        )}
       </form>
+    </div>
+  );
+}
+
+// renderVoiceSubmit — the submit button doubling as push-to-talk, mirroring the
+// composer's send button: tap submits, hold records, sliding up locks it
+// hands-free. Keeping one control (instead of adding a second mic button) means
+// the card gains dictation without growing a new thing to aim at on a phone.
+function renderVoiceSubmit(voice, free) {
+  const { recording, transcribing, locked, showSlideHint, handlers } = voice;
+  const micMode = !free.trim();
+
+  let icon = <ArrowUp size={15} />;
+  if (transcribing) icon = <Loader2 size={15} class="spin" />;
+  else if (recording && locked) icon = <Square size={13} />;
+  else if (recording || micMode) icon = <Mic size={15} />;
+
+  const title = transcribing ? "Transcribing…"
+    : recording ? (locked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
+    : micMode ? "Hold to talk · tap to send"
+    : "Send answer · hold to talk";
+
+  const cls = [
+    "ask-free-submit",
+    "gesture",
+    recording ? "recording" : "",
+    locked ? "locked" : "",
+    transcribing ? "transcribing" : "",
+    micMode ? "mic-mode" : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div class="ask-free-send-wrap">
+      {showSlideHint && (
+        <div class="ask-voice-lock-hint">
+          <ChevronUp size={13} />
+          <span>Slide up to lock</span>
+        </div>
+      )}
+      <button
+        type="button"
+        class={cls}
+        aria-label={micMode ? "Record answer" : "Send answer"}
+        title={title}
+        disabled={transcribing}
+        {...handlers}
+      >
+        {icon}
+      </button>
     </div>
   );
 }

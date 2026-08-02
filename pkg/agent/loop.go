@@ -534,8 +534,19 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.appendState(um)
 					// Carry the message's MsgID so serve can publish it on the
 					// Steered event; clients dedup the user message by MsgID
-					// (the reconnect snapshot may already contain it).
-					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: um.MsgID, Text: item.Text})
+					// (the reconnect snapshot may already contain it). Message
+					// carries the injected blocks so a steer with attachments
+					// renders live with its images, exactly like the prompt
+					// announced by AgentEventUserMessage.
+					//
+					// The blocks are cloned for the event: um is already in the
+					// agent's history, and subscribers receive events
+					// asynchronously — one that mutates a block (or its
+					// Arguments map) would otherwise corrupt the history the
+					// next provider request replays.
+					announced := um
+					announced.Content = core.CloneContent(um.Content)
+					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: um.MsgID, Text: item.Text, Message: announced})
 				}
 				// The drained steers are now in history; settle their inflight
 				// native-content bytes (paired with drainSteers).

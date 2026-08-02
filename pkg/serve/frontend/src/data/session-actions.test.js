@@ -16,7 +16,7 @@ mock.module('./api.js', () => ({
 }));
 
 const { store, setState } = await import('./store.js');
-const { loadSessions, openPersistedSubagent, sendMessage } = await import('./session-actions.js');
+const { loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
 const { handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
 beforeEach(() => {
@@ -619,4 +619,39 @@ test('sendMessage leaves the tally to the run in flight when the response beats 
   expect(s1.runTokensUp).toBe(2400);
   expect(s1.runTokensDown).toBe(610);
   expect(s1.pendingSteers).toHaveLength(1);
+});
+
+test('openBashJob opens a live background job and closes any subagent view', () => {
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', subagents: { 'bash-1': { jobId: 'bash-1', kind: 'bash', status: 'running', messages: [] } },
+        viewingSubagent: 'sa-1',
+      },
+    },
+  });
+
+  openBashJob('s1', 'bash-1');
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.viewingBashJob).toBe('bash-1');
+  // Only one thing is being looked at: opening the job leaves the subagent.
+  expect(s1.viewingSubagent).toBeNull();
+});
+
+test('openBashJob is a no-op for a job the store never had (no disk fallback)', () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {} } } });
+
+  openBashJob('s1', 'bash-gone');
+
+  expect(store.get().sessions.s1.viewingBashJob).toBeUndefined();
+});
+
+test('loadSessions preserves the open bash job view across a poll', async () => {
+  setState({ sessions: { s1: { id: 's1', state: 'idle', subagents: {}, viewingBashJob: 'bash-1' } } });
+  apiResponse = [{ id: 's1', title: 'S1', state: 'idle', cwd: '/x' }];
+
+  await loadSessions();
+
+  expect(store.get().sessions.s1.viewingBashJob).toBe('bash-1');
 });

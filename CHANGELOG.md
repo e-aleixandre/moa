@@ -23,6 +23,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since on iOS only closing the app from the app switcher clears its memory
   cache.
 
+## [0.23.0] - 2026-08-01
+
+### Added
+
+- Background bash jobs can be opened from the live dock, like async subagents.
+  The dock already listed them, but only agents were inspectable: reading a long
+  command's output meant waiting for it to land in the transcript, and stopping
+  one meant asking the agent. A bash row now opens a read-only view with the
+  full command, its working directory, live output and a Stop button, on desktop
+  and mobile. A job that ends while you watch it settles in place, and a
+  reconnect (every phone screen sleep) no longer ejects you from it.
+
+### Changed
+
+- On desktop the activity now-line moved above the composer, where mobile
+  already had it: what the agent is doing right now belongs next to where you
+  would interrupt it, while the status strip below keeps the standing telemetry
+  (context, cost, permissions, MCP, tokens). Desktop also gains the elapsed
+  timer it never had.
+- The activity label now trails an ellipsis while work is in flight
+  ("Untangling…", "Searching the code…"). "Waiting for you" keeps none: the run
+  is parked on a human, and trailing dots would claim progress that isn't
+  happening.
+- The model pill is a single button again. It had been split into two targets —
+  the name opened the model popover, the meter cycled the thinking level in
+  place — and a button nested inside what reads as one button is a confusing
+  affordance, with a small target for a setting you can hit while aiming
+  elsewhere. The meter goes back to being a state indicator.
+- The composer's queued-image hint uses the app's own icon instead of a system
+  emoji.
+
+### Fixed
+
+- A tool call that is still running no longer degrades to a nameless "Calling"
+  when you switch to another conversation and back. A call is written to history
+  only when its assistant message closes, and its result only when the tool
+  ends, so a call still streaming its arguments — or a two-minute background
+  command — fell in the gap between a reconnect snapshot that didn't mention it
+  and events that had already been delivered. The snapshot now carries the calls
+  in flight, and clients patch the existing row instead of duplicating it.
+- A message queued while the agent works (a steer) keeps its image thumbnail
+  when it is delivered. The attachment always reached the model, but the event
+  announcing the delivery carried only the plain text, so the thumbnail vanished
+  until a reload rebuilt the message from history. The TUI had the same gap and
+  now shows the attachment marker too.
+- Document previews and other modals are no longer painted under the composer,
+  the live dock and the status line on mobile. A preview opened from a message
+  rendered inside the chat subtree, where its z-index could not compete with its
+  ancestors' siblings, so a shared document ended up boxed into the transcript's
+  gap instead of covering the screen.
+
 ## [0.22.0] - 2026-07-31
 
 ### Changed

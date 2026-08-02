@@ -156,11 +156,20 @@ func RegisterHandlers(sctx *SessionContext) {
 			settle()
 		}()
 
-		sctx.Bus.Publish(AutoVerifyStarted{SessionID: sctx.SessionID})
+		cwd, err := verify.ResolveWorkDir(sctx.CWD, cmd.Dir, sctx.PathPolicy)
+		if err != nil {
+			sctx.Bus.Publish(AutoVerifyEnded{SessionID: sctx.SessionID, Err: err})
+			return err
+		}
+		dir := ""
+		if cwd != sctx.CWD {
+			dir = cwd
+		}
+		sctx.Bus.Publish(AutoVerifyStarted{SessionID: sctx.SessionID, Dir: dir, Manual: true})
 		ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
 		defer cancel()
 
-		result, err := verify.Execute(ctx, sctx.CWD)
+		result, err := verify.Execute(ctx, cwd)
 		if err != nil {
 			sctx.Bus.Publish(AutoVerifyEnded{SessionID: sctx.SessionID, Err: err})
 			return err

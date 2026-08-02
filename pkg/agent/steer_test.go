@@ -115,6 +115,75 @@ func TestSteerEmitsEvent(t *testing.T) {
 	}
 }
 
+// TestSteerEventCarriesContent covers a steer queued with attachments: the
+// delivery event must carry the injected message, not just its text, or clients
+// render the delivered message without its images until a reload.
+func TestSteerEventCarriesContent(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	blockTool := core.Tool{
+		Name:       "block",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			close(started)
+			<-release
+			return core.TextResult("done"), nil
+		},
+	}
+
+	provider := NewMockProvider(
+		toolCallResponse("tc-1", "block", nil),
+		simpleTextResponse("OK."),
+	)
+	ag := newTestAgent(provider, blockTool)
+	collector := collectEvents(ag)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ag.Run(context.Background(), "go") //nolint:errcheck
+	}()
+
+	<-started
+	content := []core.Content{core.TextContent("look at this"), core.ImageContent("aW1n", "image/png")}
+	ag.Steer(core.SteerItem{ID: "steer-1", Text: "look at this", Content: content})
+	close(release)
+	<-done
+
+	if !waitForEvent(collector, core.AgentEventSteer, 2*time.Second) {
+		t.Fatal("missing steer event")
+	}
+	for _, e := range collector.snapshot() {
+		if e.Type != core.AgentEventSteer {
+			continue
+		}
+		if e.Text != "look at this" {
+			t.Fatalf("steer event text = %q, want 'look at this'", e.Text)
+		}
+		if len(e.Message.Content) != 2 {
+			t.Fatalf("steer event content = %#v, want the two injected blocks", e.Message.Content)
+		}
+		if e.Message.Content[1].Type != "image" || e.Message.Content[1].Data != "aW1n" {
+			t.Fatalf("steer event image block = %#v", e.Message.Content[1])
+		}
+		if e.Message.MsgID == "" || e.Message.MsgID != e.MsgID {
+			t.Fatalf("steer event MsgID = %q, message MsgID = %q, want them equal and set", e.MsgID, e.Message.MsgID)
+		}
+		// The announced blocks must be a copy: subscribers get the event
+		// asynchronously, so one mutating a block would otherwise rewrite the
+		// history the next provider request replays.
+		e.Message.Content[1].Data = "mutated-by-subscriber"
+		for _, msg := range ag.Messages() {
+			for _, c := range msg.Content {
+				if c.Type == "image" && c.Data != "aW1n" {
+					t.Fatalf("mutating the event corrupted history: image data = %q", c.Data)
+				}
+			}
+		}
+		return
+	}
+}
+
 func TestFollowUpTriggersNewTurn(t *testing.T) {
 	provider := NewMockProvider(
 		simpleTextResponse("First answer."),

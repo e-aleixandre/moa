@@ -2,7 +2,9 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd } from './ws-handlers.js';
+import { liveVerb } from './util/activity.js';
+import { bashJobView } from './bash-job-view-model.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -326,6 +328,23 @@ test('handleWsSteer dedups the injected user message by MsgID', () => {
 
   const sess = store.get().sessions.s1;
   expect(sess.messages).toHaveLength(1);
+  expect(sess.pendingSteers).toBeNull();
+});
+
+test('handleWsSteer keeps the content blocks of a queued send with attachments', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], pendingSteers: [{ id: 'q1', text: 'mira esto' }] } } });
+
+  const content = [
+    { type: 'image', attachment_id: 'a1', mime_type: 'image/png' },
+    { type: 'text', text: 'mira esto' },
+  ];
+  handleWsSteer('s1', { id: 'q1', msg_id: 'm9', text: 'mira esto', content });
+
+  const sess = store.get().sessions.s1;
+  expect(sess.messages).toHaveLength(1);
+  expect(sess.messages[0].content).toEqual(content);
+  expect(sess.messages[0]._steer_id).toBe('q1');
   expect(sess.pendingSteers).toBeNull();
 });
 
@@ -834,4 +853,120 @@ test('handleWsInit prefers the server copy when the viewed job is still live', (
   handleWsInit('s1', { messages: [], subagents: [{ job_id: 'sa-1', status: 'running', task: 'fresh' }] });
 
   expect(store.get().sessions.s1.subagents['sa-1'].task).toBe('fresh');
+});
+
+test('handleWsInit keeps the finished bash job being read in its detail view', () => {
+  // A reconnect (mobile screen sleep) happens constantly while watching a long
+  // job. Once the job ends the server stops listing it, and dropping its entry
+  // would eject the reader back to the conversation mid-read.
+  setState({ sessions: { s1: { id: 's1', messages: [], viewingBashJob: 'bash-1',
+    subagents: { 'bash-1': { jobId: 'bash-1', kind: 'bash', status: 'completed', task: 'go test ./...', messages: [] } } } } });
+
+  handleWsInit('s1', { messages: [], subagents: [], bash_jobs: [] });
+
+  expect(store.get().sessions.s1.subagents['bash-1']).toBeTruthy();
+});
+
+test('handleWsInit rebuilds a live bash job being read from the snapshot output', () => {
+  // The accumulated output travels in the snapshot, so the detail view repaints
+  // itself after a reconnect without any special casing in the component.
+  setState({ sessions: { s1: { id: 's1', messages: [], viewingBashJob: 'bash-1',
+    subagents: { 'bash-1': { jobId: 'bash-1', kind: 'bash', status: 'running', task: 'go test ./...', messages: [] } } } } });
+
+  handleWsInit('s1', {
+    messages: [],
+    bash_jobs: [{ job_id: 'bash-1', command: 'go test ./...', cwd: '/work', status: 'running', output: 'compiling\n' }],
+  });
+
+  const view = bashJobView(store.get().sessions.s1, 'bash-1');
+  expect(view.command).toBe('go test ./...');
+  expect(view.lines).toEqual(['compiling']);
+  expect(view.canCancel).toBe(true);
+});
+
+test('a bash job ending while it is being read settles terminal instead of vanishing', () => {
+  seedSession('s1');
+  handleWsBashJobStart('s1', { job_id: 'bash-1', command: 'go test ./...', cwd: '/work', status: 'running' });
+  setState({ sessions: { ...store.get().sessions, s1: { ...store.get().sessions.s1, viewingBashJob: 'bash-1' } } });
+
+  handleWsBashJobEnd('s1', { job_id: 'bash-1', status: 'failed', output: 'FAIL\n' });
+
+  const view = bashJobView(store.get().sessions.s1, 'bash-1');
+  expect(view.terminal).toBe(true);
+  expect(view.outcome).toBe('failed');
+  expect(view.canCancel).toBe(false);
+  expect(view.lines).toEqual(['FAIL']);
+});
+
+// ── live tool calls in the init snapshot ──────────────────────────────────
+// Regression for "switch conversation and come back → the live row degrades to
+// a generic 'Calling'": a tool call still generating args or still executing is
+// in no message history, so the snapshot carries it separately.
+
+test('handleWsInit rebuilds a live row for a tool that is still executing', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    live_tools: [{
+      tool_call_id: 'tc1', tool_name: 'bash', args: { command: 'go test ./...' },
+      status: 'running', started_at_ms: 1_700_000_000_000,
+    }],
+  });
+  const rows = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(rows).toHaveLength(1);
+  // The real tool name is what keeps liveVerb off its 'Calling' fallback.
+  expect(rows[0]).toMatchObject({
+    tool_call_id: 'tc1', tool_name: 'bash', status: 'running',
+    args: { command: 'go test ./...' }, startedAt: 1_700_000_000_000,
+  });
+  expect(liveVerb(rows[0].tool_name)).toBe('Running');
+});
+
+test('handleWsInit restores a tool call whose arguments are still streaming', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    live_tools: [{ tool_call_id: 'tc1', tool_name: 'edit', args: { path: 'pkg/serve/ws.go' }, status: 'generating' }],
+  });
+  const [row] = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(row).toMatchObject({ tool_name: 'edit', status: 'generating', args: { path: 'pkg/serve/ws.go' } });
+  expect(liveVerb(row.tool_name)).toBe('Editing');
+});
+
+test('handleWsInit does not duplicate a live tool already present in history', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [{
+      role: 'assistant',
+      content: [{ type: 'tool_call', tool_call_id: 'tc1', tool_name: 'bash', arguments: { command: 'sleep 120' } }],
+    }],
+    live_tools: [{ tool_call_id: 'tc1', tool_name: 'bash', args: { command: 'sleep 120' }, status: 'running', started_at_ms: 42 }],
+  });
+  const rows = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(rows).toHaveLength(1);
+  // The registry is authoritative for the live phase and the start anchor.
+  expect(rows[0]).toMatchObject({ tool_call_id: 'tc1', status: 'running', startedAt: 42 });
+});
+
+test('a live event arriving after the snapshot updates the restored row instead of duplicating it', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    live_tools: [{ tool_call_id: 'tc1', tool_name: 'edit', args: { path: 'a.go' }, status: 'generating', started_at_ms: 7 }],
+  });
+  handleWsToolStart('s1', { tool_call_id: 'tc1', tool_name: 'edit', args: { path: 'a.go', oldText: 'x' } });
+  const rows = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ status: 'running', args: { path: 'a.go', oldText: 'x' }, startedAt: 7 });
+
+  handleWsToolEnd('s1', { tool_call_id: 'tc1', tool_name: 'edit', result: 'ok', is_error: false });
+  const after = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(after).toHaveLength(1);
+  expect(after[0].status).toBe('done');
+});
+
+test('handleWsInit without live tools leaves history untouched', () => {
+  seedSession('s1');
+  handleWsInit('s1', { messages: [], subagents: [] });
+  expect(store.get().sessions.s1.messages).toHaveLength(0);
 });

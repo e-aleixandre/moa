@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "preact/hooks";
+import { createPortal } from "preact/compat";
 import { X } from "lucide-preact";
 import { IconButton } from "../../primitives/index.js";
 import { openOverlay } from "../../data/overlay-history.js";
@@ -15,6 +16,15 @@ let sheetIdCounter = 0;
 // (data/overlay-history.js) so the browser/PWA back gesture closes it instead
 // of navigating away — every consumer (RewindTimeline, file/HTML viewers,
 // drawers…) gets that for free just by using Sheet.
+//
+// The overlay is PORTALLED to <body>. `.sheet-overlay` is position:fixed with
+// --z-sheet (200), above the composer/dock's --z-overlay (100), but z-index is
+// only comparable inside the same stacking context: rendered in place, a Sheet
+// opened from deep inside the chat stream (e.g. FileCard's preview) is buried
+// in a subtree that is a SIBLING of the composer and agent dock inside .mconv,
+// so the browser painted those on top of it regardless of z-index. Escaping to
+// <body> puts the overlay in the root stacking context, where --z-sheet
+// actually wins.
 export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabelAttr, children, class: className, ...rest }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
@@ -103,7 +113,7 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
     if (e.target === e.currentTarget) requestClose();
   };
 
-  return (
+  const overlay = (
     <div class="sheet-overlay" onClick={onOverlayClick}>
       <div
         class={`sheet${className ? ` ${className}` : ""}`}
@@ -126,4 +136,9 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
       </div>
     </div>
   );
+
+  // No document (SSR / non-DOM test env): render in place rather than crash;
+  // the stacking problem only exists in a real browser anyway.
+  if (typeof document === "undefined" || !document.body) return overlay;
+  return createPortal(overlay, document.body);
 }

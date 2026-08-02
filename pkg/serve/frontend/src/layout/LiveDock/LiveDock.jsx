@@ -23,9 +23,10 @@ import { useSpotlight } from "./use-live-dock.js";
 // falls back to its own local state (used by the catalog specimen, which has
 // no session to persist against).
 //
-// `onOpen(id)` opens an async subagent's detail view (tap its row). Running
-// async bash rows are informational only (no detail view; their output lands
-// inline when they end). `forceCompact` collapses the panel to the bar
+// `onOpen(id, kind)` opens a row's detail view (tap it): an async subagent's
+// conversation, or a background bash's read-only output view. The kind is
+// passed through because those are two different screens and the router is the
+// caller's business, not the dock's. `forceCompact` collapses the panel to the bar
 // (mobile keyboard open — writing wins, §1.5) WITHOUT touching the stored
 // open/onToggle preference — it's a display-only override so the keyboard
 // closing restores whatever the user had chosen.
@@ -112,18 +113,19 @@ export function LiveDock({ agents = [], onOpen, open: openProp, onToggle, forceC
 function LiveRow({ agent, onOpen }) {
   const isBash = agent.kind === "bash";
   const accent = isBash ? "blue" : agent.accent || "blue";
-  // Only async subagents have a detail view to open (tap the row → its
-  // conversation). A running async bash has no detail view and no inline
-  // surface (its full output lands inline as a delegation/history card when it
-  // ends), so its row is informational: spinner + cmd + elapsed, not a button.
-  const openable = !isBash && !!onOpen;
+  // Both kinds open a detail view: a subagent its conversation (where you can
+  // steer it), a background bash its read-only output (where you can only stop
+  // it). What each row IS stays readable at a glance from the row itself — no
+  // identity accent and a mono `bash` label — not from whether it can be
+  // tapped.
+  const openable = !!onOpen;
   const MainTag = openable ? "button" : "div";
   return (
     <div class={`ld-row${isBash ? " bash" : ""}`}>
       <MainTag
         class="ld-row-main"
         type={openable ? "button" : undefined}
-        onClick={openable ? () => onOpen(agent.id) : undefined}
+        onClick={openable ? () => onOpen(agent.id, agent.kind) : undefined}
       >
         <Spinner color={accent} size={11} />
         <span class="ld-row-name" style={isBash ? undefined : { color: `var(--${accent})` }}>

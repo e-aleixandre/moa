@@ -20,6 +20,23 @@ la otra atrás: eso genera divergencia y deuda.
   `/api/usage` + widget del frontend web).
 - Si una feature solo aplica a una capa, decláralo explícitamente y justifícalo.
 
+## Regla de DOCUMENTACIÓN
+
+`docs/` es la fuente de verdad de la documentación y se publica tal cual en
+**letmoa.run/docs** (el sitio la sincroniza desde el último tag de release; el markdown
+no se edita en ningún otro sitio). Por eso la doc viaja **en el mismo commit** que el
+código, igual que la regla de paridad:
+
+- Feature de cara al usuario ⇒ actualiza la página de `docs/` que le corresponda.
+- Flag, tool, campo de config, slash command o alias de modelo nuevo ⇒ su fila en
+  `docs/cli.md`, `docs/tools.md`, `docs/configuration.md` o `docs/tui.md`.
+  `internal/docsdrift` compara esos conjuntos con el código y **falla el build** si falta
+  alguno; compara claves, no prosa, así que reescribir una descripción es libre.
+- Página nueva en `docs/` ⇒ alta también en `docs.manifest.mjs` del repo `moa-landing`,
+  o no se publica (el sync lo avisa por consola).
+- Enlaces relativos entre docs (`./serve.md`, `../CHANGELOG.md`) e imágenes en
+  `docs/assets/`: el sync los reescribe solo. Escríbelos como se leen bien en GitHub.
+
 ## Build / test / deploy
 
 - Backend: `go build ./...` · `go vet ./...` · `go test ./...` (usa `-race` en paquetes con concurrencia).

@@ -295,7 +295,7 @@ function routeEvent(sessionId, evt) {
       handleWsRateLimit(sessionId, evt.data);
       break;
     case 'auto_verify_start':
-      handleWsAutoVerifyStart(sessionId);
+      handleWsAutoVerifyStart(sessionId, evt.data);
       break;
     case 'auto_verify_end':
       handleWsAutoVerifyEnd(sessionId, evt.data);

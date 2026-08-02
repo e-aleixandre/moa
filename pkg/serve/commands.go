@@ -394,12 +394,19 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 // cmdVerify runs the project's verification checks, mirroring the TUI's
 // manual /verify command. It reuses the core verify.Execute entry point and
 // publishes AutoVerify events so the web frontend paints the running spinner.
-func cmdVerify(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+func cmdVerify(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
 	if err := bus.RequireManualVerifyAllowed(sess.runtime.Bus); err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	if err := requireIdle(sess); err != nil {
 		return nil, err
+	}
+
+	// `/verify <dir>` targets another repository or worktree, for sessions whose
+	// work spans more than one checkout.
+	cwd, err := verify.ResolveWorkDir(sess.CWD, strings.Join(args, " "), sess.runtime.Context().PathPolicy)
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 
 	// Serialize: unlike the single-threaded TUI, two concurrent web POSTs can
@@ -411,14 +418,18 @@ func cmdVerify(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, er
 	defer sess.verifyRunning.Store(false)
 
 	b := sess.runtime.Bus
-	b.Publish(bus.AutoVerifyStarted{SessionID: sess.ID})
+	dir := ""
+	if cwd != sess.CWD {
+		dir = cwd
+	}
+	b.Publish(bus.AutoVerifyStarted{SessionID: sess.ID, Dir: dir, Manual: true})
 
 	// Derive from the session context so a shutdown (which cancels it) cancels
 	// the verify subprocess instead of leaking it for up to five minutes.
 	ctx, cancel := context.WithTimeout(sess.infra.sessionCtx, 5*time.Minute)
 	defer cancel()
 
-	result, err := verify.Execute(ctx, sess.CWD)
+	result, err := verify.Execute(ctx, cwd)
 	if err != nil {
 		b.Publish(bus.AutoVerifyEnded{SessionID: sess.ID, Err: err})
 		return &CommandResult{OK: false, Message: err.Error()}, nil

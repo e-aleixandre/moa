@@ -18,10 +18,12 @@ Type `/` to open the command palette, or type a command directly:
 | `/tasks [done\|reset\|show]` | View or manage implementation tasks |
 | `/undo` | Revert files written/edited by the last agent turn (not bash, MCP, or subagent changes); skips any file changed since then to avoid clobbering it |
 | `/branch` | Rewind to an earlier point and start a new conversation branch (alias `/back`) |
-| `/verify` | Run project verification checks |
+| `/mcp` | View MCP servers and enable/disable them |
+| `/verify [dir]` | Run project verification checks — in `dir` to verify another repository or worktree |
 | `/prompt <name>` | Insert a prompt template |
 | `/rename <title>` | Rename the current session (marks the title manual so auto-titling won't overwrite it) |
 | `/compact` | Force context compaction |
+| `/prepare-compact` | Write a handoff note, then compact context |
 | `/voice` | Toggle voice recording |
 | `/settings` | Open settings menu |
 | `/clear` | Clear conversation, start fresh session |
@@ -90,6 +92,10 @@ In `ask` or `auto` mode, tool calls prompt for approval:
 ## Voice input
 
 Requires `openai-transcribe` login and `sox` (macOS) or `arecord` (Linux) installed. Toggle with `Ctrl+R` or `/voice`.
+
+`Ctrl+R` also works while an agent question is open, where the transcript fills
+the question's answer instead of the composer. Speech is appended to what the
+answer already contains, and dictating over a highlighted option replaces it.
 
 If it keeps mangling a name or a piece of jargon, add that word to
 [`stt_vocabulary`](configuration.md#features). The model and the language hint

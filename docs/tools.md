@@ -25,6 +25,7 @@ Always registered:
 | `subagent_wait` | Block until an async subagent job finishes and return its result |
 | `subagent_cancel` | Cancel a running async subagent |
 | `tasks` | Track implementation tasks (used most heavily during plan mode, but always available) |
+| `moa_docs` | Read moa's own documentation (this page included), embedded in the binary |
 
 Conditionally registered:
 
@@ -32,7 +33,7 @@ Conditionally registered:
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | TUI or web UI is active (not headless) |
-| `verify` | `.moa/verify.json` exists |
+| `verify` | always |
 | `load_skill` | At least one skill is discovered in `.moa/skills/` or `~/.config/moa/skills/` |
 
 ## Tool selection guidance
@@ -43,6 +44,32 @@ Conditionally registered:
 - Use `apply_patch` for coordinated changes across multiple files
 - Use `write` for new files or complete rewrites
 - Use `bash` when you need actual shell behavior
+
+## Self-documentation
+
+`moa_docs` returns the pages of this documentation set from inside the binary.
+
+Installing moa gets you a single static binary, with no copy of the repository
+and nothing next to it on disk. Without this the agent could only answer
+questions about moa from whatever it happened to remember — which is how
+confident, wrong answers about flags and config files get produced. So a user
+who is working on their own project can ask moa to write them a
+`.moa/verify.json`, or explain how to trigger a run from a webhook, and get an
+answer from the real documentation without cloning anything or opening a
+browser.
+
+Because the pages are embedded at build time, they always describe the exact
+version being run: updating the binary updates its documentation with it.
+
+The page names are listed in the tool description, which is the only cost this
+carries in the system prompt — page content is read on demand, never
+preloaded.
+
+```
+moa_docs(page: "configuration")   # config.json fields and precedence
+moa_docs(page: "automation")      # HTTP API for triggering runs
+moa_docs(page: "recipes/linear")  # worked end-to-end integration
+```
 
 ## Memory
 
@@ -196,4 +223,29 @@ Define project checks in `.moa/verify.json`:
 }
 ```
 
-Run with `/verify` in the TUI, or automatically after changes if `auto_verify` is enabled in config.
+Run with `/verify`, or automatically after changes if `auto_verify` is enabled in config.
+
+### Verifying another repository or worktree
+
+Checks run in the session's working directory by default. When a session's work
+spans several checkouts — the conversation starts in one repository and the code
+being changed lives in another worktree — point verify at the other directory
+instead of editing `.moa/verify.json` to reach across:
+
+```
+/verify ../other-worktree
+```
+
+The agent can do the same through the tool's `cwd` parameter. Relative paths
+resolve against the session directory, and the target's own `.moa/verify.json`
+is the one that runs.
+
+The directory must be one the session is allowed to touch: running a
+`.moa/verify.json` means running the shell commands inside it, so the sandbox
+applies here as it does everywhere else. If it is refused, allow it with
+`/path add <dir>`. Sessions running unrestricted (YOLO) can target any
+directory.
+
+The `verify` tool is available even when the session's own directory has no
+`.moa/verify.json` — otherwise it would be missing from exactly the multi-repo
+sessions that need it. Called with nothing to run, it says so.

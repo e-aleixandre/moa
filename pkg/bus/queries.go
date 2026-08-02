@@ -104,12 +104,41 @@ type GetCompacting struct{ SessionID string }
 // message ID, surfaced in the reconnect snapshot so a reconnect during
 // generation restores the whole streamed-so-far reply instead of only post-cut
 // deltas. Captured atomically with the sequence cut via
-// SessionContext.SnapshotStreamingWithCut. Empty Text and Thinking mean nothing
+// SessionContext.SnapshotInFlightWithCut. Empty Text and Thinking mean nothing
 // is streaming right now.
 type StreamingAggregate struct {
 	Text     string
 	Thinking string
 	MsgID    string
+}
+
+// Live tool-call phases. The values match the status clients render for a live
+// tool row, so a snapshot entry restores exactly the row the live events would
+// have produced.
+const (
+	// LiveToolPhaseGenerating: the model is still streaming this call's
+	// arguments; nothing is executing yet.
+	LiveToolPhaseGenerating = "generating"
+	// LiveToolPhaseRunning: the tool started executing and has not ended.
+	LiveToolPhaseRunning = "running"
+)
+
+// LiveToolCall is one tool call that exists but has not finished. It is the
+// tool-call counterpart of StreamingAggregate: while a call streams its
+// arguments or executes, it is in no message history (a call lands in history
+// when its assistant message closes, its result when the tool ends), so a
+// client that (re)opens the session mid-call would otherwise render a nameless
+// "Calling" row — or nothing at all for a two-minute bash. Captured atomically
+// with the sequence cut via SessionContext.SnapshotInFlightWithCut.
+type LiveToolCall struct {
+	ToolCallID string
+	ToolName   string
+	Args       map[string]any
+	// Phase is LiveToolPhaseGenerating or LiveToolPhaseRunning.
+	Phase string
+	// StartedAt anchors the client's elapsed timer to the moment the call first
+	// appeared, so a reconnect resumes the count instead of restarting it.
+	StartedAt time.Time
 }
 
 // GetPendingSteers returns the authoritative queue of steer messages not yet

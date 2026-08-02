@@ -1411,7 +1411,12 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 			mid := um.MsgID
 			a.state.Messages = append(a.state.Messages, um)
 			a.mu.Unlock()
-			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: mid, Text: item.Text})
+			// Same as the mid-run drain in loop.go: carry the injected blocks so
+			// a steer with attachments renders live with its images, cloned so
+			// an async subscriber can't mutate the history entry appended above.
+			announced := um
+			announced.Content = core.CloneContent(um.Content)
+			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: mid, Text: item.Text, Message: announced})
 		}
 		// Settle the drained steers' inflight bytes now that they are in history.
 		a.steers.settle(steered)

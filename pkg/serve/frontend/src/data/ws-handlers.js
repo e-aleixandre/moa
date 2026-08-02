@@ -411,8 +411,17 @@ export function handleWsInit(id, data) {
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
     ? { [viewing]: prev.subagents[viewing] }
     : null;
+  // Same protection for a background bash being read in the BashJobView: once
+  // the job ends the server may drop it from the bash_jobs snapshot, and
+  // wiping its entry would eject the reader mid-read (a reconnect happens on
+  // every mobile screen sleep, precisely while watching a long job).
+  const viewingBash = prev.viewingBashJob;
+  const keptBash = viewingBash && prev.subagents && prev.subagents[viewingBash]
+    && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
+    ? { [viewingBash]: prev.subagents[viewingBash] }
+    : null;
   updateSession(id, {
-    messages: normalizeHistory(data.messages || [], data.subagents),
+    messages: withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools),
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
     contextPercent: data.context_percent ?? -1,
@@ -451,6 +460,7 @@ export function handleWsInit(id, data) {
     runEpoch: nextRunEpoch(id),
     subagents: {
       ...(keptLocal || {}),
+      ...(keptBash || {}),
       ...initBashJobs(data.bash_jobs, initSubagents(data.subagents)),
     },
     // subagentCount is otherwise live-only (WS subagent_count events). If an
@@ -469,6 +479,52 @@ export function handleWsInit(id, data) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
+}
+
+// withLiveTools appends the tool calls that were in flight when the snapshot
+// was cut. Such a call is in no message history yet — a tool call is written to
+// history when its assistant message closes, its result when the tool ends — so
+// a client that switches conversations and comes back would otherwise rebuild a
+// row it can't name (liveVerb falls back to 'Calling') or lose it entirely for
+// a long-running bash.
+//
+// Deduped by tool_call_id against the rebuilt history AND against itself, so a
+// snapshot that overlaps history never doubles a row. Live events landing after
+// the snapshot reconcile the same way: handleWsToolCallStart/handleWsToolStart
+// look the ID up and patch the existing row instead of appending a second one.
+function withLiveTools(messages, liveTools) {
+  if (!Array.isArray(liveTools) || liveTools.length === 0) return messages;
+  const byId = new Map();
+  for (const t of liveTools) {
+    if (t && t.tool_call_id && !byId.has(t.tool_call_id)) byId.set(t.tool_call_id, t);
+  }
+  // A call whose assistant message already closed IS in history (as a tool_call
+  // with no result yet), so patch that row rather than appending a twin: it
+  // gains the server's start anchor, and its phase comes from the authoritative
+  // registry instead of history's "no result ⇒ running" guess.
+  const out = messages.map(m => {
+    if (!m || m._type !== 'tool_start') return m;
+    const t = byId.get(m.tool_call_id);
+    if (!t) return m;
+    byId.delete(m.tool_call_id);
+    return { ...m, ...liveToolRow(t), tool_name: t.tool_name || m.tool_name, args: t.args || m.args };
+  });
+  for (const t of byId.values()) out.push(liveToolRow(t));
+  return out;
+}
+
+function liveToolRow(t) {
+  return {
+    _type: 'tool_start',
+    tool_call_id: t.tool_call_id,
+    tool_name: t.tool_name || '',
+    args: t.args || {},
+    status: t.status === 'generating' ? 'generating' : 'running',
+    result: null,
+    // Server-anchored so the row's elapsed timer resumes from the real start
+    // instead of restarting at the moment this pane reconnected.
+    startedAt: t.started_at_ms || Date.now(),
+  };
 }
 
 // initSubagents builds the session.subagents map from a WS init snapshot
@@ -1414,7 +1470,13 @@ export function handleWsSteer(id, data) {
   const already = data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id);
   const patch = { pendingSteers: steers.length > 0 ? steers : null };
   if (!already) {
-    const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content: [{ type: 'text', text: data.text }] };
+    // A steer with attachments arrives with its blocks (same projection as
+    // user_message), so the delivered message shows its thumbnails live; a
+    // text-only steer only carries text.
+    const content = Array.isArray(data.content) && data.content.length > 0
+      ? data.content
+      : [{ type: 'text', text: data.text }];
+    const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content };
     patch.messages = [...sess.messages, userMsg];
   }
   updateSession(id, patch);
@@ -1603,12 +1665,18 @@ export function handleWsGoalEnd(id, data) {
   markUnseen(id);
 }
 
-export function handleWsAutoVerifyStart(id) {
-  updateSession(id, { autoVerifying: true });
+export function handleWsAutoVerifyStart(id, data) {
+  // The directory only travels with a manual /verify aimed at another
+  // repository; auto-verify always runs in the session's own.
+  updateSession(id, {
+    autoVerifying: true,
+    verifyDir: data?.dir || null,
+    verifyManual: Boolean(data?.manual),
+  });
 }
 
 export function handleWsAutoVerifyEnd(id, data) {
-  updateSession(id, { autoVerifying: false });
+  updateSession(id, { autoVerifying: false, verifyDir: null, verifyManual: false });
 }
 
 export function handleWsCompactionStart(id) {

@@ -6,7 +6,7 @@ import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openPalette } from "../../../data/palette.js";
-import { openPersistedSubagent, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
+import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
@@ -19,6 +19,7 @@ import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
+import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { liveTrayAgents } from "../../../data/stream-model.js";
 import "./MobileConversationScreen.css";
@@ -310,6 +311,18 @@ export function MobileConversationScreen({ version = null }) {
           onBack={() => updateSession(session.id, { viewingSubagent: null })}
         />
       );
+    } else if (session.viewingBashJob) {
+      // Same full-screen push for a background bash job's read-only view — the
+      // dock's other openable row. Mutually exclusive with the subagent view by
+      // construction (opening one clears the other).
+      body = (
+        <MobileBashJobView
+          key={session.viewingBashJob}
+          session={session}
+          jobId={session.viewingBashJob}
+          onBack={() => updateSession(session.id, { viewingBashJob: null })}
+        />
+      );
     } else {
       body = (
         <>
@@ -340,7 +353,9 @@ export function MobileConversationScreen({ version = null }) {
               agents={liveAgents}
               open={!!session.dockOpen}
               onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-              onOpen={(id) => openPersistedSubagent(session.id, id)}
+              onOpen={(id, kind) => (kind === "bash"
+                ? openBashJob(session.id, id)
+                : openPersistedSubagent(session.id, id))}
               forceCompact={kbdOpen}
             />
           )}
@@ -356,9 +371,10 @@ export function MobileConversationScreen({ version = null }) {
       {body}
 
       {/* The title chip floats over the transcript and is the door to the
-          session list. It is hidden inside a subagent, which is a full-screen
-          push carrying its own header and its own way back. */}
-      {session && !session.viewingSubagent && (
+          session list. It is hidden inside a subagent or a background job,
+          each a full-screen push carrying its own header and its own way
+          back. */}
+      {session && !session.viewingSubagent && !session.viewingBashJob && (
         <MobileTitleChip
           title={sessionTitle(session)}
           attnCount={attnCount}

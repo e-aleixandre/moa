@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Plus, Slash, ArrowUp, Square, X, Mic, Loader2, ChevronUp } from "lucide-preact";
+import { Plus, Slash, ArrowUp, Square, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
@@ -877,7 +877,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             >
               <Chip size="sm" mono>{summary.count} queued</Chip>
               <span>
-                {summary.lastImages > 0 && <span aria-hidden="true">🖼 </span>}
+                {summary.lastImages > 0 && <ImageIcon size={13} aria-hidden="true" />}
                 {summary.lastIsCommand && <span aria-hidden="true">/</span>}
                 “{summary.lastText}”
               </span>

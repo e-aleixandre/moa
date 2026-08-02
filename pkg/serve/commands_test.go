@@ -331,3 +331,32 @@ func TestCmdCompact_ForwardsFocusIdle(t *testing.T) {
 		t.Fatalf("CompactSession.Focus = %q, want %q", got.Focus, "keep phase 3")
 	}
 }
+
+// `/verify <dir>` from the web UI runs another checkout's checks, the
+// multi-repo case where the session lives in one repository and the work
+// happened in another.
+func TestCmdVerify_OtherDirectory(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	session := t.TempDir()
+	other := t.TempDir()
+	writeVerifyConfig(t, session, `{"checks":[{"name":"session","command":"false"}]}`)
+	writeVerifyConfig(t, other, `{"checks":[{"name":"other","command":"true"}]}`)
+
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(), session)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: session})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.ExecCommand(sess.ID, "/verify "+other, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The session's own check fails; the target's passes. A passing result
+	// proves the target directory is what ran.
+	if !res.OK {
+		t.Fatalf("expected the other directory's passing check, got: %s", res.Message)
+	}
+}

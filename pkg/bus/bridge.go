@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/checkpoint"
@@ -145,19 +146,32 @@ type SessionContext struct {
 	// value consistent with the events streamed after the cut.
 	compacting atomic.Bool
 
-	// streamMu guards the authoritative in-flight streaming aggregate below.
-	// The agent appends an assistant message to state only after the provider
-	// turn completes, so mid-stream the partial text/thinking lives only in the
-	// deltas already sent. A reconnect during generation would otherwise miss
-	// everything streamed before the cut and render the reply "from the middle".
-	// bridgeEvent maintains this aggregate serially (in the subscriber
-	// goroutine), holding streamMu across both the mutation and the derived
-	// publish so SnapshotStreamingWithCut can pair it with the sequence cut for
-	// the reconnect snapshot.
+	// streamMu guards the authoritative in-flight state below: the streaming
+	// aggregate AND the live tool-call registry. The agent appends an assistant
+	// message to state only after the provider turn completes, so mid-stream the
+	// partial text/thinking lives only in the deltas already sent. A reconnect
+	// during generation would otherwise miss everything streamed before the cut
+	// and render the reply "from the middle".
+	// bridgeEvent maintains both serially (in the subscriber goroutine), holding
+	// streamMu across the mutation and the derived publish so
+	// SnapshotInFlightWithCut can pair them with the sequence cut for the
+	// reconnect snapshot.
 	streamMu       sync.Mutex
 	streamText     string
 	streamThinking string
 	streamMsgID    string
+
+	// liveTools is the registry of tool calls that exist but are not yet
+	// finished: either the model is still streaming their arguments, or they
+	// are executing. Such a call may not be represented in the history a
+	// reconnect snapshot is rebuilt from — it is written there only when its
+	// assistant message closes, and its result only when the tool ends — so
+	// without this the client re-renders a live row it can't name ("Calling")
+	// or loses it entirely. It also carries the phase and the start anchor,
+	// which history never holds, so a restored row resumes its timer. Kept in creation order (the order the rows render in); the
+	// cardinality is a turn's concurrent tool calls, so linear scans are the
+	// cheapest correct thing here.
+	liveTools []LiveToolCall
 
 	// persistPaused suppresses persistence-reactor snapshots while a session is
 	// being restored in place. The final complete state is saved explicitly by
@@ -416,18 +430,110 @@ func (sctx *SessionContext) StreamingAggregate() (text, thinking, msgID string) 
 	return sctx.streamText, sctx.streamThinking, sctx.streamMsgID
 }
 
-// SnapshotStreamingWithCut atomically captures the in-flight streaming aggregate
-// together with the current bus sequence, both under streamMu. bridgeEvent
-// holds streamMu across the aggregate mutation AND the derived Bus.Publish, so
-// this pairing gives a total order for the accumulative (non-idempotent)
-// aggregate: a streamed delta is either already folded into the returned text
-// AND at/below the returned cut, or absent AND published above it — never both.
-// Without this atomicity a delta could be seeded into the reconnect snapshot and
-// ALSO replayed live (seq > cut), double-rendering the partial reply.
-func (sctx *SessionContext) SnapshotStreamingWithCut() (text, thinking, msgID string, cut uint64) {
+// SnapshotInFlightWithCut atomically captures the in-flight streaming aggregate
+// AND the live tool-call registry together with the current bus sequence, all
+// under streamMu. bridgeEvent holds streamMu across the mutation AND the derived
+// Bus.Publish, so this pairing gives a total order for state that is not
+// idempotent under replay: a streamed delta is either already folded into the
+// returned text AND at/below the returned cut, or absent AND published above it
+// — never both. Without this atomicity a delta could be seeded into the
+// reconnect snapshot and ALSO replayed live (seq > cut), double-rendering the
+// partial reply.
+//
+// The tool registry rides the same gate for the same reason: a client dedups a
+// restored row by tool_call_id, but the pair (snapshot, replayed events) must
+// still be consistent — a call must not be *absent* from the snapshot while its
+// only announcing events (tool_call_start / tool_start) sit at/below the cut and
+// are therefore never replayed, which would resurrect the nameless "Calling"
+// row this registry exists to kill.
+func (sctx *SessionContext) SnapshotInFlightWithCut() (StreamingAggregate, []LiveToolCall, uint64) {
 	sctx.streamMu.Lock()
 	defer sctx.streamMu.Unlock()
-	return sctx.streamText, sctx.streamThinking, sctx.streamMsgID, sctx.Bus.LastSeq()
+	return StreamingAggregate{
+			Text:     sctx.streamText,
+			Thinking: sctx.streamThinking,
+			MsgID:    sctx.streamMsgID,
+		},
+		sctx.liveToolsSnapshotLocked(),
+		sctx.Bus.LastSeq()
+}
+
+// LiveTools returns the tool calls currently generating arguments or executing.
+func (sctx *SessionContext) LiveTools() []LiveToolCall {
+	sctx.streamMu.Lock()
+	defer sctx.streamMu.Unlock()
+	return sctx.liveToolsSnapshotLocked()
+}
+
+// liveToolsSnapshotLocked copies the registry slice so the caller can serialize
+// it after releasing streamMu without racing the bridge goroutine's next
+// mutation. The entries' args maps need no copy here: they were already deep-
+// copied on the way in (see liveToolDelta) and are never mutated in place.
+// Caller must hold streamMu.
+func (sctx *SessionContext) liveToolsSnapshotLocked() []LiveToolCall {
+	if len(sctx.liveTools) == 0 {
+		return nil
+	}
+	out := make([]LiveToolCall, len(sctx.liveTools))
+	copy(out, sctx.liveTools)
+	return out
+}
+
+// liveToolsMax bounds the registry. A turn's concurrent tool calls are already
+// capped by maxToolCallsPerTurn, so this is a belt-and-braces limit against a
+// pathological provider: the registry must never become an unbounded per-session
+// leak just because some call never reported an end.
+const liveToolsMax = 64
+
+// upsertLiveToolLocked records (or advances) a tool call in the live registry.
+// The same call is announced twice — once when the model starts streaming its
+// arguments, once when execution begins — so this is idempotent by ToolCallID
+// and only ever moves a row forward: name/args are refined as they become known,
+// and StartedAt is preserved from the first sighting so a reconnected client
+// resumes the elapsed timer instead of restarting it. Caller must hold streamMu.
+func (sctx *SessionContext) upsertLiveToolLocked(call LiveToolCall) {
+	for i := range sctx.liveTools {
+		if sctx.liveTools[i].ToolCallID != call.ToolCallID {
+			continue
+		}
+		if call.ToolName != "" {
+			sctx.liveTools[i].ToolName = call.ToolName
+		}
+		if call.Args != nil {
+			sctx.liveTools[i].Args = call.Args
+		}
+		if call.Phase == LiveToolPhaseRunning {
+			sctx.liveTools[i].Phase = call.Phase
+		}
+		return
+	}
+	// Evict the oldest rather than refusing the newest: what a client most
+	// needs to see is what is happening now.
+	if len(sctx.liveTools) >= liveToolsMax {
+		sctx.liveTools = append(sctx.liveTools[:0], sctx.liveTools[len(sctx.liveTools)-liveToolsMax+1:]...)
+	}
+	call.StartedAt = time.Now()
+	sctx.liveTools = append(sctx.liveTools, call)
+}
+
+// removeLiveToolLocked drops a finished tool call. Caller must hold streamMu.
+func (sctx *SessionContext) removeLiveToolLocked(toolCallID string) {
+	for i := range sctx.liveTools {
+		if sctx.liveTools[i].ToolCallID == toolCallID {
+			sctx.liveTools = append(sctx.liveTools[:i], sctx.liveTools[i+1:]...)
+			return
+		}
+	}
+}
+
+// resetLiveToolsLocked clears the whole registry at a boundary where nothing can
+// still be in flight (turn end, run end, run error). This is the safety net that
+// makes cleanup unconditional: a call whose end event never arrives — cancelled
+// context, aborted run, a capped response whose tool calls were never executed —
+// would otherwise leave a phantom live row on every future reconnect. Caller
+// must hold streamMu.
+func (sctx *SessionContext) resetLiveToolsLocked() {
+	sctx.liveTools = nil
 }
 
 // The mutators below assume the caller already holds streamMu (bridgeEvent holds
@@ -631,28 +737,44 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 
 	translated := TranslateAgentEvent(sid, gen, e, sctx.TaskStore)
 
-	// Maintain the authoritative in-flight streaming aggregate in lockstep with
-	// the deltas we publish, so a reconnect snapshot during generation restores
-	// the whole partial reply instead of only post-cut deltas. Cleared when the
-	// message completes (now a real message in state) or the turn/run ends.
+	// Maintain the authoritative in-flight state (streaming aggregate + live
+	// tool-call registry) in lockstep with the events we publish, so a reconnect
+	// snapshot during a run restores the whole partial reply and every tool row
+	// that has no message-history representation yet.
 	//
-	// The aggregate is accumulative (concatenated deltas), so — unlike the
-	// idempotent compacting flag — the mutation and the publish of its derived
-	// events must be atomic with respect to the snapshot cut: streamMu is held
-	// across BOTH, and SnapshotStreamingWithCut reads the aggregate and
-	// Bus.LastSeq under the same lock. That gives a total order so a streamed
-	// delta is never both folded into the snapshot AND replayed live (seq>cut).
-	if delta, mutates := streamAggregateDelta(e); mutates {
+	// Both are non-idempotent under replay, so — unlike the idempotent
+	// compacting flag — the mutation and the publish of the derived events must
+	// be atomic with respect to the snapshot cut: streamMu is held across BOTH,
+	// and SnapshotInFlightWithCut reads them and Bus.LastSeq under the same
+	// lock. That gives a total order, so a streamed delta is never both folded
+	// into the snapshot AND replayed live (seq>cut), and a live tool call is
+	// never missing from the snapshot while the events that announce it are at
+	// or below the cut (i.e. never replayed either).
+	delta, mutatesStream := streamAggregateDelta(e)
+	toolDelta, mutatesTools := liveToolDelta(e)
+	if mutatesStream || mutatesTools {
 		sctx.streamMu.Lock()
-		switch delta.kind {
-		case streamKindStart:
-			sctx.setStreamMsgIDLocked(delta.msgID)
-		case streamKindText:
-			sctx.appendStreamTextLocked(delta.text)
-		case streamKindThinking:
-			sctx.appendStreamThinkingLocked(delta.text)
-		case streamKindReset:
-			sctx.resetStreamingLocked()
+		if mutatesStream {
+			switch delta.kind {
+			case streamKindStart:
+				sctx.setStreamMsgIDLocked(delta.msgID)
+			case streamKindText:
+				sctx.appendStreamTextLocked(delta.text)
+			case streamKindThinking:
+				sctx.appendStreamThinkingLocked(delta.text)
+			case streamKindReset:
+				sctx.resetStreamingLocked()
+			}
+		}
+		if mutatesTools {
+			switch toolDelta.kind {
+			case liveToolKindUpsert:
+				sctx.upsertLiveToolLocked(toolDelta.call)
+			case liveToolKindRemove:
+				sctx.removeLiveToolLocked(toolDelta.call.ToolCallID)
+			case liveToolKindReset:
+				sctx.resetLiveToolsLocked()
+			}
 		}
 		for _, ev := range translated {
 			sctx.Bus.Publish(ev)
@@ -701,6 +823,80 @@ func streamAggregateDelta(e core.AgentEvent) (streamDelta, bool) {
 		return streamDelta{kind: streamKindReset}, true
 	}
 	return streamDelta{}, false
+}
+
+type liveToolDeltaKind int
+
+const (
+	liveToolKindUpsert liveToolDeltaKind = iota
+	liveToolKindRemove
+	liveToolKindReset
+)
+
+type liveToolMutation struct {
+	kind liveToolDeltaKind
+	call LiveToolCall
+}
+
+// liveToolDelta reports how an AgentEvent mutates the live tool-call registry,
+// and whether it mutates it at all.
+//
+// Note what is deliberately NOT here: MessageEnd. The assistant message closes
+// BEFORE its tool calls execute, so clearing the registry there would blank the
+// rows for exactly the calls about to run. The turn (which ends after
+// executeTools returns) and the run are the real boundaries at which nothing
+// can still be in flight.
+func liveToolDelta(e core.AgentEvent) (liveToolMutation, bool) {
+	switch e.Type {
+	case core.AgentEventMessageUpdate:
+		if e.AssistantEvent == nil {
+			return liveToolMutation{}, false
+		}
+		switch e.AssistantEvent.Type {
+		case core.ProviderEventToolCallStart:
+			return liveToolMutation{kind: liveToolKindUpsert, call: LiveToolCall{
+				ToolCallID: e.AssistantEvent.ToolCallID,
+				ToolName:   e.AssistantEvent.ToolName,
+				Phase:      LiveToolPhaseGenerating,
+			}}, true
+		case core.ProviderEventToolCallDelta:
+			// Partially parsed arguments: the live row's object ("Editing
+			// pkg/serve/ws.go") comes from them, so a reconnect mid-generation
+			// restores the same row the streaming client was showing.
+			if e.AssistantEvent.PartialArgs == nil {
+				return liveToolMutation{}, false
+			}
+			return liveToolMutation{kind: liveToolKindUpsert, call: LiveToolCall{
+				ToolCallID: e.AssistantEvent.ToolCallID,
+				Args:       core.CloneArgs(e.AssistantEvent.PartialArgs),
+				Phase:      LiveToolPhaseGenerating,
+			}}, true
+		}
+		return liveToolMutation{}, false
+
+	case core.AgentEventToolExecStart:
+		// The arguments map belongs to the agent's history and is mutated after
+		// this event (the permission layer pops its feedback key from it), so
+		// the registry keeps a deep copy instead of the live map: it is read by
+		// the snapshot goroutine, and a nested map/slice left aliased would
+		// still be mutable from under it.
+		return liveToolMutation{kind: liveToolKindUpsert, call: LiveToolCall{
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			Args:       core.CloneArgs(e.Args),
+			Phase:      LiveToolPhaseRunning,
+		}}, true
+
+	case core.AgentEventToolExecEnd:
+		// Covers every terminal path — success, error, permission rejection,
+		// blocked/validation rejection — because the loop emits ToolExecEnd for
+		// all of them (see rejectToolCall).
+		return liveToolMutation{kind: liveToolKindRemove, call: LiveToolCall{ToolCallID: e.ToolCallID}}, true
+
+	case core.AgentEventTurnEnd, core.AgentEventEnd, core.AgentEventError:
+		return liveToolMutation{kind: liveToolKindReset}, true
+	}
+	return liveToolMutation{}, false
 }
 
 // TranslateAgentEvent translates a single core.AgentEvent into 0..n typed bus
@@ -833,7 +1029,15 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return events
 
 	case core.AgentEventSteer:
-		return []any{Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}}
+		ev := Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}
+		// A steer always carries its plain text, but one with attachments was
+		// injected as content blocks: publish them too so clients render the
+		// thumbnails live instead of only after a reload. Text-only steers keep
+		// travelling as Text alone, so their shape is unchanged.
+		if hasNonTextContent(e.Message.Content) {
+			ev.Content = e.Message.Content
+		}
+		return []any{ev}
 
 	case core.AgentEventUserMessage:
 		ev := UserMessageAppended{SessionID: sid, RunGen: gen, MsgID: e.MsgID, Text: e.Text}
@@ -857,4 +1061,17 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		}}
 	}
 	return nil
+}
+
+// hasNonTextContent reports whether a message carries blocks that plain text
+// can't express (images, documents). Used to decide when a steer must publish
+// its full content: a text-only steer is fully described by its Text, so
+// shipping its blocks would just fatten every WS frame for nothing.
+func hasNonTextContent(content []core.Content) bool {
+	for _, c := range content {
+		if c.Type != "text" {
+			return true
+		}
+	}
+	return false
 }
