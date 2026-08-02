@@ -5,6 +5,85 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-08-02
+
+### Added
+
+- Moa can read its own documentation. Installing it gets you a single binary and
+  nothing else, so the agent answered questions about flags and config files
+  from whatever it happened to remember — confidently, and sometimes wrongly.
+  `docs/*.md` is now embedded at build time and served by a `moa_docs` tool, so
+  you can ask for a `.moa/verify.json` or how to trigger a run from a webhook
+  without cloning anything. Being embedded rather than installed alongside the
+  binary means the pages always describe the version actually running.
+- Verify can run another repository's checks: `/verify <dir>` in both frontends,
+  `cwd` on the tool. In multi-repo work the conversation starts in one checkout
+  and the real work happens in a worktree or another repo, and the only way out
+  was editing `.moa/verify.json` so its commands reached across — rewriting a
+  project's own definition of "correct" to work around the tool reading it. The
+  target's own config is what runs, and it must pass the session's path policy.
+- Answers to `ask_user` can be dictated by voice. Answering meant reaching for
+  the keyboard, so on the phone the usual workaround was to cancel the prompt
+  and dictate into the composer instead — which leaves the tool waiting on a
+  question nobody will answer. The submit button doubles as push-to-talk with
+  the composer's own gesture (hold to record, slide up to lock), Cmd+. / Alt+.
+  on the web and Ctrl+R in the TUI. Speech fills the field rather than sending
+  it, so an answer can be dictated in several passes and reviewed before it goes.
+
+### Changed
+
+- Approving a command with "always allow", or switching an MCP server off for a
+  while, no longer lands in `<cwd>/.moa/config.json`. That file mixed two things
+  with different owners: what a project uses belongs in the repository, but one
+  person's decision on one machine was being appended to it — a click produced a
+  diff nobody wanted to commit, and it followed the repository to everyone who
+  cloned it. Those now go to `~/.config/moa/projects/<hash>/state.json`, the
+  scheme memory already uses. Allow patterns already sitting in a project config
+  keep applying: moa cannot tell a deliberate team policy from a leftover click,
+  so it migrates nothing.
+- A normal session no longer writes into the checkout at all, which is what made
+  a shared checkout unusable: the file was created private, so whoever approved
+  something first owned the directory and locked everyone else out of
+  `verify.json`, skills and prompts.
+- `state.json` takes a config block. Global config covers every project and
+  `.moa/config.json` is committed and shared, so there was nowhere for a setting
+  about how *you* work in *this* project — a turn limit you prefer here, your own
+  review model. It merges after the project's own config, so it can tighten a
+  limit but never relax one.
+- `MOA_CONFIG_DIR` now moves all of moa's state. The variable existed but only
+  some call sites honored it, producing a half-moved instance — credentials and
+  attachments in the new directory, config, sessions, skills, prompts and memory
+  still in the home one — which is worse than not supporting it at all, since it
+  looks like it worked. An unresolvable directory now disables the feature
+  instead of falling back to a relative path, which could write `auth.json` into
+  whatever repository you were standing in.
+
+### Fixed
+
+- An installed iOS PWA no longer keeps running an interface the server replaced,
+  which previously needed deleting the icon and adding it again. Assets ship
+  under fixed names from an embedded filesystem with a zero modtime, so they
+  were served with no validator and no cache directive at all; they now carry a
+  content ETag and `Cache-Control: no-cache`. Because iOS is not guaranteed to
+  revalidate, the app also compares its own build id against `/api/version` and
+  reloads onto a URL the cache has no entry for, once, reporting it instead of
+  looping if the stale bundle wins.
+- A stale build tree left behind after a deploy no longer ships inside every
+  binary. It was unreachable, but users carried it: one that got committed
+  during a rebase was 732 KB, 2.2% of the binary.
+- An MCP veto written by an older moa into a trusted project's config can be
+  undone from the panel. It was merged in on every read, so switching the server
+  on wrote to the user's state and the next session turned it off again — a
+  button that reported success and changed nothing. Vetoes are imported into the
+  state once, where the toggle owns them. One written by hand in the new config
+  block never reached the effective policy either: it read as valid
+  configuration and silently did nothing.
+- Concurrent config updates are no longer lost. The read-modify-write had no
+  lock, so two sessions in the same project each saved what they had read and
+  the last one won — reproduced at 40 concurrent approvals, of which 2 survived.
+- A nil path policy answers `IsAllowed` on the nil receiver. A typed nil wrapped
+  in an interface is not `== nil`, so a check at the call site could not see it.
+
 ## [0.23.0] - 2026-08-01
 
 ### Added
