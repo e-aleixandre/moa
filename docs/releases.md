@@ -7,12 +7,14 @@ are labelled `dev`; only valid stable SemVer tags are offered as updates.
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 (`feat:`, `fix:`, `docs:`, and so on). The changelog is curated rather than
-generated: before release, move the user-visible entries from **Unreleased**
-into a dated version section in [CHANGELOG.md](../CHANGELOG.md).
+generated, and normal feature/fix PRs do not edit it. When preparing a release,
+inspect the commits since the previous tag and write one coherent dated section
+covering the user-visible changes in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Release checklist
 
-1. Confirm the version and release scope follow SemVer; curate `CHANGELOG.md`.
+1. Confirm the version and release scope follow SemVer; inspect every commit
+   since the previous tag and curate the new dated section in `CHANGELOG.md`.
 2. Rebuild the embedded frontend. CI uses `npm ci && npm run build` in
    `pkg/serve/frontend`; locally, `bun esbuild.mjs --prune` from that directory
    is an equivalent alternative when npm is unavailable. Pruning is reserved
