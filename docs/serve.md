@@ -70,7 +70,7 @@ The composer accepts file attachments (paperclip icon, drag-and-drop, or paste).
 - **Small UTF-8 text** (≤256 KiB: `.txt/.md/.csv/.json`, source code, etc.) is inlined directly into the message, wrapped in an `<attachment>` marker.
 - **Everything else** (`.xlsx/.docx/.zip`, binaries, and text larger than 256 KiB) is **saved to disk** under `/tmp/moa-<uid>/<session-id>/`, and that directory is added to the session's path allowlist so the agent can process the file with its own tools (`bash`, `read_file`, etc.). Moa itself does not parse Office/archive formats — the agent decides how, on demand.
 
-In the conversation history, each attachment is tagged so you can tell which path it took: **enviado al modelo** (native image/PDF), a collapsible inline chip, or **guardado en disco** (with the on-disk path).
+In the conversation history, images render as thumbnails you can open full-size, and every other attachment renders as a chip that downloads the stored file.
 
 ### Files sent by the agent
 
@@ -208,11 +208,3 @@ frontend, it navigates to the new versioned shell without installing or
 restarting Moa. Embedded assets use content ETags and revalidate before reuse.
 The mutable `MOA_SERVE_STATIC_DIR` tree instead uses `no-store`, and its build
 id updates without restarting the development server.
-
-<p align="center">
-  <img src="./assets/serve-desktop-overview.png" alt="Desktop" width="900" />
-</p>
-
-<p align="center">
-  <img src="./assets/serve-mobile-session.png" alt="Mobile" width="320" />
-</p>
