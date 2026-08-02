@@ -47,8 +47,11 @@ func TestBuildSession_Minimal(t *testing.T) {
 		t.Fatal("expected ToolReg to be non-nil")
 	}
 
-	// Check that key builtins are registered.
-	for _, name := range []string{"bash", "read", "write", "edit", "grep", "find", "ls", "tasks"} {
+	// Check that key builtins are registered. moa_docs is in the list because
+	// it is what lets a user who only installed the binary ask how to
+	// configure moa: if the registration is dropped, every session silently
+	// goes back to answering that from memory.
+	for _, name := range []string{"bash", "read", "write", "edit", "grep", "find", "ls", "tasks", "moa_docs"} {
 		if _, ok := sess.ToolReg.Get(name); !ok {
 			t.Errorf("expected tool %q to be registered", name)
 		}

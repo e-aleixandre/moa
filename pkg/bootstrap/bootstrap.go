@@ -22,6 +22,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/memory"
+	"github.com/e-aleixandre/moa/pkg/moadocs"
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
@@ -316,6 +317,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// 3. Task store — always available.
 	taskStore := tasks.NewStore()
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
+
+	// 3b. moa's own documentation, embedded in the binary. Always available:
+	// someone who installed the binary has no copy of the repository, and
+	// questions about how to configure or integrate moa can come up in any
+	// session, not just one opened inside this repo.
+	core.RegisterOrLog(toolReg, moadocs.NewTool())
 
 	// 4. Verify tool.
 	verifyCfg, verifyErr := verify.LoadConfig(cfg.CWD)

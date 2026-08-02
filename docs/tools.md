@@ -25,6 +25,7 @@ Always registered:
 | `subagent_wait` | Block until an async subagent job finishes and return its result |
 | `subagent_cancel` | Cancel a running async subagent |
 | `tasks` | Track implementation tasks (used most heavily during plan mode, but always available) |
+| `moa_docs` | Read moa's own documentation (this page included), embedded in the binary |
 
 Conditionally registered:
 
@@ -43,6 +44,32 @@ Conditionally registered:
 - Use `apply_patch` for coordinated changes across multiple files
 - Use `write` for new files or complete rewrites
 - Use `bash` when you need actual shell behavior
+
+## Self-documentation
+
+`moa_docs` returns the pages of this documentation set from inside the binary.
+
+Installing moa gets you a single static binary, with no copy of the repository
+and nothing next to it on disk. Without this the agent could only answer
+questions about moa from whatever it happened to remember — which is how
+confident, wrong answers about flags and config files get produced. So a user
+who is working on their own project can ask moa to write them a
+`.moa/verify.json`, or explain how to trigger a run from a webhook, and get an
+answer from the real documentation without cloning anything or opening a
+browser.
+
+Because the pages are embedded at build time, they always describe the exact
+version being run: updating the binary updates its documentation with it.
+
+The page names are listed in the tool description, which is the only cost this
+carries in the system prompt — page content is read on demand, never
+preloaded.
+
+```
+moa_docs(page: "configuration")   # config.json fields and precedence
+moa_docs(page: "automation")      # HTTP API for triggering runs
+moa_docs(page: "recipes/linear")  # worked end-to-end integration
+```
 
 ## Memory
 
