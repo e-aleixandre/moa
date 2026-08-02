@@ -320,3 +320,28 @@ func TestBuildAssetPath(t *testing.T) {
 		t.Errorf("invalid build id routed root to %q", got)
 	}
 }
+
+// Only the published build may be committed. //go:embed takes the whole static
+// tree, so a leftover directory ships inside every binary — unreachable, since
+// withBuildRouting sends any request to the current id, but carried by every
+// user regardless. The frontend build prunes stale trees when it is run through
+// npm, which leaves the invariant resting on whoever built remembering the
+// flag; this is the check that does not.
+func TestEmbeddedBundleHasNoStaleBuilds(t *testing.T) {
+	published := readBuildID(os.DirFS("static"))
+	if published == "" {
+		t.Fatal("static/build-id.txt is missing or empty")
+	}
+
+	entries, err := os.ReadDir(filepath.Join("static", "build"))
+	if err != nil {
+		t.Fatalf("read static/build: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != published {
+			t.Errorf("stale build tree static/build/%s is embedded but unreachable "+
+				"(published is %s) — delete it, or rebuild with `npm run build`",
+				entry.Name(), published)
+		}
+	}
+}
