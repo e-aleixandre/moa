@@ -3,10 +3,12 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/release"
@@ -86,6 +88,51 @@ func TestStaticIndexETagMatchesRoot(t *testing.T) {
 	}
 }
 
+func TestStaticShellVersionsBundleAssets(t *testing.T) {
+	srv, _, cancel := newTestServer(t)
+	defer cancel()
+
+	versionResp := apiReq(t, srv, "GET", "/api/version", "")
+	defer versionResp.Body.Close() //nolint:errcheck
+	var version release.Result
+	if err := json.NewDecoder(versionResp.Body).Decode(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version.BuildID == "" {
+		t.Fatal("embedded frontend has no build id")
+	}
+
+	indexResp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := io.ReadAll(indexResp.Body)
+	indexResp.Body.Close() //nolint:errcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range []string{"app.css", "app.js"} {
+		want := "/build/" + version.BuildID + "/" + asset
+		if !strings.Contains(string(index), want) {
+			t.Errorf("index does not reference %q", want)
+		}
+	}
+
+	jsResp, err := http.Get(srv.URL + "/build/" + version.BuildID + "/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, err := io.ReadAll(jsResp.Body)
+	jsResp.Body.Close() //nolint:errcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStamp := `globalThis.__MOA_BUILD_ID__="` + version.BuildID + `";`
+	if !strings.Contains(string(js), wantStamp) {
+		t.Fatalf("app.js does not carry %q", wantStamp)
+	}
+}
+
 func TestVersionReportsBuildID(t *testing.T) {
 	// The served bundle's id, not the binary's version: a self-built binary
 	// reports "dev" across every deploy, so only the bundle can tell a client
@@ -113,6 +160,111 @@ func TestVersionReportsBuildID(t *testing.T) {
 	}
 	if got.BuildID != "abc123def456" {
 		t.Fatalf("build_id = %q, want abc123def456", got.BuildID)
+	}
+}
+
+func TestStaticDirTracksWatchRebuild(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("first"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, buildIDFile), []byte("build-a\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOA_SERVE_STATIC_DIR", dir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "dev"}})
+	srv := httptest.NewServer(NewServer(mgr))
+	defer srv.Close()
+
+	readVersion := func() release.Result {
+		t.Helper()
+		resp := apiReq(t, srv, "GET", "/api/version", "")
+		defer resp.Body.Close() //nolint:errcheck
+		var got release.Result
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	if got := readVersion().BuildID; got != "build-a" {
+		t.Fatalf("initial build_id = %q, want build-a", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, buildIDFile), []byte("build-b\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readVersion().BuildID; got != "build-b" {
+		t.Fatalf("rebuilt build_id = %q, want build-b", got)
+	}
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("watch asset Cache-Control = %q, want no-store", got)
+	}
+}
+
+func TestStaticDirBuildPointerRoutesCompleteTrees(t *testing.T) {
+	dir := t.TempDir()
+	const buildA = "aaaaaaaaaaaa"
+	const buildB = "bbbbbbbbbbbb"
+	for id, contents := range map[string]string{buildA: "a", buildB: "b"} {
+		buildDir := filepath.Join(dir, "build", id)
+		if err := os.MkdirAll(buildDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for file, body := range map[string]string{
+			"shell.html": "shell-" + contents,
+			"app.js":     "js-" + contents,
+			"app.css":    "css-" + contents,
+		} {
+			if err := os.WriteFile(filepath.Join(buildDir, file), []byte(body), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, buildIDFile), []byte(buildA+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOA_SERVE_STATIC_DIR", dir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "dev"}})
+	srv := httptest.NewServer(NewServer(mgr))
+	defer srv.Close()
+
+	getBody := func(path string) string {
+		t.Helper()
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	if got := getBody("/"); got != "shell-a" {
+		t.Fatalf("root before switch = %q, want shell-a", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, buildIDFile), []byte(buildB+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := getBody("/"); got != "shell-b" {
+		t.Fatalf("root after switch = %q, want shell-b", got)
+	}
+	if got := getBody("/build/" + buildA + "/app.js"); got != "js-b" {
+		t.Fatalf("old asset URL after switch = %q, want current js-b", got)
 	}
 }
 
@@ -148,5 +300,23 @@ func TestAssetPath(t *testing.T) {
 		if got := assetPath(tc.req); got != tc.want {
 			t.Errorf("assetPath(%q) = %q, want %q", tc.req, got, tc.want)
 		}
+	}
+}
+
+func TestBuildAssetPath(t *testing.T) {
+	const current = "abc123def456"
+	for _, tc := range []struct{ req, want string }{
+		{"/", "/build/abc123def456/shell.html"},
+		{"/index.html", "/build/abc123def456/shell.html"},
+		{"/app.js", "/build/abc123def456/app.js"},
+		{"/build/000000000000/app.css", "/build/abc123def456/app.css"},
+		{"/manifest.webmanifest", "/manifest.webmanifest"},
+	} {
+		if got := buildAssetPath(tc.req, current); got != tc.want {
+			t.Errorf("buildAssetPath(%q, %q) = %q, want %q", tc.req, current, got, tc.want)
+		}
+	}
+	if got := buildAssetPath("/", "not-an-id"); got != "/" {
+		t.Errorf("invalid build id routed root to %q", got)
 	}
 }

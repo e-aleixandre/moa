@@ -1,16 +1,22 @@
 import { build, context } from "esbuild";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import {
+  existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync,
+  rmSync, unlinkSync, writeFileSync,
+} from "fs";
 import { createHash } from "crypto";
+import { basename, dirname, resolve } from "path";
 
 const watch = process.argv.includes("--watch");
+const prune = process.argv.includes("--prune");
 const outdir = "../static";
+const buildsDir = `${outdir}/build`;
+const publishLock = `${outdir}.publish.lock`;
+const appEntry = resolve("src/app.jsx");
 
 mkdirSync(outdir, { recursive: true });
 
-// Static assets copied verbatim into the build output: the shell, the PWA
-// manifest, the service worker (push + installability) and the icons the
-// manifest points at. They are served from the root, which is also the
-// manifest's scope, so the paths inside them are absolute.
+// Root-scoped PWA assets. The shell and its JS/CSS live together under the
+// content-addressed build directory selected by build-id.txt.
 const staticAssets = [
   "index.html",
   "manifest.webmanifest",
@@ -21,45 +27,181 @@ const staticAssets = [
   "apple-touch-icon.png",
 ];
 
-const copyStatic = {
-  name: "copy-static",
+const publishFrontend = {
+  name: "publish-frontend",
   setup(b) {
-    b.onEnd(() => {
-      for (const f of staticAssets) {
-        copyFileSync(`src/${f}`, `${outdir}/${f}`);
-      }
-      stampBuildID();
+    // Static assets are not imported by the JS graph. Returning the app entry
+    // through the plugin lets esbuild watch them without adding a fake runtime
+    // import or a second output bundle.
+    b.onLoad({ filter: /app\.jsx$/ }, (args) => {
+      if (args.path !== appEntry) return undefined;
+      return {
+        contents: readFileSync(args.path),
+        loader: "jsx",
+        resolveDir: dirname(args.path),
+        watchFiles: [args.path, ...staticAssets.map((f) => resolve("src", f))],
+      };
+    });
+    b.onEnd(async (result) => {
+      // onEnd also runs after failed watch rebuilds. Esbuild keeps outputs in
+      // memory, and publishBuild reads and validates every static source before
+      // replacing anything in the served tree, so the last good build survives.
+      if (result.errors.length > 0) return;
+      await withPublishLock(() => publishBuild(result.outputFiles));
     });
   },
 };
 
-// The bundle ships under fixed names, so nothing in a served response tells a
-// client whether its code is still the code the server has. stampBuildID
-// derives one id from the built output and writes it twice: into the bundle
-// itself (so a running client knows which build it is) and into build-id.txt
-// (which the server reports on /api/version). Same build, same id — a mismatch
-// means the page is stale. Digesting the output makes it reproducible and
-// independent of release tooling: a self-built binary carries no version.
-function stampBuildID() {
-  const js = readFileSync(`${outdir}/app.js`);
-  const css = readFileSync(`${outdir}/app.css`);
-  const id = createHash("sha256").update(js).update(css).digest("hex").slice(0, 12);
-  writeFileSync(`${outdir}/build-id.txt`, `${id}\n`);
-  // Appended rather than injected via `define`, which would feed back into the
-  // digest it is derived from.
-  writeFileSync(`${outdir}/app.js`, `${js}\nglobalThis.__MOA_BUILD_ID__=${JSON.stringify(id)};\n`);
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error && error.code !== "ESRCH";
+  }
+}
+
+async function withPublishLock(fn) {
+  const deadline = Date.now() + 30_000;
+  const candidate = `${publishLock}.${process.pid}`;
+  writeFileSync(candidate, `${process.pid}\n`);
+  let acquired = false;
+  try {
+    for (;;) {
+      try {
+        // Hard-linking a fully written owner record makes the lock visible
+        // atomically; a crash can never strand an empty canonical lock.
+        linkSync(candidate, publishLock);
+        acquired = true;
+        break;
+      } catch (error) {
+        if (!error || error.code !== "EEXIST") throw error;
+        let owner = 0;
+        try {
+          owner = Number.parseInt(readFileSync(publishLock, "utf8"), 10);
+        } catch (_) { /* the owner may have just released the lock */ }
+        if (!owner || !processIsAlive(owner)) {
+          try { unlinkSync(publishLock); } catch (_) { /* another waiter won */ }
+          continue;
+        }
+        if (Date.now() >= deadline) throw new Error("timed out waiting for frontend publish lock");
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+    }
+    rmSync(candidate, { force: true });
+    return fn();
+  } finally {
+    rmSync(candidate, { force: true });
+    if (acquired) rmSync(publishLock, { force: true });
+  }
+}
+
+function writeAtomic(file, data) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  writeFileSync(tmp, data);
+  renameSync(tmp, file);
+}
+
+function collectBuild(outputFiles) {
+  const files = new Map();
+  for (const output of outputFiles || []) {
+    files.set(basename(output.path), Buffer.from(output.contents));
+  }
+  for (const file of staticAssets) {
+    files.set(file, readFileSync(`src/${file}`));
+  }
+  for (const required of ["app.js", "app.css", ...staticAssets]) {
+    if (!files.has(required)) throw new Error(`frontend build did not produce ${required}`);
+  }
+  return files;
+}
+
+// The id covers the runtime frontend tree rather than only JS/CSS: shell,
+// service-worker, manifest, and icon-only changes must also make a running PWA
+// adopt the new build. File names and separators make the digest unambiguous.
+function calculateBuildID(files) {
+  const hash = createHash("sha256");
+  for (const file of ["app.js", "app.css", ...staticAssets].sort()) {
+    hash.update(file).update("\0").update(files.get(file)).update("\0");
+  }
+  return hash.digest("hex").slice(0, 12);
+}
+
+function versionShell(html, id) {
+  const css = 'href="app.css"';
+  const js = 'src="app.js"';
+  if (!html.includes(css) || !html.includes(js)) {
+    throw new Error("index.html must reference app.css and app.js without a build path");
+  }
+  return html
+    .replace(css, `href="/build/${id}/app.css"`)
+    .replace(js, `src="/build/${id}/app.js"`);
+}
+
+function writeStagedBuild(files, id) {
+  mkdirSync(buildsDir, { recursive: true });
+  const staged = `${buildsDir}/.${id}.tmp-${process.pid}`;
+  const target = `${buildsDir}/${id}`;
+  rmSync(staged, { recursive: true, force: true });
+  mkdirSync(staged);
+
+  const js = files.get("app.js").toString("utf8");
+  const html = files.get("index.html").toString("utf8");
+  writeFileSync(`${staged}/app.js`, `${js}\nglobalThis.__MOA_BUILD_ID__=${JSON.stringify(id)};\n`);
+  writeFileSync(`${staged}/app.css`, files.get("app.css"));
+  writeFileSync(`${staged}/shell.html`, versionShell(html, id));
+  for (const sourceMap of ["app.js.map", "app.css.map"]) {
+    if (files.has(sourceMap)) writeFileSync(`${staged}/${sourceMap}`, files.get(sourceMap));
+  }
+
+  // A repeated deterministic build already has these exact runtime files.
+  if (existsSync(target)) rmSync(staged, { recursive: true, force: true });
+  else renameSync(staged, target);
+}
+
+// publishBuild stages immutable JS/CSS/shell files under their build id, copies
+// root-scoped PWA assets, then atomically switches build-id.txt. The server uses
+// that one file for both / and /api/version, so concurrent readers see either
+// the complete previous build or the complete new one.
+function publishBuild(outputFiles) {
+  const files = collectBuild(outputFiles);
+  const id = calculateBuildID(files);
+  writeStagedBuild(files, id);
+
+  for (const file of staticAssets) {
+    if (file !== "index.html") writeAtomic(`${outdir}/${file}`, files.get(file));
+  }
+
+  // This is the only publication pointer and is written after every dependency.
+  writeAtomic(`${outdir}/build-id.txt`, `${id}\n`);
+
+  // Immutable trees are retained by default: a live disk server may have
+  // already routed an in-flight request through any prior pointer. Release/CI
+  // builds opt into pruning only when no server is reading this directory.
+  if (prune) {
+    for (const entry of readdirSync(buildsDir, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name !== id) {
+        rmSync(`${buildsDir}/${entry.name}`, { recursive: true, force: true });
+      }
+    }
+  }
+  for (const legacy of ["app.js", "app.css", "index.html", "app.js.map", "app.css.map"]) {
+    rmSync(`${outdir}/${legacy}`, { force: true });
+  }
 }
 
 const config = {
   entryPoints: ["src/app.jsx"],
   bundle: true,
   outdir,
+  write: false,
   format: "esm",
   minify: !watch,
   sourcemap: watch,
   jsx: "automatic",
   jsxImportSource: "preact",
-  plugins: [copyStatic],
+  plugins: [publishFrontend],
 };
 
 if (watch) {

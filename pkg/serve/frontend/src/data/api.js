@@ -32,10 +32,11 @@ export const DEFAULT_API_TIMEOUT_MS = 15000;
 // coherent timeout.
 export const MCP_RESTART_TIMEOUT_MS = 30000;
 
-export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS } = {}) {
+export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS, cache } = {}) {
   const controller = timeoutMs > 0 ? new AbortController() : null;
   const opts = { method, headers: REQUEST_HEADERS };
   if (body) opts.body = JSON.stringify(body);
+  if (cache) opts.cache = cache;
   if (controller) opts.signal = controller.signal;
 
   let timedOut = false;
@@ -68,7 +69,7 @@ export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_
 }
 
 export function getVersion() {
-  return api('GET', '/api/version');
+  return api('GET', '/api/version', null, { cache: 'no-store' });
 }
 
 // --- Centralized WS Manager ---

@@ -215,13 +215,13 @@ func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func handleVersion(mgr *Manager, buildID string) http.HandlerFunc {
+func handleVersion(mgr *Manager, buildID func() string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		// The bundle id must not be cached: it is the signal a client polls to
 		// learn that the code it is running is no longer the code being served.
 		w.Header().Set("Cache-Control", "no-store")
 		result := mgr.Version()
-		result.BuildID = buildID
+		result.BuildID = buildID()
 		writeJSON(w, http.StatusOK, result)
 	}
 }

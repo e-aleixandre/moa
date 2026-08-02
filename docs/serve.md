@@ -176,7 +176,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/version` | Current version and whether an update is available |
+| `GET /api/version` | Current version, update state, and served frontend build id |
 | `GET /api/capabilities` | Server/session capabilities (providers, features) |
 | `GET /api/usage` | Usage/cost readout |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
@@ -190,7 +190,7 @@ then override the embedded output for live development:
 
 ```bash
 # build the SPA into pkg/serve/static (embedded at compile time)
-cd pkg/serve/frontend && node esbuild.mjs   # or: bun esbuild.mjs
+cd pkg/serve/frontend && node esbuild.mjs --prune   # or: bun esbuild.mjs --prune
 
 # serve that build directory without recompiling the binary
 MOA_SERVE_STATIC_DIR=pkg/serve/static moa serve
@@ -199,6 +199,15 @@ MOA_SERVE_STATIC_DIR=pkg/serve/static moa serve
 The build output is one tree: the app bundle plus the assets the PWA references
 absolutely at the root — the service worker (`/sw.js`, which push runs through),
 the icons and the manifest.
+
+The build stamps that runtime tree with one content-derived id, embeds it in
+the JavaScript bundle, and publishes the shell, JavaScript and CSS together
+under `/build/<id>/`. A running web app compares its id with `/api/version` on
+load and when it returns to the foreground; if the server has replaced the
+frontend, it navigates to the new versioned shell without installing or
+restarting Moa. Embedded assets use content ETags and revalidate before reuse.
+The mutable `MOA_SERVE_STATIC_DIR` tree instead uses `no-store`, and its build
+id updates without restarting the development server.
 
 <p align="center">
   <img src="./assets/serve-desktop-overview.png" alt="Desktop" width="900" />
