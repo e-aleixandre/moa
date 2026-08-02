@@ -145,8 +145,9 @@ func TestLoadMoaConfigResolved_Provenance(t *testing.T) {
 
 // Moa no longer writes a veto into the project, but one left there by an older
 // version still counts: silently starting a server somebody had switched off is
-// the wrong way to announce the change.
-func TestLoadMoaConfigResolved_LegacyProjectFileVetoStillApplies(t *testing.T) {
+// the wrong way to announce the change. It is imported into the user's state,
+// which is where the panel can act on it.
+func TestLoadMoaConfigResolved_LegacyProjectFileVetoIsImported(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MOA_CONFIG_DIR", "")
@@ -162,6 +163,39 @@ func TestLoadMoaConfigResolved_LegacyProjectFileVetoStillApplies(t *testing.T) {
 	loaded := LoadMoaConfigResolved(cwd)
 	if !reflect.DeepEqual(loaded.MCPDisabled.Project, []string{"postgres"}) {
 		t.Fatalf("a veto left by an older moa should still apply, got %v", loaded.MCPDisabled.Project)
+	}
+	st, err := LoadProjectState(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(st.DisabledMCPServers, []string{"postgres"}) {
+		t.Fatalf("the veto should have moved into the user's state, got %v", st.DisabledMCPServers)
+	}
+}
+
+// The panel offers one switch for the project scope, so turning a server back
+// on has to stick. Re-reading the project's file on every load would undo it on
+// the next session: a button that reports success and changes nothing.
+func TestLoadMoaConfigResolved_TurningALegacyVetoBackOnSticks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
+	cwd := t.TempDir()
+
+	writeConfigJSON(t, filepath.Join(home, ".config", "moa", "config.json"), MoaConfig{
+		TrustedProjectPaths: []string{cwd},
+	})
+	writeConfigJSON(t, filepath.Join(cwd, ".moa", "config.json"), MoaConfig{
+		DisabledMCPServers: []string{"postgres"},
+	})
+
+	LoadMoaConfigResolved(cwd) // session that imports the veto
+	if err := SetProjectMCPServerDisabled(cwd, "postgres", false); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LoadMoaConfigResolved(cwd).MCPDisabled.Project; len(got) != 0 {
+		t.Fatalf("the server was switched back on but is still vetoed: %v", got)
 	}
 }
 

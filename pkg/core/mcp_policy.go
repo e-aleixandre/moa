@@ -2,7 +2,6 @@ package core
 
 import (
 	"log/slog"
-	"path/filepath"
 	"sort"
 )
 
@@ -58,6 +57,12 @@ func LoadMoaConfigResolved(cwd string) LoadedMoaConfig {
 		Global:         dedupeStrings(global.DisabledMCPServers),
 		ProjectTrusted: IsProjectPathTrusted(global, cwd),
 	}
+	// Vetoes an older moa left in the project's own config are carried over to
+	// this user's state before reading it, so they survive the move without
+	// becoming a toggle the panel cannot undo.
+	if err := ImportLegacyProjectVeto(cwd); err != nil {
+		slog.Warn("project state: cannot import the MCP vetoes from this project's config", "error", err)
+	}
 	// The project veto is the user's own, so it applies whether or not the
 	// project is trusted: trust governs reading the project's files, and this
 	// preference no longer lives in one.
@@ -69,16 +74,14 @@ func LoadMoaConfigResolved(cwd string) LoadedMoaConfig {
 		slog.Warn("project state: cannot read your MCP preferences; servers you disabled may start",
 			"error", err)
 	} else {
-		sources.Project = dedupeStrings(state.DisabledMCPServers)
-	}
-	// A veto written into a trusted project's config by an older moa still
-	// counts. Moa no longer puts one there, but silently starting a server
-	// somebody had switched off is the wrong way to announce that.
-	if sources.ProjectTrusted {
-		legacy := loadConfigFile(filepath.Join(cwd, ".moa", "config.json")).DisabledMCPServers
-		if len(legacy) > 0 {
-			sources.Project = dedupeStrings(append(sources.Project, legacy...))
+		project := state.DisabledMCPServers
+		// A veto written by hand in the config block counts too: it is
+		// documented as taking the same fields, and a setting that shows up in
+		// the merged config but never stops the server would be a trap.
+		if state.Config != nil {
+			project = append(project, state.Config.DisabledMCPServers...)
 		}
+		sources.Project = dedupeStrings(project)
 	}
 
 	return LoadedMoaConfig{

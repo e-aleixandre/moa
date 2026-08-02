@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -321,5 +322,50 @@ func TestProjectState_ConfigSurvivesAnApproval(t *testing.T) {
 	}
 	if st.Config == nil || st.Config.MaxTurns != 40 {
 		t.Errorf("approving a permission dropped your settings: %+v", st.Config)
+	}
+}
+
+// A veto written by hand in the config block has to reach the effective MCP
+// policy. The block is documented as taking the same fields, so a setting that
+// shows up in the merged config but never stops the server would be a trap.
+func TestProjectState_ConfigVetoReachesTheMCPPolicy(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	cwd := t.TempDir()
+
+	if err := UpdateProjectState(cwd, func(st *ProjectState) {
+		st.Config = &MoaConfig{DisabledMCPServers: []string{"db"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LoadMoaConfigResolved(cwd).MCPDisabled.Project; !slices.Contains(got, "db") {
+		t.Errorf("the veto never reaches the effective policy: %v", got)
+	}
+}
+
+// A mistyped key parses fine and does nothing, so it is worth a warning rather
+// than silence. Unknown fields must not stop the rest of the file working.
+func TestProjectState_UnknownFieldDoesNotDiscardTheRest(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", dir)
+	cwd := t.TempDir()
+
+	if err := UpdateProjectState(cwd, func(st *ProjectState) {
+		st.PermissionAllow = []string{"Bash(git:*)"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(ProjectStateDir(cwd), "state.json")
+	if err := os.WriteFile(path,
+		[]byte(`{"permission_allow":["Bash(git:*)"],"max_turms":40}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := LoadProjectState(cwd)
+	if err != nil {
+		t.Fatalf("an unknown field must not make the state unreadable: %v", err)
+	}
+	if !slices.Contains(st.PermissionAllow, "Bash(git:*)") {
+		t.Errorf("the rest of the file was discarded: %+v", st)
 	}
 }

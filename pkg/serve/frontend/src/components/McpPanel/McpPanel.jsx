@@ -306,7 +306,7 @@ function ServerItem({ sessionId, server, onMutated, open, onOpenToggle }) {
 }
 
 export function McpPanel({ sessionId, mcpTick, variant }) {
-  const [data, setData] = useState(null); // null = loading; {servers, available_scopes, ...}
+  const [data, setData] = useState(null); // null = loading; {servers, unmatched_disabled}
   const [failed, setFailed] = useState(false);
   const [openName, setOpenName] = useState(null); // which server's dossier is open
 
@@ -334,7 +334,7 @@ export function McpPanel({ sessionId, mcpTick, variant }) {
         // Drop if superseded by a newer load or if the panel moved to another
         // session since this load was issued (liveSessionRef is always current).
         if (seq !== reqSeqRef.current || forSession !== liveSessionRef.current) return;
-        setData(r && Array.isArray(r.servers) ? r : { servers: [], available_scopes: {} });
+        setData(r && Array.isArray(r.servers) ? r : { servers: [] });
         setFailed(false);
       })
       .catch(() => {

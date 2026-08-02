@@ -124,8 +124,8 @@ func newTestServerWithMCP(t *testing.T, moaCfg core.MoaConfig) (*httptest.Server
 	return srv, mgr
 }
 
-// GET returns the extended contract: per-server enabled/desired_enabled fields,
-// the available_scopes map, and a (possibly empty) unmatched_disabled array.
+// GET returns the extended contract: per-server enabled/desired_enabled fields
+// and a (possibly empty) unmatched_disabled array.
 func TestMCPStatusEndpoint_ExtendedShape(t *testing.T) {
 	moaCfg := core.MoaConfig{
 		DisableSandbox: true,
@@ -149,9 +149,6 @@ func TestMCPStatusEndpoint_ExtendedShape(t *testing.T) {
 			Enabled        bool   `json:"enabled"`
 			DesiredEnabled bool   `json:"desired_enabled"`
 		} `json:"servers"`
-		AvailableScopes map[string]struct {
-			Writable bool `json:"writable"`
-		} `json:"available_scopes"`
 		UnmatchedDisabled []json.RawMessage `json:"unmatched_disabled"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -162,9 +159,6 @@ func TestMCPStatusEndpoint_ExtendedShape(t *testing.T) {
 	}
 	if !body.Servers[0].Enabled || !body.Servers[0].DesiredEnabled {
 		t.Fatalf("svc should be enabled/desired-enabled: %+v", body.Servers[0])
-	}
-	if !body.AvailableScopes["session"].Writable || !body.AvailableScopes["global"].Writable {
-		t.Fatalf("session/global scopes should be writable: %+v", body.AvailableScopes)
 	}
 	if body.UnmatchedDisabled == nil {
 		t.Fatal("unmatched_disabled should be [] not null")

@@ -1,12 +1,14 @@
 package core
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -50,6 +52,11 @@ type ProjectState struct {
 	// and before session flags, and subject to the same rules, so it can
 	// tighten a limit the project set but never relax one.
 	Config *MoaConfig `json:"config,omitempty"`
+	// LegacyVetoImported records that vetoes an older moa wrote into the
+	// project's own config were carried over. It has to be remembered: without
+	// it the import would run again after the user switches a server back on,
+	// and the toggle would appear to do nothing.
+	LegacyVetoImported bool `json:"legacy_veto_imported,omitempty"`
 }
 
 func projectStatePath(workspaceRoot string) string {
@@ -80,10 +87,23 @@ func LoadProjectState(workspaceRoot string) (ProjectState, error) {
 	if err := json.Unmarshal(data, &st); err != nil {
 		return ProjectState{}, fmt.Errorf("corrupt project state %s: %w", path, err)
 	}
+	// The config block is hand-edited, so a typo is likely and silence is the
+	// worst answer: "max_turms" would parse fine and do nothing at all. It only
+	// warns, since a state written by a newer moa may legitimately carry fields
+	// this build does not know.
+	strict := json.NewDecoder(bytes.NewReader(data))
+	strict.DisallowUnknownFields()
+	if err := strict.Decode(new(ProjectState)); err != nil {
+		slog.Warn("project state: unrecognized setting, check for a typo", "file", path, "error", err)
+	}
 	return st, nil
 }
 
 // UpdateProjectState applies update to the stored state and writes it back.
+//
+// update must not call back into UpdateProjectState or the lock deadlocks, and
+// it should not read the state either: it receives the current one, and a
+// LoadProjectState from inside would return the version before its own edits.
 //
 // The whole read-modify-write is under an advisory lock, and the write goes
 // through a uniquely named temporary file. Both matter: the project config
@@ -144,6 +164,38 @@ func AddProjectAllowPattern(workspaceRoot, pattern string) error {
 	return UpdateProjectState(workspaceRoot, func(st *ProjectState) {
 		if !slices.Contains(st.PermissionAllow, pattern) {
 			st.PermissionAllow = append(st.PermissionAllow, pattern)
+		}
+	})
+}
+
+// ImportLegacyProjectVeto carries vetoes an older moa wrote into a trusted
+// project's own config over to this user's state, once.
+//
+// Merging them on every read instead would leave the MCP panel in a state the
+// user cannot get out of: the veto would show under the project scope, but
+// switching the server back on writes to the state, and the next session would
+// read the project file again and turn it off. Importing makes the toggle mean
+// what it says, and the flag stops the import from undoing that later.
+func ImportLegacyProjectVeto(cwd string) error {
+	global := loadConfigFile(globalConfigPath())
+	if !IsProjectPathTrusted(global, cwd) {
+		return nil
+	}
+	state, err := LoadProjectState(cwd)
+	if err != nil || state.LegacyVetoImported {
+		return err
+	}
+	legacy := loadConfigFile(filepath.Join(cwd, ".moa", "config.json")).DisabledMCPServers
+
+	return UpdateProjectState(cwd, func(st *ProjectState) {
+		if st.LegacyVetoImported {
+			return // another session won the race
+		}
+		st.LegacyVetoImported = true
+		for _, server := range legacy {
+			if !slices.Contains(st.DisabledMCPServers, server) {
+				st.DisabledMCPServers = append(st.DisabledMCPServers, server)
+			}
 		}
 	})
 }

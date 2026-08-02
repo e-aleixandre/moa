@@ -229,9 +229,19 @@ your own review model:
 
 Moa never writes this block; it is yours to edit. It is applied after global
 config and after the project's own, so it wins over both — but through the same
-merge rules, so it can **tighten** a limit and never relax one: if your global
-config caps runs at 50 turns, asking for 500 here still gives you 50. No trust
-prompt is involved, because the file is yours rather than the checkout's.
+merge rules, so `max_turns`, `max_tool_calls_per_turn` and `max_run_duration`
+can only be **tightened**: if your global config caps runs at 50 turns, asking
+for 500 here still gives you 50. `max_budget` is the exception and takes any
+explicit value, matching how the project's own config has always behaved. No
+trust prompt is involved, because the file is yours rather than the checkout's.
+
+It takes the same fields as `config.json`, which includes the ones that widen
+what moa may do — `permissions`, `path_scope`, `allowed_paths`, `mcp_servers`.
+That is intended, since the file is your own and no repository can write to it,
+but it does mean a stray `"path_scope": "unrestricted"` here applies with no
+prompt. It cannot grant trust: `trusted_project_paths` and `trusted_mcp_paths`
+are global-only and ignored at this level, so a project cannot come to trust
+itself through it.
 
 Use it when the setting is about *how you work here*, and `.moa/config.json`
 when it is about the project itself and should reach everyone who clones it.

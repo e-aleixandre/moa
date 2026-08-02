@@ -233,10 +233,6 @@
   line-height: var(--leading-tight);
 }
 
-.mcp-scope-why-warn {
-  color: var(--yellow);
-}
-
 /* On/Off chip per scope — ModelSelector's .mchip grammar, compact. */
 .mcp-schip {
   flex: none;

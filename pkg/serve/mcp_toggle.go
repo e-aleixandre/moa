@@ -13,26 +13,6 @@ var (
 	ErrScopeInvalid = errors.New("invalid scope")
 )
 
-// scopeAvailability describes whether a scope can be written for a session, and
-// why not when it can't. It feeds the GET response's available_scopes so the UI
-// can disable a control instead of failing a request.
-type scopeAvailability struct {
-	Writable bool   `json:"writable"`
-	Reason   string `json:"reason,omitempty"`
-}
-
-// mcpAvailableScopes reports, for this session, which disable scopes are
-// writable. All three are: the veto is the user's own preference, stored with
-// their config rather than in the repository, so there is nothing about the
-// project that can make it unwritable.
-func (s *ManagedSession) mcpAvailableScopes() map[string]scopeAvailability {
-	return map[string]scopeAvailability{
-		"session": {Writable: true},
-		"global":  {Writable: true},
-		"project": {Writable: true},
-	}
-}
-
 // mcpToggleResult is the outcome of a toggle fan-out: how many open sessions had
 // the change applied immediately, and how many deferred it until quiescence.
 type mcpToggleResult struct {

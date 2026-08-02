@@ -784,7 +784,7 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 }
 
 // handleMCPStatus returns the policy-decorated health snapshot of a session's
-// MCP servers, plus which scopes are writable and any disabled preferences that
+// MCP servers, plus any disabled preferences that
 // don't match a configured server.
 func handleMCPStatus(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -804,7 +804,6 @@ func handleMCPStatus(mgr *Manager) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"servers":            status,
-			"available_scopes":   sess.mcpAvailableScopes(),
 			"unmatched_disabled": unmatched,
 		})
 	}
