@@ -5,6 +5,7 @@ import {
 } from "lucide-preact";
 import { store } from "../../data/store.js";
 import { closePalette } from "../../data/palette.js";
+import { openDrawer } from "../../data/drawer.js";
 import { openPulsePairing } from "../../data/pulse-pairing-panel.js";
 import { fuzzyMatch, fuzzyMatchIndices } from "../../data/fuzzy.js";
 import {
@@ -198,6 +199,13 @@ export function CommandPalette({
   useEffect(() => {
     if (!open) return;
     openerRef.current = document.activeElement;
+    // The create step doesn't exist on a phone any more (it lives in the
+    // SessionDrawer), so an open asking for it hands over instead.
+    if (isMobile && initialStep === "create") {
+      onClose();
+      openDrawer("new");
+      return;
+    }
     setStep(initialStep);
     setQuery("");
     setSelectedIdx(0);
@@ -285,6 +293,17 @@ export function CommandPalette({
     return () => { cancelled = true; clearTimeout(timer); };
   }, [open, step, exploreDir]);
 
+  // goToCreate — the ONE way into "new session" from the palette. On desktop
+  // that is the palette's own create step. On a phone it hands over to the
+  // SessionDrawer's "new" screen instead: the drawer is the single place a
+  // phone manages sessions, and opening a second create flow inside another
+  // chassis (with its own session list and its own back) was exactly the
+  // duplication this removes.
+  const goToCreate = useCallback(() => {
+    if (isMobile) { onClose(); openDrawer("new"); return; }
+    setStep("create");
+  }, [isMobile, onClose]);
+
   // ── Actions catalogue (context-aware). CORE set only; NICE-TO-HAVE presets
   // left as TODO (spec §3).
   const actions = useMemo(() => {
@@ -292,7 +311,7 @@ export function CommandPalette({
     list.push({
       id: "__new", label: "New session…", sublabel: "pick project & model",
       icon: <Plus size={14} />, accent: "", shortcut: [modLabel, "N"],
-      run: () => setStep("create"),
+      run: goToCreate,
     });
     if (context === "grid") {
       list.push({
@@ -318,7 +337,7 @@ export function CommandPalette({
     // Settings — cheap via this action.run() pattern, left out to keep CORE tight.
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, onClose]);
+  }, [context, onClose, goToCreate]);
 
   // ── Build the flat item list for the SEARCH step ───────────────────────────
   const searchItems = useMemo(() => {
@@ -529,7 +548,7 @@ export function CommandPalette({
       // CORE fallback: open create with the query preserved (recents/browse
       // filter by it). NICE-TO-HAVE: send the query as the first message.
       // TODO: create then sendMessage(newId, query).
-      setStep("create");
+      goToCreate();
       return;
     }
     if (sel.kind === "project") { doCreate(sel.cwd); return; }
@@ -537,7 +556,7 @@ export function CommandPalette({
       if (secondary) doCreate(exploreDir); else goToDir(sel.path);
       return;
     }
-  }, [selectable, selectedIdx, step, activateSession, doCreate, goToDir, exploreDir]);
+  }, [selectable, selectedIdx, step, activateSession, doCreate, goToDir, exploreDir, goToCreate]);
 
   // create-step input handler (recents filter vs path explorer — ported from
   // NewSessionSheet.onInput).
@@ -564,7 +583,7 @@ export function CommandPalette({
     if (e.key === "Tab") { e.preventDefault(); return; }
     if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
     if (meta && (e.key === "n" || e.key === "N") && step === "search") {
-      e.preventDefault(); setStep("create"); return;
+      e.preventDefault(); goToCreate(); return;
     }
     if (meta && (e.key === "m" || e.key === "M") && step === "create") {
       e.preventDefault(); cycleModel(); return;
@@ -594,7 +613,7 @@ export function CommandPalette({
       else setStep("search");
       return;
     }
-  }, [step, query, selectable, selectedIdx, onClose, cycleModel, goToDir, activateSelected, initialStep]);
+  }, [step, query, selectable, selectedIdx, onClose, cycleModel, goToDir, activateSelected, initialStep, goToCreate]);
 
   if (!open) return null;
 
@@ -690,7 +709,7 @@ export function CommandPalette({
     if (!sel) return;
     if (sel.kind === "session") { activateSession(sel, false); return; }
     if (sel.kind === "action") { sel.run(); return; }
-    if (sel.kind === "create-from-query") { setStep("create"); return; }
+    if (sel.kind === "create-from-query") { goToCreate(); return; }
     if (sel.kind === "project") { doCreate(sel.cwd); return; }
     if (sel.kind === "dir") { goToDir(sel.path); return; }
   }

@@ -215,6 +215,7 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
 // stacking overlays or racing the shared overlay-history back()/popstate.
 export function SessionDrawer({
   open,
+  step = "list",
   onClose,
   onClosed,
   active = [],
@@ -244,9 +245,19 @@ export function SessionDrawer({
   // The drawer has two screens: the list, and "new session". They swap in place
   // instead of handing off to another overlay — the whole point of the dropdown
   // is that everything about sessions happens inside the thing hanging from the
-  // title. Both reset on every open, so the drawer never reopens mid-task.
-  const [view, setView] = useState("list");
+  // title. Which one an open lands on comes from the caller (`step`), because
+  // creating a session on a phone is ALWAYS this screen: the empty state and
+  // the command palette open the drawer on "new" rather than standing up a
+  // second create flow. Both reset on every open, so it never reopens mid-task.
+  const [view, setView] = useState(step);
   const [query, setQuery] = useState("");
+
+  // The screen an open lands on — and a step change while the drawer is
+  // already open (the palette handing over to an open drawer) — both come from
+  // the caller, without touching the enter/leave state machine below.
+  useEffect(() => {
+    if (open) setView(step);
+  }, [step, open]);
 
   // Register with the shared overlay-history stack whenever open toggles, so
   // the browser/PWA back gesture closes the drawer instead of navigating away
@@ -274,7 +285,6 @@ export function SessionDrawer({
       wasOpenRef.current = true;
       clearTimeout(closeTimerRef.current);
       setVisible(true);
-      setView("list");
       setQuery("");
       if (reduce) {
         setEntered(true);

@@ -82,6 +82,12 @@ let state = {
   // ('search' | 'create') when it opens.
   paletteOpen: false,
   paletteStep: 'search',
+
+  // Mobile session drawer. In the store for the same reason the palette is:
+  // the empty state and the command palette both need to send the user into
+  // it (see data/drawer.js). drawerStep is 'list' | 'new'.
+  drawerOpen: false,
+  drawerStep: 'list',
 };
 
 let listeners = new Set();

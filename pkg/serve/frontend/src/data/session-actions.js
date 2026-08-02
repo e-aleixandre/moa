@@ -6,6 +6,7 @@ import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   assignToTile, setActiveSession, afterVisibilityChange, autoFillTiles,
+  autoSelectMobile,
 } from './tile-actions.js';
 import { allSessionIds, clearSession } from './tileTree.js';
 
@@ -275,6 +276,15 @@ export async function closeSession(id) {
   const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;
   setState({ tileTree, activeSession });
+  // Hand the freed slot straight to another open session. Closing does NOT
+  // remove the session from the store (it stays listed as `saved`), so the
+  // app-level effect that re-fills when the session COUNT changes never fires
+  // on this path: without this, closing the session you were looking at left
+  // mobile on the "no open sessions" empty state (and a desktop tile blank)
+  // while other sessions were still open — precisely what the drawer kept
+  // listing. deleteSession never showed it because there the count does change.
+  if (store.get().isMobile) autoSelectMobile();
+  else autoFillTiles();
   afterVisibilityChange();
 }
 

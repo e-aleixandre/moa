@@ -5,7 +5,7 @@ import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
-import { openPalette } from "../../../data/palette.js";
+import { openDrawer, closeDrawer } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
@@ -167,7 +167,6 @@ export function MobileConversationScreen({ version = null }) {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [rewindOpen, setRewindOpen] = useState(false);
   // Global Settings bottom-sheet, reached from the drawer footer via a sheet
   // HANDOFF: tapping ⚙ closes the drawer, and only once the drawer's leave
@@ -181,6 +180,11 @@ export function MobileConversationScreen({ version = null }) {
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
   const loaded = state.sessionsLoaded;
+  // The drawer's open/step state lives in the store (data/drawer.js): the
+  // empty state below and the command palette both open it, so it can't be
+  // local to this component any more.
+  const drawerOpen = state.drawerOpen;
+  const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -199,21 +203,22 @@ export function MobileConversationScreen({ version = null }) {
     return () => vv.removeEventListener("resize", onResize);
   }, []);
 
-  const onSelectFromDrawer = (id) => { setActiveSession(id); setDrawerOpen(false); };
-  // The empty state has no drawer to host the "new session" screen, so there it
-  // still opens the palette straight on its create step.
-  const onNew = () => { openPalette("create"); setDrawerOpen(false); };
+  const onSelectFromDrawer = (id) => { setActiveSession(id); closeDrawer(); };
+  // Creating a session on a phone happens in ONE place: the drawer's "new"
+  // screen. The empty state's button opens that, it does not stand up a second
+  // create flow (the palette's create step is the desktop's, where ⌘K lives).
+  const onNew = () => openDrawer("new");
   // From inside the drawer, creating is done in place (NewSessionView) — this
   // just performs it and closes.
   const onCreate = (cwd) => {
-    setDrawerOpen(false);
+    closeDrawer();
     createSession({ cwd }).catch((e) =>
       addToast({ title: "Could not create session", detail: String(e.message || e), type: "error" })
     );
   };
   const onSettingsFromDrawer = () => {
     settingsPendingRef.current = true;
-    setDrawerOpen(false);
+    closeDrawer();
   };
   const onDrawerClosed = () => {
     if (!settingsPendingRef.current) return;
@@ -286,7 +291,7 @@ export function MobileConversationScreen({ version = null }) {
             <button
               type="button"
               class="mconv-empty-browse"
-              onClick={() => setDrawerOpen(true)}
+              onClick={() => openDrawer("list")}
             >
               All sessions · {activeCount + savedCount}
             </button>
@@ -385,6 +390,7 @@ export function MobileConversationScreen({ version = null }) {
 
       <SessionDrawer
         open={drawerOpen}
+        step={state.drawerStep}
         onClose={() => setDrawerOpen(false)}
         onClosed={onDrawerClosed}
         active={drawerActive}
