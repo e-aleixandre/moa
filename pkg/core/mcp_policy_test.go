@@ -143,10 +143,10 @@ func TestLoadMoaConfigResolved_Provenance(t *testing.T) {
 	}
 }
 
-// A veto written inside the project is no longer a thing moa reads: turning a
-// server off is a preference, and a repository that could declare one would be
-// deciding for whoever cloned it.
-func TestLoadMoaConfigResolved_ProjectFileVetoIsNotRead(t *testing.T) {
+// Moa no longer writes a veto into the project, but one left there by an older
+// version still counts: silently starting a server somebody had switched off is
+// the wrong way to announce the change.
+func TestLoadMoaConfigResolved_LegacyProjectFileVetoStillApplies(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MOA_CONFIG_DIR", "")
@@ -160,8 +160,27 @@ func TestLoadMoaConfigResolved_ProjectFileVetoIsNotRead(t *testing.T) {
 	})
 
 	loaded := LoadMoaConfigResolved(cwd)
+	if !reflect.DeepEqual(loaded.MCPDisabled.Project, []string{"postgres"}) {
+		t.Fatalf("a veto left by an older moa should still apply, got %v", loaded.MCPDisabled.Project)
+	}
+}
+
+// An untrusted project's config is not read at all, so a veto in it does not
+// apply — same gate that governs everything else in that file.
+func TestLoadMoaConfigResolved_UntrustedProjectFileVetoIgnored(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
+	cwd := t.TempDir()
+
+	writeConfigJSON(t, filepath.Join(home, ".config", "moa", "config.json"), MoaConfig{})
+	writeConfigJSON(t, filepath.Join(cwd, ".moa", "config.json"), MoaConfig{
+		DisabledMCPServers: []string{"postgres"},
+	})
+
+	loaded := LoadMoaConfigResolved(cwd)
 	if len(loaded.MCPDisabled.Project) != 0 {
-		t.Fatalf("a veto in the project file must not apply, got %v", loaded.MCPDisabled.Project)
+		t.Fatalf("an untrusted project's veto must not apply, got %v", loaded.MCPDisabled.Project)
 	}
 }
 

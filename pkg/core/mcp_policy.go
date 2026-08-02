@@ -1,6 +1,8 @@
 package core
 
 import (
+	"log/slog"
+	"path/filepath"
 	"sort"
 )
 
@@ -59,8 +61,24 @@ func LoadMoaConfigResolved(cwd string) LoadedMoaConfig {
 	// The project veto is the user's own, so it applies whether or not the
 	// project is trusted: trust governs reading the project's files, and this
 	// preference no longer lives in one.
-	if state, err := LoadProjectState(cwd); err == nil {
+	//
+	// A read failure is logged rather than ignored: dropping a veto silently
+	// starts a server the user had switched off, which is the one outcome they
+	// would not expect from an unreadable file.
+	if state, err := LoadProjectState(cwd); err != nil {
+		slog.Warn("project state: cannot read your MCP preferences; servers you disabled may start",
+			"error", err)
+	} else {
 		sources.Project = dedupeStrings(state.DisabledMCPServers)
+	}
+	// A veto written into a trusted project's config by an older moa still
+	// counts. Moa no longer puts one there, but silently starting a server
+	// somebody had switched off is the wrong way to announce that.
+	if sources.ProjectTrusted {
+		legacy := loadConfigFile(filepath.Join(cwd, ".moa", "config.json")).DisabledMCPServers
+		if len(legacy) > 0 {
+			sources.Project = dedupeStrings(append(sources.Project, legacy...))
+		}
 	}
 
 	return LoadedMoaConfig{

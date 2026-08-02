@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -379,6 +380,16 @@ func LoadMoaConfig(cwd string) MoaConfig {
 	if IsProjectPathTrusted(global, cwd) {
 		project := loadConfigFile(filepath.Join(cwd, ".moa", "config.json"))
 		merged = mergeConfigs(global, project)
+	}
+
+	// Your own settings for this project, kept with your config rather than in
+	// the repository. They come last so they win over the project's, and go
+	// through the same merge, so a limit can be tightened but never relaxed.
+	// No trust gate: this file is yours, and moa never writes to it.
+	if state, err := LoadProjectState(cwd); err != nil {
+		slog.Warn("project state: cannot read your settings for this project", "error", err)
+	} else if state.Config != nil {
+		merged = mergeConfigs(merged, *state.Config)
 	}
 
 	// Load global .mcp.json (always trusted).

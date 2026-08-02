@@ -44,6 +44,12 @@ type ProjectState struct {
 	PermissionAllow []string `json:"permission_allow,omitempty"`
 	// DisabledMCPServers holds servers this user switched off for this project.
 	DisabledMCPServers []string `json:"disabled_mcp_servers,omitempty"`
+	// Config is settings you want in this project but not in the repository —
+	// a turn limit you prefer here, a review model, your own budget. It is
+	// hand-edited: moa never writes it. Merged after the project's own config
+	// and before session flags, and subject to the same rules, so it can
+	// tighten a limit the project set but never relax one.
+	Config *MoaConfig `json:"config,omitempty"`
 }
 
 func projectStatePath(workspaceRoot string) string {
@@ -79,15 +85,27 @@ func LoadProjectState(workspaceRoot string) (ProjectState, error) {
 
 // UpdateProjectState applies update to the stored state and writes it back.
 //
-// The write uses a uniquely named temporary file: the project config writer it
-// replaces used a fixed name with no lock, so two moa processes updating the
-// same project could clobber each other's temporary file — which is reachable
-// with a single user running two sessions, not just two accounts.
+// The whole read-modify-write is under an advisory lock, and the write goes
+// through a uniquely named temporary file. Both matter: the project config
+// writer this replaces used a fixed temp name and no lock, so two moa
+// processes could clobber each other — reachable with one user running two
+// sessions in the same project, which would silently drop an approval or
+// re-enable a server they had switched off.
 func UpdateProjectState(workspaceRoot string, update func(*ProjectState)) error {
 	path := projectStatePath(workspaceRoot)
 	if path == "" {
 		return errors.New("cannot resolve the moa config directory")
 	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	lock, err := acquireStateLock(path + ".lock")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+
 	current, err := LoadProjectState(workspaceRoot)
 	if err != nil {
 		return err
@@ -100,10 +118,6 @@ func UpdateProjectState(workspaceRoot string, update func(*ProjectState)) error 
 	}
 	data = append(data, '\n')
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
 	tmp, err := os.CreateTemp(dir, "state-*.json.tmp")
 	if err != nil {
 		return err

@@ -1,8 +1,10 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -182,5 +184,142 @@ func TestProjectState_DoesNotSupersedeAllowPatternsInTheProjectFile(t *testing.T
 	cfg := LoadMoaConfig(cwd)
 	if len(cfg.Permissions.Allow) != 1 || cfg.Permissions.Allow[0] != "Bash(make:*)" {
 		t.Errorf("existing project allow patterns should still load, got %v", cfg.Permissions.Allow)
+	}
+}
+
+// Two sessions in the same project update this concurrently. Without a lock
+// around the read-modify-write, each one saves what it read and the last
+// rename wins — silently dropping an approval, or re-enabling a server the
+// user had switched off.
+func TestProjectState_ConcurrentUpdatesAllSurvive(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	workspace := t.TempDir()
+
+	const writers = 40
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := AddProjectAllowPattern(workspace, fmt.Sprintf("Bash(cmd%02d:*)", i)); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent update: %v", err)
+	}
+
+	st, err := LoadProjectState(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.PermissionAllow) != writers {
+		t.Errorf("saved %d approvals, want %d — concurrent updates were lost",
+			len(st.PermissionAllow), writers)
+	}
+}
+
+// Settings you want in one project but not in its repository: a turn limit you
+// prefer here, your own review model. Global config is for every project, and
+// the project's own file is committed and shared — neither fits.
+func TestProjectState_ConfigAppliesToThisProjectOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
+	cwd := t.TempDir()
+
+	writeConfigJSON(t, filepath.Join(home, ".config", "moa", "config.json"), MoaConfig{
+		MaxTurns: 100,
+	})
+	if err := UpdateProjectState(cwd, func(st *ProjectState) {
+		st.Config = &MoaConfig{MaxTurns: 40, CodeReviewModel: "haiku"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := LoadMoaConfig(cwd)
+	if cfg.MaxTurns != 40 {
+		t.Errorf("MaxTurns = %d, want your project setting (40)", cfg.MaxTurns)
+	}
+	if cfg.CodeReviewModel != "haiku" {
+		t.Errorf("CodeReviewModel = %q, want haiku", cfg.CodeReviewModel)
+	}
+	// Another workspace keeps the global value.
+	if other := LoadMoaConfig(t.TempDir()); other.MaxTurns != 100 {
+		t.Errorf("MaxTurns leaked into another project: %d", other.MaxTurns)
+	}
+}
+
+// The merge rules are the existing ones: limits can be tightened, never
+// relaxed. Your own file is no exception — otherwise it would be a way to
+// quietly undo a guardrail set globally.
+func TestProjectState_ConfigCannotRelaxAGlobalLimit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
+	cwd := t.TempDir()
+
+	writeConfigJSON(t, filepath.Join(home, ".config", "moa", "config.json"), MoaConfig{
+		MaxTurns: 50,
+	})
+	if err := UpdateProjectState(cwd, func(st *ProjectState) {
+		st.Config = &MoaConfig{MaxTurns: 500}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LoadMoaConfig(cwd).MaxTurns; got != 50 {
+		t.Errorf("MaxTurns = %d, want the tighter global limit (50)", got)
+	}
+}
+
+// It applies without trusting the project: the file is yours, not the
+// repository's, so there is nothing about the checkout to vet.
+func TestProjectState_ConfigNeedsNoProjectTrust(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", "")
+	cwd := t.TempDir()
+
+	writeConfigJSON(t, filepath.Join(home, ".config", "moa", "config.json"), MoaConfig{})
+	writeConfigJSON(t, filepath.Join(cwd, ".moa", "config.json"), MoaConfig{
+		MaxTurns: 999, // untrusted project: must be ignored
+	})
+	if err := UpdateProjectState(cwd, func(st *ProjectState) {
+		st.Config = &MoaConfig{MaxTurns: 40}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LoadMoaConfig(cwd).MaxTurns; got != 40 {
+		t.Errorf("MaxTurns = %d, want your own setting (40)", got)
+	}
+}
+
+// Moa writes approvals and vetoes into the same file, so a hand-edited config
+// block must survive that.
+func TestProjectState_ConfigSurvivesAnApproval(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	cwd := t.TempDir()
+
+	if err := UpdateProjectState(cwd, func(st *ProjectState) {
+		st.Config = &MoaConfig{MaxTurns: 40}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddProjectAllowPattern(cwd, "Bash(git:*)"); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := LoadProjectState(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Config == nil || st.Config.MaxTurns != 40 {
+		t.Errorf("approving a permission dropped your settings: %+v", st.Config)
 	}
 }

@@ -46,10 +46,6 @@ type mcpPicker struct {
 	scope   core.MCPDisableScope
 	servers []mcp.ControllerStatus
 
-	// projectTrusted gates project-scope writes; when false the scope is shown
-	// but its toggles are refused with an explanation (capability stays visible).
-	projectTrusted bool
-
 	// confirmed records which broad scopes were confirmed this open, so the
 	// frequent action isn't gated twice.
 	confirmed map[core.MCPDisableScope]bool
@@ -72,11 +68,10 @@ type mcpPendingToggle struct {
 	disabled bool
 }
 
-func (p *mcpPicker) Open(servers []mcp.ControllerStatus, projectTrusted bool) {
+func (p *mcpPicker) Open(servers []mcp.ControllerStatus) {
 	p.servers = servers
 	p.cursor = 0
 	p.scope = core.MCPScopeSession // safe default each open
-	p.projectTrusted = projectTrusted
 	p.confirmed = map[core.MCPDisableScope]bool{}
 	p.pendingConfirm = mcpPendingToggle{}
 	p.status = ""
@@ -171,7 +166,7 @@ func (p *mcpPicker) Render(width int) string {
 		}
 		where := "every project and future session"
 		if p.pendingConfirm.scope == core.MCPScopeProject {
-			where = "this project's config and open sessions"
+			where = "your work in this project and open sessions"
 		}
 		fmt.Fprintf(&sb, "\n  Confirm %s %q for %s scope — affects %s.  y/N\n",
 			verb, p.pendingConfirm.name, mcpScopeLabel(p.pendingConfirm.scope), where)

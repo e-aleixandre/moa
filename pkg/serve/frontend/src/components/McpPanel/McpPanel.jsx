@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
-import { RefreshCw, AlertTriangle, Check, ChevronRight, Lock } from "lucide-preact";
+import { RefreshCw, AlertTriangle, Check, ChevronRight } from "lucide-preact";
 import { api, MCP_RESTART_TIMEOUT_MS } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import "./McpPanel.css";
@@ -23,7 +23,7 @@ import "./McpPanel.css";
 // Scope rows, broadest last: the order tells the accumulation story.
 const SCOPES = [
   { id: "session", label: "This session", why: "Only this conversation, until it ends" },
-  { id: "project", label: "This project", why: "Writes .moa/config.json" },
+  { id: "project", label: "This project", why: "Yours, whenever you work in this project" },
   { id: "global", label: "Global", why: "Affects every project and future session" },
 ];
 
@@ -77,20 +77,20 @@ function Verdict({ verdict }) {
   );
 }
 
-function ScopeRow({ server, scope, on, writable, busy, onToggle, why }) {
+function ScopeRow({ server, scope, on, busy, onToggle, why }) {
   const label = `${server.name} in ${scope.label.toLowerCase()}: ${on ? "on" : "off"}`;
   return (
     <div class="mcp-scope-row">
       <div class="mcp-scope-key">
         <span class="mcp-scope-k">{scope.label}</span>
-        <span class={`mcp-scope-why${writable ? "" : " mcp-scope-why-warn"}`}>{why}</span>
+        <span class="mcp-scope-why">{why}</span>
       </div>
       <button
         type="button"
         class={`mcp-schip${on ? " mcp-schip-on" : ""}`}
         aria-pressed={on}
         aria-label={label}
-        disabled={busy || !writable}
+        disabled={busy}
         onClick={onToggle}
       >
         {on && (
@@ -104,7 +104,7 @@ function ScopeRow({ server, scope, on, writable, busy, onToggle, why }) {
   );
 }
 
-function ServerDossier({ sessionId, server, projectWritable, onMutated }) {
+function ServerDossier({ sessionId, server, onMutated }) {
   const [busy, setBusy] = useState(false);
   // Inline confirm for a broad, persistent change: {scope, next} or null.
   // Never window.confirm — that is a native dialog and breaks the PWA.
@@ -177,9 +177,6 @@ function ServerDossier({ sessionId, server, projectWritable, onMutated }) {
   // Per-scope helper text: explain the consequence where it is not obvious,
   // above all when another scope is what actually keeps the server off.
   const whyFor = (scope, on) => {
-    if (scope.id === "project" && !projectWritable) {
-      return "Locked — project config isn’t trusted";
-    }
     const others = offScopes.filter((s) => s !== scope.id).map((s) => SCOPE_NAME[s]);
     if (on && others.length > 0) {
       return `On here — but ${others.join(" and ")} still keeps it off`;
@@ -197,14 +194,12 @@ function ServerDossier({ sessionId, server, projectWritable, onMutated }) {
       <div class="mcp-scopes">
         {SCOPES.map((scope) => {
           const on = !offScopes.includes(scope.id);
-          const writable = scope.id === "project" ? projectWritable : true;
           return (
             <ScopeRow
               key={scope.id}
               server={server}
               scope={scope}
               on={on}
-              writable={writable}
               busy={busy}
               why={whyFor(scope, on)}
               onToggle={() => requestToggle(scope.id, !on)}
@@ -218,7 +213,7 @@ function ServerDossier({ sessionId, server, projectWritable, onMutated }) {
               <b>{confirming.scope === "global" ? "Global change" : "Project change"}</b> —{" "}
               {confirming.scope === "global"
                 ? "affects every project and future session."
-                : "writes .moa/config.json and affects open sessions here."}
+                : "applies whenever you work in this project, and to open sessions here."}
             </p>
             <button
               type="button"
@@ -266,7 +261,7 @@ function ServerDossier({ sessionId, server, projectWritable, onMutated }) {
   );
 }
 
-function ServerItem({ sessionId, server, projectWritable, onMutated, open, onOpenToggle }) {
+function ServerItem({ sessionId, server, onMutated, open, onOpenToggle }) {
   const meta = STATE_META[server.state] || {
     label: server.state,
     pill: "mcp-pill-bad",
@@ -303,7 +298,6 @@ function ServerItem({ sessionId, server, projectWritable, onMutated, open, onOpe
         <ServerDossier
           sessionId={sessionId}
           server={server}
-          projectWritable={projectWritable}
           onMutated={onMutated}
         />
       )}
@@ -375,8 +369,6 @@ export function McpPanel({ sessionId, mcpTick, variant }) {
   const servers = data.servers || [];
   if (servers.length === 0) return <div class="mcp-empty">No MCP servers for this session.</div>;
 
-  const scopes = data.available_scopes || {};
-  const projectWritable = scopes.project?.writable !== false;
   const healthy = servers.every((s) => s.state === "ready" || s.state === "disabled");
   const anyOff = servers.some((s) => s.state === "disabled");
 
@@ -395,20 +387,12 @@ export function McpPanel({ sessionId, mcpTick, variant }) {
         )}
       </div>
 
-      {!projectWritable && (
-        <div class="mcp-summary">
-          <Lock size={13} aria-hidden="true" /> Project scope is locked — this project’s config
-          isn’t trusted.
-        </div>
-      )}
-
       <div class="mcp-list">
         {servers.map((s) => (
           <ServerItem
             key={s.name}
             sessionId={sessionId}
             server={s}
-            projectWritable={projectWritable}
             onMutated={onMutated}
             open={openName === s.name}
             onOpenToggle={() => setOpenName(openName === s.name ? null : s.name)}

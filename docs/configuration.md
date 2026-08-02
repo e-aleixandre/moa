@@ -117,7 +117,7 @@ global config and a project's jargon in its `.moa/config.json`:
 | Field | Type | Description |
 |-------|------|-------------|
 | `mcp_servers` | map | MCP server definitions (see example above) |
-| `disabled_mcp_servers` | []string | Server names vetoed at this config level: the server stays configured but is never started |
+| `disabled_mcp_servers` | []string | Server names vetoed at this config level: the server stays configured but is never started. In a project file this is legacy — moa now records your vetoes in [your project state](#your-project-state) |
 | `trusted_mcp_paths` | []string | Project dirs whose `.mcp.json` is trusted. **Global-only.** |
 | `trusted_project_paths` | []string | Project dirs whose `.moa/config.json` and `.moa/tools/*` are auto-loaded without a trust prompt. **Global-only.** |
 
@@ -185,6 +185,7 @@ project **on your behalf**, kept out of the repository:
 |-------|--------------|
 | `permission_allow` | You approve a tool call with "always allow" |
 | `disabled_mcp_servers` | You switch a server off with the `project` scope |
+| `config` | Never — this one is yours to edit (see below) |
 
 The split follows who the decision belongs to. `.moa/config.json` describes the
 project — which MCP servers it uses, what its limits are — and is meant to be
@@ -204,11 +205,36 @@ Consequences worth knowing:
 - The `project` scope no longer requires trusting the project, because nothing
   is written there. Trust still governs whether the project's own config,
   script tools and `.mcp.json` are loaded.
-- `allow` patterns already present in a `.moa/config.json` keep working. Moa
-  cannot tell a deliberate team policy from a leftover click, so nothing is
-  migrated or removed — move them yourself if you want them gone.
+- `allow` patterns already present in a `.moa/config.json` keep working, and so
+  does a `disabled_mcp_servers` entry left there by an older moa. Moa cannot
+  tell a deliberate team policy from a leftover click, so nothing is migrated
+  or removed — move them yourself if you want them gone.
 - The state is per workspace path, hashed the same way [memory](./tools.md#memory)
   scopes its project facts. Moving a checkout starts a fresh state.
+
+### Settings for one project, without touching the repository
+
+The `config` block takes the same fields as `config.json`, for settings you
+want in this project but not in its repository — a turn limit you prefer here,
+your own review model:
+
+```json
+{
+  "config": {
+    "max_turns": 40,
+    "code_review_model": "haiku"
+  }
+}
+```
+
+Moa never writes this block; it is yours to edit. It is applied after global
+config and after the project's own, so it wins over both — but through the same
+merge rules, so it can **tighten** a limit and never relax one: if your global
+config caps runs at 50 turns, asking for 500 here still gives you 50. No trust
+prompt is involved, because the file is yours rather than the checkout's.
+
+Use it when the setting is about *how you work here*, and `.moa/config.json`
+when it is about the project itself and should reach everyone who clones it.
 
 ## Environment variables
 

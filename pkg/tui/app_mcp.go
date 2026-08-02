@@ -83,19 +83,13 @@ func (m appModel) handleMCPCommand() (tea.Model, tea.Cmd) {
 	// The picker opens even while the agent is running: a toggle made mid-run is
 	// recorded and deferred to the next quiescence (parity with the web panel),
 	// so a reconcile never mutates the live tool set under an active run.
-	m.mcpPicker.Open(servers, m.mcpProjectTrusted())
+	m.mcpPicker.Open(servers)
 	// If an action started in a previous open is still running, keep the picker
 	// busy so a second one can't start (single-writer to the controller).
 	m.mcpPicker.busy = m.mcpActionPending
 	m.input.SetEnabled(false)
 	m.updateViewport()
 	return m, nil
-}
-
-// mcpProjectTrusted reports whether this working directory's project moa config
-// is trusted, which gates project-scope writes.
-func (m appModel) mcpProjectTrusted() bool {
-	return core.IsProjectPathTrusted(core.LoadGlobalConfig(), m.cwd)
 }
 
 // handleMCPPickerKey routes keys while the /mcp picker is open.

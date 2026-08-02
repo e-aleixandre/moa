@@ -104,7 +104,7 @@ func mcpStatuses() []mcp.ControllerStatus {
 
 func TestMCPPickerOpenDefaultsToSessionScope(t *testing.T) {
 	var p mcpPicker
-	p.Open(mcpStatuses(), true)
+	p.Open(mcpStatuses())
 	if !p.active {
 		t.Fatal("should be active after Open")
 	}
@@ -118,7 +118,7 @@ func TestMCPPickerOpenDefaultsToSessionScope(t *testing.T) {
 
 func TestMCPPickerCycleScope(t *testing.T) {
 	var p mcpPicker
-	p.Open(mcpStatuses(), true)
+	p.Open(mcpStatuses())
 	want := []core.MCPDisableScope{core.MCPScopeProject, core.MCPScopeGlobal, core.MCPScopeSession}
 	for i, w := range want {
 		p.CycleScope()
@@ -158,7 +158,7 @@ func TestScopeVetoes(t *testing.T) {
 
 func TestMCPPickerRenderIncludesScopeAndServers(t *testing.T) {
 	var p mcpPicker
-	p.Open(mcpStatuses(), true)
+	p.Open(mcpStatuses())
 	out := p.Render(80)
 	for _, want := range []string{"MCP servers", "scope: SESSION", "github", "ready · 12 tools", "playwright", "disabled", "[G]", "s scope", "space toggle"} {
 		if !strings.Contains(out, want) {
@@ -169,7 +169,7 @@ func TestMCPPickerRenderIncludesScopeAndServers(t *testing.T) {
 
 func TestMCPPickerRenderConfirmPrompt(t *testing.T) {
 	var p mcpPicker
-	p.Open(mcpStatuses(), true)
+	p.Open(mcpStatuses())
 	p.pendingConfirm = mcpPendingToggle{name: "github", scope: core.MCPScopeGlobal, disabled: true}
 	out := p.Render(80)
 	if !strings.Contains(out, "Confirm disable") || !strings.Contains(out, "y/N") {
@@ -198,7 +198,7 @@ func TestMCPControlOrNil(t *testing.T) {
 func TestMCPSessionToggleAppliesImmediately(t *testing.T) {
 	f := &fakeMCPControl{servers: mcpStatuses()}
 	m := newMCPTestModel(f)
-	m.mcpPicker.Open(f.Status(), true) // cursor on github, scope SESSION
+	m.mcpPicker.Open(f.Status()) // cursor on github, scope SESSION
 
 	model, cmd := m.mcpPickerToggle()
 	m = model.(appModel)
@@ -227,7 +227,7 @@ func TestMCPSessionToggleAppliesImmediately(t *testing.T) {
 func TestMCPBroadScopeRequiresConfirm(t *testing.T) {
 	f := &fakeMCPControl{servers: mcpStatuses()}
 	m := newMCPTestModel(f)
-	m.mcpPicker.Open(f.Status(), true)
+	m.mcpPicker.Open(f.Status())
 	m.mcpPicker.CycleScope() // PROJECT
 	m.mcpPicker.CycleScope() // GLOBAL
 
@@ -256,8 +256,8 @@ func TestMCPProjectScopeWorksWithoutTrustingTheProject(t *testing.T) {
 	f := &fakeMCPControl{servers: mcpStatuses()}
 	m := newMCPTestModel(f)
 	m.cwd = t.TempDir()
-	m.mcpPicker.Open(f.Status(), false) // projectTrusted=false
-	m.mcpPicker.CycleScope()            // PROJECT
+	m.mcpPicker.Open(f.Status())
+	m.mcpPicker.CycleScope() // PROJECT
 
 	// The first toggle stages a confirmation, as it does for the global scope.
 	model, cmd := m.mcpPickerToggle()
@@ -291,7 +291,7 @@ func TestMCPProjectScopeWorksWithoutTrustingTheProject(t *testing.T) {
 func TestMCPRestartRefusesDisabled(t *testing.T) {
 	f := &fakeMCPControl{servers: mcpStatuses()}
 	m := newMCPTestModel(f)
-	m.mcpPicker.Open(f.Status(), true)
+	m.mcpPicker.Open(f.Status())
 	m.mcpPicker.cursor = 1 // playwright (disabled)
 
 	model, cmd := m.mcpPickerRestart()
@@ -338,7 +338,7 @@ func TestMCPActionResultAfterCloseIsSilent(t *testing.T) {
 func TestMCPReopenStaysBusyAndIgnoresStaleResult(t *testing.T) {
 	f := &fakeMCPControl{servers: mcpStatuses()}
 	m := newMCPTestModel(f)
-	m.mcpPicker.Open(f.Status(), true)
+	m.mcpPicker.Open(f.Status())
 
 	// Start action gen 1 but do not deliver its result yet.
 	model, cmd := m.mcpPickerToggle()
