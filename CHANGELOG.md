@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-08-02
+
+### Fixed
+
+- Closing the conversation you were looking at on a phone no longer drops you on
+  the "no open sessions" screen while other sessions are still open. Closing
+  keeps the session in the store, so the effect that re-fills the screen on a
+  session count change never fired; the freed slot now goes to the next open
+  session, on mobile and on the desktop tiles.
+- A phone creates sessions in exactly one place. The same screen had two ways in
+  — the drawer's own new-session view and the empty state, which opened the
+  command palette's create step, a second chassis with its own session list and
+  its own back button. Both now open the drawer. The palette keeps its create
+  step on desktop, where ⌘K is its home.
+
 ## [0.24.0] - 2026-08-02
 
 ### Added
