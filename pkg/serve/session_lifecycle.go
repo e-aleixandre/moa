@@ -18,6 +18,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/checkpoint"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
 	"github.com/e-aleixandre/moa/pkg/tool"
@@ -25,9 +26,11 @@ import (
 
 // CreateOpts configures a new session.
 type CreateOpts struct {
-	Model string `json:"model"`
-	Title string `json:"title"`
-	CWD   string `json:"cwd"`
+	Model          string `json:"model"`
+	Thinking       string `json:"thinking"`
+	PermissionMode string `json:"permission_mode"`
+	Title          string `json:"title"`
+	CWD            string `json:"cwd"`
 	// Origin records who created the session ("user" when empty). Free-form so
 	// automation callers can label their integration, e.g. "linear-webhook".
 	Origin string `json:"origin"`
@@ -62,6 +65,16 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidModel, err)
 		}
 	}
+	if opts.Thinking != "" && !core.IsValidThinkingLevel(opts.Thinking) {
+		return nil, fmt.Errorf("%w: %q (choose: %s)", ErrInvalidThinking, opts.Thinking, core.ThinkingLevelOptions())
+	}
+	if opts.PermissionMode != "" {
+		switch permission.Mode(opts.PermissionMode) {
+		case permission.ModeYolo, permission.ModeAsk, permission.ModeAuto:
+		default:
+			return nil, fmt.Errorf("%w: %q", ErrInvalidPermissionMode, opts.PermissionMode)
+		}
+	}
 
 	// A title chosen explicitly at creation is treated as manual, so auto-titling
 	// won't overwrite it. (The web never sets one — titles come from the first
@@ -89,8 +102,8 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	id := persisted.ID
 
 	var bopts *buildOpts
-	if titleSource != "" || len(opts.extraMCPServers) > 0 {
-		bopts = &buildOpts{titleSource: titleSource, extraMCPServers: opts.extraMCPServers}
+	if titleSource != "" || opts.Thinking != "" || opts.PermissionMode != "" || len(opts.extraMCPServers) > 0 {
+		bopts = &buildOpts{titleSource: titleSource, initialThinking: opts.Thinking, initialPermissionMode: opts.PermissionMode, extraMCPServers: opts.extraMCPServers}
 	}
 	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
@@ -138,6 +151,7 @@ type buildOpts struct {
 	initialMessages        []core.AgentMessage
 	initialCompactionEpoch int
 	initialThinking        string // applied via SetThinking after construction
+	initialPermissionMode  string // applied via SetPermissionMode after construction
 	titleSource            string // how the resumed title was set (session.TitleSource*)
 
 	// V2 session tree
@@ -435,7 +449,24 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	// Apply thinking level if restoring.
 	if opts != nil && opts.initialThinking != "" {
-		_ = rt.Bus.Execute(bus.SetThinking{Level: opts.initialThinking})
+		if err := rt.Bus.Execute(bus.SetThinking{Level: opts.initialThinking}); err != nil {
+			if bs.MCPManager != nil {
+				bs.MCPManager.Close()
+			}
+			sessionCancel()
+			rt.Close()
+			return nil, err
+		}
+	}
+	if opts != nil && opts.initialPermissionMode != "" {
+		if err := rt.Bus.Execute(bus.SetPermissionMode{Mode: opts.initialPermissionMode}); err != nil {
+			if bs.MCPManager != nil {
+				bs.MCPManager.Close()
+			}
+			sessionCancel()
+			rt.Close()
+			return nil, err
+		}
 	}
 
 	// PlanMode onChange is owned by the runtime (NewSessionRuntime sets it).
@@ -554,11 +585,13 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 }
 
 var (
-	ErrNotFound     = errors.New("session not found")
-	ErrBusy         = errors.New("session is busy")
-	ErrInvalidCWD   = errors.New("invalid working directory")
-	ErrInvalidModel = errors.New("invalid model")
-	ErrNoMCP        = errors.New("session has no MCP servers")
+	ErrNotFound              = errors.New("session not found")
+	ErrBusy                  = errors.New("session is busy")
+	ErrInvalidCWD            = errors.New("invalid working directory")
+	ErrInvalidModel          = errors.New("invalid model")
+	ErrInvalidThinking       = errors.New("invalid thinking level")
+	ErrInvalidPermissionMode = errors.New("invalid permission mode")
+	ErrNoMCP                 = errors.New("session has no MCP servers")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.

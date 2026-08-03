@@ -108,6 +108,10 @@ type appModel struct {
 	quit     chan struct{}
 	unsubAll func()
 	baseCtx  context.Context // parent context for signal cancellation
+	// handoffReady is held until the source run settles, because switching the
+	// reusable TUI runtime while that run is still unwinding is unsafe.
+	handoffReady   *bus.HandoffReady
+	handoffSettled bool
 
 	// Components
 	renderer       *renderer
@@ -1669,7 +1673,38 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		if e.RunGen != m.s.runGen {
 			return nil
 		}
-		return m.handleRunEnded(e)
+		cmds := m.handleRunEnded(e)
+		if m.handoffReady != nil && m.handoffSettled && e.Err == nil {
+			ready := m.handoffReady
+			m.handoffReady = nil
+			m.handoffSettled = false
+			next, handoffCmd := m.completeHandoff(*ready)
+			*m = next
+			if handoffCmd != nil {
+				cmds = append(cmds, handoffCmd)
+			}
+		}
+		return cmds
+
+	case bus.HandoffReady:
+		if m.session == nil || e.SessionID != m.session.ID {
+			return nil
+		}
+		m.handoffReady = &e
+		m.status.SetText("starting handoff...")
+		return nil
+
+	case bus.HandoffSettled:
+		if m.session == nil || e.SessionID != m.session.ID {
+			return nil
+		}
+		if e.Cancelled || e.Err != nil {
+			m.handoffReady = nil
+			m.handoffSettled = false
+			return nil
+		}
+		m.handoffSettled = true
+		return nil
 
 	// --- Auto-verify ---
 	case bus.AutoVerifyStarted:

@@ -664,6 +664,29 @@ func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
 	}
 }
 
+// addInternalRunUsage records a provider call made by session machinery rather
+// than the agent loop (currently /handoff) in the active run's accounting.
+func (sctx *SessionContext) addInternalRunUsage(usage *core.Usage, pricing *core.Pricing) (gen uint64, up, down int) {
+	if usage == nil {
+		return
+	}
+	gen = sctx.RunGenAtomic.Load()
+	sctx.runStatsMu.Lock()
+	if sctx.runStats.gen == gen && pricing != nil {
+		sctx.runStats.costUSD += pricing.Cost(*usage)
+	}
+	sctx.runStatsMu.Unlock()
+
+	sctx.runTokenMu.Lock()
+	if sctx.runTokensGen == gen {
+		sctx.runTokensUp += usage.Input
+		sctx.runTokensDown += usage.Output
+		up, down = sctx.runTokensUp, sctx.runTokensDown
+	}
+	sctx.runTokenMu.Unlock()
+	return gen, up, down
+}
+
 func (sctx *SessionContext) snapshotRunStats(gen uint64) runStats {
 	sctx.runStatsMu.Lock()
 	defer sctx.runStatsMu.Unlock()
@@ -691,6 +714,18 @@ func (sctx *SessionContext) clearRunCancel(gen uint64) {
 	if sctx.runGen == gen {
 		sctx.runCancel = nil
 	}
+}
+
+// settleRunCancel atomically closes the AbortRun window for gen and reports
+// whether it was cancelled before that terminal decision.
+func (sctx *SessionContext) settleRunCancel(gen uint64, ctx context.Context) bool {
+	sctx.runMu.Lock()
+	defer sctx.runMu.Unlock()
+	cancelled := ctx.Err() != nil
+	if sctx.runGen == gen {
+		sctx.runCancel = nil
+	}
+	return cancelled
 }
 
 // ---------------------------------------------------------------------------

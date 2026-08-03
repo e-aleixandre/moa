@@ -40,6 +40,15 @@ type AgentError struct {
 	Err       error
 }
 
+// HandoffReady carries an ephemeral handoff brief to the frontend that owns
+// session creation. It is never persisted in the source session.
+type HandoffReady struct {
+	SessionID string
+	Prompt    string
+	ModelSpec string
+	Thinking  string
+}
+
 // ---------------------------------------------------------------------------
 // Turn lifecycle
 // ---------------------------------------------------------------------------
@@ -249,6 +258,15 @@ type RunEnded struct {
 	Err       error   // non-nil for real errors (not cancellation)
 	HadEdits  bool    // true if edit/write/multiedit/apply_patch completed successfully
 	Cost      float64 // USD cost of this run (0 if the model has no pricing)
+}
+
+// HandoffSettled is the terminal outcome of an internal handoff run. Unlike
+// RunEnded it is specific to /handoff, so existing run-success consumers keep
+// their established cancellation semantics.
+type HandoffSettled struct {
+	SessionID string
+	Cancelled bool
+	Err       error
 }
 
 // ContextUpdated is published when the context window usage percentage changes.

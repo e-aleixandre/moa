@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/handoff"
 )
 
 // ErrSteerQueueFull is returned by the SteerAgent command when the agent's
@@ -201,6 +202,13 @@ type CompactSession struct {
 // PrepareCompactSession runs a short internal preparation turn then compacts
 // without releasing the session slot between the two phases.
 type PrepareCompactSession struct{ SessionID string }
+
+// HandoffSession generates an ephemeral brief from this conversation. Its
+// frontend creates and starts the destination session when HandoffReady arrives.
+type HandoffSession struct {
+	SessionID string
+	Options   handoff.Options
+}
 
 // RunManualVerify runs the project's verification checks (the /verify command)
 // as a bus command that occupies the session state (idle→running→idle), so a

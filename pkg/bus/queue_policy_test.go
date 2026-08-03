@@ -18,6 +18,7 @@ func TestClassifyCommand_Policies(t *testing.T) {
 		{"/verify", PolicyQueue},
 
 		// Reject while busy.
+		{"/handoff", PolicyReject},
 		{"/undo", PolicyReject},
 		{"/branch", PolicyReject},
 		{"/back", PolicyReject},

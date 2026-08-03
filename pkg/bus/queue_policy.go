@@ -52,6 +52,7 @@ var queuePolicyByName = map[string]QueuePolicy{
 	"model":           PolicyQueue,
 	"thinking":        PolicyQueue,
 	"verify":          PolicyQueue,
+	"handoff":         PolicyReject,
 
 	// Mode transitions / destructive rewind — refused while busy.
 	"undo":   PolicyReject,
