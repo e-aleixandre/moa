@@ -18,7 +18,7 @@ test('a multiline slash command splits on the newline, matching the server', () 
 });
 
 test('reject commands (mode/rewind) are refused while busy', () => {
-  for (const raw of ['/undo', '/branch', '/back', '/plan']) {
+  for (const raw of ['/handoff', '/undo', '/branch', '/back', '/plan']) {
     expect(classifyCommand(raw)).toBe(POLICY_REJECT);
   }
 });

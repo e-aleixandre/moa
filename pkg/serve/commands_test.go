@@ -61,6 +61,62 @@ func TestCmdClear_StartsNewSessionKeepsOld(t *testing.T) {
 	}
 }
 
+func TestCmdHandoff_StartsConfiguredSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	provider := newMockProvider(simpleResponseHandler("## Goal\nContinue the work"), simpleResponseHandler("resumed"))
+	mgr := newTestManagerWithRoot(t, ctx, provider, dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.ExecCommand(sess.ID, "/handoff --thinking high", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || res.NewSessionID == "" {
+		t.Fatalf("result = %#v", res)
+	}
+	newSess, ok := mgr.Get(res.NewSessionID)
+	if !ok {
+		t.Fatal("handoff session was not registered")
+	}
+	if newSess.CWD != sess.CWD {
+		t.Fatalf("CWD = %q, want %q", newSess.CWD, sess.CWD)
+	}
+	thinking, err := bus.QueryTyped[bus.GetThinkingLevel, string](newSess.runtime.Bus, bus.GetThinkingLevel{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thinking != "high" {
+		t.Fatalf("thinking = %q, want high", thinking)
+	}
+	permission, err := bus.QueryTyped[bus.GetPermissionMode, string](newSess.runtime.Bus, bus.GetPermissionMode{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permission != "ask" {
+		t.Fatalf("permission = %q, want ask", permission)
+	}
+	if !newSess.runtime.WaitSettled(context.Background()) {
+		t.Fatal("handoff destination did not settle")
+	}
+	msgs := newSess.runtime.Context().Agent.Messages()
+	if len(msgs) < 2 || msgs[0].Role != "user" {
+		t.Fatalf("destination messages = %#v", msgs)
+	}
+	text := msgs[0].Content[0].Text
+	if !strings.Contains(text, "# Handoff from the previous conversation") || !strings.Contains(text, "## Goal") {
+		t.Fatalf("handoff prompt = %q", text)
+	}
+}
+
 func TestCmdVerify_AllPass(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

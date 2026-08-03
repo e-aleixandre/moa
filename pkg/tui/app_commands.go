@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/handoff"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/verify"
@@ -68,6 +69,36 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	if rest, ok := cutCommand(cmd, "compact"); ok {
 		return m.handleCompactCommand(rest)
+	}
+
+	if rest, ok := cutCommand(cmd, "handoff"); ok {
+		if m.s.running {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot hand off while agent is running"})
+			return m, nil
+		}
+		if m.sessionStore == nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Handoff requires session storage"})
+			return m, nil
+		}
+		if queueLen, err := bus.QueryTyped[bus.GetQueueLen, int](m.runtime.Bus, bus.GetQueueLen{}); err != nil || queueLen != 0 {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Cannot hand off while messages are queued"})
+			return m, nil
+		}
+		opts, err := handoff.Parse(strings.Fields(rest))
+		if err != nil {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: err.Error()})
+			return m, nil
+		}
+		m.handoffReady = nil
+		m.handoffSettled = false
+		m.prepareRun("handoff")
+		b := m.runtime.Bus
+		return m, tea.Batch(func() tea.Msg {
+			if err := b.Execute(bus.HandoffSession{Options: opts}); err != nil {
+				return agentSendErrorMsg{Err: err}
+			}
+			return nil
+		}, renderTick(), m.status.spinner.Tick)
 	}
 
 	if rest, ok := cutCommand(cmd, "verify"); ok {
@@ -874,6 +905,27 @@ func (m appModel) newSession() *session.Session {
 	sess := m.sessionStore.Create()
 	// Runtime metadata is set via the persistence reactor.
 	return sess
+}
+
+func (m appModel) completeHandoff(ready bus.HandoffReady) (appModel, tea.Cmd) {
+	sess := m.newSession()
+	if sess == nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Could not create handoff session"})
+		return m, nil
+	}
+	permission, _ := bus.QueryTyped[bus.GetPermissionMode, string](m.runtime.Bus, bus.GetPermissionMode{})
+	sess.SetRuntimeMetadata(ready.ModelSpec, m.cwd, permission, ready.Thinking)
+	if err := m.sessionStore.Save(sess); err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Could not save handoff session: " + err.Error()})
+		return m, nil
+	}
+	model, switchCmd := m.activateSession(sess)
+	next, ok := model.(appModel)
+	if !ok {
+		return m, nil
+	}
+	next.prepareRun("handoff")
+	return next, tea.Batch(switchCmd, next.launchAgentSend(ready.Prompt))
 }
 
 func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {

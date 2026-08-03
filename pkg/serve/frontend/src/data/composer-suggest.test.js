@@ -15,6 +15,14 @@ test('filterCommands matches by prefix, case-insensitive', () => {
   expect(filterCommands('MOD').map((c) => c.name)).toEqual(['model']);
 });
 
+test('filterCommands exposes handoff', () => {
+  expect(filterCommands('han')).toEqual([{
+    name: 'handoff',
+    desc: 'Start a fresh session with a generated handoff',
+    args: '[--model <spec>] [--thinking <level>]',
+  }]);
+});
+
 test('filterCommands with no match returns empty array', () => {
   expect(filterCommands('zzz')).toEqual([]);
 });

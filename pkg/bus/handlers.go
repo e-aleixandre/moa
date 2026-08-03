@@ -14,6 +14,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/handoff"
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -401,6 +402,57 @@ func RegisterHandlers(sctx *SessionContext) {
 			}
 			sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "prepare-compact", Messages: sctx.Agent.Messages()})
 			return sctx.Agent.Messages(), nil
+		})
+		return nil
+	})
+
+	b.OnCommand(func(cmd HandoffSession) error {
+		if sctx.ProviderFactory == nil {
+			return fmt.Errorf("handoff unavailable: provider factory not configured")
+		}
+		if err := reserveRunSlot(sctx); err != nil {
+			return fmt.Errorf("cannot hand off: %w", err)
+		}
+		// Resolve omitted destination settings at execution time, so the
+		// destination faithfully inherits the settled source configuration.
+		sourceModel := sctx.Agent.Model()
+		targetModelSpec := sourceModel.ID
+		if sourceModel.Provider != "" {
+			targetModelSpec = sourceModel.Provider + "/" + sourceModel.ID
+		}
+		targetThinking := sctx.Agent.ThinkingLevel()
+		if cmd.Options.ModelSpec != "" {
+			targetModelSpec = cmd.Options.ModelSpec
+		}
+		if cmd.Options.Thinking != "" {
+			targetThinking = cmd.Options.Thinking
+		}
+		launchRunWithSettled(sctx, "handoff", func(ctx context.Context) ([]core.AgentMessage, error) {
+			model := sctx.Agent.Model()
+			provider, err := sctx.ProviderFactory(model)
+			if err != nil {
+				return nil, fmt.Errorf("handoff provider: %w", err)
+			}
+			summary, usage, err := handoff.Generate(ctx, provider, model, sctx.Agent.Messages())
+			if err != nil {
+				return nil, err
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if usage != nil {
+				gen, up, down := sctx.addInternalRunUsage(usage, model.Pricing)
+				sctx.Bus.Publish(RunTokensUpdated{SessionID: sctx.SessionID, RunGen: gen, Up: up, Down: down})
+			}
+			sctx.Bus.Publish(HandoffReady{
+				SessionID: sctx.SessionID,
+				Prompt:    handoff.Prompt(summary),
+				ModelSpec: targetModelSpec,
+				Thinking:  targetThinking,
+			})
+			return sctx.Agent.Messages(), nil
+		}, func(cancelled bool, err error) {
+			sctx.Bus.Publish(HandoffSettled{SessionID: sctx.SessionID, Cancelled: cancelled, Err: err})
 		})
 		return nil
 	})
@@ -2135,6 +2187,12 @@ func resetRunTokens(sctx *SessionContext, runGen uint64) {
 // reserveRunSlot. It creates the per-run context, publishes RunStarted, and runs
 // runFn in a goroutine, settling the state and publishing RunEnded when it ends.
 func launchRun(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error)) {
+	launchRunWithSettled(sctx, label, runFn, nil)
+}
+
+// launchRunWithSettled behaves like launchRun and invokes settled after the
+// state has settled but before publishing RunEnded.
+func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error), settled func(cancelled bool, err error)) {
 	// Create per-run context with generation token.
 	sctx.runMu.Lock()
 	runCtx, gen := sctx.newRunContext()
@@ -2159,6 +2217,9 @@ func launchRun(sctx *SessionContext, label string, runFn func(ctx context.Contex
 				sctx.clearRunCancel(gen)
 				if sctx.State != nil {
 					_ = sctx.State.TransitionWithError(StateError, err.Error())
+				}
+				if settled != nil {
+					settled(false, err)
 				}
 				sctx.Bus.Publish(RunEnded{SessionID: sctx.SessionID, RunGen: gen, Err: err})
 			}
@@ -2188,10 +2249,10 @@ func launchRun(sctx *SessionContext, label string, runFn func(ctx context.Contex
 		// resets the generation accumulator, but must never erase this result.
 		stats := sctx.snapshotRunStats(gen)
 
-		// Clear run cancel BEFORE state transition to prevent a race where
-		// a new run starts (setting a new runCancel) and then this goroutine
-		// clears it. The generation token ensures we only clear our own cancel.
-		sctx.clearRunCancel(gen)
+		// Atomically close the AbortRun window before deciding the terminal
+		// result. A Stop that won before this point cancels the handoff; one
+		// after it cannot retroactively change a settled run.
+		cancelled = cancelled || sctx.settleRunCancel(gen, runCtx)
 
 		// State transition.
 		if sctx.State != nil {
@@ -2216,6 +2277,9 @@ func launchRun(sctx *SessionContext, label string, runFn func(ctx context.Contex
 		var runErr error
 		if err != nil && !cancelled {
 			runErr = err
+		}
+		if settled != nil {
+			settled(cancelled, runErr)
 		}
 		sctx.Bus.Publish(RunEnded{
 			SessionID: sctx.SessionID,

@@ -10,6 +10,7 @@
 export const COMMANDS = [
   { name: 'clear', desc: 'Clear conversation history' },
   { name: 'compact', desc: 'Compact conversation context', args: '[focus]' },
+  { name: 'handoff', desc: 'Start a fresh session with a generated handoff', args: '[--model <spec>] [--thinking <level>]' },
   { name: 'model', desc: 'Switch model', args: '<model>' },
   { name: 'thinking', desc: 'Set thinking level', args: '<off|low|medium|high|xhigh>' },
   { name: 'permissions', desc: 'Set permission mode', args: '<yolo|ask|auto>' },

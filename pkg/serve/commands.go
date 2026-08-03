@@ -10,6 +10,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/handoff"
 	"github.com/e-aleixandre/moa/pkg/schedule"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/verify"
@@ -21,6 +22,7 @@ type commandHandler func(m *Manager, sess *ManagedSession, args []string) (*Comm
 // commandRegistry maps command names to handlers.
 var commandRegistry = map[string]commandHandler{
 	"clear":           cmdClear,
+	"handoff":         cmdHandoff,
 	"compact":         cmdCompact,
 	"prepare-compact": cmdPrepareCompact,
 	"model":           cmdModel,
@@ -168,6 +170,68 @@ func cmdClear(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, err
 		return &CommandResult{OK: false, Message: "could not start a new conversation: " + err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "started a new conversation", NewSessionID: newSess.ID}, nil
+}
+
+func cmdHandoff(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
+	if err := requireIdle(sess); err != nil {
+		return nil, err
+	}
+	queueLen, err := bus.QueryTyped[bus.GetQueueLen, int](sess.runtime.Bus, bus.GetQueueLen{})
+	if err != nil {
+		return &CommandResult{OK: false, Message: "could not inspect pending messages: " + err.Error()}, nil
+	}
+	if queueLen != 0 {
+		return nil, ErrBusy
+	}
+	opts, err := handoff.Parse(args)
+	if err != nil {
+		return &CommandResult{OK: false, Message: err.Error()}, nil
+	}
+	ready := make(chan bus.HandoffReady, 1)
+	settled := make(chan bus.HandoffSettled, 1)
+	unsub := sess.runtime.Bus.Subscribe(func(e bus.HandoffReady) {
+		ready <- e
+	})
+	unsubSettled := sess.runtime.Bus.Subscribe(func(e bus.HandoffSettled) {
+		settled <- e
+	})
+	defer unsub()
+	defer unsubSettled()
+	if err := sess.runtime.Bus.Execute(bus.HandoffSession{SessionID: sess.ID, Options: opts}); err != nil {
+		return &CommandResult{OK: false, Message: "handoff failed: " + err.Error()}, nil
+	}
+	timeout := time.NewTimer(2 * time.Minute)
+	defer timeout.Stop()
+	var readyEvent *bus.HandoffReady
+	completed := false
+	for {
+		if completed && readyEvent != nil {
+			permission, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
+			newSess, err := m.CreateSession(CreateOpts{CWD: sess.CWD, Model: readyEvent.ModelSpec, Thinking: readyEvent.Thinking, PermissionMode: permission})
+			if err != nil {
+				return &CommandResult{OK: false, Message: "could not start handoff session: " + err.Error()}, nil
+			}
+			if _, _, _, err := m.Send(newSess.ID, readyEvent.Prompt, nil, "", ""); err != nil {
+				_ = m.CloseSession(newSess.ID)
+				return &CommandResult{OK: false, Message: "could not start handoff: " + err.Error()}, nil
+			}
+			return &CommandResult{OK: true, Message: "started handoff", NewSessionID: newSess.ID}, nil
+		}
+		select {
+		case event := <-ready:
+			readyEvent = &event
+		case event := <-settled:
+			if event.Cancelled {
+				return &CommandResult{OK: false, Message: "handoff cancelled"}, nil
+			}
+			if event.Err != nil {
+				return &CommandResult{OK: false, Message: "handoff failed: " + event.Err.Error()}, nil
+			}
+			completed = true
+		case <-timeout.C:
+			return &CommandResult{OK: false, Message: "handoff timed out"}, nil
+		}
+	}
 }
 
 func cmdCompact(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

@@ -351,7 +351,7 @@ func handleCreateSession(mgr *Manager) http.HandlerFunc {
 		}
 		sess, err := mgr.CreateSession(opts)
 		if err != nil {
-			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) {
+			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) || errors.Is(err, ErrInvalidThinking) || errors.Is(err, ErrInvalidPermissionMode) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -1144,6 +1144,7 @@ func handleListCommands() http.HandlerFunc {
 	commandMeta := map[string]cmdDef{
 		"clear":           {Description: "Clear conversation history"},
 		"compact":         {Description: "Compact conversation to reduce context size"},
+		"handoff":         {Description: "Start a fresh session with a generated handoff", Args: "[--model <spec>] [--thinking <level>]"},
 		"prepare-compact": {Description: "Prepare handoff then compact conversation"},
 		"model":           {Description: "Switch model", Args: "<model>"},
 		"thinking":        {Description: "Set thinking level", Args: "<off|low|medium|high|xhigh>"},
