@@ -211,7 +211,7 @@ function DrawerGroupMenu({ groupByProject, onChange }) {
     {open && <div class={`sdrawer-group-menu${dropUp ? " sdrawer-group-menu--up" : ""}`} role="menu" aria-label="Session grouping" ref={menuRef} onKeyDown={onMenuKeyDown}>
       <span class="sdrawer-group-menu-label">Group sessions</span>
       <button type="button" role="menuitemradio" aria-checked={!groupByProject} onClick={() => choose(false)}><span class="sdrawer-group-menu-tick">{!groupByProject && <Check size={14} />}</span>By recency</button>
-      <button type="button" role="menuitemradio" aria-checked={groupByProject} onClick={() => choose(true)}><span class="sdrawer-group-menu-tick">{groupByProject && <Check size={14} />}</span>By project</button>
+      <button type="button" role="menuitemradio" aria-checked={groupByProject} onClick={() => choose(true)}><span class="sdrawer-group-menu-tick">{groupByProject && <Check size={14} />}</span>By folder</button>
     </div>}
   </div>;
 }

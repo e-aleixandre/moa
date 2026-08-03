@@ -70,7 +70,9 @@ let state = {
   focusedTile: initialFocused,
   soundEnabled: persisted.soundEnabled || false,
 
-  // Overview: group the session list by project (cwd) when true.
+  // Overview: group the session list by working directory when true. Named
+  // groupByProject before the UI settled on "folder"; the key is persisted, so
+  // renaming it would silently drop the preference of anyone who set it.
   groupByProject: persisted.groupByProject || false,
   drawerCollapsed: persisted.drawerCollapsed || {},
 

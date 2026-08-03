@@ -72,7 +72,7 @@ function SpineGroupMenu({ groupByProject, onChange }) {
     {open && <div class="spine-group-menu" role="menu" aria-label="Session grouping" ref={menuRef} onKeyDown={onMenuKeyDown}>
       <span>Group sessions</span>
       <button type="button" role="menuitemradio" aria-checked={!groupByProject} onClick={() => choose(false)}><i>{!groupByProject && <Check size={14} />}</i>By recency</button>
-      <button type="button" role="menuitemradio" aria-checked={groupByProject} onClick={() => choose(true)}><i>{groupByProject && <Check size={14} />}</i>By project</button>
+      <button type="button" role="menuitemradio" aria-checked={groupByProject} onClick={() => choose(true)}><i>{groupByProject && <Check size={14} />}</i>By folder</button>
     </div>}
   </div>;
 }

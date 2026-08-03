@@ -30,7 +30,14 @@ export function setDrawerStep(step) {
 }
 
 // setGroupByProject remembers whether the drawer lists sessions by recency or
-// grouped by project. Persisted by the store.
+// grouped by working directory. Persisted by the store.
+//
+// The name is historical and stays because the key is persisted. The UI says
+// "by folder", which is what this actually does: it groups by cwd, including
+// directories that are no repository at all. Memory has its own, wider notion
+// of a project — one repository, all of its worktrees — and calling both
+// "project" would promise that sessions in two worktrees group together when
+// they deliberately do not.
 export function setGroupByProject(on) {
   setState({ groupByProject: !!on });
 }
