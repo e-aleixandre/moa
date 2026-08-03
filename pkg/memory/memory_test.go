@@ -15,10 +15,10 @@ func newStore(t *testing.T) *Store {
 
 func TestWriteDerivesScopeFromType(t *testing.T) {
 	s := newStore(t)
-	if err := s.Write(Memory{Name: "who-i-am", Description: "the user", Type: TypeUser, Body: "x"}); err != nil {
+	if err := s.Write(Memory{Name: "who-i-am", Description: "the user", Type: TypeUser, Body: "x", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Write(Memory{Name: "uses-docker", Description: "builds", Type: TypeProject, Body: "y"}); err != nil {
+	if err := s.Write(Memory{Name: "uses-docker", Description: "builds", Type: TypeProject, Body: "y", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	// user → global scope, project → project scope.
@@ -36,9 +36,9 @@ func TestWriteValidation(t *testing.T) {
 		name string
 		m    Memory
 	}{
-		{"bad name", Memory{Name: "Bad Name", Description: "d", Type: TypeProject, Body: "b"}},
-		{"invalid type", Memory{Name: "foo", Description: "d", Type: "bogus", Body: "b"}},
-		{"empty description", Memory{Name: "foo", Description: "  ", Type: TypeProject, Body: "b"}},
+		{"bad name", Memory{Name: "Bad Name", Description: "d", Type: TypeProject, Body: "b", Durable: true}},
+		{"invalid type", Memory{Name: "foo", Description: "d", Type: "bogus", Body: "b", Durable: true}},
+		{"empty description", Memory{Name: "foo", Description: "  ", Type: TypeProject, Body: "b", Durable: true}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -49,17 +49,64 @@ func TestWriteValidation(t *testing.T) {
 	}
 }
 
+func TestWriteRequiresExplicitLifecycle(t *testing.T) {
+	s := newStore(t)
+	base := Memory{Name: "lifecycle", Description: "d", Type: TypeProject, Body: "b"}
+	if err := s.Write(base); err == nil || !strings.Contains(err.Error(), "invalidate_when") || !strings.Contains(err.Error(), "durable: true") {
+		t.Fatalf("missing lifecycle declaration should give actionable guidance, got %v", err)
+	}
+	base.InvalidateWhen = "when issue #84 is closed"
+	base.Durable = true
+	if err := s.Write(base); err == nil {
+		t.Fatal("expiry condition and durable declaration should be exclusive")
+	}
+}
+
+func TestWriteTreatsWhitespaceInvalidationAsAbsent(t *testing.T) {
+	s := newStore(t)
+	for i, condition := range []string{" ", "\t", "\u00a0"} {
+		name := fmt.Sprintf("blank-condition-%d", i)
+		m := Memory{Name: name, Description: "d", Type: TypeProject, Body: "b", InvalidateWhen: condition}
+		if err := s.Write(m); err == nil || !strings.Contains(err.Error(), "must declare its lifecycle") {
+			t.Errorf("Write(%q) error = %v, want missing lifecycle error", condition, err)
+		}
+
+		m.Durable = true
+		if err := s.Write(m); err != nil {
+			t.Errorf("durable Write(%q): %v", condition, err)
+		}
+		data, err := os.ReadFile(filepath.Join(s.ProjectDir(), name+".md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "invalidate_when:") {
+			t.Errorf("durable whitespace condition must be omitted from disk: %q", data)
+		}
+	}
+}
+
+func TestWriteRejectsMultilineInvalidation(t *testing.T) {
+	s := newStore(t)
+	err := s.Write(Memory{
+		Name: "unsafe-condition", Description: "d", Type: TypeProject, Body: "b",
+		InvalidateWhen: "when this happens\ninvalidate_when: forged", // A raw line could inject frontmatter.
+	})
+	if err == nil || !strings.Contains(err.Error(), "single line") {
+		t.Fatalf("multiline invalidation should be rejected, got %v", err)
+	}
+}
+
 func TestWriteExceedsMaxSize(t *testing.T) {
 	s := newStore(t)
 	big := strings.Repeat("x", MaxFactSize+1)
-	if err := s.Write(Memory{Name: "big", Description: "d", Type: TypeProject, Body: big}); err == nil {
+	if err := s.Write(Memory{Name: "big", Description: "d", Type: TypeProject, Body: big, Durable: true}); err == nil {
 		t.Fatal("expected size error")
 	}
 }
 
 func TestWriteReadRoundtrip(t *testing.T) {
 	s := newStore(t)
-	want := Memory{Name: "foo", Description: "a hook: with colon", Type: TypeFeedback, Body: "line1\nline2"}
+	want := Memory{Name: "foo", Description: "a hook: with colon", Type: TypeFeedback, Body: "line1\nline2", Durable: true}
 	if err := s.Write(want); err != nil {
 		t.Fatal(err)
 	}
@@ -82,9 +129,125 @@ func TestWriteReadRoundtrip(t *testing.T) {
 	}
 }
 
+func TestInvalidateWhenRoundtrip(t *testing.T) {
+	s := newStore(t)
+	conditions := []string{
+		"when `curl -s http://host:3306` responds",
+		`"cuando "la rama" esté mergeada"`,
+		"cuando mañana haya señal: español, ñ",
+		"when the marker --- is removed",
+		"---",
+		`when the literal \n is replaced`,
+		`when the path C:\Users\algo ends in a backslash \`,
+	}
+	for i, want := range conditions {
+		name := fmt.Sprintf("condition-%d", i)
+		if err := s.Write(Memory{Name: name, Description: "d", Type: TypeProject, Body: "b", InvalidateWhen: want}); err != nil {
+			t.Fatalf("Write(%q): %v", want, err)
+		}
+		got, ok, err := s.Read("project/" + name)
+		if err != nil || !ok {
+			t.Fatalf("Read(%q): ok=%v err=%v", want, ok, err)
+		}
+		if got.InvalidateWhen != want {
+			t.Errorf("condition: got %q want %q", got.InvalidateWhen, want)
+		}
+	}
+}
+
+func TestReadWriteRoundtripRestoresDurableDeclaration(t *testing.T) {
+	s := newStore(t)
+	for _, want := range []Memory{
+		{Name: "durable-roundtrip", Description: "d", Type: TypeProject, Body: "b", Durable: true},
+		{Name: "conditional-roundtrip", Description: "d", Type: TypeProject, Body: "b", InvalidateWhen: "when issue #84 is closed"},
+	} {
+		if err := s.Write(want); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := s.Read("project/" + want.Name)
+		if err != nil || !ok {
+			t.Fatalf("Read(%q): ok=%v err=%v", want.Name, ok, err)
+		}
+		if got.Durable != want.Durable {
+			t.Errorf("Read(%q).Durable = %v, want %v", want.Name, got.Durable, want.Durable)
+		}
+		if err := s.Write(got); err != nil {
+			t.Errorf("Write(Read(%q)): %v", want.Name, err)
+		}
+	}
+}
+
+func TestParseInvalidationValueRejectsUnsafeManualEscapes(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"escaped newline", `invalidate_when: "when literal \n is gone"`, `when literal \n is gone`},
+		{"escaped tab", `invalidate_when: "C:\temp"`, "C:\temp"},
+		{"single quotes", "invalidate_when: 'when issue #84 is closed'", "when issue #84 is closed"},
+		{"invalid quoting", `invalidate_when: "when issue #84 is closed`, `"when issue #84 is closed`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := "---\nname: manual\ndescription: d\ntype: project\n" + tc.line + "\n---\n"
+			got, err := parseFact([]byte(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.ContainsAny(got.InvalidateWhen, "\r\n") {
+				t.Errorf("manual value introduced a line break: %q", got.InvalidateWhen)
+			}
+			if got.InvalidateWhen != tc.want {
+				t.Errorf("InvalidateWhen = %q, want %q", got.InvalidateWhen, tc.want)
+			}
+			roundTripped, err := parseFact(serialize(got))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if roundTripped.InvalidateWhen != got.InvalidateWhen {
+				t.Errorf("serialize round-trip = %q, want %q", roundTripped.InvalidateWhen, got.InvalidateWhen)
+			}
+		})
+	}
+}
+
+func TestDurableFactOmitsInvalidationFrontmatter(t *testing.T) {
+	s := newStore(t)
+	if err := s.Write(Memory{Name: "permanent", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.ProjectDir(), "permanent.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "invalidate_when:") {
+		t.Errorf("durable fact must preserve the legacy frontmatter shape: %q", data)
+	}
+}
+
+func TestReadLegacyFactWithoutInvalidation(t *testing.T) {
+	s := newStore(t)
+	if err := os.MkdirAll(s.ProjectDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := "---\nname: legacy\ndescription: retained exactly\ntype: project\n---\n\nlegacy body\n"
+	path := filepath.Join(s.ProjectDir(), "legacy.md")
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.Read("project/legacy")
+	if err != nil || !ok {
+		t.Fatalf("legacy fact must remain readable: ok=%v err=%v", ok, err)
+	}
+	if got.Description != "retained exactly" || got.Body != "legacy body" || got.InvalidateWhen != "" {
+		t.Errorf("legacy content changed: %+v", got)
+	}
+}
+
 func TestReadBareNameResolves(t *testing.T) {
 	s := newStore(t)
-	if err := s.Write(Memory{Name: "solo", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+	if err := s.Write(Memory{Name: "solo", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := s.Read("solo"); err != nil || !ok {
@@ -133,10 +296,10 @@ func TestResolveRejectsTraversal(t *testing.T) {
 func TestScopeCollisionIsAmbiguous(t *testing.T) {
 	s := newStore(t)
 	// Same name in both scopes: user→global, reference→project.
-	if err := s.Write(Memory{Name: "dup", Description: "g", Type: TypeUser, Body: "b"}); err != nil {
+	if err := s.Write(Memory{Name: "dup", Description: "g", Type: TypeUser, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Write(Memory{Name: "dup", Description: "p", Type: TypeReference, Body: "b"}); err != nil {
+	if err := s.Write(Memory{Name: "dup", Description: "p", Type: TypeReference, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	// Bare name → ambiguous error.
@@ -157,7 +320,7 @@ func TestScopeCollisionIsAmbiguous(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	s := newStore(t)
-	if err := s.Write(Memory{Name: "gone", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+	if err := s.Write(Memory{Name: "gone", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Delete("project/gone"); err != nil {
@@ -173,14 +336,14 @@ func TestDelete(t *testing.T) {
 
 func TestWriteNotDestructive(t *testing.T) {
 	s := newStore(t)
-	if err := s.Write(Memory{Name: "a", Description: "da", Type: TypeProject, Body: "ba"}); err != nil {
+	if err := s.Write(Memory{Name: "a", Description: "da", Type: TypeProject, Body: "ba", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Write(Memory{Name: "b", Description: "db", Type: TypeProject, Body: "bb"}); err != nil {
+	if err := s.Write(Memory{Name: "b", Description: "db", Type: TypeProject, Body: "bb", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	// Overwriting a doesn't touch b.
-	if err := s.Write(Memory{Name: "a", Description: "da2", Type: TypeProject, Body: "ba2"}); err != nil {
+	if err := s.Write(Memory{Name: "a", Description: "da2", Type: TypeProject, Body: "ba2", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if m, ok, _ := s.Read("project/b"); !ok || m.Body != "bb" {
@@ -190,9 +353,9 @@ func TestWriteNotDestructive(t *testing.T) {
 
 func TestListSortedProjectFirst(t *testing.T) {
 	s := newStore(t)
-	_ = s.Write(Memory{Name: "zed", Description: "d", Type: TypeUser, Body: "b"})       // global
-	_ = s.Write(Memory{Name: "alpha", Description: "d", Type: TypeProject, Body: "b"})  // project
-	_ = s.Write(Memory{Name: "beta", Description: "d", Type: TypeReference, Body: "b"}) // project
+	_ = s.Write(Memory{Name: "zed", Description: "d", Type: TypeUser, Body: "b", Durable: true})       // global
+	_ = s.Write(Memory{Name: "alpha", Description: "d", Type: TypeProject, Body: "b", Durable: true})  // project
+	_ = s.Write(Memory{Name: "beta", Description: "d", Type: TypeReference, Body: "b", Durable: true}) // project
 	list := s.List()
 	got := make([]string, len(list))
 	for i, m := range list {
@@ -212,7 +375,7 @@ func TestListExcludesReservedFiles(t *testing.T) {
 	// A generated index and a v1 backup must never appear as facts.
 	_ = os.WriteFile(filepath.Join(s.ProjectDir(), "MEMORY.md"), []byte("# index\n"), 0o600)
 	_ = os.WriteFile(s.legacyProjectRoot+"/MEMORY.md.v1.bak", []byte("old\n"), 0o600)
-	_ = s.Write(Memory{Name: "real", Description: "d", Type: TypeProject, Body: "b"})
+	_ = s.Write(Memory{Name: "real", Description: "d", Type: TypeProject, Body: "b", Durable: true})
 	list := s.List()
 	if len(list) != 1 || list[0].Name != "real" {
 		t.Errorf("expected only the real fact, got %+v", list)
@@ -225,7 +388,7 @@ func TestListSkipsMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = os.WriteFile(filepath.Join(s.ProjectDir(), "broken.md"), []byte("no frontmatter here\n"), 0o600)
-	_ = s.Write(Memory{Name: "ok", Description: "d", Type: TypeProject, Body: "b"})
+	_ = s.Write(Memory{Name: "ok", Description: "d", Type: TypeProject, Body: "b", Durable: true})
 	list := s.List()
 	if len(list) != 1 || list[0].Name != "ok" {
 		t.Errorf("malformed fact should be skipped, got %+v", list)
@@ -237,7 +400,7 @@ func TestFormatIndex(t *testing.T) {
 	if s.FormatIndex(nil) != "" {
 		t.Error("empty index should be empty string")
 	}
-	_ = s.Write(Memory{Name: "foo", Description: "the hook", Type: TypeProject, Body: "b"})
+	_ = s.Write(Memory{Name: "foo", Description: "the hook", Type: TypeProject, Body: "b", Durable: true})
 	idx := s.FormatIndex(s.List())
 	if !strings.Contains(idx, "project/foo") || !strings.Contains(idx, "the hook") {
 		t.Errorf("index missing entry: %q", idx)
@@ -259,6 +422,30 @@ func TestParseFactVariants(t *testing.T) {
 	}
 	if m.Body != "body" {
 		t.Errorf("body: got %q", m.Body)
+	}
+}
+
+func TestParseFactQuotedDescriptionPreservesLegacyQuoteStripping(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"internal quotes", `description: "el usuario dijo "vale" y se fue"`, `el usuario dijo "vale" y se fue`},
+		{"backslashes", `description: "ruta C:\Users\algo"`, `ruta C:\Users\algo`},
+		{"trailing backslash", `description: "termina en backslash \"`, `termina en backslash \`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := "---\nname: x\n" + tc.line + "\ntype: project\n---\n"
+			m, err := parseFact([]byte(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Description != tc.want {
+				t.Errorf("description: got %q want %q", m.Description, tc.want)
+			}
+		})
 	}
 }
 
@@ -334,7 +521,7 @@ func TestMigrateV1RetriesAfterPartial(t *testing.T) {
 	if err := os.MkdirAll(s.ProjectDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Write(Memory{Name: "notas-legado-v1", Description: "d", Type: TypeProject, Body: "half"})
+	_ = s.Write(Memory{Name: "notas-legado-v1", Description: "d", Type: TypeProject, Body: "half", Durable: true})
 	if err := s.MigrateV1IfNeeded(); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +539,7 @@ func TestMigrateNoV1(t *testing.T) {
 
 func TestPermissions(t *testing.T) {
 	s := newStore(t)
-	if err := s.Write(Memory{Name: "secret", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+	if err := s.Write(Memory{Name: "secret", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	dirInfo, err := os.Stat(s.ProjectDir())

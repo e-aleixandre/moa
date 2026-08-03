@@ -50,11 +50,12 @@ func TestMemory_WriteReadList(t *testing.T) {
 	tool := NewMemory(cfg)
 
 	r := runMem(t, tool, map[string]any{
-		"action":      "write",
-		"name":        "uses-docker",
-		"description": "builds run in docker",
-		"type":        "project",
-		"content":     "Always build with docker compose.",
+		"action":          "write",
+		"name":            "uses-docker",
+		"description":     "builds run in docker",
+		"type":            "project",
+		"content":         "Always build with docker compose.",
+		"invalidate_when": "when issue #84 tracking the Docker migration is closed",
 	})
 	if r.IsError {
 		t.Fatalf("write failed: %q", resultText(r))
@@ -66,13 +67,13 @@ func TestMemory_WriteReadList(t *testing.T) {
 
 	// Read it back by canonical id.
 	r = runMem(t, tool, map[string]any{"action": "read", "id": "project/uses-docker"})
-	if !strings.Contains(resultText(r), "docker compose") {
+	if !strings.Contains(resultText(r), "docker compose") || !strings.Contains(resultText(r), "Invalidate when: when issue #84 tracking the Docker migration is closed") {
 		t.Errorf("read missing body: %q", resultText(r))
 	}
 
 	// List shows it with type and description.
 	r = runMem(t, tool, map[string]any{"action": "list"})
-	if !strings.Contains(resultText(r), "project/uses-docker") || !strings.Contains(resultText(r), "(project)") {
+	if !strings.Contains(resultText(r), "project/uses-docker") || !strings.Contains(resultText(r), "(project)") || strings.Contains(resultText(r), "Docker migration") {
 		t.Errorf("list missing entry: %q", resultText(r))
 	}
 }
@@ -82,7 +83,7 @@ func TestMemory_WriteRoutesGlobal(t *testing.T) {
 	tool := NewMemory(cfg)
 	runMem(t, tool, map[string]any{
 		"action": "write", "name": "prefers-tabs", "description": "tabs",
-		"type": "user", "content": "The user prefers tabs.",
+		"type": "user", "content": "The user prefers tabs.", "durable": true,
 	})
 	// user type → global scope.
 	if _, ok, _ := store.Read("global/prefers-tabs"); !ok {
@@ -95,7 +96,7 @@ func TestMemory_WriteInvalidType(t *testing.T) {
 	tool := NewMemory(cfg)
 	r := runMem(t, tool, map[string]any{
 		"action": "write", "name": "foo", "description": "d",
-		"type": "bogus", "content": "b",
+		"type": "bogus", "content": "b", "durable": true,
 	})
 	if !r.IsError {
 		t.Error("invalid type should be a hard error")
@@ -116,7 +117,7 @@ func TestMemory_Delete(t *testing.T) {
 	tool := NewMemory(cfg)
 	runMem(t, tool, map[string]any{
 		"action": "write", "name": "temp", "description": "d",
-		"type": "project", "content": "b",
+		"type": "project", "content": "b", "durable": true,
 	})
 	r := runMem(t, tool, map[string]any{"action": "delete", "id": "project/temp"})
 	if r.IsError {
@@ -125,6 +126,18 @@ func TestMemory_Delete(t *testing.T) {
 	r = runMem(t, tool, map[string]any{"action": "read", "id": "project/temp"})
 	if !r.IsError {
 		t.Error("fact should be gone after delete")
+	}
+}
+
+func TestMemory_WriteRequiresLifecycle(t *testing.T) {
+	cfg, _ := newMemoryTool(t)
+	tool := NewMemory(cfg)
+	r := runMem(t, tool, map[string]any{
+		"action": "write", "name": "short-lived", "description": "d",
+		"type": "project", "content": "b",
+	})
+	if !r.IsError || !strings.Contains(resultText(r), "invalidate_when") {
+		t.Errorf("write without lifecycle should guide the agent, got %q", resultText(r))
 	}
 }
 

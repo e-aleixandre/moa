@@ -22,8 +22,10 @@ func NewMemory(cfg ToolConfig) core.Tool {
 		Description: "Manage persistent memory as small, single-fact notes. Only the index (one line per " +
 			"fact) is in your context; read a fact's full text on demand. Each fact has a type that decides " +
 			"its scope: user/feedback are global (all projects); project/reference are scoped to this project. " +
-			"Save durable, non-obvious facts (user preferences, corrections, project constraints); update the " +
-			"existing fact instead of duplicating, and delete facts that become wrong. Refer to a fact by its " +
+			"Facts default to ephemeral: save each with a checkable expiry condition, unless it is genuinely " +
+			"permanent (such as a user preference, repository convention, or procedure). When reading a fact " +
+			"with an expiry condition, delete it if you can verify that condition has happened. Update the existing " +
+			"fact instead of duplicating, and delete facts that become wrong. Refer to a fact by its " +
 			"canonical id from the index (e.g. \"project/uses-docker\" or \"global/prefers-tabs\").",
 		Parameters: json.RawMessage(`{
 			"type": "object",
@@ -53,6 +55,14 @@ func NewMemory(cfg ToolConfig) core.Tool {
 				"content": {
 					"type": "string",
 					"description": "The full fact body in markdown (for write)."
+				},
+				"invalidate_when": {
+					"type": "string",
+					"description": "For write, the natural-language condition under which this fact stops being true. It must be checkable now by another agent against a concrete source, without interpreting relevance or asking the user. Valid: \"when issue #84 is closed\", \"when git log shows branch X is merged\", \"when port 3306 on that host responds again\". Invalid: \"when it is no longer relevant\". Mutually exclusive with durable."
+				},
+				"durable": {
+					"type": "boolean",
+					"description": "For write, explicitly mark a fact with no known expiry condition as permanent. Use only for durable preferences, repository conventions, or procedures; if an identifiable event could make the fact false, use invalidate_when instead. Mutually exclusive with invalidate_when."
 				}
 			},
 			"required": ["action"]
@@ -92,14 +102,19 @@ func NewMemory(cfg ToolConfig) core.Tool {
 				if !ok {
 					return core.ErrorResult(fmt.Sprintf("memory %q not found", id)), nil
 				}
+				if m.InvalidateWhen != "" {
+					return core.TextResult("Invalidate when: " + m.InvalidateWhen + "\n\n" + m.Body), nil
+				}
 				return core.TextResult(m.Body), nil
 
 			case "write":
 				m := memory.Memory{
-					Name:        getString(params, "name", ""),
-					Description: getString(params, "description", ""),
-					Type:        memory.Type(getString(params, "type", "")),
-					Body:        getString(params, "content", ""),
+					Name:           getString(params, "name", ""),
+					Description:    getString(params, "description", ""),
+					Type:           memory.Type(getString(params, "type", "")),
+					InvalidateWhen: getString(params, "invalidate_when", ""),
+					Durable:        getBool(params, "durable", false),
+					Body:           getString(params, "content", ""),
 				}
 				if err := store.Write(m); err != nil {
 					return core.ErrorResult(err.Error()), nil

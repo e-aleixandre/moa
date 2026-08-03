@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -85,12 +86,14 @@ func ValidName(name string) bool { return slugRe.MatchString(name) }
 
 // Memory is a single fact.
 type Memory struct {
-	Name        string
-	Description string
-	Type        Type
-	Body        string
-	Scope       Scope
-	Path        string // absolute path to the file (set on read/list)
+	Name           string
+	Description    string
+	Type           Type
+	InvalidateWhen string
+	Durable        bool // write-time declaration; durable facts omit invalidate_when on disk
+	Body           string
+	Scope          Scope
+	Path           string // absolute path to the file (set on read/list)
 }
 
 // ID is the canonical, scope-qualified identifier used in the index and by the
@@ -258,6 +261,24 @@ func (s *Store) Write(m Memory) error {
 	}
 	if strings.TrimSpace(m.Description) == "" {
 		return errors.New("description is required")
+	}
+	// Whitespace cannot express a checkable lifecycle. Normalize it so a
+	// durable declaration with an empty condition also keeps the legacy durable
+	// on-disk representation (no invalidate_when field).
+	if strings.TrimSpace(m.InvalidateWhen) == "" {
+		m.InvalidateWhen = ""
+	}
+	if m.InvalidateWhen == "" && !m.Durable {
+		return errors.New("memory must declare its lifecycle: an ephemeral fact needs invalidate_when with a condition another agent can check without asking the user (for example, \"when issue #84 is closed\"), while a permanent fact needs durable: true (for example, a user preference)")
+	}
+	if m.InvalidateWhen != "" && m.Durable {
+		return errors.New("invalidate_when and durable are mutually exclusive: declare either a checkable expiry condition or durable: true")
+	}
+	// Frontmatter is line-oriented. Reject line breaks rather than silently
+	// changing the condition: a changed condition could make a fact appear to
+	// expire for a different reason, and raw newlines could inject header keys.
+	if strings.ContainsAny(m.InvalidateWhen, "\r\n") {
+		return errors.New("invalidate_when must be a single line")
 	}
 	data := serialize(m)
 	if len(data) > MaxFactSize {
@@ -443,7 +464,8 @@ func isReservedFile(name string) bool {
 }
 
 // parseFact parses a fact file: a `---` frontmatter block (name/description/
-// type) followed by the markdown body. Tolerates CRLF, optional quotes around
+// type/invalidate_when) followed by the markdown body. invalidate_when has
+// its own quoted-value parsing rules. Tolerates CRLF, optional quotes around
 // values, and `:` inside a value. An unknown/missing type defaults to project
 // (D10). Missing or unterminated frontmatter is an error.
 func parseFact(data []byte) (Memory, error) {
@@ -476,11 +498,16 @@ func parseFact(data []byte) (Memory, error) {
 			m.Description = val
 		case "type":
 			m.Type = Type(val)
+		case "invalidate_when":
+			m.InvalidateWhen = parseInvalidationValue(line, val)
 		}
 	}
 	if !ValidType(m.Type) {
 		m.Type = TypeProject
 	}
+	// Durable is represented on disk by the absence of invalidate_when, so
+	// restore that declaration for callers that read, modify, then write facts.
+	m.Durable = m.InvalidateWhen == ""
 	m.Body = strings.Trim(strings.Join(lines[closeIdx+1:], "\n"), "\n")
 	return m, nil
 }
@@ -502,6 +529,20 @@ func splitKV(line string) (key, val string, ok bool) {
 	return key, val, key != ""
 }
 
+// parseInvalidationValue decodes the Go-quoted form written by serialize.
+// It uses the original line because splitKV deliberately preserves the legacy
+// quote-stripping behavior for all shared frontmatter fields.
+func parseInvalidationValue(line, fallback string) string {
+	i := strings.IndexByte(line, ':')
+	if i < 0 {
+		return fallback
+	}
+	if value, err := strconv.Unquote(strings.TrimSpace(line[i+1:])); err == nil && !strings.ContainsAny(value, "\r\n") {
+		return value
+	}
+	return fallback
+}
+
 // serialize renders a fact back to its file form.
 func serialize(m Memory) []byte {
 	var sb strings.Builder
@@ -511,6 +552,10 @@ func serialize(m Memory) []byte {
 	sb.WriteString(m.Description)
 	sb.WriteString("\ntype: ")
 	sb.WriteString(string(m.Type))
+	if m.InvalidateWhen != "" {
+		sb.WriteString("\ninvalidate_when: ")
+		sb.WriteString(strconv.Quote(m.InvalidateWhen))
+	}
 	sb.WriteString("\n---\n\n")
 	sb.WriteString(strings.TrimRight(m.Body, "\n"))
 	sb.WriteByte('\n')

@@ -150,7 +150,7 @@ func TestWorktreesOfOneRepoShareMemory(t *testing.T) {
 
 	configDir := t.TempDir()
 	main := New(configDir, repo)
-	if err := main.Write(Memory{Name: "uses-docker", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+	if err := main.Write(Memory{Name: "uses-docker", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,7 +170,7 @@ func TestDistinctReposDoNotShareMemory(t *testing.T) {
 	newRepo(t, b)
 
 	configDir := t.TempDir()
-	if err := New(configDir, a).Write(Memory{Name: "secret", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+	if err := New(configDir, a).Write(Memory{Name: "secret", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := New(configDir, b).List(); len(got) != 0 {
@@ -332,7 +332,7 @@ func TestMigrateAfterAFailureFollowedByAWrite(t *testing.T) {
 	// The exact sequence that used to strand the legacy store: the migration
 	// fails, the session carries on, and the first thing the agent remembers
 	// creates the destination directory.
-	if err := s.Write(Memory{Name: "written-after", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+	if err := s.Write(Memory{Name: "written-after", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	stopFailing()
@@ -358,7 +358,7 @@ func TestMigrateNeverOverwritesADestinationFact(t *testing.T) {
 	s := New(configDir, repo)
 	// Whatever is in the destination is live: an ID in an earlier conversation
 	// resolves to it, so the copy has to move aside, not the other way round.
-	if err := s.Write(Memory{Name: "shared", Description: "d", Type: TypeProject, Body: "current text"}); err != nil {
+	if err := s.Write(Memory{Name: "shared", Description: "d", Type: TypeProject, Body: "current text", Durable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Migrate(); err != nil {

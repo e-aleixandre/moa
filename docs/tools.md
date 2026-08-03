@@ -86,8 +86,26 @@ reservation the more numerous project facts crowd out the global ones entirely,
 which is the wrong trade: global facts are standing instructions and user
 preferences, the ones that do not expire.
 
-Memory is for durable, non-obvious facts. It is not a task tracker and not a
-scratchpad:
+Memory is for non-obvious facts with an explicit lifecycle. It is not a task
+tracker and not a scratchpad. Every write must declare either
+`invalidate_when`, a single-line natural-language condition under which the
+fact stops being true, or `durable: true` for a genuinely permanent fact. The
+condition must be independently checkable now against a concrete source, not a
+judgment about relevance: for example, "when issue #84 is closed", "when `git
+log` shows branch X is merged", or "when port 3306 on that host responds
+again". "When it is no longer relevant" is not a valid condition. Use
+`durable: true` for user preferences, repository conventions, and procedures.
+If an identifiable event could make a fact false, use `invalidate_when`
+instead of `durable`.
+When reading a fact with an invalidation condition, delete it if you can verify
+that the condition has occurred.
+
+The write parameters are `name`, `description`, `type`, `content`, and exactly
+one of `invalidate_when` or `durable`. `invalidate_when` is stored with the
+fact and is shown by `memory` `read`; it is intentionally omitted from the
+always-in-context `list` index.
+
+Other memory rules:
 
 - **Anything verifiable by looking at the repository does not belong here.** A
   fact should point at the code rather than restate it, or it will quietly go
