@@ -386,7 +386,8 @@ export function fmtTokens(n) {
 /** A stable key identifying the project a session belongs to (its cwd). */
 export function projectKey(cwd) {
   if (!cwd) return '';
-  return cwd.replace(/\/+$/, '');
+  const key = cwd.replace(/\/+$/, '');
+  return key || '/';
 }
 
 /** A short, human-friendly project label from a cwd: the last two path

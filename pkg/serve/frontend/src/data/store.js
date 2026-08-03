@@ -3,13 +3,26 @@
 import {
   initIds, allTileIds, allSessionIds, tileCount,
 } from './tileTree.js';
+import { pruneDrawerCollapsed } from './util/project-sessions.js';
 
 const STORAGE_KEY = 'moa-next-ui-state';
 
 function loadPersistedState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const value = JSON.parse(raw);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+      return {
+        tileTree: value.tileTree && typeof value.tileTree === 'object' ? value.tileTree : undefined,
+        focusedTile: typeof value.focusedTile === 'number' ? value.focusedTile : undefined,
+        soundEnabled: typeof value.soundEnabled === 'boolean' ? value.soundEnabled : undefined,
+        groupByProject: typeof value.groupByProject === 'boolean' ? value.groupByProject : undefined,
+        drawerCollapsed: value.drawerCollapsed && typeof value.drawerCollapsed === 'object' && !Array.isArray(value.drawerCollapsed)
+          ? Object.fromEntries(Object.entries(value.drawerCollapsed).filter(([, collapsed]) => typeof collapsed === 'boolean'))
+          : undefined,
+      };
+    }
   } catch (_) { /* ignore */ }
   return {};
 }
@@ -21,6 +34,7 @@ function persistState(s) {
       focusedTile: s.focusedTile,
       soundEnabled: s.soundEnabled,
       groupByProject: s.groupByProject,
+      drawerCollapsed: s.drawerCollapsed,
     }));
   } catch (_) { /* ignore */ }
 }
@@ -58,6 +72,7 @@ let state = {
 
   // Overview: group the session list by project (cwd) when true.
   groupByProject: persisted.groupByProject || false,
+  drawerCollapsed: persisted.drawerCollapsed || {},
 
   isMobile: false,
 
@@ -104,11 +119,16 @@ export function setState(patch) {
   const next = typeof patch === 'function' ? patch(state) : patch;
   const previous = state;
   state = { ...state, ...next };
+  if (state.sessions !== previous.sessions) {
+    const drawerCollapsed = pruneDrawerCollapsed(state.drawerCollapsed, Object.values(state.sessions));
+    if (Object.keys(drawerCollapsed).length !== Object.keys(state.drawerCollapsed).length) state = { ...state, drawerCollapsed };
+  }
   if (
     state.tileTree !== previous.tileTree ||
     state.focusedTile !== previous.focusedTile ||
     state.soundEnabled !== previous.soundEnabled ||
-    state.groupByProject !== previous.groupByProject
+    state.groupByProject !== previous.groupByProject ||
+    state.drawerCollapsed !== previous.drawerCollapsed
   ) {
     persistState(state);
   }

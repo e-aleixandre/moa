@@ -7,6 +7,7 @@ import { allTileIds, allSessionIds, findTile, tileCount, treeShape, presetTree }
 import { PRESETS } from "../../data/layoutPresets.js";
 import { applyPreset, addPane, focusTileByIndex, focusTile, openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
+import { setGroupByProject } from "../../data/drawer.js";
 import { sessionTitle } from "../../data/util/format.js";
 import "./PaneGridScreen.css";
 
@@ -37,6 +38,7 @@ function spineSessions(sessions, paneOf) {
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
     .map((s) => ({
       id: s.id,
+      cwd: s.cwd || "", updated: s.updated || 0,
       title: sessionTitle(s),
       state: s.state || "idle",
       unseen: !!s.unseen,
@@ -47,7 +49,7 @@ function spineSessions(sessions, paneOf) {
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined }));
+    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined, cwd: s.cwd || "", updated: s.updated || 0, saved: true }));
   return { active, saved };
 }
 
@@ -122,6 +124,8 @@ export function PaneGridScreen({ version }) {
         activeSessions={active}
         savedSessions={saved}
         activeId={focusedSessionId}
+        groupByProject={state.groupByProject}
+        onGroupByProject={setGroupByProject}
         onSelectSession={onSelectSession}
         onNewSession={() => openPalette("create")}
         onSearch={() => openPalette("search")}

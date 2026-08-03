@@ -5,7 +5,7 @@ import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
-import { openDrawer, closeDrawer } from "../../../data/drawer.js";
+import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
@@ -122,6 +122,8 @@ function drawerSessions(sessions, activeId) {
       active: s.id === activeId,
       saved: s.state === "saved",
       origin: s.origin || undefined,
+      cwd: s.cwd || "",
+      updated: s.updated || 0,
     };
   };
   return {
@@ -405,6 +407,10 @@ export function MobileConversationScreen({ version = null }) {
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
         onReopenSession={(id) => resumeSession(id)}
         onDeleteSession={(id) => deleteSession(id)}
+        groupByProject={state.groupByProject}
+        drawerCollapsed={state.drawerCollapsed}
+        onGroupByProject={setGroupByProject}
+        onToggleProject={setDrawerProjectCollapsed}
       />
       <MobileSheet
         open={settingsOpen}

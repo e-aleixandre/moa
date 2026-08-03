@@ -18,6 +18,7 @@ import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchS
 import { openSession } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
+import { setGroupByProject } from "../../data/drawer.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
@@ -63,6 +64,7 @@ function spineSessions(sessions) {
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
     .map((s) => ({
       id: s.id,
+      cwd: s.cwd || "", updated: s.updated || 0,
       title: sessionTitle(s),
       state: s.state || "idle",
       unseen: !!s.unseen,
@@ -72,7 +74,7 @@ function spineSessions(sessions) {
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined }));
+    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined, cwd: s.cwd || "", updated: s.updated || 0, saved: true }));
   return { active, saved };
 }
 
@@ -238,6 +240,8 @@ export function ConversationScreen({ version }) {
       activeSessions={active}
       savedSessions={saved}
       activeId={activeId}
+      groupByProject={state.groupByProject}
+      onGroupByProject={setGroupByProject}
       onSelectSession={onSelectSession}
       onNewSession={() => openPalette("create")}
       onSearch={() => openPalette("search")}

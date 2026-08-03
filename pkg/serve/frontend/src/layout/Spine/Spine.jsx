@@ -1,7 +1,10 @@
-import { Search, Plus, Settings } from "lucide-preact";
+import { Search, Plus, Settings, MoreHorizontal, Check } from "lucide-preact";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { Kbd, IconButton } from "../../primitives/index.js";
 import { SessionRow } from "../../components/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
+import { groupProjectSessions } from "../../data/util/project-sessions.js";
+import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import "./Spine.css";
 
 function SpineVersion({ version }) {
@@ -51,6 +54,29 @@ const SAVED_SESSIONS = [
   { id: "changelog-0-10", title: "changelog 0.10", meta: "6d" },
 ];
 
+function SpineGroupMenu({ groupByProject, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const { onMenuKeyDown, closeMenu } = useMenuKeyboard(open, setOpen, triggerRef, menuRef);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => { document.removeEventListener("mousedown", close); };
+  }, [open]);
+  const choose = (value) => { onChange?.(value); closeMenu(); };
+  return <div class="spine-group-wrap" ref={ref}>
+    <button type="button" ref={triggerRef} class="spine-group-more" aria-label="Session grouping" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}><MoreHorizontal size={16} /></button>
+    {open && <div class="spine-group-menu" role="menu" aria-label="Session grouping" ref={menuRef} onKeyDown={onMenuKeyDown}>
+      <span>Group sessions</span>
+      <button type="button" role="menuitemradio" aria-checked={!groupByProject} onClick={() => choose(false)}><i>{!groupByProject && <Check size={14} />}</i>By recency</button>
+      <button type="button" role="menuitemradio" aria-checked={groupByProject} onClick={() => choose(true)}><i>{groupByProject && <Check size={14} />}</i>By project</button>
+    </div>}
+  </div>;
+}
+
 export function Spine({
   version = null,
   activeSessions = ACTIVE_SESSIONS,
@@ -60,13 +86,18 @@ export function Spine({
   onNewSession,
   onSearch,
   onSettings,
+  groupByProject = false,
+  onGroupByProject,
 }) {
+  const projectSections = groupProjectSessions([...activeSessions, ...savedSessions]);
+  const row = (s) => <SessionRow key={s.id} variant="card" title={s.title} state={s.state || (s.saved ? "saved" : "idle")} active={s.active ?? s.id === activeId} unseen={s.unseen} meta={s.meta} pane={s.pane} origin={s.origin} onClick={() => onSelectSession?.(s.id)} />;
   return (
     <aside class="spine">
       <div class="spine-head">
         <span class="logo" aria-hidden="true">m</span>
         <span class="wordmark">moa</span>
         <SpineVersion version={version} />
+        <SpineGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
       </div>
 
       <button type="button" class="spine-search" onClick={onSearch}>
@@ -76,38 +107,11 @@ export function Spine({
       </button>
 
       <div class="spine-sessions">
-        <div class="spine-label">Active</div>
-        <div class="spine-list">
-          {activeSessions.map((s) => (
-            <SessionRow
-              key={s.id}
-              variant="card"
-              title={s.title}
-              state={s.state}
-              active={s.active ?? s.id === activeId}
-              unseen={s.unseen}
-              meta={s.meta}
-              pane={s.pane}
-              origin={s.origin}
-              onClick={() => onSelectSession?.(s.id)}
-            />
-          ))}
-        </div>
-
-        <div class="spine-label">Saved</div>
-        <div class="spine-list">
-          {savedSessions.map((s) => (
-            <SessionRow
-              key={s.id}
-              variant="card"
-              title={s.title}
-              state="saved"
-              meta={s.meta}
-              origin={s.origin}
-              onClick={() => onSelectSession?.(s.id)}
-            />
-          ))}
-        </div>
+        {groupByProject ? projectSections.map((section) => <div class="spine-project" key={section.key}>
+          <div class="spine-label">{section.label}{section.attention && <span class={`state-dot spine-project-attention ${section.attention}`} />}<small>{section.openCount} open{section.savedCount ? ` · ${section.savedCount} saved` : ""}</small></div>
+          {section.path && <div class="spine-project-path">{section.path}</div>}
+          <div class="spine-list">{section.sessions.map(row)}</div>
+        </div>) : <><div class="spine-label">Active</div><div class="spine-list">{activeSessions.map(row)}</div><div class="spine-label">Saved</div><div class="spine-list">{savedSessions.map(row)}</div></>}
       </div>
 
       <button type="button" class="new-session" onClick={onNewSession}>

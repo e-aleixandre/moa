@@ -34,3 +34,9 @@ export function setDrawerStep(step) {
 export function setGroupByProject(on) {
   setState({ groupByProject: !!on });
 }
+
+export function setDrawerProjectCollapsed(key, collapsed) {
+  setState((state) => ({
+    drawerCollapsed: { ...state.drawerCollapsed, [key]: !!collapsed },
+  }));
+}
