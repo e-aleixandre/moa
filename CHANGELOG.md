@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] - 2026-08-03
+
+### Fixed
+
+- The activity line no longer moves when nothing is happening. Its playful
+  gerund rotated every four seconds on a timer, so copy changed on its own and
+  read as progress: a stalled run and a busy one looked the same, and the line
+  was liveliest exactly when it had nothing to report. A gerund now belongs to
+  an episode — picked once and held until a tool actually starts or ends — so
+  stillness means nothing has happened, which is the honest signal. The list
+  grew from 16 to 42 verbs, and a verb is never immediately repeated, so a held
+  phrase still reads as chosen rather than stuck.
+- Waiting on machinery said "Working…", the emptiest word available, during the
+  longest pauses there are: a wait on a subagent can run for minutes. Those
+  waits now name themselves — "Waiting on a subagent", in the plural when
+  several block at once — and the tools that fell through the same gap say what
+  they are doing: tasks, memory, verify, the docs, and MCP servers by name.
+  Machine waits read "waiting on" while a prompt for you keeps "waiting for
+  you", so the two kinds of pause stay distinguishable at a glance.
+
 ## [0.25.0] - 2026-08-03
 
 ### Added
