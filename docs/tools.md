@@ -75,7 +75,9 @@ moa_docs(page: "recipes/linear")  # worked end-to-end integration
 
 `memory` stores single-fact notes that survive across sessions. Each fact has a
 type that decides its scope: `user` and `feedback` are global (visible in every
-project), `project` and `reference` are scoped to the current workspace.
+project), `project` and `reference` are scoped to the current **repository** —
+every git worktree of one repo reads and writes the same project facts, and
+removing a worktree no longer strands what was learned in it.
 
 Only an **index** — one line per fact — is injected into the prompt; full bodies
 are read on demand. The index has a byte budget, and each scope gets a reserved
@@ -94,6 +96,16 @@ scratchpad:
   facts that have become wrong.
 - Current task state, progress notes and handoffs are not memories — they die
   with the work. Use the session checkpoint or the task tracker.
+
+Project facts written before 0.25 lived under `~/.config/moa/projects/<hash>/`,
+keyed by the path of the working directory. moa copies them into the
+repository-keyed store the first time it opens each project, and leaves the old
+files alone so an older binary still finds them. A store whose directory no
+longer exists cannot be matched to a repository — git cannot say which repo a
+deleted worktree belonged to — so it is listed once in
+`~/.config/moa/codebases/orphaned-memory.json` with its path and fact count
+instead of being guessed at. Starting a session in that directory again, if it
+comes back, migrates it.
 
 ## Bash: persistent state & background jobs
 

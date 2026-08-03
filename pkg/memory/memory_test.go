@@ -211,7 +211,7 @@ func TestListExcludesReservedFiles(t *testing.T) {
 	}
 	// A generated index and a v1 backup must never appear as facts.
 	_ = os.WriteFile(filepath.Join(s.ProjectDir(), "MEMORY.md"), []byte("# index\n"), 0o600)
-	_ = os.WriteFile(s.projectRoot+"/MEMORY.md.v1.bak", []byte("old\n"), 0o600)
+	_ = os.WriteFile(s.legacyProjectRoot+"/MEMORY.md.v1.bak", []byte("old\n"), 0o600)
 	_ = s.Write(Memory{Name: "real", Description: "d", Type: TypeProject, Body: "b"})
 	list := s.List()
 	if len(list) != 1 || list[0].Name != "real" {
@@ -290,8 +290,8 @@ func TestFilenameAuthoritative(t *testing.T) {
 
 func TestMigrateV1(t *testing.T) {
 	s := newStore(t)
-	v1 := filepath.Join(s.projectRoot, "MEMORY.md")
-	if err := os.MkdirAll(s.projectRoot, 0o700); err != nil {
+	v1 := filepath.Join(s.legacyProjectRoot, "MEMORY.md")
+	if err := os.MkdirAll(s.legacyProjectRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(v1, []byte("# old memory\n- fact one\n"), 0o600); err != nil {
@@ -322,8 +322,8 @@ func TestMigrateV1(t *testing.T) {
 
 func TestMigrateV1RetriesAfterPartial(t *testing.T) {
 	s := newStore(t)
-	v1 := filepath.Join(s.projectRoot, "MEMORY.md")
-	if err := os.MkdirAll(s.projectRoot, 0o700); err != nil {
+	v1 := filepath.Join(s.legacyProjectRoot, "MEMORY.md")
+	if err := os.MkdirAll(s.legacyProjectRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(v1, []byte("content\n"), 0o600); err != nil {

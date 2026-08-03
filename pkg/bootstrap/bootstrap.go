@@ -347,8 +347,22 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			slog.Warn("memory: cannot determine config directory")
 		} else {
 			memStore = memory.New(dir, cfg.CWD)
-			if err := memStore.MigrateV1IfNeeded(); err != nil {
-				slog.Warn("memory: v1 migration failed", "error", err)
+			// Migrations run here, not in New: New is also called by tools and
+			// tests that only want the paths, while this is the one place with
+			// exactly one call per session start — the "once, before anything
+			// reads a fact" they need.
+			//
+			// A failure is not fatal, and it does not have to be: the migration
+			// records what it copied in an explicit marker written last, so a
+			// failed run leaves the codebase store unsealed and the legacy
+			// stores untouched, and the next start picks up exactly where this
+			// one stopped. What the session must not do is refuse to work —
+			// memory is an aid, and a user who cannot open a session cannot
+			// even ask what went wrong. It continues with whatever the store
+			// already holds, which after a partial copy is a subset of the
+			// facts, never a wrong one.
+			if err := memStore.Migrate(); err != nil {
+				slog.Warn("memory: migration failed, will retry on the next start", "error", err)
 			}
 			memoryIndex = memStore.FormatIndex(memStore.List())
 		}

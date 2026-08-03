@@ -43,7 +43,8 @@ All state lives under `~/.config/moa/`:
 | `prompts/` | Global prompt templates |
 | `skills/` | Global skill packs (`<name>/SKILL.md`) |
 | `global/memory/` | Global memory facts (user, feedback) |
-| `projects/<hash>/memory/` | Per-workspace project memory facts |
+| `codebases/<key>/memory/` | Project memory facts, keyed by repository |
+| `codebases/orphaned-memory.json` | Older project memory that no repository could claim |
 | `.mcp.json` | Global MCP server definitions |
 | `devices.json` | Paired Pulse device credentials |
 | `update.json` | Cached release-check state |
