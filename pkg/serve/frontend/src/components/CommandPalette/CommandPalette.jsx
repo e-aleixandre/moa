@@ -19,6 +19,7 @@ import {
   sessionTitle, sessionDotState, isRecentSession, projectLabel,
   tildify, expandHome, basename,
 } from "../../data/util/format.js";
+import { sessionSearchMatch } from "../../data/util/project-sessions.js";
 import { modLabel } from "../../data/util/shortcut.js";
 import "./CommandPalette.css";
 
@@ -344,8 +345,10 @@ export function CommandPalette({
     const q = query.toLowerCase().trim();
     const out = [];
 
-    // Sessions (MRU). No query → recent, capped. Query → fuzzy over every
-    // session, no cap.
+    // Sessions (MRU). No query → recent, capped. Session rows use the same
+    // word matcher as both session lists: sentence-length titles make command
+    // fuzzy matching return distracting subsequence false positives. Actions
+    // below deliberately retain their established command-palette fuzzy match.
     const all = Object.values(state.sessions).sort((a, b) => (b.updated || 0) - (a.updated || 0));
     const sessRows = [];
     for (const sess of all) {
@@ -353,8 +356,7 @@ export function CommandPalette({
       const cwdLabel = projectLabel(cwd);
       const title = sessionTitle(sess);
       if (q) {
-        const hay = `${title} ${sess.model || ""} ${cwdLabel} ${cwd}`.toLowerCase();
-        if (!fuzzyMatch(q, hay)) continue;
+        if (!sessionSearchMatch(query, { ...sess, title, path: cwdLabel })) continue;
       } else {
         if (!isRecentSession(sess)) continue;
       }

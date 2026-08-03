@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { Kbd, IconButton } from "../../primitives/index.js";
 import { SessionRow } from "../../components/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
-import { groupProjectSessions } from "../../data/util/project-sessions.js";
+import { groupProjectSessions, hiddenProjectSavedCount, visibleProjectSessions } from "../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import "./Spine.css";
 
@@ -89,6 +89,7 @@ export function Spine({
   groupByProject = false,
   onGroupByProject,
 }) {
+  const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const projectSections = groupProjectSessions([...activeSessions, ...savedSessions]);
   const row = (s) => <SessionRow key={s.id} variant="card" title={s.title} state={s.state || (s.saved ? "saved" : "idle")} active={s.active ?? s.id === activeId} unseen={s.unseen} meta={s.meta} pane={s.pane} origin={s.origin} onClick={() => onSelectSession?.(s.id)} />;
   return (
@@ -107,11 +108,16 @@ export function Spine({
       </button>
 
       <div class="spine-sessions">
-        {groupByProject ? projectSections.map((section) => <div class="spine-project" key={section.key}>
-          <div class="spine-label">{section.label}{section.attention && <span class={`state-dot spine-project-attention ${section.attention}`} />}<small>{section.openCount} open{section.savedCount ? ` · ${section.savedCount} saved` : ""}</small></div>
-          {section.path && <div class="spine-project-path">{section.path}</div>}
-          <div class="spine-list">{section.sessions.map(row)}</div>
-        </div>) : <><div class="spine-label">Active</div><div class="spine-list">{activeSessions.map(row)}</div><div class="spine-label">Saved</div><div class="spine-list">{savedSessions.map(row)}</div></>}
+        {groupByProject ? projectSections.map((section) => {
+          const expanded = expandedProjects.has(section.key);
+          const shownSessions = visibleProjectSessions(section, expanded);
+          const hiddenSaved = hiddenProjectSavedCount(section, expanded);
+          return <div class="spine-project" key={section.key}>
+            <div class="spine-label">{section.label}{section.attention && <span class={`state-dot spine-project-attention ${section.attention}`} />}<small>{section.openCount} open{section.savedCount ? ` · ${section.savedCount} saved` : ""}</small></div>
+            {section.path && <div class="spine-project-path">{section.path}</div>}
+            <div class="spine-list">{shownSessions.map(row)}{hiddenSaved > 0 && <button type="button" class="spine-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}</div>
+          </div>;
+        }) : <><div class="spine-label">Active</div><div class="spine-list">{activeSessions.map(row)}</div><div class="spine-label">Saved</div><div class="spine-list">{savedSessions.map(row)}</div></>}
       </div>
 
       <button type="button" class="new-session" onClick={onNewSession}>

@@ -128,19 +128,23 @@
 .sdrawer-group-menu-tick { width: 14px; margin-right: 9px; color: var(--mauve); }
 
 /* Project accordion: cwd is spoken once in this 44px target, leaving card
-   space for the live brief. */
-.sdrawer-project-head { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 7px 4px 5px; border: 0; border-radius: var(--radius-md); background: none; color: inherit; text-align: left; cursor: pointer; }
+   space for the live brief. Its compact type distinguishes hierarchy without
+   giving a quiet navigator a competing, heavy background. */
+.sdrawer-project-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 44px; padding: var(--space-1) var(--space-1); border: 0; border-radius: var(--radius-md); background: none; color: inherit; text-align: left; cursor: pointer; }
 .sdrawer-project-head:hover, .sdrawer-project-head:active { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
 .sdrawer-project-head:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 .sdrawer-project-chevron { flex: none; display: inline-flex; color: var(--overlay1); transition: transform var(--duration) var(--ease); }
 .sdrawer-project.is-open .sdrawer-project-chevron { transform: rotate(90deg); }
 .sdrawer-project-id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.sdrawer-project-name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sdrawer-project-name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-family: var(--mono); font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sdrawer-project-path, .sdrawer-project-count { font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sdrawer-project-count { flex: none; max-width: 40%; }
 .sdrawer-project-attention { width: 7px; height: 7px; }
-.sdrawer-project-cards { display: flex; flex-direction: column; gap: 7px; padding-left: 2px; }
-.sdrawer-project + .sdrawer-project .sdrawer-project-head { margin-top: 2px; }
+.sdrawer-project-cards { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) 0 0 var(--space-1); }
+.sdrawer-project + .sdrawer-project .sdrawer-project-head { margin-top: var(--space-2); }
+.sdrawer-show-all { min-height: 36px; align-self: flex-start; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--mauve); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.sdrawer-show-all:hover, .sdrawer-show-all:active { background: var(--surface0); color: var(--text); }
+.sdrawer-show-all:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 /* Search — filters the list below in place. It is a real field, not a door to
    somewhere else: sending the user to the command palette meant leaving the

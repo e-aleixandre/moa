@@ -1,5 +1,6 @@
-import { fuzzyMatch } from "../fuzzy.js";
 import { projectKey, projectLabel, shortPath } from "./format.js";
+
+export const PROJECT_SAVED_PREVIEW_LIMIT = 5;
 
 const updated = (session) => session.updated || 0;
 const isSaved = (session) => session.state === "saved" || session.saved;
@@ -65,15 +66,54 @@ export function pruneDrawerCollapsed(drawerCollapsed, sessions) {
   return Object.fromEntries(Object.entries(drawerCollapsed).filter(([key]) => keys.has(key)));
 }
 
+function searchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+}
+
+// Session titles are sentence-length and the list can hold hundreds of rows,
+// so palette-style subsequence matching turns ordinary words into noise. Match
+// every whitespace-delimited term as a literal substring instead. NFD folding
+// is cheap here and lets Spanish keyboard input find both "sesión" and
+// "sesion" without changing command actions' deliberately fuzzy matching.
+//
+// The model name stays in the haystack because the palette has always let you
+// find sessions by it; the drawer simply never had a model to match against.
+export function sessionSearchMatch(query, session) {
+  const terms = searchText(query).trim().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const haystack = searchText(`${session.title || ""} ${session.model || ""} ${session.path || ""} ${session.cwd || ""}`);
+  return terms.every((term) => haystack.includes(term));
+}
+
+// A project should reveal its shape before one archive consumes the viewport.
+// Open rows stay unconditionally visible: hiding a running or attention-needed
+// session behind an affordance is worse than a long group. The five newest
+// saved rows give useful recent context while leaving room for neighbouring
+// projects on a phone; searching and an explicit expansion reveal the archive.
+export function visibleProjectSessions(section, expanded = false, searching = false) {
+  if (expanded || searching) return section.sessions;
+  let savedShown = 0;
+  return section.sessions.filter((session) => {
+    if (!isSaved(session)) return true;
+    if (savedShown >= PROJECT_SAVED_PREVIEW_LIMIT) return false;
+    savedShown++;
+    return true;
+  });
+}
+
+export function hiddenProjectSavedCount(section, expanded = false, searching = false) {
+  return section.sessions.length - visibleProjectSessions(section, expanded, searching).length;
+}
+
 // Search stays global: it filters rows, retains their project metadata, and
 // leaves the persisted accordion state untouched for the caller to restore.
 export function filterProjectSections(sections, query) {
-  const q = query.trim().toLowerCase();
-  if (!q) return sections;
+  if (!query.trim()) return sections;
   return sections.flatMap((section) => {
-    const sessions = section.sessions.filter((s) =>
-      fuzzyMatch(q, `${s.title || ""} ${s.path || ""} ${s.cwd || ""}`.toLowerCase())
-    );
+    const sessions = section.sessions.filter((session) => sessionSearchMatch(query, session));
     return sessions.length ? [{ ...section, sessions }] : [];
   });
 }
