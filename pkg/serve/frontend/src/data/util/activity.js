@@ -4,8 +4,8 @@
 // flight, the label synthesizes a mid-level *intent* ("Running tests", "Editing
 // code") from the running tool and its args — an honest, glanceable summary that
 // is neither the task title nor the raw tool call (both of which the redesign
-// rejects for this line). Between tools it falls back to a rotating playful
-// gerund; the live elapsed timer is what signals progress.
+// rejects for this line). Between tools it falls back to a playful gerund that
+// stays put for that episode; the live elapsed timer is what signals progress.
 
 export const WORKING_VERBS = [
   'Pondering',
@@ -24,16 +24,73 @@ export const WORKING_VERBS = [
   'Wrangling',
   'Spelunking',
   'Musing',
+  'Crunching',
+  'Churning',
+  'Marinating',
+  'Scheming',
+  'Puzzling',
+  'Incubating',
+  'Fermenting',
+  'Distilling',
+  'Whittling',
+  'Plotting',
+  'Chewing',
+  'Juggling',
+  'Orchestrating',
+  'Sketching',
+  'Divining',
+  'Rummaging',
+  'Burrowing',
+  'Kneading',
+  'Steeping',
+  'Polishing',
+  'Calibrating',
+  'Weaving',
+  'Hatching',
+  'Mulling',
+  'Deliberating',
+  'Contemplating',
 ];
 
-const ROTATE_MS = 4000;
-
-export function workingVerb(session, nowMs) {
+// workingVerb selects one playful label for each between-tools episode. It is
+// deliberately seeded rather than clock-rotated: activityText runs on every
+// render (including the elapsed timer's one-second tick), and changing copy
+// without a new agent event falsely suggests progress. Tool starts already in
+// the session transcript give us a durable, pure episode boundary without
+// adding presentation state to the session.
+export function workingVerb(session) {
   const startedAt = session?.runStartedAtMs;
   if (!startedAt) return WORKING_VERBS[0];
 
-  const index = Math.floor((nowMs - startedAt) / ROTATE_MS) % WORKING_VERBS.length;
-  return WORKING_VERBS[Math.max(0, index)];
+  const episode = countToolStarts(session?.messages);
+  let previousIndex = -1;
+  for (let i = 0; i <= episode; i++) {
+    // Select from every verb except the preceding episode's selection. The hash
+    // disperses adjacent episodes and independent runs across the list instead
+    // of walking its order, while exclusion makes a repeated label impossible.
+    const candidateCount = WORKING_VERBS.length - (previousIndex >= 0 ? 1 : 0);
+    let index = seededIndex(`${startedAt}:${i}`, candidateCount);
+    if (previousIndex >= 0 && index >= previousIndex) index++;
+    previousIndex = index;
+  }
+  return WORKING_VERBS[previousIndex];
+}
+
+function countToolStarts(messages) {
+  if (!Array.isArray(messages)) return 0;
+  return messages.reduce((count, message) => count + (message?._type === 'tool_start' ? 1 : 0), 0);
+}
+
+// A small FNV-1a hash is enough here: it makes a stable state look random
+// without Math.random(), whose render-to-render variability would be both
+// misleading and untestable.
+function seededIndex(seed, length) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) % length;
 }
 
 // TOOL_ACTIONS maps a tool name to its present-continuous intent phrase. bash is
@@ -53,6 +110,16 @@ const TOOL_ACTIONS = {
   web_search: 'Searching the web',
   send_file: 'Sending a file',
   subagent: 'Running a subagent',
+  bash_wait: 'Waiting on a command',
+  bash_status: 'Checking a command',
+  subagent_status: 'Checking a subagent',
+  tasks: 'Updating tasks',
+  memory: 'Consulting memory',
+  verify: 'Running checks',
+  moa_docs: 'Reading the docs',
+  ask_user: 'Asking you',
+  bash_cancel: 'Cancelling a command',
+  subagent_cancel: 'Cancelling a subagent',
 };
 
 // LIVE_VERBS maps a tool name to the present-continuous verb shown on the
@@ -152,7 +219,26 @@ export function activityAction(session) {
     }
     return 'Running a command';
   }
+  if (name === 'subagent_wait') {
+    const waiting = countRunningTools(session.messages, 'subagent_wait');
+    return waiting > 1 ? `Waiting on ${waiting} subagents` : 'Waiting on a subagent';
+  }
+  if (name.startsWith('mcp__')) {
+    const [, server] = name.split('__');
+    if (server) return `Using ${server}`;
+  }
   return TOOL_ACTIONS[name] || 'Working';
+}
+
+// Parallel tool calls remain separately represented in the transcript with a
+// running status. Counting those is more accurate than counting live jobs:
+// this text describes waits currently blocking the parent agent, not every
+// background subagent it happened to launch.
+function countRunningTools(messages, toolName) {
+  if (!Array.isArray(messages)) return 0;
+  return messages.reduce((count, message) => count + (
+    message?._type === 'tool_start' && message.status === 'running' && message.tool_name === toolName ? 1 : 0
+  ), 0);
 }
 
 // formatElapsed renders a compact mm:ss-ish counter: "8s", "1m03s", "12m".
@@ -188,7 +274,7 @@ export function activityPhase(session) {
 // activityLabel builds the human text for the indicator given a coarse phase. In
 // the working phase it returns a steady "Working"; callers that have the session
 // (MobileComposer, StatusStrip) prefer activityAction(session) to name the tool
-// in flight and fall back to a rotating verb only between tools.
+// in flight and fall back to a seeded, steady verb only between tools.
 //
 // session is optional and only refines the verifying phase, which can be either
 // an automatic post-edit run or a manual /verify aimed at another repository.
@@ -228,16 +314,17 @@ function withEllipsis(text, phase) {
 
 // activityText resolves the full activity phrase for a session, following the
 // SPEC order: special phases keep their fixed copy; the working phase names the
-// in-flight tool via activityAction and falls back to a rotating verb between tools;
+// in-flight tool via activityAction and falls back to a verb that holds for the
+// episode between tools;
 // idle (null phase) returns null so the segment hides. Phrases for phases where
 // work is actually happening get a trailing ellipsis (withEllipsis). This is the
 // single source both the mobile status line and the desktop now-line consume, so
 // they never diverge. It never returns the task title or a raw tool call.
-export function activityText(session, nowMs = Date.now()) {
+export function activityText(session) {
   const phase = activityPhase(session);
   if (phase === null) return null;
   const text = phase === 'working'
-    ? activityAction(session) || workingVerb(session, nowMs)
+    ? activityAction(session) || workingVerb(session)
     : activityLabel(phase, session);
   return withEllipsis(text, phase);
 }

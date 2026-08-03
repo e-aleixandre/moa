@@ -86,6 +86,27 @@ test('activityAction maps non-bash tools to intent phrases', () => {
   expect(activityAction(running('web_search', {}))).toBe('Searching the web');
   expect(activityAction(running('send_file', {}))).toBe('Sending a file');
   expect(activityAction(running('subagent', {}))).toBe('Running a subagent');
+  expect(activityAction(running('bash_wait', {}))).toBe('Waiting on a command');
+  expect(activityAction(running('bash_status', {}))).toBe('Checking a command');
+  expect(activityAction(running('subagent_wait', {}))).toBe('Waiting on a subagent');
+  expect(activityAction(running('subagent_status', {}))).toBe('Checking a subagent');
+  expect(activityAction(running('tasks', {}))).toBe('Updating tasks');
+  expect(activityAction(running('memory', {}))).toBe('Consulting memory');
+  expect(activityAction(running('verify', {}))).toBe('Running checks');
+  expect(activityAction(running('moa_docs', {}))).toBe('Reading the docs');
+  expect(activityAction(running('ask_user', {}))).toBe('Asking you');
+  expect(activityAction(running('bash_cancel', {}))).toBe('Cancelling a command');
+  expect(activityAction(running('subagent_cancel', {}))).toBe('Cancelling a subagent');
+  expect(activityAction(running('mcp__playwright__browser_click', {}))).toBe('Using playwright');
+});
+
+test('activityAction pluralizes simultaneous subagent waits from running tool calls', () => {
+  const session = running('subagent_wait', {});
+  session.messages.unshift(
+    { _type: 'tool_start', tool_name: 'subagent_wait', args: {}, status: 'running' },
+    { _type: 'tool_start', tool_name: 'subagent_wait', args: {}, status: 'running' },
+  );
+  expect(activityAction(session)).toBe('Waiting on 3 subagents');
 });
 
 test('activityAction classifies bash commands into intents', () => {
@@ -120,15 +141,40 @@ test('activityAction returns null with no in-flight tool', () => {
   expect(activityAction(null)).toBe(null);
 });
 
-test('workingVerb rotates deterministically from the run start', () => {
-  const session = { runStartedAtMs: 10000 };
-  expect(workingVerb(session, 10000)).toBe(WORKING_VERBS[0]);
-  expect(workingVerb(session, 17999)).toBe(WORKING_VERBS[1]);
-  expect(workingVerb(session, 18000)).toBe(WORKING_VERBS[2]);
-  expect(workingVerb(session, 10000 + (WORKING_VERBS.length + 2) * 4000 + 1)).toBe(WORKING_VERBS[2]);
-  expect(workingVerb(session, 9999)).toBe(WORKING_VERBS[0]);
+test('working verbs are distinct, single-word gerunds', () => {
+  expect(new Set(WORKING_VERBS).size).toBe(WORKING_VERBS.length);
+  for (const verb of WORKING_VERBS) expect(verb).toMatch(/^[A-Z][a-z]+$/);
+});
+
+test('workingVerb stays fixed through clock ticks within one episode', () => {
+  const session = { state: 'running', runStartedAtMs: 10000, messages: [] };
+  const text = activityText(session, 10000);
+  expect(activityText(session, 14000)).toBe(text);
+  expect(activityText(session, 130000)).toBe(text);
   expect(workingVerb({}, 10000)).toBe(WORKING_VERBS[0]);
   expect(workingVerb({ runStartedAtMs: 0 }, 10000)).toBe(WORKING_VERBS[0]);
+});
+
+test('workingVerb changes on a new tool episode without repeating the previous verb', () => {
+  const session = { state: 'running', runStartedAtMs: 10000, messages: [] };
+  const first = workingVerb(session);
+  session.messages.push({ _type: 'tool_start', tool_name: 'read', status: 'done' });
+  const second = workingVerb(session);
+  expect(second).not.toBe(first);
+  session.messages.push({ _type: 'tool_start', tool_name: 'edit', status: 'done' });
+  expect(workingVerb(session)).not.toBe(second);
+});
+
+test('different runs use different seeded episode sequences', () => {
+  const sequence = (runStartedAtMs) => {
+    const session = { runStartedAtMs, messages: [] };
+    return Array.from({ length: 4 }, () => {
+      const verb = workingVerb(session);
+      session.messages.push({ _type: 'tool_start' });
+      return verb;
+    });
+  };
+  expect(sequence(10000)).not.toEqual(sequence(20000));
 });
 
 test('activityText follows the resolution order', () => {
@@ -137,8 +183,9 @@ test('activityText follows the resolution order', () => {
   // working with a tool → the synthesized action, ellipsized (work in progress)
   expect(activityText(running('edit', {}))).toBe('Editing code…');
   expect(activityText(running('bash', { command: 'go test ./...' }))).toBe('Running tests…');
-  // working between tools → rotating verb anchored to the run start
-  expect(activityText({ state: 'running', runStartedAtMs: 10000, messages: [] }, 18000)).toBe('Noodling…');
+  // working between tools → a seeded verb anchored to the run and tool episode
+  const betweenTools = { state: 'running', runStartedAtMs: 10000, messages: [] };
+  expect(activityText(betweenTools, 18000)).toBe(`${workingVerb(betweenTools)}…`);
   // special phases keep fixed copy, ignoring any tool
   expect(activityText({ state: 'running', thinkingText: 'x' })).toBe('Thinking…');
   expect(activityText({ state: 'running', compacting: true })).toBe('Compacting context…');
@@ -150,6 +197,12 @@ test('activityText follows the resolution order', () => {
 test('activityText withholds the ellipsis while waiting on the user', () => {
   expect(activityText({ state: 'permission' })).toBe('Waiting for you');
   expect(activityText({ state: 'running', pendingAsk: { id: 'a' } })).toBe('Waiting for you');
+});
+
+test('machine waits remain distinct from waiting for the user', () => {
+  expect(activityText(running('bash_wait', {}))).toBe('Waiting on a command…');
+  expect(activityText(running('subagent_wait', {}))).toBe('Waiting on a subagent…');
+  expect(activityText({ state: 'permission' })).toBe('Waiting for you');
 });
 
 // The tables stay punctuation-free: the ellipsis is added by the presentation

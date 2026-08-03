@@ -231,7 +231,7 @@ function ConnectedPane({ node, state, tileIndex }) {
     );
   }
 
-  const activity = activityText(session, nowMs);
+  const activity = activityText(session);
   const task = workIsLive && session.runStartedAtMs
     ? `${activity} · ${formatElapsed(Math.max(0, nowMs - session.runStartedAtMs))}`
     : activity;

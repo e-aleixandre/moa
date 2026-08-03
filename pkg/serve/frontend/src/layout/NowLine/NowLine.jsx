@@ -30,7 +30,7 @@ export function nowLineModel(session, nowMs) {
   const phase = activityPhase(session);
   if (!phase) return null;
 
-  const text = activityText(session, nowMs);
+  const text = activityText(session);
   if (!text) return null;
 
   const waiting = phase === "waiting";
