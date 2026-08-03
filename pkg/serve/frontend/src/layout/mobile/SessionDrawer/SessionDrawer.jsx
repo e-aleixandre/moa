@@ -2,8 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
 import { SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
-import { fuzzyMatch } from "../../../data/fuzzy.js";
-import { filterProjectSections, groupProjectSessions, projectCollapsed } from "../../../data/util/project-sessions.js";
+import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
 import { NewSessionView } from "./NewSessionView.jsx";
 import "./SessionDrawer.css";
@@ -282,6 +281,7 @@ export function SessionDrawer({
   // second create flow. Both reset on every open, so it never reopens mid-task.
   const [view, setView] = useState(step);
   const [query, setQuery] = useState("");
+  const [expandedProjects, setExpandedProjects] = useState(() => new Set());
 
   // The screen an open lands on — and a step change while the drawer is
   // already open (the palette handing over to an open drawer) — both come from
@@ -408,10 +408,11 @@ export function SessionDrawer({
     }
   };
 
-  // Search filters the list in place — no second surface, no second list. Fuzzy
-  // over title and path, the same two fields the palette matches on.
-  const q = query.trim().toLowerCase();
-  const hit = (s) => !q || fuzzyMatch(q, `${s.title || ""} ${s.path || ""} ${s.cwd || ""}`.toLowerCase());
+  // Search filters the list in place — no second surface, no second list.
+  // Session search intentionally uses word substrings rather than the command
+  // palette's subsequence matcher; long session titles otherwise match noise.
+  const q = query.trim();
+  const hit = (s) => sessionSearchMatch(q, s);
   const shownActive = active.filter(hit);
   const shownSaved = saved.filter(hit);
   const hitCount = shownActive.length + shownSaved.length;
@@ -482,6 +483,9 @@ export function SessionDrawer({
             <div class="sdrawer-list">
               {groupByProject ? projectSections.map((section) => {
                 const collapsed = projectCollapsed(section, drawerCollapsed, !!q);
+                const expanded = expandedProjects.has(section.key);
+                const shownSessions = visibleProjectSessions(section, expanded, !!q);
+                const hiddenSaved = hiddenProjectSavedCount(section, expanded, !!q);
                 const needs = section.attention === "permission" ? `${section.label}, ${section.openCount} open, ${section.attentionCount} needs permission` : section.attention === "error" ? `${section.label}, ${section.openCount} open, ${section.attentionCount} has an error` : `${section.label}, ${section.openCount} open${section.savedCount ? `, ${section.savedCount} saved` : ""}`;
                 return <section class={`sdrawer-project${collapsed ? "" : " is-open"}`} key={section.key}>
                   <button type="button" class="sdrawer-project-head" aria-expanded={!collapsed} aria-label={needs} onClick={() => onToggleProject?.(section.key, !collapsed)}>
@@ -489,7 +493,10 @@ export function SessionDrawer({
                     <span class="sdrawer-project-id"><span class="sdrawer-project-name">{section.label}{section.attention && <span class={`state-dot sdrawer-project-attention ${section.attention}`} aria-hidden="true" />}</span>{section.path && <span class="sdrawer-project-path">{section.path}</span>}</span>
                     <span class="sdrawer-project-count">{section.openCount} open{section.savedCount ? ` · ${section.savedCount} saved` : ""}</span>
                   </button>
-                  {!collapsed && <div class="sdrawer-project-cards">{section.sessions.map((s) => card(s, true))}</div>}
+                  {!collapsed && <div class="sdrawer-project-cards">
+                    {shownSessions.map((s) => card(s, true))}
+                    {hiddenSaved > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}
+                  </div>}
                 </section>;
               }) : <>{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{shownSaved.map((s) => card(s))}</>}
               {q && hitCount === 0 && (

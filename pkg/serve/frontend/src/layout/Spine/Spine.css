@@ -123,6 +123,9 @@
 .spine .spine-project .spine-label { display: flex; align-items: center; gap: var(--space-2); }
 .spine .spine-project .spine-label small { margin-left: auto; font: inherit; font-size: var(--text-nano); font-weight: var(--weight-normal); letter-spacing: normal; text-transform: none; white-space: nowrap; }
 .spine-project-attention { width: 7px; height: 7px; }
+.spine-show-all { min-height: 30px; align-self: flex-start; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--mauve); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.spine-show-all:hover { background: var(--surface0); color: var(--text); }
+.spine-show-all:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 .spine .spine-list .session-row {
   width: 100%;

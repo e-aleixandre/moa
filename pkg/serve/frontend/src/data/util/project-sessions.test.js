@@ -1,7 +1,8 @@
 import { test, expect } from "bun:test";
 import {
   defaultProjectCollapsed, filterProjectSections, groupProjectSessions,
-  projectCollapsed, projectSectionOrder, pruneDrawerCollapsed,
+  hiddenProjectSavedCount, projectCollapsed, projectSectionOrder, pruneDrawerCollapsed,
+  sessionSearchMatch, visibleProjectSessions,
 } from "./project-sessions.js";
 
 const session = (id, cwd, state, updated, extra = {}) => ({ id, cwd, state, updated, title: id, ...extra });
@@ -54,17 +55,51 @@ test("canonicalizes empty, undefined, root, and repeated trailing slashes", () =
   expect(groups.at(-1).sessions.map((s) => s.id)).toEqual(["missing", "empty"]);
 });
 
-test("search matches title, full cwd, non-consecutive fuzzy characters, and multiple sections", () => {
+test("session search matches words in title, full cwd, and multiple sections", () => {
   const sections = groupProjectSessions([
     session("title", "/work/a", "idle", 1, { title: "alpha task" }),
     session("long", "/home/me/a-very-long-directory-name/needle-is-here/project", "idle", 2, { path: "…/project", title: "other" }),
-    session("fuzzy", "/work/b", "idle", 3, { title: "fXoXo" }),
+    session("not-fuzzy", "/work/b", "idle", 3, { title: "fXoXo" }),
     session("other", "/work/c", "idle", 4, { title: "alpha second" }),
   ]);
   expect(filterProjectSections(sections, "needle-is-here")[0].sessions.map((s) => s.id)).toEqual(["long"]);
-  expect(filterProjectSections(sections, "foo")[0].sessions.map((s) => s.id)).toEqual(["fuzzy"]);
+  expect(filterProjectSections(sections, "foo")).toEqual([]);
   expect(filterProjectSections(sections, "alpha")).toHaveLength(2);
   expect(filterProjectSections(sections, "   ")).toBe(sections);
+});
+
+test("session search avoids subsequence noise in representative long titles", () => {
+  const sections = groupProjectSessions([
+    session("iread-1", "/work/iread", "saved", 1, { title: "iREAD audio notes" }),
+    session("iread-2", "/work/other", "saved", 2, { title: "Fix iRead transcript" }),
+    session("iread-3", "/work/other", "saved", 3, { title: "iREAD review" }),
+    session("pwa-1", "/work/other", "saved", 4, { title: "PWA input zoom" }),
+    session("pwa-2", "/work/other", "saved", 5, { title: "Ship the pwa" }),
+    session("docs-1", "/work/other", "saved", 6, { title: "Moa Docs Web" }),
+    session("docs-2", "/work/other", "saved", 7, { title: "Documentation docs drift" }),
+    session("memory", "/work/other", "saved", 8, { title: "Sessions and Memory" }),
+  ]);
+  const count = (query) => filterProjectSections(sections, query).flatMap((section) => section.sessions).length;
+  expect(count("iread")).toBe(3);
+  expect(count("pwa")).toBe(2);
+  expect(count("docs")).toBe(2);
+  expect(count("memoria")).toBe(0);
+  expect(sessionSearchMatch("moa docs", { title: "Moa Docs Web" })).toBe(true);
+  expect(sessionSearchMatch("sesion", { title: "Sesión guardada" })).toBe(true);
+  // The palette has always matched sessions by model name; keep that reachable.
+  expect(sessionSearchMatch("opus", { title: "Untitled", model: "Claude Opus 5" })).toBe(true);
+});
+
+test("project previews never hide open sessions and reveal every saved row on search or expansion", () => {
+  const [section] = groupProjectSessions([
+    ...Array.from({ length: 7 }, (_, i) => session(`open-${i}`, "/work/a", "idle", 100 - i)),
+    ...Array.from({ length: 8 }, (_, i) => session(`saved-${i}`, "/work/a", "saved", 100 - i)),
+  ]);
+  expect(visibleProjectSessions(section).filter((row) => row.state !== "saved")).toHaveLength(7);
+  expect(visibleProjectSessions(section)).toHaveLength(12);
+  expect(hiddenProjectSavedCount(section)).toBe(3);
+  expect(visibleProjectSessions(section, false, true)).toHaveLength(15);
+  expect(visibleProjectSessions(section, true)).toHaveLength(15);
 });
 
 test("accordion integration preserves the user fold across search and restore", () => {
