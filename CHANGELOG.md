@@ -5,6 +5,67 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-08-03
+
+### Added
+
+- `/handoff` continues the work in a fresh session. Long conversations end up
+  carrying context that no longer earns its place, and the only ways out were
+  compacting in place or starting from nothing and re-explaining the task. The
+  current model writes a curated handoff, then a new session starts and runs
+  with it. Model and thinking level are inherited unless `--model` or
+  `--thinking` say otherwise. Available in both frontends.
+- Every memory fact now declares when it stops being true. Memory accumulated
+  claims that had quietly gone stale — a phase still "pending" long after it
+  shipped, a version three releases behind — because nothing in a fact said
+  what would end it. Deleting was never the missing piece; knowing *which* fact
+  to delete was. A write now declares either `invalidate_when`, a condition
+  another agent can check right now against a concrete source, or
+  `durable: true` for facts that outlive the work that produced them. Staying
+  silent is not an option, because a default of "permanent" is how the pile
+  grew. The condition shows when a fact is read and is kept out of the
+  always-injected index, so it costs no context until someone opens the fact.
+  Existing facts carry no condition and read back as durable: nothing to migrate.
+
+### Changed
+
+- Project memory follows the git repository instead of the working directory.
+  Every worktree of the same repository used to get its own store, so a fact
+  learned in one branch was invisible from another and the same correction had
+  to be repeated per checkout. Memory is now keyed by repository — all of its
+  worktrees share it — while permissions and MCP vetoes stay per directory on
+  purpose, since those are decisions about one checkout on one machine.
+  Migration is one-shot and copies rather than moves, so rolling back is just
+  the previous binary. Stores that cannot be attributed to a repository are
+  left untouched and listed in `codebases/orphaned-memory.json`.
+- The session list can group by folder, on the phone's drawer and the desktop
+  spine. It is optional, lives in the `⋯` menu, and the preference is
+  remembered.
+
+### Fixed
+
+- Searching the session list returned noise instead of results. It matched by
+  subsequence — an algorithm borrowed from the command palette, where it suits
+  twenty short command names. Against sentence-length titles it matched almost
+  everything: with 119 sessions, "iread" returned 75 of them, because those
+  five letters appear, in order, in most titles. Sessions now match whole terms
+  as substrings, in any order, with diacritics folded so a Spanish keyboard
+  finds "sesión" by typing "sesion". Command actions keep the fuzzy match they
+  were designed around.
+- A folder with dozens of sessions filled the screen, so the grouping hid the
+  structure it existed to show: you scrolled past one archive to learn a second
+  folder existed. A group now previews its most recent saved sessions behind a
+  "show all". Open sessions are never hidden — a running or attention-needed
+  session behind a disclosure is worse than a long list, and that limit would
+  otherwise bury exactly the rows worth acting on.
+- Group headers sat flush against their first session while sessions had gaps
+  between them, and consecutive groups were separated by less space than rows
+  within a single group — spacing that contradicted the hierarchy it was meant
+  to express. The whitespace now goes to the boundary that carries meaning, and
+  a header reads as a label rather than as another card.
+- The menus in the session list can be driven from the keyboard: arrows, Home,
+  End and Escape, with focus returning where it came from.
+
 ## [0.24.1] - 2026-08-02
 
 ### Fixed
