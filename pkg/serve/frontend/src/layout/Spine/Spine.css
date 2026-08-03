@@ -44,6 +44,15 @@
   border-radius: var(--radius-sm);
   padding: 2px var(--space-2);
 }
+.spine-group-wrap { position: relative; flex: none; }
+.spine-group-more { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-md); background: none; color: var(--overlay1); cursor: pointer; }
+.spine-group-more:hover { background: var(--surface0); color: var(--text); }
+.spine-group-more:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+.spine-group-menu { position: absolute; top: calc(100% + 5px); right: 0; z-index: var(--z-overlay); min-width: 196px; padding: var(--space-1); background: var(--surface0); border: 1px solid var(--surface1); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+.spine-group-menu > span { display: block; padding: 7px 10px 5px; font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
+.spine-group-menu button { display: flex; align-items: center; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--subtext0); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.spine-group-menu button:hover, .spine-group-menu button:focus-visible { background: var(--surface1); color: var(--text); outline: none; }
+.spine-group-menu i { display: inline-flex; width: 14px; margin-right: 9px; color: var(--mauve); }
 
 .spine a.ver-update {
   color: var(--yellow);
@@ -110,6 +119,10 @@
   gap: var(--space-2);
   margin-bottom: var(--space-2);
 }
+.spine .spine-project-path { margin: -2px var(--space-1) var(--space-1); font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spine .spine-project .spine-label { display: flex; align-items: center; gap: var(--space-2); }
+.spine .spine-project .spine-label small { margin-left: auto; font: inherit; font-size: var(--text-nano); font-weight: var(--weight-normal); letter-spacing: normal; text-transform: none; white-space: nowrap; }
+.spine-project-attention { width: 7px; height: 7px; }
 
 .spine .spine-list .session-row {
   width: 100%;

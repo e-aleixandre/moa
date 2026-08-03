@@ -18,6 +18,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Queue commands and messages while the agent is working (strict send order)
 - Per-session cost readout (main run + subagents), matching the TUI
 - Rename (`/rename <title>`) and delete sessions from the overview
+- Group the mobile drawer and desktop session spine by recency or project; the choice is saved locally
 - Unread badges on sessions with activity you haven't seen yet
 - Multi-pane tiled layouts
 - Keyboard-first navigation

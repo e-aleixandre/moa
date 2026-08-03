@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Plus, MoreHorizontal, Settings, Search } from "lucide-preact";
+import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
 import { SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
 import { fuzzyMatch } from "../../../data/fuzzy.js";
+import { filterProjectSections, groupProjectSessions, projectCollapsed } from "../../../data/util/project-sessions.js";
+import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
 import { NewSessionView } from "./NewSessionView.jsx";
 import "./SessionDrawer.css";
 
@@ -53,25 +55,17 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
   const [dropUp, setDropUp] = useState(false);
   const ref = useRef(null);
   const actionsRef = useRef(null);
+  const triggerRef = useRef(null);
+  const { onMenuKeyDown, closeMenu } = useMenuKeyboard(open, setOpen, triggerRef, actionsRef);
 
   useEffect(() => {
     if (!open) return;
     const onDocDown = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     };
-    // Capture Escape here and stop it: otherwise the drawer's own key handler
-    // (added on document) would also fire and close the whole drawer.
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
     document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [open]);
 
@@ -104,6 +98,7 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
       <button
         type="button"
         class="sdcard-menu-btn"
+        ref={triggerRef}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Session actions"
@@ -117,13 +112,14 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
           role="menu"
           aria-label="Session actions"
           ref={actionsRef}
+          onKeyDown={onMenuKeyDown}
         >
           {isSaved ? (
-            <button type="button" role="menuitem" class="sdcard-action" onClick={() => { setOpen(false); onReopen?.(session.id); }}>
+            <button type="button" role="menuitem" class="sdcard-action" onClick={() => { closeMenu(); onReopen?.(session.id); }}>
               Reopen session
             </button>
           ) : (
-            <button type="button" role="menuitem" class="sdcard-action" onClick={() => { setOpen(false); onClose?.(session.id); }}>
+            <button type="button" role="menuitem" class="sdcard-action" onClick={() => { closeMenu(); onClose?.(session.id); }}>
               Close session
             </button>
           )}
@@ -132,7 +128,7 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
               type="button"
               role="menuitem"
               class="sdcard-action sdcard-action-danger"
-              onClick={() => { setOpen(false); onDelete?.(session.id); }}
+              onClick={() => { closeMenu(); onDelete?.(session.id); }}
             >
               Delete — this cannot be undone
             </button>
@@ -158,7 +154,7 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
 // part is the ⋯ overflow laid over its top-right corner; SessionRow's own
 // `onClose` X is deliberately not used, because lifecycle here is a menu
 // (close/reopen/delete), not a single dismiss.
-function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession, onDeleteSession }) {
+function SessionDrawerCard({ session, hidePath = false, onSelect, onCloseSession, onReopenSession, onDeleteSession }) {
   const { id, title, state, when, last, needsLabel, path, unseen, origin } = session;
   const brief = last
     ? needsLabel
@@ -176,7 +172,7 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
         when={when}
         origin={origin}
         brief={brief}
-        path={path}
+        path={hidePath ? undefined : path}
         onClick={() => onSelect?.(id)}
       />
       <SessionCardMenu
@@ -187,6 +183,37 @@ function SessionDrawerCard({ session, onSelect, onCloseSession, onReopenSession,
       />
     </div>
   );
+}
+
+function DrawerGroupMenu({ groupByProject, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const [dropUp, setDropUp] = useState(false);
+  const { onMenuKeyDown, closeMenu } = useMenuKeyboard(open, setOpen, triggerRef, menuRef);
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    return () => { document.removeEventListener("mousedown", onDocDown); };
+  }, [open]);
+  useLayoutEffect(() => {
+    if (!open || !ref.current || !menuRef.current) return;
+    const drawer = ref.current.closest(".sdrawer");
+    setDropUp(menuRef.current.offsetHeight + 8 > drawer.getBoundingClientRect().bottom - ref.current.getBoundingClientRect().bottom);
+  }, [open]);
+  const choose = (on) => { onChange?.(on); closeMenu(); };
+  return <div class="sdrawer-more-wrap" ref={ref}>
+    <button type="button" ref={triggerRef} class="sdrawer-more" aria-label="Session grouping" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <MoreHorizontal size={16} aria-hidden="true" />
+    </button>
+    {open && <div class={`sdrawer-group-menu${dropUp ? " sdrawer-group-menu--up" : ""}`} role="menu" aria-label="Session grouping" ref={menuRef} onKeyDown={onMenuKeyDown}>
+      <span class="sdrawer-group-menu-label">Group sessions</span>
+      <button type="button" role="menuitemradio" aria-checked={!groupByProject} onClick={() => choose(false)}><span class="sdrawer-group-menu-tick">{!groupByProject && <Check size={14} />}</span>By recency</button>
+      <button type="button" role="menuitemradio" aria-checked={groupByProject} onClick={() => choose(true)}><span class="sdrawer-group-menu-tick">{groupByProject && <Check size={14} />}</span>By project</button>
+    </div>}
+  </div>;
 }
 
 // SessionDrawer — the mobile session list, unfurled from the title chip it is
@@ -230,6 +257,10 @@ export function SessionDrawer({
   onCloseSession,
   onReopenSession,
   onDeleteSession,
+  groupByProject = false,
+  drawerCollapsed = {},
+  onGroupByProject,
+  onToggleProject,
 }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
@@ -380,15 +411,17 @@ export function SessionDrawer({
   // Search filters the list in place — no second surface, no second list. Fuzzy
   // over title and path, the same two fields the palette matches on.
   const q = query.trim().toLowerCase();
-  const hit = (s) => !q || fuzzyMatch(q, `${s.title || ""} ${s.path || ""}`.toLowerCase());
+  const hit = (s) => !q || fuzzyMatch(q, `${s.title || ""} ${s.path || ""} ${s.cwd || ""}`.toLowerCase());
   const shownActive = active.filter(hit);
   const shownSaved = saved.filter(hit);
   const hitCount = shownActive.length + shownSaved.length;
+  const projectSections = filterProjectSections(groupProjectSessions([...active, ...saved]), query);
 
-  const card = (s) => (
+  const card = (s, hidePath = false) => (
     <SessionDrawerCard
       key={s.id}
       session={s}
+      hidePath={hidePath}
       onSelect={onSelect}
       onCloseSession={onCloseSession}
       onReopenSession={onReopenSession}
@@ -429,6 +462,7 @@ export function SessionDrawer({
               >
                 <Plus size={15} aria-hidden="true" />
               </button>
+              <DrawerGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
             </div>
 
             <div class="sdrawer-search">
@@ -446,9 +480,18 @@ export function SessionDrawer({
             </div>
 
             <div class="sdrawer-list">
-              {shownActive.map(card)}
-              {shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}
-              {shownSaved.map(card)}
+              {groupByProject ? projectSections.map((section) => {
+                const collapsed = projectCollapsed(section, drawerCollapsed, !!q);
+                const needs = section.attention === "permission" ? `${section.label}, ${section.openCount} open, ${section.attentionCount} needs permission` : section.attention === "error" ? `${section.label}, ${section.openCount} open, ${section.attentionCount} has an error` : `${section.label}, ${section.openCount} open${section.savedCount ? `, ${section.savedCount} saved` : ""}`;
+                return <section class={`sdrawer-project${collapsed ? "" : " is-open"}`} key={section.key}>
+                  <button type="button" class="sdrawer-project-head" aria-expanded={!collapsed} aria-label={needs} onClick={() => onToggleProject?.(section.key, !collapsed)}>
+                    <span class="sdrawer-project-chevron"><ChevronRight size={14} aria-hidden="true" /></span>
+                    <span class="sdrawer-project-id"><span class="sdrawer-project-name">{section.label}{section.attention && <span class={`state-dot sdrawer-project-attention ${section.attention}`} aria-hidden="true" />}</span>{section.path && <span class="sdrawer-project-path">{section.path}</span>}</span>
+                    <span class="sdrawer-project-count">{section.openCount} open{section.savedCount ? ` · ${section.savedCount} saved` : ""}</span>
+                  </button>
+                  {!collapsed && <div class="sdrawer-project-cards">{section.sessions.map((s) => card(s, true))}</div>}
+                </section>;
+              }) : <>{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{shownSaved.map((s) => card(s))}</>}
               {q && hitCount === 0 && (
                 <span class="sdrawer-note">No session matches “{query}”</span>
               )}
