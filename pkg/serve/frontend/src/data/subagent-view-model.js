@@ -180,7 +180,7 @@ export function subagentView(session, jobId) {
         thinkingText: sub.thinkingText,
         state: 'running',
         runStartedAtMs: sub.startedAtMs,
-      }, Date.now());
+      });
       if (label) view.action = label;
     }
     if (sub.startedAtMs) {
