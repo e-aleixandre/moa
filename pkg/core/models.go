@@ -107,12 +107,17 @@ var knownModels = map[string]Model{
 	},
 
 	// --- xAI ---
-	// The locally verified xAI reference identifies Grok 4.5's 500K context
-	// window. Pricing and output limits remain unset until verified on xAI's
-	// public API, preventing fabricated cost estimates or caps.
+	// Grok 4.5 charges its long-context rate to the whole request once the
+	// prompt reaches 200K tokens, including cached input.
 	"grok-4.5": {
 		ID: "grok-4.5", Provider: "xai", API: "xai-responses",
 		Name: "Grok 4.5", MaxInput: 500_000,
+		Pricing: &Pricing{
+			Input: 2, Output: 6, CacheRead: 0.3,
+			Tiers: []PricingTier{
+				{Threshold: 200_000, Input: 4, Output: 12, CacheRead: 0.6},
+			},
+		},
 	},
 }
 
