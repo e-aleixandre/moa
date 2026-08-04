@@ -14,7 +14,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Streaming output over WebSocket
 - Permission prompts and cancel
 - Plan mode, subagents, MCP
-- Model and thinking reconfiguration per session
+- Model and thinking reconfiguration per session, with pinned-model shortcuts and provider drill-down
 - Queue commands and messages while the agent is working (strict send order)
 - Per-session cost readout (main run + subagents), matching the TUI
 - Rename (`/rename <title>`) and delete sessions from the overview
@@ -180,6 +180,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/version` | Current version, update state, and served frontend build id |
 | `GET /api/capabilities` | Server/session capabilities (providers, features) |
 | `GET /api/usage` | Usage/cost readout |
+| `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |

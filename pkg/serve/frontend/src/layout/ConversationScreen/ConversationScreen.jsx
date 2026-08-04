@@ -26,6 +26,7 @@ import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
+import { addToast } from "../../data/notifications.js";
 import { configureSession, closeSession, openPersistedSubagent, openBashJob, rewindToMessage } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
@@ -290,7 +291,16 @@ export function ConversationScreen({ version }) {
           models={specs}
           selected={selectedModel}
           thinking={thinking}
-          onSelect={(spec) => configureSession(session.id, { model: spec })}
+          sessionModel={session.model || ""}
+          onSelect={(spec) => {
+            configureSession(session.id, { model: spec })
+              .then(() => setModelOpen(false))
+              .catch((error) => addToast({
+                title: "Could not change model",
+                detail: error.message,
+                type: "error",
+              }));
+          }}
           onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
         />
       </div>

@@ -106,7 +106,7 @@ global config and a project's jargon in its `.moa/config.json`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `pinned_models` | []string | Models for `Ctrl+P` cycling. **Global-only.** |
+| `pinned_models` | []string | Models shown as shortcuts in the web/TUI selectors and used for `Ctrl+P` cycling. **Global-only.** |
 | `plan_review_model` | string | Model for plan review (default: current model) |
 | `plan_review_thinking` | string | Thinking level for plan review (default: `low`) |
 | `code_review_model` | string | Model for code review |

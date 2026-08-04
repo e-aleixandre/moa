@@ -467,12 +467,11 @@ type Manager struct {
 	versionMu sync.RWMutex
 	version   release.Result
 
-	// mcpConfigMu serializes MCP disable-preference mutations across the whole
-	// process: SaveGlobalConfig/SaveProjectConfig do atomic read-modify-write per
-	// file, but two toggles racing on the same file could still lose an update
-	// between read and rename. It also serializes the fan-out to open sessions so
-	// two concurrent toggles don't interleave reconciles.
-	mcpConfigMu sync.Mutex
+	// configMutationMu serializes global and project configuration mutations
+	// across the process: the core persistence helpers atomically replace a file,
+	// but concurrent read-modify-write operations could still lose an update. It
+	// also serializes MCP preference fan-out to open sessions.
+	configMutationMu sync.Mutex
 
 	// automation indexes Automation API idempotency keys; automationMu makes
 	// check-create-record atomic so two retries of the same webhook cannot both

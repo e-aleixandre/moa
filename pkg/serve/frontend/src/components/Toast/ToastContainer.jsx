@@ -36,6 +36,13 @@ export function ToastContainer() {
         <Toast
           key={t.id}
           tone={TONE[t.type] || "info"}
+          action={t.action ? {
+            ...t.action,
+            onClick: (event) => {
+              t.action.onClick?.(event);
+              removeToast(t.id);
+            },
+          } : undefined}
           onDismiss={() => removeToast(t.id)}
           onClick={t.sessionId ? () => handleClick(t) : undefined}
           style={t.sessionId ? "cursor:pointer" : undefined}

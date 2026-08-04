@@ -184,8 +184,8 @@ func parseMCPScope(raw string) (core.MCPDisableScope, error) {
 func (m *Manager) ToggleMCPServer(anchor *ManagedSession, params mcpDisableParams, server string) (mcpToggleResult, error) {
 	// Serialize the whole mutation (persist + fan-out) so two concurrent toggles
 	// can't lose a config update or interleave reconciles.
-	m.mcpConfigMu.Lock()
-	defer m.mcpConfigMu.Unlock()
+	m.configMutationMu.Lock()
+	defer m.configMutationMu.Unlock()
 
 	// A session being closed is having its MCP manager torn down: mutating its
 	// live tool set now is at best wasted work. Sessions already dropped from

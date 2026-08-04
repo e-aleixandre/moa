@@ -338,7 +338,15 @@ export function MobileStatusLine({ session, usage }) {
             thinking={thinking}
             embedded
             sessionModel={session.model || ""}
-            onSelect={(spec) => configureSession(session.id, { model: spec })}
+            onSelect={(spec) => {
+              configureSession(session.id, { model: spec })
+                .then(() => setSessionOpen(false))
+                .catch((error) => addToast({
+                  title: "Could not change model",
+                  detail: error.message,
+                  type: "error",
+                }));
+            }}
             onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
           />
 

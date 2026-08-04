@@ -503,11 +503,16 @@ func main() {
 			StartInSessionBrowser: startInSessionBrowser,
 			CWD:                   cwd,
 			PinnedModels:          moaCfg.PinnedModels,
-			PromptTemplates:       promptTemplates,
-			MCPController:         sess.MCPController,
-			OnPinnedModelsChange: func(ids []string) error {
+			LoadPinnedModels: func() []string {
+				return core.LoadGlobalConfig().PinnedModels
+			},
+			PromptTemplates: promptTemplates,
+			MCPController:   sess.MCPController,
+			OnPinnedModelsChange: func(changes []tui.PinnedModelChange) error {
 				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
-					cfg.PinnedModels = ids
+					for _, change := range changes {
+						cfg.PinnedModels = core.UpdatePinnedModels(cfg.PinnedModels, change.ID, change.Pinned)
+					}
 				})
 			},
 			Transcriber:        transcriber,

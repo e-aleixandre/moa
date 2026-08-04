@@ -105,6 +105,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	static := newStaticServer()
 
 	mux.HandleFunc("GET /api/models", handleListModels())
+	mux.HandleFunc("GET /api/model-preferences", handleModelPreferences(manager))
+	mux.HandleFunc("PATCH /api/model-preferences", handleModelPreferences(manager))
 	mux.HandleFunc("GET /api/version", handleVersion(manager, static.buildID))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
@@ -744,13 +746,13 @@ func handleTrustMCP(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		// Hold mcpConfigMu across the trust write AND the reload: a concurrent
+		// Hold configMutationMu across the trust write AND the reload: a concurrent
 		// GLOBAL ToggleMCPServer also does a read-modify-write of the global
 		// config, so the two must not interleave (lost update / temp-file
-		// collision). ToggleMCPServer takes mcpConfigMu then the per-session
+		// collision). ToggleMCPServer takes configMutationMu then the per-session
 		// lifecycle guard; we take the same order below.
-		mgr.mcpConfigMu.Lock()
-		defer mgr.mcpConfigMu.Unlock()
+		mgr.configMutationMu.Lock()
+		defer mgr.configMutationMu.Unlock()
 
 		if err := core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 			if core.IsMCPPathTrusted(*cfg, cwd) {
