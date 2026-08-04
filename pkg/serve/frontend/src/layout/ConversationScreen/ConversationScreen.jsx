@@ -290,6 +290,7 @@ export function ConversationScreen({ version }) {
           models={specs}
           selected={selectedModel}
           thinking={thinking}
+          provider={session.provider}
           onSelect={(spec) => configureSession(session.id, { model: spec })}
           onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
         />

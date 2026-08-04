@@ -40,10 +40,15 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 
 	if thinking != "" {
 		normalized := normalizeThinkingLevel(thinking)
-		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: normalized}); err != nil {
+		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+		effective, err := core.EffectiveThinkingLevel(model, normalized)
+		if err != nil {
 			return nil, err
 		}
-		result["thinking"] = normalized
+		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: effective}); err != nil {
+			return nil, err
+		}
+		result["thinking"] = effective
 	}
 
 	// Fill in current values for non-changed fields.

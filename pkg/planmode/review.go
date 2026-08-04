@@ -36,6 +36,10 @@ func Review(ctx context.Context, cfg ReviewConfig, planPath string, onStream Rev
 	if cfg.ProviderFactory == nil {
 		return ReviewResult{}, errNoProvider
 	}
+	thinking, err := core.EffectiveThinkingLevel(cfg.Model, cfg.ThinkingLevel)
+	if err != nil {
+		return ReviewResult{}, err
+	}
 	provider, err := cfg.ProviderFactory(cfg.Model)
 	if err != nil {
 		return ReviewResult{}, err
@@ -50,12 +54,12 @@ func Review(ctx context.Context, cfg ReviewConfig, planPath string, onStream Rev
 	}
 
 	child, err := agent.New(agent.AgentConfig{
-		Provider:            provider,
-		Model:               cfg.Model,
-		SystemPrompt:        reviewerPrompt,
-		ThinkingLevel:       cfg.ThinkingLevel,
-		Tools:               reviewReg,
-		Compaction: &core.CompactionSettings{Enabled: false},
+		Provider:      provider,
+		Model:         cfg.Model,
+		SystemPrompt:  reviewerPrompt,
+		ThinkingLevel: thinking,
+		Tools:         reviewReg,
+		Compaction:    &core.CompactionSettings{Enabled: false},
 	})
 	if err != nil {
 		return ReviewResult{}, err
@@ -141,6 +145,10 @@ func ReviewCode(ctx context.Context, cfg ReviewConfig, summary string, filesChan
 	if cfg.ProviderFactory == nil {
 		return ReviewResult{}, errNoProvider
 	}
+	thinking, err := core.EffectiveThinkingLevel(cfg.Model, cfg.ThinkingLevel)
+	if err != nil {
+		return ReviewResult{}, err
+	}
 	provider, err := cfg.ProviderFactory(cfg.Model)
 	if err != nil {
 		return ReviewResult{}, err
@@ -157,7 +165,7 @@ func ReviewCode(ctx context.Context, cfg ReviewConfig, summary string, filesChan
 		Provider:      provider,
 		Model:         cfg.Model,
 		SystemPrompt:  codeReviewerPrompt,
-		ThinkingLevel: cfg.ThinkingLevel,
+		ThinkingLevel: thinking,
 		Tools:         reviewReg,
 		Compaction:    &core.CompactionSettings{Enabled: false},
 	})

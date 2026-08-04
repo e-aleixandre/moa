@@ -95,18 +95,6 @@ func (e Extra) CurrencySymbol() string {
 	}
 }
 
-// Snapshot is a point-in-time view of plan usage. Window pointers are nil when
-// the corresponding window is not reported (e.g. per-model weekly windows with
-// no usage yet).
-type Snapshot struct {
-	FiveHour       *Window   `json:"five_hour"`
-	SevenDay       *Window   `json:"seven_day"`
-	SevenDayOpus   *Window   `json:"seven_day_opus"`
-	SevenDaySonnet *Window   `json:"seven_day_sonnet"`
-	Extra          Extra     `json:"extra_usage"`
-	FetchedAt      time.Time `json:"fetched_at"`
-}
-
 // Fetch retrieves a usage snapshot using the given OAuth access token.
 func Fetch(ctx context.Context, client *http.Client, token string) (*Snapshot, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -135,6 +123,7 @@ func Fetch(ctx context.Context, client *http.Client, token string) (*Snapshot, e
 		return nil, fmt.Errorf("decoding usage response: %w", err)
 	}
 	snap.FetchedAt = time.Now()
+	snap.NormalizeAnthropic()
 	return &snap, nil
 }
 
@@ -150,6 +139,7 @@ type Poller struct {
 	tokenFn     TokenFunc
 	client      *http.Client
 	minInterval time.Duration
+	fetch       Fetcher
 
 	fetchMu sync.Mutex // serializes network fetches (single-flight)
 
@@ -165,6 +155,7 @@ func NewPoller(tokenFn TokenFunc) *Poller {
 		tokenFn:     tokenFn,
 		client:      &http.Client{Timeout: 15 * time.Second},
 		minInterval: time.Minute,
+		fetch:       Fetch,
 	}
 }
 
@@ -176,7 +167,7 @@ func (p *Poller) Get(ctx context.Context) (*Snapshot, error) {
 	p.mu.Lock()
 	if snap, err, ok := p.cachedLocked(); ok {
 		p.mu.Unlock()
-		return snap, err
+		return cloneSnapshot(snap), err
 	}
 	p.mu.Unlock()
 
@@ -187,7 +178,7 @@ func (p *Poller) Get(ctx context.Context) (*Snapshot, error) {
 	p.mu.Lock()
 	if snap, err, ok := p.cachedLocked(); ok {
 		p.mu.Unlock()
-		return snap, err
+		return cloneSnapshot(snap), err
 	}
 	p.mu.Unlock()
 
@@ -199,13 +190,34 @@ func (p *Poller) Get(ctx context.Context) (*Snapshot, error) {
 	if err != nil {
 		p.lastErr = err
 		if p.latest != nil {
-			return p.latest, nil // serve stale on transient error
+			p.latest.Stale = true
+			return cloneSnapshot(p.latest), nil // serve stale on transient error
 		}
 		return nil, err
 	}
 	p.latest = snap
+	if snap != nil {
+		snap.Stale = false
+	}
 	p.lastErr = nil
-	return snap, nil
+	return cloneSnapshot(snap), nil
+}
+
+// cloneSnapshot prevents callers (HTTP encoders and UI consumers included)
+// from observing or mutating the poller's cached object.
+func cloneSnapshot(s *Snapshot) *Snapshot {
+	if s == nil {
+		return nil
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return nil
+	}
+	var out Snapshot
+	if json.Unmarshal(b, &out) != nil {
+		return nil
+	}
+	return &out
 }
 
 // cachedLocked returns the cached response when the last fetch is still fresh.
@@ -230,5 +242,5 @@ func (p *Poller) doFetch(ctx context.Context) (*Snapshot, error) {
 	if !ok {
 		return nil, nil
 	}
-	return Fetch(ctx, p.client, token)
+	return p.fetch(ctx, p.client, token)
 }

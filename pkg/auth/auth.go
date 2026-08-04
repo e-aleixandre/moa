@@ -94,6 +94,19 @@ func (s *Store) load() {
 	_ = json.Unmarshal(data, &s.data)
 }
 
+// withFileLock serializes auth.json updates between CLI and serve processes.
+// The credential file itself is still atomically replaced; the adjacent lock
+// file has a stable inode, so it remains useful across those replacements.
+func (s *Store) withFileLock(fn func() error) error {
+	if s.path == "" {
+		return fn()
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
+		return fmt.Errorf("creating config dir: %w", err)
+	}
+	return withPlatformFileLock(s.path+".lock", fn)
+}
+
 // loadFromDisk reads the credential file into a fresh map without mutating the
 // in-memory store. Used before an OAuth refresh to pick up a token that a
 // sibling process (e.g. serve + CLI) may have already rotated. The atomic
@@ -150,15 +163,23 @@ func (s *Store) save() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming credentials: %w", err)
 	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("syncing config dir: %w", err)
+	}
 	return nil
 }
 
 // Set stores a credential for a provider.
 func (s *Store) Set(provider string, cred Credential) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.data[provider] = cred
-	return s.save()
+	return s.withFileLock(func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if disk, err := s.loadFromDisk(); err == nil {
+			s.data = disk
+		}
+		s.data[provider] = cred
+		return s.save()
+	})
 }
 
 // Get retrieves a credential for a provider.
@@ -171,10 +192,15 @@ func (s *Store) Get(provider string) (Credential, bool) {
 
 // Remove deletes a credential for a provider.
 func (s *Store) Remove(provider string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.data, provider)
-	return s.save()
+	return s.withFileLock(func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if disk, err := s.loadFromDisk(); err == nil {
+			s.data = disk
+		}
+		delete(s.data, provider)
+		return s.save()
+	})
 }
 
 // GetAPIKey resolves the API key for a provider.
@@ -188,6 +214,11 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 	// 1. Environment variable
 	envKey := envKeyForProvider(provider)
 	if v := os.Getenv(envKey); v != "" {
+		// XAI_API_KEY is always an API key. In particular, a JWT-shaped value
+		// must never accidentally select the consumer OAuth transport.
+		if provider == "xai" {
+			return v, false, nil
+		}
 		return v, IsOAuthToken(v), nil
 	}
 
@@ -228,51 +259,114 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 			return cred.Access, true, nil
 		}
 
-		// Re-read from disk under the refresh lock: a sibling process (serve +
-		// CLI share ~/.config/moa/auth.json) may have already refreshed and
-		// rotated the token. Refreshing with our stale in-memory refresh token
-		// would be rejected by the provider and force a needless re-login, so
-		// adopt the on-disk credential — and reuse it directly if still valid.
-		// (Residual gap: two processes refreshing in the exact same instant
-		// still race; a true fix needs a cross-process file lock.)
-		if disk, derr := s.loadFromDisk(); derr == nil {
-			if dc, ok := disk[provider]; ok && dc.Type == "oauth" && dc.Refresh != "" {
-				s.mu.Lock()
-				s.data[provider] = dc
-				s.mu.Unlock()
-				cred = dc
-				if time.Now().UnixMilli() < cred.Expires {
-					return cred.Access, true, nil
+		var result Credential
+		var saveErr error
+		err := s.withFileLock(func() error {
+			// Reload only after owning the inter-process lock. This makes refresh
+			// token rotation safe even when CLI and serve expire simultaneously.
+			if disk, derr := s.loadFromDisk(); derr == nil {
+				if dc, found := disk[provider]; found && dc.Type == "oauth" {
+					cred = dc
+					s.mu.Lock()
+					s.data[provider] = dc
+					s.mu.Unlock()
 				}
 			}
-		}
-
-		refreshed, err := s.refresh(provider, cred.Refresh)
+			if time.Now().UnixMilli() < cred.Expires {
+				result = cred
+				return nil
+			}
+			refreshed, err := s.refresh(provider, cred.Refresh)
+			if err != nil {
+				return err
+			}
+			result = Credential{Type: "oauth", Access: refreshed.Access, Refresh: refreshed.Refresh, Expires: refreshed.Expires, AccountID: refreshed.AccountID}
+			s.mu.Lock()
+			s.data[provider] = result
+			saveErr = s.save()
+			s.mu.Unlock()
+			return nil
+		})
 		if err != nil {
 			return "", false, fmt.Errorf("token refresh failed: %w (run --login %s to re-authenticate)", err, provider)
 		}
-		cred = Credential{
-			Type:      "oauth",
-			Access:    refreshed.Access,
-			Refresh:   refreshed.Refresh,
-			Expires:   refreshed.Expires,
-			AccountID: refreshed.AccountID,
-		}
-		// Persist the rotated token. A failed save is not silent: the provider
-		// already invalidated the previous refresh token, so a stale on-disk
-		// copy will force a re-login on the next start — warn so it is visible.
-		s.mu.Lock()
-		s.data[provider] = cred
-		saveErr := s.save()
-		s.mu.Unlock()
 		if saveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not persist refreshed %s token: %v (next start may require re-login)\n", provider, saveErr)
 		}
-		return cred.Access, true, nil
+		return result.Access, true, nil
 
 	default:
 		return "", false, fmt.Errorf("unknown credential type %q for provider %q", cred.Type, provider)
 	}
+}
+
+// CredentialKind reports the credential origin without inspecting token
+// contents. Environment values are always API keys, including JWT-shaped xAI
+// values, so transport selection cannot be confused by token syntax.
+func (s *Store) CredentialKind(provider string) string {
+	if os.Getenv(envKeyForProvider(provider)) != "" {
+		return "api_key"
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.data[provider].Type
+}
+
+// RefreshOAuthIfCurrent reactively rotates an OAuth token that a consumer API
+// rejected. If another request already rotated it, that newer token is reused.
+// It deliberately never considers environment variables: those are API keys.
+func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	s.mu.RLock()
+	cred, ok := s.data[provider]
+	s.mu.RUnlock()
+	if !ok || cred.Type != "oauth" {
+		return "", fmt.Errorf("no OAuth credentials for provider %q", provider)
+	}
+	if cred.Access != rejected {
+		return cred.Access, nil
+	}
+	var result Credential
+	err := s.withFileLock(func() error {
+		if disk, derr := s.loadFromDisk(); derr == nil {
+			if dc, found := disk[provider]; found && dc.Type == "oauth" {
+				cred = dc
+				s.mu.Lock()
+				s.data[provider] = dc
+				s.mu.Unlock()
+			}
+		}
+		if cred.Access != rejected {
+			result = cred
+			return nil
+		}
+		// Do not keep serving a token the consumer explicitly rejected. Persist
+		// its invalid expiry before refreshing so a later request retries refresh
+		// even if this attempt fails.
+		cred.Expires = 0
+		s.mu.Lock()
+		s.data[provider] = cred
+		s.mu.Unlock()
+		refreshed, err := s.refresh(provider, cred.Refresh)
+		if err != nil {
+			s.mu.Lock()
+			_ = s.save()
+			s.mu.Unlock()
+			return err
+		}
+		result = Credential{Type: "oauth", Access: refreshed.Access, Refresh: refreshed.Refresh, Expires: refreshed.Expires, AccountID: refreshed.AccountID}
+		s.mu.Lock()
+		s.data[provider] = result
+		err = s.save()
+		s.mu.Unlock()
+		return err
+	})
+	if err != nil {
+		return "", fmt.Errorf("token refresh failed: %w (run --login %s to re-authenticate)", err, provider)
+	}
+	return result.Access, nil
 }
 
 // PeekOAuthToken returns the current OAuth access token for a provider WITHOUT
@@ -288,6 +382,9 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 func (s *Store) PeekOAuthToken(provider string) (token string, isOAuth, valid bool) {
 	// 1. Environment variable (never refreshed; treated as always valid).
 	if v := os.Getenv(envKeyForProvider(provider)); v != "" {
+		if provider == "xai" {
+			return "", false, false
+		}
 		if IsOAuthToken(v) {
 			return v, true, true
 		}
@@ -322,8 +419,12 @@ func refreshOAuthToken(provider, refreshToken string) (*OAuthCredentials, error)
 	switch provider {
 	case "openai":
 		return RefreshOpenAIToken(refreshToken)
-	default:
+	case "anthropic":
 		return RefreshAnthropicToken(refreshToken)
+	case "xai":
+		return RefreshXAIToken(refreshToken)
+	default:
+		return nil, fmt.Errorf("unsupported OAuth provider %q", provider)
 	}
 }
 

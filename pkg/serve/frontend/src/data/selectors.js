@@ -98,10 +98,11 @@ const THINKING_CYCLE = ['off', 'low', 'medium', 'high', 'xhigh'];
 // nextThinkingLevel returns the next level in THINKING_CYCLE after `level`,
 // wrapping back to "off" after "xhigh". Unknown/missing levels start the
 // cycle at "low" (one step past "off"), so a stray click always moves it.
-export function nextThinkingLevel(level) {
-  const idx = THINKING_CYCLE.indexOf(level);
+export function nextThinkingLevel(level, levels = THINKING_CYCLE) {
+  const cycle = levels.length ? levels : THINKING_CYCLE;
+  const idx = cycle.indexOf(level);
   const from = idx === -1 ? 0 : idx;
-  return THINKING_CYCLE[(from + 1) % THINKING_CYCLE.length];
+  return cycle[(from + 1) % cycle.length];
 }
 
 // matchSelectedModel finds the spec whose display name matches the session's

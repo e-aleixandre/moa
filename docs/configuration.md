@@ -112,6 +112,11 @@ global config and a project's jargon in its `.moa/config.json`:
 | `code_review_model` | string | Model for code review |
 | `code_review_thinking` | string | Thinking level for code review |
 
+The initial xAI model is `grok-4.5`, also available as `grok`. Its supported
+thinking levels are `low`, `medium`, and `high`. A provider-qualified custom
+model such as `xai/<model-id>` is accepted, but Moa has no context-window or
+pricing metadata for it unless it is in the built-in model registry.
+
 ### MCP servers
 
 | Field | Type | Description |
@@ -250,7 +255,7 @@ when it is about the project itself and should reach everyone who clones it.
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)) |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)). An environment key takes precedence over the stored credential for that provider; in particular, `XAI_API_KEY` selects the metered `api.x.ai` API-key route and eclipses a stored xAI OAuth login. |
 | `MOA_CONFIG_DIR` | Moves everything moa stores about itself (default `~/.config/moa`): `config.json`, credentials, sessions, skills, prompts, memory, attachments. See [Running two instances](#running-two-instances) |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 | `MOA_AUTOMATION_TOKEN` | Shared secret enabling the inbound [Automation API](./automation.md); equivalent to `--automation-token`. Separate from `MOA_SERVE_TOKEN` |

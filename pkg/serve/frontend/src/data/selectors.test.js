@@ -73,3 +73,9 @@ test('nextThinkingLevel: unknown level starts the cycle at "low"', () => {
   expect(nextThinkingLevel('none')).toBe('low');
   expect(nextThinkingLevel(undefined)).toBe('low');
 });
+
+
+test('nextThinkingLevel: Grok cycles only supported persisted levels', () => {
+  expect(nextThinkingLevel('low', ['low', 'medium', 'high'])).toBe('medium');
+  expect(nextThinkingLevel('high', ['low', 'medium', 'high'])).toBe('low');
+});

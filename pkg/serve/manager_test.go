@@ -115,7 +115,7 @@ func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.P
 	t.Helper()
 	mgr := NewManager(ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return provider, nil },
-		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		DefaultModel:    core.Model{ID: "claude-haiku-4-5-20251001", Provider: "anthropic"},
 		WorkspaceRoot:   root,
 		MoaCfg:          moaCfg,
 		ConfigLoader:    isolatedTestConfigLoader(t, moaCfg),

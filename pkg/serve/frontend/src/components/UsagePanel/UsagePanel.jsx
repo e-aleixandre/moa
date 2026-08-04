@@ -40,7 +40,7 @@ function Meter({ pct, level }) {
 // planReset renders the reset copy for a meter: Anthropic windows carry a reset
 // timestamp ("resets in 2h 10m"); OpenAI meters are percent-only (no reset).
 function planReset(m) {
-  if (m.source === "anthropic" && m.resetsAt) return `resets in ${fmtReset(m.resetsAt)}`;
+  if (m.resetsAt) return `resets in ${fmtReset(m.resetsAt)}`;
   return "";
 }
 
@@ -75,11 +75,11 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
         </div>
       )}
 
-      {(u.fiveHour || u.week || extra) && (
+      {(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
         <div class="usage-panel-group">
           {u.fiveHour && (
             <div class="usage-panel-row usage-panel-meter-row">
-              <span class="usage-panel-key">Plan · 5h</span>
+              <span class="usage-panel-key">Plan · {u.fiveHour.label || "5h"}</span>
               <Meter pct={u.fiveHour.pct} level={usageLevel(u.fiveHour.pct)} />
               <span class="usage-panel-val">{u.fiveHour.pct}%</span>
               {planReset(u.fiveHour) && <span class="usage-panel-note">{planReset(u.fiveHour)}</span>}
@@ -87,7 +87,7 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
           )}
           {u.week && (
             <div class="usage-panel-row usage-panel-meter-row">
-              <span class="usage-panel-key">Plan · week</span>
+              <span class="usage-panel-key">Plan · {u.week.label || "week"}</span>
               <Meter pct={u.week.pct} level={usageLevel(u.week.pct)} />
               <span class="usage-panel-val">{u.week.pct}%</span>
               {planReset(u.week) && <span class="usage-panel-note">{planReset(u.week)}</span>}
@@ -103,6 +103,19 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
               <span class="usage-panel-note">pay-as-you-go</span>
             </div>
           )}
+          {(u.moneyBuckets || []).filter((b) => b.id !== "payg").map((b) => (
+            <div class="usage-panel-row" key={b.id}>
+              <span class="usage-panel-key">{b.label || b.id}</span>
+              <span class="usage-panel-val">{b.remaining_minor != null ? money(b.remaining_minor, { decimal_places: b.decimals, currency: b.currency }) : "—"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(u.tier || u.stale) && <div class="usage-panel-group"><div class="usage-panel-row">{u.tier && <><span class="usage-panel-key">Plan</span><span class="usage-panel-val">{u.tier}</span></>}{u.stale && <span class="usage-panel-note">stale</span>}</div></div>}
+      {u.providerStatus && u.providerStatus.reason === "plan_unsupported" && (
+        <div class="usage-panel-group">
+          <div class="usage-panel-row"><span class="usage-panel-note">Consumer plan quota is unavailable for an xAI API key.</span></div>
         </div>
       )}
     </div>

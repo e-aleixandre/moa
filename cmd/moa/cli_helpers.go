@@ -61,6 +61,12 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 		APIKey:  apiKey,
 		IsOAuth: isOAuth,
 	}
+	if providerName == "xai" {
+		cfg.AuthKind = provider.AuthKindAPIKey
+		if authStore.CredentialKind("xai") == "oauth" {
+			cfg.AuthKind = provider.AuthKindOAuth
+		}
+	}
 
 	var authNotice string
 	switch providerName {
@@ -72,6 +78,13 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 	case "anthropic":
 		if isOAuth {
 			authNotice = "Claude Max OAuth"
+		}
+	case "xai":
+		if isOAuth {
+			cfg.RefreshOAuth = func(rejected string) (string, error) {
+				return authStore.RefreshOAuthIfCurrent("xai", rejected)
+			}
+			authNotice = "SuperGrok/X subscription OAuth"
 		}
 	}
 

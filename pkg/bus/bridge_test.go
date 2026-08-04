@@ -2054,6 +2054,27 @@ func TestHandler_SwitchModel_Unknown(t *testing.T) {
 	}
 }
 
+func TestHandler_SwitchModel_CustomProviderModel(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{model: core.Model{ID: "grok-4.5", Provider: "xai"}, thinkingLevel: "low"}
+	sctx := newTestSessionContext(b, fa)
+	sctx.ProviderFactory = func(m core.Model) (core.Provider, error) {
+		if m.Provider != "xai" || m.ID != "future-grok" {
+			t.Fatalf("factory model = %+v", m)
+		}
+		return errProvider{}, nil
+	}
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(SwitchModel{ModelSpec: "xai/future-grok"}); err != nil {
+		t.Fatal(err)
+	}
+	if fa.setModelModel.Provider != "xai" || fa.setModelModel.ID != "future-grok" {
+		t.Fatalf("switched model = %+v", fa.setModelModel)
+	}
+}
+
 // ===========================================================================
 // SendPrompt handler tests
 // ===========================================================================

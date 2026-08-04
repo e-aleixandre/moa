@@ -371,6 +371,9 @@ func TestNewOAuth_UsesCodexEndpoint(t *testing.T) {
 		if bytes.Contains(reqBody, []byte("max_output_tokens")) {
 			t.Errorf("codex request must not include max_output_tokens, got body: %s", reqBody)
 		}
+		if bytes.Contains(reqBody, []byte("parallel_tool_calls")) {
+			t.Errorf("codex request must not include unverified parallel_tool_calls: %s", reqBody)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
 		_, _ = fmt.Fprint(w,

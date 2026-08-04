@@ -4,7 +4,9 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -25,6 +27,17 @@ func TestParseAllowPattern_Valid(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("parseAllowPattern(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestBuildProvider_XAIStoredOAuth(t *testing.T) {
+	store := newTestAuthStore(t)
+	if err := store.Set("xai", auth.Credential{Type: "oauth", Access: "consumer-token", Refresh: "refresh", Expires: time.Now().Add(time.Hour).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	built, err := buildProvider(core.Model{Provider: "xai", ID: "grok-4.5"}, store)
+	if err != nil || built.Provider == nil || built.AuthNotice == "" {
+		t.Fatalf("build xAI OAuth = %#v, %v", built, err)
 	}
 }
 

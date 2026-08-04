@@ -1,6 +1,9 @@
 package tui
 
-import "strings"
+import (
+	"github.com/e-aleixandre/moa/pkg/core"
+	"strings"
+)
 
 // thinkingPicker is a small inline selector for thinking levels.
 type thinkingPicker struct {
@@ -22,8 +25,13 @@ var defaultThinkingEntries = []thinkingEntry{
 	{"Extra High", "xhigh"},
 }
 
-func (p *thinkingPicker) Open(currentLevel string) {
+func (p *thinkingPicker) Open(currentLevel string) { p.OpenForModel(currentLevel, core.Model{}) }
+
+func (p *thinkingPicker) OpenForModel(currentLevel string, model core.Model) {
 	p.entries = defaultThinkingEntries
+	if model.Provider == "xai" {
+		p.entries = defaultThinkingEntries[1:4]
+	}
 	p.cursor = 0
 	for i, e := range p.entries {
 		if e.value == currentLevel {

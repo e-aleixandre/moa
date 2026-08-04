@@ -15,15 +15,15 @@ import (
 // planningAllowlist are the tool names available during planning mode.
 // Tools not in this set are unregistered from the agent's registry.
 var planningAllowlist = map[string]bool{
-	"read":        true,
-	"grep":        true,
-	"find":        true,
-	"ls":          true,
-	"bash":        true, // filtered by IsSafeCommand via FilterToolCall
-	"write":       true, // restricted to plan file via FilterToolCall
-	"edit":        true, // restricted to plan file via FilterToolCall
-	"web_search":  true,
-	"fetch_content": true,
+	"read":            true,
+	"grep":            true,
+	"find":            true,
+	"ls":              true,
+	"bash":            true, // filtered by IsSafeCommand via FilterToolCall
+	"write":           true, // restricted to plan file via FilterToolCall
+	"edit":            true, // restricted to plan file via FilterToolCall
+	"web_search":      true,
+	"fetch_content":   true,
 	"submit_plan":     true,
 	"tasks":           true,
 	"subagent":        true, // read-only context gathering; children inherit the restricted registry
@@ -355,6 +355,13 @@ func (pm *PlanMode) GetReviewConfig() ReviewConfig {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	return pm.reviewCfg
+}
+
+// GetCodeReviewConfig returns the code review configuration.
+func (pm *PlanMode) GetCodeReviewConfig() ReviewConfig {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return pm.codeReviewCfg
 }
 
 // --- internal ---

@@ -27,7 +27,9 @@ type Content struct {
 	// output message id and its phase ("commentary"/"final_answer"). OpenAI
 	// warns that dropping the phase when replaying manually causes "early
 	// stopping and other misbehavior", which manifests as empty/stalled turns.
-	// Opaque to everything except the provider that produced it.
+	// Opaque to everything except the provider/model pair that produced it.
+	// Replay adapters must discard it when Message.Provider or Message.Model
+	// differs from their target.
 	TextSignature string `json:"text_signature,omitempty"`
 
 	// thinking

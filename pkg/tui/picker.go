@@ -113,7 +113,11 @@ func (p pickerModel) View(width int) string {
 		// Provider header.
 		if e.model.Provider != lastProvider {
 			lastProvider = e.model.Provider
-			lines = append(lines, pickerDimStyle.Render("  "+strings.ToUpper(e.model.Provider)))
+			providerLabel := strings.ToUpper(e.model.Provider)
+			if e.model.Provider == "xai" {
+				providerLabel = "xAI"
+			}
+			lines = append(lines, pickerDimStyle.Render("  "+providerLabel))
 		}
 
 		line := p.renderEntry(i, e)

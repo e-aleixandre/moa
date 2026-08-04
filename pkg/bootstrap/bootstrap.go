@@ -211,6 +211,11 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	if cfg.ThinkingLevel == "" {
 		cfg.ThinkingLevel = "medium"
 	}
+	var err error
+	cfg.ThinkingLevel, err = core.EffectiveThinkingLevel(cfg.Model, cfg.ThinkingLevel)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: thinking level: %w", err)
+	}
 	// MaxTurns, MaxToolCallsPerTurn, MaxRunDuration: 0 = unlimited.
 	// Explicit values from CLI flags take precedence; otherwise fall through
 	// to config.json values loaded below.
@@ -550,11 +555,20 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			planSessionDir = cfg.CWD // last resort
 		}
 	}
-	reviewModel, reviewThinking := resolveReviewConfig(cfg.Model, moaCfg.PlanReviewModel, moaCfg.PlanReviewThinking)
-	codeReviewModel, codeReviewThinking := resolveReviewConfig(reviewModel, moaCfg.CodeReviewModel, moaCfg.CodeReviewThinking)
+	reviewModel, reviewThinking, err := resolveReviewConfig(cfg.Model, moaCfg.PlanReviewModel, moaCfg.PlanReviewThinking)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: plan review: %w", err)
+	}
+	codeReviewModel, codeReviewThinking, err := resolveReviewConfig(reviewModel, moaCfg.CodeReviewModel, moaCfg.CodeReviewThinking)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: code review: %w", err)
+	}
 	// Code review defaults to plan review settings (not the primary model).
 	if moaCfg.CodeReviewThinking == "" {
-		codeReviewThinking = reviewThinking
+		codeReviewThinking, err = core.EffectiveThinkingLevel(codeReviewModel, reviewThinking)
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap: code review: %w", err)
+		}
 	}
 
 	pm := planmode.New(planmode.Config{
@@ -625,18 +639,27 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 // resolveReviewConfig resolves the model and thinking level for plan/code review.
 // Falls back to the parent model and DefaultReviewThinking when not configured.
-func resolveReviewConfig(fallbackModel core.Model, modelSpec, thinkingSpec string) (core.Model, string) {
+func resolveReviewConfig(fallbackModel core.Model, modelSpec, thinkingSpec string) (core.Model, string, error) {
 	model := fallbackModel
 	if modelSpec != "" {
-		if m, ok := core.ResolveModel(modelSpec); ok {
-			model = m
+		if err := core.ValidateModelSpec(modelSpec); err != nil {
+			return core.Model{}, "", err
 		}
+		// An explicit provider/model is a valid custom model even when it has
+		// no catalog metadata. Keep that provider: silently retaining the
+		// parent here can send a review to a different vendor.
+		m, _ := core.ResolveModel(modelSpec)
+		model = m
 	}
 	thinking := DefaultReviewThinking
 	if thinkingSpec != "" {
 		thinking = thinkingSpec
 	}
-	return model, thinking
+	effective, err := core.EffectiveThinkingLevel(model, thinking)
+	if err != nil {
+		return core.Model{}, "", err
+	}
+	return model, effective, nil
 }
 
 // FormatSubagentNotification produces the text injected into the agent's

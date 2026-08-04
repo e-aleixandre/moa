@@ -39,6 +39,16 @@ func TestNew_OpenAI_OAuth(t *testing.T) {
 	}
 }
 
+func TestNew_XAI_APIKey(t *testing.T) {
+	p, err := New(core.Model{Provider: "xai", ID: "grok-4.5"}, Config{APIKey: "xai-key", AuthKind: AuthKindAPIKey})
+	if err != nil || p == nil {
+		t.Fatalf("New xAI = %v, %v", p, err)
+	}
+	if p, err := New(core.Model{Provider: "xai", ID: "grok-4.5"}, Config{APIKey: "consumer-token", AuthKind: AuthKindOAuth}); err != nil || p == nil {
+		t.Fatalf("New xAI OAuth = %v, %v", p, err)
+	}
+}
+
 func TestNew_EmptyProvider_Errors(t *testing.T) {
 	model := core.Model{Provider: "", ID: "some-model"}
 	_, err := New(model, Config{APIKey: "key"})

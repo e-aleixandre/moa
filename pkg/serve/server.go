@@ -1044,32 +1044,29 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-// usageResponse wraps a usage snapshot for the API. The embedded pointer is nil
-// (and its fields omitted) when plan usage tracking is unavailable.
+// usageResponse is versioned provider-qualified usage data. The legacy fields
+// remain populated for Anthropic clients while frontend callers use providers.
 type usageResponse struct {
-	Available bool   `json:"available"`
-	Error     string `json:"error,omitempty"`
+	Available      bool                            `json:"available"`
+	Error          string                          `json:"error,omitempty"`
+	Version        int                             `json:"version"`
+	Providers      map[string]*usage.Snapshot      `json:"providers,omitempty"`
+	ProviderStatus map[string]usage.ProviderStatus `json:"provider_status,omitempty"`
 	*usage.Snapshot
 }
 
 func handleUsage(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if mgr.usagePoller == nil {
-			writeJSON(w, http.StatusOK, usageResponse{Available: false})
+			writeJSON(w, http.StatusOK, usageResponse{Available: false, Version: 2})
 			return
 		}
-		snap, err := mgr.usagePoller.Get(r.Context())
-		if err != nil || snap == nil {
-			resp := usageResponse{Available: false}
-			if err != nil {
-				// Keep the client-facing error generic: the underlying error may
-				// embed the raw upstream response body, which we don't echo out.
-				resp.Error = "usage temporarily unavailable"
-			}
-			writeJSON(w, http.StatusOK, resp)
-			return
+		providers, statuses := mgr.usagePoller.GetAll(r.Context())
+		resp := usageResponse{Available: len(providers) > 0, Version: 2, Providers: providers, ProviderStatus: statuses, Snapshot: providers["anthropic"]}
+		if resp.Snapshot == nil && statuses["anthropic"].Reason == "temporarily_unavailable" {
+			resp.Error = "usage temporarily unavailable"
 		}
-		writeJSON(w, http.StatusOK, usageResponse{Available: true, Snapshot: snap})
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

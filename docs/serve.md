@@ -17,6 +17,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Model and thinking reconfiguration per session
 - Queue commands and messages while the agent is working (strict send order)
 - Per-session cost readout (main run + subagents), matching the TUI
+- Account plan-usage panel when a supported subscription OAuth login is active
 - Rename (`/rename <title>`) and delete sessions from the overview
 - Group the mobile drawer and desktop session spine by recency or folder; the choice is saved locally
 - Unread badges on sessions with activity you haven't seen yet
@@ -67,7 +68,7 @@ are configurable there too.
 The composer accepts file attachments (paperclip icon, drag-and-drop, or paste). How each file is handled depends on its type:
 
 - **Images** (`jpeg/png/gif/webp`) are sent to the model natively as vision input. Large photos are downscaled in the browser before upload. The server validates the file's magic bytes against the declared type — a binary mislabeled as an image is saved to disk instead of being forwarded to the provider.
-- **PDFs** are sent to the model natively as a `document` block **when the active provider supports it AND the bytes are actually a PDF** (`%PDF-` magic; Anthropic always supports documents, OpenAI on the API-key path). If the active provider does not support native documents — the PDF exceeds the size limit, or the content isn't a real PDF — it is saved to disk as a fallback (see below) and the agent is told where to find it. Because Moa is provider-agnostic and you can switch models mid-conversation, this decision is made per message against whichever provider is active at send time; a `document` already in the history is degraded to a text note if you later switch to a provider that can't accept it.
+- **PDFs** are sent to the model natively as a `document` block **when the active provider supports it AND the bytes are actually a PDF** (`%PDF-` magic; Anthropic always supports documents, OpenAI on the API-key path). xAI Grok currently supports images but not native document/PDF input in Moa. If the active provider does not support native documents — the PDF exceeds the size limit, or the content isn't a real PDF — it is saved to disk as a fallback (see below) and the agent is told where to find it. Because Moa is provider-agnostic and you can switch models mid-conversation, this decision is made per message against whichever provider is active at send time; a `document` already in the history is degraded to a text note if you later switch to a provider that can't accept it.
 - **Small UTF-8 text** (≤256 KiB: `.txt/.md/.csv/.json`, source code, etc.) is inlined directly into the message, wrapped in an `<attachment>` marker.
 - **Everything else** (`.xlsx/.docx/.zip`, binaries, and text larger than 256 KiB) is **saved to disk** under `/tmp/moa-<uid>/<session-id>/`, and that directory is added to the session's path allowlist so the agent can process the file with its own tools (`bash`, `read_file`, etc.). Moa itself does not parse Office/archive formats — the agent decides how, on demand.
 
@@ -116,6 +117,19 @@ You don't have to wait for a run to finish before lining up your next move. What
 - **Stopping**: pressing Stop/`Esc` while a run is in flight dumps whatever was queued back into the composer, so nothing you lined up is silently lost.
 
 `/clear` while a run is queued behind it starts a fresh conversation but keeps the items queued after it — they belong to the new conversation.
+
+## Plan usage
+
+The web usage panel can show provider-qualified subscription plan quota. For
+xAI it is available only for `moa --login xai`: Moa reads the SuperGrok/X
+consumer plan through a private consumer endpoint on a best-effort basis. This
+is not a public consumer API promise and is not a billing authority. It may be
+unavailable or stale if that endpoint changes or cannot be reached; failure to
+read it never blocks a Grok request.
+
+`XAI_API_KEY` uses the separate, metered `api.x.ai` developer API, so its plan
+usage is intentionally not shown in this panel. Moa does not publish xAI
+pricing or calculate xAI run cost until that information is verified.
 
 ## Security
 
@@ -170,6 +184,9 @@ echo-confirmation requirement from the queue. Serve has no formal API version;
 this is the current attention contract.
 
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
+
+xAI login and plan-usage support do not change this security model or expose a
+new Serve authentication route.
 
 ## REST endpoints
 

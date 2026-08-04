@@ -435,10 +435,10 @@ type Manager struct {
 	conversationKey []byte // process-local HMAC key for read cursors
 
 	providerFactory func(model core.Model) (core.Provider, error)
-	transcriber     core.Transcriber // nil when no speech-to-text is available
-	usagePoller     *usage.Poller    // nil when plan usage tracking is unavailable
-	pushStore       *push.Store      // nil when Web Push is unavailable
-	pushDispatcher  *push.Dispatcher // nil when Web Push is unavailable
+	transcriber     core.Transcriber   // nil when no speech-to-text is available
+	usagePoller     *usage.MultiPoller // nil when plan usage tracking is unavailable
+	pushStore       *push.Store        // nil when Web Push is unavailable
+	pushDispatcher  *push.Dispatcher   // nil when Web Push is unavailable
 	defaultModel    core.Model
 	workspaceRoot   string
 	moaCfg          core.MoaConfig
@@ -484,10 +484,10 @@ type Manager struct {
 // ManagerConfig configures a Manager.
 type ManagerConfig struct {
 	ProviderFactory func(model core.Model) (core.Provider, error)
-	Transcriber     core.Transcriber // optional; enables POST /api/transcribe
-	UsagePoller     *usage.Poller    // optional; enables GET /api/usage
-	PushStore       *push.Store      // optional; enables Web Push
-	PushDispatcher  *push.Dispatcher // optional; enables Web Push
+	Transcriber     core.Transcriber   // optional; enables POST /api/transcribe
+	UsagePoller     *usage.MultiPoller // optional; enables GET /api/usage
+	PushStore       *push.Store        // optional; enables Web Push
+	PushDispatcher  *push.Dispatcher   // optional; enables Web Push
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig

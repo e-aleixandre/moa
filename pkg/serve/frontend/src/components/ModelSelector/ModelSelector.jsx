@@ -28,7 +28,8 @@ const LARGE_CATALOG_THRESHOLD = 12;
 // so the radiogroup / roving-tabindex / arrow-key a11y isn't duplicated —
 // this only supplies per-option content (`renderOption`) and the "xhigh is
 // peach (hot)" styling hook (`itemClassName`).
-function ThinkingStepper({ value, onChange }) {
+function ThinkingStepper({ value, onChange, levels = THINKING_OPTIONS.map((o) => o.value) }) {
+  const options = THINKING_OPTIONS.filter((o) => levels.includes(o.value));
   const hot = value === "xhigh";
   return (
     <div class="think-block">
@@ -36,7 +37,7 @@ function ThinkingStepper({ value, onChange }) {
         Thinking <b class={hot ? "hot" : ""}>{value.toUpperCase()}</b>
       </div>
       <Segmented
-        options={THINKING_OPTIONS}
+        options={options}
         value={value}
         onChange={onChange}
         aria-labelledby="model-selector-thinking-label"
@@ -137,7 +138,7 @@ function ModelGrid({ models, selected, onSelect, collapsible = false }) {
         return (
           <div key={g.provider}>
             {isOpen ? (
-              <div class="prov-lbl">{g.provider}</div>
+              <div class="prov-lbl">{g.provider === "xai" ? "xAI" : g.provider}</div>
             ) : (
               <button
                 type="button"
@@ -145,7 +146,7 @@ function ModelGrid({ models, selected, onSelect, collapsible = false }) {
                 aria-expanded={false}
                 onClick={() => setExpanded((e) => ({ ...e, [g.provider]: true }))}
               >
-                <span class="prov-lbl">{g.provider}</span>
+                <span class="prov-lbl">{g.provider === "xai" ? "xAI" : g.provider}</span>
                 <span class="prov-count">{g.items.length}</span>
                 <ChevronRight size={13} aria-hidden="true" />
               </button>
@@ -206,6 +207,7 @@ export function ModelSelector({
   onThinkingChange,
   embedded = false,
   sessionModel,
+  provider,
   ...rest
 }) {
   const [query, setQuery] = useState("");
@@ -223,7 +225,7 @@ export function ModelSelector({
   return (
     <div class={`model-selector${embedded ? " model-selector--embedded" : ""}`} {...rest}>
       {!embedded && <div class="sel-head">Model &amp; thinking</div>}
-      <ThinkingStepper value={thinking} onChange={onThinkingChange} />
+      <ThinkingStepper value={thinking} onChange={onThinkingChange} levels={(selectedSpec?.provider || provider) === "xai" ? ["low", "medium", "high"] : undefined} />
       {!!sessionModel && (
         <CurrentModelRow spec={selectedSpec} sessionModel={sessionModel} />
       )}

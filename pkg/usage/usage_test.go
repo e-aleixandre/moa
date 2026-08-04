@@ -130,6 +130,40 @@ func TestFetchNon200(t *testing.T) {
 	}
 }
 
+func TestFetchXAIMapsConsumerPlanAndMoney(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-XAI-Token-Auth") == "" || r.Header.Get("x-grok-client-mode") != "interactive" {
+			t.Error("missing consumer compatibility headers")
+		}
+		switch r.URL.Path {
+		case "/v1/user":
+			if r.URL.RawQuery != "include=subscription" {
+				t.Errorf("user query = %q", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"userId":"u-1","subscriptionTier":"fallback"}`))
+		case "/v1/billing":
+			if r.URL.RawQuery != "format=credits" {
+				t.Errorf("billing query = %q", r.URL.RawQuery)
+			}
+			if r.Header.Get("x-userid") != "u-1" {
+				t.Errorf("x-userid = %q", r.Header.Get("x-userid"))
+			}
+			_, _ = w.Write([]byte(`{"subscriptionTier":"supergrok","config":{"creditUsagePercent":0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-04-01T00:00:00Z","end":"2026-04-08T00:00:00Z"},"onDemandUsed":{},"onDemandCap":{"val":1000},"prepaidBalance":{"val":500}}}`))
+		}
+	}))
+	defer srv.Close()
+	s, err := FetchXAI(context.Background(), &http.Client{Transport: rewriteHost(srv.URL)}, "oauth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Plan.Tier != "supergrok" || len(s.Quotas) != 1 || s.Quotas[0].Utilization == nil || *s.Quotas[0].Utilization != 0 {
+		t.Fatalf("zero utilization was lost: %#v", s)
+	}
+	if len(s.Money) != 2 || s.Money[0].Used == nil || *s.Money[0].Used != 0 || s.Money[1].Remaining == nil {
+		t.Fatalf("money = %#v", s.Money)
+	}
+}
+
 func TestPollerCachesWithinInterval(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -194,8 +228,8 @@ func TestPollerServesStaleOnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Get returned error instead of stale snapshot: %v", err)
 	}
-	if second != first {
-		t.Errorf("expected stale snapshot to be served on error")
+	if second == first || !second.Stale || second.FiveHour == nil || second.FiveHour.Utilization != first.FiveHour.Utilization {
+		t.Errorf("expected independent stale snapshot to be served on error")
 	}
 }
 

@@ -73,6 +73,63 @@ func TestBuildSession_Minimal(t *testing.T) {
 	}
 }
 
+func TestBuildSession_XAIThinkingIsEffectiveForAgentAndReview(t *testing.T) {
+	cfg := minimalConfig(t)
+	cfg.Model = core.Model{ID: "grok-4.5", Provider: "xai"}
+	cfg.ThinkingLevel = "off"
+	cfg.MoaCfg = &core.MoaConfig{PlanReviewModel: "grok", PlanReviewThinking: "xhigh"}
+	sess, err := BuildSession(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sess.Agent.ThinkingLevel(); got != "low" {
+		t.Fatalf("agent thinking = %q", got)
+	}
+	review := sess.PlanMode.GetReviewConfig()
+	if review.Model.Provider != "xai" || review.ThinkingLevel != "high" {
+		t.Fatalf("review = %+v", review)
+	}
+}
+
+func TestBuildSession_XAIUnknownThinkingFails(t *testing.T) {
+	cfg := minimalConfig(t)
+	cfg.Model = core.Model{ID: "grok-4.5", Provider: "xai"}
+	cfg.ThinkingLevel = "unknown"
+	if _, err := BuildSession(cfg); err == nil {
+		t.Fatal("expected invalid xAI thinking error")
+	}
+}
+
+func TestBuildSession_XAICustomReviewModelKeepsVendorAndThinking(t *testing.T) {
+	cfg := minimalConfig(t)
+	cfg.MoaCfg = &core.MoaConfig{PlanReviewModel: "xai/grok-custom", PlanReviewThinking: "off"}
+	sess, err := BuildSession(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := sess.PlanMode.GetReviewConfig()
+	if review.Model.Provider != "xai" || review.Model.ID != "grok-custom" || review.ThinkingLevel != "low" {
+		t.Fatalf("review = %+v", review)
+	}
+}
+
+func TestBuildSession_CodeReviewInheritedThinkingIsEffectiveForModel(t *testing.T) {
+	cfg := minimalConfig(t)
+	cfg.MoaCfg = &core.MoaConfig{
+		PlanReviewModel:    "opus",
+		PlanReviewThinking: "xhigh",
+		CodeReviewModel:    "grok",
+	}
+	sess, err := BuildSession(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := sess.PlanMode.GetCodeReviewConfig()
+	if review.Model.Provider != "xai" || review.ThinkingLevel != "high" {
+		t.Fatalf("code review = %+v", review)
+	}
+}
+
 func TestBuildSession_RequiredFields(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -35,6 +35,8 @@ func cheapModelSpecFor(provider string) (string, bool) {
 		return "gpt-5.4-mini", true
 	case "anthropic":
 		return DefaultModelSpec, true
+	case "xai":
+		return "grok", true
 	default:
 		return "", false
 	}
@@ -137,6 +139,10 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 	if !strings.EqualFold(model.Provider, sessionModel.Provider) {
 		return Brief{}, fmt.Errorf("pulsebrief: %w for provider %q", ErrNoCheapSameVendorModel, sessionModel.Provider)
 	}
+	thinking, err := core.EffectiveThinkingLevel(model, internalThinking(model))
+	if err != nil {
+		return Brief{}, fmt.Errorf("pulsebrief: thinking level: %w", err)
+	}
 	prov, err := factory(model)
 	if err != nil {
 		return Brief{}, fmt.Errorf("pulsebrief: provider: %w", err)
@@ -149,7 +155,7 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 		Model:    model,
 		System:   systemPrompt,
 		Messages: []core.Message{core.NewUserMessage(wrapPrompt(prompt))},
-		Options:  core.StreamOptions{ThinkingLevel: "off"},
+		Options:  core.StreamOptions{ThinkingLevel: thinking},
 	}
 	ch, err := prov.Stream(ctx, req)
 	if err != nil {
@@ -310,4 +316,11 @@ func allText(content []core.Content) string {
 		}
 	}
 	return strings.Join(text, "\n")
+}
+
+func internalThinking(model core.Model) string {
+	if model.Provider == "xai" {
+		return "low"
+	}
+	return "off"
 }

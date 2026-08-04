@@ -1,4 +1,5 @@
-package openai
+// Package responses implements the provider-neutral Responses API wire codec.
+package responses
 
 import (
 	"encoding/json"
@@ -10,17 +11,18 @@ import (
 
 // responsesRequest is the JSON body for POST /v1/responses (or /codex/responses).
 type responsesRequest struct {
-	Model        string           `json:"model"`
-	Input        []map[string]any `json:"input"`
-	Instructions string           `json:"instructions,omitempty"`
-	Tools        []map[string]any `json:"tools,omitempty"`
-	Stream       bool             `json:"stream"`
-	Store        bool             `json:"store"`
-	MaxTokens    *int             `json:"max_output_tokens,omitempty"`
-	Temperature  *float64         `json:"temperature,omitempty"`
-	Reasoning    *reasoning       `json:"reasoning,omitempty"`
-	ToolChoice   string           `json:"tool_choice,omitempty"`
-	Include      []string         `json:"include,omitempty"`
+	Model             string           `json:"model"`
+	Input             []map[string]any `json:"input"`
+	Instructions      string           `json:"instructions,omitempty"`
+	Tools             []map[string]any `json:"tools,omitempty"`
+	Stream            bool             `json:"stream"`
+	Store             bool             `json:"store"`
+	MaxTokens         *int             `json:"max_output_tokens,omitempty"`
+	Temperature       *float64         `json:"temperature,omitempty"`
+	Reasoning         *reasoning       `json:"reasoning,omitempty"`
+	ToolChoice        string           `json:"tool_choice,omitempty"`
+	Include           []string         `json:"include,omitempty"`
+	ParallelToolCalls bool             `json:"parallel_tool_calls,omitempty"`
 }
 
 type reasoning struct {
@@ -28,17 +30,31 @@ type reasoning struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-func buildRequestBody(req core.Request, supportsDocuments, supportsMaxOutputTokens bool) ([]byte, error) {
+// Dialect describes the validated Responses API capabilities of a transport.
+// It intentionally contains protocol features only; URLs, credentials and retry
+// policies stay in the owning provider.
+type Dialect struct {
+	Provider                  string
+	Model                     string
+	SupportsDocuments         bool
+	SupportsMaxOutputTokens   bool
+	SupportsParallelToolCalls bool
+	AllowedReasoningEfforts   []string
+}
+
+// BuildRequestBody encodes a stateless streaming Responses API request.
+func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 	r := responsesRequest{
-		Model:        req.Model.ID,
-		Stream:       true,
-		Store:        false,
-		Instructions: req.System,
-		ToolChoice:   "auto",
-		Include:      []string{"reasoning.encrypted_content"},
+		Model:             req.Model.ID,
+		Stream:            true,
+		Store:             false,
+		Instructions:      req.System,
+		ToolChoice:        "auto",
+		Include:           []string{"reasoning.encrypted_content"},
+		ParallelToolCalls: dialect.SupportsParallelToolCalls,
 	}
 
-	r.Input = convertMessages(req.Messages, supportsDocuments, req.Model.ID)
+	r.Input = convertMessages(req.Messages, dialect.SupportsDocuments, dialect.Provider, dialect.Model)
 
 	if len(req.Tools) > 0 {
 		r.Tools = convertToolSpecs(req.Tools)
@@ -48,7 +64,7 @@ func buildRequestBody(req core.Request, supportsDocuments, supportsMaxOutputToke
 	// ChatGPT OAuth backend (/codex/responses) rejects it with HTTP 400
 	// ("Unsupported parameter: max_output_tokens"). Only send the cap where it's
 	// supported.
-	if supportsMaxOutputTokens {
+	if dialect.SupportsMaxOutputTokens {
 		maxTokens := core.ResolveMaxOutputTokens(req.Model, req.Options.MaxTokens)
 		r.MaxTokens = &maxTokens
 	}
@@ -56,7 +72,7 @@ func buildRequestBody(req core.Request, supportsDocuments, supportsMaxOutputToke
 		r.Temperature = req.Options.Temperature
 	}
 
-	if effort := mapReasoningEffort(req.Options.ThinkingLevel); effort != "" {
+	if effort := MapReasoningEffort(req.Options.ThinkingLevel, dialect.AllowedReasoningEfforts); effort != "" {
 		r.Reasoning = &reasoning{Effort: effort, Summary: "auto"}
 	}
 
@@ -65,23 +81,33 @@ func buildRequestBody(req core.Request, supportsDocuments, supportsMaxOutputToke
 
 // mapReasoningEffort maps our thinking levels to OpenAI reasoning effort.
 // OpenAI supports: none, minimal, low, medium, high, xhigh.
-func mapReasoningEffort(level string) string {
+func MapReasoningEffort(level string, allowed []string) string {
+	var effort string
 	switch strings.ToLower(level) {
 	case "off", "none", "":
-		return ""
+		effort = ""
 	case "minimal":
-		return "minimal"
+		effort = "minimal"
 	case "low":
-		return "low"
+		effort = "low"
 	case "medium":
-		return "medium"
+		effort = "medium"
 	case "high":
-		return "high"
+		effort = "high"
 	case "xhigh":
-		return "xhigh"
+		effort = "xhigh"
 	default:
-		return "medium"
+		effort = "medium"
 	}
+	if effort == "" || len(allowed) == 0 {
+		return effort
+	}
+	for _, candidate := range allowed {
+		if effort == candidate {
+			return effort
+		}
+	}
+	return ""
 }
 
 // convertMessages maps core messages to Responses API input format.
@@ -91,18 +117,18 @@ func mapReasoningEffort(level string) string {
 // modelID is the target model of THIS request; assistant items produced by a
 // different model omit their provider-assigned output-item ids to avoid pairing
 // validation errors (see convertAssistantMessage).
-func convertMessages(msgs []core.Message, supportsDocuments bool, modelID string) []map[string]any {
+func convertMessages(msgs []core.Message, supportsDocuments bool, provider, modelID string) []map[string]any {
 	var result []map[string]any
 
 	for i, msg := range msgs {
-		items := convertMessage(msg, supportsDocuments, modelID, i)
+		items := convertMessageForDialect(msg, supportsDocuments, provider, modelID, i)
 		result = append(result, items...)
 	}
 
 	return result
 }
 
-func convertMessage(msg core.Message, supportsDocuments bool, modelID string, msgIndex int) []map[string]any {
+func convertMessageForDialect(msg core.Message, supportsDocuments bool, provider, modelID string, msgIndex int) []map[string]any {
 	switch msg.Role {
 	case "user":
 		return []map[string]any{
@@ -113,7 +139,7 @@ func convertMessage(msg core.Message, supportsDocuments bool, modelID string, ms
 		}
 
 	case "assistant":
-		return convertAssistantMessage(msg, modelID, msgIndex)
+		return convertAssistantMessageForDialect(msg, provider, modelID, msgIndex)
 
 	case "tool_result":
 		text := extractTextParts(msg.Content)
@@ -149,10 +175,12 @@ func convertMessage(msg core.Message, supportsDocuments bool, modelID string, ms
 // synthetic id (msgIndex-based) when no real signature id is available or the
 // message is cross-model — a message id is not pairing-validated, and always
 // sending one reduces early stopping (matches pi).
-func convertAssistantMessage(msg core.Message, modelID string, msgIndex int) []map[string]any {
-	// Foreign model: message carries a model tag that differs from the target.
-	// Empty msg.Model (legacy/unknown) is treated as same-model.
-	foreignModel := msg.Model != "" && modelID != "" && msg.Model != modelID
+func convertAssistantMessageForDialect(msg core.Message, provider, modelID string, msgIndex int) []map[string]any {
+	// Responses messages written before model provenance was added still carry
+	// their provider. Preserve that known-provider legacy metadata, while
+	// continuing to reject unknown-provider and explicitly cross-model state.
+	sameOrigin := msg.Provider != "" && modelID != "" && msg.Provider == provider && (msg.Model == "" || msg.Model == modelID)
+	foreignModel := !sameOrigin
 
 	var items []map[string]any
 	textBlockIndex := 0
@@ -168,7 +196,7 @@ func convertAssistantMessage(msg core.Message, modelID string, msgIndex int) []m
 				},
 				"status": "completed",
 			}
-			id, phase := parseTextSignature(c.TextSignature)
+			id, phase := ParseTextSignature(c.TextSignature)
 			// Message items should always carry an id: OpenAI documents that
 			// replaying assistant text without it contributes to early
 			// stopping. When we have a real signature id (same model), use it;
@@ -209,6 +237,11 @@ func convertAssistantMessage(msg core.Message, modelID string, msgIndex int) []m
 			items = append(items, fc)
 
 		case "thinking":
+			// Encrypted reasoning is provider/model-bound. Replaying it across
+			// providers or models is invalid and leaks opaque provider state.
+			if foreignModel {
+				continue
+			}
 			// Re-serialize the encrypted reasoning item if we have a signature.
 			if c.ThinkingSignature != "" {
 				var item map[string]any
