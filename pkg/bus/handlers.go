@@ -226,7 +226,9 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 		newModel, ok := core.ResolveModel(cmd.ModelSpec)
 		if !ok {
-			return fmt.Errorf("unknown model: %s", cmd.ModelSpec)
+			if err := core.ValidateModelSpec(cmd.ModelSpec); err != nil {
+				return err
+			}
 		}
 		newProvider, err := sctx.ProviderFactory(newModel)
 		if err != nil {
@@ -236,9 +238,20 @@ func RegisterHandlers(sctx *SessionContext) {
 		if err := sctx.Agent.SetModel(newProvider, newModel); err != nil {
 			return err
 		}
+		if effective, err := core.EffectiveThinkingLevel(newModel, sctx.Agent.ThinkingLevel()); err != nil {
+			return err
+		} else if effective != sctx.Agent.ThinkingLevel() {
+			if err := sctx.Agent.SetThinkingLevel(effective); err != nil {
+				return err
+			}
+		}
+		modelName := newModel.Name
+		if modelName == "" {
+			modelName = newModel.ID
+		}
 		changed := ConfigChanged{
 			SessionID:     sctx.SessionID,
-			Model:         newModel.Name,
+			Model:         modelName,
 			Provider:      newModel.Provider,
 			Thinking:      sctx.Agent.ThinkingLevel(),
 			ContextWindow: newModel.MaxInput,
@@ -251,15 +264,16 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SetThinking) error {
-		if !core.IsValidThinkingLevel(cmd.Level) {
-			return fmt.Errorf("invalid thinking level %q (options: %s)", cmd.Level, core.ThinkingLevelOptions())
+		effective, err := core.EffectiveThinkingLevel(sctx.Agent.Model(), cmd.Level)
+		if err != nil {
+			return err
 		}
-		if err := sctx.Agent.SetThinkingLevel(cmd.Level); err != nil {
+		if err := sctx.Agent.SetThinkingLevel(effective); err != nil {
 			return err
 		}
 		sctx.Bus.Publish(ConfigChanged{
 			SessionID: sctx.SessionID,
-			Thinking:  cmd.Level,
+			Thinking:  effective,
 		})
 		return nil
 	})

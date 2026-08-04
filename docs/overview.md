@@ -19,7 +19,7 @@ Moa is a coding agent runtime in Go. One core, three interfaces: TUI, web UI, an
 - **Voice input**: in both TUI and web UI
 - **Prompt templates**: reusable prompts from `~/.config/moa/prompts/` or `.moa/prompts/`
 - **AGENTS.md**: project instructions discovered automatically from working directory
-- **Multi-provider**: Anthropic and OpenAI, with model aliases for quick switching
+- **Multi-provider**: Anthropic, OpenAI, and xAI Grok, with model aliases for quick switching
 
 ## How it works
 

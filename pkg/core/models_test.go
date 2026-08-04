@@ -15,6 +15,28 @@ func TestResolveModel_Alias(t *testing.T) {
 	}
 }
 
+func TestResolveModel_Grok(t *testing.T) {
+	for _, spec := range []string{"grok", "xai/grok-4.5"} {
+		m, ok := ResolveModel(spec)
+		if !ok || m.ID != "grok-4.5" || m.Provider != "xai" {
+			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
+		}
+	}
+}
+
+func TestEffectiveThinkingLevel_Grok(t *testing.T) {
+	model := Model{Provider: "xai", ID: "grok-4.5"}
+	for input, want := range map[string]string{"off": "low", "low": "low", "medium": "medium", "high": "high", "xhigh": "high"} {
+		got, err := EffectiveThinkingLevel(model, input)
+		if err != nil || got != want {
+			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := EffectiveThinkingLevel(model, "unknown"); err == nil {
+		t.Fatal("unknown Grok level must fail")
+	}
+}
+
 func TestResolveModel_DirectID(t *testing.T) {
 	m, ok := ResolveModel("gpt-5.3-codex")
 	if !ok {
@@ -268,10 +290,13 @@ func TestPricing_Cost_Tiers(t *testing.T) {
 	})
 }
 
-func TestKnownModels_HavePricing(t *testing.T) {
+func TestKnownModels_PricingIsExplicit(t *testing.T) {
 	for id, m := range knownModels {
-		if m.Pricing == nil {
+		if m.Pricing == nil && id != "grok-4.5" {
 			t.Errorf("model %s has no pricing", id)
 		}
+	}
+	if knownModels["grok-4.5"].Pricing != nil {
+		t.Error("unverified xAI pricing must remain unavailable")
 	}
 }

@@ -200,6 +200,34 @@ func TestStore_GetAPIKey_ConcurrentRefreshSingleFlight(t *testing.T) {
 	}
 }
 
+func TestStore_RefreshOAuthIfCurrent_SingleFlight(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.Set("xai", Credential{Type: "oauth", Access: "rejected", Refresh: "r0", Expires: time.Now().Add(time.Hour).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	var calls int32
+	store.refresh = func(_, _ string) (*OAuthCredentials, error) {
+		atomic.AddInt32(&calls, 1)
+		time.Sleep(15 * time.Millisecond)
+		return &OAuthCredentials{Access: "fresh", Refresh: "r1", Expires: time.Now().Add(time.Hour).UnixMilli()}, nil
+	}
+	const workers = 12
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if token, err := store.RefreshOAuthIfCurrent("xai", "rejected"); err != nil || token != "fresh" {
+				t.Errorf("refresh = %q, %v", token, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("refresh calls = %d", got)
+	}
+}
+
 // TestStore_GetAPIKey_AdoptsSiblingRefreshedToken pins M8: when our in-memory
 // OAuth token is expired but a sibling process (serve + CLI share auth.json)
 // already refreshed and wrote a fresh token to disk, GetAPIKey must adopt the
@@ -239,6 +267,47 @@ func TestStore_GetAPIKey_AdoptsSiblingRefreshedToken(t *testing.T) {
 	}
 	if !isOAuth || key != "sibling-access" {
 		t.Fatalf("got key=%q isOAuth=%v, want sibling-access/true", key, isOAuth)
+	}
+}
+
+func TestStore_GetAPIKey_CrossStoreRefreshLock(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "auth.json")
+	t.Setenv("XAI_API_KEY", "")
+	seed := NewStore(path)
+	if err := seed.Set("xai", Credential{Type: "oauth", Access: "old", Refresh: "rotating", Expires: time.Now().Add(-time.Minute).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	first, second := NewStore(path), NewStore(path)
+	var calls int32
+	refresh := func(string, string) (*OAuthCredentials, error) {
+		atomic.AddInt32(&calls, 1)
+		time.Sleep(25 * time.Millisecond)
+		return &OAuthCredentials{Access: "fresh", Refresh: "rotated", Expires: time.Now().Add(time.Hour).UnixMilli()}, nil
+	}
+	first.refresh, second.refresh = refresh, refresh
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, store := range []*Store{first, second} {
+		wg.Add(1)
+		go func(store *Store) {
+			defer wg.Done()
+			key, oauth, err := store.GetAPIKey("xai")
+			if err == nil && (key != "fresh" || !oauth) {
+				err = fmt.Errorf("got key=%q oauth=%v", key, oauth)
+			}
+			errs <- err
+		}(store)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("refresh called %d times, want one across stores", got)
 	}
 }
 

@@ -196,7 +196,7 @@ type appModel struct {
 	promptTemplates []promptpkg.Template
 
 	// Plan usage (account-global; shared poller, refreshed on a timer)
-	usagePoller        *usage.Poller
+	usagePoller        *usage.MultiPoller
 	updateChecker      *release.Checker
 	updateCheckEnabled bool
 	// Last-known plan-quota percents (-1 = unknown), so a per-request rate-limit
@@ -229,7 +229,7 @@ type Config struct {
 	STTModel              string                                  // STT model id ("" = provider default)
 	STTVocabulary         []string                                // words the transcriber tends to get wrong (names, jargon)
 	CacheTTL              time.Duration                           // prompt-cache retention (Anthropic); drives the "cache cold" hint
-	UsagePoller           *usage.Poller                           // plan usage poller (nil = usage tracking disabled)
+	UsagePoller           *usage.MultiPoller                      // plan usage poller (nil = usage tracking disabled)
 	ProviderFactory       func(core.Model) (core.Provider, error) // one-shot LLM calls (auto-titling); nil disables
 	ReleaseInfo           release.Info                            // build metadata shown immediately in the status line
 	UpdateChecker         *release.Checker                        // optional stable-release checker
@@ -403,24 +403,26 @@ func (m appModel) updateCheckCmd() tea.Cmd {
 const usagePollInterval = 60 * time.Second
 
 // usageMsg carries a refreshed plan usage snapshot from the poller.
-type usageMsg struct{ snap *usage.Snapshot }
+type usageMsg struct {
+	provider string
+	snap     *usage.Snapshot
+}
 
 // usageTickMsg fires on the usage refresh interval.
 type usageTickMsg struct{}
 
 // fetchUsageCmd fetches the plan usage snapshot off the UI goroutine. Returns
 // nil when usage tracking is disabled (no poller) or the current model isn't
-// Anthropic (the usage endpoint only reflects the Anthropic subscription plan,
-// so it's meaningless — and confusing — for other providers).
+// provider selection keeps account-global data relevant to the active model.
 func (m appModel) fetchUsageCmd() tea.Cmd {
 	poller := m.usagePoller
-	if poller == nil || m.modelProvider != "anthropic" {
+	if poller == nil {
 		return nil
 	}
 	ctx := m.baseCtx
 	return func() tea.Msg {
-		snap, _ := poller.Get(ctx)
-		return usageMsg{snap: snap}
+		snap, _ := poller.GetProvider(ctx, m.modelProvider)
+		return usageMsg{provider: m.modelProvider, snap: snap}
 	}
 }
 
@@ -443,9 +445,58 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 		week = int(snap.SevenDay.Utilization + 0.5)
 	}
 	m.lastFiveHPct, m.lastWeekPct = five, week
-	m.statusBar.UpdateUsageSegment(five, week)
-	used, _ := snap.Extra.UsedAmount()
-	m.statusBar.UpdateUsageExtraSegment(used, snap.Extra.CurrencySymbol(), snap.Extra.IsEnabled)
+	// Generic providers select their first two meaningful quotas.
+	if snap.Provider != "anthropic" {
+		five, week = -1, -1
+		if len(snap.Quotas) > 0 && snap.Quotas[0].Utilization != nil {
+			five = int(*snap.Quotas[0].Utilization + .5)
+		}
+		if len(snap.Quotas) > 1 && snap.Quotas[1].Utilization != nil {
+			week = int(*snap.Quotas[1].Utilization + .5)
+		}
+		labels := []string{}
+		for i := 0; i < len(snap.Quotas) && i < 2; i++ {
+			labels = append(labels, snap.Quotas[i].Label)
+		}
+		m.statusBar.UpdateQuotaSegment(labels, []int{five, week})
+	} else {
+		m.statusBar.UpdateUsageSegment(five, week)
+	}
+	if snap.Provider == "anthropic" {
+		used, _ := snap.Extra.UsedAmount()
+		m.statusBar.UpdateUsageExtraSegment(used, snap.Extra.CurrencySymbol(), snap.Extra.IsEnabled)
+	} else {
+		for _, b := range snap.Money {
+			amount := b.Used
+			if amount == nil {
+				amount = b.Remaining
+			}
+			if amount == nil {
+				continue
+			}
+			dp := 2
+			if b.Decimals != nil {
+				dp = *b.Decimals
+			}
+			scale := 1.0
+			for i := 0; i < dp; i++ {
+				scale *= 10
+			}
+			symbol := b.Currency + " "
+			if b.Currency == "USD" || b.Currency == "" {
+				symbol = "$"
+			}
+			if b.Currency == "EUR" {
+				symbol = "€"
+			}
+			if b.Currency == "GBP" {
+				symbol = "£"
+			}
+			m.statusBar.UpdateUsageExtraSegment(float64(*amount)/scale, symbol, true)
+			return
+		}
+		m.statusBar.UpdateUsageExtraSegment(0, "", false)
+	}
 }
 
 // applyRateLimit refreshes the plan-quota segments instantly from a request's
@@ -562,7 +613,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case usageMsg:
-		m.applyUsage(msg.snap)
+		if msg.provider == m.modelProvider {
+			m.applyUsage(msg.snap)
+		}
 		return m, nil
 
 	case updateCheckMsg:
@@ -1004,7 +1057,8 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		current, _ := bus.QueryTyped[bus.GetThinkingLevel, string](m.runtime.Bus, bus.GetThinkingLevel{})
-		level := cycleThinkingLevel(current)
+		model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+		level := cycleThinkingLevelFor(current, core.ThinkingLevelsForModel(model))
 		_ = m.runtime.Bus.Execute(bus.SetThinking{Level: level})
 		// ConfigChanged event updates status bar
 		m.status.SetText("thinking: " + level)
@@ -1745,11 +1799,13 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 
 	// --- Config ---
 	case bus.ConfigChanged:
+		providerChanged := false
 		if e.Model != "" {
+			providerChanged = e.Provider != "" && e.Provider != m.modelProvider
 			m.modelName = e.Model
 			m.modelProvider = e.Provider
 			m.statusBar.UpdateModelSegment(e.Model)
-			if e.Provider != "anthropic" {
+			if providerChanged {
 				m.applyUsage(nil)
 			}
 		}
@@ -1761,6 +1817,11 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		}
 		if e.PathScope != "" {
 			m.statusBar.UpdatePathScopeSegment(e.PathScope)
+		}
+		if providerChanged {
+			if cmd := m.fetchUsageCmd(); cmd != nil {
+				return []tea.Cmd{cmd}
+			}
 		}
 
 	// --- MCP ---

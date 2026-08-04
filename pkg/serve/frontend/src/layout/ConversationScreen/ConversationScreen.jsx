@@ -292,6 +292,7 @@ export function ConversationScreen({ version }) {
           selected={selectedModel}
           thinking={thinking}
           sessionModel={session.model || ""}
+          sessionProvider={session.provider}
           onSelect={(spec) => {
             configureSession(session.id, { model: spec })
               .then(() => setModelOpen(false))

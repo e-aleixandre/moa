@@ -39,7 +39,9 @@
 |---------|------|
 | `pkg/provider/` | Factory: resolve model → provider adapter |
 | `pkg/provider/anthropic/` | Anthropic Messages API (streaming SSE) |
-| `pkg/provider/openai/` | OpenAI Chat API (streaming + transcription) |
+| `pkg/provider/openai/` | OpenAI API transport and transcription |
+| `pkg/provider/responses/` | Shared stateless Responses request/replay codec for OpenAI-compatible Responses transports (`store: false`) |
+| `pkg/provider/xai/` | xAI Responses transport: `api.x.ai` API keys or the separate Grok consumer OAuth proxy |
 | `pkg/provider/retry/` | Retry wrapper with backoff |
 | `pkg/provider/sseutil/` | SSE timeout reader |
 
@@ -54,7 +56,7 @@
 
 | Package | Role |
 |---------|------|
-| `pkg/auth/` | Credential store + OAuth flows |
+| `pkg/auth/` | Credential store + OAuth flows, including xAI's OIDC device grant |
 | `pkg/session/` | Session persistence (file-backed, atomic writes) |
 | `pkg/extension/` | Extension host + typed hooks (internal; fired every turn but no user-facing loader/config to register extensions yet) |
 | `pkg/mcp/` | MCP manager — stdio tool-server integration |
@@ -63,7 +65,7 @@
 | `pkg/files/` | File utilities |
 | `pkg/jsonutil/` | JSON parsing utilities |
 | `pkg/push/` | Web Push notifications (VAPID keys, subscription store, dispatch) |
-| `pkg/usage/` | Polls Anthropic's undocumented endpoint for Claude subscription plan usage |
+| `pkg/usage/` | Provider-qualified plan-usage pollers; Claude and xAI consumer data come from private, best-effort endpoints |
 | `pkg/attention/` | Attention Service: consumes every session's event bus and produces a priority-ordered attention queue |
 | `pkg/schedule/` | Durable one-shot schedule records (backs the web `/schedule` command) |
 | `pkg/release/` | Build metadata and best-effort release update checks |

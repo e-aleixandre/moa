@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -11,7 +12,7 @@ import (
 )
 
 // handleLogin performs provider-specific login.
-func handleLogin(providerName string, authStore *auth.Store) {
+func handleLogin(ctx context.Context, providerName string, authStore *auth.Store) {
 	switch providerName {
 	case "anthropic":
 		fmt.Println("Logging in to Anthropic (Claude Max)...")
@@ -46,13 +47,37 @@ func handleLogin(providerName string, authStore *auth.Store) {
 	case "openai":
 		handleOpenAILogin(authStore)
 
+	case "xai":
+		handleXAILogin(ctx, authStore)
+
 	case "openai-transcribe":
 		handleTranscribeKeySetup(authStore)
 
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, openai-transcribe\n", providerName)
+		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, xai, openai-transcribe\n", providerName)
 		os.Exit(1)
 	}
+}
+
+func handleXAILogin(ctx context.Context, authStore *auth.Store) {
+	fmt.Println("Logging in to xAI (SuperGrok/X subscription)...")
+	creds, err := auth.LoginXAI(ctx, func(url string) {
+		if url != "" {
+			fmt.Printf("\nOpening browser for xAI authentication...\n%s\n\n", url)
+			auth.OpenBrowser(url)
+		}
+	}, func(device *auth.XAIDeviceCode) {
+		fmt.Printf("Visit: %s\nCode: %s\n", device.VerificationURI, device.UserCode)
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		os.Exit(1)
+	}
+	if err := authStore.Set("xai", auth.Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires}); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ xAI OAuth login successful!")
 }
 
 func handleOpenAILogin(authStore *auth.Store) {

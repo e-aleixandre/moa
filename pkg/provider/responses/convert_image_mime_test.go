@@ -1,4 +1,4 @@
-package openai
+package responses
 
 import (
 	"encoding/base64"

@@ -1,4 +1,4 @@
-package openai
+package responses
 
 import (
 	"encoding/json"
@@ -175,7 +175,7 @@ func TestConvertMessage_ToolResult(t *testing.T) {
 
 func TestConvertMessage_AssistantWithToolCalls(t *testing.T) {
 	msg := core.Message{
-		Role: "assistant",
+		Role: "assistant", Provider: "openai", Model: "gpt-5.3-codex",
 		Content: []core.Content{
 			core.TextContent("I'll run this"),
 			core.ToolCallContent("tc-1", "bash", map[string]any{"command": "ls"}),
@@ -200,7 +200,7 @@ func TestConvertMessage_AssistantWithToolCalls(t *testing.T) {
 func TestConvertAssistantMessage_NilArguments(t *testing.T) {
 	// nil arguments should serialize as "{}", not "null".
 	msg := core.Message{
-		Role: "assistant",
+		Role: "assistant", Provider: "openai", Model: "gpt-5.3-codex",
 		Content: []core.Content{
 			core.ToolCallContent("tc-1", "pwd", nil),
 		},
@@ -278,20 +278,11 @@ func TestConvertUserContent_DocumentDegraded(t *testing.T) {
 	}
 }
 
-func TestSupportsDocuments(t *testing.T) {
-	if !New("key").SupportsDocuments() {
-		t.Error("expected SupportsDocuments true for API-key provider")
-	}
-	if NewOAuth("tok", "acct").SupportsDocuments() {
-		t.Error("expected SupportsDocuments false for OAuth provider")
-	}
-}
-
 // TestConvertAssistantMessage_RoundTripsSignatures verifies the message item id
 // and phase and the function_call fc_ item id are replayed on the next request.
 func TestConvertAssistantMessage_RoundTripsSignatures(t *testing.T) {
 	msg := core.Message{
-		Role: "assistant",
+		Role: "assistant", Provider: "openai", Model: "gpt-5.3-codex",
 		Content: []core.Content{
 			{Type: "text", Text: "done", TextSignature: `{"v":1,"id":"msg_42","phase":"final_answer"}`},
 			{Type: "tool_call", ToolCallID: "call_1", ToolName: "bash",
@@ -323,7 +314,7 @@ func TestConvertAssistantMessage_RoundTripsSignatures(t *testing.T) {
 // phase stays absent and the function_call fc_ id stays omitted.
 func TestConvertAssistantMessage_NoSignatureSyntheticID(t *testing.T) {
 	msg := core.Message{
-		Role: "assistant",
+		Role: "assistant", Provider: "openai", Model: "gpt-5.3-codex",
 		Content: []core.Content{
 			{Type: "text", Text: "hi"},
 			{Type: "tool_call", ToolCallID: "call_1", ToolName: "bash",
@@ -349,7 +340,7 @@ func TestConvertAssistantMessage_NoSignatureSyntheticID(t *testing.T) {
 // call_id/name/args/phase are preserved.
 func TestConvertAssistantMessage_ForeignModelIDs(t *testing.T) {
 	msg := core.Message{
-		Role:  "assistant",
+		Role: "assistant", Provider: "openai",
 		Model: "gpt-5.6-terra",
 		Content: []core.Content{
 			{Type: "text", Text: "done", TextSignature: `{"v":1,"id":"msg_42","phase":"final_answer"}`},

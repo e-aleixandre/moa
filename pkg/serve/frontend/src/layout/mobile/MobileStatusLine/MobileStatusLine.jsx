@@ -338,6 +338,7 @@ export function MobileStatusLine({ session, usage }) {
             thinking={thinking}
             embedded
             sessionModel={session.model || ""}
+            sessionProvider={session.provider}
             onSelect={(spec) => {
               configureSession(session.id, { model: spec })
                 .then(() => setSessionOpen(false))

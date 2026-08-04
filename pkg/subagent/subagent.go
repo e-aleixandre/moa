@@ -208,7 +208,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if errResult != nil {
 				return *errResult, nil
 			}
-			thinkingLevel, errResult := resolveThinking(currentThinkingLevel(cfg), params)
+			thinkingLevel, errResult := resolveThinking(model, currentThinkingLevel(cfg), params)
 			if errResult != nil {
 				return *errResult, nil
 			}
@@ -860,11 +860,15 @@ func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns
 
 func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
 	maxTurns, runDuration := resolveChildGuardrails(cfg, maxRunDuration)
+	effectiveThinking, err := core.EffectiveThinkingLevel(model, thinkingLevel)
+	if err != nil {
+		return nil, err
+	}
 	return agent.New(agent.AgentConfig{
 		Provider:       provider,
 		Model:          model,
 		SystemPrompt:   systemPrompt,
-		ThinkingLevel:  thinkingLevel,
+		ThinkingLevel:  effectiveThinking,
 		Tools:          childReg,
 		MaxTurns:       maxTurns,
 		MaxRunDuration: runDuration,
@@ -966,13 +970,14 @@ func resolveModel(defaultModel core.Model, params map[string]any) (core.Model, *
 	return model, nil
 }
 
-func resolveThinking(defaultThinking string, params map[string]any) (string, *core.Result) {
+func resolveThinking(model core.Model, defaultThinking string, params map[string]any) (string, *core.Result) {
 	thinking, _ := params["thinking"].(string)
 	if strings.TrimSpace(thinking) == "" {
-		return defaultThinking, nil
+		thinking = defaultThinking
 	}
-	if core.IsValidThinkingLevel(thinking) {
-		return thinking, nil
+	effective, err := core.EffectiveThinkingLevel(model, thinking)
+	if err == nil {
+		return effective, nil
 	}
 	res := core.ErrorResult("invalid thinking level: " + thinking)
 	return "", &res

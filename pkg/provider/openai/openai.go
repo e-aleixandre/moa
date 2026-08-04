@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/provider/responses"
 	"github.com/e-aleixandre/moa/pkg/provider/retry"
 	"github.com/e-aleixandre/moa/pkg/provider/sseutil"
 )
@@ -88,7 +89,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		apiKey = req.Options.APIKey
 	}
 
-	body, err := buildRequestBody(req, o.SupportsDocuments(), o.supportsMaxOutputTokens())
+	body, err := responses.BuildRequestBody(req, responses.Dialect{Provider: "openai", Model: req.Model.ID, SupportsDocuments: o.SupportsDocuments(), SupportsMaxOutputTokens: o.supportsMaxOutputTokens(), SupportsParallelToolCalls: o.endpoint == apiEndpoint})
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}
@@ -155,7 +156,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 			}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
-		consumeStream(ctx, body, ch)
+		responses.ConsumeStream(ctx, body, ch, "openai", req.Model.ID)
 	}()
 
 	return ch, nil

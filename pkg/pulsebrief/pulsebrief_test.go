@@ -51,6 +51,26 @@ func TestParseBrief_TwoFields(t *testing.T) {
 	}
 }
 
+func TestGenerate_XAIUsesGrokAndLowThinking(t *testing.T) {
+	p := &fakeProvider{response: "ATTEMPTING: Fix Grok\nPROGRESS: Writing tests"}
+	var factoryModel core.Model
+	brief, err := Generate(context.Background(), func(m core.Model) (core.Provider, error) { factoryModel = m; return p, nil }, core.Model{Provider: "xai"}, []core.AgentMessage{userMsg("Fix Grok")})
+	if err != nil || brief.IsEmpty() {
+		t.Fatalf("brief=%+v err=%v", brief, err)
+	}
+	if factoryModel.Provider != "xai" || factoryModel.ID != "grok-4.5" || p.request.Options.ThinkingLevel != "low" {
+		t.Fatalf("model=%+v thinking=%q", factoryModel, p.request.Options.ThinkingLevel)
+	}
+}
+
+func TestGenerate_UnknownProviderDoesNotFallbackToAnthropic(t *testing.T) {
+	called := false
+	_, err := Generate(context.Background(), func(core.Model) (core.Provider, error) { called = true; return nil, nil }, core.Model{Provider: "unknown"}, []core.AgentMessage{userMsg("task")})
+	if !errors.Is(err, ErrNoCheapSameVendorModel) || called {
+		t.Fatalf("err=%v factory called=%v", err, called)
+	}
+}
+
 func TestParseBrief_CaseAndBulletTolerant(t *testing.T) {
 	// Lower-case labels, markdown bullets and extra noise lines must still parse.
 	b := parseBrief("Here you go:\n- attempting: Arreglar el refresco del token\n* Progress: bloqueada en un fallo de compilación\ndone")

@@ -217,8 +217,8 @@ var errUsageTokenExpired = errors.New("oauth token expired")
 // present — a plain API key has no plan usage to report. It reads the token
 // without triggering a refresh (see auth.Store.PeekOAuthToken). Shared by serve
 // and TUI.
-func newAnthropicUsagePoller(authStore *auth.Store) *usage.Poller {
-	return usage.NewPoller(func(context.Context) (string, bool, error) {
+func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
+	anthropic := usage.NewPoller(func(context.Context) (string, bool, error) {
 		token, isOAuth, valid := authStore.PeekOAuthToken("anthropic")
 		if !isOAuth {
 			return "", false, nil // no Claude subscription credential → inert
@@ -228,4 +228,24 @@ func newAnthropicUsagePoller(authStore *auth.Store) *usage.Poller {
 		}
 		return token, true, nil
 	})
+	// An explicit API key selects xAI's developer product, whose consumer plan
+	// quota is unrelated and must never be displayed.
+	xaiPoller := usage.NewProviderPoller(func(context.Context) (string, bool, error) {
+		if os.Getenv("XAI_API_KEY") != "" {
+			return "", false, nil
+		}
+		token, isOAuth, valid := authStore.PeekOAuthToken("xai")
+		if !isOAuth {
+			return "", false, nil
+		}
+		if !valid {
+			return "", false, errUsageTokenExpired
+		}
+		return token, true, nil
+	}, usage.FetchXAI)
+	multi := &usage.MultiPoller{Pollers: map[string]*usage.Poller{"anthropic": anthropic, "xai": xaiPoller}}
+	if os.Getenv("XAI_API_KEY") != "" {
+		multi.StaticStatus = map[string]usage.ProviderStatus{"xai": {AuthKind: "api_key", Reason: "plan_unsupported"}}
+	}
+	return multi
 }

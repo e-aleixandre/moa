@@ -105,6 +105,15 @@ var knownModels = map[string]Model{
 		Name: "GPT-5.4 Mini", MaxInput: 400_000, MaxOutput: 128_000,
 		Pricing: &Pricing{Input: 0.75, Output: 4.5, CacheRead: 0.075},
 	},
+
+	// --- xAI ---
+	// The locally verified xAI reference identifies Grok 4.5's 500K context
+	// window. Pricing and output limits remain unset until verified on xAI's
+	// public API, preventing fabricated cost estimates or caps.
+	"grok-4.5": {
+		ID: "grok-4.5", Provider: "xai", API: "xai-responses",
+		Name: "Grok 4.5", MaxInput: 500_000,
+	},
 }
 
 // Short aliases → full model ID.
@@ -125,6 +134,8 @@ var modelAliases = map[string]string{
 	"gpt5":        "gpt-5.5",
 	"gpt5-mini":   "gpt-5.4-mini",
 	"gpt5.5":      "gpt-5.5",
+	// xAI
+	"grok": "grok-4.5",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
@@ -268,6 +279,8 @@ var modelDisplayOrder = []string{
 	"gpt-5.3-codex",
 	"gpt-5.3-codex-spark",
 	"gpt-5.2-codex",
+	// xAI
+	"grok-4.5",
 }
 
 func ListModels() []ModelEntry {

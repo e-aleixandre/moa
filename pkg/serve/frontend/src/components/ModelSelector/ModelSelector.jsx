@@ -21,7 +21,8 @@ const THINKING_OPTIONS = [
 
 const PINNED_COLLAPSE_THRESHOLD = 4;
 
-function ThinkingStepper({ value, onChange }) {
+function ThinkingStepper({ value, onChange, levels = THINKING_OPTIONS.map((option) => option.value) }) {
+  const options = THINKING_OPTIONS.filter((option) => levels.includes(option.value));
   const hot = value === "xhigh";
   return (
     <div class="think-block">
@@ -216,6 +217,7 @@ export function ModelSelector({
   onThinkingChange,
   embedded = false,
   sessionModel,
+  sessionProvider,
   ...rest
 }) {
   const [query, setQuery] = useState("");
@@ -311,7 +313,11 @@ export function ModelSelector({
   return (
     <div class={`model-selector${embedded ? " model-selector--embedded" : ""}`} {...rest}>
       {!embedded && <div class="sel-head">Model &amp; thinking</div>}
-      <ThinkingStepper value={thinking} onChange={onThinkingChange} />
+      <ThinkingStepper
+        value={thinking}
+        onChange={onThinkingChange}
+        levels={(selectedSpec?.provider === "xai" || sessionProvider === "xai") ? ["low", "medium", "high"] : undefined}
+      />
       {!!sessionModel && (
         <CurrentModelRow
           spec={selectedSpec}

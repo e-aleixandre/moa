@@ -42,7 +42,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, toolName string, args map[stri
 	req := core.Request{
 		Model:    e.model,
 		Messages: []core.Message{core.NewUserMessage(prompt)},
-		Options:  core.StreamOptions{ThinkingLevel: "off"},
+		Options:  core.StreamOptions{ThinkingLevel: evaluatorThinking(e.model)},
 	}
 
 	stream, err := e.provider.Stream(ctx, req)
@@ -158,4 +158,11 @@ func parseDecision(response string) Decision {
 
 	// Default to ask when uncertain
 	return DecisionAsk
+}
+
+func evaluatorThinking(model core.Model) string {
+	if model.Provider == "xai" {
+		return "low"
+	}
+	return "off"
 }

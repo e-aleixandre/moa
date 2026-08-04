@@ -122,7 +122,7 @@ func main() {
 		extraAllowPaths = append(extraAllowPaths, val)
 		return nil
 	})
-	login := flag.String("login", "", "Login to a provider: anthropic (OAuth) or openai (API key)")
+	login := flag.String("login", "", "Login to a provider: anthropic, openai, or xai (OAuth)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	cpuprofile := flag.String("cpuprofile", "", "Write CPU profile to file")
 	flag.Usage = printUsage
@@ -155,11 +155,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// SIGINT/SIGTERM must also interrupt interactive OAuth device polling.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	authStore := auth.NewStore("")
 
 	// Handle --login <provider>
 	if *login != "" {
-		handleLogin(*login, authStore)
+		handleLogin(ctx, *login, authStore)
 		return
 	}
 
@@ -179,10 +183,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-
-	// SIGINT/SIGTERM → cancel context → agent aborts cleanly
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 
 	cwd, err := os.Getwd()
 	if err != nil {

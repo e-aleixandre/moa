@@ -389,12 +389,21 @@ func usageStyle(pct int) lipgloss.Style {
 // UpdateUsageSegment sets the plan quota segment (5h + weekly windows).
 // Pass -1 for a window that is not reported. Removed when neither is reported.
 func (sl *StatusLine) UpdateUsageSegment(fiveHPct, weekPct int) {
+	sl.UpdateQuotaSegment([]string{"5h", "wk"}, []int{fiveHPct, weekPct})
+}
+
+// UpdateQuotaSegment renders up to two provider-neutral quota meters.
+func (sl *StatusLine) UpdateQuotaSegment(labels []string, pcts []int) {
 	var parts []string
-	if fiveHPct >= 0 {
-		parts = append(parts, "5h "+usageStyle(fiveHPct).Render(fmt.Sprintf("%d%%", fiveHPct)))
-	}
-	if weekPct >= 0 {
-		parts = append(parts, "wk "+usageStyle(weekPct).Render(fmt.Sprintf("%d%%", weekPct)))
+	for i, pct := range pcts {
+		if pct < 0 {
+			continue
+		}
+		label := "quota"
+		if i < len(labels) && labels[i] != "" {
+			label = labels[i]
+		}
+		parts = append(parts, label+" "+usageStyle(pct).Render(fmt.Sprintf("%d%%", pct)))
 	}
 	if len(parts) == 0 {
 		sl.Remove(SegmentUsage)

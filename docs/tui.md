@@ -60,6 +60,19 @@ opens a provider or selects a pinned model; inside a provider, `Space` pins or
 unpins the highlighted model and `Esc` returns to the overview. Pinned models
 are shared with the web selector through the global `pinned_models` preference.
 
+## Grok thinking and plan quota
+
+With an xAI Grok model selected, the thinking selector opened by
+`/thinking` or `Shift+Tab` offers only `low`, `medium`, and `high`; Grok does
+not accept `off` or `xhigh`.
+
+For an xAI OAuth login, the status line can show the account plan's reported
+quota and any reported credit buckets. This is a best-effort read of a private
+consumer endpoint, not a billing authority. It is unavailable for
+`XAI_API_KEY`, whose separately metered developer API does not expose that
+consumer plan meter here. A failed quota refresh only hides or leaves stale
+status information; it never blocks inference.
+
 ## Queuing while the agent works
 
 You can keep typing while a run is in flight — messages and slash commands are handled in **strict send order** (the order you sent them is the order the agent sees).

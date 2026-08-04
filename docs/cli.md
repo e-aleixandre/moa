@@ -6,7 +6,7 @@
 |------|---------|-------------|
 | `-p` | | Prompt text, or `@file` to read from file |
 | `-model` | `sonnet` | Model alias or `provider/model-id` |
-| `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` |
+| `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` (xAI Grok accepts `low`, `medium`, or `high`) |
 | `-max-turns` | 0 (unlimited) | Max agent turns per run |
 | `-max-budget` | from config | Max USD spend per run (`-1` sentinel = use `config.json`; an explicit `0` means unlimited) |
 | `-yolo` | false | Disable sandbox and all permissions |
@@ -18,7 +18,7 @@
 | `-continue` | | Resume latest session |
 | `-resume` | | Session browser, or `--resume <id>` for specific session |
 | `-output` | `text` | `text` or `json` (JSON-lines) |
-| `-login` | | `anthropic`, `openai`, `openai-transcribe` |
+| `-login` | | `anthropic`, `openai`, `xai` (SuperGrok/X OAuth device login), `openai-transcribe` |
 | `-logout` | | Remove stored credentials for provider |
 
 ## Version subcommand
@@ -78,6 +78,7 @@ See [Web UI](./serve.md) for details.
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
+| `grok` | `grok-4.5` (xAI) |
 | `sol` | `gpt-5.6-sol` |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-5.6-luna` |
@@ -86,7 +87,7 @@ See [Web UI](./serve.md) for details.
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Unknown IDs are accepted but context-window management is disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Examples
 
@@ -96,6 +97,9 @@ moa -p "fix flaky tests"
 
 # explicit provider/model
 moa -model openai/gpt-5.3-codex -p "optimize this query"
+
+# Grok 4.5 with its supported thinking levels
+moa -model grok -thinking high -p "review this change"
 
 # budget-limited run
 moa -max-budget 0.50 -p "refactor auth module"

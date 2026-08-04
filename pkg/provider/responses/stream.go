@@ -1,4 +1,4 @@
-package openai
+package responses
 
 import (
 	"bufio"
@@ -116,8 +116,9 @@ type slot struct {
 
 // streamState tracks the evolving message across SSE events.
 type streamState struct {
-	message core.Message
-	started bool
+	message        core.Message
+	started        bool
+	sanitizeErrors bool
 
 	// slots holds the in-flight output items keyed by output_index.
 	slots map[int]*slot
@@ -133,14 +134,27 @@ func (s *streamState) getSlot(idx int, kind string) *slot {
 }
 
 // consumeStream parses Responses API SSE and emits normalized AssistantEvents.
-func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent) {
+func ConsumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string) {
+	consumeStream(ctx, body, ch, provider, model, false)
+}
+
+// ConsumeStreamSanitized parses a Responses stream without exposing upstream
+// error messages. Private compatibility backends can echo request metadata in
+// SSE errors, so their adapters use this stricter boundary.
+func ConsumeStreamSanitized(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string) {
+	consumeStream(ctx, body, ch, provider, model, true)
+}
+
+func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string, sanitizeErrors bool) {
 	state := &streamState{
 		message: core.Message{
 			Role:      "assistant",
-			Provider:  "openai",
+			Provider:  provider,
+			Model:     model,
 			Timestamp: time.Now().Unix(),
 		},
-		slots: make(map[int]*slot),
+		slots:          make(map[int]*slot),
+		sanitizeErrors: sanitizeErrors,
 	}
 	sentTerminal := false
 
@@ -217,6 +231,10 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		state.ensureStarted(ch)
 		switch ev.Item.Type {
 		case "function_call":
+			if ev.Item.CallID == "" || ev.Item.Name == "" {
+				ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("%s: function call missing call_id or name", state.message.Provider)}
+				return true
+			}
 			sl := &slot{
 				kind:     "function_call",
 				callID:   ev.Item.CallID,
@@ -299,7 +317,10 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		if argsStr == "" {
 			argsStr = sl.argsJSON.String()
 		}
-		state.finalizeToolCall(sl, argsStr, ch)
+		if err := state.finalizeToolCall(sl, argsStr, ch); err != nil {
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: err}
+			return true
+		}
 
 	case eventOutputItemDone:
 		if ev.Item == nil {
@@ -339,6 +360,12 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 			state.message.Content[sl.contentIndex].TextSignature = encodeTextSignature(id, phase)
 			delete(state.slots, ev.OutputIndex)
 		case "function_call":
+			// A done item is authoritative too: accepting an incomplete done item
+			// can otherwise end a call that was only partially described on added.
+			if ev.Item.CallID == "" || ev.Item.Name == "" {
+				ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("%s: function call missing call_id or name", state.message.Provider)}
+				return true
+			}
 			sl := state.getSlot(ev.OutputIndex, "function_call")
 			// Reconcile from the authoritative item in case
 			// function_call_arguments.done never arrived (a stream variant or a
@@ -355,11 +382,18 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 				if ev.Item.ID != "" {
 					sl.callItem = ev.Item.ID
 				}
+				if sl.callID == "" || sl.callName == "" {
+					ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("%s: function call missing call_id or name", state.message.Provider)}
+					return true
+				}
 				argsStr := ev.Item.Arguments
 				if argsStr == "" {
 					argsStr = sl.argsJSON.String()
 				}
-				state.finalizeToolCall(sl, argsStr, ch)
+				if err := state.finalizeToolCall(sl, argsStr, ch); err != nil {
+					ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: err}
+					return true
+				}
 			}
 			delete(state.slots, ev.OutputIndex)
 		case "reasoning":
@@ -416,21 +450,24 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 
 	case eventFailed:
 		errMsg := "response failed"
-		if ev.Response != nil && ev.Response.Error != nil {
+		if !state.sanitizeErrors && ev.Response != nil && ev.Response.Error != nil {
 			errMsg = ev.Response.Error.Message
 		}
-		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("openai: %s", errMsg)}
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("%s: %s", state.message.Provider, errMsg)}
 		return true
 
 	case eventError:
-		errMsg := ev.Message
-		if errMsg == "" {
-			errMsg = ev.Code
+		errMsg := "stream error"
+		if !state.sanitizeErrors {
+			errMsg = ev.Message
+			if errMsg == "" {
+				errMsg = ev.Code
+			}
+			if errMsg == "" {
+				errMsg = "unknown error"
+			}
 		}
-		if errMsg == "" {
-			errMsg = "unknown error"
-		}
-		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("openai: %s", errMsg)}
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("%s: %s", state.message.Provider, errMsg)}
 		return true
 	}
 
@@ -456,13 +493,13 @@ func (s *streamState) ensureStarted(ch chan<- core.AssistantEvent) {
 // finalizeToolCall fills a slot's reserved tool_call block with parsed arguments
 // and emits ToolCallEnd once, marking the slot done so the same call is not
 // finalized twice (args.done then item.done).
-func (s *streamState) finalizeToolCall(sl *slot, argsStr string, ch chan<- core.AssistantEvent) {
+func (s *streamState) finalizeToolCall(sl *slot, argsStr string, ch chan<- core.AssistantEvent) error {
 	if sl.done {
-		return
+		return nil
 	}
 	var args map[string]any
-	if argsStr != "" {
-		_ = json.Unmarshal([]byte(argsStr), &args)
+	if argsStr == "" || json.Unmarshal([]byte(argsStr), &args) != nil || args == nil {
+		return fmt.Errorf("%s: malformed function call arguments for %q", s.message.Provider, sl.callName)
 	}
 	blk := &s.message.Content[sl.contentIndex]
 	blk.ToolCallID = sl.callID
@@ -471,11 +508,10 @@ func (s *streamState) finalizeToolCall(sl *slot, argsStr string, ch chan<- core.
 	blk.Arguments = args
 	sl.done = true
 	ch <- core.AssistantEvent{
-		Type:         core.ProviderEventToolCallEnd,
-		ContentIndex: sl.contentIndex,
-		ToolCallID:   sl.callID,
-		ToolName:     sl.callName,
+		Type: core.ProviderEventToolCallEnd, ContentIndex: sl.contentIndex,
+		ToolCallID: sl.callID, ToolName: sl.callName,
 	}
+	return nil
 }
 
 // finalize handles response.completed or response.incomplete. Precedence,
@@ -565,7 +601,7 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 	if !hasSubstantiveContent(s.message.Content) {
 		ch <- core.AssistantEvent{
 			Type:  core.ProviderEventError,
-			Error: &core.EmptyResponseError{Provider: "openai", Usage: s.message.Usage},
+			Error: &core.EmptyResponseError{Provider: s.message.Provider, Usage: s.message.Usage},
 		}
 		return true
 	}
@@ -648,7 +684,7 @@ type textSignatureV1 struct {
 
 // parseTextSignature decodes a TextSignature blob back into id/phase. Tolerates
 // empty/legacy values.
-func parseTextSignature(sig string) (id, phase string) {
+func ParseTextSignature(sig string) (id, phase string) {
 	if sig == "" {
 		return "", ""
 	}

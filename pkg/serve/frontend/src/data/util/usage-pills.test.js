@@ -157,6 +157,26 @@ test("openai: zero percent is a valid meter", () => {
   expect(out.fiveHour).toEqual({ pct: 0, resetsAt: null, source: "openai" });
 });
 
+test("xAI v2 provider map keeps quota, tier, prepaid-only bucket and stale", () => {
+  const out = usageForSession({ provider: "xai" }, { available: true, providers: { xai: {
+    stale: true, plan: { tier: "SuperGrok" }, quotas: [{ id: "plan", label: "week", utilization: 0, period_end: "2026-08-01T00:00:00Z" }],
+    money: [{ id: "prepaid", label: "Credits", remaining_minor: 500, currency: "USD", decimals: 2 }],
+  } } });
+  expect(out.fiveHour).toEqual({ pct: 0, resetsAt: "2026-08-01T00:00:00Z", label: "week", source: "xai", stale: true });
+  expect(out.tier).toBe("SuperGrok");
+  expect(out.moneyBuckets).toHaveLength(1);
+  expect(out.stale).toBe(true);
+});
+
+test("xAI provider status distinguishes API key, oauth pending and error", () => {
+  for (const [reason, auth] of [["plan_unsupported", "api_key"], ["pending", "oauth"], ["temporarily_unavailable", "oauth"]]) {
+    const out = usageForSession({ provider: "xai" }, { available: false, providers: {}, provider_status: { xai: { reason, auth_kind: auth } } });
+    expect(out.providerStatus.reason).toBe(reason);
+    expect(out.providerStatus.auth_kind).toBe(auth);
+    expect(out.fiveHour).toBeNull();
+  }
+});
+
 // --- guards / overage --------------------------------------------------------
 
 test("onOverage flag is passed through for either provider", () => {

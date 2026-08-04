@@ -550,7 +550,11 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if currentThinking == "" {
 				currentThinking = "medium"
 			}
-			m.thinkingPicker.Open(currentThinking)
+			model, ok := core.ResolveModel(selected.ID)
+			if !ok {
+				model = core.Model{ID: selected.ID}
+			}
+			m.thinkingPicker.OpenForModel(currentThinking, model)
 			return m, nil
 		}
 
@@ -847,7 +851,8 @@ func (m appModel) handleThinkingSwitch(level string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// ConfigChanged event updates status bar.
-	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", level)
+	effective, _ := bus.QueryTyped[bus.GetThinkingLevel, string](m.runtime.Bus, bus.GetThinkingLevel{})
+	m.s.pendingStatus = fmt.Sprintf("✓ Thinking level: %s", effective)
 	return m, nil
 }
 

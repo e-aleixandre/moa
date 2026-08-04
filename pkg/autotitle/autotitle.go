@@ -13,18 +13,23 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// DefaultModelSpec is the cheap, fast model used for title generation when the
-// session's provider has no cheaper same-vendor option (Anthropic).
+// DefaultModelSpec is the cheap Anthropic title model.
 const DefaultModelSpec = "haiku"
 
 // cheapModelSpecFor returns a cheap title-generation model on the SAME provider
 // as the session, so an OpenAI session's transcript isn't shipped to Anthropic
 // (a different vendor) just to make a title. Falls back to the Anthropic default.
 func cheapModelSpecFor(provider string) string {
-	if provider == "openai" {
+	switch provider {
+	case "anthropic":
+		return DefaultModelSpec
+	case "openai":
 		return "gpt-5.4-mini"
+	case "xai":
+		return "grok"
+	default:
+		return ""
 	}
-	return DefaultModelSpec
 }
 
 // MaxTitleLen caps the generated title length (in runes).
@@ -83,9 +88,16 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 	}
 
 	spec := cheapModelSpecFor(sessionModel.Provider)
+	if spec == "" {
+		return "", fmt.Errorf("autotitle: no same-vendor model for provider %q", sessionModel.Provider)
+	}
 	model, ok := core.ResolveModel(spec)
 	if !ok {
 		return "", fmt.Errorf("autotitle: cannot resolve model %q", spec)
+	}
+	thinking, err := core.EffectiveThinkingLevel(model, internalThinking(model))
+	if err != nil {
+		return "", fmt.Errorf("autotitle: thinking level: %w", err)
 	}
 	prov, err := factory(model)
 	if err != nil {
@@ -99,7 +111,7 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 		Model:    model,
 		System:   systemPrompt,
 		Messages: []core.Message{core.NewUserMessage(wrapPrompt(prompt))},
-		Options:  core.StreamOptions{ThinkingLevel: "off"},
+		Options:  core.StreamOptions{ThinkingLevel: thinking},
 	}
 	ch, err := prov.Stream(ctx, req)
 	if err != nil {
@@ -198,4 +210,11 @@ func clean(s string) string {
 		s = strings.TrimSpace(string(runes[:MaxTitleLen]))
 	}
 	return s
+}
+
+func internalThinking(model core.Model) string {
+	if model.Provider == "xai" {
+		return "low"
+	}
+	return "off"
 }

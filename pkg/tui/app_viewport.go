@@ -226,7 +226,19 @@ func cycleThinkingLevel(current string) string {
 			return thinkingLevels[(i+1)%len(thinkingLevels)]
 		}
 	}
-	return "medium" // fallback
+	return "medium"
+}
+
+func cycleThinkingLevelFor(current string, levels []string) string {
+	if len(levels) == 0 {
+		return current
+	}
+	for i, level := range levels {
+		if level == current {
+			return levels[(i+1)%len(levels)]
+		}
+	}
+	return levels[0]
 }
 
 // parseSubagentNotification detects steer messages formatted as subagent

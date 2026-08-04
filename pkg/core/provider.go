@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
 
 // Provider streams LLM responses. Each provider (Anthropic, OpenAI, etc.)
@@ -193,6 +194,37 @@ func ThinkingLevelOptions() string {
 		s += l
 	}
 	return s
+}
+
+// ThinkingLevelsForModel returns the levels the selected model accepts. Unknown
+// models retain the common vocabulary; only verified constrained models narrow
+// it. This keeps model switching and persisted session state deterministic.
+func ThinkingLevelsForModel(model Model) []string {
+	if model.Provider == "xai" {
+		return []string{"low", "medium", "high"}
+	}
+	return ThinkingLevels
+}
+
+// EffectiveThinkingLevel resolves a persisted level for a model. xAI requires
+// reasoning and only accepts low/medium/high; other providers keep the value.
+func EffectiveThinkingLevel(model Model, level string) (string, error) {
+	if model.Provider != "xai" {
+		if !IsValidThinkingLevel(level) {
+			return "", fmt.Errorf("invalid thinking level %q", level)
+		}
+		return level, nil
+	}
+	switch level {
+	case "off", "minimal", "low":
+		return "low", nil
+	case "medium":
+		return "medium", nil
+	case "high", "xhigh":
+		return "high", nil
+	default:
+		return "", fmt.Errorf("invalid xAI thinking level %q (choose: low, medium, high)", level)
+	}
 }
 
 // AssistantEvent is emitted by providers during streaming.

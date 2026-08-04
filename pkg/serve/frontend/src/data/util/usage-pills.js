@@ -84,7 +84,12 @@ export function usageForSession(session, globalUsage) {
   const s = session || {};
   const isOpenAI = s.provider === "openai";
   const isAnthropic = !s.provider || s.provider === "anthropic";
-  const u = globalUsage && globalUsage.available ? globalUsage : null;
+  // v2 is provider-qualified; accepting the old flat contract keeps saved
+  // frontend bundles and server upgrades compatible.
+  const u = globalUsage && globalUsage.available
+    ? ((globalUsage.providers && globalUsage.providers[s.provider || "anthropic"]) || (!globalUsage.providers && globalUsage))
+    : null;
+  const providerStatus = globalUsage && globalUsage.provider_status && globalUsage.provider_status[s.provider || "anthropic"];
 
   let fiveHour = null;
   let week = null;
@@ -117,6 +122,16 @@ export function usageForSession(session, globalUsage) {
     }
   }
 
+  // Generic consumer plan snapshots (xAI today, future providers tomorrow).
+  // No hardcoded provider fields: the API owns labels, periods and money ids.
+  if (!isAnthropic && !isOpenAI && u) {
+    const qs = Array.isArray(u.quotas) ? u.quotas : [];
+    if (qs[0] && Number.isFinite(qs[0].utilization)) fiveHour = { pct: Math.round(qs[0].utilization), resetsAt: qs[0].period_end || null, label: qs[0].label || qs[0].id, source: s.provider, stale: !!u.stale };
+    if (qs[1] && Number.isFinite(qs[1].utilization)) week = { pct: Math.round(qs[1].utilization), resetsAt: qs[1].period_end || null, label: qs[1].label || qs[1].id, source: s.provider, stale: !!u.stale };
+    const payg = (u.money || []).find((b) => b.id === "payg");
+    if (payg) extra = { enabled: true, used: payg.used_minor ?? 0, limit: payg.limit_minor ?? null, currency: payg.currency || "USD", decimalPlaces: Number.isInteger(payg.decimals) ? payg.decimals : 2 };
+  }
+
   if (isOpenAI) {
     if (typeof s.rlFiveHourPct === "number" && s.rlFiveHourPct >= 0) {
       fiveHour = { pct: Math.round(s.rlFiveHourPct), resetsAt: null, source: "openai" };
@@ -126,5 +141,12 @@ export function usageForSession(session, globalUsage) {
     }
   }
 
-  return { fiveHour, week, extra, onOverage: !!s.onOverage };
+  const result = { fiveHour, week, extra, onOverage: !!s.onOverage };
+  if (u && (Array.isArray(u.money) || u.plan || u.stale)) {
+    result.moneyBuckets = Array.isArray(u.money) ? u.money : [];
+    result.tier = u.plan && u.plan.tier;
+    result.stale = !!u.stale;
+  }
+  if (providerStatus) result.providerStatus = providerStatus;
+  return result;
 }
