@@ -581,34 +581,40 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   }, [canVoice, toggleFromShortcut]);
 
   // --- Stop / abort ---
-  // Ported from InputBar.handleStop: on abort the agent discards its queued
-  // steers (they belonged to the now-dead run) without emitting an event, so
-  // the user's intent would be lost. Preserve it — dump the locally-tracked
-  // queued chips back into the input before cancelling, clear them, and warn
-  // about queued images that can't be restored (mirror of the TUI's
-  // abort-dumps-queue-to-input).
+  // On abort, queue ownership belongs to the server: it atomically reports
+  // which steers it discarded, so the client can restore only messages that
+  // were not already delivered in the stop-vs-tool-return race.
   const handleStop = useCallback(async () => {
     if (!sessionId) return;
     const sess = store.get().sessions[sessionId];
     const steers = sess?.pendingSteers;
-    if (steers && steers.length > 0) {
+    try {
+      const result = await cancelRun(sessionId);
+      // Stop is authoritative: a steer can cross the delivery boundary just
+      // before the abort reaches the server. Restore only the IDs the server
+      // confirms it discarded, or the user would resend an already-delivered
+      // message and see both "You steered" and "You" in the transcript.
+      const discarded = new Set(result?.discarded_steer_ids || []);
+      const restored = (steers || []).filter((steer) => discarded.has(steer.id));
+      if (restored.length === 0) return;
       const el = textareaRef.current;
       if (el) {
-        el.value = combineQueueText(el.value, steers);
+        el.value = combineQueueText(el.value, restored);
         setHasText(!!el.value.trim());
         autoResize();
         el.focus();
         el.selectionStart = el.selectionEnd = el.value.length;
+        saveDraft(sessionId, el.value); // persist the dumped queue (no input event)
       }
-      saveDraft(sessionId, el.value); // persist the dumped queue (no input event)
-      const dropped = droppedImageCount(steers);
+      const dropped = droppedImageCount(restored);
       if (dropped > 0) {
         addToast({ sessionId, title: "Queued images dropped", detail: `${dropped} attached image${dropped > 1 ? "s were" : " was"} not restored — re-attach if still needed.`, type: "attention" });
       }
-      updateSession(sessionId, { pendingSteers: null });
-    }
-    try {
-      await cancelRun(sessionId);
+      const current = store.get().sessions[sessionId];
+      if (current?.pendingSteers) {
+        const kept = current.pendingSteers.filter((steer) => !discarded.has(steer.id));
+        updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
+      }
     } catch (e) {
       console.error("Cancel failed:", e);
     }

@@ -872,6 +872,97 @@ func TestAbort_DiscardsQueuedSteer(t *testing.T) {
 	}
 }
 
+func TestAbortDuringToolDoesNotDeliverQueuedSteer(t *testing.T) {
+	toolStarted := make(chan struct{})
+	block := core.Tool{
+		Name:       "block",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			close(toolStarted)
+			<-ctx.Done()
+			return core.TextResult("interrupted"), nil
+		},
+	}
+	ag := newTestAgent(NewMockProvider(toolCallResponse("tc-1", "block", nil)), block)
+	events := collectEvents(ag)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = ag.Run(context.Background(), "first")
+	}()
+
+	<-toolStarted
+	ag.Steer(core.SteerItem{ID: "restored", Text: "send this again"})
+	ag.Abort()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("aborted run did not finish")
+	}
+
+	for _, event := range events.snapshot() {
+		if event.Type == core.AgentEventSteer && event.Text == "send this again" {
+			t.Fatal("abort delivered a queued steer that should have been discarded")
+		}
+	}
+	if len(ag.PendingSteers()) != 0 {
+		t.Fatal("abort left the queued steer behind")
+	}
+}
+
+func TestSteerInterruptsWaitToolWithoutStoppingParentRun(t *testing.T) {
+	toolStarted := make(chan struct{})
+	cause := make(chan error, 1)
+	wait := core.Tool{
+		Name:       "bash_wait",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			close(toolStarted)
+			<-ctx.Done()
+			cause <- context.Cause(ctx)
+			return core.TextResult("wait interrupted"), nil
+		},
+	}
+	ag := newTestAgent(NewMockProvider(
+		toolCallResponse("tc-1", "bash_wait", nil),
+		simpleTextResponse("handled the message"),
+	), wait)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = ag.Run(context.Background(), "first")
+	}()
+
+	<-toolStarted
+	if !ag.Steer(core.SteerItem{ID: "wake", Text: "please respond now"}) {
+		t.Fatal("Steer returned false")
+	}
+	select {
+	case got := <-cause:
+		if !errors.Is(got, core.ErrWaitInterruptedBySteer) {
+			t.Fatalf("wait cause = %v, want user steer interruption", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("steer did not interrupt wait tool")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("parent run did not resume after wait interruption")
+	}
+
+	var sawSteer, sawReply bool
+	for _, msg := range ag.Messages() {
+		for _, content := range msg.Content {
+			sawSteer = sawSteer || content.Text == "please respond now"
+			sawReply = sawReply || content.Text == "handled the message"
+		}
+	}
+	if !sawSteer || !sawReply {
+		t.Fatalf("messages missing steer or resumed reply: %+v", ag.Messages())
+	}
+}
+
 func TestAgent_CancelSteer_DrainsQueuedSteers(t *testing.T) {
 	ag := newTestAgent(NewMockProvider())
 

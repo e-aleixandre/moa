@@ -470,11 +470,53 @@ function hasLiveSubagents(sess) {
   return false;
 }
 
+// copyWithExecCommand runs synchronously in the user's click, which is required
+// by Safari/iOS PWAs. Clipboard.writeText is only attempted when this legacy
+// path is unavailable, because a rejected promise may arrive after activation.
+function copyWithExecCommand(text) {
+  if (typeof document === 'undefined' || !document.body || !document.execCommand) return false;
+  const active = document.activeElement;
+  const selectionStart = typeof active?.selectionStart === 'number' ? active.selectionStart : null;
+  const selectionEnd = typeof active?.selectionEnd === 'number' ? active.selectionEnd : null;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+    if (active?.isConnected && typeof active.focus === 'function') {
+      try {
+        active.focus({ preventScroll: true });
+      } catch {
+        active.focus();
+      }
+      if (selectionStart !== null && selectionEnd !== null && typeof active.setSelectionRange === 'function') {
+        active.setSelectionRange(selectionStart, selectionEnd);
+      }
+    }
+  }
+}
+
 /** copyToClipboard writes text to the clipboard and resolves true/false so a
  *  caller can only flash "copied ✓" on real success, never unconditionally.
- *  A rejected clipboard promise (permissions/insecure context/user gesture
- *  lost) is swallowed here rather than left as an unhandled rejection. */
+ *  A synchronous execCommand attempt covers installed iOS PWAs; Clipboard
+ *  writeText remains the fallback in browsers where legacy copying is absent. */
 export function copyToClipboard(text) {
-  if (!text || !navigator.clipboard?.writeText) return Promise.resolve(false);
-  return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+  if (!text) return Promise.resolve(false);
+  if (copyWithExecCommand(text)) return Promise.resolve(true);
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    return Promise.resolve(false);
+  }
+  return navigator.clipboard.writeText(text)
+    .then(() => true)
+    .catch(() => false);
 }

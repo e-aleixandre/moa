@@ -495,3 +495,27 @@ func TestNewBashWaitBlockedWaiterReturnsStatus(t *testing.T) {
 		t.Fatal("bash_wait did not return")
 	}
 }
+
+func TestNewBashWaitSteerInterruptKeepsJobRunning(t *testing.T) {
+	release := make(chan struct{})
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	job, err := jobs.Start("echo hi", "/tmp", "", func(_ context.Context, _ func(core.Result)) (core.Result, error) {
+		<-release
+		return core.TextResult("hi\n"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer close(release)
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(core.ErrWaitInterruptedBySteer)
+	res, err := NewBashWait(ToolConfig{BashJobs: jobs}).Execute(ctx, map[string]any{"job_id": job.JobID}, nil)
+	if err != nil || res.IsError || !strings.Contains(bashResultText(res), "interrupted by a user message") {
+		t.Fatalf("steer-interrupted wait = %+v, %v", res, err)
+	}
+	info, ok := jobs.Get(job.JobID)
+	if !ok || info.Status != "running" {
+		t.Fatalf("background job = %+v, %v; want running", info, ok)
+	}
+}

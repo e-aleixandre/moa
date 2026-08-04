@@ -78,15 +78,39 @@ func RegisterHandlers(sctx *SessionContext) {
 	// Commands
 	// -------------------------------------------------------------------
 
-	b.OnCommand(func(cmd AbortRun) error {
-		// Cancel run context FIRST so runCtx.Err() != nil before Agent.Abort()
-		// causes runFn to return. This prevents misclassifying abort as real error.
-		sctx.cancelRun()
+	abortRun := func(expectedGen uint64, discardedOut *[]core.SteerItem) error {
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
+		if expectedGen != 0 && sctx.RunGenAtomic.Load() != expectedGen {
+			return ErrSessionBusy
+		}
+		// Agent.Abort takes the same lock as the post-tool delivery boundary, so
+		// no queued steer can cross into history after Stop has claimed it.
 		sctx.Agent.Abort()
+		sctx.cancelRun()
+		// Claim the remaining queue after cancellation. A steer that already
+		// crossed into history is not returned here, so clients must not restore
+		// and send it a second time after Stop.
+		discarded := sctx.Agent.CancelSteer()
+		if discardedOut != nil {
+			*discardedOut = discarded
+		}
+		sctx.Bus.Publish(SteersCanceled{
+			SessionID:     sctx.SessionID,
+			AttachmentIDs: steerAttachmentIDs(discarded),
+		})
 		return nil
+	}
+	b.OnCommand(func(AbortRun) error {
+		return abortRun(0, nil)
+	})
+	b.OnCommand(func(cmd AbortAndRecall) error {
+		return abortRun(cmd.RunGen, cmd.DiscardedSteers)
 	})
 
 	b.OnCommand(func(cmd SteerAgent) error {
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
 		// Centralize the ID invariant: every queued steer has a stable ID even
 		// if a caller (CLI, internal) forgot to mint one.
 		if cmd.ID == "" {
@@ -105,6 +129,8 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd QueueCommand) error {
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
 		if cmd.ID == "" {
 			cmd.ID = core.NewSteerID()
 		}
@@ -545,6 +571,10 @@ func RegisterHandlers(sctx *SessionContext) {
 		return RunTokens{Up: sctx.runTokensUp, Down: sctx.runTokensDown}, nil
 	})
 
+	b.OnQuery(func(q GetRunGeneration) (uint64, error) {
+		return sctx.RunGenAtomic.Load(), nil
+	})
+
 	b.OnQuery(func(q GetPlanMode) (PlanModeInfo, error) {
 		if sctx.PlanMode == nil {
 			return PlanModeInfo{Mode: "off"}, nil
@@ -653,6 +683,8 @@ func RegisterHandlers(sctx *SessionContext) {
 	}
 
 	b.OnCommand(func(cmd SendPrompt) error {
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
 		// Strict-order gate (INV-2): a genuine user prompt must not start a run
 		// while the queue rail holds pending items — it would jump ahead of a
 		// queued barrier/steer. Convert it into a steer at the tail of the queue
@@ -735,6 +767,8 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd SendPromptWithContent) error {
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
 		// Strict-order gate (INV-2): queue behind pending items instead of
 		// jumping ahead. Content sends are always user-initiated, so no source
 		// exemption applies.

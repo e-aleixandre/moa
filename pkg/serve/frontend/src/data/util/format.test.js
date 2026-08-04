@@ -1,6 +1,54 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle, copyToClipboard } from './format.js';
+
+test('copyToClipboard falls back to execCommand when Clipboard.writeText is unavailable', async () => {
+  const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const doc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const textarea = {
+    value: '', style: {}, setAttribute() {}, select() {}, setSelectionRange() {},
+  };
+  const body = { appendChild() {}, removeChild() {} };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { body, createElement: () => textarea, execCommand: (cmd) => cmd === 'copy' },
+  });
+  try {
+    expect(await copyToClipboard('result')).toBe(true);
+    expect(textarea.value).toBe('result');
+  } finally {
+    if (nav) Object.defineProperty(globalThis, 'navigator', nav);
+    else delete globalThis.navigator;
+    if (doc) Object.defineProperty(globalThis, 'document', doc);
+    else delete globalThis.document;
+  }
+});
+
+test('copyToClipboard uses execCommand before a rejecting Clipboard.writeText call', async () => {
+  const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const doc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const textarea = {
+    value: '', style: {}, setAttribute() {}, select() {}, setSelectionRange() {},
+  };
+  const body = { appendChild() {}, removeChild() {} };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: () => Promise.reject(new Error('denied')) } },
+  });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { body, createElement: () => textarea, execCommand: (cmd) => cmd === 'copy' },
+  });
+  try {
+    expect(await copyToClipboard('result')).toBe(true);
+  } finally {
+    if (nav) Object.defineProperty(globalThis, 'navigator', nav);
+    else delete globalThis.navigator;
+    if (doc) Object.defineProperty(globalThis, 'document', doc);
+    else delete globalThis.document;
+  }
+});
 
 test('sessionTitle keeps a title and falls back to Untitled', () => {
   expect(sessionTitle({ title: 'Build dashboard' })).toBe('Build dashboard');

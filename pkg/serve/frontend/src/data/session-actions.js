@@ -578,7 +578,7 @@ export async function sendMessage(id, text, attachments = []) {
 }
 
 export async function cancelRun(id) {
-  await api('POST', `/api/sessions/${id}/cancel`);
+  return api('POST', `/api/sessions/${id}/cancel-and-recall`);
 }
 
 // cancelSteers drops every steer message still queued (not yet delivered) on

@@ -115,6 +115,15 @@ type AppendToConversation struct {
 // AbortRun cancels a running agent.
 type AbortRun struct{ SessionID string }
 
+// AbortAndRecall cancels a running agent and returns the queued items it
+// atomically removed. Interactive clients use those IDs to restore only
+// messages that were truly not delivered.
+type AbortAndRecall struct {
+	SessionID       string
+	RunGen          uint64
+	DiscardedSteers *[]core.SteerItem
+}
+
 // PromoteSubagent flips a running synchronous subagent job to async,
 // unblocking its parent's blocking tool call while the child keeps running
 // in the background.

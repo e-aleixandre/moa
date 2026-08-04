@@ -209,6 +209,10 @@ type SessionContext struct {
 
 	// Run context management — used by SendPrompt handler.
 	// Protected by runMu.
+	// abortMu serializes AbortRun against commands that can enqueue a steer or
+	// claim a new run. Without it, a late enqueue can be cleared by abort cleanup
+	// without ever being returned to the client that needs to recall it.
+	abortMu    sync.Mutex
 	runMu      sync.Mutex
 	runCancel  context.CancelFunc // cancels the current run context; nil when idle
 	runGen     uint64             // incremented each run; used to avoid clearing a newer run's cancel

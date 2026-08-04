@@ -64,6 +64,44 @@ type steerQueue struct {
 	inflightNativeDocBytes int64
 }
 
+// steerWaitInterrupts holds the cancellers for the wait tools currently
+// observing background work. A user steer wakes those tools without cancelling
+// their bash/subagent jobs or the parent run itself.
+type steerWaitInterrupts struct {
+	mu      sync.Mutex
+	nextID  uint64
+	cancels map[uint64]context.CancelCauseFunc
+}
+
+func (w *steerWaitInterrupts) register(cancel context.CancelCauseFunc) func() {
+	w.mu.Lock()
+	if w.cancels == nil {
+		w.cancels = make(map[uint64]context.CancelCauseFunc)
+	}
+	w.nextID++
+	id := w.nextID
+	w.cancels[id] = cancel
+	w.mu.Unlock()
+
+	return func() {
+		w.mu.Lock()
+		delete(w.cancels, id)
+		w.mu.Unlock()
+	}
+}
+
+func (w *steerWaitInterrupts) interrupt() {
+	w.mu.Lock()
+	cancels := make([]context.CancelCauseFunc, 0, len(w.cancels))
+	for _, cancel := range w.cancels {
+		cancels = append(cancels, cancel)
+	}
+	w.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel(core.ErrWaitInterruptedBySteer)
+	}
+}
+
 // push appends an item, returning false (dropping it) if the queue is already
 // at steerBufferSize. The bool lets
 // callers surface a "queue full" rejection instead of silently confirming.
@@ -194,6 +232,17 @@ func (q *steerQueue) len() int {
 	return len(q.items)
 }
 
+func (q *steerQueue) hasUserSteer() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, item := range q.items {
+		if !item.Internal && !item.IsBarrier() {
+			return true
+		}
+	}
+	return false
+}
+
 // addInflight / subInflight adjust the inflight native-byte ledger under q.mu.
 // subInflight floors at 0 so a benign over-settle can't drive the ledger
 // negative and corrupt a concurrent reservation.
@@ -285,7 +334,10 @@ type Agent struct {
 	cancel  context.CancelFunc
 	mu      sync.Mutex
 
-	steers     steerQueue // inspectable queue, drained by agentLoop between steps
+	steers     steerQueue          // inspectable queue, drained by agentLoop between steps
+	waitSteers steerWaitInterrupts // wakes an active wait when a user steer arrives
+	steerMu    sync.Mutex          // serializes stop, steer admission, and delivery
+	aborting   bool                // rejects steers until a newly-started run owns them
 	followUpMu sync.Mutex
 	followUps  []string // consumed after agentLoop returns in execute()
 
@@ -1080,6 +1132,9 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	ctx, a.cancel = context.WithCancel(ctx)
 	cancel := a.cancel
 	a.mu.Unlock()
+	a.steerMu.Lock()
+	a.aborting = false
+	a.steerMu.Unlock()
 
 	defer func() {
 		cancel()
@@ -1142,7 +1197,28 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 // Returns false if the queue is full (the message was dropped), so callers can
 // surface a rejection instead of confirming a message that will never arrive.
 func (a *Agent) Steer(it core.SteerItem) bool {
-	return a.steers.push(ownItem(it))
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if a.aborting {
+		return false
+	}
+	if !a.steers.push(ownItem(it)) {
+		return false
+	}
+	if !it.Internal && !it.IsBarrier() {
+		a.waitSteers.interrupt()
+	}
+	return true
+}
+
+func (a *Agent) registerSteerWait(cancel context.CancelCauseFunc) func() {
+	unregister := a.waitSteers.register(cancel)
+	// Cover a steer that arrived between the model choosing a wait tool and the
+	// tool registering itself as interruptible.
+	if a.steers.hasUserSteer() {
+		cancel(core.ErrWaitInterruptedBySteer)
+	}
+	return unregister
 }
 
 // CancelSteer drops and returns all steer messages still queued for inter-step delivery.
@@ -1206,11 +1282,14 @@ func (a *Agent) drainFollowUps() []string {
 
 // Abort cancels the current run.
 func (a *Agent) Abort() {
+	a.steerMu.Lock()
+	a.aborting = true
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.cancel != nil {
 		a.cancel()
 	}
+	a.mu.Unlock()
+	a.steerMu.Unlock()
 }
 
 // MarkerRunTimedOut is the synthetic assistant-message text inserted when a run
@@ -1311,6 +1390,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	}
 	cancel := a.cancel
 	a.mu.Unlock()
+	a.steerMu.Lock()
+	a.aborting = false
+	a.steerMu.Unlock()
 
 	// The user message appended by prepare (if any) is now visible to every
 	// reader of the agent's state, so announcing it here can no longer race a
@@ -1377,8 +1459,10 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 			}
 			return a.checkpointReader()
 		}(),
-		drainSteers:  a.steers.drainUntilBarrier,
-		settleSteers: a.steers.settle,
+		drainSteers:       a.steers.drainUntilBarrier,
+		settleSteers:      a.steers.settle,
+		registerSteerWait: a.registerSteerWait,
+		steerMu:           &a.steerMu,
 	}
 
 	var err error
@@ -1387,9 +1471,16 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		if err != nil {
 			break
 		}
+		a.steerMu.Lock()
+		if ctx.Err() != nil {
+			a.steerMu.Unlock()
+			err = ctx.Err()
+			break
+		}
 		followUps := a.drainFollowUps()
 		steered := a.steers.drainUntilBarrier()
 		if len(followUps) == 0 && len(steered) == 0 {
+			a.steerMu.Unlock()
 			break
 		}
 		// Deterministic order: follow-ups first, then steered.
@@ -1420,6 +1511,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		}
 		// Settle the drained steers' inflight bytes now that they are in history.
 		a.steers.settle(steered)
+		a.steerMu.Unlock()
 	}
 
 	// Classify the termination cause NOW, the instant the loop returned — before
@@ -1442,7 +1534,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// queued chips back into the input; the agent's buffer is cleared here
 	// regardless.
 	if err != nil {
+		a.steerMu.Lock()
 		discarded := a.steers.clear()
+		a.steerMu.Unlock()
 		emitLifecycle(cfg, core.AgentEvent{
 			Type:          core.AgentEventSteersCanceled,
 			AttachmentIDs: steerAttachmentIDs(discarded),

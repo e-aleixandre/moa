@@ -69,11 +69,16 @@ func pumpLoop(sctx *SessionContext) {
 // Bus.Execute.
 func pumpOnce(sctx *SessionContext) {
 	for {
+		// Serialize claiming the idle slot and draining queued steers against an
+		// AbortRun. A stop must never cancel a newer run that this pump started
+		// from the same queue after the previous one settled.
+		sctx.abortMu.Lock()
 		// Only act when the session is idle/error. A run in flight owns the
 		// drain and re-triggers the pump on its RunEnded. Error is treated like
 		// idle: a barrier (e.g. /clear) can recover the session.
 		if sctx.State != nil {
 			if s := sctx.State.Current(); s != StateIdle && s != StateError {
+				sctx.abortMu.Unlock()
 				return
 			}
 		}
@@ -83,15 +88,18 @@ func pumpOnce(sctx *SessionContext) {
 		// barrier stealing the slot would break the goal loop. Queued barriers
 		// wait until the goal ends or is stopped.
 		if sctx.Goal != nil && sctx.Goal.Active() {
+			sctx.abortMu.Unlock()
 			return
 		}
 
 		head, ok := sctx.Agent.PeekQueueHead()
 		if !ok {
+			sctx.abortMu.Unlock()
 			return // queue empty
 		}
 
 		if head.IsBarrier() {
+			sctx.abortMu.Unlock()
 			if done := pumpBarrier(sctx, head); !done {
 				return // transient failure (lost slot): retry at next idle
 			}
@@ -101,6 +109,7 @@ func pumpOnce(sctx *SessionContext) {
 		// Reserve the run slot BEFORE draining, so a concurrent SendPrompt can't
 		// see empty-queue + idle and jump ahead of these steers.
 		if err := reserveRunSlot(sctx); err != nil {
+			sctx.abortMu.Unlock()
 			return // a run started concurrently; its RunEnded re-triggers us
 		}
 		items := sctx.Agent.DrainUntilBarrier()
@@ -110,9 +119,11 @@ func pumpOnce(sctx *SessionContext) {
 			if sctx.State != nil {
 				_ = sctx.State.Transition(StateIdle)
 			}
+			sctx.abortMu.Unlock()
 			return
 		}
 		launchQueuedSteers(sctx, items)
+		sctx.abortMu.Unlock()
 		return // the run owns the rest; its RunEnded re-triggers the pump
 	}
 }

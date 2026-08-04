@@ -1379,6 +1379,43 @@ func TestCancel_WhileRunning(t *testing.T) {
 	})
 }
 
+func TestCancelWithDiscardedSteers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	started := make(chan struct{})
+	prov := newMockProvider(func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent)
+		go func() {
+			defer close(ch)
+			close(started)
+			<-ctx.Done()
+		}()
+		return ch, nil
+	})
+	mgr := newTestManagerWithRoot(t, ctx, prov, dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "first", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	action, steerID, _, err := mgr.Send(sess.ID, "queued", nil, "client-steer", "")
+	if err != nil || action != "steer" || steerID != "client-steer" {
+		t.Fatalf("queued send = %q, %q, %v", action, steerID, err)
+	}
+	discarded, err := mgr.CancelWithDiscardedSteers(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(discarded) != 1 || discarded[0].ID != "client-steer" {
+		t.Fatalf("discarded = %+v, want client steer", discarded)
+	}
+}
+
 func TestCancel_WhileIdle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -163,19 +163,17 @@ func (m appModel) submitBusy(text string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dumpQueueToInput moves any queued steer/command chips back into the input
-// before an abort. The agent discards its queue on abort without an event, so
-// this preserves the user's intent (parity with the web client's handleStop).
+// restoreSteersToInput moves discarded steer/command chips back into the input.
 // Command barriers are restored with their leading "/" so re-submitting parses
 // them as commands again; image steers can't be restored (raw bytes not
-// retained) and set a status note. A no-op when the queue is empty.
-func (m *appModel) dumpQueueToInput() {
-	if len(m.s.queuedSteers) == 0 {
+// retained) and set a status note. A no-op when the input set is empty.
+func (m *appModel) restoreSteersToInput(steers []core.SteerItem) {
+	if len(steers) == 0 {
 		return
 	}
-	texts := make([]string, len(m.s.queuedSteers))
+	texts := make([]string, len(steers))
 	imageDropped := false
-	for i, s := range m.s.queuedSteers {
+	for i, s := range steers {
 		t := s.Text
 		if s.IsBarrier() && !strings.HasPrefix(t, "/") {
 			t = "/" + t
@@ -189,13 +187,53 @@ func (m *appModel) dumpQueueToInput() {
 	if current := m.input.textarea.Value(); current != "" {
 		combined = current + "\n" + combined
 	}
-	m.s.queuedSteers = nil
 	m.input.textarea.SetValue(combined)
 	m.input.textarea.CursorEnd()
 	if imageDropped {
 		m.status.SetText("queued image(s) not restored — re-attach if still needed")
 	}
 	m.updateViewport()
+}
+
+// dumpQueueToInput is used when the user explicitly dequeues messages for
+// editing. Stop uses abortRunAndRestoreQueue instead, because its server-side
+// result distinguishes discarded items from steers already delivered in flight.
+func (m *appModel) dumpQueueToInput() {
+	m.restoreSteersToInput(m.s.queuedSteers)
+	m.s.queuedSteers = nil
+}
+
+func (m *appModel) abortRunAndRestoreQueue() {
+	var discarded []core.SteerItem
+	runGen, _ := bus.QueryTyped[bus.GetRunGeneration, uint64](m.runtime.Bus, bus.GetRunGeneration{})
+	if err := m.runtime.Bus.Execute(bus.AbortAndRecall{RunGen: runGen, DiscardedSteers: &discarded}); err != nil {
+		m.s.pendingStatus = "✗ " + err.Error()
+		return
+	}
+	// Internal steers are system-owned completion notifications, never text the
+	// user typed. They are intentionally discarded with the aborted run rather
+	// than being turned into editable composer input.
+	userSteers := discarded[:0]
+	for _, steer := range discarded {
+		if !steer.Internal {
+			userSteers = append(userSteers, steer)
+		}
+	}
+	if len(userSteers) == 0 {
+		return
+	}
+	ids := make(map[string]struct{}, len(userSteers))
+	for _, steer := range userSteers {
+		ids[steer.ID] = struct{}{}
+	}
+	kept := m.s.queuedSteers[:0]
+	for _, steer := range m.s.queuedSteers {
+		if _, ok := ids[steer.ID]; !ok {
+			kept = append(kept, steer)
+		}
+	}
+	m.s.queuedSteers = kept
+	m.restoreSteersToInput(userSteers)
 }
 
 // checkClipboardImage reads image data from the system clipboard.

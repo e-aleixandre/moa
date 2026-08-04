@@ -1,6 +1,14 @@
 package core
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrWaitInterruptedBySteer marks a wait tool whose parent agent received a
+// user steer. The job being observed continues in the background; only the
+// parent's blocking wait is interrupted so it can process the new message.
+var ErrWaitInterruptedBySteer = errors.New("wait interrupted by user steer")
 
 // agentIDKey is the private context key under which the agent identifier is
 // stored. Using a struct type avoids collisions with other context values.

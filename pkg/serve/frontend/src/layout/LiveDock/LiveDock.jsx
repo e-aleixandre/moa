@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { ChevronUp, ChevronDown, ChevronRight } from "lucide-preact";
 import "./LiveDock.css";
 import { Spinner } from "../../primitives/index.js";
@@ -32,19 +32,34 @@ import { useSpotlight } from "./use-live-dock.js";
 // closing restores whatever the user had chosen.
 export function LiveDock({ agents = [], onOpen, open: openProp, onToggle, forceCompact = false }) {
   const [localExpanded, setLocalExpanded] = useState(false);
+  const [forceCompactOverride, setForceCompactOverride] = useState(false);
   const controlled = onToggle != null;
   const expanded = controlled ? !!openProp : localExpanded;
   const setExpanded = (next) => {
     if (controlled) onToggle(typeof next === "function" ? next(expanded) : next);
     else setLocalExpanded(next);
   };
-  const open = expanded && !forceCompact;
+  // The keyboard state is inferred from the viewport and can briefly be stale
+  // on iOS. A deliberate tap on this primary navigation control wins over that
+  // heuristic, rather than leaving live work inaccessible until a reload.
+  const open = expanded && (!forceCompact || forceCompactOverride);
 
-  // While the keyboard forces the bar compact, tapping it must NOT flip the
-  // stored preference (you can't see the panel to intend it) — the bar just
-  // can't expand right now. Toggling is a no-op until forceCompact clears.
+  useEffect(() => {
+    if (!forceCompact) setForceCompactOverride(false);
+  }, [forceCompact]);
+
+  // While the keyboard normally keeps the dock compact, an explicit tap is
+  // still an unambiguous request to inspect the live work. This also provides
+  // a safe escape hatch when Safari has not yet reported the keyboard closing.
   const toggle = () => {
-    if (forceCompact) return;
+    if (forceCompact && !open) {
+      // `expanded` may already be true behind the compact presentation. Make
+      // the first tap reveal it rather than toggling that hidden preference
+      // off and making the user tap a second time.
+      setForceCompactOverride(true);
+      setExpanded(true);
+      return;
+    }
     setExpanded((v) => !v);
   };
 

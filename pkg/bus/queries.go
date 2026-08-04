@@ -29,6 +29,12 @@ type GetThinkingLevel struct{ SessionID string }
 // Handler returns: string
 type GetSessionState struct{ SessionID string }
 
+// GetRunGeneration returns the generation of the current or most recently
+// settled run. A stop command binds to this value so it cannot abort a newer
+// run that starts while the request is in flight.
+// Handler returns: uint64
+type GetRunGeneration struct{ SessionID string }
+
 // GetContextUsage returns the context window usage as a percentage (0-100).
 // Handler returns: int
 type GetContextUsage struct{ SessionID string }

@@ -2373,14 +2373,18 @@ func TestPermissionDenyDumpsQueueToInput(t *testing.T) {
 	b := bus.NewLocalBus()
 	defer b.Close()
 	b.OnCommand(func(bus.ResolvePermission) error { return nil })
-	b.OnCommand(func(bus.AbortRun) error { return nil })
-	m.runtime = &bus.SessionRuntime{Bus: b}
-	m.s.running = true
-	m.permPrompt.ShowFromBus("perm-1", "bash", map[string]any{"command": "rm"}, "", "ask")
-	m.s.queuedSteers = []core.SteerItem{
+	discarded := []core.SteerItem{
 		{ID: "c1", Text: "compact", Command: "compact"},
 		{ID: "s1", Text: "then this"},
 	}
+	b.OnCommand(func(cmd bus.AbortAndRecall) error {
+		*cmd.DiscardedSteers = discarded
+		return nil
+	})
+	m.runtime = &bus.SessionRuntime{Bus: b}
+	m.s.running = true
+	m.permPrompt.ShowFromBus("perm-1", "bash", map[string]any{"command": "rm"}, "", "ask")
+	m.s.queuedSteers = discarded
 
 	updated, _ := m.handlePermissionKey(tea.KeyMsg{Type: tea.KeyEsc})
 	rm := updated.(appModel)

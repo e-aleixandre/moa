@@ -106,7 +106,7 @@ review any external resources the page references before it loads.
 
 You don't have to wait for a run to finish before lining up your next move. What you type while the agent is working is handled in **strict send order** — the order you sent things is the order the agent sees them.
 
-- **Messages** typed mid-run are *steered* onto a queue and delivered to the agent between steps of the current run (or, if they arrive after the run ends, they start the next one). They show up as a **queued** chip above the composer.
+- **Messages** typed mid-run are *steered* onto a queue and delivered to the agent between steps of the current run (or, if they arrive after the run ends, they start the next one). If the agent is blocked in `bash_wait` or `subagent_wait`, a message wakes that wait immediately while its background job continues. They show up as a **queued** chip above the composer.
 - **Slash commands** typed mid-run are classified by what they do:
   - **Queued** (`/compact`, `/clear`, `/model`, `/thinking`, `/verify`, `/goal <objective>`) — these rewrite or reconfigure the conversation, so they can't run in the middle of a live turn. They wait in the queue as a **command** chip and run at the next idle point, in order relative to your messages. So `message → /compact → message` compacts *after* the first message lands and *before* the second.
   - **Instant** (`/rename`, `/permissions`, `/path`, `/tasks`, `/schedule`, `/goal status`, `/goal stop`) — these only touch side state, so they run immediately without waiting.

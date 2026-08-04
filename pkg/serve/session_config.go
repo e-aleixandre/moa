@@ -133,17 +133,32 @@ func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
 
 // Cancel aborts the running agent in a session via bus command.
 func (m *Manager) Cancel(sessionID string) error {
+	_, err := m.CancelWithDiscardedSteers(sessionID)
+	return err
+}
+
+// CancelWithDiscardedSteers aborts the running agent and returns the queued
+// steers atomically discarded by that operation.
+func (m *Manager) CancelWithDiscardedSteers(sessionID string) ([]core.SteerItem, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	state := sess.runtime.State.Current()
 	if state != bus.StateRunning && state != bus.StatePermission {
-		return fmt.Errorf("session is not running")
+		return nil, fmt.Errorf("session is not running")
 	}
 
-	return sess.runtime.Bus.Execute(bus.AbortRun{})
+	runGen, err := bus.QueryTyped[bus.GetRunGeneration, uint64](sess.runtime.Bus, bus.GetRunGeneration{})
+	if err != nil {
+		return nil, err
+	}
+	var discarded []core.SteerItem
+	if err := sess.runtime.Bus.Execute(bus.AbortAndRecall{RunGen: runGen, DiscardedSteers: &discarded}); err != nil {
+		return nil, err
+	}
+	return discarded, nil
 }
 
 // CancelSubagent requests cancellation of a single (async) subagent job

@@ -33,6 +33,11 @@ var doomLoopExemptTools = map[string]bool{
 	"subagent_wait":   true,
 }
 
+var steerInterruptibleWaitTools = map[string]bool{
+	"bash_wait":     true,
+	"subagent_wait": true,
+}
+
 // maxPauseTurnResubmits caps consecutive pause_turn continuations. Anthropic
 // pauses a long-running turn (stop_reason "pause_turn") and expects the client
 // to resubmit the conversation as-is to let the model continue. We do that
@@ -120,6 +125,11 @@ type loopConfig struct {
 	// settleSteers settles a drained batch's inflight native-content bytes once
 	// the batch's messages are appended to history (paired with drainSteers).
 	settleSteers func([]core.SteerItem)
+	// registerSteerWait makes one interruptible wait tool wake when a user steer
+	// arrives. It returns the cleanup that removes the tool's cancellation hook.
+	registerSteerWait func(context.CancelCauseFunc) func()
+	// steerMu makes cancellation and the post-tool delivery boundary atomic.
+	steerMu *sync.Mutex
 }
 
 // emitLifecycle emits a lifecycle event to both the emitter (subscribers)
@@ -524,6 +534,18 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		// Execute tool calls concurrently.
 		executeTools(ctx, cfg, toolCalls)
+		if cfg.steerMu != nil {
+			cfg.steerMu.Lock()
+		}
+		// A stopped run must not deliver its queued steers in the narrow gap after
+		// a cancelled tool returns. The abort cleanup owns discarding them, while
+		// the frontend restores them to the composer for an explicit resend.
+		if err := ctx.Err(); err != nil {
+			if cfg.steerMu != nil {
+				cfg.steerMu.Unlock()
+			}
+			return err
+		}
 
 		// Inject steering messages between steps.
 		if cfg.drainSteers != nil {
@@ -554,6 +576,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.settleSteers(steered)
 				}
 			}
+		}
+		if cfg.steerMu != nil {
+			cfg.steerMu.Unlock()
 		}
 
 		// Budget check — after tool execution so conversation state has matching
@@ -1003,6 +1028,11 @@ func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core
 	}
 
 	ctx = core.WithToolCallID(ctx, tc.ToolCallID)
+	if steerInterruptibleWaitTools[tc.ToolName] && cfg.registerSteerWait != nil {
+		var cancel context.CancelCauseFunc
+		ctx, cancel = context.WithCancelCause(ctx)
+		defer cfg.registerSteerWait(cancel)()
+	}
 	result, err := t.Execute(ctx, tc.Arguments, onUpdate)
 	if err != nil {
 		return core.ErrorResult(err.Error()), true

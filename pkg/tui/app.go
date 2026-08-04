@@ -913,8 +913,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.s.running {
-				m.dumpQueueToInput()
-				_ = m.runtime.Bus.Execute(bus.AbortRun{})
+				m.abortRunAndRestoreQueue()
 				return m, nil
 			}
 			m.cleanup()
@@ -962,11 +961,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.s.running {
-			// Preserve the user's intent before aborting: the agent discards its
-			// queue on abort without an event, so dump the queued chips back into
-			// the input (parity with the web client's handleStop).
-			m.dumpQueueToInput()
-			_ = m.runtime.Bus.Execute(bus.AbortRun{})
+			m.abortRunAndRestoreQueue()
 			return m, nil
 		}
 		if msg.Type == tea.KeyCtrlC {

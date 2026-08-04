@@ -1,5 +1,6 @@
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { copyToClipboard } from './format.js';
 // Divergence from the ported engine: import highlight.js core +
 // a selective language subset instead of the full package. The full import
 // pulls ~984KB of languages into the bundle; core + this subset covers the
@@ -100,7 +101,8 @@ marked.use({ renderer });
 function copyCode(btn) {
   const pre = btn.closest('.code-block')?.querySelector('pre code');
   if (!pre) return;
-  navigator.clipboard.writeText(pre.textContent).then(() => {
+  copyToClipboard(pre.textContent).then((copied) => {
+    if (!copied) return;
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
     setTimeout(() => {

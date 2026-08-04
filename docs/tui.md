@@ -59,7 +59,7 @@ Type `/` to open the command palette, or type a command directly:
 
 You can keep typing while a run is in flight — messages and slash commands are handled in **strict send order** (the order you sent them is the order the agent sees).
 
-- **Messages** are steered onto a queue and delivered between steps of the current run (or start the next one if they arrive after it ends). A clipboard image staged with `Ctrl+V` rides along with the message.
+- **Messages** are steered onto a queue and delivered between steps of the current run (or start the next one if they arrive after it ends). A message wakes a `bash_wait` or `subagent_wait` immediately while its background job continues. A clipboard image staged with `Ctrl+V` rides along with the message.
 - **Slash commands** are classified: `/compact`, `/clear`, `/model`, `/thinking`, `/verify`, and `/goal <objective>` **queue** as a barrier (shown with a `command` tag) and run at the next idle point in order; `/rename`, `/permissions`, `/path`, `/tasks`, `/goal status|stop` run **instantly**; `/handoff`, `/undo`, `/branch`, `/back`, `/plan` are **refused** while working — stop the run first. `/handoff` also needs an empty message queue so its brief contains every preceding message.
 - `Alt+Up` pulls the whole queue back into the input for editing (commands keep their leading `/`); pressing `Ctrl+C`/`Esc` to abort also dumps the queue back into the input so nothing you lined up is lost. Queued images aren't restored — re-stage them if needed.
 

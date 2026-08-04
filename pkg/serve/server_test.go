@@ -953,7 +953,7 @@ func TestCancelEndpoint(t *testing.T) {
 
 	resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel", "")
 	defer resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode != 204 {
+	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
 

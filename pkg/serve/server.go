@@ -120,6 +120,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/cancel-and-recall", handleCancelAndRecall(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/bash-jobs/{jobID}/cancel", handleCancelBashJob(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
@@ -933,6 +934,28 @@ func handleCancel(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+}
+
+// handleCancelAndRecall is the interactive frontend variant of cancel. It
+// preserves the public cancel endpoint's no-content contract while returning
+// only the steer IDs the server atomically discarded, so a client can recall
+// them to its composer without resending a steer that already reached history.
+func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		discarded, err := mgr.CancelWithDiscardedSteers(r.PathValue("id"))
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			ids := make([]string, 0, len(discarded))
+			for _, steer := range discarded {
+				ids = append(ids, steer.ID)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"discarded_steer_ids": ids})
 		}
 	}
 }

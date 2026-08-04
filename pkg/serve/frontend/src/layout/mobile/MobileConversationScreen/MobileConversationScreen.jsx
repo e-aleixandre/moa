@@ -199,10 +199,38 @@ export function MobileConversationScreen({ version = null }) {
   useEffect(() => {
     const vv = typeof window !== "undefined" && window.visualViewport;
     if (!vv) return;
-    const onResize = () => setKbdOpen(window.innerHeight - vv.height > 150);
-    vv.addEventListener("resize", onResize);
-    onResize();
-    return () => vv.removeEventListener("resize", onResize);
+    let frame = null;
+    let settleTimer = null;
+    const sync = () => setKbdOpen(window.innerHeight - vv.height > 150);
+    // Safari can report its final visual-viewport height a frame or two after
+    // it sends the event, especially when an installed PWA returns foreground.
+    // Sample both immediately and after that settle period so the Live Dock is
+    // not left compact after the keyboard is gone.
+    const scheduleSync = () => {
+      sync();
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (settleTimer !== null) clearTimeout(settleTimer);
+      frame = requestAnimationFrame(sync);
+      settleTimer = setTimeout(sync, 180);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") scheduleSync();
+    };
+    vv.addEventListener("resize", scheduleSync);
+    vv.addEventListener("scroll", scheduleSync);
+    window.addEventListener("resize", scheduleSync);
+    window.addEventListener("orientationchange", scheduleSync);
+    document.addEventListener("visibilitychange", onVisibility);
+    scheduleSync();
+    return () => {
+      vv.removeEventListener("resize", scheduleSync);
+      vv.removeEventListener("scroll", scheduleSync);
+      window.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("orientationchange", scheduleSync);
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (settleTimer !== null) clearTimeout(settleTimer);
+    };
   }, []);
 
   const onSelectFromDrawer = (id) => { setActiveSession(id); closeDrawer(); };
