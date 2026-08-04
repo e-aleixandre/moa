@@ -49,7 +49,6 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 		Stream:            true,
 		Store:             false,
 		Instructions:      req.System,
-		ToolChoice:        "auto",
 		Include:           []string{"reasoning.encrypted_content"},
 		ParallelToolCalls: dialect.SupportsParallelToolCalls,
 	}
@@ -58,6 +57,7 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 
 	if len(req.Tools) > 0 {
 		r.Tools = convertToolSpecs(req.Tools)
+		r.ToolChoice = "auto"
 	}
 
 	// The public Responses API (/v1/responses) accepts max_output_tokens; the
