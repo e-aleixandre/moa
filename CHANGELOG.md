@@ -5,6 +5,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-08-04
+
+### Added
+
+- xAI Grok is now a first-class provider. Authenticate with `moa auth xai` for
+  Grok's consumer OAuth flow or use `XAI_API_KEY` for the developer API; Grok
+  models appear in the model pickers, retain their supported thinking levels,
+  and work across the TUI and web interface. Consumer OAuth usage shows its
+  reported quota and credit buckets where available, while API-key accounts
+  explicitly state that consumer-plan usage is unavailable.
+- The web model selector can pin frequently used models. Pins are shared across
+  desktop and mobile, grouped ahead of the provider catalogue, and the TUI
+  mirrors the same model choices through its provider picker.
+
+### Fixed
+
+- Mobile/PWA controls no longer become unreachable after iOS leaves stale
+  keyboard viewport state behind, and copying subagent results/errors now falls
+  back safely when the platform Clipboard API rejects the gesture.
+- Stopping a run no longer duplicates a queued steering message. Steering a
+  parent that is waiting on `bash_wait` or `subagent_wait` wakes it immediately
+  without cancelling its background job.
+- Completed subagent rows retain their result inline and can reopen the full
+  child conversation after a reload. Their restored identity is no longer
+  guessed from the task text.
+- OpenAI/Codex plan meters now follow the response-declared window duration,
+  rather than assuming the primary header always represents the five-hour
+  window.
+
 ## [0.25.1] - 2026-08-03
 
 ### Fixed
