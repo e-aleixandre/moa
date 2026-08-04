@@ -49,6 +49,9 @@ export function Pane({
   onRewind,
   onMaximize,
   onClose,
+  onModelClick,
+  modelPopover,
+  modelAnchorRef,
   children,
   footer,
   hideComposer = false,
@@ -130,9 +133,25 @@ export function Pane({
         </button>
         {path && <span class="p-path">{path}</span>}
         {model && (
-          <span class="p-model">
-            {model} <ThinkingMeter variant="glyph" level={thinkingLevel} label={`Thinking: ${thinkingLevel}`} />
-          </span>
+          onModelClick ? (
+            <div class="p-model-wrap" ref={modelAnchorRef}>
+              <button
+                type="button"
+                class="p-model p-model-btn"
+                onClick={(e) => { e.stopPropagation(); onModelClick(e); }}
+                aria-label="Model and thinking — change"
+                aria-expanded={!!modelPopover}
+                aria-haspopup="dialog"
+              >
+                {model} <ThinkingMeter variant="glyph" level={thinkingLevel} label={`Thinking: ${thinkingLevel}`} />
+              </button>
+              {modelPopover}
+            </div>
+          ) : (
+            <span class="p-model">
+              {model} <ThinkingMeter variant="glyph" level={thinkingLevel} label={`Thinking: ${thinkingLevel}`} />
+            </span>
+          )
         )}
 
         <div class="p-tools">

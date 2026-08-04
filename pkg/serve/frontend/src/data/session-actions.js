@@ -106,6 +106,9 @@ export async function loadSessions() {
         // viewingBashJob is the read-only counterpart (a background command's
         // detail view); client UI-only too, so it survives a poll the same way.
         viewingBashJob: existing ? existing.viewingBashJob : null,
+        // detailReturnView — where Back from bash/subagent detail should land
+        // ("grid" when opened from the pane grid). Client UI-only; survives polls.
+        detailReturnView: existing ? existing.detailReturnView : null,
         // dockOpen is the LiveDock's per-session open/closed preference (client
         // UI-only, no server field): preserved across polls exactly like
         // viewingSubagent, so switching sessions and back doesn't reset it.
@@ -315,10 +318,12 @@ export async function cancelBashJob(sessionId, jobId) {
 // a bash job has no persisted transcript endpoint, and once it ends its output
 // lands inline in the conversation as a card — so this only opens jobs still
 // present in the store (i.e. the ones the LiveDock lists).
-export function openBashJob(id, jobId) {
+export function openBashJob(id, jobId, opts = {}) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.subagents || !sess.subagents[jobId]) return;
-  updateSession(id, { viewingBashJob: jobId, viewingSubagent: null });
+  const patch = { viewingBashJob: jobId, viewingSubagent: null };
+  if (opts.returnView != null) patch.detailReturnView = opts.returnView;
+  updateSession(id, patch);
 }
 
 // attachmentToContent builds the local content needed for the immediate
@@ -610,12 +615,15 @@ export async function steerSubagent(id, jobId, text) {
 // openPersistedSubagent loads a finished subagent's transcript from disk and
 // opens it in the SubagentView. Used when clicking a subagent card in the chat
 // after the live tray entry is gone.
-export async function openPersistedSubagent(id, jobId) {
+// opts.returnView — optional view key to restore on Back (e.g. "grid" when the
+// detail was opened from the pane grid). Cleared when Back runs.
+export async function openPersistedSubagent(id, jobId, opts = {}) {
   const sess = store.get().sessions[id];
   if (!sess) return;
+  const returnPatch = opts.returnView != null ? { detailReturnView: opts.returnView } : {};
   // If we still have it live in memory, just open it.
   if (sess.subagents && sess.subagents[jobId]) {
-    updateSession(id, { viewingSubagent: jobId, viewingBashJob: null });
+    updateSession(id, { viewingSubagent: jobId, viewingBashJob: null, ...returnPatch });
     return;
   }
   const t = await api('GET', `/api/sessions/${id}/subagents/${jobId}`);
@@ -646,7 +654,7 @@ export async function openPersistedSubagent(id, jobId) {
   };
   // Clearing viewingBashJob keeps the two detail views mutually exclusive:
   // only one thing is being looked at, whichever was opened last.
-  updateSession(id, { subagents: subs, viewingSubagent: jobId, viewingBashJob: null });
+  updateSession(id, { subagents: subs, viewingSubagent: jobId, viewingBashJob: null, ...returnPatch });
 }
 
 export async function resolvePermission(sessionId, permId, approved, opts = {}) {
