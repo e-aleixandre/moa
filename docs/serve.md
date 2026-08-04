@@ -20,7 +20,9 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Account plan-usage panel when a supported subscription OAuth login is active
 - Rename (`/rename <title>`) and delete sessions from the overview
 - Group the mobile drawer and desktop session spine by recency or folder; the choice is saved locally
-- Unread badges on sessions with activity you haven't seen yet
+- Unread result badges on sessions whose successful run finished while you were
+  away; they are in-memory only, clear when you open the session, and appear
+  first under **New results** in the mobile drawer
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input
