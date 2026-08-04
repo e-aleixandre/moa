@@ -569,6 +569,29 @@ func SaveProjectConfig(cwd string, update func(*MoaConfig)) error {
 	return saveConfigFile(filepath.Join(cwd, ".moa", "config.json"), update)
 }
 
+// UpdatePinnedModels returns models with id added or removed. Adding preserves
+// the existing order and appends new IDs; removing preserves the order of IDs
+// that remain.
+func UpdatePinnedModels(models []string, id string, pinned bool) []string {
+	if pinned {
+		updated := append([]string(nil), models...)
+		for _, model := range updated {
+			if model == id {
+				return updated
+			}
+		}
+		return append(updated, id)
+	}
+
+	updated := make([]string, 0, len(models))
+	for _, model := range models {
+		if model != id {
+			updated = append(updated, model)
+		}
+	}
+	return updated
+}
+
 // saveConfigFile is the read-modify-write primitive shared by SaveGlobalConfig
 // and SaveProjectConfig. It re-reads path from disk, applies update, and writes
 // the result back atomically (temp file → rename), creating parent dirs.
@@ -576,6 +599,11 @@ func saveConfigFile(path string, update func(*MoaConfig)) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
+	unlock, err := lockConfigFile(path + ".lock")
+	if err != nil {
+		return fmt.Errorf("locking config: %w", err)
+	}
+	defer unlock()
 
 	cfg := loadConfigFile(path)
 	update(&cfg)
@@ -586,12 +614,24 @@ func saveConfigFile(path string, update func(*MoaConfig)) error {
 	}
 
 	// Atomic write: temp file in same dir → rename.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return fmt.Errorf("creating config temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("setting config permissions: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("writing config: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 	return nil

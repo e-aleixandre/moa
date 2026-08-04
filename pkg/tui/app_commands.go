@@ -107,8 +107,7 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	switch cmd {
 	case "model", "models":
-		model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
-		m.picker.Open(model.ID, m.scopedModels)
+		m.openModelPicker(pickerForModelSwitch)
 		m.input.SetEnabled(false)
 		return m, nil
 
@@ -512,20 +511,13 @@ func (m appModel) handleSessionBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
-	case tea.KeyEsc, tea.KeyCtrlC:
-		prev := m.scopedModels
-		m.scopedModels = m.picker.ScopedIDs()
-		m.picker.Close()
-
-		if m.pickerPurpose == pickerForReviewConfig {
-			m.planMenu.active = true
-			m.planMenu.variant = m.lastMenuVariant
-			m.pickerPurpose = pickerForModelSwitch
+	case tea.KeyEsc:
+		if m.picker.Back() {
 			return m, nil
 		}
-
-		m.input.SetEnabled(true)
-		return m, m.savePinnedIfChanged(prev, m.scopedModels)
+		return m.closePicker()
+	case tea.KeyCtrlC:
+		return m.closePicker()
 
 	case tea.KeyUp:
 		m.picker.MoveUp()
@@ -539,8 +531,11 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		selected, ok := m.picker.Activate()
+		if !ok {
+			return m, nil
+		}
 		prev := m.scopedModels
-		selected := m.picker.Selected()
 		m.scopedModels = m.picker.ScopedIDs()
 		m.picker.Close()
 
@@ -574,6 +569,22 @@ func (m appModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m appModel) closePicker() (tea.Model, tea.Cmd) {
+	prev := m.scopedModels
+	m.scopedModels = m.picker.ScopedIDs()
+	m.picker.Close()
+
+	if m.pickerPurpose == pickerForReviewConfig {
+		m.planMenu.active = true
+		m.planMenu.variant = m.lastMenuVariant
+		m.pickerPurpose = pickerForModelSwitch
+		return m, m.savePinnedIfChanged(prev, m.scopedModels)
+	}
+
+	m.input.SetEnabled(true)
+	return m, m.savePinnedIfChanged(prev, m.scopedModels)
 }
 
 func (m appModel) handleThinkingPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

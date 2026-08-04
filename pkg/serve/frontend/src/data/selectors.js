@@ -40,8 +40,8 @@ export function modelAccent(model) {
 }
 
 // deriveModelSpecs maps /api/models entries ({id, name, provider, alias?,
-// max_input?}) into the shape the model grid expects: {id, name, provider,
-// codename, sub, accent, alias}. `id` here is the full "provider/id" spec
+// max_input?}) into the shape the model selector expects: {id, catalogId,
+// name, provider, codename, sub, accent, alias}. `id` here is the full "provider/id" spec
 // configureSession sends over the wire (matches the old SettingsDropdown's
 // `m.provider + '/' + m.id`). `codename` is the one-word vocabulary the rest
 // of the UI already uses (modelCodename — Opus/Sonnet/Sol/Terra…); models
@@ -62,6 +62,7 @@ export function deriveModelSpecs(models) {
     const sub = [rest, ctx].filter(Boolean).join(' \u00b7 ');
     return {
       id: `${m.provider}/${m.id}`,
+      catalogId: m.id,
       name: m.name,
       provider: m.provider,
       codename,

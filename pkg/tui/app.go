@@ -172,7 +172,8 @@ type appModel struct {
 
 	// Provider switching (for model picker — factory data only)
 	scopedModels         map[string]bool
-	onPinnedModelsChange func([]string) error
+	loadPinnedModels     func() []string
+	onPinnedModelsChange func([]PinnedModelChange) error
 
 	// Verify
 	verifyCancel context.CancelFunc
@@ -220,7 +221,8 @@ type Config struct {
 	StartInSessionBrowser bool                                    // open the session browser before entering chat
 	CWD                   string                                  // working directory for session metadata
 	PinnedModels          []string                                // model IDs pre-pinned for Ctrl+P cycling
-	OnPinnedModelsChange  func([]string) error                    // called when the user changes pinned models
+	LoadPinnedModels      func() []string                         // loads the current global pinned model IDs
+	OnPinnedModelsChange  func([]PinnedModelChange) error         // atomically applies pinned-model add/remove changes
 	PromptTemplates       []promptpkg.Template                    // available prompt templates
 	Transcriber           core.Transcriber                        // speech-to-text for voice input (nil = disabled)
 	STTLanguage           string                                  // ISO-639-1 language hint for STT ("" = auto-detect)
@@ -300,6 +302,7 @@ func New(ctx context.Context, cfg Config) appModel {
 		providerFactory:      cfg.ProviderFactory,
 		cwd:                  cfg.CWD,
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
+		loadPinnedModels:     cfg.LoadPinnedModels,
 		onPinnedModelsChange: cfg.OnPinnedModelsChange,
 		promptTemplates:      cfg.PromptTemplates,
 		usagePoller:          cfg.UsagePoller,
@@ -775,6 +778,13 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pinnedModelsSavedMsg:
+		if msg.err != nil {
+			m.refreshPinnedModels()
+			m.status.SetText("saving pinned models: " + msg.err.Error())
+			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+				return clearThinkingStatusMsg{}
+			})
+		}
 		return m, nil
 
 	case clipboardImageMsg:
@@ -1006,6 +1016,7 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.s.running {
 			return m, nil
 		}
+		m.refreshPinnedModels()
 		return m.cycleScopedModel()
 
 	case tea.KeyCtrlY:

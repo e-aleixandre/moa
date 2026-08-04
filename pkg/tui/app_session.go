@@ -2,35 +2,76 @@ package tui
 
 import (
 	"fmt"
-	"slices"
+	"sort"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // --- Pinned models ---
 
 func (m appModel) savePinnedIfChanged(prev, curr map[string]bool) tea.Cmd {
-	if pinnedSetsEqual(prev, curr) {
+	changes := pinnedModelChanges(prev, curr)
+	if len(changes) == 0 {
 		return nil
 	}
-	return m.savePinnedModels(curr)
+	return m.savePinnedModelChanges(changes)
 }
 
-func (m appModel) savePinnedModels(ids map[string]bool) tea.Cmd {
+// PinnedModelChange is one ordered add/remove operation for the global pin set.
+type PinnedModelChange struct {
+	ID     string
+	Pinned bool
+}
+
+func (m appModel) savePinnedModelChanges(changes []PinnedModelChange) tea.Cmd {
 	fn := m.onPinnedModelsChange
 	if fn == nil {
 		return nil
 	}
-	list := make([]string, 0, len(ids))
-	for id := range ids {
-		list = append(list, id)
-	}
-	slices.Sort(list)
 	return func() tea.Msg {
-		return pinnedModelsSavedMsg{err: fn(list)}
+		return pinnedModelsSavedMsg{err: fn(changes)}
 	}
+}
+
+func pinnedModelChanges(prev, curr map[string]bool) []PinnedModelChange {
+	var changes []PinnedModelChange
+	removed := make([]string, 0)
+	for id := range prev {
+		if !curr[id] {
+			removed = append(removed, id)
+		}
+	}
+	sort.Strings(removed)
+	for _, id := range removed {
+		changes = append(changes, PinnedModelChange{ID: id})
+	}
+	added := make([]string, 0)
+	for id := range curr {
+		if !prev[id] {
+			added = append(added, id)
+		}
+	}
+	sort.Strings(added)
+	for _, id := range added {
+		changes = append(changes, PinnedModelChange{ID: id, Pinned: true})
+	}
+	return changes
+}
+
+func (m *appModel) refreshPinnedModels() {
+	if m.loadPinnedModels != nil {
+		m.scopedModels = pinnedModelsToSet(m.loadPinnedModels())
+	}
+}
+
+func (m *appModel) openModelPicker(purpose pickerPurpose) {
+	m.refreshPinnedModels()
+	model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
+	m.picker.Open(model.ID, m.scopedModels)
+	m.pickerPurpose = purpose
 }
 
 func pinnedModelsToSet(ids []string) map[string]bool {
@@ -39,18 +80,6 @@ func pinnedModelsToSet(ids []string) map[string]bool {
 		set[id] = true
 	}
 	return set
-}
-
-func pinnedSetsEqual(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for id := range a {
-		if !b[id] {
-			return false
-		}
-	}
-	return true
 }
 
 func newModelSwitchEvent(model core.Model) *pendingTimelineEvent {

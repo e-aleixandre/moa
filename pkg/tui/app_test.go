@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1957,13 +1958,15 @@ func TestNew_PinnedModelsLoadedFromConfig(t *testing.T) {
 	}
 }
 
-func TestSavePinnedModels_CallbackFired(t *testing.T) {
+func TestSavePinnedModelChanges_CallbackFired(t *testing.T) {
 	m := newTestModel()
-	var got []string
-	m.onPinnedModelsChange = func(ids []string) error { got = ids; return nil }
-	m.scopedModels = map[string]bool{"claude-sonnet-4-5": true}
+	var got []PinnedModelChange
+	m.onPinnedModelsChange = func(changes []PinnedModelChange) error {
+		got = append(got, changes...)
+		return nil
+	}
 
-	cmd := m.savePinnedModels(m.scopedModels)
+	cmd := m.savePinnedModelChanges([]PinnedModelChange{{ID: "claude-sonnet-4-5", Pinned: true}, {ID: "gpt-4o"}})
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd when callback is set")
 	}
@@ -1973,15 +1976,15 @@ func TestSavePinnedModels_CallbackFired(t *testing.T) {
 	} else if pmsg.err != nil {
 		t.Fatalf("unexpected error: %v", pmsg.err)
 	}
-	if len(got) != 1 || got[0] != "claude-sonnet-4-5" {
-		t.Fatalf("callback called with %v, want [claude-sonnet-4-5]", got)
+	want := []PinnedModelChange{{ID: "claude-sonnet-4-5", Pinned: true}, {ID: "gpt-4o"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("callback changes = %v, want %v", got, want)
 	}
 }
 
-func TestSavePinnedModels_NilWhenNoCallback(t *testing.T) {
+func TestSavePinnedModelChanges_NilWhenNoCallback(t *testing.T) {
 	m := newTestModel()
-	m.onPinnedModelsChange = nil
-	cmd := m.savePinnedModels(map[string]bool{"claude-sonnet-4-5": true})
+	cmd := m.savePinnedModelChanges([]PinnedModelChange{{ID: "claude-sonnet-4-5", Pinned: true}})
 	if cmd != nil {
 		t.Fatal("expected nil Cmd when no callback is configured")
 	}
@@ -1989,7 +1992,7 @@ func TestSavePinnedModels_NilWhenNoCallback(t *testing.T) {
 
 func TestSavePinnedIfChanged_SkipsWhenEqual(t *testing.T) {
 	m := newTestModel()
-	m.onPinnedModelsChange = func(ids []string) error {
+	m.onPinnedModelsChange = func([]PinnedModelChange) error {
 		t.Fatal("callback should not be called when sets are equal")
 		return nil
 	}
@@ -2000,37 +2003,39 @@ func TestSavePinnedIfChanged_SkipsWhenEqual(t *testing.T) {
 	}
 }
 
-func TestSavePinnedIfChanged_FiresWhenDifferent(t *testing.T) {
+func TestSavePinnedIfChanged_FiresDeltas(t *testing.T) {
 	m := newTestModel()
-	var called bool
-	m.onPinnedModelsChange = func(ids []string) error { called = true; return nil }
-	prev := map[string]bool{"a": true}
-	curr := map[string]bool{"a": true, "b": true}
+	var got []PinnedModelChange
+	m.onPinnedModelsChange = func(changes []PinnedModelChange) error {
+		got = append(got, changes...)
+		return nil
+	}
+	prev := map[string]bool{"a": true, "removed": true}
+	curr := map[string]bool{"a": true, "added": true}
 	cmd := m.savePinnedIfChanged(prev, curr)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd when sets differ")
 	}
 	cmd()
-	if !called {
-		t.Fatal("callback was not called")
+	if len(got) != 2 {
+		t.Fatalf("callback changes = %v, want one add and one remove", got)
+	}
+	changes := make(map[string]bool, len(got))
+	for _, change := range got {
+		changes[change.ID] = change.Pinned
+	}
+	if changes["removed"] || !changes["added"] {
+		t.Fatalf("callback changes = %v, want remove removed and add added", got)
 	}
 }
 
-func TestPinnedSetsEqual(t *testing.T) {
-	tests := []struct {
-		a, b map[string]bool
-		want bool
-	}{
-		{nil, nil, true},
-		{map[string]bool{}, map[string]bool{}, true},
-		{map[string]bool{"a": true}, map[string]bool{"a": true}, true},
-		{map[string]bool{"a": true}, map[string]bool{"b": true}, false},
-		{map[string]bool{"a": true}, map[string]bool{"a": true, "b": true}, false},
-	}
-	for _, tt := range tests {
-		if got := pinnedSetsEqual(tt.a, tt.b); got != tt.want {
-			t.Errorf("pinnedSetsEqual(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
-		}
+func TestRefreshPinnedModels(t *testing.T) {
+	m := newTestModel()
+	m.scopedModels = map[string]bool{"stale": true}
+	m.loadPinnedModels = func() []string { return []string{"fresh"} }
+	m.refreshPinnedModels()
+	if len(m.scopedModels) != 1 || !m.scopedModels["fresh"] {
+		t.Fatalf("scopedModels = %v, want refreshed pinned IDs", m.scopedModels)
 	}
 }
 

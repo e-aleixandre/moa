@@ -9,6 +9,7 @@ test('deriveModelSpecs: known codename splits into codename + version/context su
   ]);
   expect(specs[0]).toMatchObject({
     id: 'anthropic/claude-opus-4-8',
+    catalogId: 'claude-opus-4-8',
     provider: 'anthropic',
     codename: 'Opus',
     sub: '4.8 · 1M ctx',

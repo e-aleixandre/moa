@@ -88,9 +88,7 @@ func (m appModel) handlePlanMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		actions := m.planMenu.actions()
 		if m.planMenu.cursor < len(actions) && actions[m.planMenu.cursor].action == planActionReview {
 			m.planMenu.Close()
-			model, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
-			m.picker.Open(model.ID, m.scopedModels)
-			m.pickerPurpose = pickerForReviewConfig
+			m.openModelPicker(pickerForReviewConfig)
 		}
 	}
 	return m, nil

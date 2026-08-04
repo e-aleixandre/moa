@@ -110,6 +110,31 @@ func TestSaveGlobalConfig_PreservesOtherFields(t *testing.T) {
 	}
 }
 
+func TestUpdatePinnedModels(t *testing.T) {
+	original := []string{"first", "second", "third"}
+	tests := []struct {
+		name   string
+		id     string
+		pinned bool
+		want   []string
+	}{
+		{name: "add appends", id: "fourth", pinned: true, want: []string{"first", "second", "third", "fourth"}},
+		{name: "add existing keeps order", id: "second", pinned: true, want: []string{"first", "second", "third"}},
+		{name: "remove keeps remaining order", id: "second", want: []string{"first", "third"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := UpdatePinnedModels(original, tt.id, tt.pinned)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("UpdatePinnedModels(%v, %q, %t) = %v, want %v", original, tt.id, tt.pinned, got, tt.want)
+			}
+			if !slices.Equal(original, []string{"first", "second", "third"}) {
+				t.Fatalf("UpdatePinnedModels modified input: %v", original)
+			}
+		})
+	}
+}
+
 func TestSaveProjectConfig_RoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

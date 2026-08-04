@@ -55,6 +55,11 @@ Type `/` to open the command palette, or type a command directly:
 | `Ctrl+C` | Clear input / abort run / quit |
 | `Ctrl+D` | Quit |
 
+The `/models` picker opens on pinned models and a provider overview. `Enter`
+opens a provider or selects a pinned model; inside a provider, `Space` pins or
+unpins the highlighted model and `Esc` returns to the overview. Pinned models
+are shared with the web selector through the global `pinned_models` preference.
+
 ## Queuing while the agent works
 
 You can keep typing while a run is in flight — messages and slash commands are handled in **strict send order** (the order you sent them is the order the agent sees).

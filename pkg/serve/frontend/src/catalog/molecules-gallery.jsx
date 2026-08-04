@@ -28,6 +28,7 @@ const SESSION_SAMPLES = [
 const MODELS = [
   {
     id: "sol",
+    catalogId: "sol",
     name: "sol",
     provider: "openai",
     codename: "Sol",
@@ -36,6 +37,7 @@ const MODELS = [
   },
   {
     id: "fable",
+    catalogId: "fable",
     name: "fable",
     provider: "anthropic",
     codename: "Fable",
@@ -44,6 +46,7 @@ const MODELS = [
   },
   {
     id: "terra",
+    catalogId: "terra",
     name: "terra",
     provider: "openai",
     codename: "Terra",
@@ -52,6 +55,7 @@ const MODELS = [
   },
   {
     id: "haiku",
+    catalogId: "haiku",
     name: "haiku",
     provider: "anthropic",
     codename: "Haiku",
