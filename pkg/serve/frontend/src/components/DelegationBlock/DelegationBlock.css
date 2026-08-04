@@ -156,6 +156,59 @@
   font-variant-numeric: tabular-nums;
 }
 
+.dlg-complete {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+}
+
+.dlg-complete .dlg-agent {
+  grid-template-columns: minmax(120px, 220px) 1fr auto auto;
+  border-top: none;
+}
+
+.dlg-open {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: var(--space-3);
+  color: var(--a);
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.dlg-open:hover {
+  text-decoration: underline;
+}
+
+.a-expand {
+  color: var(--overlay0);
+  transition: transform var(--duration) var(--ease);
+}
+
+.a-expand.open {
+  transform: rotate(180deg);
+}
+
+.dlg-result-body {
+  grid-column: 1 / -1;
+  max-height: 18rem;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  background: color-mix(in srgb, var(--mantle) 65%, transparent);
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* indeterminate progress bar under a running agent's action line, in its
    accent color — same pattern as the old .fanout .ibar */
 .dlg-ibar {
@@ -369,5 +422,14 @@
 
   .dlg-agent {
     grid-template-columns: 110px 1fr 54px;
+  }
+
+  .dlg-complete .dlg-agent {
+    grid-template-columns: 105px minmax(0, 1fr) auto auto;
+  }
+
+  .dlg-open {
+    min-height: 44px;
+    padding: 0 var(--space-2);
   }
 }

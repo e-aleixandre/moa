@@ -818,6 +818,7 @@ function delegationDoneAgent(msg, accent, jobIDOverride) {
   };
   const chip = msg.result ? shortLabel(firstLine(msg.result), 48) : '';
   if (chip) agent.chip = chip;
+  if (msg.result) agent.result = String(msg.result);
   return agent;
 }
 

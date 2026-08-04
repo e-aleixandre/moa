@@ -178,9 +178,14 @@ calls, output) streams to the UI as it happens:
   open its sub-conversation — rendered exactly like the main chat, updating
   live. A back arrow (or `Ctrl+G`) returns to the parent conversation. Async
   agents can be cancelled from the tray. The tray only lists *live* agents;
-  finished ones drop off.
-- **TUI:** press `Ctrl+G` to pick a live subagent and view its transcript in
-  streaming; `Ctrl+G` or `Esc` returns.
+  finished ones drop off. Their transcript rows retain the final result that
+  reached the parent (which may be a tail for a large output): expand it inline,
+  or open the complete child conversation.
+- **TUI:** press `Ctrl+G` to pick a subagent and view its transcript in
+  streaming; `Ctrl+G` or `Esc` returns. Completed transcript blocks retain the
+  final result delivered to the parent conversation. Unlike serve, the TUI
+  keeps child transcripts only for its current process, so it cannot reopen a
+  completed child after switching sessions or restarting.
 
 The parent agent still receives the subagent's final text as the tool result,
 so its own context is unchanged — the streaming view is purely for the user.

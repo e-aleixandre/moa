@@ -702,6 +702,18 @@ test('normalizeHistory carries the job ID the subagent tool recorded on its resu
   expect(out[0]).toEqual(expect.objectContaining({ tool_name: 'subagent', subagentJobId: 'sa-1' }));
 });
 
+test('normalizeHistory recovers a completed subagent job ID from its notification', () => {
+  const raw = [{
+    role: 'user',
+    content: [{ type: 'text', text: '[subagent completed] Job sa-9 finished.\nTask: review\nwith reproduction steps\n\nResult (truncated — use subagent_status for full output):\nlast line' }],
+  }];
+  const out = normalizeHistory(raw);
+  expect(out[0]).toEqual(expect.objectContaining({
+    tool_name: 'subagent', tool_call_id: 'subagent-sa-9', subagentJobId: 'sa-9',
+    args: { task: 'review\nwith reproduction steps' }, result: 'last line',
+  }));
+});
+
 test('normalizeHistory reloads a bash_job custom notification as a bash card', () => {
   const raw = [{
     role: 'user',

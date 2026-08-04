@@ -2057,6 +2057,14 @@ func TestParseSubagentNotification(t *testing.T) {
 			wantResult: "all tests pass",
 		},
 		{
+			name:       "completed multiline task",
+			text:       "[subagent completed] Job abc123 finished.\nTask: fix the tests\nand report the failing cases\n\nResult:\nall tests pass",
+			wantOK:     true,
+			wantTask:   "fix the tests\nand report the failing cases",
+			wantStatus: "completed",
+			wantResult: "all tests pass",
+		},
+		{
 			name:       "failed",
 			text:       "[subagent failed] Job abc123 failed.\nTask: deploy\nError: connection refused",
 			wantOK:     true,

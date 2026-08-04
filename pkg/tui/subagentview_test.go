@@ -180,7 +180,7 @@ func TestHandleSubagentStarted_DoesNotResurrectTerminal(t *testing.T) {
 	}
 }
 
-func TestSubagentPicker_OnlyListsLiveEntries(t *testing.T) {
+func TestSubagentPicker_ListsCompletedEntries(t *testing.T) {
 	subs := map[string]*subagentTranscript{
 		"running1":  {jobID: "running1", task: "task A", status: "running"},
 		"done1":     {jobID: "done1", task: "task B", status: "completed"},
@@ -192,16 +192,19 @@ func TestSubagentPicker_OnlyListsLiveEntries(t *testing.T) {
 	var p subagentPicker
 	p.Open(subs)
 
-	if len(p.entries) != 2 {
-		t.Fatalf("expected 2 live entries, got %d: %+v", len(p.entries), p.entries)
+	if len(p.entries) != 5 {
+		t.Fatalf("expected every captured entry, got %d: %+v", len(p.entries), p.entries)
 	}
+	statuses := map[string]bool{}
 	for _, e := range p.entries {
-		if e.status != "running" {
-			t.Errorf("unexpected entry with status %q in picker", e.status)
+		statuses[e.status] = true
+	}
+	for _, status := range []string{"running", "completed", "failed", "cancelled"} {
+		if !statuses[status] {
+			t.Errorf("picker omitted %q status", status)
 		}
 	}
-
-	if got := p.Selected(); got != "running1" && got != "running2" {
-		t.Errorf("Selected() = %q, want one of the live job IDs", got)
+	if got := p.Selected(); got != "cancelled" {
+		t.Errorf("Selected() = %q, want first sorted job ID", got)
 	}
 }

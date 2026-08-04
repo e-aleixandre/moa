@@ -36,6 +36,33 @@ func TestParseRateLimit_Headers(t *testing.T) {
 			wantFiveH: 0.125, wantSevenD: 0.005, wantOverage: -1,
 		},
 		{
+			name: "duration headers swap the plan windows",
+			headers: map[string]string{
+				"x-codex-primary-used-percent":     "50",
+				"x-codex-primary-window-minutes":   "10080",
+				"x-codex-secondary-used-percent":   "0",
+				"x-codex-secondary-window-minutes": "300",
+			},
+			wantFiveH: 0, wantSevenD: 0.50, wantOverage: -1,
+		},
+		{
+			name: "declared secondary window wins over undated primary fallback",
+			headers: map[string]string{
+				"x-codex-primary-used-percent":     "75",
+				"x-codex-secondary-used-percent":   "10",
+				"x-codex-secondary-window-minutes": "300",
+			},
+			wantFiveH: 0.10, wantSevenD: 0.75, wantOverage: -1,
+		},
+		{
+			name: "disabled duration is not treated as a legacy window",
+			headers: map[string]string{
+				"x-codex-primary-used-percent":   "75",
+				"x-codex-primary-window-minutes": "0",
+			},
+			wantFiveH: -1, wantSevenD: -1, wantOverage: -1,
+		},
+		{
 			name: "only primary present -> weekly unknown",
 			headers: map[string]string{
 				"x-codex-primary-used-percent": "40",

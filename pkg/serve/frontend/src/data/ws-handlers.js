@@ -110,10 +110,11 @@ export function normalizeHistory(raw, liveSubagents = []) {
         const userText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
         const subagent = parseSubagentNotification(userText);
         if (subagent) {
-          const jobId = legacySubagentJobIds.get(subagentTaskIdentity(subagent.task));
+          const jobId = subagent.jobId || legacySubagentJobIds.get(subagentTaskIdentity(subagent.task));
           result.push({
             _type: 'tool_start',
             tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
+            subagentJobId: jobId || undefined,
             tool_name: 'subagent',
             args: { task: subagent.task },
             status: subagentRestoreStatus(subagent.status),
@@ -1137,15 +1138,20 @@ export function handleWsSubagentComplete(id, data) {
   const priorAccent = sess.subagents && sess.subagents[data.job_id]
     ? sess.subagents[data.job_id].accentIndex
     : undefined;
+  const completion = parseSubagentNotification(data.text || '');
   messages.push({
     _type: 'tool_start',
     tool_call_id: `subagent-${data.job_id}`,
+    // A completion card outlives the live subagent map. Keep the canonical job
+    // identity on the durable card so its result can always open the persisted
+    // child conversation instead of guessing from a provider tool-call ID.
+    subagentJobId: data.job_id,
     tool_name: 'subagent',
-    args: { task: data.task || '' },
+    args: { task: data.task || completion?.task || '' },
     // Preserve cancelled distinctly (⊘) from a real failure (✗).
     status: data.status === 'completed' ? 'done' : data.status === 'cancelled' ? 'cancelled' : 'error',
     accentIndex: Number.isInteger(priorAccent) ? priorAccent : undefined,
-    result: data.text || '',
+    result: completion?.result || data.text || '',
   });
   updateSession(id, { messages });
   markUnseen(id);
@@ -1574,21 +1580,37 @@ function parseSubagentNotification(text) {
   for (const [prefix, status] of Object.entries(prefixes)) {
     if (text.startsWith(prefix)) {
       const rest = text.slice(prefix.length);
-      const lines = rest.split('\n');
+      const firstNewline = rest.indexOf('\n');
+      const jobLine = firstNewline >= 0 ? rest.slice(0, firstNewline) : rest;
+      const jobMatch = /^Job (\S+) (?:finished|failed|was cancelled)\.$/.exec(jobLine);
       let task = '';
-      let resultStart = 2;
-      if (lines.length >= 2 && lines[1].startsWith('Task: ')) {
-        task = lines[1].slice('Task: '.length);
-      }
-      let result = lines.slice(resultStart).join('\n').trim();
-      // Strip known result prefixes
-      for (const p of ['Result (last 50 lines):\n', 'Error: ']) {
-        if (result.startsWith(p)) {
-          result = result.slice(p.length).trim();
-          break;
+      let result = '';
+      const payload = firstNewline >= 0 ? rest.slice(firstNewline + 1) : '';
+      if (payload.startsWith('Task: ')) {
+        const taskAndResult = payload.slice('Task: '.length);
+        const markers = [
+          '\n\nResult (last 50 lines):\n',
+          '\n\nResult (truncated — use subagent_status for full output):\n',
+          '\n\nResult:\n',
+          '\nError: ',
+        ];
+        let markerAt = -1;
+        let marker = '';
+        for (const candidate of markers) {
+          const at = taskAndResult.indexOf(candidate);
+          if (at >= 0 && (markerAt < 0 || at < markerAt)) {
+            markerAt = at;
+            marker = candidate;
+          }
+        }
+        if (markerAt >= 0) {
+          task = taskAndResult.slice(0, markerAt).trim();
+          result = taskAndResult.slice(markerAt + marker.length).trim();
+        } else {
+          task = taskAndResult.trim();
         }
       }
-      return { task, status, result };
+      return { jobId: jobMatch ? jobMatch[1] : '', task, status, result };
     }
   }
   return null;

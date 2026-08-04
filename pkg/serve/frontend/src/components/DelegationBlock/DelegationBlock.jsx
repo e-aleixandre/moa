@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { GitFork, Check, X, ChevronDown } from "lucide-preact";
+import { GitFork, Check, X, ChevronDown, ChevronRight } from "lucide-preact";
 import "./DelegationBlock.css";
 import { Spinner } from "../../primitives/index.js";
 
@@ -79,40 +79,50 @@ function RunningAgentRow({ agent, onOpenAgent }) {
 }
 
 function DoneAgentRow({ agent, onOpenAgent }) {
-  const { id, name, accent = "sky", state, chip, time } = agent;
+  const { id, name, accent = "sky", state, chip, result, time } = agent;
   const failed = state === "failed" || state === "cancelled";
-  const clickable = !!onOpenAgent;
-  const Tag = clickable ? "button" : "div";
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = !!result;
+  const RowTag = canExpand ? "button" : "div";
   return (
-    <Tag
-      class={`dlg-agent ${failed ? "failed" : "done"}${clickable ? " clickable" : ""}`}
-      style={{ "--a": `var(--${accent})` }}
-      onClick={clickable ? () => onOpenAgent(id) : undefined}
-      type={clickable ? "button" : undefined}
-    >
-      <span class="a-id">
-        {failed ? (
-          <span class="fail-x" aria-hidden="true">
-            {state === "cancelled" ? "⊘" : <X size={12} strokeWidth={2.5} />}
-          </span>
-        ) : (
-          <span class="a-dot" aria-hidden="true">
-            <Check size={12} strokeWidth={2.5} />
-          </span>
-        )}
-        <span class="a-name">{name}</span>
-      </span>
-      <span class="a-result">
-        {chip && <span class={`a-chip${failed ? " err" : ""}`}>{chip}</span>}
-      </span>
-      {time && <span class="a-time">{time}</span>}
-    </Tag>
+    <div class="dlg-complete" style={{ "--a": `var(--${accent})` }}>
+      <RowTag
+        {...(canExpand ? { type: "button" } : {})}
+        class={`dlg-agent ${failed ? "failed" : "done"}${canExpand ? " clickable" : ""}`}
+        onClick={canExpand ? () => setExpanded((open) => !open) : undefined}
+        aria-expanded={canExpand ? expanded : undefined}
+      >
+        <span class="a-id">
+          {failed ? (
+            <span class="fail-x" aria-hidden="true">
+              {state === "cancelled" ? "⊘" : <X size={12} strokeWidth={2.5} />}
+            </span>
+          ) : (
+            <span class="a-dot" aria-hidden="true">
+              <Check size={12} strokeWidth={2.5} />
+            </span>
+          )}
+          <span class="a-name">{name}</span>
+        </span>
+        <span class="a-result">
+          {chip && <span class={`a-chip${failed ? " err" : ""}`}>{chip}</span>}
+        </span>
+        {time && <span class="a-time">{time}</span>}
+        {canExpand && <ChevronDown class={`a-expand${expanded ? " open" : ""}`} size={13} aria-hidden="true" />}
+      </RowTag>
+      {onOpenAgent && (
+        <button type="button" class="dlg-open" onClick={() => onOpenAgent(id)} aria-label={`Open ${name} conversation`}>
+          <span>conversation</span><ChevronRight size={14} aria-hidden="true" />
+        </button>
+      )}
+      {expanded && <pre class="dlg-result-body">{result}</pre>}
+    </div>
   );
 }
 
 // DelegationBlock — props.agents: array of
 // { id, name, accent, state:'running'|'done'|'failed'|'cancelled', action?,
-// time?, chip?, bashJobs:[] } as emitted by stream-model.js. `summary` is
+// time?, chip?, result?, bashJobs:[] } as emitted by stream-model.js. `summary` is
 // { total, done, failed }; `settled` is true once no agent is running.
 // `onOpenAgent(id)` opens the subagent's detail view on row click.
 export function DelegationBlock({ agents = [], summary, settled, onOpenAgent }) {

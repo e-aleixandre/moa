@@ -275,15 +275,15 @@ type subagentPicker struct {
 	cursor  int
 }
 
-// Open populates the picker from live subagents and from completed children
-// that still own a running async bash command.
+// Open populates the picker from every captured child. A completed child keeps
+// its transcript and result, so it remains useful after the live work ends.
 func (p *subagentPicker) Open(subagents map[string]*subagentTranscript) {
 	p.entries = p.entries[:0]
 	for jobID, t := range subagents {
-		liveBash := transcriptHasLiveBash(t)
-		if t.status != "running" && t.status != "cancelling" && !liveBash {
+		if t == nil {
 			continue
 		}
+		liveBash := transcriptHasLiveBash(t)
 		status := t.status
 		if liveBash {
 			status = "running"
@@ -332,7 +332,7 @@ func (p subagentPicker) View(width int) string {
 	}
 
 	var lines []string
-	lines = append(lines, pickerHeaderStyle.Render("Live Subagents — ↑↓ navigate · enter view · esc close"))
+	lines = append(lines, pickerHeaderStyle.Render("Subagents — ↑↓ navigate · enter view · esc close"))
 	lines = append(lines, "")
 
 	for i, e := range p.entries {
@@ -422,16 +422,16 @@ func (m *appModel) hasLiveSubagents() bool {
 	return false
 }
 
-// handleCtrlG opens the live-subagent picker, closes the current subagent
-// view, or reports that there is nothing to show.
+// handleCtrlG opens the subagent picker, closes the current subagent view, or
+// reports that there is nothing to show.
 func (m appModel) handleCtrlG() (tea.Model, tea.Cmd) {
 	if m.s.viewingSubagent != "" {
 		m.s.viewingSubagent = ""
 		m.updateViewport()
 		return m, nil
 	}
-	if !m.hasLiveSubagents() {
-		m.status.SetText("no live subagents")
+	if len(m.s.subagents) == 0 {
+		m.status.SetText("no subagents")
 		return m, nil
 	}
 	m.subagentPicker.Open(m.s.subagents)

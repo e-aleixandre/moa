@@ -242,24 +242,21 @@ func parseSubagentNotification(text string) (task, status, result string, ok boo
 		if strings.HasPrefix(text, prefix) {
 			status = s
 			rest := text[len(prefix):]
-			// Extract task from "Job <id> finished.\nTask: <task>\n..."
-			lines := strings.SplitN(rest, "\n", 3)
-			if len(lines) >= 2 {
-				taskLine := lines[1]
-				if strings.HasPrefix(taskLine, "Task: ") {
-					task = strings.TrimPrefix(taskLine, "Task: ")
-				}
-			}
-			// Everything after the task line is the result
-			if len(lines) >= 3 {
-				result = strings.TrimSpace(lines[2])
-				// Strip known prefixes
-				for _, p := range []string{"Result (last 50 lines):\n", "Error: "} {
-					if strings.HasPrefix(result, p) {
-						result = strings.TrimSpace(result[len(p):])
-						break
+			if jobEnd := strings.IndexByte(rest, '\n'); jobEnd >= 0 {
+				payload := strings.TrimPrefix(rest[jobEnd+1:], "Task: ")
+				for _, marker := range []string{
+					"\n\nResult (last 50 lines):\n",
+					"\n\nResult (truncated — use subagent_status for full output):\n",
+					"\n\nResult:\n",
+					"\nError: ",
+				} {
+					if at := strings.Index(payload, marker); at >= 0 {
+						task = strings.TrimSpace(payload[:at])
+						result = strings.TrimSpace(payload[at+len(marker):])
+						return task, status, result, true
 					}
 				}
+				task = strings.TrimSpace(payload)
 			}
 			return task, status, result, true
 		}

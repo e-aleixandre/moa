@@ -366,6 +366,7 @@ test('a terminated subagent in messages folds into a delegation block, not a led
   expect(delegation.agents[0].state).toBe('done');
   expect(delegation.agents[0].name).toBe('Analyze auth');
   expect(delegation.agents[0].chip).toBe('Found 3 issues in auth');
+  expect(delegation.agents[0].result).toBe('Found 3 issues in auth');
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
