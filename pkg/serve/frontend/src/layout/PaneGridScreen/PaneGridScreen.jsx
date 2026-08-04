@@ -9,6 +9,7 @@ import { applyPreset, addPane, focusTileByIndex, focusTile, openSession } from "
 import { openPalette } from "../../data/palette.js";
 import { setGroupByProject } from "../../data/drawer.js";
 import { sessionTitle } from "../../data/util/format.js";
+import { Sheet, GlobalSettings } from "../../components/index.js";
 import "./PaneGridScreen.css";
 
 // PaneGridScreen — root organism AND container of the desktop pane grid.
@@ -67,6 +68,7 @@ function matchPreset(tree) {
 export function PaneGridScreen({ version }) {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
+  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
 
   // sessionId → pane index+1 (DFS order), for the Spine's Pn badges.
   const paneOf = new Map();
@@ -129,7 +131,7 @@ export function PaneGridScreen({ version }) {
         onSelectSession={onSelectSession}
         onNewSession={() => openPalette("create")}
         onSearch={() => openPalette("search")}
-        onSettings={() => { /* 5x: settings */ }}
+        onSettings={() => setGlobalSettingsOpen(true)}
       />
       <main class="pane-grid-main">
         <GridToolbar
@@ -143,6 +145,14 @@ export function PaneGridScreen({ version }) {
         />
         <PaneGrid state={state} />
       </main>
+      <Sheet
+        open={globalSettingsOpen}
+        onClose={() => setGlobalSettingsOpen(false)}
+        title="Settings"
+        class="global-settings-sheet"
+      >
+        <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
+      </Sheet>
     </div>
   );
 }

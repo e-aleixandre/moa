@@ -10,7 +10,7 @@ import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resume
 import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
-import { PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings } from "../../../components/index.js";
+import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
@@ -446,10 +446,7 @@ export function MobileConversationScreen({ version = null }) {
         title="Settings"
         scope="everywhere"
       >
-        <div class="mconv-settings-body">
-          <div class="mconv-settings-lbl">Notifications</div>
-          <NotificationSettings soundEnabled={state.soundEnabled} />
-        </div>
+        <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
       </MobileSheet>
       {session && (
         <RewindTimeline
