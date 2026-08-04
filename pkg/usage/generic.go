@@ -266,3 +266,13 @@ func (m *MultiPoller) GetProvider(ctx context.Context, provider string) (*Snapsh
 	}
 	return m.Pollers[provider].Get(ctx)
 }
+
+// StaticProviderStatus returns a provider state that is known without polling,
+// such as an API-key account whose consumer-plan usage is unsupported.
+func (m *MultiPoller) StaticProviderStatus(provider string) (ProviderStatus, bool) {
+	if m == nil {
+		return ProviderStatus{}, false
+	}
+	status, ok := m.StaticStatus[provider]
+	return status, ok
+}

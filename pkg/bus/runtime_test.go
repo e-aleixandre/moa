@@ -813,3 +813,39 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 		t.Fatalf("SessionLoaded events = %d, want 3", got)
 	}
 }
+
+func TestSessionRuntime_SwitchSession_NormalizesPersistedGrokThinking(t *testing.T) {
+	grok, ok := core.ResolveModel("grok-4.5")
+	if !ok {
+		t.Fatal("Grok model not found")
+	}
+	fake := newFakeAgentSubscriber()
+	fake.model = grok
+	fake.thinkingLevel = "medium"
+	runtime, err := NewSessionRuntime(RuntimeConfig{
+		Agent:      fake.fakeAgent,
+		Subscriber: &fake.fakeSubscriber,
+		ProviderFactory: func(core.Model) (core.Provider, error) {
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+
+	sess := &session.Session{Metadata: map[string]any{
+		session.MetaModel:    "xai/grok-4.5",
+		session.MetaThinking: "xhigh",
+	}}
+	if err := runtime.SwitchSession(sess); err != nil {
+		t.Fatal(err)
+	}
+	thinking, err := QueryTyped[GetThinkingLevel, string](runtime.Bus, GetThinkingLevel{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thinking != "high" {
+		t.Fatalf("restored thinking = %q, want high", thinking)
+	}
+}

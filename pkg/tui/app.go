@@ -406,6 +406,7 @@ const usagePollInterval = 60 * time.Second
 type usageMsg struct {
 	provider string
 	snap     *usage.Snapshot
+	status   usage.ProviderStatus
 }
 
 // usageTickMsg fires on the usage refresh interval.
@@ -422,7 +423,8 @@ func (m appModel) fetchUsageCmd() tea.Cmd {
 	ctx := m.baseCtx
 	return func() tea.Msg {
 		snap, _ := poller.GetProvider(ctx, m.modelProvider)
-		return usageMsg{provider: m.modelProvider, snap: snap}
+		status, _ := poller.StaticProviderStatus(m.modelProvider)
+		return usageMsg{provider: m.modelProvider, snap: snap, status: status}
 	}
 }
 
@@ -430,9 +432,13 @@ func (m appModel) fetchUsageCmd() tea.Cmd {
 // snapshot means usage is unavailable (no OAuth credential, or an error with no
 // cached snapshot to fall back on): clear the segments so stale data doesn't
 // linger, matching the web UI which hides the widget when usage is unavailable.
-func (m *appModel) applyUsage(snap *usage.Snapshot) {
+func (m *appModel) applyUsage(snap *usage.Snapshot, status usage.ProviderStatus) {
 	if snap == nil {
-		m.statusBar.UpdateUsageSegment(-1, -1)
+		if status.Reason == "plan_unsupported" {
+			m.statusBar.UpdateUsageUnavailable("unavailable for xAI API key")
+		} else {
+			m.statusBar.UpdateUsageSegment(-1, -1)
+		}
 		m.statusBar.UpdateUsageExtraSegment(0, "", false)
 		m.lastFiveHPct, m.lastWeekPct = -1, -1
 		return
@@ -466,10 +472,17 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 		used, _ := snap.Extra.UsedAmount()
 		m.statusBar.UpdateUsageExtraSegment(used, snap.Extra.CurrencySymbol(), snap.Extra.IsEnabled)
 	} else {
+		buckets := make([]UsageMoney, 0, len(snap.Money))
 		for _, b := range snap.Money {
 			amount := b.Used
-			if amount == nil {
+			label := b.Label
+			if b.ID != "payg" {
 				amount = b.Remaining
+			} else if amount == nil {
+				amount = b.Limit
+			}
+			if amount == nil {
+				amount = b.Used
 			}
 			if amount == nil {
 				continue
@@ -492,10 +505,15 @@ func (m *appModel) applyUsage(snap *usage.Snapshot) {
 			if b.Currency == "GBP" {
 				symbol = "£"
 			}
-			m.statusBar.UpdateUsageExtraSegment(float64(*amount)/scale, symbol, true)
-			return
+			if label == "" {
+				label = b.ID
+			}
+			if b.ID == "payg" {
+				label = "extra"
+			}
+			buckets = append(buckets, UsageMoney{Label: label, Amount: float64(*amount) / scale, Symbol: symbol})
 		}
-		m.statusBar.UpdateUsageExtraSegment(0, "", false)
+		m.statusBar.UpdateUsageMoneySegments(buckets)
 	}
 }
 
@@ -614,7 +632,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case usageMsg:
 		if msg.provider == m.modelProvider {
-			m.applyUsage(msg.snap)
+			m.applyUsage(msg.snap, msg.status)
 		}
 		return m, nil
 
@@ -1806,7 +1824,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 			m.modelProvider = e.Provider
 			m.statusBar.UpdateModelSegment(e.Model)
 			if providerChanged {
-				m.applyUsage(nil)
+				m.applyUsage(nil, usage.ProviderStatus{})
 			}
 		}
 		if e.Thinking != "" {

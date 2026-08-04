@@ -173,8 +173,7 @@ function UsageSheetBody({ session, usage, busy }) {
   const extra = u.extra;
   const extraMoney = (v) =>
     money(v, { decimal_places: extra.decimalPlaces, currency: extra.currency });
-  const planReset = (m) =>
-    m.source === "anthropic" && m.resetsAt ? `resets in ${fmtReset(m.resetsAt)}` : "";
+  const planReset = (m) => m.resetsAt ? `resets in ${fmtReset(m.resetsAt)}` : "";
 
   return (
     <div class="msl-usage">
@@ -195,11 +194,11 @@ function UsageSheetBody({ session, usage, busy }) {
         </div>
       )}
 
-      {(u.fiveHour || u.week || extra) && (
+      {(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
         <div class="msl-ugroup">
           {u.fiveHour && (
             <div class="msl-urow">
-              <span class="uk">Plan · 5h</span>
+              <span class="uk">Plan · {u.fiveHour.label || "5h"}</span>
               <span class={`umeter u-${usageLevel(u.fiveHour.pct)}`} aria-hidden="true">
                 <span style={{ width: `${Math.min(100, Math.max(0, u.fiveHour.pct))}%` }} />
               </span>
@@ -209,7 +208,7 @@ function UsageSheetBody({ session, usage, busy }) {
           )}
           {u.week && (
             <div class="msl-urow">
-              <span class="uk">Plan · week</span>
+              <span class="uk">Plan · {u.week.label || "week"}</span>
               <span class={`umeter u-${usageLevel(u.week.pct)}`} aria-hidden="true">
                 <span style={{ width: `${Math.min(100, Math.max(0, u.week.pct))}%` }} />
               </span>
@@ -227,6 +226,30 @@ function UsageSheetBody({ session, usage, busy }) {
               <span class="unote">pay-as-you-go</span>
             </div>
           )}
+          {(u.moneyBuckets || []).filter((bucket) => bucket.id !== "payg").map((bucket) => (
+            <div class="msl-urow" key={bucket.id}>
+              <span class="uk">{bucket.label || bucket.id}</span>
+              <span class="uv">
+                {bucket.remaining_minor != null
+                  ? money(bucket.remaining_minor, { decimal_places: bucket.decimals, currency: bucket.currency })
+                  : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(u.tier || u.stale) && (
+        <div class="msl-ugroup">
+          <div class="msl-urow">
+            {u.tier && <><span class="uk">Plan</span><span class="uv">{u.tier}</span></>}
+            {u.stale && <span class="unote">stale</span>}
+          </div>
+        </div>
+      )}
+      {u.providerStatus && u.providerStatus.reason === "plan_unsupported" && (
+        <div class="msl-ugroup">
+          <div class="msl-urow"><span class="unote">Consumer plan quota is unavailable for an xAI API key.</span></div>
         </div>
       )}
 

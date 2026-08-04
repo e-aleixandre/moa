@@ -228,10 +228,13 @@ func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
 		}
 		return token, true, nil
 	})
-	// An explicit API key selects xAI's developer product, whose consumer plan
+	// An API key selects xAI's developer product, whose consumer plan
 	// quota is unrelated and must never be displayed.
+	credential, storedXAIAPIKey := authStore.Get("xai")
+	storedXAIAPIKey = storedXAIAPIKey && credential.Type == "api_key" && credential.Key != ""
+	xaiAPIKey := os.Getenv("XAI_API_KEY") != "" || storedXAIAPIKey
 	xaiPoller := usage.NewProviderPoller(func(context.Context) (string, bool, error) {
-		if os.Getenv("XAI_API_KEY") != "" {
+		if xaiAPIKey {
 			return "", false, nil
 		}
 		token, isOAuth, valid := authStore.PeekOAuthToken("xai")
@@ -244,7 +247,7 @@ func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
 		return token, true, nil
 	}, usage.FetchXAI)
 	multi := &usage.MultiPoller{Pollers: map[string]*usage.Poller{"anthropic": anthropic, "xai": xaiPoller}}
-	if os.Getenv("XAI_API_KEY") != "" {
+	if xaiAPIKey {
 		multi.StaticStatus = map[string]usage.ProviderStatus{"xai": {AuthKind: "api_key", Reason: "plan_unsupported"}}
 	}
 	return multi

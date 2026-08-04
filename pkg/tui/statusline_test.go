@@ -64,6 +64,18 @@ func TestStatusLine_SetEmptyRemoves(t *testing.T) {
 	}
 }
 
+func TestStatusLine_UsageMoneySegmentsKeepsEveryCreditBucket(t *testing.T) {
+	sl := NewStatusLine(plainStyle())
+	sl.UpdateUsageMoneySegments([]UsageMoney{
+		{Label: "extra", Amount: 1.25, Symbol: "$"},
+		{Label: "Credits", Amount: 4.5, Symbol: "$"},
+	})
+	view := sl.View(200)
+	if !strings.Contains(view, "extra $1.25") || !strings.Contains(view, "Credits $4.50") {
+		t.Fatalf("usage buckets missing from status line: %q", view)
+	}
+}
+
 func TestStatusLine_Clear(t *testing.T) {
 	sl := NewStatusLine(plainStyle())
 	sl.Set("a", "one", 1)

@@ -613,6 +613,12 @@ func (r *SessionRuntime) SwitchSession(sess *session.Session) error {
 	if restored.HasThinking {
 		thinking = restored.Thinking
 	}
+	if model.Provider == "xai" {
+		thinking, err = core.EffectiveThinkingLevel(model, thinking)
+		if err != nil {
+			return fmt.Errorf("bus: SwitchSession thinking for %s: %w", model.ID, err)
+		}
+	}
 	if err := r.sctx.Agent.SetThinkingLevel(thinking); err != nil {
 		return fmt.Errorf("bus: SwitchSession SetThinkingLevel: %w", err)
 	}

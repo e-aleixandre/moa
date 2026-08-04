@@ -41,6 +41,19 @@ func TestBuildProvider_XAIStoredOAuth(t *testing.T) {
 	}
 }
 
+func TestNewAnthropicUsagePoller_StoredXAIAPIKeyIsPlanUnsupported(t *testing.T) {
+	t.Setenv("XAI_API_KEY", "")
+	store := newTestAuthStore(t)
+	if err := store.Set("xai", auth.Credential{Type: "api_key", Key: "xai-key"}); err != nil {
+		t.Fatal(err)
+	}
+	poller := newAnthropicUsagePoller(store)
+	status, ok := poller.StaticProviderStatus("xai")
+	if !ok || status.AuthKind != "api_key" || status.Reason != "plan_unsupported" {
+		t.Fatalf("xAI status = %#v, found=%v", status, ok)
+	}
+}
+
 func TestParseAllowPattern_Empty(t *testing.T) {
 	for _, input := range []string{"", "  ", "\t"} {
 		_, err := parseAllowPattern(input)

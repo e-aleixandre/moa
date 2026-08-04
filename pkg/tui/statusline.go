@@ -392,6 +392,16 @@ func (sl *StatusLine) UpdateUsageSegment(fiveHPct, weekPct int) {
 	sl.UpdateQuotaSegment([]string{"5h", "wk"}, []int{fiveHPct, weekPct})
 }
 
+// UpdateUsageUnavailable explains why a provider has no consumer-plan meter.
+func (sl *StatusLine) UpdateUsageUnavailable(reason string) {
+	if reason == "" {
+		sl.Remove(SegmentUsage)
+		return
+	}
+	text := statusLineKeyStyle.Render("quota ") + statusLineValueStyle.Render(reason)
+	sl.Set(SegmentUsage, text, PriorityUsage)
+}
+
 // UpdateQuotaSegment renders up to two provider-neutral quota meters.
 func (sl *StatusLine) UpdateQuotaSegment(labels []string, pcts []int) {
 	var parts []string
@@ -421,11 +431,35 @@ func (sl *StatusLine) UpdateUsageExtraSegment(used float64, symbol string, enabl
 		sl.Remove(SegmentUsageExtra)
 		return
 	}
-	style := statusLineValueStyle
-	if used > 0 {
-		style = statusLineContextHighStyle
+	sl.UpdateUsageMoneySegments([]UsageMoney{{Label: "extra", Amount: used, Symbol: symbol}})
+}
+
+// UsageMoney is one provider-reported money bucket for the status line.
+type UsageMoney struct {
+	Label  string
+	Amount float64
+	Symbol string
+}
+
+// UpdateUsageMoneySegments renders every reported provider credit bucket.
+func (sl *StatusLine) UpdateUsageMoneySegments(buckets []UsageMoney) {
+	if len(buckets) == 0 {
+		sl.Remove(SegmentUsageExtra)
+		return
 	}
-	text := statusLineKeyStyle.Render("extra ") + style.Render(fmt.Sprintf("%s%.2f", symbol, used))
+	parts := make([]string, 0, len(buckets))
+	for _, bucket := range buckets {
+		style := statusLineValueStyle
+		if bucket.Amount > 0 {
+			style = statusLineContextHighStyle
+		}
+		label := bucket.Label
+		if label == "" {
+			label = "credits"
+		}
+		parts = append(parts, statusLineKeyStyle.Render(label+" ")+style.Render(fmt.Sprintf("%s%.2f", bucket.Symbol, bucket.Amount)))
+	}
+	text := strings.Join(parts, " ")
 	sl.Set(SegmentUsageExtra, text, PriorityUsageExtra)
 }
 

@@ -30,7 +30,7 @@ function ThinkingStepper({ value, onChange, levels = THINKING_OPTIONS.map((optio
         Thinking <b class={hot ? "hot" : ""}>{value.toUpperCase()}</b>
       </div>
       <Segmented
-        options={THINKING_OPTIONS}
+        options={options}
         value={value}
         onChange={onChange}
         aria-labelledby="model-selector-thinking-label"
