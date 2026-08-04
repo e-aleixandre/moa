@@ -11,14 +11,15 @@ import "./MobileTitleChip.css";
 // list reads as belonging to the title rather than arriving from nowhere.
 //
 // It replaces the status line's explicit "Sessions" door, and inherits its
-// cross-session attention duty: the peach dot means ANOTHER session is blocked
-// on you (the active session's own block is the inline PermissionPrompt). The
-// count is deliberately not shown here — the drawer is one tap away and lists
-// exactly who needs you, so a number on a 8px dot would be noise.
-export function MobileTitleChip({ title, attnCount = 0, open = false, onToggle }) {
-  const hasAttn = attnCount > 0;
+// cross-session attention duty. Urgent blocks use peach; an otherwise-idle
+// session with a new result uses mauve. The active session is handled inline.
+export function MobileTitleChip({ title, attention = {}, open = false, onToggle }) {
+  const urgent = attention.urgent || 0;
+  const unseen = attention.unseen || 0;
+  const count = urgent + unseen;
+  const hasAttn = count > 0;
   const label = hasAttn
-    ? `${title} — sessions; ${attnCount} other session${attnCount === 1 ? "" : "s"} need you`
+    ? `${title} — sessions; ${count} other session${count === 1 ? "" : "s"} need attention`
     : `${title} — sessions`;
   return (
     <button
@@ -33,7 +34,7 @@ export function MobileTitleChip({ title, attnCount = 0, open = false, onToggle }
       <span class="mtchip-chev" aria-hidden="true">
         <ChevronDown size={12} />
       </span>
-      {hasAttn && <span class="mtchip-attn" aria-hidden="true" />}
+      {hasAttn && <span class={`mtchip-attn${urgent ? "" : " mtchip-attn-unseen"}`} aria-hidden="true" />}
     </button>
   );
 }

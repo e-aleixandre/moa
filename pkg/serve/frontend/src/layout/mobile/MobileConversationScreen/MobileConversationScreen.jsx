@@ -84,17 +84,18 @@ function sessionBrief(sess) {
   return sess.state || "idle";
 }
 
-// aggregateAttention counts OTHER sessions (excluding the active one) that are
-// blocked on the user — the exact "needs you" datum the desktop GridToolbar's
-// attn-lamp consumes (permission ∪ error), so the mobile Sessions badge and the
-// desktop lamp never disagree. It reuses the same per-session "needs" predicate
-// the drawer cards use (pendingPerm / pendingAsk / permission), plus error.
+// aggregateAttention distinguishes urgent blocks from successful results the
+// user has not opened yet. Both light the mobile Sessions door, but the tone
+// preserves urgency: errors/permissions win over a merely new result.
 function aggregateAttention(sessions, activeId) {
-  return Object.values(sessions).filter(
-    (s) =>
-      s.id !== activeId &&
-      (s.pendingPerm || s.pendingAsk || s.state === "permission" || s.state === "error")
-  ).length;
+  let urgent = 0;
+  let unseen = 0;
+  for (const s of Object.values(sessions)) {
+    if (s.id === activeId) continue;
+    if (s.pendingPerm || s.pendingAsk || s.state === "permission" || s.state === "error") urgent += 1;
+    else if (s.unseen && s.state === "idle") unseen += 1;
+  }
+  return { urgent, unseen };
 }
 
 // drawerSessions builds the drawer's two groups — active (newest first) and
@@ -126,8 +127,11 @@ function drawerSessions(sessions, activeId) {
       updated: s.updated || 0,
     };
   };
+  const newResults = active.filter((s) => s.unseen && s.state === "idle");
+  const remainingActive = active.filter((s) => !newResults.includes(s));
   return {
-    active: active.map(toCard),
+    newResults: newResults.map(toCard),
+    active: remainingActive.map(toCard),
     saved: saved.map(toCard),
     activeCount: active.length,
     savedCount: saved.length,
@@ -261,8 +265,9 @@ export function MobileConversationScreen({ version = null }) {
   // Aggregate cross-session attention for the title chip's dot: OTHER sessions
   // blocked on the user (excludes the active one, whose block is the inline
   // PermissionPrompt in the conversation).
-  const attnCount = aggregateAttention(state.sessions, activeId);
+  const attention = aggregateAttention(state.sessions, activeId);
   const {
+    newResults,
     active: drawerActive,
     saved: drawerSaved,
     activeCount,
@@ -412,7 +417,7 @@ export function MobileConversationScreen({ version = null }) {
       {session && !session.viewingSubagent && !session.viewingBashJob && (
         <MobileTitleChip
           title={sessionTitle(session)}
-          attnCount={attnCount}
+          attention={attention}
           open={drawerOpen}
           onToggle={setDrawerOpen}
         />
@@ -424,6 +429,7 @@ export function MobileConversationScreen({ version = null }) {
         onClose={() => setDrawerOpen(false)}
         onClosed={onDrawerClosed}
         active={drawerActive}
+        newResults={newResults}
         saved={drawerSaved}
         activeCount={activeCount}
         savedCount={savedCount}

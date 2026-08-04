@@ -47,6 +47,7 @@ export function SessionRow({
   ...rest
 }) {
   const needs = NEEDS_TONE[state];
+  const isUnseenResult = unseen && state === "idle";
   const classes = [
     "session-row",
     `variant-${variant}`,
@@ -61,7 +62,7 @@ export function SessionRow({
     onClose?.(event);
   };
 
-  const hitLabel = `${title}${origin ? `, started by ${origin}` : ""}${pane ? `, pane ${pane}` : ""}${STATE_LABEL_SUFFIX[state] ?? ""}`;
+  const hitLabel = `${title}${origin ? `, started by ${origin}` : ""}${pane ? `, pane ${pane}` : ""}${isUnseenResult ? ", new result" : STATE_LABEL_SUFFIX[state] ?? ""}`;
 
   return (
     <span class={classes} {...rest}>
@@ -75,11 +76,10 @@ export function SessionRow({
         {variant === "card" ? (
           <>
             <span class="r1">
-              <StateDot state={state} size={8} />
+              <StateDot state={isUnseenResult ? "unseen" : state} size={8} />
               <span class="title" aria-hidden="true">{title}</span>
               {origin && <span class="origin" aria-hidden="true">{origin}</span>}
               {pane && <span class="pane" aria-hidden="true">{pane}</span>}
-              {unseen && <span class="unseen" aria-hidden="true" />}
               {when && <span class="when" aria-hidden="true">{when}</span>}
             </span>
             {meta && <span class="r2" aria-hidden="true">{meta}</span>}
@@ -88,9 +88,8 @@ export function SessionRow({
           </>
         ) : (
           <>
-            <StateDot state={state} size={8} />
+            <StateDot state={isUnseenResult ? "unseen" : state} size={8} />
             <span class="title" aria-hidden="true">{title}</span>
-            {unseen && <span class="unseen" aria-hidden="true" />}
             {variant === "tab" && age && <span class="n" aria-hidden="true">{age}</span>}
           </>
         )}

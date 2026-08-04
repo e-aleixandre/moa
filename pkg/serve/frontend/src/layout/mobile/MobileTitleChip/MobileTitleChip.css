@@ -73,6 +73,10 @@
   border: 2px solid var(--base);
   box-shadow: 0 0 6px color-mix(in srgb, var(--peach) 70%, transparent);
 }
+.mtchip-attn-unseen {
+  background: var(--mauve);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--mauve) 70%, transparent);
+}
 
 /* Open — solid, above the veil, chevron flipped to point back at the chip. */
 .mtchip.is-open {
