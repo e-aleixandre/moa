@@ -49,13 +49,10 @@
 .perm-chip.perm-auto { color: var(--blue); }
 .perm-chip:not(:disabled):hover { filter: brightness(1.15); }
 
-/* The menu — opens upward from the chip. Right-aligned to the chip and
-   width-clamped to the viewport so it can never clip off-screen on a narrow
-   desktop pane (mobile uses the Sheet variant instead, see .perm-sheet-list). */
+/* The menu — opens upward from the chip. Portalled to <body> with fixed
+   positioning (see PermissionControl.jsx) so pane overflow:hidden cannot clip
+   it in the grid. right/top/bottom come from inline style. */
 .perm-menu {
-  position: absolute;
-  bottom: calc(100% + var(--space-2));
-  right: 0;
   z-index: var(--z-overlay);
   width: 220px;
   max-width: calc(100vw - var(--space-4));
@@ -67,6 +64,10 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+.perm-menu-portal {
+  position: fixed;
 }
 
 /* The mobile Sheet variant reuses the same rows (.perm-menu-item) laid out
