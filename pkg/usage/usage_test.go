@@ -233,6 +233,31 @@ func TestPollerServesStaleOnError(t *testing.T) {
 	}
 }
 
+func TestMultiPollerObserveRateLimitCachesByProvider(t *testing.T) {
+	m := &MultiPoller{}
+	m.ObserveRateLimit("openai", "oauth", 0.4, -1)
+	m.ObserveRateLimit("openai", "oauth", -1, 0.51)
+
+	snaps, statuses := m.GetAll(context.Background())
+	snap := snaps["openai"]
+	if snap == nil || snap.FiveHour == nil || snap.SevenDay == nil {
+		t.Fatalf("OpenAI snapshot = %#v, want both windows", snap)
+	}
+	if snap.FiveHour.Utilization != 40 || snap.SevenDay.Utilization != 51 {
+		t.Errorf("windows = (%v, %v), want (40, 51)", snap.FiveHour.Utilization, snap.SevenDay.Utilization)
+	}
+	if status := statuses["openai"]; !status.Available || status.AuthKind != "oauth" {
+		t.Errorf("OpenAI status = %#v", status)
+	}
+
+	// GetAll must return independent data; callers cannot mutate the cache.
+	snap.FiveHour.Utilization = 0
+	again, _ := m.GetAll(context.Background())
+	if got := again["openai"].FiveHour.Utilization; got != 40 {
+		t.Errorf("mutated cached utilization = %v, want 40", got)
+	}
+}
+
 // rewriteHost returns a RoundTripper that redirects any request to the given
 // base URL's host, so Fetch (which uses a fixed endpoint const) can be pointed
 // at a test server.

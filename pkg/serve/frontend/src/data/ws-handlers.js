@@ -1070,12 +1070,10 @@ export function handleWsSessionCost(id, data) {
   }
 }
 
-// handleWsRateLimit reflects a request's live rate-limit headers: a per-session
-// "on extra usage" flag, the per-session 5h/weekly utilizations (the only usage
-// source for OpenAI/Codex, which has no poller), plus — for Anthropic — an
-// instant refresh of the global plan-usage snapshot (account-wide windows) so
-// the widget doesn't lag the 60s poll. The extra-usage spend (€) stays sourced
-// from the poller.
+// handleWsRateLimit reflects a request's live rate-limit headers. OpenAI/Codex
+// has no usage endpoint, so its last observed account-wide windows are kept in
+// the global snapshot. Anthropic also patches its global plan snapshot here so
+// the widget does not lag the 60s poll; extra-usage spend (€) stays poller-owned.
 export function handleWsRateLimit(id, data) {
   // Per-session utilizations: always record when the header was present
   // (pct >= 0). This is what the OpenAI widget reads (no global poller), and it
@@ -1090,6 +1088,25 @@ export function handleWsRateLimit(id, data) {
   // must NOT overwrite the Anthropic snapshot in a mixed layout.
   const sess = store.get().sessions[id];
   const isAnthropic = !sess?.provider || sess.provider === 'anthropic';
+  if (sess?.provider === 'openai') {
+    const current = store.get().usage || { available: false, version: 2, providers: {}, provider_status: {} };
+    const prior = current.providers?.openai || {};
+    const openai = {
+      ...prior,
+      provider: 'openai',
+      auth_kind: 'oauth',
+      stability: 'response_headers',
+    };
+    if (data.five_hour_pct >= 0) openai.five_hour = { utilization: data.five_hour_pct };
+    if (data.seven_day_pct >= 0) openai.seven_day = { utilization: data.seven_day_pct };
+    setState({ usage: {
+      ...current,
+      available: true,
+      providers: { ...(current.providers || {}), openai },
+      provider_status: { ...(current.provider_status || {}), openai: { available: true, auth_kind: 'oauth' } },
+    } });
+    return;
+  }
   if (!isAnthropic) return;
 
   const u = store.get().usage;

@@ -113,10 +113,8 @@ export async function loadSessions() {
         autoVerifying: existing ? existing.autoVerifying : false,
         compacting: existing ? existing.compacting : false,
         onOverage: existing ? existing.onOverage : false,
-        // Per-request rate-limit percents (the only usage source for OpenAI,
-        // which has no poller) are WS/live-only state; the poll doesn't carry
-        // them, so preserve them or the OpenAI usage pills flicker away on every
-        // poll tick.
+        // Per-request rate-limit percents remain as an old-server fallback;
+        // current OpenAI usage comes from the provider-wide /api/usage snapshot.
         rlFiveHourPct: existing ? existing.rlFiveHourPct : undefined,
         rlSevenDayPct: existing ? existing.rlSevenDayPct : undefined,
         // Live per-run state fed by WS (run start timestamp + the running token

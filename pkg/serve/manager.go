@@ -64,10 +64,11 @@ type ManagedSession struct {
 	attachMu sync.Mutex
 
 	// Mutable under mu.
-	mu          sync.Mutex
-	Title       string
-	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
-	Updated     time.Time
+	mu            sync.Mutex
+	Title         string
+	TitleSource   string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
+	Updated       time.Time
+	modelProvider string // current model provider; updated with idle model switches
 	// briefAttempting/briefProgress are the cheap LLM-generated status prose
 	// (what the session is attempting, how it's going) surfaced to voice/mobile
 	// clients. This is prose that can age; the actionable state (idle/running/
@@ -142,6 +143,7 @@ type ManagedSession struct {
 	briefPending atomic.Bool
 	briefRunning atomic.Bool
 	pushUnsubs   []func()
+	usageUnsub   func()
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -167,6 +169,18 @@ func (s *ManagedSession) title() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Title
+}
+
+func (s *ManagedSession) providerName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.modelProvider
+}
+
+func (s *ManagedSession) setProviderName(provider string) {
+	s.mu.Lock()
+	s.modelProvider = provider
+	s.mu.Unlock()
 }
 
 // serveInfra holds serve-layer infrastructure that doesn't belong in the bus.

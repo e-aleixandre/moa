@@ -474,16 +474,17 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// the system prompt automatically.
 
 	sess = &ManagedSession{
-		ID:         id,
-		Title:      title,
-		CWD:        cwd,
-		Created:    time.Now(),
-		Updated:    time.Now(),
-		cacheTTL:   core.CacheTTLDuration(moaCfg),
-		runtime:    rt,
-		subagents:  bs.Subagents,
-		bashJobs:   bs.BashJobs,
-		pathPolicy: bs.PathPolicy,
+		ID:            id,
+		Title:         title,
+		CWD:           cwd,
+		Created:       time.Now(),
+		Updated:       time.Now(),
+		modelProvider: model.Provider,
+		cacheTTL:      core.CacheTTLDuration(moaCfg),
+		runtime:       rt,
+		subagents:     bs.Subagents,
+		bashJobs:      bs.BashJobs,
+		pathPolicy:    bs.PathPolicy,
 		infra: serveInfra{
 			sessionCtx:      sessionCtx,
 			sessionCancel:   sessionCancel,
@@ -517,6 +518,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
 	m.subscribeSessionBrief(sess)
+	m.subscribeUsageCache(sess)
 	// A resumed transcript has no in-memory brief after a server restart. Queue
 	// one refresh rather than generating synchronously: briefPending coalesces
 	// this with any immediate bus trigger, while briefRunning and the per-session
@@ -660,6 +662,9 @@ func (m *Manager) deleteSession(id string) error {
 	sess.mu.Unlock()
 	for _, unsub := range sess.pushUnsubs {
 		unsub()
+	}
+	if sess.usageUnsub != nil {
+		sess.usageUnsub()
 	}
 
 	// Close MCP connections before context cancellation.
@@ -814,6 +819,9 @@ func (m *Manager) CloseSession(id string) error {
 	// MCP, then the session context, then the runtime.
 	for _, unsub := range sess.pushUnsubs {
 		unsub()
+	}
+	if sess.usageUnsub != nil {
+		sess.usageUnsub()
 	}
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()

@@ -7,8 +7,8 @@
 //     extra-usage spend come from the GLOBAL /api/usage snapshot (shared across
 //     sessions), which also carries reset timestamps.
 //   • OpenAI/Codex (provider 'openai'): there is NO usage endpoint, so the
-//     5h/weekly meters come from the per-session rate-limit headers
-//     (session.rlFiveHourPct / rlSevenDayPct) — percent only, no reset time.
+//     5h/weekly meters come from the process-local provider snapshot assembled
+//     from response headers — percent only, no reset time.
 //
 // usageForSession collapses both into ONE shape the StatusStrip renders without
 // caring which provider it came from:
@@ -87,7 +87,7 @@ export function usageForSession(session, globalUsage) {
   // v2 is provider-qualified; accepting the old flat contract keeps saved
   // frontend bundles and server upgrades compatible.
   const u = globalUsage && globalUsage.available
-    ? ((globalUsage.providers && globalUsage.providers[s.provider || "anthropic"]) || (!globalUsage.providers && globalUsage))
+    ? ((globalUsage.providers && globalUsage.providers[s.provider || "anthropic"]) || (!globalUsage.providers && isAnthropic && globalUsage))
     : null;
   const providerStatus = globalUsage && globalUsage.provider_status && globalUsage.provider_status[s.provider || "anthropic"];
 
@@ -133,10 +133,16 @@ export function usageForSession(session, globalUsage) {
   }
 
   if (isOpenAI) {
-    if (typeof s.rlFiveHourPct === "number" && s.rlFiveHourPct >= 0) {
+    if (u?.five_hour && Number.isFinite(u.five_hour.utilization)) {
+      fiveHour = { pct: Math.round(u.five_hour.utilization), resetsAt: null, source: "openai" };
+    } else if (typeof s.rlFiveHourPct === "number" && s.rlFiveHourPct >= 0) {
+      // Kept as a compatibility fallback while an older server is upgraded.
       fiveHour = { pct: Math.round(s.rlFiveHourPct), resetsAt: null, source: "openai" };
     }
-    if (typeof s.rlSevenDayPct === "number" && s.rlSevenDayPct >= 0) {
+    if (u?.seven_day && Number.isFinite(u.seven_day.utilization)) {
+      week = { pct: Math.round(u.seven_day.utilization), resetsAt: null, source: "openai" };
+    } else if (typeof s.rlSevenDayPct === "number" && s.rlSevenDayPct >= 0) {
+      // Kept as a compatibility fallback while an older server is upgraded.
       week = { pct: Math.round(s.rlSevenDayPct), resetsAt: null, source: "openai" };
     }
   }

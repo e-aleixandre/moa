@@ -742,7 +742,7 @@ test('normalizeHistory reloads a prefix-based bash notification (no custom)', ()
 
 import { handleWsRateLimit } from './ws-handlers.js';
 
-test('handleWsRateLimit stores per-session pcts and does not touch the global snapshot for OpenAI', () => {
+test('handleWsRateLimit stores OpenAI usage globally without touching Anthropic', () => {
   setState({
     sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
     usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
@@ -753,7 +753,9 @@ test('handleWsRateLimit stores per-session pcts and does not touch the global sn
   const sess = store.get().sessions.s1;
   expect(sess.rlFiveHourPct).toBe(40);
   expect(sess.rlSevenDayPct).toBe(51);
-  // Anthropic global snapshot must be untouched by an OpenAI session.
+  expect(store.get().usage.providers.openai.five_hour.utilization).toBe(40);
+  expect(store.get().usage.providers.openai.seven_day.utilization).toBe(51);
+  // Anthropic's legacy global snapshot must be untouched by an OpenAI session.
   expect(store.get().usage.five_hour.utilization).toBe(10);
   expect(store.get().usage.seven_day.utilization).toBe(20);
 });
@@ -782,6 +784,8 @@ test('handleWsRateLimit ignores unknown windows (pct < 0)', () => {
   const sess = store.get().sessions.s1;
   expect(sess.rlFiveHourPct).toBe(40);
   expect(sess.rlSevenDayPct).toBeUndefined();
+  expect(store.get().usage.providers.openai.five_hour.utilization).toBe(40);
+  expect(store.get().usage.providers.openai.seven_day).toBeUndefined();
 });
 
 test('handleWsRateLimit isolates providers in a mixed layout', () => {
@@ -793,14 +797,16 @@ test('handleWsRateLimit isolates providers in a mixed layout', () => {
     usage: { available: true, five_hour: { utilization: 5 }, seven_day: { utilization: 6 } },
   });
 
-  // OpenAI session updates only its own per-session pcts, not the global snapshot.
+  // OpenAI updates its provider-qualified global snapshot, not Anthropic's.
   handleWsRateLimit('o', { five_hour_pct: 80, seven_day_pct: 90, on_overage: false });
   expect(store.get().sessions.o.rlFiveHourPct).toBe(80);
   expect(store.get().usage.five_hour.utilization).toBe(5);
+  expect(store.get().usage.providers.openai.five_hour.utilization).toBe(80);
 
-  // Anthropic session patches the global snapshot; OpenAI's per-session values stay put.
+  // Anthropic patches its global snapshot; OpenAI's provider data stays put.
   handleWsRateLimit('a', { five_hour_pct: 30, seven_day_pct: 40, on_overage: false });
   expect(store.get().usage.five_hour.utilization).toBe(30);
+  expect(store.get().usage.providers.openai.five_hour.utilization).toBe(80);
   expect(store.get().sessions.o.rlFiveHourPct).toBe(80);
   expect(store.get().sessions.a.rlFiveHourPct).toBe(30);
 });

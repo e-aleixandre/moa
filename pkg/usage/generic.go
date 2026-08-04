@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/provider/xai"
@@ -215,6 +216,12 @@ func NewProviderPoller(tokenFn TokenFunc, fetch Fetcher) *Poller {
 type MultiPoller struct {
 	Pollers      map[string]*Poller
 	StaticStatus map[string]ProviderStatus
+
+	// observed holds provider usage reported opportunistically in successful
+	// model response headers. Unlike Pollers, these sources have no usage
+	// endpoint to refresh; their lifetime is intentionally just this process.
+	observedMu sync.RWMutex
+	observed   map[string]*Snapshot
 }
 
 // Status is returned even without a snapshot, so UIs never have to infer an
@@ -225,6 +232,54 @@ type ProviderStatus struct {
 	AuthKind  string `json:"auth_kind,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Error     string `json:"error,omitempty"`
+}
+
+// ObserveRateLimit records the latest account-wide plan windows reported by a
+// provider response. Unknown windows (< 0) preserve their previous value, so
+// a partial header set cannot erase useful telemetry from an earlier request.
+// Values are fractions in [0,1], matching core.RateLimit.
+func (m *MultiPoller) ObserveRateLimit(provider, authKind string, fiveHour, sevenDay float64) {
+	if m == nil || (fiveHour < 0 && sevenDay < 0) {
+		return
+	}
+	m.observedMu.Lock()
+	defer m.observedMu.Unlock()
+	if m.observed == nil {
+		m.observed = make(map[string]*Snapshot)
+	}
+	var next Snapshot
+	if previous := m.observed[provider]; previous != nil {
+		if cloned := cloneSnapshot(previous); cloned != nil {
+			next = *cloned
+		}
+	}
+	next.Provider = provider
+	next.AuthKind = authKind
+	next.Stability = "response_headers"
+	next.FetchedAt = time.Now()
+	if fiveHour >= 0 {
+		next.FiveHour = &Window{Utilization: fiveHour * 100}
+	}
+	if sevenDay >= 0 {
+		next.SevenDay = &Window{Utilization: sevenDay * 100}
+	}
+	next.Quotas = next.Quotas[:0]
+	if next.FiveHour != nil {
+		next.Quotas = append(next.Quotas, Quota{ID: "five_hour", Label: "5h", Utilization: floatp(next.FiveHour.Utilization), PeriodKind: "five_hour"})
+	}
+	if next.SevenDay != nil {
+		next.Quotas = append(next.Quotas, Quota{ID: "seven_day", Label: "week", Utilization: floatp(next.SevenDay.Utilization), PeriodKind: "week"})
+	}
+	m.observed[provider] = &next
+}
+
+func (m *MultiPoller) observedSnapshot(provider string) *Snapshot {
+	if m == nil {
+		return nil
+	}
+	m.observedMu.RLock()
+	defer m.observedMu.RUnlock()
+	return cloneSnapshot(m.observed[provider])
 }
 
 func (m *MultiPoller) Get(ctx context.Context) map[string]*Snapshot {
@@ -258,10 +313,25 @@ func (m *MultiPoller) GetAll(ctx context.Context) (map[string]*Snapshot, map[str
 			statuses[name] = ProviderStatus{Reason: "pending"}
 		}
 	}
+	// Header-observed sources are intentionally applied after pollers: an
+	// endpoint-backed snapshot remains authoritative for its own provider, but
+	// OpenAI/Codex has no such endpoint and is represented here.
+	m.observedMu.RLock()
+	for name, observed := range m.observed {
+		snaps[name] = cloneSnapshot(observed)
+		statuses[name] = ProviderStatus{Available: true, AuthKind: observed.AuthKind}
+	}
+	m.observedMu.RUnlock()
 	return snaps, statuses
 }
 func (m *MultiPoller) GetProvider(ctx context.Context, provider string) (*Snapshot, error) {
-	if m == nil || m.Pollers[provider] == nil {
+	if m == nil {
+		return nil, nil
+	}
+	if observed := m.observedSnapshot(provider); observed != nil {
+		return observed, nil
+	}
+	if m.Pollers[provider] == nil {
 		return nil, nil
 	}
 	return m.Pollers[provider].Get(ctx)

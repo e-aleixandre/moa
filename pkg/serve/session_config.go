@@ -35,6 +35,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 			return nil, err
 		}
 		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
+		sess.setProviderName(model.Provider)
 		result["model"] = modelDisplayName(model)
 	}
 
