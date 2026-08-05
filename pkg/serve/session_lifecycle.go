@@ -632,7 +632,7 @@ func (m *Manager) deleteSession(id string) error {
 			return err
 		}
 		m.invalidateSavedCache()
-		m.clearUnseen(id)
+		m.forgetUnseen(id)
 		_ = removeSessionAttachDir(id)
 		if m.attachStore != nil {
 			if err := m.attachStore.ReleaseSession(id); err != nil {
@@ -644,7 +644,7 @@ func (m *Manager) deleteSession(id string) error {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	sess.deleted.Store(true)
-	m.clearUnseen(id)
+	m.forgetUnseen(id)
 	// Mark closing and drain the runtime's users before tearing it down, so a
 	// /send or /command already holding this pointer can't start a run into a
 	// runtime that is going away. Delete does NOT refuse a busy session (unlike

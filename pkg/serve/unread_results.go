@@ -8,7 +8,7 @@ import "github.com/e-aleixandre/moa/pkg/bus"
 func (m *Manager) subscribeUnreadResults(sess *ManagedSession) {
 	sess.unreadUnsub = sess.runtime.Bus.Subscribe(func(event bus.RunEnded) {
 		if event.Err == nil && !event.Cancelled && !sess.deleted.Load() {
-			m.markUnseen(sess.ID, event.RunGen)
+			m.markUnseen(sess, event.RunGen)
 		}
 	})
 }

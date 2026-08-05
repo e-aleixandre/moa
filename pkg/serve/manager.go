@@ -427,21 +427,26 @@ func (m *Manager) isUnseen(id string) bool {
 	return m.unseen[id]
 }
 
-func (m *Manager) markUnseen(id string, gen uint64) {
+func (m *Manager) markUnseen(sess *ManagedSession, gen uint64) {
 	m.unseenMu.Lock()
 	defer m.unseenMu.Unlock()
-	if m.readGen[id] >= gen {
+	if sess.deleted.Load() || m.readGen[sess.ID] >= gen {
 		return
 	}
 	if m.unseen == nil {
 		m.unseen = make(map[string]bool)
 	}
-	m.unseen[id] = true
+	if m.unseenGen == nil {
+		m.unseenGen = make(map[string]uint64)
+	}
+	m.unseen[sess.ID] = true
+	m.unseenGen[sess.ID] = gen
 }
 
-func (m *Manager) clearUnseen(id string) {
+func (m *Manager) forgetUnseen(id string) {
 	m.unseenMu.Lock()
 	delete(m.unseen, id)
+	delete(m.unseenGen, id)
 	delete(m.readGen, id)
 	m.unseenMu.Unlock()
 }
@@ -452,17 +457,20 @@ func (m *Manager) MarkSessionRead(id string, gen uint64) error {
 	if _, ok := m.Get(id); !ok {
 		return ErrNotFound
 	}
-	m.clearUnseen(id)
+	m.unseenMu.Lock()
 	if gen > 0 {
-		m.unseenMu.Lock()
 		if m.readGen == nil {
 			m.readGen = make(map[string]uint64)
 		}
 		if gen > m.readGen[id] {
 			m.readGen[id] = gen
 		}
-		m.unseenMu.Unlock()
 	}
+	if gen == 0 || gen >= m.unseenGen[id] {
+		delete(m.unseen, id)
+		delete(m.unseenGen, id)
+	}
+	m.unseenMu.Unlock()
 	return nil
 }
 
@@ -484,13 +492,14 @@ func (m *Manager) activityIndex() map[string]*attention.SessionActivity {
 
 // Manager owns all active sessions.
 type Manager struct {
-	mu       sync.RWMutex
-	sessions map[string]*ManagedSession
-	resuming map[string]struct{}
-	unseenMu sync.RWMutex
-	unseen   map[string]bool // process-local; never persisted with a session
-	readGen  map[string]uint64
-	baseCtx  context.Context
+	mu        sync.RWMutex
+	sessions  map[string]*ManagedSession
+	resuming  map[string]struct{}
+	unseenMu  sync.RWMutex
+	unseen    map[string]bool // process-local; never persisted with a session
+	unseenGen map[string]uint64
+	readGen   map[string]uint64
+	baseCtx   context.Context
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
