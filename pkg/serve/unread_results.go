@@ -7,7 +7,7 @@ import "github.com/e-aleixandre/moa/pkg/bus"
 // session; neither transition is written to the session store.
 func (m *Manager) subscribeUnreadResults(sess *ManagedSession) {
 	sess.unreadUnsub = sess.runtime.Bus.Subscribe(func(event bus.RunEnded) {
-		if event.Err == nil {
+		if event.Err == nil && !sess.deleted.Load() {
 			m.markUnseen(sess.ID)
 		}
 	})

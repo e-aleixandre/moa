@@ -145,6 +145,7 @@ type ManagedSession struct {
 	pushUnsubs   []func()
 	usageUnsub   func()
 	unreadUnsub  func()
+	runProvider  string
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -225,7 +226,7 @@ type SessionInfo struct {
 	Updated      time.Time    `json:"updated"`
 	Origin       string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
 	Error        string       `json:"error,omitempty"`
-	Unseen       bool         `json:"unseen,omitempty"`
+	Unseen       bool         `json:"unseen"`
 	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
@@ -441,15 +442,19 @@ func (m *Manager) markUnseen(id string) {
 	m.unseenMu.Unlock()
 }
 
+func (m *Manager) clearUnseen(id string) {
+	m.unseenMu.Lock()
+	delete(m.unseen, id)
+	m.unseenMu.Unlock()
+}
+
 // MarkSessionRead clears a process-local unread result marker. It intentionally
 // does not save the session: a Moa restart resets this transient UI state.
 func (m *Manager) MarkSessionRead(id string) error {
 	if _, ok := m.Get(id); !ok {
 		return ErrNotFound
 	}
-	m.unseenMu.Lock()
-	delete(m.unseen, id)
-	m.unseenMu.Unlock()
+	m.clearUnseen(id)
 	return nil
 }
 

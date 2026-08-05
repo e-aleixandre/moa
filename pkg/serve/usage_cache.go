@@ -10,10 +10,18 @@ func (m *Manager) subscribeUsageCache(sess *ManagedSession) {
 		return
 	}
 	sess.usageUnsub = sess.runtime.Bus.SubscribeAll(func(event any) {
-		update, ok := event.(bus.RateLimitUpdated)
-		if !ok || sess.providerName() != "openai" {
-			return
+		switch event := event.(type) {
+		case bus.RunStarted:
+			sess.mu.Lock()
+			sess.runProvider = sess.modelProvider
+			sess.mu.Unlock()
+		case bus.RateLimitUpdated:
+			sess.mu.Lock()
+			provider := sess.runProvider
+			sess.mu.Unlock()
+			if provider == "openai" {
+				m.usagePoller.ObserveRateLimit("openai", "oauth", event.RateLimit.FiveHourUtil, event.RateLimit.SevenDayUtil)
+			}
 		}
-		m.usagePoller.ObserveRateLimit("openai", "oauth", update.RateLimit.FiveHourUtil, update.RateLimit.SevenDayUtil)
 	})
 }

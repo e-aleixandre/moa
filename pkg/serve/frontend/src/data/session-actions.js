@@ -131,10 +131,7 @@ export async function loadSessions() {
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
-        // The server owns unread results for this process so a browser reload
-        // restores them; client-only unseen markers remain a compatibility
-        // fallback while an older server is upgraded.
-        unseen: info.unseen ?? (existing ? existing.unseen : false),
+        unseen: info.unseen ?? false,
         // Server-owned session brief (cheap LLM status summary): attempting /
         // progress prose + freshness stamp. No WS event tracks it, so the poll
         // is the source of truth. Preserve the prior value when the poll omits

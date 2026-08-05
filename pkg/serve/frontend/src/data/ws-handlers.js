@@ -1,6 +1,7 @@
 // ws-handlers.js — WebSocket event handlers and streaming delta batching
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
+import { api } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 import { truncateText } from './util/format.js';
@@ -936,6 +937,8 @@ export function handleWsStateChange(id, data) {
         } else {
           triggerDone(sess, store.get().soundEnabled);
         }
+      } else if (data.state === 'idle' && (typeof document === 'undefined' || !document.hidden)) {
+        api('POST', `/api/sessions/${id}/read`).catch(() => {});
       }
     }
   }
