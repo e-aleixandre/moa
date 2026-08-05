@@ -1,0 +1,47 @@
+.responsive-lab {
+  margin-top: var(--space-12);
+}
+
+.responsive-lab > p {
+  max-width: 68ch;
+  color: var(--subtext0);
+}
+
+.responsive-lab-state {
+  margin-top: var(--space-8);
+}
+
+.responsive-lab-state > h3 {
+  margin-bottom: var(--space-3);
+}
+
+.responsive-specimens {
+  display: flex;
+  gap: var(--space-4);
+  overflow-x: auto;
+  padding: var(--space-2) 0 var(--space-4);
+  align-items: flex-start;
+}
+
+.responsive-specimen {
+  flex: none;
+  max-width: calc(100vw - var(--space-8));
+  border: 1px dashed var(--surface1);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  background: var(--crust);
+}
+
+.responsive-specimen-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 var(--space-1) var(--space-2);
+  color: var(--overlay1);
+  font-size: var(--text-xs);
+}
+
+.responsive-specimen-head b {
+  color: var(--subtext0);
+  font-family: var(--mono);
+}
