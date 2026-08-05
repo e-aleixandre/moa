@@ -195,7 +195,7 @@ function MobileOutcome({ view, onBack }) {
           </button>
         )}
         {view.outcome === "completed" && (
-          <button type="button" class="msa-outcome-btn" onClick={() => copy(view.resultChip || "")}>
+          <button type="button" class="msa-outcome-btn" onClick={() => copy(view.result || "")}>
             {copied ? "copied ✓" : <>{<Copy size={13} />} Copy result</>}
           </button>
         )}

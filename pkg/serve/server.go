@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -929,7 +930,8 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 
 func handleReadSession(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := mgr.MarkSessionRead(r.PathValue("id")); err != nil {
+		gen, _ := strconv.ParseUint(r.URL.Query().Get("run_gen"), 10, 64)
+		if err := mgr.MarkSessionRead(r.PathValue("id"), gen); err != nil {
 			if errors.Is(err, ErrNotFound) {
 				http.Error(w, "not found", http.StatusNotFound)
 				return

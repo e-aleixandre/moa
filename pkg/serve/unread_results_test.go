@@ -21,7 +21,7 @@ func TestUnreadResultIsProcessLocalAndClearedOnRead(t *testing.T) {
 	pollUntil(t, time.Second, "unread completion", func() bool {
 		return mgr.sessionInfo(sess).Unseen
 	})
-	if err := mgr.MarkSessionRead(sess.ID); err != nil {
+	if err := mgr.MarkSessionRead(sess.ID, 0); err != nil {
 		t.Fatal(err)
 	}
 	if mgr.sessionInfo(sess).Unseen {

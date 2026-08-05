@@ -211,7 +211,8 @@ type TasksUpdateData struct {
 
 // RunEndData carries the final assistant text when a run completes.
 type RunEndData struct {
-	Text string `json:"text"`
+	Text   string `json:"text"`
+	RunGen uint64 `json:"run_gen"`
 }
 
 // ContextUpdateData carries the current context usage percentage.

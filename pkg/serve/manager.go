@@ -433,28 +433,42 @@ func (m *Manager) isUnseen(id string) bool {
 	return m.unseen[id]
 }
 
-func (m *Manager) markUnseen(id string) {
+func (m *Manager) markUnseen(id string, gen uint64) {
 	m.unseenMu.Lock()
+	defer m.unseenMu.Unlock()
+	if m.readGen[id] >= gen {
+		return
+	}
 	if m.unseen == nil {
 		m.unseen = make(map[string]bool)
 	}
 	m.unseen[id] = true
-	m.unseenMu.Unlock()
 }
 
 func (m *Manager) clearUnseen(id string) {
 	m.unseenMu.Lock()
 	delete(m.unseen, id)
+	delete(m.readGen, id)
 	m.unseenMu.Unlock()
 }
 
 // MarkSessionRead clears a process-local unread result marker. It intentionally
 // does not save the session: a Moa restart resets this transient UI state.
-func (m *Manager) MarkSessionRead(id string) error {
+func (m *Manager) MarkSessionRead(id string, gen uint64) error {
 	if _, ok := m.Get(id); !ok {
 		return ErrNotFound
 	}
 	m.clearUnseen(id)
+	if gen > 0 {
+		m.unseenMu.Lock()
+		if m.readGen == nil {
+			m.readGen = make(map[string]uint64)
+		}
+		if gen > m.readGen[id] {
+			m.readGen[id] = gen
+		}
+		m.unseenMu.Unlock()
+	}
 	return nil
 }
 
@@ -481,6 +495,7 @@ type Manager struct {
 	resuming map[string]struct{}
 	unseenMu sync.RWMutex
 	unseen   map[string]bool // process-local; never persisted with a session
+	readGen  map[string]uint64
 	baseCtx  context.Context
 
 	conversationKey []byte // process-local HMAC key for read cursors

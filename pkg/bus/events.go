@@ -255,7 +255,8 @@ type RunEnded struct {
 	SessionID string
 	RunGen    uint64
 	FinalText string
-	Err       error   // non-nil for real errors (not cancellation)
+	Err       error // non-nil for real errors (not cancellation)
+	Cancelled bool
 	HadEdits  bool    // true if edit/write/multiedit/apply_patch completed successfully
 	Cost      float64 // USD cost of this run (0 if the model has no pricing)
 }

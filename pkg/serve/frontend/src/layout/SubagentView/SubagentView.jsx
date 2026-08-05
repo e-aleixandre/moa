@@ -268,7 +268,7 @@ function OutcomeBanner({ view, onBack }) {
         {view.resultChip && <span class="sa-outcome-chip">{view.resultChip}</span>}
       </div>
       <div class="sa-outcome-actions">
-        <button type="button" class="sa-outcome-btn" onClick={() => copy(view.resultChip || "")}>
+        <button type="button" class="sa-outcome-btn" onClick={() => copy(view.result || "")}>
           {copied ? "copied ✓" : <>{<Copy size={13} />} Copy result</>}
         </button>
         <button type="button" class="sa-outcome-btn primary" onClick={onBack}>Back to parent</button>

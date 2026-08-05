@@ -632,6 +632,7 @@ func (m *Manager) deleteSession(id string) error {
 			return err
 		}
 		m.invalidateSavedCache()
+		m.clearUnseen(id)
 		_ = removeSessionAttachDir(id)
 		if m.attachStore != nil {
 			if err := m.attachStore.ReleaseSession(id); err != nil {

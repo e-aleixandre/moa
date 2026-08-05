@@ -2334,6 +2334,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			RunGen:    gen,
 			FinalText: stats.finalText,
 			Err:       runErr,
+			Cancelled: cancelled,
 			HadEdits:  stats.hadEdits,
 			Cost:      stats.costUSD,
 		})

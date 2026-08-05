@@ -172,7 +172,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
 	case bus.RunEnded:
-		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}}, true
+		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText, RunGen: e.RunGen}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
 	case bus.MCPChanged:

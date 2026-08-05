@@ -937,8 +937,6 @@ export function handleWsStateChange(id, data) {
         } else {
           triggerDone(sess, store.get().soundEnabled);
         }
-      } else if (data.state === 'idle' && (typeof document === 'undefined' || !document.hidden)) {
-        api('POST', `/api/sessions/${id}/read`).catch(() => {});
       }
     }
   }
@@ -1426,7 +1424,7 @@ export function handleWsBashJobEnd(id, data) {
   });
 }
 
-export function handleWsRunEnd(id) {
+export function handleWsRunEnd(id, data = {}) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
@@ -1458,6 +1456,10 @@ export function handleWsRunEnd(id) {
     });
   } else {
     updateSession(id, { streamingText: null, thinkingText: null, runningTool: null, compacting: false });
+  }
+  const hidden = typeof document !== 'undefined' && document.hidden;
+  if (!hidden && visibleSessionIds(store.get()).includes(id) && data.run_gen) {
+    api('POST', `/api/sessions/${id}/read?run_gen=${data.run_gen}`).catch(() => {});
   }
 }
 

@@ -245,7 +245,7 @@ function routeEvent(sessionId, evt) {
       handleWsBashComplete(sessionId, evt.data);
       break;
     case 'run_end':
-      handleWsRunEnd(sessionId);
+      handleWsRunEnd(sessionId, evt.data);
       break;
     case 'command':
       handleWsCommand(sessionId, evt.data);
