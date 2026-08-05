@@ -287,10 +287,14 @@ export class VoiceCaptureController {
       });
       if (!this.isCurrent(attempt) || attempt.discard) return;
       if (!response.ok) {
-        this.reportError(attempt, (await response.text()).trim() || `Transcription failed (HTTP ${response.status})`);
+        const detail = (await response.text()).trim();
+        if (!this.isCurrent(attempt) || attempt.discard) return;
+        this.reportError(attempt, detail || `Transcription failed (HTTP ${response.status})`);
         return;
       }
-      const text = ((await response.json()).text || '').trim();
+      const data = await response.json();
+      if (!this.isCurrent(attempt) || attempt.discard) return;
+      const text = (data.text || '').trim();
       if (text) this.callbacks.onTranscript?.(text);
       else this.reportError(attempt, 'No speech detected. Try again a bit closer to the mic.');
     } catch (error) {
