@@ -163,9 +163,17 @@
 }
 
 .dlg-complete .dlg-agent {
-  grid-template-columns: minmax(120px, 220px) 1fr auto auto;
-  border-top: none;
+	grid-template-columns: minmax(120px, 1fr) auto auto;
+	border-top: none;
 }
+
+.dlg-agent .a-state {
+	color: var(--green);
+	font-size: var(--text-xs);
+	white-space: nowrap;
+}
+
+.dlg-agent .a-state.failed { color: var(--red); }
 
 .dlg-open {
   align-self: center;
@@ -202,12 +210,34 @@
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
   background: color-mix(in srgb, var(--mantle) 65%, transparent);
-  color: var(--subtext0);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+	color: var(--subtext0);
+	display: grid;
+	gap: var(--space-2);
+	font-family: var(--mono);
+	font-size: var(--text-xs);
 }
+
+.dlg-result-body pre {
+	margin: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font: inherit;
+}
+
+.dlg-result-label { color: var(--overlay1); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: .08em; }
+
+.dlg-copy {
+	justify-self: start;
+	border: 1px solid var(--surface1);
+	border-radius: var(--radius-sm);
+	padding: 4px 8px;
+	background: var(--surface0);
+	color: var(--subtext0);
+	font: inherit;
+	cursor: pointer;
+}
+
+.dlg-copy:hover { color: var(--text); background: var(--surface1); }
 
 /* indeterminate progress bar under a running agent's action line, in its
    accent color — same pattern as the old .fanout .ibar */

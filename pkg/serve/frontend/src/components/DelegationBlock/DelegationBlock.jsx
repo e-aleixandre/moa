@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { GitFork, Check, X, ChevronDown, ChevronRight } from "lucide-preact";
 import "./DelegationBlock.css";
 import { Spinner } from "../../primitives/index.js";
+import { copyToClipboard } from "../../data/util/format.js";
 
 // DelegationBlock — replaces FanoutBlock as the ONE surface for a wave of
 // subagents in the stream (SUBAGENTS-REDESIGN-SPEC-FABLE.md §1). It renders
@@ -79,9 +80,10 @@ function RunningAgentRow({ agent, onOpenAgent }) {
 }
 
 function DoneAgentRow({ agent, onOpenAgent }) {
-  const { id, name, accent = "sky", state, chip, result, time } = agent;
+  const { id, name, accent = "sky", state, result, time } = agent;
   const failed = state === "failed" || state === "cancelled";
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const canExpand = !!result;
   const RowTag = canExpand ? "button" : "div";
   return (
@@ -104,9 +106,7 @@ function DoneAgentRow({ agent, onOpenAgent }) {
           )}
           <span class="a-name">{name}</span>
         </span>
-        <span class="a-result">
-          {chip && <span class={`a-chip${failed ? " err" : ""}`}>{chip}</span>}
-        </span>
+        <span class={`a-state${failed ? " failed" : ""}`}>{state === "cancelled" ? "Cancelled" : failed ? "Failed" : "Completed"}</span>
         {time && <span class="a-time">{time}</span>}
         {canExpand && <ChevronDown class={`a-expand${expanded ? " open" : ""}`} size={13} aria-hidden="true" />}
       </RowTag>
@@ -115,7 +115,11 @@ function DoneAgentRow({ agent, onOpenAgent }) {
           <span>conversation</span><ChevronRight size={14} aria-hidden="true" />
         </button>
       )}
-      {expanded && <pre class="dlg-result-body">{result}</pre>}
+      {expanded && <div class="dlg-result-body">
+        <span class="dlg-result-label">Result</span>
+        <pre>{result}</pre>
+        <button type="button" class="dlg-copy" onClick={() => copyToClipboard(result).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1200); } })}>{copied ? "Copied ✓" : "Copy result"}</button>
+      </div>}
     </div>
   );
 }
