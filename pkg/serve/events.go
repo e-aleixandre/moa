@@ -47,9 +47,13 @@ type InitData struct {
 	PendingSteers     []PendingSteerData  `json:"pending_steers,omitempty"`
 	CostUSD           float64             `json:"cost_usd,omitempty"`
 	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
-	BashJobs          []BashJobInitData   `json:"bash_jobs,omitempty"`
-	LastSeq           uint64              `json:"last_seq,omitempty"`
-	HistoryTruncated  bool                `json:"history_truncated,omitempty"`
+	// SubagentOutcomes restores terminal child cards after reconnect/restart.
+	// It is separate from live Subagents because terminal jobs do not belong in
+	// the Live Dock.
+	SubagentOutcomes []SubagentEndData `json:"subagent_outcomes,omitempty"`
+	BashJobs         []BashJobInitData `json:"bash_jobs,omitempty"`
+	LastSeq          uint64            `json:"last_seq,omitempty"`
+	HistoryTruncated bool              `json:"history_truncated,omitempty"`
 }
 
 // PendingSteerData is one queued (not yet delivered) item in the unified queue
@@ -402,8 +406,19 @@ type SubagentUsageData struct {
 
 // SubagentEndData is sent when a subagent finishes, carrying its usage/cost.
 type SubagentEndData struct {
-	JobID        string  `json:"job_id"`
-	Status       string  `json:"status"`
+	JobID  string `json:"job_id"`
+	Task   string `json:"task,omitempty"`
+	Async  bool   `json:"async"`
+	Status string `json:"status"`
+	// Result is present for completed children. Error is present for failures;
+	// cancellation intentionally has neither, so it cannot masquerade as a
+	// successful empty result.
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+	// Excerpt says Result/Error was bounded for this WebSocket/init payload;
+	// the Conversation action still opens the complete persisted transcript.
+	Excerpt      bool    `json:"excerpt,omitempty"`
+	FinishedAtMs int64   `json:"finished_at_ms,omitempty"`
 	InputTokens  int     `json:"input_tokens"`
 	OutputTokens int     `json:"output_tokens"`
 	CostUSD      float64 `json:"cost_usd"`

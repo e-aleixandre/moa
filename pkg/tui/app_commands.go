@@ -984,6 +984,7 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.sessionCacheRead = 0
 	m.s.asyncSubagents = 0
 	m.s.subagents = nil
+	m.s.subagentNotificationDelivery = nil
 	m.s.viewingSubagent = ""
 	m.statusBar.UpdateCostSegment(0)
 	m.statusBar.UpdateCacheSegment(0)

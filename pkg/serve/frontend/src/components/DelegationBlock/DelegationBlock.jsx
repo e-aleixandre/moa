@@ -125,7 +125,7 @@ function DoneAgentRow({ agent, onOpenAgent }) {
 }
 
 function OutcomeAgentRow({ agent, onOpenAgent }) {
-  const { id, name, accent = "sky", state, action, chip, result, time } = agent;
+	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time } = agent;
   const terminal = state !== "running";
   const failed = state === "failed";
   const cancelled = state === "cancelled";
@@ -133,7 +133,9 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef(null);
   useEffect(() => () => clearTimeout(copiedTimer.current), []);
-  const canExpand = !!result;
+	const outcomeText = failed ? error : result;
+	const outcomeLabel = `${failed ? "Error" : "Result"}${excerpt ? " excerpt" : ""}`;
+	const canExpand = !!outcomeText;
   const SummaryTag = canExpand ? "button" : "div";
   const preview = terminal ? (chip || (cancelled ? "Cancelled before producing a result." : "No result returned.")) : action || "Working";
 
@@ -153,14 +155,14 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
         </span>
         <span class="outcome-preview">{state === "running" && "▸ "}{preview}</span>
       </SummaryTag>
-      {(canExpand || onOpenAgent) && <div class={`dlg-outcome-actions${canExpand && onOpenAgent ? "" : " single"}`}>
-        {canExpand && <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>Result <ChevronDown class={expanded ? "open" : ""} size={13} aria-hidden="true" /></button>}
-        {onOpenAgent && <button type="button" onClick={() => onOpenAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
-      </div>}
-      {expanded && <div class="dlg-result-body">
-        <span class="dlg-result-label">Result</span><pre>{result}</pre>
-        <button type="button" class="dlg-copy" onClick={() => copyToClipboard(result).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? "Copied ✓" : "Copy result"}</button>
-      </div>}
+		{(canExpand || onOpenAgent) && <div class={`dlg-outcome-actions${canExpand && onOpenAgent ? "" : " single"}`}>
+			{canExpand && <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>{outcomeLabel} <ChevronDown class={expanded ? "open" : ""} size={13} aria-hidden="true" /></button>}
+			{onOpenAgent && <button type="button" onClick={() => onOpenAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
+		</div>}
+		{expanded && <div class="dlg-result-body">
+			<span class="dlg-result-label">{outcomeLabel}</span><pre>{outcomeText}</pre>
+			<button type="button" class="dlg-copy" onClick={() => copyToClipboard(outcomeText).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? "Copied ✓" : `Copy ${outcomeLabel.toLowerCase()}`}</button>
+		</div>}
     </div>
   );
 }

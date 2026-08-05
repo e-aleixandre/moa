@@ -523,9 +523,19 @@ type SubagentEvent struct {
 type SubagentEnded struct {
 	SessionID string
 	JobID     string
-	Status    string
-	Usage     *core.Usage
-	CostUSD   float64
+	// Task and Async identify the terminal outcome independently from how its
+	// text was delivered to the parent model (notification or subagent_wait).
+	Task   string
+	Async  bool
+	Status string
+	// Result is populated only for a completed child. Error is populated only
+	// for a failed child; cancelled children deliberately have neither.
+	Result string
+	Error  string
+	// FinishedAt anchors a durable UI outcome at the actual child completion.
+	FinishedAt time.Time
+	Usage      *core.Usage
+	CostUSD    float64
 }
 
 // ---------------------------------------------------------------------------

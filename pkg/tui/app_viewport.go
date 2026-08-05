@@ -276,6 +276,31 @@ func parseSubagentNotification(text string) (task, status, result string, ok boo
 	return "", "", "", false
 }
 
+// subagentNotificationJobID extracts the durable job ID from a notification
+// produced by bootstrap.FormatSubagentNotification. It deliberately accepts
+// only that fixed envelope, so ordinary user steers cannot suppress a card.
+func subagentNotificationJobID(text string) string {
+	if !strings.HasPrefix(text, "[subagent ") {
+		return ""
+	}
+	line, _, ok := strings.Cut(text, "\n")
+	if !ok || !strings.Contains(line, "] Job ") {
+		return ""
+	}
+	after, ok := strings.CutPrefix(line, "[subagent completed] Job ")
+	if !ok {
+		after, ok = strings.CutPrefix(line, "[subagent failed] Job ")
+	}
+	if !ok {
+		after, ok = strings.CutPrefix(line, "[subagent cancelled] Job ")
+	}
+	if !ok {
+		return ""
+	}
+	jobID, _, _ := strings.Cut(after, " ")
+	return jobID
+}
+
 // parseBashNotification detects steer messages formatted as async bash
 // completion notifications and extracts the command + status. Returns false for
 // anything else.

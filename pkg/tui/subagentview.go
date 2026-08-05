@@ -12,16 +12,17 @@ import (
 // subagentTranscript holds the live/completed sub-conversation of a single
 // subagent job, built by applying bus.SubagentEvent.Inner events.
 type subagentTranscript struct {
-	jobID      string
-	task       string
-	model      string
-	status     string // "running", "completed", "failed", "cancelled"
-	async      bool
-	kind       string // "subagent" or "bash"
-	blocks     []messageBlock
-	streamText string // current streaming assistant text (not yet materialized)
-	costUSD    float64
-	tokens     int // input+output tokens, populated on end
+	jobID            string
+	originToolCallID string
+	task             string
+	model            string
+	status           string // "running", "completed", "failed", "cancelled"
+	async            bool
+	kind             string // "subagent" or "bash"
+	blocks           []messageBlock
+	streamText       string // current streaming assistant text (not yet materialized)
+	costUSD          float64
+	tokens           int // input+output tokens, populated on end
 }
 
 // acceptSessionScopedAsyncEvent keeps background subagent work bound to the
@@ -158,6 +159,9 @@ func (m *appModel) ensureSubagent(jobID string) *subagentTranscript {
 // handleSubagentStarted records a new subagent job.
 func (m *appModel) handleSubagentStarted(e bus.SubagentStarted) {
 	t := m.ensureSubagent(e.JobID)
+	if e.OriginToolCallID != "" {
+		t.originToolCallID = e.OriginToolCallID
+	}
 	if e.Task != "" {
 		t.task = e.Task
 	}
@@ -190,6 +194,42 @@ func (m *appModel) handleSubagentEnded(e bus.SubagentEnded) {
 	if m.s.viewingSubagent == e.JobID {
 		m.s.viewportDirty = true
 	}
+	// The terminal UI outcome is independent from who received the result in
+	// model context. In particular, subagent_wait owns model delivery but must
+	// not make the completed child disappear from the parent transcript.
+	for i := range m.s.blocks {
+		if m.s.blocks[i].Type == "subagent" && m.s.blocks[i].SubagentJobID == e.JobID {
+			m.s.blocks[i].SubagentStatus = t.status
+			m.s.blocks[i].SubagentTask = firstNonEmpty(e.Task, t.task)
+			m.s.blocks[i].SubagentResult = terminalSubagentText(e)
+			m.s.blocks[i].touch()
+			return
+		}
+	}
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type: "subagent", SubagentJobID: e.JobID, SubagentTask: firstNonEmpty(e.Task, t.task),
+		SubagentStatus: t.status, SubagentResult: terminalSubagentText(e),
+	})
+	m.s.viewportDirty = true
+}
+
+func terminalSubagentText(e bus.SubagentEnded) string {
+	if e.Status == "completed" {
+		return e.Result
+	}
+	if e.Status == "failed" {
+		return e.Error
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // applySubagentInner applies a single already-unwrapped bus event (the Inner

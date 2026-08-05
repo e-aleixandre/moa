@@ -139,6 +139,18 @@ test('openPersistedSubagent restores newest-first transcripts to chronological o
   expect(messages[1]).toMatchObject({ _type: 'tool_start', tool_call_id: 'newest-tool' });
 });
 
+test('openPersistedSubagent reloads a terminal child instead of trusting its live cache', async () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {
+    'job-1': { jobId: 'job-1', status: 'completed', messages: [{ role: 'assistant', content: [{ type: 'text', text: 'stale' }] }] },
+  } } } });
+  apiResponse = { task: 'complete transcript', status: 'completed', messages: [{ id: 'fresh', role: 'assistant', text: 'full transcript' }] };
+
+  await openPersistedSubagent('s1', 'job-1');
+
+  expect(store.get().sessions.s1.viewingSubagent).toBe('job-1');
+  expect(store.get().sessions.s1.subagents['job-1'].messages[0]).toMatchObject({ _msg_id: 'fresh' });
+});
+
 test('loadSessions preserves the live per-run token tally across a poll', async () => {
   // A run finished with a token tally; the poll (which changes the title, e.g.
   // a fresh brief) must not drop the live-only counts.

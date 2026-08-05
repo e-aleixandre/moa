@@ -239,7 +239,6 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				return
 			}
 			b := s.runtime.Bus
-			b.Publish(bus.SubagentCompleted{SessionID: s.ID, JobID: jobID, Task: task, Status: status, Text: agentText})
 
 			if s.runtime.State.Current() == bus.StateRunning {
 				subagentTexts.Store(agentText, struct{}{})
@@ -282,12 +281,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 			}
 		},
-		OnSubagentEnd: func(jobID, status string, usage *core.Usage, costUSD float64) {
+		OnSubagentEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
 			if s := sess; s != nil {
+				// Persist first: a client that reconnects immediately after the
+				// terminal WS event must be able to restore this same outcome.
+				s.persistSubagentTranscript(jobID, status, result, resultErr, finishedAt, usage, costUSD)
 				s.runtime.Bus.Publish(bus.SubagentEnded{
-					SessionID: s.ID, JobID: jobID, Status: status, Usage: usage, CostUSD: costUSD,
+					SessionID: s.ID, JobID: jobID, Task: task, Async: async, Status: status,
+					Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD,
 				})
-				s.persistSubagentTranscript(jobID, status, usage, costUSD)
 			}
 		},
 		OnBashJobStart: func(job tool.BashJobInfo) {
@@ -1083,7 +1085,7 @@ func (s *ManagedSession) flushLiveSubagentTranscripts() {
 		if info.Status != "running" && info.Status != "cancelling" {
 			continue // finished ones were already persisted on OnSubagentEnd
 		}
-		s.persistSubagentTranscript(info.JobID, info.Status, nil, 0)
+		s.persistSubagentTranscript(info.JobID, info.Status, "", "", time.Time{}, nil, 0)
 	}
 }
 

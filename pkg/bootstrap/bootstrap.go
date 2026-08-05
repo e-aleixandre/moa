@@ -116,7 +116,7 @@ type SessionConfig struct {
 	OnSubagentStart func(jobID, task, model, thinking, originToolCallID string, async bool, startedAt time.Time, accentIndex int)
 	OnSubagentEvent func(jobID string, inner any)
 	OnSubagentUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
-	OnSubagentEnd   func(jobID, status string, usage *core.Usage, costUSD float64)
+	OnSubagentEnd   func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64)
 
 	// Background bash callbacks feed the shared session bus/UI. Output is a
 	// lossy live delta; end carries the authoritative bounded log.

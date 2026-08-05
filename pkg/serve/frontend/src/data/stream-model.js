@@ -816,9 +816,16 @@ function delegationDoneAgent(msg, accent, jobIDOverride) {
     state: failed ? (msg.status === 'cancelled' ? 'cancelled' : 'failed') : 'done',
     bashJobs: [],
   };
-  const chip = msg.result ? shortLabel(firstLine(msg.result), 48) : '';
+  const outcome = msg.status === 'error' || msg.status === 'failed'
+    ? (msg.error || msg.result)
+    : msg.result;
+  const chip = outcome ? shortLabel(firstLine(outcome), 48) : '';
   if (chip) agent.chip = chip;
   if (msg.result) agent.result = String(msg.result);
+  if (msg.error || ((msg.status === 'error' || msg.status === 'failed') && msg.result)) {
+    agent.error = String(msg.error || msg.result);
+  }
+  if (msg.excerpt) agent.excerpt = true;
   return agent;
 }
 

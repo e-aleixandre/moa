@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 
@@ -84,6 +84,62 @@ test('handleWsSubagentStart does not downgrade a terminal status back to running
   const sa = store.get().sessions.s1.subagents.j1;
   expect(sa.status).toBe('completed');
   expect(sa.async).toBe(true);
+});
+
+test('terminal subagent outcome is keyed by job ID and preserves result/error semantics', () => {
+  let messages = upsertTerminalSubagentOutcome([], { task: 'inspect', accentIndex: 2 }, {
+    job_id: 'j1', status: 'completed', result: 'the actual child result', finished_at_ms: 10,
+  });
+  // A completion delivery replay must update, never add a second terminal row.
+  messages = upsertTerminalSubagentOutcome(messages, { task: 'inspect', accentIndex: 2 }, {
+    job_id: 'j1', status: 'completed', result: 'the actual child result', finished_at_ms: 10,
+  });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({ tool_call_id: 'subagent-j1', status: 'done', result: 'the actual child result', error: '' });
+
+  const failed = upsertTerminalSubagentOutcome([], { task: 'inspect' }, {
+    job_id: 'j2', status: 'failed', error: 'network unavailable',
+  })[0];
+  expect(failed).toMatchObject({ status: 'error', result: '', error: 'network unavailable' });
+
+  const cancelled = upsertTerminalSubagentOutcome([], { task: 'inspect' }, {
+    job_id: 'j3', status: 'cancelled', result: 'must not leak', error: 'must not leak',
+  })[0];
+  expect(cancelled).toMatchObject({ status: 'cancelled', result: '', error: '' });
+});
+
+test('terminal upsert keeps legacy parent outcome when old persisted fields are absent', () => {
+  const messages = upsertTerminalSubagentOutcome([{
+    _type: 'tool_start', tool_call_id: 'subagent-old', tool_name: 'subagent',
+    status: 'error', result: 'legacy failure detail', args: { task: 'old work' },
+  }], { task: 'old work' }, {
+    job_id: 'old', status: 'failed', error: '',
+  });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({ result: '', error: 'legacy failure detail' });
+});
+
+test('subagent_end creates the terminal card when a waiter owns model delivery', () => {
+  seedSession('s1');
+  handleWsSubagentStart('s1', { job_id: 'waited', task: 'waiter path', model: 'm', async: true });
+  // No subagent_complete event: subagent_wait claimed delivery to the model.
+  handleWsSubagentEnd('s1', {
+    job_id: 'waited', status: 'completed', result: 'wait-owned result', finished_at_ms: 12,
+  });
+  const cards = store.get().sessions.s1.messages.filter(m => m.tool_call_id === 'subagent-waited');
+  expect(cards).toHaveLength(1);
+  expect(cards[0].result).toBe('wait-owned result');
+});
+
+test('init restores persisted waiter-owned terminal outcomes without reviving the Live Dock', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [], subagents: [],
+    subagent_outcomes: [{ job_id: 'saved', task: 'saved work', status: 'failed', error: 'saved error' }],
+  });
+  const session = store.get().sessions.s1;
+  expect(session.messages).toContainEqual(expect.objectContaining({ tool_call_id: 'subagent-saved', error: 'saved error' }));
+  expect(liveTrayAgents(session)).toHaveLength(0);
 });
 
 test('handleWsInit dedups restored subagent cards against a running snapshot entry', () => {
@@ -383,6 +439,51 @@ test('handleWsUserMessage keeps the content blocks of a send with attachments', 
   handleWsUserMessage('s1', { msg_id: 'm2', content });
 
   expect(store.get().sessions.s1.messages[0].content).toEqual(content);
+});
+
+test('model-facing subagent completion user/steer notifications are hidden while structured lifecycle owns presentation', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+  handleWsSubagentStart('s1', { job_id: 'live', task: 'inspect', model: 'm', async: true });
+  const text = '[subagent completed] Job live finished.\nTask: inspect\n\nResult:\nmodel notification';
+
+  handleWsSteer('s1', { id: 'notification', msg_id: 'steer-notification', text });
+  expect(store.get().sessions.s1.messages).toHaveLength(0);
+  expect(store.get().sessions.s1.pendingSteers).toBeNull();
+
+  handleWsUserMessage('s1', { msg_id: 'user-notification', text });
+  expect(store.get().sessions.s1.messages).toHaveLength(0);
+
+  handleWsSubagentEnd('s1', { job_id: 'live', status: 'completed', result: 'structured result', finished_at_ms: 20 });
+  expect(store.get().sessions.s1.messages).toHaveLength(1);
+  expect(store.get().sessions.s1.messages[0]).toMatchObject({ tool_call_id: 'subagent-live', result: 'structured result' });
+});
+
+test('persisted terminal outcomes restore chronologically by finished_at_ms', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [], subagents: [],
+    // Deliberately newest-first, matching SubagentStore.List.
+    subagent_outcomes: [
+      { job_id: 'late', task: 'late', status: 'completed', result: 'late', finished_at_ms: 30 },
+      { job_id: 'early', task: 'early', status: 'completed', result: 'early', finished_at_ms: 10 },
+    ],
+  });
+  expect(store.get().sessions.s1.messages.map(m => m.tool_call_id)).toEqual(['subagent-early', 'subagent-late']);
+});
+
+test('persisted terminal outcomes insert before parent messages written after completion', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [
+      { role: 'user', msg_id: 'before', timestamp: 10, content: [{ type: 'text', text: 'before child' }] },
+      { role: 'assistant', msg_id: 'after', timestamp: 30, content: [{ type: 'text', text: 'after child' }] },
+    ],
+    subagents: [],
+    subagent_outcomes: [{ job_id: 'waited', task: 'waited', status: 'completed', result: 'child result', finished_at_ms: 20_000 }],
+  });
+  const messages = store.get().sessions.s1.messages;
+  expect(messages.map(m => m.tool_call_id || m._msg_id)).toEqual(['before', 'subagent-waited', 'after']);
 });
 
 test('handleWsSteersCanceled clears the shared queue on every client', () => {

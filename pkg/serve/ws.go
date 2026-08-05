@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
@@ -306,10 +308,16 @@ func wsEventFromBus(event any) (Event, bool) {
 			inputTok = e.Usage.Input
 			outputTok = e.Usage.Output
 		}
-		return Event{Type: "subagent_end", Data: SubagentEndData{
-			JobID: e.JobID, Status: e.Status,
+		data := SubagentEndData{
+			JobID: e.JobID, Task: e.Task, Async: e.Async, Status: e.Status,
+			Result: truncateHistoryString(e.Result), Error: truncateHistoryString(e.Error),
 			InputTokens: inputTok, OutputTokens: outputTok, CostUSD: e.CostUSD,
-		}}, true
+		}
+		data.Excerpt = data.Result != e.Result || data.Error != e.Error
+		if !e.FinishedAt.IsZero() {
+			data.FinishedAtMs = e.FinishedAt.UnixMilli()
+		}
+		return Event{Type: "subagent_end", Data: data}, true
 	case bus.SubagentEvent:
 		inner, ok := wsEventFromBus(e.Inner)
 		if !ok {
@@ -498,6 +506,38 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 			data.Subagents[i] = sad
 		}
 	}
+	// Terminal outcomes are persisted separately from parent model delivery:
+	// an async result consumed by subagent_wait never creates a notification
+	// prompt, but its completed/failed card must survive reload just the same.
+	if sess.persister != nil {
+		transcripts, err := sess.persister.subagentStore(sess.ID).List()
+		if err == nil && len(transcripts) > 0 {
+			data.SubagentOutcomes = make([]SubagentEndData, 0, len(transcripts))
+			for _, transcript := range transcripts {
+				if transcript.Status != "completed" && transcript.Status != "failed" && transcript.Status != "cancelled" {
+					continue
+				}
+				result, resultErr := persistedSubagentOutcome(transcript)
+				outcome := SubagentEndData{
+					JobID: transcript.JobID, Task: transcript.Task, Async: transcript.Async,
+					Status: transcript.Status, Result: truncateHistoryString(result), Error: truncateHistoryString(resultErr),
+					CostUSD: transcript.CostUSD,
+				}
+				outcome.Excerpt = outcome.Result != result || outcome.Error != resultErr
+				if !transcript.FinishedAt.IsZero() {
+					outcome.FinishedAtMs = transcript.FinishedAt.UnixMilli()
+				}
+				if transcript.Usage != nil {
+					outcome.InputTokens = transcript.Usage.Input
+					outcome.OutputTokens = transcript.Usage.Output
+				}
+				data.SubagentOutcomes = append(data.SubagentOutcomes, outcome)
+			}
+		}
+	}
+	if len(data.SubagentOutcomes) > 1 {
+		sortSubagentOutcomes(data.SubagentOutcomes)
+	}
 	if len(bashJobs) > 0 {
 		data.BashJobs = make([]BashJobInitData, len(bashJobs))
 		for i, job := range bashJobs {
@@ -533,6 +573,33 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	return data
+}
+
+func sortSubagentOutcomes(outcomes []SubagentEndData) {
+	sort.SliceStable(outcomes, func(i, j int) bool {
+		left, right := outcomes[i].FinishedAtMs, outcomes[j].FinishedAtMs
+		if left == 0 {
+			return false
+		}
+		if right == 0 {
+			return true
+		}
+		return left < right
+	})
+}
+
+// persistedSubagentOutcome reads the explicit terminal fields written by the
+// structured lifecycle. Pre-change transcripts have neither: completed jobs
+// can safely recover their result from the child's final assistant response;
+// failed jobs deliberately remain empty because a partial assistant reply is
+// not necessarily the failure error. The frontend retains any legacy parent
+// notification text when this fallback is empty.
+func persistedSubagentOutcome(transcript session.SubagentTranscript) (result, resultErr string) {
+	result, resultErr = transcript.Result, transcript.Error
+	if transcript.Status == "completed" && result == "" {
+		result = core.ExtractFinalAssistantText(transcript.Messages)
+	}
+	return result, resultErr
 }
 
 // liveToolInitData projects the bus registry of in-flight tool calls into the

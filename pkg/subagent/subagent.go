@@ -102,10 +102,10 @@ type Config struct {
 	// final total.
 	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
 
-	// OnChildEnd is called once when a child agent (sync or async) finishes,
-	// with its final status and aggregated usage/cost (cost computed with the
-	// CHILD's model pricing, which may differ from the parent's).
-	OnChildEnd func(jobID, status string, usage *core.Usage, costUSD float64)
+	// OnChildEnd is called once when a child agent (sync or async) finishes.
+	// Result/Error are the terminal child outcome, not the one-time model
+	// delivery claim used by subagent_wait and async notifications.
+	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64)
 
 	// ChildMaxTurns caps the number of turns a child agent may take. 0 (or
 	// negative) falls back to defaultChildMaxTurns.
@@ -258,7 +258,8 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				if cfg.OnAsyncJobChange != nil {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
-				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil)
+				notifyChildStart(cfg, jobs, job, task, model, true)
+				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true)
 				return taggedWithJob(core.TextResult("Subagent started in background.\nJob ID: "+job.id+"\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), job.id), nil
 			}
 
@@ -282,7 +283,8 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 			}
 			go linker(ctx, jobCancel, job)
-			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate)
+			notifyChildStart(cfg, jobs, job, task, model, false)
+			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true)
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
 	}
@@ -543,7 +545,7 @@ func syncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Mode
 // sync job may be promoted to async mid-run) decides how each streamed event
 // is forwarded, so there is a single subscription with no resubscription and
 // therefore no risk of losing or duplicating events across a promotion.
-func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result)) {
+func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool) {
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
@@ -582,10 +584,18 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		if cfg.OnChildEnd != nil {
 			snap, ok := jobs.snapshot(j.id)
 			status := statusFailed
+			result := ""
+			resultErr := ""
+			finishedAt := time.Time{}
+			async := !j.isSync()
 			if ok {
 				status = snap.Status
+				result = snap.Result
+				resultErr = snap.Error
+				finishedAt = snap.FinishedAt
+				async = !snap.Sync
 			}
-			cfg.OnChildEnd(j.id, status, childUsage(finalMsgs), childCost(model, finalMsgs))
+			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs))
 		}
 	}()
 
@@ -619,18 +629,8 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	})
 	defer unsub()
 
-	if cfg.OnChildStart != nil {
-		var startedAt time.Time
-		var accentIndex int
-		var thinking string
-		var originToolCallID string
-		if snap, ok := jobs.snapshot(j.id); ok {
-			startedAt = snap.StartedAt
-			accentIndex = snap.AccentIndex
-			thinking = snap.Thinking
-			originToolCallID = snap.OriginToolCallID
-		}
-		cfg.OnChildStart(j.id, task, model.ID, thinking, originToolCallID, !j.isSync(), startedAt, accentIndex)
+	if !startNotified {
+		notifyChildStart(cfg, jobs, j, task, model, !j.isSync())
 	}
 
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)
@@ -669,6 +669,27 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		return
 	}
 	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
+}
+
+// notifyChildStart publishes the durable job identity before the spawning tool
+// can return. This makes an async launch an immediately-live Dock entry rather
+// than a transient terminal-looking tool result if the parent reaches its tool
+// end before the child goroutine gets scheduled.
+func notifyChildStart(cfg Config, jobs *jobStore, j *job, task string, model core.Model, async bool) {
+	if cfg.OnChildStart == nil {
+		return
+	}
+	var startedAt time.Time
+	var accentIndex int
+	var thinking string
+	var originToolCallID string
+	if snap, ok := jobs.snapshot(j.id); ok {
+		startedAt = snap.StartedAt
+		accentIndex = snap.AccentIndex
+		thinking = snap.Thinking
+		originToolCallID = snap.OriginToolCallID
+	}
+	cfg.OnChildStart(j.id, task, model.ID, thinking, originToolCallID, async, startedAt, accentIndex)
 }
 
 // timeoutMessage builds the actionable text shown when a subagent exhausts its

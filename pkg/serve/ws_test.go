@@ -13,6 +13,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func TestWsEventFromBus_SubagentStarted(t *testing.T) {
@@ -116,6 +117,21 @@ func TestWsEventFromBus_SubagentUsage(t *testing.T) {
 		ev, _ := wsEventFromBus(bus.SubagentUsage{JobID: "sa-1"})
 		if !isLossyWsEvent(ev) {
 			t.Fatal("subagent_usage should be lossy")
+		}
+	})
+
+	t.Run("terminal outcome preserves result separately from failure", func(t *testing.T) {
+		finished := time.UnixMilli(1_700_000_000_000)
+		ev, ok := wsEventFromBus(bus.SubagentEnded{
+			SessionID: "s1", JobID: "sa-3", Task: "inspect", Async: true,
+			Status: "failed", Error: "connection refused", FinishedAt: finished,
+		})
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		data := ev.Data.(SubagentEndData)
+		if data.Task != "inspect" || !data.Async || data.Status != "failed" || data.Result != "" || data.Error != "connection refused" || data.FinishedAtMs != finished.UnixMilli() {
+			t.Fatalf("terminal data = %+v", data)
 		}
 	})
 }
@@ -443,6 +459,39 @@ func TestWsEventFromBus_SubagentEnded(t *testing.T) {
 			t.Fatalf("expected zero tokens for nil usage, got %+v", data)
 		}
 	})
+}
+
+func TestPersistedSubagentOutcome_BackwardCompatibleResultFallback(t *testing.T) {
+	legacy := session.SubagentTranscript{
+		Status: "completed",
+		Messages: []core.AgentMessage{{Message: core.Message{
+			Role: "assistant", Content: []core.Content{core.TextContent("legacy final result")},
+		}}},
+	}
+	result, resultErr := persistedSubagentOutcome(legacy)
+	if result != "legacy final result" || resultErr != "" {
+		t.Fatalf("legacy outcome = result %q, error %q", result, resultErr)
+	}
+
+	failed := session.SubagentTranscript{Status: "failed", Messages: legacy.Messages}
+	result, resultErr = persistedSubagentOutcome(failed)
+	if result != "" || resultErr != "" {
+		t.Fatalf("failed legacy outcome must not mislabel partial output: result %q, error %q", result, resultErr)
+	}
+}
+
+func TestBuildInitData_SortsPersistedSubagentOutcomesChronologically(t *testing.T) {
+	// Sorting itself is intentionally independent of filesystem/list order;
+	// completed cards must replay oldest-to-newest in the parent timeline.
+	outcomes := []SubagentEndData{
+		{JobID: "late", FinishedAtMs: 30},
+		{JobID: "unknown"},
+		{JobID: "early", FinishedAtMs: 10},
+	}
+	sortSubagentOutcomes(outcomes)
+	if outcomes[0].JobID != "early" || outcomes[1].JobID != "late" || outcomes[2].JobID != "unknown" {
+		t.Fatalf("outcome order = %+v", outcomes)
+	}
 }
 
 func TestWsEventFromBus_SubagentEvent_Translatable(t *testing.T) {

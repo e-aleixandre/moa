@@ -17,16 +17,20 @@ import (
 // transcript survives restarts and can be reopened after it finished, without
 // bloating the parent session's own tree/history.
 type SubagentTranscript struct {
-	JobID      string              `json:"job_id"`
-	Task       string              `json:"task"`
-	Model      string              `json:"model"`
-	Status     string              `json:"status"`
-	Thinking   string              `json:"thinking,omitempty"`
-	Async      bool                `json:"async"`
-	StartedAt  time.Time           `json:"started_at,omitempty"`
-	FinishedAt time.Time           `json:"finished_at,omitempty"`
-	Usage      *core.Usage         `json:"usage,omitempty"`
-	CostUSD    float64             `json:"cost_usd,omitempty"`
+	JobID  string `json:"job_id"`
+	Task   string `json:"task"`
+	Model  string `json:"model"`
+	Status string `json:"status"`
+	// Result and Error retain the terminal outcome separately from the child
+	// transcript so a parent timeline can restore the correct terminal card.
+	Result     string      `json:"result,omitempty"`
+	Error      string      `json:"error,omitempty"`
+	Thinking   string      `json:"thinking,omitempty"`
+	Async      bool        `json:"async"`
+	StartedAt  time.Time   `json:"started_at,omitempty"`
+	FinishedAt time.Time   `json:"finished_at,omitempty"`
+	Usage      *core.Usage `json:"usage,omitempty"`
+	CostUSD    float64     `json:"cost_usd,omitempty"`
 	// ContextPercent is how full the child's own window was when it finished
 	// (0-100). Stored alongside usage so reopening a finished subagent
 	// restores the same reading it had while it ran. A POINTER because 0 is a
@@ -34,8 +38,8 @@ type SubagentTranscript struct {
 	// distinguishable from a transcript written before this was recorded:
 	// nil means unknown, and unknown hides the ring instead of drawing an
 	// empty one.
-	ContextPercent *int `json:"context_percent,omitempty"`
-	Messages   []core.AgentMessage `json:"messages"`
+	ContextPercent *int                `json:"context_percent,omitempty"`
+	Messages       []core.AgentMessage `json:"messages"`
 }
 
 // SubagentStore persists subagent transcripts for one parent session in a

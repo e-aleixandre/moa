@@ -35,6 +35,7 @@ type messageBlock struct {
 	SubagentStatus string // "completed", "failed", "cancelled"
 	SubagentTask   string // original task description
 	SubagentResult string // full result text (for expand)
+	SubagentJobID  string // terminal lifecycle identity; prevents duplicate rows
 
 	// Render cache — avoids re-rendering immutable blocks every frame.
 	// Invalidated when version changes (block mutation) or width/layout changes.

@@ -612,8 +612,11 @@ export async function steerSubagent(id, jobId, text) {
 export async function openPersistedSubagent(id, jobId) {
   const sess = store.get().sessions[id];
   if (!sess) return;
-  // If we still have it live in memory, just open it.
-  if (sess.subagents && sess.subagents[jobId]) {
+  // A running transcript is already authoritative enough for live viewing.
+  // Terminal cards always reload their persisted transcript so Conversation
+  // opens the complete child history rather than a possibly lossy live cache.
+  const existing = sess.subagents && sess.subagents[jobId];
+  if (existing && (existing.status === 'running' || existing.status === 'cancelling')) {
     updateSession(id, { viewingSubagent: jobId, viewingBashJob: null });
     return;
   }

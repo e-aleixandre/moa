@@ -112,6 +112,36 @@ func TestHandleSubagentStartedAndEnded(t *testing.T) {
 	}
 }
 
+func TestStructuredTerminalOutcomeSuppressesModelNotificationDuplicate(t *testing.T) {
+	for _, name := range []string{"natural async", "promoted sync"} {
+		t.Run(name, func(t *testing.T) {
+			m := &appModel{s: &state{}}
+			jobID := "sa-" + name
+			m.handleSubagentStarted(bus.SubagentStarted{JobID: jobID, Task: "inspect", Async: true})
+
+			// SubagentCompleted still delivers its notification to the model as a
+			// steer. Marking it makes the subsequent Steered event presentation-
+			// only, leaving SubagentEnded as the sole terminal UI owner.
+			m.markSubagentNotificationDelivery(jobID)
+			m.handleSubagentNotificationSteer(jobID, "inspect", "completed", "notification tail")
+			if got := len(m.s.blocks); got != 0 {
+				t.Fatalf("notification added %d UI blocks, want 0", got)
+			}
+
+			m.handleSubagentEnded(bus.SubagentEnded{
+				JobID: jobID, Task: "inspect", Status: "completed", Result: "full terminal result",
+			})
+			if got := len(m.s.blocks); got != 1 {
+				t.Fatalf("terminal blocks = %d, want exactly 1", got)
+			}
+			block := m.s.blocks[0]
+			if block.SubagentJobID != jobID || block.SubagentResult != "full terminal result" {
+				t.Fatalf("terminal block = %+v", block)
+			}
+		})
+	}
+}
+
 func TestBashJobTranscript(t *testing.T) {
 	m := &appModel{s: &state{}}
 	m.handleBashJobStarted(bus.BashJobStarted{JobID: "bash-1", Command: "go test ./...", CWD: "/work"})

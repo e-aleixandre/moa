@@ -300,7 +300,7 @@ func (s *ManagedSession) History() []core.AgentMessage {
 // side store so it survives restarts and can be reopened. Best-effort: logged
 // and dropped on error. Metadata (task/model/async/messages) comes from the
 // live Jobs handle, which still holds the job at OnChildEnd time.
-func (s *ManagedSession) persistSubagentTranscript(jobID, status string, usage *core.Usage, costUSD float64) {
+func (s *ManagedSession) persistSubagentTranscript(jobID, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
 	if s.persister == nil || s.subagents == nil {
 		return
 	}
@@ -308,12 +308,17 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status string, usage *
 	if store == nil {
 		return
 	}
+	if finishedAt.IsZero() {
+		finishedAt = time.Now()
+	}
 	t := session.SubagentTranscript{
 		JobID:      jobID,
 		Status:     status,
+		Result:     result,
+		Error:      resultErr,
 		Usage:      usage,
 		CostUSD:    costUSD,
-		FinishedAt: time.Now(),
+		FinishedAt: finishedAt,
 		Messages:   s.subagents.Messages(jobID),
 	}
 	for _, info := range s.subagents.Snapshot() {

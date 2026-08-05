@@ -2118,6 +2118,12 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 
 	var mu sync.Mutex
 	completeN := 0
+	type terminalOutcome struct {
+		status string
+		result string
+		err    string
+	}
+	ended := make(chan terminalOutcome, 1)
 	reg := core.NewRegistry()
 	cfg := Config{
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
@@ -2127,6 +2133,9 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 			mu.Lock()
 			completeN++
 			mu.Unlock()
+		},
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
+			ended <- terminalOutcome{status: status, result: result, err: resultErr}
 		},
 	}
 	cfg.ParentTools = reg
@@ -2167,6 +2176,14 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 	if !claimed {
 		t.Fatal("blocked waiter did not claim terminal result")
 	}
+	select {
+	case outcome := <-ended:
+		if outcome.status != statusCompleted || outcome.result != "child result" || outcome.err != "" {
+			t.Fatalf("terminal outcome = %+v, want completed child result", outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnChildEnd did not publish waiter-owned terminal outcome")
+	}
 }
 
 // TestSubagentWaitNoWaiterStillNotifies verifies OnAsyncComplete DOES fire
@@ -2178,6 +2195,10 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 
 	var mu sync.Mutex
 	completeN := 0
+	ended := make(chan struct {
+		status string
+		result string
+	}, 1)
 	reg := core.NewRegistry()
 	cfg := Config{
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
@@ -2187,6 +2208,12 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 			mu.Lock()
 			completeN++
 			mu.Unlock()
+		},
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
+			ended <- struct {
+				status string
+				result string
+			}{status: status, result: result}
 		},
 	}
 	cfg.ParentTools = reg
@@ -2226,6 +2253,14 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 	mu.Unlock()
 	if gotCompleteN != 1 {
 		t.Fatalf("OnAsyncComplete called %d times after fast-path wait, want 1", gotCompleteN)
+	}
+	select {
+	case outcome := <-ended:
+		if outcome.status != statusCompleted || outcome.result != "child result" {
+			t.Fatalf("terminal outcome = %+v, want completed child result", outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnChildEnd did not publish natural async terminal outcome")
 	}
 }
 

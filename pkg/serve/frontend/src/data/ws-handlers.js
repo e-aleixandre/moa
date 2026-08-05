@@ -25,7 +25,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           textParts.push(c.text);
         } else if (c.type === 'tool_call') {
           if (textParts.length > 0) {
-            result.push({ role: 'assistant', _msg_id: msg.msg_id, content: [{ type: 'text', text: textParts.join('') }] });
+            result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, content: [{ type: 'text', text: textParts.join('') }] });
             textParts.length = 0;
           }
           const tr = resultMap[c.tool_call_id];
@@ -53,11 +53,12 @@ export function normalizeHistory(raw, liveSubagents = []) {
             // tool call ID is the provider's, so this is the only link from a
             // restored card to a subagent transcript on disk.
             subagentJobId: tr?.custom?.subagent_job_id || undefined,
+            timestamp: tr?.timestamp || msg.timestamp,
           });
         }
       }
       if (textParts.length > 0) {
-        result.push({ role: 'assistant', _msg_id: msg.msg_id, content: [{ type: 'text', text: textParts.join('') }] });
+        result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, content: [{ type: 'text', text: textParts.join('') }] });
       }
     } else if (msg.role === 'shell' || (msg.role === 'user' && msg.custom?.shell)) {
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
@@ -93,7 +94,9 @@ export function normalizeHistory(raw, liveSubagents = []) {
           accentIndex: Number.isInteger(msg.custom.subagent_accent_index)
             ? msg.custom.subagent_accent_index
             : undefined,
-          result: msg.custom.subagent_result || '',
+          result: msg.custom.subagent_status === 'completed' ? (msg.custom.subagent_result || '') : '',
+          error: msg.custom.subagent_status === 'failed' ? (msg.custom.subagent_result || '') : '',
+          timestamp: msg.timestamp,
         });
       } else if (msg.custom?.source === 'bash_job') {
         const bashText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
@@ -422,8 +425,17 @@ export function handleWsInit(id, data) {
     && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
     ? { [viewingBash]: prev.subagents[viewingBash] }
     : null;
+  let messages = withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);
+  // The live init snapshot cannot contain terminal jobs, so restore their
+  // persisted lifecycle cards separately. Upserting by job ID also upgrades
+  // old notification-derived cards to the real terminal result/error.
+  for (const outcome of chronologicalSubagentOutcomes(data.subagent_outcomes)) {
+    messages = upsertTerminalSubagentOutcome(messages, {
+      task: outcome.task || '', accentIndex: outcome.accent_index,
+    }, outcome);
+  }
   updateSession(id, {
-    messages: withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools),
+    messages,
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
     contextPercent: data.context_percent ?? -1,
@@ -1149,29 +1161,9 @@ export function handleWsSubagentComplete(id, data) {
     });
   }
 
-  // Add a subagent card to the chat (mirrors TUI's subagent block).
-  const sess = store.get().sessions[id];
-  if (!sess) return;
-  const messages = [...(sess.messages || [])];
-  const priorAccent = sess.subagents && sess.subagents[data.job_id]
-    ? sess.subagents[data.job_id].accentIndex
-    : undefined;
-  const completion = parseSubagentNotification(data.text || '');
-  messages.push({
-    _type: 'tool_start',
-    tool_call_id: `subagent-${data.job_id}`,
-    // A completion card outlives the live subagent map. Keep the canonical job
-    // identity on the durable card so its result can always open the persisted
-    // child conversation instead of guessing from a provider tool-call ID.
-    subagentJobId: data.job_id,
-    tool_name: 'subagent',
-    args: { task: data.task || completion?.task || '' },
-    // Preserve cancelled distinctly (⊘) from a real failure (✗).
-    status: data.status === 'completed' ? 'done' : data.status === 'cancelled' ? 'cancelled' : 'error',
-    accentIndex: Number.isInteger(priorAccent) ? priorAccent : undefined,
-    result: completion?.result || data.text || '',
-  });
-  updateSession(id, { messages });
+  // This legacy event is a model-delivery mechanism, not a UI lifecycle
+  // event. subagent_end owns the one terminal card even when subagent_wait
+  // consumed the model result and no completion notification was emitted.
   markUnseen(id);
 }
 
@@ -1311,7 +1303,16 @@ export function handleWsSubagentStart(id, data) {
     // the live event omits it, though the backend always sends it).
     accentIndex: data.accent_index ?? (existing && existing.accentIndex),
   };
-  updateSession(id, { subagents: subs });
+  // A start can race the parent's already-materialized tool row. Attach the
+  // durable job ID immediately so the launch acknowledgement never projects
+  // as a completed Result while the child is actually live.
+  const originToolCallId = data.origin_tool_call_id || existing?.originToolCallId;
+  const messages = originToolCallId
+    ? (sess.messages || []).map(m => m?._type === 'tool_start' && m.tool_call_id === originToolCallId
+      ? { ...m, subagentJobId: jobId }
+      : m)
+    : sess.messages;
+  updateSession(id, { subagents: subs, ...(originToolCallId ? { messages } : {}) });
 }
 
 // handleWsSubagentUsage applies the backend's live, cumulative token/cost
@@ -1365,8 +1366,17 @@ export function handleWsSubagentEnd(id, data) {
   const after = store.get().sessions[id];
   if (!after) return;
   const subs = { ...(after.subagents || {}) };
-  const existing = subs[jobId];
-  if (!existing) return;
+  const existing = subs[jobId] || {
+    jobId,
+    task: data.task || '',
+    model: '',
+    status: data.status || 'completed',
+    async: !!data.async,
+    messages: [],
+    streamingText: null,
+    thinkingText: null,
+    usage: null,
+  };
   subs[jobId] = {
     ...existing,
     status: data.status || 'completed',
@@ -1379,7 +1389,70 @@ export function handleWsSubagentEnd(id, data) {
     },
   };
   delete subagentBuffers[subBufKey(id, jobId)];
-  updateSession(id, { subagents: subs });
+  const terminal = subs[jobId];
+  updateSession(id, {
+    subagents: subs,
+    messages: upsertTerminalSubagentOutcome(after.messages, terminal, data),
+  });
+}
+
+// upsertTerminalSubagentOutcome is the UI's terminal lifecycle projection.
+// It is keyed by job ID rather than model-delivery ownership: a waiter-owned
+// result, a natural async notification, and a promoted sync child therefore
+// all produce exactly one card. A later replay/reconnect simply replaces it.
+export function upsertTerminalSubagentOutcome(messages, subagent, data) {
+  const jobId = data?.job_id;
+  if (!jobId) return messages || [];
+  const status = data.status || subagent?.status || 'completed';
+  const current = Array.isArray(messages) ? messages : [];
+  const key = `subagent-${jobId}`;
+  const index = current.findIndex(m => m?._type === 'tool_start' && m.tool_call_id === key);
+  const existing = index >= 0 ? current[index] : null;
+  // Old sidecar transcripts did not carry explicit result/error. Do not let
+  // their empty fields erase the historical parent notification that is the
+  // only available outcome for that job.
+  const legacyResult = existing?.result || '';
+  const legacyError = existing?.error || existing?.result || '';
+  const result = status === 'completed' ? (data.result || legacyResult) : '';
+  const error = status === 'failed' ? (data.error || legacyError) : '';
+  const row = {
+    _type: 'tool_start',
+    tool_call_id: `subagent-${jobId}`,
+    subagentJobId: jobId,
+    tool_name: 'subagent',
+    args: { task: data.task || subagent?.task || '' },
+    status: status === 'completed' ? 'done' : status === 'cancelled' ? 'cancelled' : 'error',
+    accentIndex: Number.isInteger(subagent?.accentIndex) ? subagent.accentIndex : undefined,
+    // A successful but empty child response has no Result action. Failed
+    // children expose their actual error as Error; cancelled has neither.
+    result,
+    error,
+    excerpt: !!data.excerpt,
+    finishedAtMs: data.finished_at_ms || null,
+  };
+  if (index < 0) return insertTerminalSubagentOutcome(current, row);
+  const next = [...current];
+  next[index] = { ...next[index], ...row };
+  return next;
+}
+
+// Restored terminal cards belong at their real completion point in the parent
+// history. Core message timestamps are seconds; lifecycle outcomes are millis.
+function insertTerminalSubagentOutcome(messages, row) {
+  const finished = row.finishedAtMs || 0;
+  if (!finished) return [...messages, row];
+  const index = messages.findIndex(message => {
+    const timestamp = messageTimelineMs(message);
+    return timestamp > 0 && timestamp > finished;
+  });
+  if (index < 0) return [...messages, row];
+  return [...messages.slice(0, index), row, ...messages.slice(index)];
+}
+
+function messageTimelineMs(message) {
+  if (!message) return 0;
+  if (message.finishedAtMs) return message.finishedAtMs;
+  return message.timestamp ? message.timestamp * 1000 : 0;
 }
 
 export function handleWsBashJobStart(id, data) {
@@ -1470,19 +1543,26 @@ export function handleWsRunEnd(id, data = {}) {
 // optimistically under the same ID, and a reconnect snapshot may already
 // contain it too.
 export function handleWsUserMessage(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess || !data) return;
-  if (data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id)) return;
+	const sess = store.get().sessions[id];
+	if (!sess || !data) return;
+	const messages = sess.messages || [];
+	if (data.msg_id && messages.some(m => m._msg_id === data.msg_id)) return;
   const content = Array.isArray(data.content) && data.content.length > 0
     ? data.content
     : [{ type: 'text', text: data.text || '' }];
-  const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content };
-  updateSession(id, { messages: [...sess.messages, userMsg] });
+  // Completion notifications are still delivered to the parent model as user
+  // messages. The structured child lifecycle owns their presentation, though:
+  // while its live/terminal job exists, rendering this envelope as another
+  // user turn would duplicate the terminal outcome and diverge from reload.
+	if (isStructuredSubagentNotification(sess, data.text || '')) return;
+	const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content };
+	updateSession(id, { messages: [...messages, userMsg] });
 }
 
 export function handleWsSteer(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess) return;
+	const sess = store.get().sessions[id];
+	if (!sess) return;
+	const messages = sess.messages || [];
   let steers = [...(sess.pendingSteers || [])];
   // Reconcile purely by authoritative ID. Steer IDs are minted client-side
   // before the chip appears, so every chip already has its final identity and
@@ -1495,7 +1575,7 @@ export function handleWsSteer(id, data) {
   // Dedup the injected user message by MsgID: a non-atomic reconnect snapshot
   // may already contain it (the agent appended it to state before the cut),
   // and this Steered event (seq > cut) would otherwise add it a second time.
-  const already = data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id);
+	const already = data.msg_id && messages.some(m => m._msg_id === data.msg_id);
   const patch = { pendingSteers: steers.length > 0 ? steers : null };
   if (!already) {
     // A steer with attachments arrives with its blocks (same projection as
@@ -1504,10 +1584,35 @@ export function handleWsSteer(id, data) {
     const content = Array.isArray(data.content) && data.content.length > 0
       ? data.content
       : [{ type: 'text', text: data.text }];
-    const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content };
-    patch.messages = [...sess.messages, userMsg];
+    if (!isStructuredSubagentNotification(sess, data.text || '')) {
+      const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content };
+		patch.messages = [...messages, userMsg];
+    }
   }
   updateSession(id, patch);
+}
+
+function isStructuredSubagentNotification(session, text) {
+  const notification = parseSubagentNotification(text);
+  if (!notification?.jobId) return false;
+  if (session?.subagents?.[notification.jobId]) return true;
+  return (session?.messages || []).some(m =>
+    m?._type === 'tool_start' && m.tool_call_id === `subagent-${notification.jobId}`,
+  );
+}
+
+// Sidecar storage historically returns newest-first. Terminal cards are parent
+// timeline entries, so restore them from their actual completion anchors, not
+// reverse directory/list order. Unknown old timestamps stay after dated rows
+// in their stable source order.
+function chronologicalSubagentOutcomes(outcomes) {
+  return [...(outcomes || [])].sort((a, b) => {
+    const at = a?.finished_at_ms || 0;
+    const bt = b?.finished_at_ms || 0;
+    if (!at) return bt ? 1 : 0;
+    if (!bt) return -1;
+    return at - bt;
+  });
 }
 
 // handleWsSteersCanceled clears the shared queue on every client when the

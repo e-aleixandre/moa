@@ -1067,6 +1067,7 @@ test('a failed subagent is summarised as failed with an error chip', () => {
   const delegation = doc.blocks.find(b => b.type === 'delegation');
   expect(delegation.agents[0].state).toBe('failed');
   expect(delegation.agents[0].chip).toBe('panic: nil map');
+  expect(delegation.agents[0].error).toBe('panic: nil map');
   expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 1 });
   expect(delegation.settled).toBe(true);
 });
