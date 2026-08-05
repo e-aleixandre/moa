@@ -53,6 +53,14 @@ test('loadSessions leaves rate-limit percents undefined for a fresh session', as
   expect(s2.rlSevenDayPct).toBeUndefined();
 });
 
+test('loadSessions restores an unread result from the serve snapshot', async () => {
+  apiResponse = [{ id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z', unseen: true }];
+
+  await loadSessions();
+
+  expect(store.get().sessions.s3.unseen).toBe(true);
+});
+
 test('loadSessions adopts the server state for a visible-but-saved session (just resumed)', async () => {
   // Regression: tapping a saved session makes it visible (activeSession) while
   // still 'saved'. resumeSession POSTs /resume (server flips it to idle) then
