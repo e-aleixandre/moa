@@ -121,6 +121,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/read", handleReadSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel-and-recall", handleCancelAndRecall(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
@@ -923,6 +924,20 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
+	}
+}
+
+func handleReadSession(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := mgr.MarkSessionRead(r.PathValue("id")); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

@@ -144,6 +144,7 @@ type ManagedSession struct {
 	briefRunning atomic.Bool
 	pushUnsubs   []func()
 	usageUnsub   func()
+	unreadUnsub  func()
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -224,6 +225,7 @@ type SessionInfo struct {
 	Updated      time.Time    `json:"updated"`
 	Origin       string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
 	Error        string       `json:"error,omitempty"`
+	Unseen       bool         `json:"unseen,omitempty"`
 	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
@@ -411,6 +413,7 @@ func nonUserOrigin(origin string) string {
 // second, potentially divergent event tracker in ManagedSession.
 func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
 	info := s.info()
+	info.Unseen = m.isUnseen(s.ID)
 	if m.attention == nil {
 		return info
 	}
@@ -421,6 +424,33 @@ func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
 		}
 	}
 	return info
+}
+
+func (m *Manager) isUnseen(id string) bool {
+	m.unseenMu.RLock()
+	defer m.unseenMu.RUnlock()
+	return m.unseen[id]
+}
+
+func (m *Manager) markUnseen(id string) {
+	m.unseenMu.Lock()
+	if m.unseen == nil {
+		m.unseen = make(map[string]bool)
+	}
+	m.unseen[id] = true
+	m.unseenMu.Unlock()
+}
+
+// MarkSessionRead clears a process-local unread result marker. It intentionally
+// does not save the session: a Moa restart resets this transient UI state.
+func (m *Manager) MarkSessionRead(id string) error {
+	if _, ok := m.Get(id); !ok {
+		return ErrNotFound
+	}
+	m.unseenMu.Lock()
+	delete(m.unseen, id)
+	m.unseenMu.Unlock()
+	return nil
 }
 
 // activityIndex snapshots the attention roster once and indexes live activity
@@ -444,6 +474,8 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*ManagedSession
 	resuming map[string]struct{}
+	unseenMu sync.RWMutex
+	unseen   map[string]bool // process-local; never persisted with a session
 	baseCtx  context.Context
 
 	conversationKey []byte // process-local HMAC key for read cursors
@@ -857,6 +889,7 @@ func (m *Manager) List() []SessionInfo {
 			continue // nil placeholder during ResumeSession
 		}
 		info := s.info()
+		info.Unseen = m.isUnseen(s.ID)
 		info.Activity = activity[s.ID]
 		list = append(list, info)
 	}
@@ -879,6 +912,7 @@ func (m *Manager) List() []SessionInfo {
 			Origin:  nonUserOrigin(origin),
 			Created: sum.Created,
 			Updated: sum.Updated,
+			Unseen:  m.isUnseen(sum.ID),
 		})
 	}
 

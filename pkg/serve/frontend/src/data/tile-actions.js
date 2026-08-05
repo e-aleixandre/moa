@@ -1,6 +1,6 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
-import { syncConnections } from './api.js';
+import { api, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
@@ -254,7 +254,12 @@ export function afterVisibilityChange() {
   if (typeof document === 'undefined' || !document.hidden) {
     for (const id of visible) {
       const sess = state.sessions[id];
-      if (sess && sess.unseen) updateSession(id, { unseen: false });
+      if (sess && sess.unseen) {
+        updateSession(id, { unseen: false });
+        // Unread results belong to the serve process, not this React instance:
+        // acknowledge them when the user actually opens the session.
+        api('POST', `/api/sessions/${id}/read`).catch(() => {});
+      }
     }
   }
 

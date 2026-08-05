@@ -519,6 +519,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribeAutoTitle(sess)
 	m.subscribeSessionBrief(sess)
 	m.subscribeUsageCache(sess)
+	m.subscribeUnreadResults(sess)
 	// A resumed transcript has no in-memory brief after a server restart. Queue
 	// one refresh rather than generating synchronously: briefPending coalesces
 	// this with any immediate bus trigger, while briefRunning and the per-session
@@ -665,6 +666,9 @@ func (m *Manager) deleteSession(id string) error {
 	}
 	if sess.usageUnsub != nil {
 		sess.usageUnsub()
+	}
+	if sess.unreadUnsub != nil {
+		sess.unreadUnsub()
 	}
 
 	// Close MCP connections before context cancellation.
@@ -822,6 +826,9 @@ func (m *Manager) CloseSession(id string) error {
 	}
 	if sess.usageUnsub != nil {
 		sess.usageUnsub()
+	}
+	if sess.unreadUnsub != nil {
+		sess.unreadUnsub()
 	}
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()
