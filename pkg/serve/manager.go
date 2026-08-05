@@ -173,12 +173,6 @@ func (s *ManagedSession) title() string {
 	return s.Title
 }
 
-func (s *ManagedSession) providerName() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.modelProvider
-}
-
 func (s *ManagedSession) setProviderName(provider string) {
 	s.mu.Lock()
 	s.modelProvider = provider
