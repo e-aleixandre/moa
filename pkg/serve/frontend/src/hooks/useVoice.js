@@ -31,6 +31,12 @@ const MIN_RECORDING_MS = 400;
 // so genuinely short commands ("sí", "no") still go through.
 const MIN_BLOB_BYTES = 256;
 
+// Browsers expose one physical microphone. Independent composers can coexist
+// in a tiled session or an ask_user prompt, so serialize acquisition across
+// hook instances without touching a recorder that iOS may resume after lock.
+let captureOwner = null;
+let lastError = { message: '', at: 0 };
+
 // Apple's WebKit (Safari, and every iOS browser / WKWebView, which are all
 // WebKit under the hood) advertises audio/webm support but its MediaRecorder
 // actually produces MP4/AAC — and sometimes an empty webm container. Detect it
@@ -66,6 +72,8 @@ export function useVoice(onTranscript, onError) {
   const [transcribing, setTranscribing] = useState(false);
 
   const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const ownerRef = useRef(Symbol('voice'));
   const startingRef = useRef(false);
   const transcribingRef = useRef(false);
   // Bumped by every start/stop/cancel; an in-flight async start() aborts if its
@@ -75,9 +83,31 @@ export function useVoice(onTranscript, onError) {
   const supported = typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
   const reportError = useCallback((msg) => {
+    const now = Date.now();
+    if (lastError.message === msg && now - lastError.at < 1000) return;
+    lastError = { message: msg, at: now };
     if (onError) onError(msg);
     else console.error('Voice:', msg);
   }, [onError]);
+
+  const releaseCapture = useCallback(() => {
+    if (captureOwner === ownerRef.current) captureOwner = null;
+  }, []);
+
+  const resetStaleCapture = useCallback(() => {
+    const recorder = recorderRef.current;
+    const stream = streamRef.current;
+    const live = stream?.getTracks().some((track) => track.readyState === 'live');
+    if (!recorder || (recorder.state !== 'inactive' && live)) return false;
+    if (recorder.state !== 'inactive') recorder.stop();
+    stream?.getTracks().forEach((track) => track.stop());
+    recorderRef.current = null;
+    streamRef.current = null;
+    setRecording(false);
+    releaseWakeLock();
+    releaseCapture();
+    return true;
+  }, [releaseCapture]);
 
   // finish stops the active recorder (if any). discard=true throws the audio
   // away; discard=false transcribes it (decision read by the recorder's own
@@ -93,14 +123,20 @@ export function useVoice(onTranscript, onError) {
       if (rec.state !== 'inactive') rec.stop();
       recorderRef.current = null;
     }
+    // Let onstop release the stream and capture lease after MediaRecorder has
+    // delivered its final chunk. Stopping tracks here can truncate the last
+    // second of an iOS recording.
     setRecording(false);
-  }, []);
+  }, [releaseCapture]);
 
   const stop = useCallback(() => finish(false), [finish]);
   const cancel = useCallback(() => finish(true), [finish]);
 
   const start = useCallback(async () => {
+    resetStaleCapture();
     if (recorderRef.current || startingRef.current || transcribingRef.current) return;
+    if (captureOwner && captureOwner !== ownerRef.current) return;
+    captureOwner = ownerRef.current;
 
     const token = ++startTokenRef.current;
     startingRef.current = true;
@@ -111,9 +147,15 @@ export function useVoice(onTranscript, onError) {
     } catch (e) {
       startingRef.current = false;
       setRecording(false);
+      releaseCapture();
       const name = e?.name || '';
       if (name === 'NotAllowedError' || name === 'SecurityError') {
-        reportError('Microphone access denied. Allow it in your browser settings.');
+        let denied = false;
+        try {
+          const permission = await navigator.permissions?.query?.({ name: 'microphone' });
+          denied = permission?.state === 'denied';
+        } catch {}
+        reportError(denied ? 'Microphone access denied. Allow it in your browser settings.' : 'Microphone unavailable right now. Try again in a moment.');
       } else if (name === 'NotFoundError') {
         reportError('No microphone found.');
       } else {
@@ -127,6 +169,7 @@ export function useVoice(onTranscript, onError) {
     // The user released / cancelled before the mic opened → don't record.
     if (token !== startTokenRef.current) {
       stream.getTracks().forEach(t => t.stop());
+      releaseCapture();
       return;
     }
 
@@ -156,6 +199,7 @@ export function useVoice(onTranscript, onError) {
       recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
     } catch (e) {
       stream.getTracks().forEach(t => t.stop());
+      releaseCapture();
       reportError('Could not start recording: ' + (e.message || String(e)));
       return;
     }
@@ -183,8 +227,10 @@ export function useVoice(onTranscript, onError) {
       // newer recording that may already own recorderRef.
       if (recorderRef.current === recorder) {
         recorderRef.current = null;
+        streamRef.current = null;
         setRecording(false);
         releaseWakeLock();
+        releaseCapture();
       }
       reportError('Recording failed: ' + (e.error?.message || 'unknown error'));
     };
@@ -192,12 +238,15 @@ export function useVoice(onTranscript, onError) {
     recorder.onstop = async () => {
       // Stop mic tracks so the browser indicator goes away.
       stream.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      releaseCapture();
 
       // finish() nulls recorderRef before calling stop(), so a non-null match
       // here means the recorder stopped on its own (device/stream cut) without
       // releasing the wake lock or resetting the UI — do it now.
       if (recorderRef.current === recorder) {
         recorderRef.current = null;
+        streamRef.current = null;
         setRecording(false);
         releaseWakeLock();
       }
@@ -274,16 +323,18 @@ export function useVoice(onTranscript, onError) {
       recorder.start(1000);
     } catch (e) {
       stream.getTracks().forEach(t => t.stop());
+      releaseCapture();
       reportError('Could not start recording: ' + (e.message || String(e)));
       return;
     }
     recorderRef.current = recorder;
+    streamRef.current = stream;
     setRecording(true);
     // Recording is live — keep the screen awake so the phone doesn't auto-lock
     // mid-sentence and cut the mic off. Released in finish() on stop/cancel/
     // unmount. Best-effort: a no-op where the Wake Lock API is unsupported.
     requestWakeLock();
-  }, [onTranscript, reportError]);
+  }, [onTranscript, releaseCapture, reportError, resetStaleCapture]);
 
   const toggle = useCallback(() => {
     if (recording) stop();

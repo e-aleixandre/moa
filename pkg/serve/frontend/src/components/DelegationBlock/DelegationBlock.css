@@ -481,7 +481,9 @@
 .dlg-outcome-card.failed .outcome-preview { color: var(--red); }
 .dlg-outcome-card.cancelled .outcome-preview { color: var(--overlay1); }
 .dlg-outcome-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+.dlg-outcome-actions.single { grid-template-columns: minmax(0, 1fr); }
 .dlg-outcome-actions button { min-height: 44px; display: inline-flex; justify-content: center; align-items: center; gap: 3px; border: 0; background: transparent; color: var(--a); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .dlg-outcome-actions button + button { border-left: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
 .dlg-outcome-actions button:hover { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+.dlg-outcome-summary:focus-visible, .dlg-outcome-actions button:focus-visible, .dlg-copy:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-ring-width)); }
 .dlg-outcome-actions .open { transform: rotate(180deg); }
