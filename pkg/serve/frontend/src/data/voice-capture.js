@@ -78,7 +78,9 @@ export class VoiceCaptureController {
   constructor(options = {}) {
     this.getUserMedia = options.getUserMedia || ((constraints) => navigator.mediaDevices.getUserMedia(constraints));
     this.MediaRecorder = options.MediaRecorder || globalThis.MediaRecorder;
-    this.fetch = options.fetch || globalThis.fetch;
+    // WebKit's Window.fetch requires Window as its receiver. Keep injected
+    // test fakes untouched, but call the platform fetch through globalThis.
+    this.fetch = options.fetch || ((...args) => globalThis.fetch(...args));
     this.FormData = options.FormData || globalThis.FormData;
     this.Blob = options.Blob || globalThis.Blob;
     this.now = options.now || Date.now;
