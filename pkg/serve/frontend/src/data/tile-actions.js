@@ -258,7 +258,7 @@ export function afterVisibilityChange() {
         updateSession(id, { unseen: false });
         // Unread results belong to the serve process, not this React instance:
         // acknowledge them when the user actually opens the session.
-        api('POST', `/api/sessions/${id}/read`).catch(() => {});
+        api('POST', `/api/sessions/${id}/read?run_gen=${sess.unseenGen || 0}`).catch(() => {});
       }
     }
   }

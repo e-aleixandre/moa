@@ -221,6 +221,7 @@ type SessionInfo struct {
 	Origin       string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
 	Error        string       `json:"error,omitempty"`
 	Unseen       bool         `json:"unseen"`
+	UnseenGen    uint64       `json:"unseen_gen,omitempty"`
 	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
@@ -409,6 +410,7 @@ func nonUserOrigin(origin string) string {
 func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
 	info := s.info()
 	info.Unseen = m.isUnseen(s.ID)
+	info.UnseenGen = m.unseenGeneration(s.ID)
 	if m.attention == nil {
 		return info
 	}
@@ -425,6 +427,12 @@ func (m *Manager) isUnseen(id string) bool {
 	m.unseenMu.RLock()
 	defer m.unseenMu.RUnlock()
 	return m.unseen[id]
+}
+
+func (m *Manager) unseenGeneration(id string) uint64 {
+	m.unseenMu.RLock()
+	defer m.unseenMu.RUnlock()
+	return m.unseenGen[id]
 }
 
 func (m *Manager) markUnseen(sess *ManagedSession, gen uint64) {
@@ -913,6 +921,7 @@ func (m *Manager) List() []SessionInfo {
 		}
 		info := s.info()
 		info.Unseen = m.isUnseen(s.ID)
+		info.UnseenGen = m.unseenGeneration(s.ID)
 		info.Activity = activity[s.ID]
 		list = append(list, info)
 	}
@@ -927,15 +936,16 @@ func (m *Manager) List() []SessionInfo {
 		cwd, _ := sum.Metadata["cwd"].(string)
 		origin, _ := sum.Metadata[session.MetaOrigin].(string)
 		list = append(list, SessionInfo{
-			ID:      sum.ID,
-			Title:   sum.Title,
-			State:   StateSaved,
-			Model:   model,
-			CWD:     cwd,
-			Origin:  nonUserOrigin(origin),
-			Created: sum.Created,
-			Updated: sum.Updated,
-			Unseen:  m.isUnseen(sum.ID),
+			ID:        sum.ID,
+			Title:     sum.Title,
+			State:     StateSaved,
+			Model:     model,
+			CWD:       cwd,
+			Origin:    nonUserOrigin(origin),
+			Created:   sum.Created,
+			Updated:   sum.Updated,
+			Unseen:    m.isUnseen(sum.ID),
+			UnseenGen: m.unseenGeneration(sum.ID),
 		})
 	}
 

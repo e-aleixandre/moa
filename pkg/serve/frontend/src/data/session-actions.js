@@ -132,6 +132,7 @@ export async function loadSessions() {
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
         unseen: info.unseen ?? false,
+        unseenGen: info.unseen_gen || 0,
         // Server-owned session brief (cheap LLM status summary): attempting /
         // progress prose + freshness stamp. No WS event tracks it, so the poll
         // is the source of truth. Preserve the prior value when the poll omits
