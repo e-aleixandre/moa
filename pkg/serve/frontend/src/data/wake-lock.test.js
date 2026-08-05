@@ -1,16 +1,8 @@
-// wake-lock.test.js — run with `bun test`.
-//
-// bun's default test environment has no DOM and no navigator.wakeLock, so these
-// tests install a minimal fake navigator/document on globalThis for the
-// duration of each test. Because wake-lock.js reads `supported` once at import
-// time, the fakes are installed here before the dynamic import inside each test
-// (a fresh module instance per test via the query-string cache-buster).
-
 import { test, expect, afterEach } from 'bun:test';
 
-let released; // count of sentinel.release() calls in the current test
-let requests; // count of navigator.wakeLock.request() calls
-let sentinels; // live fake sentinels, so a test can fire their 'release' event
+let released;
+let requests;
+let sentinels;
 
 function installFakeEnv({ supported = true, visibility = 'visible' } = {}) {
   released = 0;
@@ -28,15 +20,14 @@ function installFakeEnv({ supported = true, visibility = 'visible' } = {}) {
     nav.wakeLock = {
       async request() {
         requests++;
-        const s = {
-          _rel: new Set(),
-          released: false,
-          release() { this.released = true; released++; this._rel.forEach((fn) => fn()); },
-          addEventListener(type, fn) { if (type === 'release') this._rel.add(fn); },
-          fireRelease() { this._rel.forEach((fn) => fn()); },
+        const sentinel = {
+          _listeners: new Set(),
+          release() { released++; this._listeners.forEach((fn) => fn()); },
+          addEventListener(type, fn) { if (type === 'release') this._listeners.add(fn); },
+          fireRelease() { this._listeners.forEach((fn) => fn()); },
         };
-        sentinels.push(s);
-        return s;
+        sentinels.push(sentinel);
+        return sentinel;
       },
     };
   }
@@ -45,124 +36,85 @@ function installFakeEnv({ supported = true, visibility = 'visible' } = {}) {
   return doc;
 }
 
-function uninstall() {
+afterEach(() => {
   delete globalThis.navigator;
   delete globalThis.document;
-}
+});
 
-afterEach(uninstall);
-
-// Fresh module instance per test so module-level `supported`/`sentinel`/`wanted`
-// reflect the env installed just before.
 let importCounter = 0;
 async function freshModule() {
   importCounter++;
   return import(`./wake-lock.js?t=${importCounter}`);
 }
 
-test('requestWakeLock acquires a screen lock when supported', async () => {
+test('a wake-lock claim acquires and its release drops the final claim', async () => {
   installFakeEnv();
-  const { requestWakeLock, __wakeLockStateForTests } = await freshModule();
-  requestWakeLock();
-  // request() is async; let the microtask settle.
+  const { claimWakeLock, __wakeLockStateForTests } = await freshModule();
+  const release = claimWakeLock();
   await Promise.resolve();
-  const st = __wakeLockStateForTests();
-  expect(st.supported).toBe(true);
-  expect(st.wanted).toBe(true);
-  expect(st.held).toBe(true);
-  expect(requests).toBe(1);
-});
-
-test('releaseWakeLock releases the lock and stops wanting it', async () => {
-  installFakeEnv();
-  const { requestWakeLock, releaseWakeLock, __wakeLockStateForTests } = await freshModule();
-  requestWakeLock();
-  await Promise.resolve();
-  releaseWakeLock();
-  const st = __wakeLockStateForTests();
-  expect(st.wanted).toBe(false);
-  expect(st.held).toBe(false);
-  expect(st.listening).toBe(false);
+  expect(__wakeLockStateForTests()).toMatchObject({ held: true, wanted: true, claims: 1 });
+  release();
+  expect(__wakeLockStateForTests()).toMatchObject({ held: false, wanted: false, claims: 0, listening: false });
   expect(released).toBe(1);
 });
 
-test('returning to foreground re-acquires the lock if still wanted', async () => {
-  const doc = installFakeEnv({ visibility: 'visible' });
-  const { requestWakeLock, __wakeLockStateForTests } = await freshModule();
-  requestWakeLock();
+test('releasing one scope does not release another scope claim', async () => {
+  installFakeEnv();
+  const { claimWakeLock, __wakeLockStateForTests } = await freshModule();
+  const releaseOne = claimWakeLock();
+  const releaseTwo = claimWakeLock();
   await Promise.resolve();
-  // Simulate the OS dropping the lock (screen locked / backgrounded).
+  releaseOne();
+  expect(__wakeLockStateForTests()).toMatchObject({ held: true, wanted: true, claims: 1 });
+  expect(released).toBe(0);
+  releaseTwo();
+  expect(__wakeLockStateForTests()).toMatchObject({ held: false, wanted: false, claims: 0 });
+  expect(released).toBe(1);
+});
+
+test('an active claim reacquires after WebKit drops its sentinel while hidden', async () => {
+  const doc = installFakeEnv();
+  const { claimWakeLock, __wakeLockStateForTests } = await freshModule();
+  claimWakeLock();
+  await Promise.resolve();
   sentinels[0].fireRelease();
   expect(__wakeLockStateForTests().held).toBe(false);
-  // Back to foreground while still wanted → re-acquire.
   doc.fireVisibility();
   await Promise.resolve();
   expect(__wakeLockStateForTests().held).toBe(true);
   expect(requests).toBe(2);
 });
 
-test('a visibilitychange after release does not re-acquire', async () => {
-  const doc = installFakeEnv();
-  const { requestWakeLock, releaseWakeLock, __wakeLockStateForTests } = await freshModule();
-  requestWakeLock();
-  await Promise.resolve();
-  releaseWakeLock();
-  doc.fireVisibility();
-  await Promise.resolve();
-  expect(__wakeLockStateForTests().held).toBe(false);
-  expect(requests).toBe(1);
-});
-
-test('a release during an in-flight request does not leave an orphaned lock', async () => {
-  // Make request() resolve on our command so we can release mid-flight.
+test('a released in-flight claim cannot adopt an orphaned sentinel', async () => {
   installFakeEnv();
-  let resolveReq;
-  navigator.wakeLock.request = () => new Promise((res) => {
-    resolveReq = () => {
-      const s = {
-        _rel: new Set(),
-        released: false,
-        release() { this.released = true; released++; this._rel.forEach((fn) => fn()); },
-        addEventListener(type, fn) { if (type === 'release') this._rel.add(fn); },
-      };
-      sentinels.push(s);
-      res(s);
-    };
-  });
-  const { requestWakeLock, releaseWakeLock, __wakeLockStateForTests } = await freshModule();
-  requestWakeLock();
-  // Release before the request resolves.
-  releaseWakeLock();
-  // Now let the pending request resolve — its sentinel must be released, not held.
-  resolveReq();
+  let resolveRequest;
+  navigator.wakeLock.request = () => new Promise((resolve) => { resolveRequest = resolve; });
+  const { claimWakeLock, __wakeLockStateForTests } = await freshModule();
+  const release = claimWakeLock();
+  release();
+  const sentinel = { addEventListener() {}, release() { released++; } };
+  resolveRequest(sentinel);
   await Promise.resolve();
   await Promise.resolve();
-  const st = __wakeLockStateForTests();
-  expect(st.held).toBe(false);
-  expect(st.wanted).toBe(false);
-  // The stale sentinel was released.
+  expect(__wakeLockStateForTests()).toMatchObject({ held: false, wanted: false });
   expect(released).toBe(1);
 });
 
-test('is a safe no-op when the Wake Lock API is unsupported', async () => {
-  installFakeEnv({ supported: false });
-  const { requestWakeLock, releaseWakeLock, __wakeLockStateForTests } = await freshModule();
-  expect(() => { requestWakeLock(); releaseWakeLock(); }).not.toThrow();
-  const st = __wakeLockStateForTests();
-  expect(st.supported).toBe(false);
-  expect(st.held).toBe(false);
-});
-
-test('does not acquire while the page is hidden, but arms the listener', async () => {
+test('hidden pages wait to acquire until visible', async () => {
   const doc = installFakeEnv({ visibility: 'hidden' });
-  const { requestWakeLock, __wakeLockStateForTests } = await freshModule();
-  requestWakeLock();
+  const { claimWakeLock, __wakeLockStateForTests } = await freshModule();
+  claimWakeLock();
   await Promise.resolve();
-  // Hidden → no lock yet, but wanted + listening so it acquires on foreground.
-  expect(__wakeLockStateForTests().held).toBe(false);
-  expect(__wakeLockStateForTests().listening).toBe(true);
+  expect(__wakeLockStateForTests()).toMatchObject({ held: false, wanted: true, listening: true });
   doc.visibilityState = 'visible';
   doc.fireVisibility();
   await Promise.resolve();
   expect(__wakeLockStateForTests().held).toBe(true);
+});
+
+test('unsupported wake locks are safe no-ops', async () => {
+  installFakeEnv({ supported: false });
+  const { claimWakeLock, __wakeLockStateForTests } = await freshModule();
+  expect(() => claimWakeLock()()).not.toThrow();
+  expect(__wakeLockStateForTests().supported).toBe(false);
 });
