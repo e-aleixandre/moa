@@ -463,3 +463,25 @@
     padding: 0 var(--space-2);
   }
 }
+
+/* Outcome-line is a cataloged alternative to the dense default row. It keeps
+   payload and actions in separate bands so narrow screens never make two
+   destinations compete for one horizontal track. */
+.dlg-outcome-card { border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+.dlg-outcome-summary { width: 100%; display: grid; gap: 3px; padding: var(--space-3) var(--space-4); border: 0; background: transparent; color: inherit; text-align: left; font: inherit; }
+.dlg-outcome-summary.clickable { cursor: pointer; }
+.dlg-outcome-summary.clickable:hover { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+.outcome-title { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); min-height: 20px; }
+.outcome-mark { color: var(--green); display: inline-flex; justify-content:center; align-items:center; }
+.dlg-outcome-card.failed .outcome-mark { color: var(--red); }
+.dlg-outcome-card.cancelled .outcome-mark { color: var(--overlay0); }
+.outcome-name { min-width: 0; color: var(--a); font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.outcome-time { color: var(--overlay0); font-family: var(--mono); font-size: var(--text-micro); white-space: nowrap; }
+.outcome-preview { margin-left: 26px; color: var(--subtext0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: var(--text-xs); }
+.dlg-outcome-card.failed .outcome-preview { color: var(--red); }
+.dlg-outcome-card.cancelled .outcome-preview { color: var(--overlay1); }
+.dlg-outcome-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+.dlg-outcome-actions button { min-height: 44px; display: inline-flex; justify-content: center; align-items: center; gap: 3px; border: 0; background: transparent; color: var(--a); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.dlg-outcome-actions button + button { border-left: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+.dlg-outcome-actions button:hover { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+.dlg-outcome-actions .open { transform: rotate(180deg); }

@@ -21,13 +21,13 @@ const STATES = [
     id: "complete",
     label: "Completed · collapsed",
     settled: true,
-    agent: { id: "complete", name: "High-thinking review of post-v0.26.0", accent: "mauve", state: "done", result: RESULT, time: "2m" },
+    agent: { id: "complete", name: "High-thinking review of post-v0.26.0", accent: "mauve", state: "done", chip: "No P0/P1/P2 findings. Generation-aware acknowledgements preserve newer completions…", result: RESULT, time: "2m" },
   },
   {
     id: "failed",
     label: "Failed",
     settled: true,
-    agent: { id: "failed", name: "Run integration tests with the long project name", accent: "peach", state: "failed", result: "go test ./... failed: example assertion did not match", time: "1m" },
+    agent: { id: "failed", name: "Run integration tests with the long project name", accent: "peach", state: "failed", chip: "go test ./... failed: example assertion did not match", result: "go test ./... failed: example assertion did not match", time: "1m" },
   },
   {
     id: "cancelled",
@@ -47,6 +47,7 @@ function Specimen({ state, width }) {
         agents={[state.agent]}
         summary={{ total: 1, done: state.agent.state === "done" ? 1 : 0, failed: ["failed", "cancelled"].includes(state.agent.state) ? 1 : 0 }}
         settled={state.settled}
+        variant="outcome"
         onOpenAgent={() => {}}
       />
     </article>
