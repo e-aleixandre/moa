@@ -163,19 +163,13 @@ function useBootstrap() {
   // hops use pushState, no reload — see data/router.js).
   useEffect(() => bindRouter(), []);
 
-  // Mobile breakpoint → setMobile. Also lock the document to the viewport on
-  // mobile (adds .mobile-locked to <html>): the mobile shell owns its own
-  // internal scroll (.mconv-stream), so the page itself must not scroll — on
-  // iOS a scrollable document lets Safari pan the whole page up to reveal a
-  // focused input and never pans it back when the keyboard closes, leaving a
-  // gap and pushing the header out of view (reset.css min-height:100vh made the
-  // document taller than the visual viewport). Locking html/body/#root to the
-  // dynamic viewport height keeps the header pinned.
+  // Mobile breakpoint → setMobile. The App below decides whether the current
+  // view owns document scrolling: galleries need native document scroll while
+  // the mobile conversation keeps its dedicated internal scroller.
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
     const handler = (e) => {
       setMobile(e.matches);
-      document.documentElement.classList.toggle("mobile-locked", e.matches);
     };
     handler(mq);
     mq.addEventListener("change", handler);
@@ -364,6 +358,13 @@ function App() {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
   const view = state.view;
+
+  // Lock the document only for application screens that supply their own
+  // mobile scroller. Catalog and gallery routes are long reference documents.
+  useEffect(() => {
+    const gallery = view === "catalog" || view === "live" || view === "subagent" || view === "mobile";
+    document.documentElement.classList.toggle("mobile-locked", state.isMobile && !gallery);
+  }, [state.isMobile, view]);
 
   if (view === "catalog") {
     return (
