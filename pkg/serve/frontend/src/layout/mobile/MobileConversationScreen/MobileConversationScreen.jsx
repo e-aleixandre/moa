@@ -109,17 +109,17 @@ function drawerSessions(sessions, activeId) {
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  const toCard = (s) => {
+  const toCard = (s, newResult = false) => {
     const needs = !!(s.pendingPerm || s.pendingAsk || s.state === "permission");
     return {
       id: s.id,
       title: sessionTitle(s),
-      state: sessionDotState(s),
+      state: newResult ? "idle" : sessionDotState(s),
       when: relAge(s.updated),
       last: sessionBrief(s),
       needsLabel: needs ? "Needs you:" : undefined,
       path: shortPath(s.cwd) || s.cwd || "",
-      unseen: !!s.unseen,
+      unseen: newResult || !!s.unseen,
       active: s.id === activeId,
       saved: s.state === "saved",
       origin: s.origin || undefined,
@@ -130,7 +130,7 @@ function drawerSessions(sessions, activeId) {
   const newResults = active.filter((s) => s.unseen && s.state === "idle");
   const remainingActive = active.filter((s) => !newResults.includes(s));
   return {
-    newResults: newResults.map(toCard),
+    newResults: newResults.map((s) => toCard(s, true)),
     active: remainingActive.map(toCard),
     saved: saved.map(toCard),
     activeCount: active.length,
