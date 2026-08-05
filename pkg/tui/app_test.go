@@ -2178,6 +2178,27 @@ func TestStructuredSubagentToolAndTerminalLifecycleProduceExactlyOneTUIOutcome(t
 	}
 }
 
+func TestRebuildHistoryPlacesStructuredAsyncOutcomeAtCompletionNotNotificationTime(t *testing.T) {
+	m := newTestModel()
+	finished := time.Unix(20, 0)
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-async", Task: "async work", Async: true})
+	m.handleSubagentEnded(bus.SubagentEnded{JobID: "sa-async", Task: "async work", Status: "completed", Result: "structured result", FinishedAt: finished})
+
+	m.rebuildFromMessages([]core.AgentMessage{
+		{Message: core.Message{Role: "assistant", Timestamp: 10, Content: []core.Content{core.TextContent("before")}}},
+		{Message: core.Message{Role: "user", Timestamp: 30, Content: []core.Content{core.TextContent("model notification")}}, Custom: map[string]any{
+			"source": "subagent", "subagent_job_id": "sa-async", "subagent_task": "async work", "subagent_status": "completed", "subagent_result": "notification result",
+		}},
+		{Message: core.Message{Role: "assistant", Timestamp: 40, Content: []core.Content{core.TextContent("after")}}},
+	})
+	if len(m.s.blocks) != 3 {
+		t.Fatalf("blocks = %+v", m.s.blocks)
+	}
+	if m.s.blocks[0].Type != "assistant" || m.s.blocks[1].Type != "subagent" || m.s.blocks[1].SubagentResult != "structured result" || m.s.blocks[2].Type != "assistant" {
+		t.Fatalf("outcome chronology = %+v", m.s.blocks)
+	}
+}
+
 func TestHandleModelSwitch_UnknownModel_ReportsAndStops(t *testing.T) {
 	m := newTestModel()
 	_, _ = m.handleModelSwitch("totally-unknown-model-xyz")

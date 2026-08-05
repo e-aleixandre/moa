@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/base64"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -374,8 +375,46 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	m.s.blocks = m.s.blocks[:0]
 
 	pendingCalls := make(map[string]core.Content)
+	// A terminal child outcome belongs at its actual completion point, not at
+	// the timestamp of the parent notification that happened to deliver it to
+	// the model. Keep the structured lifecycle as the sole presentation owner.
+	type terminalOutcome struct {
+		jobID      string
+		task       string
+		status     string
+		result     string
+		finishedAt time.Time
+	}
+	var outcomes []terminalOutcome
+	for jobID, child := range m.s.subagents {
+		if child == nil || child.kind == "bash" || (child.status != "completed" && child.status != "failed" && child.status != "cancelled") {
+			continue
+		}
+		outcomes = append(outcomes, terminalOutcome{
+			jobID: jobID, task: child.task, status: child.status,
+			result: child.terminalResult, finishedAt: child.finishedAt,
+		})
+	}
+	sort.SliceStable(outcomes, func(i, j int) bool {
+		if outcomes[i].finishedAt.IsZero() {
+			return false
+		}
+		if outcomes[j].finishedAt.IsZero() {
+			return true
+		}
+		return outcomes[i].finishedAt.Before(outcomes[j].finishedAt)
+	})
+	nextOutcome := 0
+	appendOutcomesThrough := func(timestamp int64) {
+		for nextOutcome < len(outcomes) && !outcomes[nextOutcome].finishedAt.IsZero() && outcomes[nextOutcome].finishedAt.Unix() <= timestamp {
+			o := outcomes[nextOutcome]
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "subagent", SubagentJobID: o.jobID, SubagentTask: o.task, SubagentStatus: o.status, SubagentResult: o.result})
+			nextOutcome++
+		}
+	}
 
 	for _, msg := range msgs {
+		appendOutcomesThrough(msg.Timestamp)
 		if isShellMessage(msg) {
 			cmd, output := parseShellBody(firstTextContent(msg.Content))
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -395,6 +434,10 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			if len(msg.Content) > 0 {
 				text := msg.Content[0].Text
 				if source, _ := msg.Custom["source"].(string); source == "subagent" {
+					jobID, _ := msg.Custom["subagent_job_id"].(string)
+					if m.hasTerminalSubagentOutcome(jobID) {
+						continue
+					}
 					task, _ := msg.Custom["subagent_task"].(string)
 					status, _ := msg.Custom["subagent_status"].(string)
 					result, _ := msg.Custom["subagent_result"].(string)
@@ -409,6 +452,9 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 					status, _ := msg.Custom["bash_status"].(string)
 					m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, text))
 				} else if task, status, result, ok := parseSubagentNotification(text); ok {
+					if m.hasTerminalSubagentOutcome(subagentNotificationJobID(text)) {
+						continue
+					}
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type:           "subagent",
 						SubagentTask:   task,
@@ -494,6 +540,20 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			}
 		}
 	}
+	// Legacy messages may have no timestamps; retain terminal outcomes rather
+	// than dropping them, after all timestamped parent history.
+	for ; nextOutcome < len(outcomes); nextOutcome++ {
+		o := outcomes[nextOutcome]
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "subagent", SubagentJobID: o.jobID, SubagentTask: o.task, SubagentStatus: o.status, SubagentResult: o.result})
+	}
+}
+
+func (m *appModel) hasTerminalSubagentOutcome(jobID string) bool {
+	if jobID == "" {
+		return false
+	}
+	child := m.s.subagents[jobID]
+	return child != nil && (child.status == "completed" || child.status == "failed" || child.status == "cancelled")
 }
 
 // isShellMessage returns true for messages produced by ! or !! shell escapes.

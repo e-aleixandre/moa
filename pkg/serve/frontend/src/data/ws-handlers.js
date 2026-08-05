@@ -1431,9 +1431,12 @@ export function upsertTerminalSubagentOutcome(messages, subagent, data) {
     finishedAtMs: data.finished_at_ms || null,
   };
   if (index < 0) return insertTerminalSubagentOutcome(current, row);
-  const next = [...current];
-  next[index] = { ...next[index], ...row };
-  return next;
+  // A model-delivery notification may already have normalized to this card,
+  // but its parent-message timestamp is not the child's completion time. Move
+  // it to the authoritative finished_at_ms position rather than retaining a
+  // live/reload ordering discrepancy.
+  const withoutExisting = [...current.slice(0, index), ...current.slice(index + 1)];
+  return insertTerminalSubagentOutcome(withoutExisting, { ...existing, ...row });
 }
 
 // Restored terminal cards belong at their real completion point in the parent

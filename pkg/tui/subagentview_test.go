@@ -142,6 +142,20 @@ func TestStructuredTerminalOutcomeSuppressesModelNotificationDuplicate(t *testin
 	}
 }
 
+func TestTerminalOutcomeMovesFallbackNotificationToLiveCompletionPosition(t *testing.T) {
+	m := &appModel{s: &state{}}
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-async", Task: "async work", Async: true})
+	m.s.blocks = []messageBlock{
+		{Type: "assistant", Raw: "before"},
+		{Type: "subagent", SubagentJobID: "sa-async", SubagentTask: "async work", SubagentStatus: "completed", SubagentResult: "notification result"},
+		{Type: "assistant", Raw: "parent work after notification"},
+	}
+	m.handleSubagentEnded(bus.SubagentEnded{JobID: "sa-async", Task: "async work", Status: "completed", Result: "structured result"})
+	if len(m.s.blocks) != 3 || m.s.blocks[0].Raw != "before" || m.s.blocks[1].Raw != "parent work after notification" || m.s.blocks[2].Type != "subagent" || m.s.blocks[2].SubagentResult != "structured result" {
+		t.Fatalf("live terminal chronology = %+v", m.s.blocks)
+	}
+}
+
 func TestBashJobTranscript(t *testing.T) {
 	m := &appModel{s: &state{}}
 	m.handleBashJobStarted(bus.BashJobStarted{JobID: "bash-1", Command: "go test ./...", CWD: "/work"})

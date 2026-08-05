@@ -486,6 +486,31 @@ test('persisted terminal outcomes insert before parent messages written after co
   expect(messages.map(m => m.tool_call_id || m._msg_id)).toEqual(['before', 'subagent-waited', 'after']);
 });
 
+test('async notification outcome uses the same completion position live and after reload', () => {
+  const rawHistory = [
+    { role: 'user', msg_id: 'before', timestamp: 10, content: [{ type: 'text', text: 'before' }] },
+    { role: 'user', msg_id: 'notification', timestamp: 30, custom: {
+      source: 'subagent', subagent_job_id: 'async', subagent_task: 'async work',
+      subagent_status: 'completed', subagent_result: 'notification result',
+    }, content: [{ type: 'text', text: 'model delivery' }] },
+    { role: 'assistant', msg_id: 'after', timestamp: 40, content: [{ type: 'text', text: 'after' }] },
+  ];
+  const outcome = { job_id: 'async', task: 'async work', status: 'completed', result: 'structured result', finished_at_ms: 20_000 };
+
+  seedSession('live');
+  setState({ sessions: { ...store.get().sessions, live: { id: 'live', messages: normalizeHistory(rawHistory), subagents: {} } } });
+  handleWsSubagentStart('live', { job_id: 'async', task: 'async work', model: 'm', async: true });
+  handleWsSubagentEnd('live', outcome);
+  const liveOrder = store.get().sessions.live.messages.map(m => m.tool_call_id || m._msg_id);
+
+  seedSession('reload');
+  handleWsInit('reload', { messages: rawHistory, subagents: [], subagent_outcomes: [outcome] });
+  const reloadOrder = store.get().sessions.reload.messages.map(m => m.tool_call_id || m._msg_id);
+
+  expect(liveOrder).toEqual(['before', 'subagent-async', 'after']);
+  expect(reloadOrder).toEqual(liveOrder);
+});
+
 test('handleWsSteersCanceled clears the shared queue on every client', () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [

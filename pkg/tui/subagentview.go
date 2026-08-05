@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -17,6 +18,8 @@ type subagentTranscript struct {
 	task             string
 	model            string
 	status           string // "running", "completed", "failed", "cancelled"
+	finishedAt       time.Time
+	terminalResult   string
 	async            bool
 	kind             string // "subagent" or "bash"
 	blocks           []messageBlock
@@ -187,6 +190,8 @@ func (m *appModel) handleSubagentEnded(e bus.SubagentEnded) {
 		t.status = "completed"
 	}
 	t.streamText = ""
+	t.finishedAt = e.FinishedAt
+	t.terminalResult = terminalSubagentText(e)
 	t.costUSD = e.CostUSD
 	if e.Usage != nil {
 		t.tokens = e.Usage.Input + e.Usage.Output
@@ -199,11 +204,11 @@ func (m *appModel) handleSubagentEnded(e bus.SubagentEnded) {
 	// not make the completed child disappear from the parent transcript.
 	for i := range m.s.blocks {
 		if m.s.blocks[i].Type == "subagent" && m.s.blocks[i].SubagentJobID == e.JobID {
-			m.s.blocks[i].SubagentStatus = t.status
-			m.s.blocks[i].SubagentTask = firstNonEmpty(e.Task, t.task)
-			m.s.blocks[i].SubagentResult = terminalSubagentText(e)
-			m.s.blocks[i].touch()
-			return
+			// A fallback notification card can precede/follow the actual child
+			// finish. Replace and move it to this lifecycle event's position;
+			// keeping its parent-message location would diverge from a rebuild.
+			m.s.blocks = append(m.s.blocks[:i], m.s.blocks[i+1:]...)
+			break
 		}
 	}
 	m.s.blocks = append(m.s.blocks, messageBlock{
