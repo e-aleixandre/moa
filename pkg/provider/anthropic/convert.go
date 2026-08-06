@@ -273,7 +273,7 @@ func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer) map[st
 	case "assistant":
 		return map[string]any{
 			"role":    "assistant",
-			"content": convertAssistantContent(msg.Content, isOAuth),
+			"content": convertAssistantContent(msg.Content, isOAuth, foreignThinking(msg)),
 		}
 
 	case "tool_result":
@@ -376,8 +376,22 @@ func retiredImageNote(w, h int) string {
 		manyImageThreshold, manyImageMaxDimension)
 }
 
-// convertAssistantContent converts assistant message content including tool calls and thinking.
-func convertAssistantContent(blocks []core.Content, isOAuth bool) []any {
+// foreignThinking reports whether a message's thinking signatures were minted
+// by another provider. Signatures are opaque and validated server-side, so
+// replaying one from a different provider is rejected with HTTP 400
+// ("Invalid `signature` in `thinking` block"). A session that switched models
+// keeps the original blocks in its append-only tree, so this must be decided
+// per message at request time rather than once at switch time. Messages with
+// no provenance are assumed native: they predate provenance tracking, and
+// dropping their thinking would needlessly degrade old sessions.
+func foreignThinking(msg core.Message) bool {
+	return msg.Provider != "" && msg.Provider != "anthropic"
+}
+
+// convertAssistantContent converts assistant message content including tool
+// calls and thinking. dropThinking discards thinking blocks whose signatures
+// came from another provider (see foreignThinking).
+func convertAssistantContent(blocks []core.Content, isOAuth bool, dropThinking bool) []any {
 	result := make([]any, 0, len(blocks))
 	for _, b := range blocks {
 		switch b.Type {
@@ -387,6 +401,12 @@ func convertAssistantContent(blocks []core.Content, isOAuth bool) []any {
 				"text": b.Text,
 			})
 		case "thinking":
+			if dropThinking {
+				// Another provider's block: the signature can't be validated
+				// here and the plain reasoning text carries no value for this
+				// request, so the whole block goes.
+				continue
+			}
 			if b.Redacted {
 				result = append(result, map[string]any{
 					"type": "redacted_thinking",
