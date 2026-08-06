@@ -24,6 +24,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
 	"github.com/e-aleixandre/moa/pkg/tool"
@@ -542,6 +543,8 @@ type Manager struct {
 	attentionSeqWake   chan struct{}
 	serverInstance     string
 	baseCtx            context.Context
+	secretReaperCancel context.CancelFunc
+	secretReaperDone   <-chan struct{}
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
@@ -561,6 +564,8 @@ type Manager struct {
 	mcpSourcesLoader func(cwd string) *core.MCPDisableSources
 	sessionBaseDir   string // root for session stores; empty = default (~/.config/moa/sessions/)
 	attachStore      *attachment.Store
+	secretMu         sync.Mutex
+	secretBatches    map[string][]string // process-local; values never enter session persistence
 
 	// savedCache caches the result of session.ListAll to avoid
 	// re-scanning disk on every poll (frontend polls every 3s).
@@ -777,6 +782,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		mcpSourcesLoader:       mcpSourcesLoader,
 		sessionBaseDir:         cfg.SessionBaseDir,
 		attachStore:            attachStore,
+		secretBatches:          make(map[string][]string),
 		savedCacheTTL:          30 * time.Second,
 		fileScanner:            files.NewScanner(),
 		scheduler:              scheduler,
@@ -811,6 +817,13 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		m.scheduler.Start(m)
 	}
 	reapStaleAttachments()
+	secrets.Reap()
+	// The manager, rather than its caller's context, owns this process-wide
+	// maintenance goroutine. An embedding caller may keep ctx alive after
+	// shutting down a manager.
+	reaperCtx, reaperCancel := context.WithCancel(context.Background())
+	m.secretReaperCancel = reaperCancel
+	m.secretReaperDone = secrets.StartReaper(reaperCtx)
 	if m.attachStore != nil {
 		live := make(map[string]bool)
 		if summaries, err := session.ListAll(m.sessionBaseDir); err != nil {

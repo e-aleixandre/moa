@@ -254,7 +254,7 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 			Command: e.Command, Messages: messages, HistoryTruncated: truncated,
 		}}, true
 	case bus.Steered:
-		data := SteerData{ID: e.ID, MsgID: e.MsgID, Text: truncateHistoryString(e.Text)}
+		data := SteerData{ID: e.ID, MsgID: e.MsgID, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
 		if len(e.Content) > 0 {
 			// Same history projection as UserMessageAppended, so an attached
 			// image travels bounded (inline payloads stripped to references)
@@ -264,7 +264,7 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 		}
 		return Event{Type: "steer", Data: data}, true
 	case bus.UserMessageAppended:
-		data := UserMessageData{MsgID: e.MsgID, Text: truncateHistoryString(e.Text)}
+		data := UserMessageData{MsgID: e.MsgID, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
 		if len(e.Content) > 0 {
 			// Reuse the history projection so inline attachment payloads and
 			// oversized text are bounded exactly as on reconnect.
@@ -366,6 +366,31 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	default:
 		return Event{}, false
 	}
+}
+
+// projectWSMessageCustom is a second transport boundary for callers that
+// publish bus events directly. Keep it aligned with bus.projectLiveCustom.
+func projectWSMessageCustom(custom map[string]any) map[string]any {
+	source, _ := custom["source"].(string)
+	if source == "" {
+		return nil
+	}
+	projected := map[string]any{"source": source}
+	if source == "secret_batch" {
+		switch aliases := custom["secret_aliases"].(type) {
+		case []string:
+			projected["secret_aliases"] = append([]string(nil), aliases...)
+		case []any:
+			values := make([]string, 0, len(aliases))
+			for _, alias := range aliases {
+				if value, ok := alias.(string); ok {
+					values = append(values, value)
+				}
+			}
+			projected["secret_aliases"] = values
+		}
+	}
+	return projected
 }
 
 // wsLossyEventTypes are streaming deltas that may be dropped under backpressure
@@ -737,7 +762,10 @@ func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) 
 func sanitizeHistoryMessage(msg core.AgentMessage) (core.AgentMessage, int) {
 	copyMsg := msg
 	copyMsg.Content = append([]core.Content(nil), msg.Content...)
-	copyMsg.Custom = boundedHistoryMap(copyMsg.Custom)
+	// Reconnect history crosses the same public WS boundary as live message
+	// events. Do not expose internal custom fields merely because this is an
+	// init snapshot.
+	copyMsg.Custom = projectWSMessageCustom(copyMsg.Custom)
 	for i := range copyMsg.Content {
 		content := &copyMsg.Content[i]
 		switch content.Type {

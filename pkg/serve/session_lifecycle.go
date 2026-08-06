@@ -642,6 +642,7 @@ func (m *Manager) deleteSession(id string) error {
 		}
 		m.invalidateSavedCache()
 		m.forgetUnseen(id)
+		m.forgetSecretBatches(id)
 		_ = removeSessionAttachDir(id)
 		if m.attachStore != nil {
 			if err := m.attachStore.ReleaseSession(id); err != nil {
@@ -654,6 +655,7 @@ func (m *Manager) deleteSession(id string) error {
 	m.mu.Unlock()
 	sess.deleted.Store(true)
 	m.forgetUnseen(id)
+	m.forgetSecretBatches(id)
 	m.forgetAttentionSequences(sess)
 	// Mark closing and drain the runtime's users before tearing it down, so a
 	// /send or /command already holding this pointer can't start a run into a
@@ -684,6 +686,10 @@ func (m *Manager) deleteSession(id string) error {
 		sess.unreadUnsub()
 	}
 	m.forgetAttentionSequences(sess)
+	// Delete removed the first snapshot before it waited for in-flight users.
+	// Sweep again so a secret request that had already passed that boundary
+	// cannot leave a newly registered batch behind.
+	m.forgetSecretBatches(id)
 
 	// Close MCP connections before context cancellation.
 	if sess.infra.mcpMgr != nil {
@@ -857,6 +863,7 @@ func (m *Manager) CloseSession(id string) error {
 		sess.unreadUnsub()
 	}
 	m.forgetAttentionSequences(sess)
+	m.forgetSecretBatches(id)
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()
 	}
@@ -1055,6 +1062,12 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	if m.secretReaperCancel != nil {
+		m.secretReaperCancel()
+		if m.secretReaperDone != nil {
+			<-m.secretReaperDone
+		}
+	}
 	if m.scheduler != nil {
 		m.scheduler.Close()
 	}

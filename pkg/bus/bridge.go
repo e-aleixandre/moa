@@ -50,6 +50,7 @@ type AgentController interface {
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
 	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
+	SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
 	SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
 	// SendWithContentAnnounced is SendWithContentMsgID that also announces the
@@ -1069,6 +1070,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventSteer:
 		ev := Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}
+		ev.Custom = projectLiveCustom(e.Message.Custom)
 		// A steer always carries its plain text, but one with attachments was
 		// injected as content blocks: publish them too so clients render the
 		// thumbnails live instead of only after a reload. Text-only steers keep
@@ -1080,6 +1082,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventUserMessage:
 		ev := UserMessageAppended{SessionID: sid, RunGen: gen, MsgID: e.MsgID, Text: e.Text}
+		ev.Custom = projectLiveCustom(e.Message.Custom)
 		// A structured send carries its blocks; a plain-text prompt travels in
 		// Text alone, so clients render exactly one shape per message.
 		if e.Text == "" {
@@ -1100,6 +1103,32 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		}}
 	}
 	return nil
+}
+
+// projectLiveCustom limits live transport metadata to the fields frontends
+// render. Conversation Custom may grow internal fields; publishing it whole
+// would silently turn each one into a WebSocket API field.
+func projectLiveCustom(custom map[string]any) map[string]any {
+	source, _ := custom["source"].(string)
+	if source == "" {
+		return nil
+	}
+	projected := map[string]any{"source": source}
+	if source == "secret_batch" {
+		switch aliases := custom["secret_aliases"].(type) {
+		case []string:
+			projected["secret_aliases"] = append([]string(nil), aliases...)
+		case []any:
+			values := make([]string, 0, len(aliases))
+			for _, alias := range aliases {
+				if value, ok := alias.(string); ok {
+					values = append(values, value)
+				}
+			}
+			projected["secret_aliases"] = values
+		}
+	}
+	return projected
 }
 
 // hasNonTextContent reports whether a message carries blocks that plain text

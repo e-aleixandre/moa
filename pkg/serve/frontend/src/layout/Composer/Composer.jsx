@@ -13,6 +13,8 @@ import { combineQueueText, droppedImageCount, queueSummary } from "../../data/co
 import {
   slashSuggestions, findMentionToken, computeMentionInsertion, normalizeDashes,
 } from "../../data/composer-suggest.js";
+import { interceptSecretCommand } from "../../data/secrets.js";
+import { loadDraft, saveDraft } from "../../data/composer-draft.js";
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
 import { processFile } from "../../data/util/attachments.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
@@ -57,20 +59,7 @@ const MAX_HISTORY = 100;
 // backgrounded PWAs freely) doesn't lose what you were typing. The prefix is
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
 // don't clobber each other's drafts while they coexist under /next.
-const DRAFT_PREFIX = "moa-next-draft-";
-function loadDraft(id) {
-  if (!id) return "";
-  try { return localStorage.getItem(DRAFT_PREFIX + id) || ""; } catch (_) { return ""; }
-}
-function saveDraft(id, text) {
-  if (!id) return;
-  try {
-    if (text) localStorage.setItem(DRAFT_PREFIX + id, text);
-    else localStorage.removeItem(DRAFT_PREFIX + id);
-  } catch (_) { /* ignore */ }
-}
-
-export function Composer({ sessionId, session, shortPlaceholder = false, steer = null }) {
+export function Composer({ sessionId, session, shortPlaceholder = false, steer = null, onSecret }) {
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
   const sessionState = session?.state;
@@ -334,10 +323,24 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
 
   const handlePaste = useCallback((e) => {
     const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
-    if (files.length === 0) return;
-    e.preventDefault();
-    addFiles(files);
-  }, [addFiles]);
+    if (files.length > 0) {
+      e.preventDefault();
+      addFiles(files);
+      return;
+    }
+
+    // Native text pastes subsequently emit input, which performs the same
+    // check. Remove an old draft now as well, before the browser inserts a
+    // recognized /secret command into the textarea.
+    const pasted = e.clipboardData?.getData("text/plain");
+    const el = textareaRef.current;
+    if (pasted && el) {
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? start;
+      const nextValue = el.value.slice(0, start) + pasted + el.value.slice(end);
+      if (interceptSecretCommand(nextValue.trim()) !== null) saveDraft(sessionId, "");
+    }
+  }, [addFiles, sessionId]);
 
   // The composer bar has no dedicated "/" affordance in the old SPA (the popup
   // only appears once you type "/" yourself). We give the button a concrete
@@ -366,6 +369,37 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     const text = el.value.trim();
     const atts = attachments;
     if (!text && atts.length === 0) return;
+
+    // This client-only command is deliberately intercepted before generic
+    // slash handling. It carries aliases only; values are typed exclusively in
+    // SecretBatch's local password inputs and never enter this textarea's
+    // draft/history lifecycle.
+    const secretCommand = interceptSecretCommand(text);
+    if (secretCommand !== null) {
+      // Clear this before validating: every /secret invocation may contain an
+      // accidentally typed value and must never enter composer history or its
+      // persisted localStorage draft.
+      el.value = secretCommand.composerDraft;
+      saveDraft(sessionId, secretCommand.composerDraft);
+      setHasText(false);
+      setCmdSuggestions(null);
+      setFileSuggestions(null);
+      autoResize();
+      if (atts.length > 0) {
+        addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments before storing secrets', type: 'attention' });
+        return;
+      }
+      if (steer) {
+        addToast({ title: 'Refused /secret command', detail: 'Secrets can only be staged from the main conversation composer. The command was discarded; rotate a value if you typed one.', type: 'error' });
+        return;
+      }
+      if (secretCommand.error) {
+        addToast({ title: 'Refused /secret command', detail: `${secretCommand.error} The command was discarded; rotate a value if you typed one.`, type: 'error' });
+        return;
+      }
+      onSecret?.(secretCommand.aliases);
+      return;
+    }
 
     // Steer mode: everything the user types goes to the live subagent as a
     // steer. No slash/shell/queue semantics, no attachments (the subagent steer
@@ -520,7 +554,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       // reason (e.g. a 400) so it's not silent.
       addToast({ sessionId, title: 'Message not sent', detail: String(e.message || e), type: 'error' });
     }
-  }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer]);
+  }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer, onSecret]);
 
   const handleSend = useCallback(() => handleSendInner(textareaRef.current), [handleSendInner]);
   // acceptSuggestion (below) is defined before handleSendInner and has an
@@ -763,6 +797,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const handleInput = useCallback((e) => {
     autoResize();
     updateSuggestions();
+    // saveDraft recognizes /secret from its first line and removes any prior
+    // draft instead of retaining a command that may have pasted a value below.
     saveDraft(sessionId, e.target.value);
     setHasText(!!e.target.value.trim());
     // File suggestions with debounce.

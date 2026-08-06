@@ -116,7 +116,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if cmd.ID == "" {
 			cmd.ID = core.NewSteerID()
 		}
-		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Content: cmd.Content, Internal: cmd.Internal}) {
+		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Custom: cmd.Custom, Content: cmd.Content, Internal: cmd.Internal}) {
 			return ErrSteerQueueFull
 		}
 		// Kick the pump after enqueuing. While a run is in flight this is a
@@ -711,7 +711,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			if id == "" {
 				id = core.NewSteerID()
 			}
-			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text}) {
+			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom}) {
 				return ErrSteerQueueFull
 			}
 			// Report the identity on the STEER rail: a chip ID must never be
@@ -746,9 +746,10 @@ func RegisterHandlers(sctx *SessionContext) {
 		// Pre-mint the user message's ID so the prompt is announced live
 		// (UserMessageAppended, emitted by the agent when the message actually
 		// lands in history) under the same identity clients dedup by. Prompts
-		// carrying Custom metadata are internal producers (goal/auto-verify/
-		// schedule) or notifications (subagent/bash) with their own rendering, so
-		// they keep the plain path and are not announced.
+		// carrying Custom metadata are usually internal producers (goal/auto-
+		// verify/schedule) or notifications (subagent/bash) with their own
+		// rendering. Secret batches are the exception: their trusted metadata
+		// drives the live secret card.
 		//
 		// The claim happens HERE, at the point the run is accepted, not in the
 		// caller: only an atomic check-and-claim keeps two concurrent sends with
@@ -763,6 +764,9 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 		if err := startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
+				if cmd.Custom["source"] == "secret_batch" {
+					return sctx.Agent.SendWithCustomAnnounced(ctx, cmd.Text, cmd.Custom)
+				}
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
 			}
 			if msgID != "" {

@@ -6,6 +6,8 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
 import { McpBanner, PermissionPrompt, AskUserPrompt } from "../../components/index.js";
+import { Sheet } from "../../components/Sheet/Sheet.jsx";
+import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { snapToRatio } from "../../data/snap.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import {
@@ -93,7 +95,7 @@ function ResizeHandle({ path, direction }) {
 // ConnectedPane — a leaf tile bound to a real session (or empty). Wires the
 // Pane's optional connected props to the tile actions and mounts the live Stream +
 // Composer (+ blocking) when a session is assigned.
-function ConnectedPane({ node, state, tileIndex }) {
+function ConnectedPane({ node, state, tileIndex, onSecret }) {
   const tileId = node.id;
   const session = node.sessionId ? state.sessions[node.sessionId] : null;
   const [nowMs, setNowMs] = useState(Date.now());
@@ -261,7 +263,7 @@ function ConnectedPane({ node, state, tileIndex }) {
       onMaximize={handleMaximize}
       blocking={blocking}
       bodyLive
-      composer={<Composer key={session.id} sessionId={session.id} session={session} />}
+      composer={<Composer key={session.id} sessionId={session.id} session={session} onSecret={(aliases) => onSecret(session.id, aliases)} />}
       dock={liveAgents.length > 0 && (
         <LiveDock
           agents={liveAgents}
@@ -296,13 +298,14 @@ function ConnectedPane({ node, state, tileIndex }) {
 
 // TileNode — recursive render of the tree. `path` accumulates the split path
 // used by resizeSplit (setRatioAtPath).
-function TileNode({ node, state, path, tileIndexMap }) {
+function TileNode({ node, state, path, tileIndexMap, onSecret }) {
   if (node.type === "tile") {
     return (
       <ConnectedPane
         node={node}
         state={state}
         tileIndex={tileIndexMap.get(node.id) ?? 0}
+        onSecret={onSecret}
       />
     );
   }
@@ -314,17 +317,18 @@ function TileNode({ node, state, path, tileIndexMap }) {
   return (
     <div class={`split ${isH ? "split-h" : "split-v"}`}>
       <div class="split-pane" style={{ flex: ra }}>
-        <TileNode node={a} state={state} path={[...path, 0]} tileIndexMap={tileIndexMap} />
+        <TileNode node={a} state={state} path={[...path, 0]} tileIndexMap={tileIndexMap} onSecret={onSecret} />
       </div>
       <ResizeHandle path={path} direction={node.direction} />
       <div class="split-pane" style={{ flex: rb }}>
-        <TileNode node={b} state={state} path={[...path, 1]} tileIndexMap={tileIndexMap} />
+        <TileNode node={b} state={state} path={[...path, 1]} tileIndexMap={tileIndexMap} onSecret={onSecret} />
       </div>
     </div>
   );
 }
 
 export function PaneGrid({ state }) {
+  const [secretBatch, setSecretBatch] = useState(null);
   const tileIndexMap = useMemo(() => {
     const ids = allTileIds(state.tileTree);
     const m = new Map();
@@ -333,8 +337,24 @@ export function PaneGrid({ state }) {
   }, [state.tileTree]);
 
   return (
-    <div class="pane-grid">
-      <TileNode node={state.tileTree} state={state} path={[]} tileIndexMap={tileIndexMap} />
-    </div>
+    <>
+      <div class="pane-grid">
+        <TileNode
+          node={state.tileTree}
+          state={state}
+          path={[]}
+          tileIndexMap={tileIndexMap}
+          onSecret={(sessionId, aliases) => setSecretBatch({ sessionId, aliases })}
+        />
+      </div>
+      <Sheet open={secretBatch !== null} onClose={() => setSecretBatch(null)} title="Store secrets">
+        <SecretBatch
+          open={secretBatch !== null}
+          sessionId={secretBatch?.sessionId || ""}
+          aliases={secretBatch?.aliases || []}
+          onClose={() => setSecretBatch(null)}
+        />
+      </Sheet>
+    </>
   );
 }

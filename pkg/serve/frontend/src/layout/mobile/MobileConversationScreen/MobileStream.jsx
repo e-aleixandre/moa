@@ -7,6 +7,7 @@ import {
   DelegationBlock,
   FileCard,
 } from "../../../components/index.js";
+import { SecretBatchCard } from "../../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../../data/util/markdown.js";
 import { fuseLedgerDetails } from "../../../data/util/ledger-details.jsx";
 import "./MobileStream.css";
@@ -81,6 +82,8 @@ function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
   switch (block.kind) {
     case "system":
       return <div class="mstream-system">{block.text}</div>;
+    case "secret_batch":
+      return <SecretBatchCard aliases={block.aliases} />;
     case "waypoint":
       return (
         <UserWaypoint

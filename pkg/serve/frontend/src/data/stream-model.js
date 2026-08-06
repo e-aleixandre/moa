@@ -271,6 +271,14 @@ export function projectStream(session) {
       continue;
     }
 
+    if (msg && msg._type === 'secret_batch') {
+      currentDoc = null;
+      currentLedger = null;
+      closeDelegation();
+      blocks.push({ kind: 'secret_batch', id: `secret-${msg._msg_id || abs}`, aliases: msg.aliases || [] });
+      continue;
+    }
+
     if (msg && msg.role === 'assistant') {
       const text = joinText(msg.content);
       if (text) {

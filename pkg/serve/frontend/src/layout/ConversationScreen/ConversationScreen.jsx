@@ -9,6 +9,8 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
+import { Sheet } from "../../components/Sheet/Sheet.jsx";
+import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
@@ -190,7 +192,9 @@ export function ConversationScreen({ version }) {
 
   // --- Rewind timeline sheet (ChatHead/MobileHeader's Rewind button) ---
   const [rewindOpen, setRewindOpen] = useState(false);
+  const [secretAliases, setSecretAliases] = useState(null);
   useEffect(() => { setRewindOpen(false); }, [activeId]);
+  useEffect(() => { setSecretAliases(null); }, [activeId]);
 
   // --- Usage panel popover (StatusStrip's cost segment) — level 2 telemetry
   // (TELEMETRY-SETTINGS-REDESIGN §2). Anchored to the strip, not the head, but
@@ -408,7 +412,7 @@ export function ConversationScreen({ version }) {
                 permissions, MCP, tokens). flex:none, so it pushes the stream up
                 instead of overlaying the composer. */}
             <NowLine session={session} nowMs={nowMs} />
-            <Composer key={session.id} sessionId={session.id} session={session} />
+            <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
             <div class="status-strip-anchor" ref={usageAnchorRef}>
               <StatusStrip
                 ctxPercent={session.contextPercent}
@@ -455,6 +459,16 @@ export function ConversationScreen({ version }) {
           onClose={() => setRewindOpen(false)}
           sessionId={session.id}
         />
+      )}
+      {session && (
+        <Sheet open={secretAliases !== null} onClose={() => setSecretAliases(null)} title="Store secrets">
+          <SecretBatch
+            open={secretAliases !== null}
+            sessionId={session.id}
+            aliases={secretAliases || []}
+            onClose={() => setSecretAliases(null)}
+          />
+        </Sheet>
       )}
     </div>
   );

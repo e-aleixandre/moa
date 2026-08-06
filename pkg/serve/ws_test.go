@@ -268,7 +268,10 @@ func TestWsEventFromBus_CommandDequeued(t *testing.T) {
 }
 
 func TestWsEventFromBus_UserMessageAppended(t *testing.T) {
-	ev, ok := wsEventFromBus(bus.UserMessageAppended{SessionID: "s1", MsgID: "m1", Text: "hola"})
+	ev, ok := wsEventFromBus(bus.UserMessageAppended{
+		SessionID: "s1", MsgID: "m1", Text: "hola",
+		Custom: map[string]any{"source": "secret_batch", "secret_aliases": []string{"db"}},
+	})
 	if !ok || ev.Type != "user_message" {
 		t.Fatalf("Type = %q ok=%v, want user_message", ev.Type, ok)
 	}
@@ -278,6 +281,26 @@ func TestWsEventFromBus_UserMessageAppended(t *testing.T) {
 	}
 	if data.MsgID != "m1" || data.Text != "hola" || len(data.Content) != 0 {
 		t.Fatalf("Data = %+v, want text-only message m1", data)
+	}
+	if data.Custom["source"] != "secret_batch" {
+		t.Fatalf("Custom = %#v", data.Custom)
+	}
+}
+
+func TestWsEventFromBus_UserMessageAppended_ProjectsCustom(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.UserMessageAppended{
+		SessionID: "s1", MsgID: "m1", Text: "hola",
+		Custom: map[string]any{"source": "secret_batch", "secret_aliases": []string{"db"}, "internal": "nope"},
+	})
+	if !ok {
+		t.Fatal("event was not translated")
+	}
+	data := ev.Data.(UserMessageData)
+	if data.Custom["source"] != "secret_batch" {
+		t.Fatalf("source = %#v", data.Custom)
+	}
+	if _, ok := data.Custom["internal"]; ok {
+		t.Fatalf("internal custom field exposed in WS payload: %#v", data.Custom)
 	}
 }
 
@@ -423,6 +446,44 @@ func TestLimitInitHistoryDropsOversizedToolArguments(t *testing.T) {
 	args := limited[0].Content[0].Arguments
 	if args["_truncated"] != true {
 		t.Fatalf("oversized args = %#v, want truncation marker", args)
+	}
+}
+
+func TestBuildInitData_ReconnectProjectsSecretCustom(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secretDir = "/tmp/moa-secrets-private/batch-private"
+	appendConversationTestMessage(sess, "secret-note", "user", "secret batch staged", map[string]any{
+		"source":         "secret_batch",
+		"secret_aliases": []string{"token"},
+		"secret_dir":     secretDir,
+		"internal":       true,
+	})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	if len(data.Messages) != 1 {
+		t.Fatalf("init messages = %#v", data.Messages)
+	}
+	custom := data.Messages[0].Custom
+	aliases, ok := custom["secret_aliases"].([]string)
+	if custom["source"] != "secret_batch" || !ok || len(aliases) != 1 {
+		t.Fatalf("projected custom = %#v", custom)
+	}
+	if _, ok := custom["secret_dir"]; ok {
+		t.Fatalf("secret_dir leaked in reconnect history: %#v", custom)
+	}
+	if _, ok := custom["internal"]; ok {
+		t.Fatalf("internal custom field leaked in reconnect history: %#v", custom)
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), secretDir) {
+		t.Fatalf("secret directory reached reconnect payload: %s", encoded)
 	}
 }
 

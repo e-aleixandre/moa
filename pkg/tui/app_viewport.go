@@ -97,6 +97,10 @@ func (m *appModel) buildBottomChrome() string {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			parts = append(parts, pv)
 		}
+	} else if m.secretPrompt.active {
+		if sv := m.secretPrompt.View(m.width, ActiveTheme); sv != "" {
+			parts = append(parts, sv)
+		}
 	} else if m.askPrompt.active {
 		if av := m.askPrompt.View(m.width, ActiveTheme, m.voice.available()); av != "" {
 			parts = append(parts, av)
@@ -210,7 +214,7 @@ func (m *appModel) renderTranscriptBlocks(fullHistory bool) string {
 // recomputeInputEnabled sets input enabled/disabled based on current state.
 // Used when exiting transcript mode to avoid unconditionally enabling input.
 func (m *appModel) recomputeInputEnabled() {
-	enabled := !m.s.running && !m.permPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active && !m.branchPicker.active && !m.subagentPicker.active && !m.mcpPicker.active
+	enabled := !m.s.running && !m.permPrompt.active && !m.secretPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active && !m.branchPicker.active && !m.subagentPicker.active && !m.mcpPicker.active
 	m.input.SetEnabled(enabled)
 }
 

@@ -7,6 +7,7 @@ import {
   DelegationBlock,
   FileCard,
 } from "../../components/index.js";
+import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
 import "./Stream.css";
@@ -83,6 +84,8 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
   switch (block.kind) {
     case "system":
       return <div class="stream-system">{block.text}</div>;
+    case "secret_batch":
+      return <SecretBatchCard aliases={block.aliases} />;
     case "waypoint":
       return (
         <UserWaypoint

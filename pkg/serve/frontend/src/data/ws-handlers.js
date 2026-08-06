@@ -78,7 +78,14 @@ export function normalizeHistory(raw, liveSubagents = []) {
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
       result.push({ _type: 'system', text });
     } else if (msg.role === 'user') {
-      if (msg.custom?.source === 'subagent') {
+      if (msg.custom?.source === 'secret_batch') {
+        result.push({
+          _type: 'secret_batch',
+          _msg_id: msg.msg_id,
+          timestamp: msg.timestamp,
+          aliases: Array.isArray(msg.custom.secret_aliases) ? msg.custom.secret_aliases : [],
+        });
+      } else if (msg.custom?.source === 'subagent') {
         // When a real job ID is available, key the restored card
         // `subagent-<jobId>` so projectStream folds it into the turn's
         // delegation block by that ID. Unmatched legacy cards retain a
@@ -1605,6 +1612,11 @@ export function handleWsUserMessage(id, data) {
 	if (!sess || !data) return;
 	const messages = sess.messages || [];
 	if (data.msg_id && messages.some(m => m._msg_id === data.msg_id)) return;
+  const secretBatch = secretBatchFromMessage(data);
+  if (secretBatch) {
+    updateSession(id, { messages: [...messages, { _type: 'secret_batch', _msg_id: data.msg_id || undefined, aliases: secretBatch }] });
+    return;
+  }
   const content = Array.isArray(data.content) && data.content.length > 0
     ? data.content
     : [{ type: 'text', text: data.text || '' }];
@@ -1613,7 +1625,7 @@ export function handleWsUserMessage(id, data) {
   // while its live/terminal job exists, rendering this envelope as another
   // user turn would duplicate the terminal outcome and diverge from reload.
 	if (isStructuredSubagentNotification(sess, data.text || '')) return;
-	const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content };
+	const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content, custom: data.custom };
 	updateSession(id, { messages: [...messages, userMsg] });
 }
 
@@ -1636,6 +1648,12 @@ export function handleWsSteer(id, data) {
 	const already = data.msg_id && messages.some(m => m._msg_id === data.msg_id);
   const patch = { pendingSteers: steers.length > 0 ? steers : null };
   if (!already) {
+    const secretBatch = secretBatchFromMessage(data);
+    if (secretBatch) {
+      patch.messages = [...messages, { _type: 'secret_batch', _msg_id: data.msg_id || undefined, aliases: secretBatch }];
+      updateSession(id, patch);
+      return;
+    }
     // A steer with attachments arrives with its blocks (same projection as
     // user_message), so the delivered message shows its thumbnails live; a
     // text-only steer only carries text.
@@ -1643,11 +1661,18 @@ export function handleWsSteer(id, data) {
       ? data.content
       : [{ type: 'text', text: data.text }];
     if (!isStructuredSubagentNotification(sess, data.text || '')) {
-      const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content };
+		const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content, custom: data.custom };
 		patch.messages = [...messages, userMsg];
     }
   }
   updateSession(id, patch);
+}
+
+function secretBatchFromMessage(data) {
+  if (data?.custom?.source === 'secret_batch') {
+    return Array.isArray(data.custom.secret_aliases) ? data.custom.secret_aliases : [];
+  }
+  return null;
 }
 
 function isStructuredSubagentNotification(session, text) {

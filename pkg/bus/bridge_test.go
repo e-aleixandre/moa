@@ -346,6 +346,10 @@ func (f *fakeAgent) SendWithCustom(ctx context.Context, prompt string, custom ma
 	return f.Send(ctx, prompt)
 }
 
+func (f *fakeAgent) SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return f.Send(ctx, prompt)
+}
+
 func (f *fakeAgent) SendPrepareCompact(ctx context.Context, prompt string, _ *sessioncheckpoint.Slot, _ string) ([]core.AgentMessage, error) {
 	return f.Send(ctx, prompt)
 }
@@ -1059,6 +1063,27 @@ func TestBridgeEvent_Steered(t *testing.T) {
 	e := drainChan(got, b, t)
 	if e.Text != "focus on X" {
 		t.Fatalf("Text = %q", e.Text)
+	}
+}
+
+func TestProjectLiveCustomExposesOnlyFrontendFields(t *testing.T) {
+	got := projectLiveCustom(map[string]any{
+		"source":         "secret_batch",
+		"secret_aliases": []string{"db"},
+		"internal_only":  "must-not-leave-the-process",
+	})
+	if got["source"] != "secret_batch" {
+		t.Fatalf("source = %#v", got)
+	}
+	if aliases, ok := got["secret_aliases"].([]string); !ok || len(aliases) != 1 || aliases[0] != "db" {
+		t.Fatalf("aliases = %#v", got["secret_aliases"])
+	}
+	if _, ok := got["internal_only"]; ok {
+		t.Fatalf("internal Custom field was exposed: %#v", got)
+	}
+	ordinary := projectLiveCustom(map[string]any{"source": "schedule", "schedule_id": "private"})
+	if len(ordinary) != 1 || ordinary["source"] != "schedule" {
+		t.Fatalf("ordinary source projection = %#v", ordinary)
 	}
 }
 

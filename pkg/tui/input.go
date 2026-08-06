@@ -76,6 +76,14 @@ func (m *inputModel) Submit() string {
 	return text
 }
 
+// Discard clears an input without recording it in history. Sensitive commands
+// use this path as soon as they are recognized.
+func (m *inputModel) Discard() {
+	m.textarea.Reset()
+	m.histIdx = -1
+	m.draft = ""
+}
+
 // HistoryUp navigates to the previous history entry.
 // Returns true if it consumed the key (caller should not propagate).
 func (m *inputModel) HistoryUp() bool {

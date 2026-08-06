@@ -15,6 +15,7 @@ import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
+import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileNowLine } from "./MobileNowLine.jsx";
@@ -162,6 +163,7 @@ export function MobileConversationScreen({ version = null }) {
   useEffect(() => store.subscribe(setState), []);
 
   const [rewindOpen, setRewindOpen] = useState(false);
+  const [secretAliases, setSecretAliases] = useState(null);
   // Global Settings bottom-sheet, reached from the drawer footer via a sheet
   // HANDOFF: tapping ⚙ closes the drawer, and only once the drawer's leave
   // animation has settled (onClosed) does the Settings sheet slide up — one
@@ -249,6 +251,7 @@ export function MobileConversationScreen({ version = null }) {
   };
 
   useEffect(() => { setRewindOpen(false); }, [activeId]);
+  useEffect(() => { setSecretAliases(null); }, [activeId]);
 
   // Aggregate cross-session attention for the title chip's dot: OTHER sessions
   // blocked on the user (excludes the active one, whose block is the inline
@@ -388,7 +391,7 @@ export function MobileConversationScreen({ version = null }) {
             />
           )}
           <MobileNowLine session={session} />
-          <MobileComposer key={session.id} session={session} usage={state.usage} />
+          <MobileComposer key={session.id} session={session} usage={state.usage} onSecret={setSecretAliases} />
         </>
       );
     }
@@ -445,6 +448,21 @@ export function MobileConversationScreen({ version = null }) {
           <NotificationSettings soundEnabled={state.soundEnabled} />
         </div>
       </MobileSheet>
+      {session && (
+        <MobileSheet
+          open={secretAliases !== null}
+          onClose={() => setSecretAliases(null)}
+          title="Store secrets"
+          scope="private"
+        >
+          <SecretBatch
+            open={secretAliases !== null}
+            sessionId={session.id}
+            aliases={secretAliases || []}
+            onClose={() => setSecretAliases(null)}
+          />
+        </MobileSheet>
+      )}
       {session && (
         <RewindTimeline
           open={rewindOpen}

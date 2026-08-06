@@ -434,6 +434,31 @@ test('handleWsUserMessage appends a prompt sent from another client', () => {
   expect(messages[0].content).toEqual([{ type: 'text', text: 'dictado desde el móvil' }]);
 });
 
+test('secret batch delivery uses trusted metadata and never renders the backend note text', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+  const text = 'A secret batch is available in /tmp/moa-secrets-42/batch-a (aliases: db-produccion, api-key). Install each secret where its relevant client expects it, then delete these files. Never print a value or copy one into the repository or into a command that would echo it.';
+
+  handleWsUserMessage('s1', { msg_id: 'secret-1', text, custom: {
+    source: 'secret_batch', secret_aliases: ['db-produccion', 'api-key'],
+  } });
+
+  expect(store.get().sessions.s1.messages).toEqual([{
+    _type: 'secret_batch', _msg_id: 'secret-1', aliases: ['db-produccion', 'api-key'],
+  }]);
+  expect(JSON.stringify(store.get().sessions.s1.messages)).not.toContain('/tmp/moa-secrets');
+});
+
+test('ordinary text that resembles a secret note stays a user message', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+  const text = 'A secret batch is available in /tmp with space (aliases: db). Install each secret where its relevant client expects it, then delete these files. Never print a value or copy one into the repository or into a command that would echo it.';
+
+  handleWsUserMessage('s1', { msg_id: 'ordinary', text });
+
+  expect(store.get().sessions.s1.messages[0]).toMatchObject({ role: 'user', _msg_id: 'ordinary' });
+});
+
 test('handleWsUserMessage dedups against the optimistic echo by MsgID', () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [

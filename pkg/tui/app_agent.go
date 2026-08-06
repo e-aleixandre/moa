@@ -451,6 +451,8 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 					command, _ := msg.Custom["bash_command"].(string)
 					status, _ := msg.Custom["bash_status"].(string)
 					m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, text))
+				} else if source == "secret_batch" {
+					m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: secretBatchStatus(secretAliases(msg.Custom))})
 				} else if task, status, result, ok := parseSubagentNotification(text); ok {
 					if m.hasTerminalSubagentOutcome(subagentNotificationJobID(text)) {
 						continue

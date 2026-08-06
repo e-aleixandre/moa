@@ -26,6 +26,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input
+- Stage short-lived secrets for the agent without putting their values in chat
 - Pair a Pulse device by scanning a **QR code** (or manual code), created from the top bar (`POST /api/pulse/pairings`)
 - **Version indicator** in the top bar that links to the latest release when an update is available
 
@@ -104,6 +105,50 @@ review any external resources the page references before it loads.
 - Native binary content (images, plus any natively-forwarded documents) is additionally capped at **48 MB cumulative across the session's history** (`maxSessionNativeDocBytes`), because native blocks are re-sent to the model every turn; individual images are capped at **5 MB** decoded. Content beyond the cumulative budget falls back to disk instead.
 - Files that exceed the client-side cap are rejected before upload. Raising these limits would require changing the transport (currently base64-in-JSON), which is out of scope.
 - The base directory can be overridden with the `MOA_ATTACHMENTS_DIR` environment variable. It defaults to `/tmp/moa-<uid>`: the directory is created `0700` and moa refuses one owned by another account, so keying it by user is what lets two accounts on the same machine both stage attachments.
+
+## Staging secrets
+
+An owner-authorized client can send a short-lived credential batch to
+`POST /api/sessions/{id}/secrets` without putting the values in the chat:
+
+```json
+{
+  "secrets": [
+    {"name": "db-produccion", "value": "…"},
+    {"name": "netrc", "value": "…"}
+  ]
+}
+```
+
+Moa writes one `0600` file per alias in a fresh `0700` directory below the
+system temporary directory, then tells the agent only that directory and the
+aliases. The agent installs each credential where its client expects it and
+deletes the files afterwards. Batches are also removed on session close/delete
+or periodically once they are at least six hours old. The response contains
+only `directory` and `aliases`.
+
+**Important boundary: this is not a vault and does not protect a secret from
+the agent.** The agent's shell runs as the same Unix user and **can read the
+staged files**. If it reads or prints a value, that content enters the model
+context and transcript like any other tool output. Only use it with
+repositories and commands you trust.
+
+What staging does provide is narrower: the value never passes through chat
+input, is never persisted in your message, and Moa itself never sends it to the
+model — only the directory path and aliases.
+
+In the web or terminal UI, use `/secret alias1 alias2` to enter a masked value
+for each alias, or `/secret` to add aliases one at a time. Type **only names,
+never values**, after `/secret`. To limit the chance that a pasted value is
+mistaken for a name, the command accepts at most three aliases; add further
+names in the masked form. Values are deliberately not accepted on that command
+line. Moa refuses and discards every recognized `/secret` command before it can
+enter its composer history, local draft, dispatch, or transcript. Your browser,
+terminal, keyboard, or OS may still retain text you typed outside Moa's draft
+store; if you accidentally type a value there, rotate that credential. The same boundary
+applies: only the directory path and aliases reach the model from Moa; the
+agent can nevertheless read a staged file, and any
+value it reads or prints enters context and the transcript as tool output.
 
 ## Queued commands and mid-run messages
 
@@ -200,6 +245,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/capabilities` | Server/session capabilities (providers, features) |
 | `GET /api/usage` | Usage/cost readout |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
+| `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |

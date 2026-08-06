@@ -197,6 +197,10 @@ func (m *Message) EnsureMsgID() {
 type SteerItem struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	// Custom is persisted with the eventual conversation message. It lets
+	// internal ingress retain its rendering/source metadata when it has to wait
+	// on the queue rail instead of starting a direct run.
+	Custom map[string]any `json:"-"`
 	// Content, when non-nil, is the full payload of a steer (text plus image or
 	// other content blocks). It is injected with NewUserMessageWithContent. A
 	// nil Content means a plain-text steer carried in Text.

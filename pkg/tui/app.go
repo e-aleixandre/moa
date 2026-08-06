@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/planmode"
 	promptpkg "github.com/e-aleixandre/moa/pkg/prompt"
 	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/usage"
@@ -107,11 +108,13 @@ type appModel struct {
 	s *state
 
 	// Bus runtime — all interaction goes through this
-	runtime  *bus.SessionRuntime
-	eventCh  chan busEventMsg
-	quit     chan struct{}
-	unsubAll func()
-	baseCtx  context.Context // parent context for signal cancellation
+	runtime            *bus.SessionRuntime
+	eventCh            chan busEventMsg
+	quit               chan struct{}
+	unsubAll           func()
+	baseCtx            context.Context // parent context for signal cancellation
+	secretReaperCancel context.CancelFunc
+	secretReaperDone   <-chan struct{}
 	// handoffReady is held until the source run settles, because switching the
 	// reusable TUI runtime while that run is still unwinding is unsafe.
 	handoffReady   *bus.HandoffReady
@@ -156,6 +159,9 @@ type appModel struct {
 	cmdPalette         cmdPalette
 	filePicker         filePicker
 	permPrompt         permissionPrompt
+	secretPrompt       secretPrompt
+	secretSteers       map[string]struct{}
+	secretDirs         []string
 	askPrompt          askPrompt
 	sessionBrowser     sessionBrowser
 	statusBar          *StatusLine
@@ -261,6 +267,9 @@ func isStructuralBusEvent(event any) bool {
 
 // New creates the TUI model. All interaction goes through the bus runtime.
 func New(ctx context.Context, cfg Config) appModel {
+	secrets.Reap()
+	secretReaperCtx, secretReaperCancel := context.WithCancel(ctx)
+	secretReaperDone := secrets.StartReaper(secretReaperCtx)
 	eventCh := make(chan busEventMsg, 1024)
 	quit := make(chan struct{})
 
@@ -294,6 +303,8 @@ func New(ctx context.Context, cfg Config) appModel {
 		quit:                 quit,
 		unsubAll:             unsubAll,
 		baseCtx:              ctx,
+		secretReaperCancel:   secretReaperCancel,
+		secretReaperDone:     secretReaperDone,
 		mcpCtrl:              mcpControlOrNil(cfg.MCPController),
 		mcpSessionVetoes:     map[string][]string{},
 		mcpReconcileArmed:    &atomic.Bool{},
@@ -326,6 +337,7 @@ func New(ctx context.Context, cfg Config) appModel {
 			model:       cfg.STTModel,
 			vocabPrompt: core.BuildSTTPrompt(cfg.STTVocabulary),
 		},
+		secretSteers: map[string]struct{}{},
 	}
 	if cfg.ReleaseInfo.Version != "" {
 		m.statusBar.UpdateVersionSegment(cfg.ReleaseInfo.DisplayVersion(), "")
@@ -957,6 +969,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePermissionKey(msg)
 	}
 
+	if m.secretPrompt.active {
+		return m.handleSecretKey(msg)
+	}
+
 	if m.picker.active {
 		return m.handlePickerKey(msg)
 	}
@@ -1185,6 +1201,14 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.acceptFileMention(selected)
 			}
 			return m, m.forceRepaint()
+		}
+		// /secret is recognized before Submit so even a refused command cannot
+		// land in input history. Its text may already contain an accidentally
+		// pasted value, so discard it unconditionally, including while a run is
+		// active (the busy path would otherwise call Submit first).
+		if cmd, ok := ParseCommand(m.input.textarea.Value()); ok && strings.Fields(commandFirstLine(cmd))[0] == "secret" {
+			m.input.Discard()
+			return m.handleCommand(cmd)
 		}
 		if m.s.running {
 			text := m.input.Submit()
@@ -1663,6 +1687,8 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 			m.handleSubagentNotificationSteer(subagentNotificationJobID(e.Text), task, status, result)
 		} else if command, status, ok := parseBashNotification(e.Text); ok {
 			m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, e.Text))
+		} else if _, secretSteer := m.secretSteers[e.ID]; secretSteer {
+			delete(m.secretSteers, e.ID)
 		} else {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
 			// A steer queued with an image now carries its blocks, so the
@@ -2308,6 +2334,16 @@ func renderTick() tea.Cmd {
 
 func (m *appModel) cleanup() {
 	m.s.cleanupOnce.Do(func() {
+		if m.secretReaperCancel != nil {
+			m.secretReaperCancel()
+			if m.secretReaperDone != nil {
+				<-m.secretReaperDone
+			}
+		}
+		for _, dir := range m.secretDirs {
+			_ = secrets.Forget(dir)
+		}
+		m.secretDirs = nil
 		close(m.quit)
 		// Let an active run observe cancellation and let TreeSyncer consume its
 		// final events before taking the durable snapshot. Closing the runtime

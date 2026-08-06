@@ -129,6 +129,20 @@ func TestNew_StartInSessionBrowserDisablesInput(t *testing.T) {
 	}
 }
 
+func TestCleanupWaitsForSecretReaper(t *testing.T) {
+	m := newSwitchTestApp(t)
+	done := m.secretReaperDone
+	if done == nil {
+		t.Fatal("New did not start a secret reaper")
+	}
+	m.cleanup()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup did not wait for the secret reaper")
+	}
+}
+
 func TestActivateSession_ClosesBrowserAndRebuildsBlocks(t *testing.T) {
 	m := newSwitchTestApp(t)
 	m.sessionBrowser.Open()

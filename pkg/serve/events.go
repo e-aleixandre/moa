@@ -286,6 +286,7 @@ type SteerData struct {
 	MsgID   string         `json:"msg_id,omitempty"`
 	Text    string         `json:"text"`
 	Content []core.Content `json:"content,omitempty"`
+	Custom  map[string]any `json:"custom,omitempty"`
 }
 
 // UserMessageData is sent when a user prompt starts a new run, so every
@@ -297,6 +298,7 @@ type UserMessageData struct {
 	MsgID   string         `json:"msg_id,omitempty"`
 	Text    string         `json:"text,omitempty"`
 	Content []core.Content `json:"content,omitempty"`
+	Custom  map[string]any `json:"custom,omitempty"`
 }
 
 // CommandQueuedData is sent when a slash command is enqueued as a barrier in the

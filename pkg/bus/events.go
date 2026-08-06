@@ -187,6 +187,7 @@ type Steered struct {
 	MsgID     string
 	Text      string
 	Content   []core.Content
+	Custom    map[string]any
 }
 
 // SteersCanceled is published when all queued (not yet delivered) steers are
@@ -280,9 +281,10 @@ type ContextUpdated struct {
 // the conversation as a new run (SendPrompt / SendPromptWithContent), so every
 // connected client renders it live instead of waiting for a reload. Mid-run
 // messages are NOT reported here: they travel the queue rail and are announced
-// by Steered on delivery. Internal prompts (goal loop, auto-verify, subagent /
-// bash notifications) carry a Custom source and are excluded too — they already
-// have their own live representation.
+// by Steered on delivery. Most internal prompts (goal loop, auto-verify,
+// subagent / bash notifications) are excluded because they have their own live
+// representation. Explicitly announced custom sources carry trusted Custom
+// rendering metadata.
 //
 // Text carries a plain-text prompt; Content carries the full block list of a
 // structured send (attachments plus text). Exactly one of them is populated.
@@ -294,6 +296,7 @@ type UserMessageAppended struct {
 	MsgID     string
 	Text      string
 	Content   []core.Content
+	Custom    map[string]any
 }
 
 // MCPChanged is published when a session's MCP servers change: a server

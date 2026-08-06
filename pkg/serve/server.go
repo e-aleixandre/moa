@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
 	"github.com/e-aleixandre/moa/pkg/usage"
@@ -118,6 +120,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/close", handleCloseSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/secrets", handleStashSecrets(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/steers/cancel", handleCancelSteers(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
@@ -464,6 +467,54 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 				resp.Attachments = append(resp.Attachments, attachmentDTO(sessionID, d))
 			}
 			writeJSON(w, http.StatusAccepted, resp)
+		}
+	}
+}
+
+// handleStashSecrets accepts credential values without adding them to a chat
+// message. The staged directory note, not the values, is what reaches the
+// agent. This is not a vault: the agent runs as the same Unix user and can
+// read the staged files.
+func handleStashSecrets(mgr *Manager) http.HandlerFunc {
+	type secretDTO struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	type request struct {
+		Secrets []secretDTO `json:"secrets"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		limitBody(w, r, maxJSONBodySize)
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		var body request
+		if err := decoder.Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if decoder.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		entries := make([]secrets.Entry, len(body.Secrets))
+		for i, secret := range body.Secrets {
+			entries[i] = secrets.Entry{Name: secret.Name, Value: secret.Value}
+		}
+		dir, names, err := mgr.stashSecrets(r.PathValue("id"), entries)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, bus.ErrSteerQueueFull):
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		case err != nil:
+			// pkg/secrets errors name aliases only, never values. Do not log this
+			// path: a request body must never become a credential log sink.
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			writeJSON(w, http.StatusAccepted, struct {
+				Directory string   `json:"directory"`
+				Aliases   []string `json:"aliases"`
+			}{Directory: dir, Aliases: names})
 		}
 	}
 }

@@ -19,10 +19,10 @@ import "./MobileComposer.css";
 // Visual fit is CSS-only (MobileComposer.css); the composer's own textarea uses
 // --text-input (≥16px) so iOS never auto-zooms, and this wrapper keeps the
 // bottom safe-area inset via the status line below it.
-export function MobileComposer({ session, usage }) {
+export function MobileComposer({ session, usage, onSecret }) {
   return (
     <div class="mcomposer">
-      <Composer sessionId={session.id} session={session} shortPlaceholder />
+      <Composer sessionId={session.id} session={session} shortPlaceholder onSecret={onSecret} />
       <MobileStatusLine session={session} usage={usage} />
     </div>
   );

@@ -27,10 +27,38 @@ Type `/` to open the command palette, or type a command directly:
 | `/prepare-compact` | Write a handoff note, then compact context |
 | `/voice` | Toggle voice recording |
 | `/settings` | Open settings menu |
+| `/secret [alias ...]` | Enter one or more masked secrets for the agent without putting values in chat |
 | `/clear` | Clear conversation, start fresh session |
 | `/exit` | Quit (alias `/quit`) |
 
 `/handoff` is inspired by [Matt Pocock's handoff skill](https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff): it references durable artifacts instead of duplicating them, and uses a fresh conversation to continue the live thread.
+
+## Staging secrets
+
+Use `/secret alias1 alias2` to enter a masked value for each alias. With no
+aliases, `/secret` asks for an alias and value, then offers to add another.
+Type **only names, never values**, after `/secret`. To limit the chance that a
+pasted value is mistaken for a name, the command accepts at most three aliases;
+add further names in the masked prompt. Values are never accepted on the
+command line. Moa refuses and discards every recognized `/secret` command
+before it can enter its input history, local draft, dispatch, or transcript.
+Your terminal, keyboard, or OS may still retain text you typed outside Moa's
+input state; if you accidentally type a value there, rotate that credential.
+
+Moa writes each value to a short-lived `0600` file in a private `0700`
+directory and tells the agent only the directory path and aliases. Batches are
+removed when the TUI exits or periodically once they are at least six hours
+old.
+
+**Important boundary: this is not a vault and does not protect a secret from
+the agent.** The agent's shell runs as the same Unix user and **can read the
+staged files**. If it reads or prints a value, that content enters the model
+context and transcript like any other tool output. Only use it with
+repositories and commands you trust.
+
+What staging does provide is narrower: the value never passes through chat
+input, is never persisted in your message, and Moa itself never sends it to the
+model — only the directory path and aliases.
 
 ## Keybindings
 

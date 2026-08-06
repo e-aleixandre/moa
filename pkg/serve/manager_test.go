@@ -208,6 +208,26 @@ func pollUntil(t *testing.T, timeout time.Duration, desc string, fn func() bool)
 // Tests
 // ===========================================================================
 
+func TestShutdownStopsOwnedSecretReaper(t *testing.T) {
+	ctx := context.Background() // deliberately remains live after Shutdown
+	mgr := NewManager(ctx, ManagerConfig{
+		DefaultModel:   core.Model{ID: "test", Provider: "test"},
+		WorkspaceRoot:  t.TempDir(),
+		SessionBaseDir: t.TempDir(),
+		SchedulePath:   filepath.Join(t.TempDir(), "schedules.json"),
+	})
+	done := mgr.secretReaperDone
+	if done == nil {
+		t.Fatal("manager did not start its secret reaper")
+	}
+	mgr.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Shutdown did not wait for the secret reaper")
+	}
+}
+
 func TestCreateSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
