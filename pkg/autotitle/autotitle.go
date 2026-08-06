@@ -13,25 +13,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// DefaultModelSpec is the cheap Anthropic title model.
-const DefaultModelSpec = "haiku"
-
-// cheapModelSpecFor returns a cheap title-generation model on the SAME provider
-// as the session, so an OpenAI session's transcript isn't shipped to Anthropic
-// (a different vendor) just to make a title. Falls back to the Anthropic default.
-func cheapModelSpecFor(provider string) string {
-	switch provider {
-	case "anthropic":
-		return DefaultModelSpec
-	case "openai":
-		return "gpt-5.4-mini"
-	case "xai":
-		return "grok"
-	default:
-		return ""
-	}
-}
-
 // MaxTitleLen caps the generated title length (in runes).
 const MaxTitleLen = 60
 
@@ -75,10 +56,9 @@ func isNoConcreteTask(title string) bool {
 type ProviderFactory func(core.Model) (core.Provider, error)
 
 // Generate makes a one-shot LLM call to produce a session title from the
-// conversation messages. It uses a cheap model (DefaultModelSpec) and returns
-// the cleaned title. Returns an error if the model can't be resolved, the
-// provider can't be built, or the call produces no usable text.
-func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Model, msgs []core.AgentMessage) (string, error) {
+// conversation messages using model. Returns an error if the provider can't be
+// built or the call produces no usable text.
+func Generate(ctx context.Context, factory ProviderFactory, model core.Model, msgs []core.AgentMessage) (string, error) {
 	if factory == nil {
 		return "", fmt.Errorf("autotitle: nil provider factory")
 	}
@@ -87,14 +67,6 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 		return "", fmt.Errorf("autotitle: no conversation content")
 	}
 
-	spec := cheapModelSpecFor(sessionModel.Provider)
-	if spec == "" {
-		return "", fmt.Errorf("autotitle: no same-vendor model for provider %q", sessionModel.Provider)
-	}
-	model, ok := core.ResolveModel(spec)
-	if !ok {
-		return "", fmt.Errorf("autotitle: cannot resolve model %q", spec)
-	}
 	thinking, err := core.EffectiveThinkingLevel(model, internalThinking(model))
 	if err != nil {
 		return "", fmt.Errorf("autotitle: thinking level: %w", err)

@@ -167,8 +167,10 @@ type appModel struct {
 
 	// Auto-titling: one-shot cheap LLM call to name the session after the
 	// first run. nil factory disables it.
-	providerFactory func(core.Model) (core.Provider, error)
-	autoTitled      bool
+	providerFactory  func(core.Model) (core.Provider, error)
+	autoTitleModel   core.Model
+	autoTitleEnabled bool
+	autoTitled       bool
 
 	// Display
 	modelName     string
@@ -235,6 +237,8 @@ type Config struct {
 	CacheTTL              time.Duration                           // prompt-cache retention (Anthropic); drives the "cache cold" hint
 	UsagePoller           *usage.MultiPoller                      // plan usage poller (nil = usage tracking disabled)
 	ProviderFactory       func(core.Model) (core.Provider, error) // one-shot LLM calls (auto-titling); nil disables
+	AutoTitleModel        core.Model                              // resolved auto-title model
+	AutoTitleEnabled      bool                                    // false disables automatic titles
 	ReleaseInfo           release.Info                            // build metadata shown immediately in the status line
 	UpdateChecker         *release.Checker                        // optional stable-release checker
 	UpdateCheckEnabled    bool                                    // false disables the asynchronous check
@@ -304,6 +308,8 @@ func New(ctx context.Context, cfg Config) appModel {
 		sessionStore:         cfg.SessionStore,
 		session:              cfg.Session,
 		providerFactory:      cfg.ProviderFactory,
+		autoTitleModel:       cfg.AutoTitleModel,
+		autoTitleEnabled:     cfg.AutoTitleEnabled,
 		cwd:                  cfg.CWD,
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		loadPinnedModels:     cfg.LoadPinnedModels,
@@ -2249,7 +2255,7 @@ type autoTitleMsg struct {
 // first successful run, unless the session was manually renamed. Returns nil
 // when titling doesn't apply.
 func (m *appModel) maybeAutoTitle(msgs []core.AgentMessage, runErr error) tea.Cmd {
-	if runErr != nil || m.autoTitled || m.providerFactory == nil || m.session == nil {
+	if runErr != nil || m.autoTitled || m.providerFactory == nil || !m.autoTitleEnabled || m.session == nil {
 		return nil
 	}
 	if m.session.TitleIsManual() || len(msgs) == 0 {
@@ -2260,9 +2266,8 @@ func (m *appModel) maybeAutoTitle(msgs []core.AgentMessage, runErr error) tea.Cm
 	ctx := m.baseCtx
 	target := m.session
 	epoch := m.s.sessionEpoch
-	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
 	return func() tea.Msg {
-		title, err := autotitle.Generate(ctx, factory, sessionModel, msgs)
+		title, err := autotitle.Generate(ctx, factory, m.autoTitleModel, msgs)
 		if err != nil {
 			return autoTitleMsg{} // empty → ignored
 		}

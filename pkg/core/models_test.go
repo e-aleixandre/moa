@@ -2,6 +2,7 @@ package core
 
 import (
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -43,6 +44,40 @@ func TestGrokPricing(t *testing.T) {
 	long := p.Cost(Usage{Input: 200_000, Output: 1_000})
 	if math.Abs(short-0.405998) > 1e-12 || math.Abs(long-0.812) > 1e-12 {
 		t.Fatalf("Grok costs = short %v, long %v", short, long)
+	}
+}
+
+func TestGPT56TerraPricing(t *testing.T) {
+	model, ok := ResolveModel("terra")
+	if !ok || model.Pricing == nil {
+		t.Fatal("Terra pricing missing")
+	}
+	p := model.Pricing
+	if got, want := *p, (Pricing{Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5, Tiers: []PricingTier{{Threshold: 272_000, Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Terra pricing = %+v, want %+v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 261_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), 0.542998; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short Terra cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 262_000, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), 1.08; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long Terra cost = %v, want %v", got, want)
+	}
+}
+
+func TestGPT56LunaPricing(t *testing.T) {
+	model, ok := ResolveModel("luna")
+	if !ok || model.Pricing == nil {
+		t.Fatal("Luna pricing missing")
+	}
+	p := model.Pricing
+	if got, want := *p, (Pricing{Input: .2, Output: 1.2, CacheRead: .02, CacheWrite: .25, Tiers: []PricingTier{{Threshold: 272_000, Input: .4, Output: 1.8, CacheRead: .04, CacheWrite: .5}}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Luna pricing = %+v, want %+v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 261_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), .0542998; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short Luna cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 262_000, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), .108; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long Luna cost = %v, want %v", got, want)
 	}
 }
 

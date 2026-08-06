@@ -36,6 +36,22 @@ func newTestModel() appModel {
 	}
 }
 
+func TestMaybeAutoTitle_DisabledDoesNotStartBackgroundCall(t *testing.T) {
+	called := false
+	m := appModel{
+		s:                &state{},
+		session:          &session.Session{},
+		providerFactory:  func(core.Model) (core.Provider, error) { called = true; return staticProvider{}, nil },
+		autoTitleEnabled: false,
+	}
+	if cmd := m.maybeAutoTitle([]core.AgentMessage{core.WrapMessage(core.NewUserMessage("task"))}, nil); cmd != nil {
+		t.Fatal("disabled auto-title must not schedule a command")
+	}
+	if called {
+		t.Fatal("disabled auto-title must not construct a provider")
+	}
+}
+
 // newTestRuntime creates a SessionRuntime for tests.
 func newTestRuntime(t *testing.T, ag *agent.Agent) *bus.SessionRuntime {
 	t.Helper()

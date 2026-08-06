@@ -192,6 +192,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
 	moaCfg := m.loadConfig(cwd)
+	autoTitleModel, autoTitleEnabled := m.resolveAuxiliaryModel(moaCfg.AutoTitleModel, id, "auto title")
+	briefModel, briefEnabled := m.resolveAuxiliaryModel(moaCfg.SessionBriefModel, id, "session brief")
 	var mcpSources *core.MCPDisableSources
 	if m.mcpSourcesLoader != nil {
 		mcpSources = m.mcpSourcesLoader(cwd)
@@ -476,17 +478,21 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// the system prompt automatically.
 
 	sess = &ManagedSession{
-		ID:            id,
-		Title:         title,
-		CWD:           cwd,
-		Created:       time.Now(),
-		Updated:       time.Now(),
-		modelProvider: model.Provider,
-		cacheTTL:      core.CacheTTLDuration(moaCfg),
-		runtime:       rt,
-		subagents:     bs.Subagents,
-		bashJobs:      bs.BashJobs,
-		pathPolicy:    bs.PathPolicy,
+		ID:                  id,
+		Title:               title,
+		CWD:                 cwd,
+		Created:             time.Now(),
+		Updated:             time.Now(),
+		modelProvider:       model.Provider,
+		cacheTTL:            core.CacheTTLDuration(moaCfg),
+		autoTitleModel:      autoTitleModel,
+		autoTitleEnabled:    autoTitleEnabled,
+		sessionBriefModel:   briefModel,
+		sessionBriefEnabled: briefEnabled,
+		runtime:             rt,
+		subagents:           bs.Subagents,
+		bashJobs:            bs.BashJobs,
+		pathPolicy:          bs.PathPolicy,
 		infra: serveInfra{
 			sessionCtx:      sessionCtx,
 			sessionCancel:   sessionCancel,

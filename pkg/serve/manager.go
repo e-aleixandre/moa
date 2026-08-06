@@ -100,6 +100,12 @@ type ManagedSession struct {
 	// cacheTTL is the prompt-cache retention window (5m default, or 1h when
 	// configured). Immutable after creation; read alongside lastRunAt.
 	cacheTTL time.Duration
+	// Auxiliary models are resolved when this session is created, from its own
+	// merged project config.
+	autoTitleModel      core.Model
+	autoTitleEnabled    bool
+	sessionBriefModel   core.Model
+	sessionBriefEnabled bool
 
 	// Bus runtime — owns all session state.
 	runtime *bus.SessionRuntime
@@ -516,15 +522,16 @@ type Manager struct {
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
-	providerFactory func(model core.Model) (core.Provider, error)
-	transcriber     core.Transcriber   // nil when no speech-to-text is available
-	usagePoller     *usage.MultiPoller // nil when plan usage tracking is unavailable
-	pushStore       *push.Store        // nil when Web Push is unavailable
-	pushDispatcher  *push.Dispatcher   // nil when Web Push is unavailable
-	defaultModel    core.Model
-	workspaceRoot   string
-	moaCfg          core.MoaConfig
-	configLoader    func(cwd string) core.MoaConfig
+	providerFactory        func(model core.Model) (core.Provider, error)
+	transcriber            core.Transcriber   // nil when no speech-to-text is available
+	usagePoller            *usage.MultiPoller // nil when plan usage tracking is unavailable
+	pushStore              *push.Store        // nil when Web Push is unavailable
+	pushDispatcher         *push.Dispatcher   // nil when Web Push is unavailable
+	defaultModel           core.Model
+	workspaceRoot          string
+	moaCfg                 core.MoaConfig
+	configLoader           func(cwd string) core.MoaConfig
+	auxiliaryModelResolver func(spec string) (core.Model, bool, error)
 	// mcpSourcesLoader resolves the provenance (global vs project) of MCP disable
 	// vetoes for a cwd. nil when a custom ConfigLoader is in use (tests), in which
 	// case bootstrap falls back to treating the merged list as global.
@@ -572,6 +579,10 @@ type ManagerConfig struct {
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
+	// AuxiliaryModelResolver resolves auto-title/session-brief settings against
+	// normal completion credentials. A nil resolver leaves auto unavailable;
+	// explicit specs continue to work through the core resolver.
+	AuxiliaryModelResolver func(spec string) (core.Model, bool, error)
 	// ConfigLoader loads configuration for an individual session CWD. When
 	// nil, core.LoadMoaConfig preserves the normal global/project lookup.
 	ConfigLoader   func(cwd string) core.MoaConfig
@@ -643,27 +654,28 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		slog.Warn("conversation cursor key unavailable", "error", err)
 	}
 	m := &Manager{
-		sessions:         make(map[string]*ManagedSession),
-		resuming:         make(map[string]struct{}),
-		baseCtx:          ctx,
-		providerFactory:  cfg.ProviderFactory,
-		transcriber:      cfg.Transcriber,
-		usagePoller:      cfg.UsagePoller,
-		pushStore:        cfg.PushStore,
-		pushDispatcher:   cfg.PushDispatcher,
-		defaultModel:     cfg.DefaultModel,
-		workspaceRoot:    cfg.WorkspaceRoot,
-		moaCfg:           cfg.MoaCfg,
-		configLoader:     configLoader,
-		mcpSourcesLoader: mcpSourcesLoader,
-		sessionBaseDir:   cfg.SessionBaseDir,
-		attachStore:      attachStore,
-		savedCacheTTL:    30 * time.Second,
-		fileScanner:      files.NewScanner(),
-		scheduler:        scheduler,
-		attention:        attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
-		conversationKey:  conversationKey,
-		version:          release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
+		sessions:               make(map[string]*ManagedSession),
+		resuming:               make(map[string]struct{}),
+		baseCtx:                ctx,
+		providerFactory:        cfg.ProviderFactory,
+		transcriber:            cfg.Transcriber,
+		usagePoller:            cfg.UsagePoller,
+		pushStore:              cfg.PushStore,
+		pushDispatcher:         cfg.PushDispatcher,
+		defaultModel:           cfg.DefaultModel,
+		workspaceRoot:          cfg.WorkspaceRoot,
+		moaCfg:                 cfg.MoaCfg,
+		configLoader:           configLoader,
+		auxiliaryModelResolver: cfg.AuxiliaryModelResolver,
+		mcpSourcesLoader:       mcpSourcesLoader,
+		sessionBaseDir:         cfg.SessionBaseDir,
+		attachStore:            attachStore,
+		savedCacheTTL:          30 * time.Second,
+		fileScanner:            files.NewScanner(),
+		scheduler:              scheduler,
+		attention:              attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
+		conversationKey:        conversationKey,
+		version:                release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
 	m.automation = newAutomationIndex(cfg.SessionBaseDir)
 	if cfg.UpdateCheckEnabled && cfg.UpdateChecker != nil {
@@ -723,6 +735,25 @@ func (m *Manager) Version() release.Result {
 
 func (m *Manager) loadConfig(cwd string) core.MoaConfig {
 	return m.configLoader(cwd)
+}
+
+// resolveAuxiliaryModel deliberately degrades invalid settings and unavailable
+// credentials to disabled: a background convenience must never prevent a
+// session from being usable. Explicit settings are resolved once only; callers
+// do not retry another vendor after a provider failure.
+func (m *Manager) resolveAuxiliaryModel(spec, sessionID, feature string) (core.Model, bool) {
+	resolver := m.auxiliaryModelResolver
+	if resolver == nil {
+		resolver = func(spec string) (core.Model, bool, error) {
+			return core.ResolveAuxiliaryModel(spec, nil)
+		}
+	}
+	model, enabled, err := resolver(spec)
+	if err != nil {
+		slog.Warn("auxiliary model disabled", "session", sessionID, "feature", feature, "error", err)
+		return core.Model{}, false
+	}
+	return model, enabled
 }
 
 // Send delivers a user message (with optional attachments) to a session.

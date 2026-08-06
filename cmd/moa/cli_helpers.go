@@ -103,6 +103,18 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 	return ProviderBuildResult{Provider: wrapped, AuthNotice: authNotice}, nil
 }
 
+// auxiliaryModelResolver uses only a provider's normal completion credential.
+// In particular, the dedicated openai-transcribe credential does not make Luna
+// available for titles or briefs.
+func auxiliaryModelResolver(authStore *auth.Store) func(string) (core.Model, bool, error) {
+	return func(spec string) (core.Model, bool, error) {
+		return core.ResolveAuxiliaryModel(spec, func(provider string) bool {
+			key, _, err := authStore.GetAPIKey(provider)
+			return err == nil && key != ""
+		})
+	}
+}
+
 func printAuthNotice(w io.Writer, notice string) {
 	if notice == "" {
 		return

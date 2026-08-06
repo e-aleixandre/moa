@@ -2,7 +2,6 @@ package pulsebrief
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -51,23 +50,16 @@ func TestParseBrief_TwoFields(t *testing.T) {
 	}
 }
 
-func TestGenerate_XAIUsesGrokAndLowThinking(t *testing.T) {
+func TestGenerate_UsesConfiguredModel(t *testing.T) {
 	p := &fakeProvider{response: "ATTEMPTING: Fix Grok\nPROGRESS: Writing tests"}
 	var factoryModel core.Model
-	brief, err := Generate(context.Background(), func(m core.Model) (core.Provider, error) { factoryModel = m; return p, nil }, core.Model{Provider: "xai"}, []core.AgentMessage{userMsg("Fix Grok")})
+	model, _ := core.ResolveModel("luna")
+	brief, err := Generate(context.Background(), func(m core.Model) (core.Provider, error) { factoryModel = m; return p, nil }, model, []core.AgentMessage{userMsg("Fix Grok")})
 	if err != nil || brief.IsEmpty() {
 		t.Fatalf("brief=%+v err=%v", brief, err)
 	}
-	if factoryModel.Provider != "xai" || factoryModel.ID != "grok-4.5" || p.request.Options.ThinkingLevel != "low" {
+	if factoryModel.ID != "gpt-5.6-luna" || p.request.Model.ID != "gpt-5.6-luna" {
 		t.Fatalf("model=%+v thinking=%q", factoryModel, p.request.Options.ThinkingLevel)
-	}
-}
-
-func TestGenerate_UnknownProviderDoesNotFallbackToAnthropic(t *testing.T) {
-	called := false
-	_, err := Generate(context.Background(), func(core.Model) (core.Provider, error) { called = true; return nil, nil }, core.Model{Provider: "unknown"}, []core.AgentMessage{userMsg("task")})
-	if !errors.Is(err, ErrNoCheapSameVendorModel) || called {
-		t.Fatalf("err=%v factory called=%v", err, called)
 	}
 }
 
@@ -210,20 +202,6 @@ func TestGenerate_NoContent(t *testing.T) {
 	}
 }
 
-func TestCheapModelSpecFor(t *testing.T) {
-	if got, ok := cheapModelSpecFor("openai"); !ok || got != "gpt-5.4-mini" {
-		t.Fatalf("openai → %q, want gpt-5.4-mini", got)
-	}
-	if got, ok := cheapModelSpecFor("anthropic"); !ok || got != DefaultModelSpec {
-		t.Fatalf("anthropic → %q, want %q", got, DefaultModelSpec)
-	}
-	for _, p := range []string{"google", "custom", ""} {
-		if got, ok := cheapModelSpecFor(p); ok || got != "" {
-			t.Fatalf("%q → (%q, %t), want no model", p, got, ok)
-		}
-	}
-}
-
 func TestWrapPrompt_FramesAsData(t *testing.T) {
 	got := wrapPrompt("User: hola")
 	if !strings.Contains(got, "<conversation>") || !strings.Contains(got, "</conversation>") {
@@ -231,20 +209,6 @@ func TestWrapPrompt_FramesAsData(t *testing.T) {
 	}
 	if !strings.Contains(got, "User: hola") {
 		t.Errorf("wrapPrompt must include the transcript, got:\n%s", got)
-	}
-}
-
-func TestGenerate_UnknownProviderDoesNotBuildProvider(t *testing.T) {
-	built := false
-	_, err := Generate(context.Background(), func(core.Model) (core.Provider, error) {
-		built = true
-		return &fakeProvider{}, nil
-	}, core.Model{Provider: "google"}, []core.AgentMessage{userMsg("summarize this")})
-	if !errors.Is(err, ErrNoCheapSameVendorModel) {
-		t.Fatalf("Generate error = %v, want ErrNoCheapSameVendorModel", err)
-	}
-	if built {
-		t.Fatal("unknown provider must not construct a provider or send its transcript")
 	}
 }
 

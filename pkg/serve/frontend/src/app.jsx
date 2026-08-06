@@ -20,6 +20,7 @@ import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
+import { installOpenSessionNavigation } from "./data/push-navigation.js";
 import {
   setMobile, autoFillTiles, autoSelectMobile, openSession,
 } from "./data/tile-actions.js";
@@ -162,6 +163,10 @@ function useBootstrap() {
   // keep the store's `view` in sync with the URL (in-app conversation ⇄ grid
   // hops use pushState, no reload — see data/router.js).
   useEffect(() => bindRouter(), []);
+
+  // Warm notification taps use the same openSession behavior as a cold
+  // ?session= deep link, waiting for the authoritative initial session list.
+  useEffect(() => installOpenSessionNavigation(), []);
 
   // Mobile breakpoint → setMobile. The App below decides whether the current
   // view owns document scrolling: galleries need native document scroll while

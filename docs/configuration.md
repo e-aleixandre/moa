@@ -111,6 +111,8 @@ global config and a project's jargon in its `.moa/config.json`:
 | `plan_review_thinking` | string | Thinking level for plan review (default: `low`) |
 | `code_review_model` | string | Model for code review |
 | `code_review_thinking` | string | Thinking level for code review |
+| `auto_title_model` | string | Model for automatic session titles: `auto` (default), `off`, or a valid model spec/alias. Auto may send a snippet of **any session’s transcript** — not only sessions already on that vendor — to the selected available auxiliary provider: OpenAI Luna when normal OpenAI completion credentials exist, otherwise Anthropic Haiku. Thus an Anthropic/xAI session can be sent to OpenAI, or an OpenAI/xAI session to Anthropic when Haiku is the fallback. Privacy-sensitive users should choose an explicit same-provider model or `off`. |
+| `session_brief_model` | string | Model for web/Pulse session status briefs: `auto` (default), `off`, or a valid model spec/alias. Auto has the same cross-provider behavior as titles: a snippet of any session transcript can be sent to Luna, or to Haiku when it is the available fallback. Choose an explicit same-provider model or `off` when that is not acceptable. Briefs are not shown in the single-session TUI. |
 
 The initial xAI model is `grok-4.5`, also available as `grok`. Its supported
 thinking levels are `low`, `medium`, and `high`. A provider-qualified custom
