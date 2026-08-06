@@ -1,4 +1,6 @@
 import { ChevronDown } from "lucide-preact";
+import { useRef } from "preact/hooks";
+import { mobileTitleChipLabel, mobileTitleChipPresentation, nextMobileTitleRipple } from "../MobileConversationScreen/attention-model.js";
 import "./MobileTitleChip.css";
 
 // MobileTitleChip — the floating session title, centred over the top of the
@@ -11,20 +13,20 @@ import "./MobileTitleChip.css";
 // list reads as belonging to the title rather than arriving from nowhere.
 //
 // It replaces the status line's explicit "Sessions" door, and inherits its
-// cross-session attention duty. Urgent blocks use peach; an otherwise-idle
-// session with a new result uses mauve. The active session is handled inline.
+// cross-session attention duty. Errors, human-input requests, and new results
+// keep their winning red, yellow, or mauve color. The active session is inline.
 export function MobileTitleChip({ title, attention = {}, open = false, onToggle }) {
-  const urgent = attention.urgent || 0;
-  const unseen = attention.unseen || 0;
-  const count = urgent + unseen;
-  const hasAttn = count > 0;
-  const label = hasAttn
-    ? `${title} — sessions; ${count} other session${count === 1 ? "" : "s"} need attention`
-    : `${title} — sessions`;
+  const presentation = mobileTitleChipPresentation(attention);
+  const arrivalRef = useRef(0);
+  const rippleRef = useRef(0);
+  const nextRipple = nextMobileTitleRipple(arrivalRef.current, rippleRef.current, attention);
+  arrivalRef.current = nextRipple.arrival;
+  rippleRef.current = nextRipple.ripple;
+  const label = mobileTitleChipLabel(title, attention);
   return (
     <button
       type="button"
-      class={`mtchip${open ? " is-open" : ""}`}
+      class={`mtchip${open ? " is-open" : ""}${presentation.hasAttention ? ` has-attention mtchip-attention-${presentation.tone}` : ""}`}
       onClick={() => onToggle?.(!open)}
       aria-haspopup="dialog"
       aria-expanded={open}
@@ -34,7 +36,13 @@ export function MobileTitleChip({ title, attention = {}, open = false, onToggle 
       <span class="mtchip-chev" aria-hidden="true">
         <ChevronDown size={12} />
       </span>
-      {hasAttn && <span class={`mtchip-attn${urgent ? "" : " mtchip-attn-unseen"}`} aria-hidden="true" />}
+      {presentation.hasAttention && (
+        <span
+          key={rippleRef.current}
+          class={`mtchip-attn mtchip-attn-${presentation.tone}${presentation.tone === "unseen" ? " mtchip-attn-unseen" : ""}`}
+          aria-hidden="true"
+        />
+      )}
     </button>
   );
 }

@@ -5,6 +5,7 @@ import { api } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 import { truncateText } from './util/format.js';
+import { attentionArrival } from './attention-arrivals.js';
 
 // --- Message normalization ---
 
@@ -411,6 +412,11 @@ export function handleWsInit(id, data) {
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
   const prev = store.get().sessions[id] || {};
+  // Attention generations restart from zero with the server process. Reset the
+  // per-session server high water at the WS boundary too (polling covers hidden
+  // sessions) so the first lower-generation live occurrence is never hidden.
+  const serverInstance = data.server_instance || prev.serverInstance || '';
+  const serverRestarted = !!data.server_instance && !!prev.serverInstance && data.server_instance !== prev.serverInstance;
   const viewing = prev.viewingSubagent;
   const keptLocal = viewing && prev.subagents && prev.subagents[viewing]
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
@@ -435,6 +441,9 @@ export function handleWsInit(id, data) {
     }, outcome);
   }
   updateSession(id, {
+    serverInstance,
+    serverUnseenInstance: serverRestarted ? serverInstance : (prev.serverUnseenInstance || serverInstance),
+    serverUnseenGen: serverRestarted ? 0 : (prev.serverUnseenGen || 0),
     messages,
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
@@ -493,6 +502,16 @@ export function handleWsInit(id, data) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
+  acknowledgeVisiblePendingInit(id, data);
+}
+
+function acknowledgeVisiblePendingInit(id, data) {
+  const hidden = typeof document !== 'undefined' && document.hidden;
+  if (hidden || !visibleSessionIds(store.get()).includes(id)) return;
+  const generation = data.pending_permission?.unseen_gen || data.pending_ask?.unseen_gen || 0;
+  if (!generation) return;
+  updateSession(id, { unseen: false, unseenGen: generation });
+  api('POST', `/api/sessions/${id}/read?unseen_gen=${generation}`).catch(() => {});
 }
 
 // withLiveTools appends the tool calls that were in flight when the snapshot
@@ -929,7 +948,13 @@ export function handleWsStateChange(id, data) {
     if (sess) updateSession(id, { streamingText: null, thinkingText: null, compacting: false, runStartedAtMs: null });
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
-      markUnseen(id);
+      // A successful/cancelled terminal state is followed by run_end, which
+      // owns its authoritative occurrence. Only error state_change is itself
+      // the terminal attention event (its run_end reuses that same ID).
+      if (data.state === 'error' && data.unseen_gen) {
+        markUnseen(id, data.unseen_gen, true);
+        acknowledgeVisibleAttention(id, data.unseen_gen);
+      }
       // Surface the reason for an error end so it's visible even when the tile
       // isn't focused — parity with the TUI's run-end error block. A usage/quota
       // limit reads as an actionable "resets in X" line rather than a fault.
@@ -965,6 +990,8 @@ export function handleWsAskUser(id, data) {
     const sess = state.sessions[id];
     if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
   }
+  markUnseen(id, data.unseen_gen, true);
+  acknowledgeVisibleAttention(id, data.unseen_gen);
 }
 
 export function handleWsPermissionRequest(id, data) {
@@ -983,6 +1010,15 @@ export function handleWsPermissionRequest(id, data) {
   if (!visible.includes(id)) {
     const sess = state.sessions[id];
     if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
+  }
+  markUnseen(id, data.unseen_gen, true);
+  acknowledgeVisibleAttention(id, data.unseen_gen);
+}
+
+function acknowledgeVisibleAttention(id, runGen) {
+  const hidden = typeof document !== 'undefined' && document.hidden;
+  if (!hidden && visibleSessionIds(store.get()).includes(id) && runGen) {
+    api('POST', `/api/sessions/${id}/read?unseen_gen=${runGen}`).catch(() => {});
   }
 }
 
@@ -1012,13 +1048,30 @@ function flashSession(id, type) {
 // markUnseen flags a session as having unread activity when the user isn't
 // currently looking at it (not visible, or the tab is backgrounded), so a badge
 // can nudge them back. Cleared by afterVisibilityChange when it comes into view.
-function markUnseen(id) {
+function markUnseen(id, generation = 0, isNewOccurrence = false) {
   const state = store.get();
   const visible = visibleSessionIds(state);
   const hidden = typeof document !== 'undefined' && document.hidden;
   if (visible.includes(id) && !hidden) return;
   const sess = state.sessions[id];
-  if (sess && !sess.unseen) updateSession(id, { unseen: true });
+  if (!sess) return;
+  const serverInstance = sess.serverInstance || '';
+  const sameServerInstance = (sess.serverUnseenInstance || serverInstance) === serverInstance;
+  const serverUnseenGen = sameServerInstance
+    ? (generation > (sess.serverUnseenGen || 0) ? generation : (sess.serverUnseenGen || 0))
+    : generation;
+  const arrival = generation
+    ? attentionArrival(id, generation, serverInstance)
+    : ((isNewOccurrence || !sess.unseen) ? (sess.attentionArrival || 0) + 1 : sess.attentionArrival || 0);
+  if (!sess.unseen || serverUnseenGen !== sess.serverUnseenGen || arrival !== sess.attentionArrival) {
+    updateSession(id, {
+      unseen: true,
+      unseenGen: serverUnseenGen || sess.unseenGen,
+      serverUnseenGen,
+      serverUnseenInstance: serverInstance,
+      attentionArrival: arrival,
+    });
+  }
 }
 
 // isSessionAway is true when the user isn't looking at a session (tab hidden or
@@ -1533,10 +1586,12 @@ export function handleWsRunEnd(id, data = {}) {
   } else {
     updateSession(id, { streamingText: null, thinkingText: null, runningTool: null, compacting: false });
   }
-  const hidden = typeof document !== 'undefined' && document.hidden;
-  if (!hidden && visibleSessionIds(store.get()).includes(id) && data.run_gen) {
-    api('POST', `/api/sessions/${id}/read?run_gen=${data.run_gen}`).catch(() => {});
-  }
+  if (!data.unseen_gen) return; // cancelled/non-attention terminal run
+  acknowledgeVisibleAttention(id, data.unseen_gen);
+  // Error state_change already announced this terminal occurrence. A normal
+  // completion after a permission/ask is a new occurrence and must restart
+  // the title-chip arrival treatment even though the session was already unseen.
+  markUnseen(id, data.unseen_gen, sess?.state !== 'error');
 }
 
 // handleWsUserMessage renders a user prompt that started a new run on EVERY

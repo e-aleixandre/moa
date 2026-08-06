@@ -16,7 +16,7 @@ import { navigate } from "../../data/router.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
 import { addToast } from "../../data/notifications.js";
 import {
-  sessionTitle, sessionDotState, isRecentSession, projectLabel,
+  sessionTitle, sessionDisplayDotState, isRecentSession, projectLabel,
   tildify, expandHome, basename,
 } from "../../data/util/format.js";
 import { sessionSearchMatch } from "../../data/util/project-sessions.js";
@@ -364,7 +364,7 @@ export function CommandPalette({
         kind: "session",
         id: sess.id,
         title,
-        dotState: sessionDotState(sess),
+        dotState: sessionDisplayDotState(sess),
         live: liveStatus(sess),
         cwdLabel,
         when: relativeWhen(sess.updated),

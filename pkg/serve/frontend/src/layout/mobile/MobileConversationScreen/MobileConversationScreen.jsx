@@ -8,7 +8,7 @@ import { setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
-import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
+import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
@@ -22,6 +22,7 @@ import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { liveTrayAgents } from "../../../data/stream-model.js";
+import { aggregateAttention, newResultSessions } from "./attention-model.js";
 import "./MobileConversationScreen.css";
 
 // MobileConversationScreen — the CONNECTED root container of the mobile
@@ -84,20 +85,6 @@ function sessionBrief(sess) {
   return sess.state || "idle";
 }
 
-// aggregateAttention distinguishes urgent blocks from successful results the
-// user has not opened yet. Both light the mobile Sessions door, but the tone
-// preserves urgency: errors/permissions win over a merely new result.
-function aggregateAttention(sessions, activeId) {
-  let urgent = 0;
-  let unseen = 0;
-  for (const s of Object.values(sessions)) {
-    if (s.id === activeId) continue;
-    if (s.pendingPerm || s.pendingAsk || s.state === "permission" || s.state === "error") urgent += 1;
-    else if (s.unseen && s.state === "idle") unseen += 1;
-  }
-  return { urgent, unseen };
-}
-
 // drawerSessions builds the drawer's two groups — active (newest first) and
 // saved — kept apart rather than concatenated because the drawer labels them
 // separately, exactly as the desktop Spine does.
@@ -109,17 +96,18 @@ function drawerSessions(sessions, activeId) {
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  const toCard = (s, newResult = false) => {
-    const needs = !!(s.pendingPerm || s.pendingAsk || s.state === "permission");
+  const toCard = (s) => {
+    const dotState = sessionDisplayDotState(s);
+    const needs = dotState === "permission";
     return {
       id: s.id,
       title: sessionTitle(s),
-      state: newResult ? "idle" : sessionDotState(s),
+      state: dotState,
       when: relAge(s.updated),
       last: sessionBrief(s),
       needsLabel: needs ? "Needs you:" : undefined,
       path: shortPath(s.cwd) || s.cwd || "",
-      unseen: newResult || !!s.unseen,
+      unseen: !!s.unseen,
       active: s.id === activeId,
       saved: s.state === "saved",
       origin: s.origin || undefined,
@@ -127,10 +115,10 @@ function drawerSessions(sessions, activeId) {
       updated: s.updated || 0,
     };
   };
-  const newResults = active.filter((s) => s.unseen && s.state === "idle");
+  const newResults = newResultSessions(active);
   const remainingActive = active.filter((s) => !newResults.includes(s));
   return {
-    newResults: newResults.map((s) => toCard(s, true)),
+    newResults: newResults.map(toCard),
     active: remainingActive.map(toCard),
     saved: saved.map(toCard),
     activeCount: active.length,

@@ -1,0 +1,329 @@
+/* title-attention-lab.css — CATALOG-ONLY styling for the mobile title
+   attention exploration. Two kinds of rules live here:
+
+   1. `.talab-*` — the lab's own chrome (phone-ish frames, fake transcript,
+      keyboard slab, replay button). Purely presentational scaffolding.
+
+   2. `.title-attn-lab--{variant}` — the four experimental treatments. They
+      target the REAL production markup (`.mtchip`, `.mtchip-attn-unseen`,
+      `.mtchip-chev`, `.mtchip-title`) but only under these wrapper classes,
+      so production CSS is never touched and the specimens render with real
+      tokens. The wash treatments key off the real attention dot and fixture
+      state classes, while quiet chips remain untouched. */
+
+/* ---- Lab chrome -------------------------------------------------------- */
+
+.talab-specimen {
+  padding: 0;
+  overflow: hidden;
+}
+
+.talab-specimen .responsive-specimen-head {
+  margin: var(--space-2) var(--space-3);
+}
+
+/* The frame stands in for the phone screen: the chip anchors to it exactly
+   like it anchors to .mconv (nearest positioned ancestor). Isolated so the
+   chip/drawer z-sheet layers stay inside the specimen. */
+.talab-frame {
+  position: relative;
+  isolation: isolate;
+  height: 150px;
+  overflow: hidden;
+  background: var(--base);
+  border-top: 1px solid var(--surface0);
+  --talab-attn-color: var(--mauve);
+}
+
+.talab-frame--permission { --talab-attn-color: var(--yellow); }
+.talab-frame--error,
+.talab-frame--mixed { --talab-attn-color: var(--red); }
+
+.talab-frame--drawer {
+  height: 480px;
+}
+
+/* Short frame: composer + keyboard slab pinned to the bottom, so the eye
+   starts down there and the treatment has to pull it up to the title. */
+.talab-frame--keyboard {
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* Muted text-shaped bars, so the chip's blur pill sits over "content". */
+.talab-transcript {
+  position: absolute;
+  inset: 0;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.talab-transcript span {
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--surface0);
+}
+
+.talab-transcript span:nth-child(1) { width: 82%; }
+.talab-transcript span:nth-child(2) { width: 64%; }
+.talab-transcript span:nth-child(3) { width: 74%; }
+.talab-transcript span:nth-child(4) { width: 40%; }
+
+/* Composer stand-in, styled as focused (ring + caret-coloured border) — the
+   textarea is readOnly so the lab never steals real focus, but it reads as
+   the field the user is typing into. */
+.talab-composer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-lg);
+  background: var(--mantle);
+  border: 1px solid var(--mauve);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mauve) 25%, transparent);
+}
+
+.talab-composer-input {
+  flex: 1;
+  border: none;
+  background: none;
+  resize: none;
+  font-family: var(--font);
+  font-size: var(--text-input);
+  color: var(--text);
+  outline: none;
+}
+
+.talab-composer-send {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--mauve);
+  color: var(--crust);
+  font-size: var(--text-sm);
+  cursor: default;
+}
+
+/* Keyboard slab — rows of blank keys, enough to say "keyboard". */
+.talab-keyboard {
+  position: relative;
+  z-index: 1;
+  padding: 8px 6px 10px;
+  background: var(--mantle);
+  border-top: 1px solid var(--surface0);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.talab-key-row {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+}
+
+.talab-key {
+  width: 28px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+}
+
+.talab-key--space {
+  width: 60%;
+}
+
+.talab-state-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.talab-note {
+  margin: var(--space-1) 0 var(--space-2);
+  max-width: 68ch;
+  color: var(--subtext0);
+  font-size: var(--text-sm);
+}
+
+.talab-replay {
+  padding: 2px 10px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-full);
+  background: var(--surface0);
+  color: var(--subtext1);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.talab-replay:hover {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+/* ---- Variant 1 · rail --------------------------------------------------
+   The detached dot goes away; a 2px mauve line runs along the lower edge of
+   the title area instead. The signal lives INSIDE the pill, under the words
+   the eye already reads. */
+
+.title-attn-lab--rail .mtchip-attn-unseen {
+  display: none;
+}
+
+/* Drawn on the chip, not the title span — the span clips overflow for its
+   ellipsis, so a pseudo hanging below it would be cut off. The insets mirror
+   the chip's own padding (14px on the text side; 8px + 18px chevron + gap on
+   the right), so the rail underlines exactly the title area. */
+.title-attn-lab--rail .mtchip:has(.mtchip-attn-unseen)::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 40px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--mauve);
+  pointer-events: none;
+}
+
+/* ---- Variant 2 · chevron -----------------------------------------------
+   The chevron well — the door to the session list — tints mauve. The
+   affordance itself carries the news; the dot is hidden. */
+
+.title-attn-lab--chevron .mtchip-attn-unseen {
+  display: none;
+}
+
+.title-attn-lab--chevron .mtchip:has(.mtchip-attn-unseen) .mtchip-chev {
+  background: color-mix(in srgb, var(--mauve) 28%, transparent);
+  color: var(--mauve);
+}
+
+.title-attn-lab--chevron .mtchip.is-open:has(.mtchip-attn-unseen) .mtchip-chev {
+  background: color-mix(in srgb, var(--mauve) 36%, var(--surface2));
+}
+
+/* ---- Variant 3 · wash --------------------------------------------------
+   A faint state-coloured rim bleeds up from the chip's lower edge — the whole
+   pill is gently "lit from below", with the matching dot kept visible. */
+
+.title-attn-lab--wash .mtchip-attn {
+  background: var(--talab-attn-color);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--talab-attn-color) 70%, transparent);
+}
+
+.title-attn-lab--wash .mtchip:has(.mtchip-attn)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--talab-attn-color) 22%, transparent),
+    transparent 62%
+  );
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--talab-attn-color) 55%, transparent);
+}
+
+/* ---- Variant 4 · arrival -----------------------------------------------
+   The dot keeps its shape but moves to the LOWER-right — nearer where the
+   drawer will unfurl — and announces itself once: two finite ripples
+   (~700ms × 2), then fully static. A quiet chevron tint keeps a whisper of
+   the signal after the motion ends. Remounting the chip (the lab's "Replay
+   arrival" key bump) restarts the ripples. */
+
+.title-attn-lab--arrival .mtchip-attn-unseen {
+  top: auto;
+  bottom: -3px;
+  right: 2px;
+  box-shadow: none;
+}
+
+.title-attn-lab--arrival .mtchip-attn-unseen::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--mauve);
+  opacity: 0;
+  animation: talab-arrival-ripple 700ms var(--ease) 2;
+}
+
+.title-attn-lab--arrival .mtchip:has(.mtchip-attn-unseen) .mtchip-chev {
+  background: color-mix(in srgb, var(--mauve) 16%, transparent);
+  color: color-mix(in srgb, var(--mauve) 70%, var(--subtext0));
+}
+
+@keyframes talab-arrival-ripple {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+/* Reduced motion: no ripples at all — a static mauve ring around the
+   relocated dot carries the same "this one is new" weight without movement. */
+@media (prefers-reduced-motion: reduce) {
+  .title-attn-lab--arrival .mtchip-attn-unseen::before {
+    animation: none;
+    opacity: 0.6;
+    transform: scale(1.6);
+  }
+}
+
+/* ---- Variant 5 · arrival (top dot) + wash ------------------------------
+   The state-coloured dot never leaves its production top-right slot, so
+   urgent/unread stay positionally identical and only differ in hue, while the
+   wash's lower rim carries the state after the two finite ripples end. */
+
+.title-attn-lab--arrival-top-wash .mtchip-attn {
+  background: var(--talab-attn-color);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--talab-attn-color) 70%, transparent);
+}
+
+.title-attn-lab--arrival-top-wash .mtchip:has(.mtchip-attn)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--talab-attn-color) 22%, transparent),
+    transparent 62%
+  );
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--talab-attn-color) 55%, transparent);
+}
+
+.title-attn-lab--arrival-top-wash .mtchip-attn::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--talab-attn-color);
+  opacity: 0;
+  animation: talab-arrival-ripple 700ms var(--ease) 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .title-attn-lab--arrival-top-wash .mtchip-attn::before {
+    animation: none;
+    opacity: 0.6;
+    transform: scale(1.6);
+  }
+}

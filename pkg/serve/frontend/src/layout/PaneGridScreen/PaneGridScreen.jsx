@@ -8,7 +8,7 @@ import { PRESETS } from "../../data/layoutPresets.js";
 import { applyPreset, addPane, focusTileByIndex, focusTile, openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { setGroupByProject } from "../../data/drawer.js";
-import { sessionTitle } from "../../data/util/format.js";
+import { sessionDisplayDotState, sessionTitle } from "../../data/util/format.js";
 import "./PaneGridScreen.css";
 
 // PaneGridScreen — root organism AND container of the desktop pane grid.
@@ -40,7 +40,7 @@ function spineSessions(sessions, paneOf) {
       id: s.id,
       cwd: s.cwd || "", updated: s.updated || 0,
       title: sessionTitle(s),
-      state: s.state || "idle",
+      state: sessionDisplayDotState(s),
       unseen: !!s.unseen,
       meta: relAge(s.updated),
       pane: paneOf.get(s.id) || undefined,

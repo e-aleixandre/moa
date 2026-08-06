@@ -663,8 +663,16 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// Subscribe before taking the init snapshot. Events published while the
 		// snapshot is assembled are queued by the reactor and sent immediately
 		// after init, rather than being lost in the old snapshot→subscribe gap.
-		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD)
+		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
+			return mgr.attentionGenerationForSequence(sess, seq)
+		})
 		defer reactor.cleanup()
+
+		// A pending approval can be installed immediately before its bus event
+		// reaches serve's occurrence tracker. Drain that accepted batch before
+		// building init, so a visible reconnect receives (and acknowledges) the
+		// exact unseen_gen rather than a zero/default snapshot.
+		sess.runtime.Bus.Drain(2 * time.Second)
 
 		// The sequence cut and the in-flight state (streaming aggregate + live
 		// tool calls) are captured TOGETHER under the session's streamMu
@@ -930,7 +938,7 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 
 func handleReadSession(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		gen, _ := strconv.ParseUint(r.URL.Query().Get("run_gen"), 10, 64)
+		gen, _ := strconv.ParseUint(r.URL.Query().Get("unseen_gen"), 10, 64)
 		if err := mgr.MarkSessionRead(r.PathValue("id"), gen); err != nil {
 			if errors.Is(err, ErrNotFound) {
 				http.Error(w, "not found", http.StatusNotFound)

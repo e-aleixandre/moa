@@ -17,7 +17,7 @@ import { getTileCount, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { openPersistedSubagent, openBashJob } from "../../data/session-actions.js";
 import { modelAccent } from "../../data/selectors.js";
-import { shortModel, shortPath, sessionDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
+import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
@@ -238,7 +238,7 @@ function ConnectedPane({ node, state, tileIndex }) {
 
   const blocks = projectStream(session);
   const liveAgents = liveTrayAgents(session);
-  const dotState = sessionDotState(session);
+  const dotState = sessionDisplayDotState(session);
   const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
   const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk) ? (
     <>

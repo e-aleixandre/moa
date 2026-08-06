@@ -479,6 +479,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	sess = &ManagedSession{
 		ID:                  id,
+		serverInstance:      m.serverInstance,
 		Title:               title,
 		CWD:                 cwd,
 		Created:             time.Now(),
@@ -653,6 +654,7 @@ func (m *Manager) deleteSession(id string) error {
 	m.mu.Unlock()
 	sess.deleted.Store(true)
 	m.forgetUnseen(id)
+	m.forgetAttentionSequences(sess)
 	// Mark closing and drain the runtime's users before tearing it down, so a
 	// /send or /command already holding this pointer can't start a run into a
 	// runtime that is going away. Delete does NOT refuse a busy session (unlike
@@ -681,6 +683,7 @@ func (m *Manager) deleteSession(id string) error {
 	if sess.unreadUnsub != nil {
 		sess.unreadUnsub()
 	}
+	m.forgetAttentionSequences(sess)
 
 	// Close MCP connections before context cancellation.
 	if sess.infra.mcpMgr != nil {
@@ -767,6 +770,11 @@ func (m *Manager) CloseSession(id string) error {
 		}
 		return nil
 	}
+	// Establish close's send boundary while m.mu still identifies this runtime.
+	// A sender that was already using it, or which acquires lifecycle after this
+	// point but before the writer lock, advances this value before it releases
+	// lifecycle and therefore makes this close lose the race.
+	sendGeneration := sess.sendGeneration.Load()
 	m.mu.Unlock()
 
 	// Drain the users of this runtime before deciding anything. Taking the
@@ -774,8 +782,15 @@ func (m *Manager) CloseSession(id string) error {
 	// the quiescence check below cannot be invalidated by a run starting right
 	// after it. Acquired OUTSIDE m.mu: senders hold it while doing bus work, so
 	// holding m.mu across it would stall every unrelated session.
+	//
+	// A Send that was admitted while this close waited may have a very fast
+	// provider and return to idle before we inspect the runtime; its acceptance
+	// still wins this race.
 	sess.lifecycle.Lock()
 	defer sess.lifecycle.Unlock()
+	if sess.sendGeneration.Load() != sendGeneration {
+		return ErrBusy
+	}
 
 	// A RunEnded fan-out schedules the automatic reactors asynchronously, so a
 	// close arriving right after a turn could observe "no background work" just
@@ -841,6 +856,7 @@ func (m *Manager) CloseSession(id string) error {
 	if sess.unreadUnsub != nil {
 		sess.unreadUnsub()
 	}
+	m.forgetAttentionSequences(sess)
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()
 	}
@@ -966,6 +982,10 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 	}
 	sess.Origin = saved.Origin()
 	sess.automationCreated = automationCreatedMeta(saved.Metadata)
+	// A resumed runtime starts its run and attention counters afresh. The old
+	// process-local acknowledgement cursor must not suppress this runtime's
+	// first attention occurrence.
+	m.forgetUnseen(id)
 
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {
@@ -1066,6 +1086,7 @@ func (m *Manager) Shutdown() {
 		// callback waits for quiescence and then POSTs. The cancelled context is
 		// what makes that work give up instead of outliving the shutdown.
 		s.infra.sessionCancel()
+		m.forgetAttentionSequences(s)
 		// Close the runtime after flushing: this drains the bus's async
 		// persistence reactor (Bus.Close waits for subscriber goroutines to
 		// finish their queued events) so no delayed save can still be writing

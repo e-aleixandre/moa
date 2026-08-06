@@ -18,6 +18,10 @@ type Event struct {
 
 // InitData is sent on WebSocket connect with the full session state.
 type InitData struct {
+	// ServerInstance scopes process-local attention occurrence generations.
+	// Reconnecting to the same process preserves client deduplication; a restart
+	// starts a new generation namespace.
+	ServerInstance    string              `json:"server_instance"`
 	Messages          []core.AgentMessage `json:"messages"`
 	State             string              `json:"state"`
 	ContextPercent    int                 `json:"context_percent"`
@@ -139,6 +143,8 @@ type BashJobInitData struct {
 // PermissionData is a pending permission request.
 type PermissionData struct {
 	ID           string         `json:"id"`
+	RunGen       uint64         `json:"run_gen,omitempty"`
+	UnseenGen    uint64         `json:"unseen_gen,omitempty"`
 	ToolName     string         `json:"tool_name"`
 	Args         map[string]any `json:"args"`
 	AllowPattern string         `json:"allow_pattern,omitempty"`
@@ -147,13 +153,16 @@ type PermissionData struct {
 // AskData is a pending ask_user request.
 type AskData struct {
 	ID        string            `json:"id"`
+	RunGen    uint64            `json:"run_gen,omitempty"`
+	UnseenGen uint64            `json:"unseen_gen,omitempty"`
 	Questions []bus.AskQuestion `json:"questions"`
 }
 
 // StateChangeData is sent when the session state changes.
 type StateChangeData struct {
-	State string `json:"state"`
-	Error string `json:"error,omitempty"`
+	State     string `json:"state"`
+	Error     string `json:"error,omitempty"`
+	UnseenGen uint64 `json:"unseen_gen,omitempty"`
 }
 
 // DeltaData carries a streaming text delta.
@@ -215,8 +224,9 @@ type TasksUpdateData struct {
 
 // RunEndData carries the final assistant text when a run completes.
 type RunEndData struct {
-	Text   string `json:"text"`
-	RunGen uint64 `json:"run_gen"`
+	Text      string `json:"text"`
+	RunGen    uint64 `json:"run_gen"`
+	UnseenGen uint64 `json:"unseen_gen,omitempty"`
 }
 
 // ContextUpdateData carries the current context usage percentage.

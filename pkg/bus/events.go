@@ -597,6 +597,7 @@ type BashJobSettled struct {
 // PermissionRequested is published when a tool needs user approval.
 type PermissionRequested struct {
 	SessionID    string
+	RunGen       uint64
 	ID           string
 	ToolName     string
 	Args         map[string]any
@@ -616,6 +617,7 @@ type PermissionResolved struct {
 // AskUserRequested is published when the agent needs user input.
 type AskUserRequested struct {
 	SessionID string
+	RunGen    uint64
 	ID        string
 	Questions []AskQuestion
 }

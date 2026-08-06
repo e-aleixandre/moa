@@ -45,6 +45,30 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	})
 }
 
+func TestWsAttentionEventsCarryOccurrenceGeneration(t *testing.T) {
+	permission, ok := wsEventFromBus(bus.PermissionRequested{SessionID: "s1", ID: "p1"}, 11)
+	if !ok {
+		t.Fatal("permission event not translated")
+	}
+	if got := permission.Data.(PermissionData).UnseenGen; got != 11 {
+		t.Fatalf("permission unseen_gen = %d, want 11", got)
+	}
+	errorEvent, ok := wsEventFromBus(bus.StateChanged{SessionID: "s1", State: string(bus.StateError)}, 12)
+	if !ok {
+		t.Fatal("error event not translated")
+	}
+	if got := errorEvent.Data.(StateChangeData).UnseenGen; got != 12 {
+		t.Fatalf("error unseen_gen = %d, want 12", got)
+	}
+	completion, ok := wsEventFromBus(bus.RunEnded{SessionID: "s1", RunGen: 1}, 13)
+	if !ok {
+		t.Fatal("completion event not translated")
+	}
+	if got := completion.Data.(RunEndData).UnseenGen; got != 13 {
+		t.Fatalf("completion unseen_gen = %d, want 13", got)
+	}
+}
+
 func TestBuildInitData_SubagentThinking(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

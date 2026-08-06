@@ -47,7 +47,7 @@ export function SessionRow({
   ...rest
 }) {
   const needs = NEEDS_TONE[state];
-  const isUnseenResult = unseen && state === "idle";
+  const isUnseenResult = unseen && (state === "idle" || state === "running" || state === "unseen");
   const classes = [
     "session-row",
     `variant-${variant}`,

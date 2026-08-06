@@ -384,7 +384,8 @@ func TestSessionInfoSerializesAttentionActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var dto struct {
-		Activity *attention.SessionActivity `json:"activity"`
+		Activity       *attention.SessionActivity `json:"activity"`
+		ServerInstance string                     `json:"server_instance"`
 	}
 	if err := json.Unmarshal(encoded, &dto); err != nil {
 		t.Fatal(err)
@@ -392,6 +393,12 @@ func TestSessionInfoSerializesAttentionActivity(t *testing.T) {
 	want := &attention.SessionActivity{Kind: "tool", Tool: "bash", Detail: "phpstan analyse"}
 	if !reflect.DeepEqual(dto.Activity, want) {
 		t.Fatalf("activity = %+v, want %+v", dto.Activity, want)
+	}
+	if dto.ServerInstance == "" || dto.ServerInstance != mgr.serverInstance {
+		t.Fatalf("session server_instance = %q, want %q", dto.ServerInstance, mgr.serverInstance)
+	}
+	if got := buildInitData(sess, bus.StreamingAggregate{}, nil).ServerInstance; got != mgr.serverInstance {
+		t.Fatalf("init server_instance = %q, want %q", got, mgr.serverInstance)
 	}
 }
 

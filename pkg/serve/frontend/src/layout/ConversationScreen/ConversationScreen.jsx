@@ -20,7 +20,7 @@ import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
 import { setGroupByProject } from "../../data/drawer.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
+import { shortModel, shortPath, modelCodename, sessionDisplayDotState, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
@@ -67,7 +67,7 @@ function spineSessions(sessions) {
       id: s.id,
       cwd: s.cwd || "", updated: s.updated || 0,
       title: sessionTitle(s),
-      state: s.state || "idle",
+      state: sessionDisplayDotState(s),
       unseen: !!s.unseen,
       meta: relAge(s.updated),
       origin: s.origin || undefined,

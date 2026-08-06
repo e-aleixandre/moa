@@ -1,10 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
+import { lazy, Suspense } from "preact/compat";
 import "./index.css";
-import { Catalog } from "./catalog/catalog.jsx";
-import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
-import { MobileGallery } from "./catalog/mobile-gallery.jsx";
-import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
 import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
@@ -24,6 +21,26 @@ import { installOpenSessionNavigation } from "./data/push-navigation.js";
 import {
   setMobile, autoFillTiles, autoSelectMobile, openSession,
 } from "./data/tile-actions.js";
+
+// Galleries are development/reference surfaces, never part of the production
+// startup graph. Dynamic imports retain direct ?view=… access while keeping
+// their specimens and CSS out of app.js/app.css.
+const loadCatalog = () => import("./catalog-entry.js");
+const Catalog = lazy(() => loadCatalog().then((m) => ({ default: m.Catalog })));
+const LiveStatesGallery = lazy(() => loadCatalog().then((m) => ({ default: m.LiveStatesGallery })));
+const MobileGallery = lazy(() => loadCatalog().then((m) => ({ default: m.MobileGallery })));
+const SubagentGallery = lazy(() => loadCatalog().then((m) => ({ default: m.SubagentGallery })));
+
+function GalleryLoad({ children }) {
+  useEffect(() => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = new URL("./catalog-entry.css", import.meta.url).href;
+    document.head.appendChild(link);
+    return () => link.remove();
+  }, []);
+  return <Suspense fallback={<div class="conversation-placeholder">Loading gallery…</div>}>{children}</Suspense>;
+}
 
 const welcomeStyle = {
   maxWidth: "640px",
@@ -374,7 +391,7 @@ function App() {
   if (view === "catalog") {
     return (
       <>
-        <CatalogScreen />
+      <GalleryLoad><CatalogScreen /></GalleryLoad>
         <GalleryNav current="catalog" />
       </>
     );
@@ -382,7 +399,7 @@ function App() {
   if (view === "live") {
     return (
       <>
-        <LiveStatesGallery />
+        <GalleryLoad><LiveStatesGallery /></GalleryLoad>
         <GalleryNav current="live" />
       </>
     );
@@ -390,7 +407,7 @@ function App() {
   if (view === "subagent") {
     return (
       <>
-        <SubagentGallery />
+        <GalleryLoad><SubagentGallery /></GalleryLoad>
         <GalleryNav current="subagent" />
       </>
     );
@@ -398,7 +415,7 @@ function App() {
   if (view === "mobile") {
     return (
       <>
-        <MobileGallery />
+        <GalleryLoad><MobileGallery /></GalleryLoad>
         <GalleryNav current="mobile" />
       </>
     );

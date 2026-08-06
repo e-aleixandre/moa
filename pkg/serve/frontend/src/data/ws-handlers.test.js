@@ -2,9 +2,10 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
+import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
@@ -12,6 +13,7 @@ function seedSession(id) {
 
 beforeEach(() => {
   setState({ sessions: {} });
+  __resetAttentionArrivalsForTests();
 });
 
 test('normalizeConversationProjection preserves persisted tool activity', () => {
@@ -48,6 +50,21 @@ test('handleWsInit retains a subagent thinking level and origin tool call ID', (
   });
   expect(store.get().sessions.s1.subagents.j1.thinking).toBe('medium');
   expect(store.get().sessions.s1.subagents.j1.originToolCallId).toBe('toolu_init');
+});
+
+test('handleWsInit acknowledges a visible pending request from its attention occurrence', () => {
+  setState({
+    isMobile: true,
+    activeSession: 's1',
+    sessions: { s1: { id: 's1', unseen: true, unseenGen: 4, subagents: {} } },
+  });
+  handleWsInit('s1', {
+    messages: [],
+    pending_permission: { id: 'p1', unseen_gen: 9, tool_name: 'bash', args: {} },
+  });
+  expect(store.get().sessions.s1.unseen).toBe(false);
+  expect(store.get().sessions.s1.unseenGen).toBe(9);
+  setState({ isMobile: false, activeSession: null });
 });
 
 test('subagents without a thinking level normalize to off', () => {
@@ -589,6 +606,76 @@ test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', () => {
   expect(steers[0].id).toBe('q1');
 });
 
+test('a server occurrence is counted once locally even when its poll snapshot follows', () => {
+  setState({ sessions: {
+    s1: { id: 's1', state: 'idle', unseen: true, unseenGen: 4, serverUnseenGen: 4, attentionArrival: 4, messages: [], subagents: {} },
+  } });
+  handleWsRunEnd('s1', { run_gen: 1, unseen_gen: 5 });
+  const firstArrival = store.get().sessions.s1.attentionArrival;
+  // The same occurrence can arrive again through the poll/reconnect path; it
+  // must not restart the title-chip ripple.
+  handleWsRunEnd('s1', { run_gen: 1, unseen_gen: 5 });
+  expect(store.get().sessions.s1.attentionArrival).toBe(firstArrival);
+  handleWsRunEnd('s1', { run_gen: 2, unseen_gen: 6 });
+  expect(store.get().sessions.s1.attentionArrival).toBeGreaterThan(firstArrival);
+});
+
+test('a restarted WS server accepts a lower attention generation once', () => {
+  setState({ sessions: {
+    s1: { id: 's1', state: 'idle', serverInstance: 'server-a', messages: [], subagents: {} },
+  } });
+  handleWsRunEnd('s1', { run_gen: 1, unseen_gen: 5000 });
+  const beforeRestart = store.get().sessions.s1.attentionArrival;
+
+  // A reconnect snapshots the new process identity before its lower sequence
+  // of attention events arrives.
+  handleWsInit('s1', { messages: [], server_instance: 'server-b' });
+  handleWsRunEnd('s1', { run_gen: 1, unseen_gen: 1 });
+  const afterRestart = store.get().sessions.s1;
+  expect(afterRestart.attentionArrival).toBeGreaterThan(beforeRestart);
+  expect(afterRestart.serverUnseenGen).toBe(1);
+  expect(afterRestart.serverUnseenInstance).toBe('server-b');
+});
+
+test('the first unseen occurrence in another session gets a later global arrival', () => {
+  setState({ sessions: {
+    a: { id: 'a', state: 'idle', messages: [], subagents: {} },
+    b: { id: 'b', state: 'idle', messages: [], subagents: {} },
+  } });
+  handleWsRunEnd('a', { run_gen: 1, unseen_gen: 1 });
+  handleWsRunEnd('b', { run_gen: 1, unseen_gen: 2 });
+  expect(store.get().sessions.b.attentionArrival).toBeGreaterThan(store.get().sessions.a.attentionArrival);
+  handleWsRunEnd('b', { run_gen: 1, unseen_gen: 2 });
+  expect(store.get().sessions.b.attentionArrival).toBe(2);
+});
+
+test('terminal state changes defer attention to their authoritative occurrence', () => {
+  const originalDocument = globalThis.document;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  globalThis.document = { hidden: false };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { vibrate() {} } });
+  try {
+    setState({ sessions: {
+      s1: { id: 's1', state: 'running', attentionArrival: 0, messages: [], subagents: {} },
+    }, isMobile: true, activeSession: 'other' });
+    handleWsStateChange('s1', { state: 'idle' });
+    expect(store.get().sessions.s1.attentionArrival || 0).toBe(0);
+    handleWsRunEnd('s1', { run_gen: 1 }); // cancelled/no attention occurrence
+    expect(store.get().sessions.s1.attentionArrival || 0).toBe(0);
+
+    handleWsStateChange('s1', { state: 'running' });
+    handleWsStateChange('s1', { state: 'error', unseen_gen: 7, error: 'boom' });
+    expect(store.get().sessions.s1.attentionArrival).toBe(1);
+    handleWsRunEnd('s1', { run_gen: 2, unseen_gen: 7 });
+    expect(store.get().sessions.s1.attentionArrival).toBe(1);
+  } finally {
+    globalThis.document = originalDocument;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+    else delete globalThis.navigator;
+    setState({ isMobile: false, activeSession: null });
+  }
+});
+
 // Regression: a stale "compacting" spinner must be cleared by the
 // authoritative snapshot when the compaction finished while the pane had no WS.
 test('handleWsInit clears a stale compacting spinner from the snapshot', () => {
@@ -683,7 +770,6 @@ test('handleWsGoalVerify toggles goalVerifying', () => {
   expect(store.get().sessions.s1.goalVerifying).toBe(false);
 });
 
-import { handleWsStateChange } from './ws-handlers.js';
 import { getToasts } from './notifications.js';
 
 // Bug: an OpenAI usage-limit (429) ends the run in the "error" state. The web

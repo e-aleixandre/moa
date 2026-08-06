@@ -448,17 +448,31 @@ export function isRecentSession(sess, days = RECENT_DAYS) {
 
 /** Returns the state used to color a session's status dot. It mirrors the
  *  session's own state, except that an idle main agent which has live
- *  subagents still counts as 'running' — otherwise a session waiting on a
- *  delegated subagent shows green (idle) despite work being in progress.
- *  A non-idle main state (running/permission/error) always wins. */
+ *  background work still counts as 'running' — otherwise a session waiting on
+ *  a delegated subagent or background bash job shows green despite work being
+ *  in progress. A non-idle main state (running/permission/error) always wins. */
 export function sessionDotState(sess) {
   if (!sess) return 'idle';
   if (sess.state && sess.state !== 'idle') return sess.state;
-  if (hasLiveSubagents(sess)) return 'running';
+  if (hasLiveBackgroundWork(sess)) return 'running';
   return sess.state || 'idle';
 }
 
-function hasLiveSubagents(sess) {
+// sessionDisplayDotState is the display precedence shared by every session
+// list and pane: urgent blocks first, then a completed result the user has not
+// seen, then any current work. `unseen` is deliberately limited to active
+// idle/running sessions; saved sessions retain their grey saved state.
+export function sessionDisplayDotState(sess, unseen = sess?.unseen) {
+  if (!sess) return 'idle';
+  if (sess.state === 'error') return 'error';
+  if (sess.state === 'permission' || sess.pendingPerm || sess.pendingAsk) return 'permission';
+
+  const state = sessionDotState(sess);
+  if (unseen && (state === 'idle' || state === 'running')) return 'unseen';
+  return state;
+}
+
+function hasLiveBackgroundWork(sess) {
   if (sess.subagentCount > 0) return true;
   const subs = sess.subagents;
   if (subs) {

@@ -5,6 +5,8 @@ package serve
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -53,6 +55,10 @@ type ManagedSession struct {
 	// label any creator may pass, it is what authorizes the automation token to
 	// interact with the session.
 	automationCreated bool
+	// serverInstance identifies the Manager process that assigned this
+	// runtime's process-local attention generations. It is sent with snapshots
+	// and session info so clients do not compare generations across a restart.
+	serverInstance string
 
 	// pathPolicy is the runtime-mutable path access policy shared with the
 	// session's tools; attachments-to-disk add the session's attachment dir
@@ -129,7 +135,11 @@ type ManagedSession struct {
 	// non-blocking notifications), a "deleted" guard against late pushes, and
 	// the bus unsubscribe funcs registered by subscribePush.
 	wsConns atomic.Int32
-	deleted atomic.Bool
+	// attentionGen is the latest process-local attention occurrence assigned to
+	// this runtime. It lets a reconnect snapshot acknowledge a pending request.
+	attentionGen    atomic.Uint64
+	attentionClosed atomic.Bool
+	deleted         atomic.Bool
 	// closing marks a session whose runtime is being torn down by CloseSession.
 	// Set atomically with respect to run-start (under the state lock) so a /send
 	// admitted just before cannot begin a run into a runtime that is going away,
@@ -141,8 +151,14 @@ type ManagedSession struct {
 	// waits for in-flight senders and no new one can slip between the quiescence
 	// check and the teardown. Checking `closing` alone is not enough: the check
 	// and the run-start are two steps, and this is what makes them one.
-	lifecycle  sync.RWMutex
-	autoTitled atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
+	lifecycle sync.RWMutex
+	// sendGeneration advances only after Send has accepted work, while it still
+	// holds lifecycle. CloseSession snapshots it before waiting for lifecycle's
+	// write lock: if a send it had to wait for settled unusually quickly, closing
+	// must still lose that race instead of treating the now-idle runtime as one
+	// that was never used.
+	sendGeneration atomic.Uint64
+	autoTitled     atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
 	// briefGen serializes brief regeneration (see brief.go): briefPending marks
 	// a coalesced regeneration request; briefRunning is the one-flight guard so
 	// two generations for the same session never overlap.
@@ -215,20 +231,21 @@ type MCPSummary struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID           string       `json:"id"`
-	Title        string       `json:"title"`
-	State        SessionState `json:"state"`
-	Model        string       `json:"model"`
-	Provider     string       `json:"provider"`
-	Thinking     string       `json:"thinking"`
-	CWD          string       `json:"cwd"`
-	Created      time.Time    `json:"created"`
-	Updated      time.Time    `json:"updated"`
-	Origin       string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
-	Error        string       `json:"error,omitempty"`
-	Unseen       bool         `json:"unseen"`
-	UnseenGen    uint64       `json:"unseen_gen,omitempty"`
-	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
+	ID             string       `json:"id"`
+	Title          string       `json:"title"`
+	State          SessionState `json:"state"`
+	Model          string       `json:"model"`
+	Provider       string       `json:"provider"`
+	Thinking       string       `json:"thinking"`
+	CWD            string       `json:"cwd"`
+	Created        time.Time    `json:"created"`
+	Updated        time.Time    `json:"updated"`
+	Origin         string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Error          string       `json:"error,omitempty"`
+	Unseen         bool         `json:"unseen"`
+	UnseenGen      uint64       `json:"unseen_gen,omitempty"`
+	ServerInstance string       `json:"server_instance"`
+	UntrustedMCP   bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
@@ -384,6 +401,7 @@ func (s *ManagedSession) info() SessionInfo {
 		CompactAtMin:   compactAtMin,
 		PermissionMode: permMode,
 		CostUSD:        cost,
+		ServerInstance: s.serverInstance,
 
 		BriefAttempting: s.briefAttempting,
 		BriefProgress:   s.briefProgress,
@@ -446,11 +464,11 @@ func (m *Manager) unseenGeneration(id string) uint64 {
 	return m.unseenGen[id]
 }
 
-func (m *Manager) markUnseen(sess *ManagedSession, gen uint64) {
+func (m *Manager) markUnseen(sess *ManagedSession) uint64 {
 	m.unseenMu.Lock()
 	defer m.unseenMu.Unlock()
-	if sess.deleted.Load() || m.readGen[sess.ID] >= gen {
-		return
+	if sess.deleted.Load() {
+		return 0
 	}
 	if m.unseen == nil {
 		m.unseen = make(map[string]bool)
@@ -458,33 +476,32 @@ func (m *Manager) markUnseen(sess *ManagedSession, gen uint64) {
 	if m.unseenGen == nil {
 		m.unseenGen = make(map[string]uint64)
 	}
+	// This is an attention-occurrence generation, not the runtime's run
+	// generation. One run can request permission and later end; reading the
+	// first must never suppress the second.
+	m.attentionGen++
+	gen := m.attentionGen
 	m.unseen[sess.ID] = true
 	m.unseenGen[sess.ID] = gen
+	sess.attentionGen.Store(gen)
+	return gen
 }
 
 func (m *Manager) forgetUnseen(id string) {
 	m.unseenMu.Lock()
 	delete(m.unseen, id)
 	delete(m.unseenGen, id)
-	delete(m.readGen, id)
 	m.unseenMu.Unlock()
 }
 
-// MarkSessionRead clears a process-local unread result marker. It intentionally
-// does not save the session: a Moa restart resets this transient UI state.
+// MarkSessionRead clears a process-local attention marker when the caller has
+// observed that occurrence or a newer one. It intentionally does not save the
+// session: a Moa restart resets this transient UI state.
 func (m *Manager) MarkSessionRead(id string, gen uint64) error {
 	if _, ok := m.Get(id); !ok {
 		return ErrNotFound
 	}
 	m.unseenMu.Lock()
-	if gen > 0 {
-		if m.readGen == nil {
-			m.readGen = make(map[string]uint64)
-		}
-		if gen > m.readGen[id] {
-			m.readGen[id] = gen
-		}
-	}
 	if gen == 0 || gen >= m.unseenGen[id] {
 		delete(m.unseen, id)
 		delete(m.unseenGen, id)
@@ -511,14 +528,20 @@ func (m *Manager) activityIndex() map[string]*attention.SessionActivity {
 
 // Manager owns all active sessions.
 type Manager struct {
-	mu        sync.RWMutex
-	sessions  map[string]*ManagedSession
-	resuming  map[string]struct{}
-	unseenMu  sync.RWMutex
-	unseen    map[string]bool // process-local; never persisted with a session
-	unseenGen map[string]uint64
-	readGen   map[string]uint64
-	baseCtx   context.Context
+	mu                 sync.RWMutex
+	sessions           map[string]*ManagedSession
+	resuming           map[string]struct{}
+	unseenMu           sync.RWMutex
+	unseen             map[string]bool // process-local; never persisted with a session
+	unseenGen          map[string]uint64
+	attentionGen       uint64
+	attentionSeqMu     sync.Mutex
+	attentionSeq       map[attentionSequenceKey]uint64
+	attentionSeqOrder  []attentionSequenceKey
+	attentionSeqLatest map[*ManagedSession]uint64
+	attentionSeqWake   chan struct{}
+	serverInstance     string
+	baseCtx            context.Context
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
@@ -567,6 +590,88 @@ type Manager struct {
 	// create a session.
 	automation   *automationIndex
 	automationMu sync.Mutex
+}
+
+const maxAttentionSequenceRecords = 512
+
+type attentionSequenceKey struct {
+	session *ManagedSession
+	seq     uint64
+}
+
+func (m *Manager) recordAttentionSequence(sess *ManagedSession, seq, gen uint64) {
+	m.attentionSeqMu.Lock()
+	if sess.attentionClosed.Load() {
+		m.attentionSeqMu.Unlock()
+		return
+	}
+	if m.attentionSeq == nil {
+		m.attentionSeq = make(map[attentionSequenceKey]uint64)
+	}
+	key := attentionSequenceKey{session: sess, seq: seq}
+	m.attentionSeq[key] = gen
+	if m.attentionSeqLatest == nil {
+		m.attentionSeqLatest = make(map[*ManagedSession]uint64)
+	}
+	m.attentionSeqLatest[sess] = seq
+	m.attentionSeqOrder = append(m.attentionSeqOrder, key)
+	if len(m.attentionSeqOrder) > maxAttentionSequenceRecords {
+		old := m.attentionSeqOrder[0]
+		m.attentionSeqOrder = m.attentionSeqOrder[1:]
+		delete(m.attentionSeq, old)
+	}
+	if m.attentionSeqWake != nil {
+		close(m.attentionSeqWake)
+	}
+	m.attentionSeqWake = make(chan struct{})
+	m.attentionSeqMu.Unlock()
+}
+
+// attentionGenerationForSequence waits for the unread subscriber to record a
+// relevant bus event before its websocket representation is emitted. This makes
+// an occurrence ID available end-to-end and prevents /read racing ahead of the
+// server-side marker.
+func (m *Manager) attentionGenerationForSequence(sess *ManagedSession, seq uint64) uint64 {
+	for {
+		m.attentionSeqMu.Lock()
+		gen, ok := m.attentionSeq[attentionSequenceKey{session: sess, seq: seq}]
+		latest := m.attentionSeqLatest[sess]
+		wake := m.attentionSeqWake
+		m.attentionSeqMu.Unlock()
+		if ok {
+			return gen
+		}
+		if sess.attentionClosed.Load() {
+			return 0
+		}
+		if latest >= seq {
+			return 0 // pruned stale event; do not wait forever
+		}
+		<-wake
+	}
+}
+
+func (m *Manager) forgetAttentionSequences(sess *ManagedSession) {
+	m.attentionSeqMu.Lock()
+	sess.attentionClosed.Store(true)
+	for key := range m.attentionSeq {
+		if key.session == sess {
+			delete(m.attentionSeq, key)
+		}
+	}
+	kept := m.attentionSeqOrder[:0]
+	for _, key := range m.attentionSeqOrder {
+		if key.session != sess {
+			kept = append(kept, key)
+		}
+	}
+	m.attentionSeqOrder = kept
+	delete(m.attentionSeqLatest, sess)
+	if m.attentionSeqWake != nil {
+		close(m.attentionSeqWake)
+	}
+	m.attentionSeqWake = make(chan struct{})
+	m.attentionSeqMu.Unlock()
 }
 
 // ManagerConfig configures a Manager.
@@ -656,6 +761,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	m := &Manager{
 		sessions:               make(map[string]*ManagedSession),
 		resuming:               make(map[string]struct{}),
+		attentionSeqWake:       make(chan struct{}),
+		serverInstance:         newServerInstanceID(),
 		baseCtx:                ctx,
 		providerFactory:        cfg.ProviderFactory,
 		transcriber:            cfg.Transcriber,
@@ -718,6 +825,19 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}
 	}
 	return m
+}
+
+var serverInstanceFallback atomic.Uint64
+
+// newServerInstanceID creates an opaque process epoch for attention occurrence
+// IDs. It deliberately is not persisted: the client must discard its
+// generation high-water marks after every server restart.
+func newServerInstanceID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err == nil {
+		return hex.EncodeToString(b)
+	}
+	return fmt.Sprintf("%x-%x", time.Now().UnixNano(), serverInstanceFallback.Add(1))
 }
 
 func newConversationKey() ([]byte, error) {
@@ -784,7 +904,15 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	// admitted while this runs, so the quiescence check it makes and the run
 	// this may start cannot interleave. `closing` is then a stable read.
 	sess.lifecycle.RLock()
-	defer sess.lifecycle.RUnlock()
+	defer func() {
+		// Record acceptance before releasing lifecycle. A very fast provider can
+		// settle a run before Execute returns; CloseSession still needs to see
+		// that this sender won the lifecycle race rather than unload its runtime.
+		if err == nil && action != "" {
+			sess.sendGeneration.Add(1)
+		}
+		sess.lifecycle.RUnlock()
+	}()
 	// A close won the race: the runtime is gone (or going). The session is no
 	// longer in the manager, so this reads as "not found" — which is what a
 	// client that raced a close sees.
@@ -972,16 +1100,17 @@ func (m *Manager) List() []SessionInfo {
 		cwd, _ := sum.Metadata["cwd"].(string)
 		origin, _ := sum.Metadata[session.MetaOrigin].(string)
 		list = append(list, SessionInfo{
-			ID:        sum.ID,
-			Title:     sum.Title,
-			State:     StateSaved,
-			Model:     model,
-			CWD:       cwd,
-			Origin:    nonUserOrigin(origin),
-			Created:   sum.Created,
-			Updated:   sum.Updated,
-			Unseen:    m.isUnseen(sum.ID),
-			UnseenGen: m.unseenGeneration(sum.ID),
+			ID:             sum.ID,
+			Title:          sum.Title,
+			State:          StateSaved,
+			Model:          model,
+			CWD:            cwd,
+			Origin:         nonUserOrigin(origin),
+			Created:        sum.Created,
+			Updated:        sum.Updated,
+			Unseen:         m.isUnseen(sum.ID),
+			UnseenGen:      m.unseenGeneration(sum.ID),
+			ServerInstance: m.serverInstance,
 		})
 	}
 

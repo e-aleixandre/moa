@@ -9,6 +9,7 @@ import {
   autoSelectMobile,
 } from './tile-actions.js';
 import { allSessionIds, clearSession } from './tileTree.js';
+import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
 
 let pollTimer = null;
 
@@ -133,6 +134,14 @@ export async function loadSessions() {
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
         unseen: info.unseen ?? false,
         unseenGen: info.unseen_gen || 0,
+        serverUnseenGen: info.unseen_gen || 0,
+        serverUnseenInstance: info.server_instance || '',
+        serverInstance: info.server_instance || (existing ? existing.serverInstance : ''),
+        // One global client arrival sequence covers every session. Repeating
+        // the same server-instance occurrence after a poll returns its original value.
+        attentionArrival: info.unseen
+          ? attentionArrival(info.id, info.unseen_gen || 0, info.server_instance || '')
+          : (existing ? existing.attentionArrival || 0 : 0),
         // Server-owned session brief (cheap LLM status summary): attempting /
         // progress prose + freshness stamp. No WS event tracks it, so the poll
         // is the source of truth. Preserve the prior value when the poll omits
@@ -164,6 +173,7 @@ export async function loadSessions() {
 		}
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
+    retainAttentionArrivals(validIds);
     const currentState = store.get();
     let tree = currentState.tileTree;
     let changed = false;
@@ -239,6 +249,7 @@ export async function deleteSession(id) {
   delete sessions[id];
   const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;
+  forgetAttentionArrival(id);
   setState({ sessions, tileTree, activeSession });
   afterVisibilityChange();
 }

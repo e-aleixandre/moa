@@ -153,10 +153,16 @@ func buildAssetPath(requestPath, buildID string) string {
 	}
 	if strings.HasPrefix(requestPath, "/build/") {
 		parts := strings.SplitN(strings.TrimPrefix(requestPath, "/build/"), "/", 2)
-		if len(parts) == 2 {
-			switch parts[1] {
-			case "shell.html", "app.js", "app.css", "app.js.map", "app.css.map":
-				return prefix + parts[1]
+		// A response remains at its requested URL: when a stale app.js is
+		// rebased, its relative imports still resolve below the stale build ID.
+		// Rebase the complete tree, not a fixed entry-file allowlist, so every
+		// split chunk, lazy catalog entry, stylesheet, and source map resolves
+		// from the same current build. This is intentionally generic because
+		// esbuild owns output names and may add more split assets at any time.
+		if len(parts) == 2 && validBuildID(parts[0]) {
+			asset := strings.TrimPrefix(path.Clean("/"+parts[1]), "/")
+			if asset != "" && asset != "." {
+				return prefix + asset
 			}
 		}
 	}

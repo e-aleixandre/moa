@@ -44,7 +44,7 @@ const (
 // cwd is the session working directory, used to resolve relative file paths
 // when enriching edit tool_start events with real line numbers.
 // Returns the reactor and a read-only channel for the WS writer loop.
-func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string) *wsReactor {
+func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attentionGeneration ...func(uint64) uint64) *wsReactor {
 	r := &wsReactor{
 		ch:   make(chan Event, wsReactorBuffer),
 		done: make(chan struct{}),
@@ -73,8 +73,16 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string) *wsRea
 		}
 	}
 
+	resolver := func(uint64) uint64 { return 0 }
+	if len(attentionGeneration) > 0 && attentionGeneration[0] != nil {
+		resolver = attentionGeneration[0]
+	}
 	r.unsubs = append(r.unsubs, b.SubscribeAllSeq(func(seq uint64, event any) {
-		if wsEvent, ok := wsEventFromBus(event); ok {
+		attentionGen := uint64(0)
+		if isAttentionEvent(event) {
+			attentionGen = resolver(seq)
+		}
+		if wsEvent, ok := wsEventFromBus(event, attentionGen); ok {
 			wsEvent.Seq = seq
 			send(enrichEditToolStart(wsEvent, cwd))
 		}
@@ -94,6 +102,17 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string) *wsRea
 	}()
 
 	return r
+}
+
+func isAttentionEvent(event any) bool {
+	switch event := event.(type) {
+	case bus.RunEnded, bus.PermissionRequested, bus.AskUserRequested:
+		return true
+	case bus.StateChanged:
+		return event.State == string(bus.StateError)
+	default:
+		return false
+	}
 }
 
 // enrichEditToolStart adds the real 1-based starting line number to edit
@@ -122,11 +141,15 @@ func enrichEditToolStart(e Event, cwd string) Event {
 	return e
 }
 
-func wsEventFromBus(event any) (Event, bool) {
+func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
+	attentionGen := uint64(0)
+	if len(attentionGeneration) > 0 {
+		attentionGen = attentionGeneration[0]
+	}
 	switch e := event.(type) {
 	case bus.StateChanged:
 		return Event{Type: "state_change", Data: StateChangeData{
-			State: e.State, Error: e.Error,
+			State: e.State, Error: e.Error, UnseenGen: attentionGen,
 		}}, true
 	case bus.TurnStarted:
 		return Event{Type: "turn_start"}, true
@@ -174,7 +197,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
 	case bus.RunEnded:
-		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText, RunGen: e.RunGen}}, true
+		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText, RunGen: e.RunGen, UnseenGen: attentionGen}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
 	case bus.MCPChanged:
@@ -267,14 +290,14 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "auto_verify_end", Data: data}, true
 	case bus.PermissionRequested:
 		return Event{Type: "permission_request", Data: PermissionData{
-			ID: e.ID, ToolName: e.ToolName, Args: e.Args,
+			ID: e.ID, RunGen: e.RunGen, UnseenGen: attentionGen, ToolName: e.ToolName, Args: e.Args,
 			AllowPattern: e.AllowPattern,
 		}}, true
 	case bus.PermissionResolved:
 		return Event{Type: "permission_resolved", Data: map[string]any{"id": e.ID}}, true
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
-			"id": e.ID, "questions": e.Questions,
+			"id": e.ID, "run_gen": e.RunGen, "unseen_gen": attentionGen, "questions": e.Questions,
 		}}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: map[string]any{"id": e.ID}}, true
@@ -319,7 +342,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}
 		return Event{Type: "subagent_end", Data: data}, true
 	case bus.SubagentEvent:
-		inner, ok := wsEventFromBus(e.Inner)
+		inner, ok := wsEventFromBus(e.Inner, attentionGen)
 		if !ok {
 			return Event{}, false
 		}
@@ -438,6 +461,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 
 	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
+		ServerInstance:    sess.serverInstance,
 		Messages:          msgs,
 		HistoryTruncated:  historyTruncated,
 		State:             state,
@@ -545,20 +569,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		}
 	}
 
-	if pending.Permission != nil {
-		data.PendingPermission = &PermissionData{
-			ID:           pending.Permission.ID,
-			ToolName:     pending.Permission.ToolName,
-			Args:         pending.Permission.Args,
-			AllowPattern: pending.Permission.AllowPattern,
-		}
-	}
-	if pending.Ask != nil {
-		data.PendingAsk = &AskData{
-			ID:        pending.Ask.ID,
-			Questions: pending.Ask.Questions,
-		}
-	}
+	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending, sess.attentionGen.Load())
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile
@@ -573,6 +584,28 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	return data
+}
+
+func pendingAttentionData(pending bus.PendingApprovalInfo, attentionGen uint64) (*PermissionData, *AskData) {
+	var permissionData *PermissionData
+	if pending.Permission != nil {
+		permissionData = &PermissionData{
+			ID:           pending.Permission.ID,
+			UnseenGen:    attentionGen,
+			ToolName:     pending.Permission.ToolName,
+			Args:         pending.Permission.Args,
+			AllowPattern: pending.Permission.AllowPattern,
+		}
+	}
+	var askData *AskData
+	if pending.Ask != nil {
+		askData = &AskData{
+			ID:        pending.Ask.ID,
+			UnseenGen: attentionGen,
+			Questions: pending.Ask.Questions,
+		}
+	}
+	return permissionData, askData
 }
 
 func sortSubagentOutcomes(outcomes []SubagentEndData) {

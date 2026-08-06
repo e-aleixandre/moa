@@ -220,9 +220,13 @@ func TestStaticDirBuildPointerRoutesCompleteTrees(t *testing.T) {
 			t.Fatal(err)
 		}
 		for file, body := range map[string]string{
-			"shell.html": "shell-" + contents,
-			"app.js":     "js-" + contents,
-			"app.css":    "css-" + contents,
+			"shell.html":           "shell-" + contents,
+			"app.js":               "js-" + contents + `; import("./catalog-entry.js"); import "./chunk-current.js";`,
+			"app.css":              "css-" + contents,
+			"chunk-current.js":     "chunk-" + contents,
+			"catalog-entry.js":     "catalog-js-" + contents,
+			"catalog-entry.css":    "catalog-css-" + contents,
+			"catalog-entry.js.map": "catalog-map-" + contents,
 		} {
 			if err := os.WriteFile(filepath.Join(buildDir, file), []byte(body), 0644); err != nil {
 				t.Fatal(err)
@@ -263,8 +267,32 @@ func TestStaticDirBuildPointerRoutesCompleteTrees(t *testing.T) {
 	if got := getBody("/"); got != "shell-b" {
 		t.Fatalf("root after switch = %q, want shell-b", got)
 	}
-	if got := getBody("/build/" + buildA + "/app.js"); got != "js-b" {
-		t.Fatalf("old asset URL after switch = %q, want current js-b", got)
+
+	// The stale entry is deliberately served at its old URL. Its dynamic and
+	// static relative imports therefore also request the old build prefix; each
+	// one must resolve into build B or a current entry could run stale chunks.
+	appB := `js-b; import("./catalog-entry.js"); import "./chunk-current.js";`
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		// Root aliases always follow the publication pointer.
+		{"/", "shell-b"},
+		{"/app.js", appB},
+		{"/app.css", "css-b"},
+		// A stale entry and the relative dependency URLs it induces stay coherent.
+		{"/build/" + buildA + "/app.js", appB},
+		{"/build/" + buildA + "/chunk-current.js", "chunk-b"},
+		{"/build/" + buildA + "/catalog-entry.js", "catalog-js-b"},
+		{"/build/" + buildA + "/catalog-entry.css", "catalog-css-b"},
+		{"/build/" + buildA + "/catalog-entry.js.map", "catalog-map-b"},
+		// Current build paths remain direct and return the same current tree.
+		{"/build/" + buildB + "/app.js", appB},
+		{"/build/" + buildB + "/catalog-entry.js", "catalog-js-b"},
+	} {
+		if got := getBody(tc.path); got != tc.want {
+			t.Errorf("GET %s = %q, want %q", tc.path, got, tc.want)
+		}
 	}
 }
 
@@ -310,6 +338,9 @@ func TestBuildAssetPath(t *testing.T) {
 		{"/index.html", "/build/abc123def456/shell.html"},
 		{"/app.js", "/build/abc123def456/app.js"},
 		{"/build/000000000000/app.css", "/build/abc123def456/app.css"},
+		{"/build/000000000000/chunk-ABC.js", "/build/abc123def456/chunk-ABC.js"},
+		{"/build/000000000000/nested/catalog-entry.css", "/build/abc123def456/nested/catalog-entry.css"},
+		{"/build/abc123def456/catalog-entry.js", "/build/abc123def456/catalog-entry.js"},
 		{"/manifest.webmanifest", "/manifest.webmanifest"},
 	} {
 		if got := buildAssetPath(tc.req, current); got != tc.want {
