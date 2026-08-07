@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Plus, X } from "lucide-preact";
+import { Button } from "../../primitives/index.js";
 import { MAX_SECRET_ROWS, buildSecretBatch, secretRowsForAliases, storeSecretBatch } from "../../data/secrets.js";
 import "./SecretBatch.css";
 
@@ -40,14 +41,14 @@ export function SecretBatch({ open, sessionId, aliases, onClose, onStored }) {
     } catch (_) {
       // Do not surface a transport response here: secret values must never be
       // reflected into UI diagnostics, even by a misbehaving intermediary.
-      setErrors({ form: "Could not store this batch. Try again.", rows: {} });
+      setErrors({ form: "Could not send this batch. Try again.", rows: {} });
       setSaving(false);
     }
   };
 
   return (
     <div class="secret-batch">
-      <p class="secret-batch-intro">One protected file per alias is stored together. Values never enter the chat.</p>
+      <p class="secret-batch-intro">Each value goes straight to a protected file. Values never enter the chat.</p>
       <div class="secret-batch-rows">
         {rows.map((row, index) => {
           const rowErrors = errors.rows[index] || {};
@@ -77,8 +78,8 @@ export function SecretBatch({ open, sessionId, aliases, onClose, onStored }) {
       <button type="button" class="secret-batch-add" onClick={addRow} disabled={rows.length >= MAX_SECRET_ROWS}><Plus size={15} /> Add another</button>
       <p class="secret-batch-hint">The model only sees the temporary directory path and aliases, never values.</p>
       <div class="secret-batch-actions">
-        <button type="button" class="secret-batch-cancel" onClick={onClose} disabled={saving}>Cancel</button>
-        <button type="button" class="secret-batch-save" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save all"}</button>
+        <Button variant="ghost" size="md" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="solid" size="md" className="secret-batch-save" onClick={save} disabled={saving}>{saving ? "Sending…" : "Send"}</Button>
       </div>
     </div>
   );

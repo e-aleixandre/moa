@@ -36,13 +36,13 @@ function ActionRow({ lock = false, save = false }) {
     <div class="secret-lab-action-row">
       <button type="button" class="secret-lab-action" aria-label="Attach" tabIndex={-1}>+</button>
       {lock && (
-        <button type="button" class="secret-lab-action secret-lab-lock" aria-label="Store secret batch" tabIndex={-1}>
+        <button type="button" class="secret-lab-action secret-lab-lock" aria-label="Send secret batch" tabIndex={-1}>
           <Lock size={15} strokeWidth={2} aria-hidden="true" />
         </button>
       )}
       <div class="secret-lab-compose-copy">{save ? "Masked batch mode" : "Message moa"}</div>
       <button type="button" class={`secret-lab-send ${save ? "secret-lab-store" : ""}`} tabIndex={-1}>
-        {save ? "Save" : "↑"}
+        {save ? "Send" : "↑"}
       </button>
     </div>
   );
@@ -71,9 +71,9 @@ function SecretRow({ alias, selfNamed = false }) {
 function SecretSheet({ selfNamed = false }) {
   const aliases = selfNamed ? [""] : ALIASES;
   return (
-    <div class="secret-lab-sheet" role="group" aria-label="Store secret batch">
+    <div class="secret-lab-sheet" role="group" aria-label="Send secret batch">
       <div class="secret-lab-sheet-grab" aria-hidden="true" />
-      <div class="secret-lab-sheet-title"><h4>Store secrets</h4><span>Batch</span></div>
+      <div class="secret-lab-sheet-title"><h4>Send secrets</h4><span>Batch</span></div>
       <div class="secret-lab-rows">
         {aliases.map((alias, index) => <SecretRow key={alias || index} alias={alias} selfNamed={selfNamed} />)}
       </div>
@@ -81,7 +81,7 @@ function SecretSheet({ selfNamed = false }) {
       <p class="secret-lab-hint">One 0600 file per alias in one temp directory. Moa does not put values in chat input.</p>
       <div class="secret-lab-sheet-actions">
         <button type="button" class="secret-lab-cancel" tabIndex={-1}>Cancel</button>
-        <button type="button" class="secret-lab-save" tabIndex={-1}>Save all</button>
+        <button type="button" class="secret-lab-save" tabIndex={-1}>Send</button>
       </div>
     </div>
   );

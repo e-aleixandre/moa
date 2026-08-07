@@ -8,7 +8,7 @@
 // Available commands for the suggestion popup. Copied 1:1 from InputBar.jsx —
 // keep in sync with the server's command table if it changes.
 export const COMMANDS = [
-  { name: 'secret', desc: 'Store secrets without sending values through chat', args: '[alias …]' },
+  { name: 'secret', desc: 'Send secrets without typing values in the chat', args: '[alias …]' },
   { name: 'clear', desc: 'Clear conversation history' },
   { name: 'compact', desc: 'Compact conversation context', args: '[focus]' },
   { name: 'handoff', desc: 'Start a fresh session with a generated handoff', args: '[--model <spec>] [--thinking <level>]' },

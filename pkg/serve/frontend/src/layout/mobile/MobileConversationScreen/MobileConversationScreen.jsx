@@ -452,7 +452,7 @@ export function MobileConversationScreen({ version = null }) {
         <MobileSheet
           open={secretAliases !== null}
           onClose={() => setSecretAliases(null)}
-          title="Store secrets"
+          title="Send secrets"
           scope="private"
         >
           <SecretBatch

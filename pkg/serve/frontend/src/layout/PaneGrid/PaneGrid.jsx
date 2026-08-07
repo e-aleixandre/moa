@@ -347,7 +347,7 @@ export function PaneGrid({ state }) {
           onSecret={(sessionId, aliases) => setSecretBatch({ sessionId, aliases })}
         />
       </div>
-      <Sheet open={secretBatch !== null} onClose={() => setSecretBatch(null)} title="Store secrets">
+      <Sheet open={secretBatch !== null} onClose={() => setSecretBatch(null)} title="Send secrets">
         <SecretBatch
           open={secretBatch !== null}
           sessionId={secretBatch?.sessionId || ""}

@@ -461,7 +461,7 @@ export function ConversationScreen({ version }) {
         />
       )}
       {session && (
-        <Sheet open={secretAliases !== null} onClose={() => setSecretAliases(null)} title="Store secrets">
+        <Sheet open={secretAliases !== null} onClose={() => setSecretAliases(null)} title="Send secrets">
           <SecretBatch
             open={secretAliases !== null}
             sessionId={session.id}

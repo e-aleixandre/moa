@@ -43,7 +43,7 @@ export function interceptSecretCommand(text) {
 export function validateSecretRows(rows) {
   const errors = {};
   if (rows.length === 0) return { form: "Add at least one secret", rows: errors };
-  if (rows.length > MAX_SECRET_ROWS) return { form: `At most ${MAX_SECRET_ROWS} secrets can be stored together`, rows: errors };
+  if (rows.length > MAX_SECRET_ROWS) return { form: `At most ${MAX_SECRET_ROWS} secrets can be sent together`, rows: errors };
 
   const names = new Map();
   rows.forEach((row, index) => {
