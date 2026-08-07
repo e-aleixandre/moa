@@ -20,6 +20,27 @@ import (
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
+func TestClearRunStartedAtCannotEraseNewGenerationAnchor(t *testing.T) {
+	sctx := &SessionContext{}
+	old := &runStartAnchor{gen: 1, at: time.Unix(1, 0)}
+	newer := &runStartAnchor{gen: 2, at: time.Unix(2, 0)}
+	sctx.runStartedAnchor.Store(old)
+
+	// This is the formerly unsafe interleaving: the old run has loaded its
+	// anchor, a new run has installed its anchor, then the old clear executes.
+	// A generation check followed by Store(nil) loses newer; CAS must fail.
+	loadedByOldRun := sctx.runStartedAnchor.Load()
+	sctx.runStartedAnchor.Store(newer)
+	if sctx.runStartedAnchor.CompareAndSwap(loadedByOldRun, nil) {
+		t.Fatal("stale clear erased a newer run anchor")
+	}
+
+	sctx.clearRunStartedAt(1)
+	if got := sctx.RunStartedAt(); !got.Equal(newer.at) {
+		t.Fatalf("run start after stale clear = %v, want %v", got, newer.at)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // fakeAgent — implements AgentController for handler tests
 // Thread-safe: all fields protected by mu for SendPrompt goroutine tests.

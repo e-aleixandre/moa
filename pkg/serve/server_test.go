@@ -410,6 +410,10 @@ func TestWebSocket_Init(t *testing.T) {
 	defer cancel()
 
 	sess, _ := mgr.CreateSession(CreateOpts{Title: "ws-test"})
+	// UnseenGen is an acknowledgement boundary, not merely an internal InitData
+	// field: assert the actual websocket JSON keeps it on the wire.
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p-init"})
+	sess.runtime.Bus.Drain(time.Second)
 
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
@@ -434,6 +438,82 @@ func TestWebSocket_Init(t *testing.T) {
 	if data["state"] != "idle" {
 		t.Fatalf("expected state idle, got %v", data["state"])
 	}
+	if data["unseen_gen"] != float64(1) {
+		t.Fatalf("init unseen_gen = %v, want 1", data["unseen_gen"])
+	}
+}
+
+func TestWebSocketInit_EmptySessionBindsInitialZeroAndStaysConnected(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "empty-ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancelWS := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWS()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var evt Event
+	if err := wsjson.Read(ctx, conn, &evt); err != nil {
+		t.Fatal(err)
+	}
+	if evt.Type != "init" {
+		t.Fatalf("first event = %q, want init", evt.Type)
+	}
+	data, ok := evt.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("init data type = %T, want object", evt.Data)
+	}
+	if data["attention_bound"] != true {
+		t.Fatalf("empty init attention_bound = %v, want true", data["attention_bound"])
+	}
+	if unseen, present := data["unseen_gen"]; present && unseen != float64(0) {
+		t.Fatalf("empty init unseen_gen = %v, want omitted or 0", unseen)
+	}
+	// The client closes and backs off immediately when attention_bound is false.
+	// Keep this otherwise idle socket open beyond that recovery turn; wsConns
+	// would drop to zero if the server had initiated the reconnect loop.
+	time.Sleep(150 * time.Millisecond)
+	if got := sess.wsConns.Load(); got != 1 {
+		t.Fatalf("empty-session websocket viewers = %d, want stable 1", got)
+	}
+}
+
+func TestWebSocketInitCloseDuringAttentionFenceReleasesViewer(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Block the rare attention tracker after publishing its event. Init is now
+	// waiting on the fence rather than a lossy delta sequence; closing the peer
+	// must cancel that wait and release the handler's wsConns reference.
+	mgr.attentionSeqMu.Lock()
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p-close"})
+	wsCtx, wsCancel := context.WithTimeout(context.Background(), time.Second)
+	defer wsCancel()
+	conn, _, err := websocket.Dial(wsCtx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	if err != nil {
+		mgr.attentionSeqMu.Unlock()
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	pollUntil(t, time.Second, "websocket viewer", func() bool { return sess.wsConns.Load() == 1 })
+	if err := conn.Close(websocket.StatusNormalClosure, "gone"); err != nil { //nolint:staticcheck // TODO: migrate to coder/websocket
+		mgr.attentionSeqMu.Unlock()
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "closed websocket handler", func() bool { return sess.wsConns.Load() == 0 })
+	mgr.attentionSeqMu.Unlock()
 }
 
 func TestWebSocket_Streaming(t *testing.T) {

@@ -698,6 +698,7 @@ func (m *Manager) deleteSession(id string) error {
 
 	// Cancel session context — stops bridges, subagent jobs, and in-flight runs.
 	sess.infra.sessionCancel()
+	sess.waitOverflowClear()
 
 	// Close runtime — stops bridges, aborts agent, closes bus.
 	sess.runtime.Close()
@@ -868,6 +869,7 @@ func (m *Manager) CloseSession(id string) error {
 		sess.infra.mcpMgr.Close()
 	}
 	sess.infra.sessionCancel()
+	sess.waitOverflowClear()
 	// Close drains the bus's async persistence reactor, so no delayed save can
 	// still be writing when the deferred unreserve lets a resume rebuild this
 	// session from the same files.
@@ -1099,6 +1101,7 @@ func (m *Manager) Shutdown() {
 		// callback waits for quiescence and then POSTs. The cancelled context is
 		// what makes that work give up instead of outliving the shutdown.
 		s.infra.sessionCancel()
+		s.waitOverflowClear()
 		m.forgetAttentionSequences(s)
 		// Close the runtime after flushing: this drains the bus's async
 		// persistence reactor (Bus.Close waits for subscriber goroutines to

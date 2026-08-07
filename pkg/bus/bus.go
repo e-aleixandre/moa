@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -57,8 +58,20 @@ type EventBus interface {
 	// publication boundary; gaps are valid when consumers drop lossy events.
 	SubscribeAllSeq(handler func(seq uint64, event any)) func()
 
+	// SubscribeAttentionSeq registers the bounded, sequenced attention tracker.
+	// Its event selection and compact projection are declarative and fixed: no
+	// caller code runs in Publish's critical section. Overflowed reports a
+	// dropped occurrence so callers must explicitly resynchronize before
+	// accepting another acknowledgement boundary.
+	SubscribeAttentionSeq(handler func(seq uint64, event AttentionSequenceEvent)) SeqFenceSubscription
+
 	// LastSeq returns the most recently accepted publication sequence.
 	LastSeq() uint64
+
+	// CaptureSeq returns the most recently accepted publication sequence while
+	// sequence allocation is serialized with Publish. It is an exact
+	// publication cut.
+	CaptureSeq() uint64
 
 	// Execute dispatches a command to its registered handler synchronously.
 	// Returns ErrNoHandler if none registered, ErrClosed if bus is closed.
@@ -91,6 +104,62 @@ type EventBus interface {
 	Close()
 }
 
+// SeqFenceSubscription is a filtered sequence subscription with a causal
+// completion fence. Fence returns false when the bus or subscription has
+// already stopped; otherwise its channel closes after all earlier matching
+// publications have run the handler.
+type SeqFenceSubscription interface {
+	Unsubscribe()
+	// CaptureCut returns the bus sequence cut together with the overflow and
+	// clear versions at that exact publication boundary. A snapshot must use
+	// this instead of reading overflow after taking its sequence cut: another
+	// snapshot may otherwise clear an overflow contained by this one.
+	CaptureCut() (seq, overflow, cleared uint64, ok bool)
+	// CaptureCutBefore is CaptureCut bounded by deadline. On expiry it returns
+	// a best-effort sequence cut and ok=false; callers must treat the matching
+	// attention boundary as unbound rather than use its watermarks.
+	CaptureCutBefore(deadline time.Time) (seq, overflow, cleared uint64, ok bool)
+	// Fence returns a completion channel and the overflow version observed at
+	// the marker's publication cut. Clearing can only use that version: an
+	// overflow after the marker remains visible to the next boundary attempt.
+	Fence() (<-chan struct{}, uint64, bool)
+	// FenceBefore is Fence with a deadline for placing its publication marker.
+	// On expiry it returns ok=false; implementations must not wait past
+	// deadline to acquire their publication boundary.
+	FenceBefore(deadline time.Time) (<-chan struct{}, uint64, bool)
+	Done() <-chan struct{}
+	Overflowed() bool
+	OverflowVersion() uint64
+	ClearOverflowThrough(version uint64)
+	// ClearOverflowThroughContext is the cancellable form for deferred
+	// acknowledgement work. It returns false when the context, bus, or
+	// subscription has stopped before the watermark was cleared.
+	ClearOverflowThroughContext(ctx context.Context, version uint64) bool
+	// ClearOverflowThroughBefore clears an observed overflow watermark before
+	// deadline. false leaves it pending so the caller can arrange an eventual
+	// clear without extending a latency-sensitive operation.
+	ClearOverflowThroughBefore(version uint64, deadline time.Time) bool
+}
+
+// AttentionSequenceKind identifies the compact attention occurrence retained
+// by SubscribeAttentionSeq.
+type AttentionSequenceKind uint8
+
+const (
+	AttentionRunEnded AttentionSequenceKind = iota
+	AttentionPermissionRequested
+	AttentionAskUserRequested
+	AttentionStateError
+)
+
+// AttentionSequenceEvent is the fixed compact projection used by the
+// correctness tracker. In particular it never retains RunEnded.FinalText.
+type AttentionSequenceEvent struct {
+	Kind      AttentionSequenceKind
+	Cancelled bool
+	Errored   bool
+}
+
 // ---------------------------------------------------------------------------
 // QueryTyped — generic helper
 // ---------------------------------------------------------------------------
@@ -121,6 +190,11 @@ func QueryTyped[Q any, R any](b EventBus, q Q) (R, error) {
 // never dropped and are not subject to this cap.
 const subscriberBuffer = 256
 
+// correctnessSubscriberBuffer bounds a rare structural subscription without
+// making ordinary event delivery lossy. Overflow is surfaced to its owner,
+// which must explicitly resynchronize before accepting another boundary.
+const correctnessSubscriberBuffer = 64
+
 // LocalBus is an in-process EventBus implementation.
 // Create with NewLocalBus; zero value is NOT usable.
 type LocalBus struct {
@@ -138,6 +212,9 @@ type LocalBus struct {
 	inflight atomic.Int64
 	idleCh   chan struct{} // buffered(1), signalled when inflight reaches 0
 	seq      atomic.Uint64
+	// published distinguishes a new bus's initial sequence zero from the
+	// otherwise ambiguous value after uint64 sequence wrap.
+	published atomic.Bool
 }
 
 // NewLocalBus creates a ready-to-use LocalBus.
@@ -162,19 +239,25 @@ type subscriber struct {
 	queue  []queuedEvent // FIFO of pending events
 	notify chan struct{} // buffered(1): signals the queue is non-empty
 
-	fn       reflect.Value
-	done     chan struct{} // closed to signal drain-and-exit
-	exited   chan struct{} // closed when goroutine returns
-	stopOnce sync.Once     // guards close(done) — safe for concurrent close/unsub
-	stopped  atomic.Bool   // fast check: true after stop() called
-	bus      *LocalBus     // back-reference for inflight tracking
-	isAll    bool          // true for SubscribeAll handlers (fn is func(any))
-	isSeqAll bool          // true for SubscribeAllSeq (fn is func(uint64, any))
+	fn              reflect.Value
+	done            chan struct{} // closed to signal drain-and-exit
+	exited          chan struct{} // closed when goroutine returns
+	stopOnce        sync.Once     // guards close(done) — safe for concurrent close/unsub
+	stopped         atomic.Bool   // fast check: true after stop() called
+	bus             *LocalBus     // back-reference for inflight tracking
+	isAll           bool          // true for SubscribeAll handlers (fn is func(any))
+	isSeqAll        bool          // true for SubscribeAllSeq (fn is func(uint64, any))
+	isAttentionSeq  bool          // true for SubscribeAttentionSeq
+	queueCap        int
+	discardOnStop   bool
+	overflow        atomic.Uint64
+	clearedOverflow atomic.Uint64
 }
 
 type queuedEvent struct {
 	seq   uint64
 	event any
+	fence chan struct{}
 }
 
 // stop signals the subscriber goroutine to drain and exit. Safe to call
@@ -183,6 +266,22 @@ type queuedEvent struct {
 func (s *subscriber) stop() {
 	s.stopOnce.Do(func() {
 		s.stopped.Store(true)
+		if s.discardOnStop {
+			// Discard the backlog instead of draining it, so a large queue is
+			// reclaimed promptly. A queued fence is dropped WITHOUT closing it:
+			// closing would falsely claim every earlier matching publication had
+			// run. Waiters observe Done() instead and treat the bound as unknown.
+			s.mu.Lock()
+			queued := s.queue
+			s.queue = nil
+			s.mu.Unlock()
+			for _, event := range queued {
+				if event.fence != nil {
+					continue
+				}
+				s.bus.decrementInflight()
+			}
+		}
 		close(s.done)
 	})
 }
@@ -324,8 +423,286 @@ func (b *LocalBus) SubscribeAllSeq(handler func(uint64, any)) func() {
 	}
 }
 
+// SubscribeAttentionSeq implements EventBus.SubscribeAttentionSeq.
+func (b *LocalBus) SubscribeAttentionSeq(handler func(uint64, AttentionSequenceEvent)) SeqFenceSubscription {
+	if handler == nil {
+		panic("bus: SubscribeAttentionSeq handler must not be nil")
+	}
+	b.mu.Lock()
+	if b.closed.Load() {
+		b.mu.Unlock()
+		return stoppedSeqFenceSubscription{}
+	}
+	sub := &subscriber{
+		notify: make(chan struct{}, 1), fn: reflect.ValueOf(handler),
+		done: make(chan struct{}), exited: make(chan struct{}), bus: b,
+		isAttentionSeq: true,
+		queueCap:       correctnessSubscriberBuffer, discardOnStop: true,
+	}
+	go sub.loop()
+	b.allSeqSubs = append(b.allSeqSubs, sub)
+	b.mu.Unlock()
+	return &seqFenceSubscription{bus: b, sub: sub}
+}
+
+type seqFenceSubscription struct {
+	bus  *LocalBus
+	sub  *subscriber
+	once sync.Once
+}
+
+// initialCutCapturer is deliberately narrower than SeqFenceSubscription: it
+// lets snapshots that use LocalBus distinguish the initial zero sequence from
+// a wrapped zero without making alternate subscription implementations claim
+// that they can do so.
+type initialCutCapturer interface {
+	CaptureCutWithInitial() (seq, overflow, cleared uint64, initial, ok bool)
+	CaptureCutWithInitialBefore(deadline time.Time) (seq, overflow, cleared uint64, initial, ok bool)
+}
+
+func (s *seqFenceSubscription) Unsubscribe() {
+	s.once.Do(func() {
+		s.bus.mu.Lock()
+		for i, candidate := range s.bus.allSeqSubs {
+			if candidate == s.sub {
+				s.bus.allSeqSubs = append(s.bus.allSeqSubs[:i], s.bus.allSeqSubs[i+1:]...)
+				break
+			}
+		}
+		s.bus.mu.Unlock()
+		s.sub.stop()
+	})
+}
+
+func (s *seqFenceSubscription) CaptureCut() (uint64, uint64, uint64, bool) {
+	// publishMu puts the sequence and both overflow watermarks in one total
+	// order with publication and overflow recording. ClearOverflowThrough also
+	// takes this lock, so a concurrent init cannot move the clear watermark
+	// between this snapshot's cut and its overflow observation.
+	s.bus.publishMu.Lock()
+	defer s.bus.publishMu.Unlock()
+	seq, overflow, cleared, _, ok := s.captureCutLocked()
+	return seq, overflow, cleared, ok
+}
+
+func (s *seqFenceSubscription) CaptureCutWithInitial() (uint64, uint64, uint64, bool, bool) {
+	s.bus.publishMu.Lock()
+	defer s.bus.publishMu.Unlock()
+	return s.captureCutLocked()
+}
+
+// CaptureCutBefore is the deadline-aware form used during WebSocket init. If
+// publication is stalled, its sequence is still sufficient to replay events
+// after the stream snapshot (whose caller holds streamMu), but its overflow
+// watermarks are deliberately unusable: the init is explicitly unbound.
+func (s *seqFenceSubscription) CaptureCutBefore(deadline time.Time) (uint64, uint64, uint64, bool) {
+	if !tryLockBefore(&s.bus.publishMu, deadline) {
+		return s.bus.seq.Load(), 0, 0, false
+	}
+	defer s.bus.publishMu.Unlock()
+	if !time.Now().Before(deadline) {
+		return s.bus.seq.Load(), 0, 0, false
+	}
+	seq, overflow, cleared, _, ok := s.captureCutLocked()
+	return seq, overflow, cleared, ok
+}
+
+func (s *seqFenceSubscription) CaptureCutWithInitialBefore(deadline time.Time) (uint64, uint64, uint64, bool, bool) {
+	if !tryLockBefore(&s.bus.publishMu, deadline) {
+		return s.bus.seq.Load(), 0, 0, false, false
+	}
+	defer s.bus.publishMu.Unlock()
+	if !time.Now().Before(deadline) {
+		return s.bus.seq.Load(), 0, 0, false, false
+	}
+	return s.captureCutLocked()
+}
+
+func (s *seqFenceSubscription) captureCutLocked() (uint64, uint64, uint64, bool, bool) {
+	if s.bus.closed.Load() || s.sub.stopped.Load() {
+		return 0, 0, 0, false, false
+	}
+	seq := s.bus.seq.Load()
+	return seq, s.sub.overflow.Load(), s.sub.clearedOverflow.Load(), seq == 0 && !s.bus.published.Load(), true
+}
+
+func (s *seqFenceSubscription) Fence() (<-chan struct{}, uint64, bool) {
+	// publishMu makes this marker a publication cut. A matching event cannot
+	// be inserted before the marker after this point.
+	s.bus.publishMu.Lock()
+	defer s.bus.publishMu.Unlock()
+	return s.fenceLocked()
+}
+
+// FenceBefore is the deadline-aware form used by latency-sensitive snapshot
+// initialization. It includes waiting to acquire the publication cut lock in
+// the deadline instead of letting a contended publisher extend the fence cap.
+func (s *seqFenceSubscription) FenceBefore(deadline time.Time) (<-chan struct{}, uint64, bool) {
+	if !tryLockBefore(&s.bus.publishMu, deadline) {
+		return nil, 0, false
+	}
+	defer s.bus.publishMu.Unlock()
+	if !time.Now().Before(deadline) {
+		return nil, 0, false
+	}
+	return s.fenceLocked()
+}
+
+func (s *seqFenceSubscription) fenceLocked() (<-chan struct{}, uint64, bool) {
+	if s.bus.closed.Load() || s.sub.stopped.Load() {
+		return nil, 0, false
+	}
+	s.bus.mu.RLock()
+	if s.sub.stopped.Load() {
+		s.bus.mu.RUnlock()
+		return nil, 0, false
+	}
+	done := make(chan struct{})
+	overflowVersion := s.sub.overflow.Load()
+	queued := s.sub.enqueueFence(done)
+	s.bus.mu.RUnlock()
+	if !queued {
+		return nil, 0, false
+	}
+	return done, overflowVersion, true
+}
+
+func (s *seqFenceSubscription) Done() <-chan struct{} { return s.sub.done }
+func (s *seqFenceSubscription) Overflowed() bool {
+	return s.sub.stopped.Load() || overflowPending(s.sub.overflow.Load(), s.sub.clearedOverflow.Load())
+}
+func (s *seqFenceSubscription) OverflowVersion() uint64 { return s.sub.overflow.Load() }
+func (s *seqFenceSubscription) ClearOverflowThrough(version uint64) {
+	s.ClearOverflowThroughContext(context.Background(), version)
+}
+
+// ClearOverflowThroughContext is the cancellable form used by serve's
+// deferred overflow-clear worker. It never waits indefinitely for publishMu
+// after its session or subscription has ended.
+func (s *seqFenceSubscription) ClearOverflowThroughContext(ctx context.Context, version uint64) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		if s.bus.publishMu.TryLock() {
+			if ctx.Err() != nil || s.bus.closed.Load() || s.sub.stopped.Load() {
+				s.bus.publishMu.Unlock()
+				return false
+			}
+			for {
+				cleared := s.sub.clearedOverflow.Load()
+				if overflowVersionAtOrAfter(cleared, version) || s.sub.clearedOverflow.CompareAndSwap(cleared, version) {
+					s.bus.publishMu.Unlock()
+					return true
+				}
+			}
+		}
+		timer := time.NewTimer(time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return false
+		case <-s.sub.done:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return false
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *seqFenceSubscription) ClearOverflowThroughBefore(version uint64, deadline time.Time) bool {
+	if !tryLockBefore(&s.bus.publishMu, deadline) {
+		return false
+	}
+	defer s.bus.publishMu.Unlock()
+	if !time.Now().Before(deadline) {
+		return false
+	}
+	for {
+		cleared := s.sub.clearedOverflow.Load()
+		if overflowVersionAtOrAfter(cleared, version) || s.sub.clearedOverflow.CompareAndSwap(cleared, version) {
+			return true
+		}
+	}
+}
+
+// tryLockBefore avoids letting a mutex wait extend a caller's latency budget.
+// Mutex acquisition itself is not cancellable, so poll in short intervals.
+func tryLockBefore(mu *sync.Mutex, deadline time.Time) bool {
+	for {
+		if mu.TryLock() {
+			if time.Now().Before(deadline) {
+				return true
+			}
+			mu.Unlock()
+			return false
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		if remaining > time.Millisecond {
+			remaining = time.Millisecond
+		}
+		timer := time.NewTimer(remaining)
+		<-timer.C
+	}
+}
+
+// overflowVersionAtOrAfter compares serial numbers rather than ordinary
+// unsigned integers. Overflow versions advance one at a time, so the usual
+// half-range serial-number ordering preserves their order across uint64 wrap.
+func overflowVersionAtOrAfter(a, b uint64) bool {
+	return int64(a-b) >= 0
+}
+
+func overflowPending(overflow, cleared uint64) bool {
+	return overflow != cleared && overflowVersionAtOrAfter(overflow, cleared)
+}
+
+type stoppedSeqFenceSubscription struct{}
+
+func (stoppedSeqFenceSubscription) Unsubscribe() {}
+func (stoppedSeqFenceSubscription) CaptureCut() (uint64, uint64, uint64, bool) {
+	return 0, 0, 0, false
+}
+func (stoppedSeqFenceSubscription) CaptureCutBefore(time.Time) (uint64, uint64, uint64, bool) {
+	return 0, 0, 0, false
+}
+func (stoppedSeqFenceSubscription) Fence() (<-chan struct{}, uint64, bool) {
+	return nil, 0, false
+}
+func (stoppedSeqFenceSubscription) FenceBefore(time.Time) (<-chan struct{}, uint64, bool) {
+	return nil, 0, false
+}
+func (stoppedSeqFenceSubscription) Done() <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
+func (stoppedSeqFenceSubscription) Overflowed() bool            { return true }
+func (stoppedSeqFenceSubscription) OverflowVersion() uint64     { return 1 }
+func (stoppedSeqFenceSubscription) ClearOverflowThrough(uint64) {}
+func (stoppedSeqFenceSubscription) ClearOverflowThroughContext(context.Context, uint64) bool {
+	return false
+}
+func (stoppedSeqFenceSubscription) ClearOverflowThroughBefore(uint64, time.Time) bool {
+	return false
+}
+
 // LastSeq implements EventBus.LastSeq.
 func (b *LocalBus) LastSeq() uint64 {
+	b.publishMu.Lock()
+	defer b.publishMu.Unlock()
+	return b.seq.Load()
+}
+
+// CaptureSeq implements EventBus.CaptureSeq.
+func (b *LocalBus) CaptureSeq() uint64 {
 	b.publishMu.Lock()
 	defer b.publishMu.Unlock()
 	return b.seq.Load()
@@ -341,6 +718,7 @@ func (b *LocalBus) Publish(event any) {
 	if b.closed.Load() {
 		return
 	}
+	b.published.Store(true)
 	seq := b.seq.Add(1)
 	et := reflect.TypeOf(event)
 
@@ -366,8 +744,16 @@ func (b *LocalBus) Publish(event any) {
 		if sub.stopped.Load() {
 			continue
 		}
+		queued := event
+		if sub.isAttentionSeq {
+			var accepted bool
+			queued, accepted = projectAttentionSequenceEvent(event)
+			if !accepted {
+				continue
+			}
+		}
 		b.inflight.Add(1)
-		if !sub.enqueue(seq, event, lossy) {
+		if !sub.enqueue(seq, queued, lossy) {
 			b.decrementInflight()
 		}
 	}
@@ -576,11 +962,16 @@ func (b *LocalBus) Close() {
 // ---------------------------------------------------------------------------
 
 // enqueue appends an event to the subscriber's queue and wakes its goroutine.
-// Lossy events are dropped once the queue depth reaches subscriberBuffer;
-// lossless events are always enqueued. Returns false only when the event was
-// dropped. Never blocks.
+// A correctness subscription may impose its own bounded queue; its owner sees
+// an overflow and must resynchronize rather than accepting a missing event.
+// Ordinary lossless subscriptions retain their established delivery semantics.
 func (s *subscriber) enqueue(seq uint64, event any, lossy bool) bool {
 	s.mu.Lock()
+	if s.queueCap > 0 && len(s.queue) >= s.queueCap {
+		s.overflow.Add(1)
+		s.mu.Unlock()
+		return false
+	}
 	if lossy && len(s.queue) >= subscriberBuffer {
 		s.mu.Unlock()
 		return false
@@ -596,6 +987,25 @@ func (s *subscriber) enqueue(seq uint64, event any, lossy bool) bool {
 	return true
 }
 
+// enqueueFence appends a completion marker without affecting the bus inflight
+// count. Callers hold the bus publication lock, so matching events published
+// before this marker are already ahead of it in this FIFO.
+func (s *subscriber) enqueueFence(done chan struct{}) bool {
+	s.mu.Lock()
+	if s.queueCap > 0 && len(s.queue) >= s.queueCap {
+		s.overflow.Add(1)
+		s.mu.Unlock()
+		return false
+	}
+	s.queue = append(s.queue, queuedEvent{fence: done})
+	s.mu.Unlock()
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+	return true
+}
+
 func (s *subscriber) loop() {
 	defer close(s.exited)
 	for {
@@ -603,7 +1013,9 @@ func (s *subscriber) loop() {
 		case <-s.notify:
 			s.drain()
 		case <-s.done:
-			s.drain() // process everything queued before exiting
+			if !s.discardOnStop {
+				s.drain() // process everything queued before exiting
+			}
 			return
 		}
 	}
@@ -622,6 +1034,10 @@ func (s *subscriber) drain() {
 		s.queue = nil
 		s.mu.Unlock()
 		for _, event := range batch {
+			if event.fence != nil {
+				close(event.fence)
+				continue
+			}
 			s.process(event)
 		}
 	}
@@ -635,9 +1051,32 @@ func (s *subscriber) process(queued queuedEvent) {
 		s.fn.Interface().(func(any))(queued.event)
 	} else if s.isSeqAll {
 		s.fn.Interface().(func(uint64, any))(queued.seq, queued.event)
+	} else if s.isAttentionSeq {
+		s.fn.Interface().(func(uint64, AttentionSequenceEvent))(queued.seq, queued.event.(AttentionSequenceEvent))
 	} else {
 		s.fn.Call([]reflect.Value{reflect.ValueOf(queued.event)})
 	}
+}
+
+func projectAttentionSequenceEvent(event any) (AttentionSequenceEvent, bool) {
+	switch event := event.(type) {
+	case RunEnded:
+		if event.Cancelled && event.Err == nil {
+			return AttentionSequenceEvent{}, false
+		}
+		return AttentionSequenceEvent{
+			Kind: AttentionRunEnded, Cancelled: event.Cancelled, Errored: event.Err != nil,
+		}, true
+	case PermissionRequested:
+		return AttentionSequenceEvent{Kind: AttentionPermissionRequested}, true
+	case AskUserRequested:
+		return AttentionSequenceEvent{Kind: AttentionAskUserRequested}, true
+	case StateChanged:
+		if event.State == string(StateError) {
+			return AttentionSequenceEvent{Kind: AttentionStateError}, true
+		}
+	}
+	return AttentionSequenceEvent{}, false
 }
 
 func (b *LocalBus) decrementInflight() {

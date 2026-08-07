@@ -692,6 +692,43 @@ func TestWSReactor_CleanupStopsWatcher(t *testing.T) {
 	}
 }
 
+func TestWSReactorUnresolvedLiveAttentionForcesReconnectInsteadOfGenerationZero(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
+		return mgr.attentionGenerationForSequence(sess, seq)
+	})
+	defer r.cleanup()
+
+	// The tracker cannot acquire its recorder lock before its bounded wait. The
+	// old path sent unseen_gen:0; the reactor must instead close so the next init
+	// uses the explicit attention_bound:false recovery protocol.
+	mgr.attentionSeqMu.Lock()
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p1"})
+	select {
+	case <-r.Done():
+	case <-time.After(attentionSequenceWait + time.Second):
+		mgr.attentionSeqMu.Unlock()
+		t.Fatal("unresolved live attention did not force reconnect")
+	}
+	mgr.attentionSeqMu.Unlock()
+	select {
+	case event := <-r.Events():
+		if event.Type == "permission_request" {
+			data := event.Data.(PermissionData)
+			if data.UnseenGen == 0 {
+				t.Fatal("serialized permission carried silent generation zero")
+			}
+		}
+	default:
+	}
+}
+
 func TestEnrichEditToolStart(t *testing.T) {
 	dir := t.TempDir()
 	var sb strings.Builder

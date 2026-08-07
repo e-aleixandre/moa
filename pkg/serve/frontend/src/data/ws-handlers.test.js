@@ -60,6 +60,7 @@ test('handleWsInit acknowledges a visible pending request from its attention occ
   });
   handleWsInit('s1', {
     messages: [],
+    unseen_gen: 9,
     pending_permission: { id: 'p1', unseen_gen: 9, tool_name: 'bash', args: {} },
   });
   expect(store.get().sessions.s1.unseen).toBe(false);

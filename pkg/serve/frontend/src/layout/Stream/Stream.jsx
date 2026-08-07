@@ -6,10 +6,14 @@ import {
   DiffBlock,
   DelegationBlock,
   FileCard,
+  HistoryHydrationTail,
+  historyHydrationTailVisible,
 } from "../../components/index.js";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
+import { retryHistoryHydration } from "../../data/api.js";
+import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
 import "./Stream.css";
 
 // Stream — the scrollable conversation area. It renders the REAL
@@ -120,6 +124,7 @@ const AT_BOTTOM_PX = 80;
 
 export function Stream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind }) {
   const containerRef = useRef(null);
+  const hydrationAnchor = useRef(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   // Length of the in-flight tool's streaming output (a tool_update grows this
   // without changing block/message count or streamingText), so it must be its
@@ -176,6 +181,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     session?.messages?.length,
     session?.streamingText,
     session?.thinkingText,
+    session?.historyPending,
     liveToolTailLen,
   ]);
 
@@ -191,6 +197,17 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     setShowNewBtn(false);
     scrollToBottomNow();
   }, [session?.id, scrollToBottomNow]);
+
+  // The init snapshot replaces cached blocks wholesale. A reader who is not
+  // following the tail keeps the same rendered block at the same viewport
+  // offset when that block survives the swap; if it does not, preserve their
+  // absolute position rather than yanking them to the refreshed tail.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    restoreHydrationAnchor(el, hydrationAnchor.current, session?.id, !!session?.historyPending, stickToBottom.current);
+    hydrationAnchor.current = captureHydrationAnchor(el, session?.id, !!session?.historyPending);
+  }, [session?.id, session?.historyPending, blocks]);
 
   // A new ask_user prompt blocks the turn, so reveal it once even when the
   // user had scrolled away. Future scroll events immediately restore their
@@ -218,9 +235,18 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
         <div class="stream-col">
           {lead}
           {blocks.map((block) => (
-            <StreamBlock key={block.id} block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
+            <div key={block.id} data-stream-anchor={block.id}>
+              <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
+            </div>
           ))}
           {tail}
+          {historyHydrationTailVisible(session) && (
+            <HistoryHydrationTail
+              hasCachedTranscript={(session.messages || []).length > 0}
+              stale={session.historyStale}
+              onRetry={() => retryHistoryHydration(session.id)}
+            />
+          )}
         </div>
       </div>
 

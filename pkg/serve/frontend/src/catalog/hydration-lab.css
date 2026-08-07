@@ -1,0 +1,315 @@
+/* hydration-lab.css — CATALOG-ONLY styling for the stale-transcript hydration
+   exploration. Two kinds of rules live here:
+
+   1. `.hydra-*` — the lab's own chrome (390px phone frame, composer stand-in,
+      replay control) plus the four experimental treatments. They target the
+      REAL production markup (`.mconv`, `.mconv-stream`, `.doc`, `.tg`,
+      `.waypoint`, `.skel-block`) but only under a `.hydra--{variant}` wrapper,
+      so production CSS is untouched and the specimens render with real tokens.
+
+   2. The shimmer is NEVER re-authored: variant A and D mount the shipped
+      <StreamingSkeleton>, so `.skel-line`'s gradient, its 1.5s tempo and its
+      prefers-reduced-motion opt-out all come from StreamingSkeleton.css. Only
+      bar geometry is restyled below.
+
+   Colour roles: --blue is the informational/running signal every "catching up"
+   indicator uses; --mauve stays the model/selection + focus ring; --peach stays
+   the primary action. No colour is hand-authored anywhere in this file. */
+
+.hydration-lab { margin-top: var(--space-12); }
+.hydration-lab > p { max-width: 72ch; color: var(--subtext0); }
+
+.hydra-note {
+  max-width: 76ch;
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--subtext0);
+  font-size: var(--text-sm);
+}
+
+.hydra-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.hydra-controls-hint {
+  color: var(--overlay1);
+  font-size: var(--text-xs);
+}
+
+.hydra-play {
+  padding: 3px 12px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-full);
+  background: var(--surface0);
+  color: var(--subtext1);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.hydra-play:hover { background: var(--surface1); color: var(--text); }
+.hydra-play:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ---- Phone frame ------------------------------------------------------- */
+
+.hydra-specimen { padding: 0; overflow: hidden; }
+.hydra-specimen .responsive-specimen-head { margin: var(--space-2) var(--space-3); }
+
+.hydra-frame {
+  position: relative;
+  isolation: isolate;
+  width: 390px;
+  height: 620px;
+  overflow: hidden;
+  border-top: 1px solid var(--surface0);
+  background: var(--base);
+}
+
+/* The production .mconv is a 100dvh column; inside the lab frame it fills the
+   frame instead. Everything else about it (the --base sheet, the stream's
+   masked edges, the mobile density rules) is the shipped CSS. */
+.hydra-screen.mconv {
+  height: 100%;
+  /* The lab has no notch, so the chip does not need the iOS safe-area room the
+     real screen reserves; pull the stream's top padding back to what a device
+     with a zero inset would give it. */
+  --hydra-top: 50px;
+}
+
+.hydra-screen .mconv-stream { padding-top: var(--hydra-top); }
+
+/* SR-only utility: there is no global one (ActivityLedger scopes its own). */
+.hydra-screen .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Composer stand-in — the real MobileComposer is store-bound, so the frame
+   gets a dumb bar for bottom weight (same approach as mobile-gallery). */
+.hydra-composer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 10px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  background: var(--mantle);
+}
+
+.hydra-composer-box {
+  flex: 1;
+  min-width: 0;
+  color: var(--overlay1);
+  font-size: var(--text-input);
+}
+
+.hydra-composer-send {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--peach);
+  color: var(--crust);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+/* ---- Shared "catching up" indicator ------------------------------------
+   One shape, three placements. --blue is the informational/running role, so
+   every variant's indicator reads as the same event regardless of where it
+   sits: a spinner, one sentence, no count, no dismiss. */
+
+.hydra-status,
+.hydra-veil-note,
+.hydra-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--blue);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+/* A · a plain line under the skeleton — on a screen with no content, the
+   words do not need a container to be found. */
+.hydra-status {
+  flex: none;
+  justify-content: center;
+  align-self: center;
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-4);
+}
+
+/* B · centred over the dimmed transcript: a pill, because it has to hold its
+   own against text it is sitting on. Centred on BOTH axes rather than tucked
+   under the title — over a scrim, a pill landing mid-sentence reads as a
+   collision, while the middle of the veil reads as the veil's own label. */
+.hydra-veil-note {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--blue) 34%, transparent);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--base) 88%, var(--blue));
+  box-shadow: var(--shadow-sm);
+  white-space: nowrap;
+}
+
+/* C · a full-width chip tucked directly under the title chip. Deliberately
+   quiet: it must not compete with the title for the top of the screen. */
+.hydra-banner {
+  position: absolute;
+  top: calc(var(--hydra-top) - 4px);
+  right: var(--space-4);
+  left: var(--space-4);
+  z-index: 1;
+  justify-content: center;
+  padding: 4px var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--blue) 26%, transparent);
+  border-radius: var(--radius-full);
+  background: var(--blue-dim);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* The banner is absolutely positioned, so the transcript reserves its row
+   rather than starting underneath it. */
+.hydra-banner-spacer { height: 26px; }
+
+/* ---- Variant A · full skeleton -----------------------------------------
+   The cached transcript is not rendered at all. Four <StreamingSkeleton>
+   blocks stand in for the shape of a conversation (a short user quote, a
+   paragraph, a tool card, a closing paragraph) so the screen still reads as
+   "a transcript is coming", not "this session is empty". */
+
+.hydra-skel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* The skeleton blocks inherit .skel-line's shimmer from StreamingSkeleton.css;
+   only the block geometry changes, so reduced motion is already handled. */
+.hydra-skel .skel-block { max-width: none; margin-bottom: var(--space-4); }
+
+/* User-turn stand-in: the waypoint's peach left rule is the one piece of
+   structure worth keeping, because it is how the eye finds its own messages. */
+.hydra-skel-quote {
+  padding: 10px 13px;
+  border-left: 3px solid color-mix(in srgb, var(--peach) 45%, transparent);
+  border-radius: 3px 12px 12px 3px;
+  background: var(--mantle);
+}
+
+/* Tool-card stand-in: the ledger's card silhouette, with taller bars standing
+   in for its rows. */
+.hydra-skel-card {
+  padding: var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: var(--mantle);
+}
+
+.hydra-skel-card .skel-line { height: 14px; }
+
+/* ---- Variant B · veiled stale content ----------------------------------
+   The cached transcript stays in place at reduced opacity, with a scrim over
+   it so no part of it can be read as current. Interaction is suppressed for
+   the same reason: a tool row you expand here may not exist in a moment. */
+
+.hydra--veil.is-waiting .hydra-cached {
+  opacity: 0.42;
+  filter: saturate(0.75);
+  pointer-events: none;
+}
+
+.hydra--veil.is-waiting .mstream::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--base) 45%, transparent);
+}
+
+/* ---- Variant C · stale + banner ----------------------------------------
+   Nothing is dimmed; the chip above carries the whole message. Left with no
+   variant-specific rules on purpose: that IS the variant. */
+
+/* ---- Variant D · trailing skeleton (recommended) -----------------------
+   The cached turns stay at full contrast, and the gap is drawn where it
+   actually is — at the tail, under a labelled hairline, at roughly the height
+   the incoming turn will need, so the arrival does not shove the scroll. */
+
+.hydra-tail { margin-top: var(--space-2); }
+
+.hydra-tail-rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--blue);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.hydra-tail-rule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--blue) 40%, transparent),
+    transparent
+  );
+}
+
+.hydra-tail-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hydra-tail .skel-block { max-width: none; margin-bottom: var(--space-3); }
+
+/* ---- Arrival ------------------------------------------------------------
+   The resolved state fades its authoritative tail in over one --duration beat
+   rather than popping: the point of the lab is to judge the swap, not just the
+   endpoints. */
+
+.hydra-screen:not(.is-waiting) .doc:last-of-type {
+  animation: hydra-settle calc(var(--duration) * 3) var(--ease) 1;
+}
+
+@keyframes hydra-settle {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Reduced motion: the skeletons already drop their shimmer via
+   StreamingSkeleton.css; here the arrival stops moving and the spinners stop
+   spinning via Spinner.css. Nothing else needs disabling. */
+@media (prefers-reduced-motion: reduce) {
+  .hydra-screen:not(.is-waiting) .doc:last-of-type { animation: none; }
+}

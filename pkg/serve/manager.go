@@ -163,12 +163,21 @@ type ManagedSession struct {
 	// briefGen serializes brief regeneration (see brief.go): briefPending marks
 	// a coalesced regeneration request; briefRunning is the one-flight guard so
 	// two generations for the same session never overlap.
-	briefPending atomic.Bool
-	briefRunning atomic.Bool
-	pushUnsubs   []func()
-	usageUnsub   func()
-	unreadUnsub  func()
-	runProvider  string
+	briefPending    atomic.Bool
+	briefRunning    atomic.Bool
+	pushUnsubs      []func()
+	usageUnsub      func()
+	unreadUnsub     func()
+	attentionSeqSub bus.SeqFenceSubscription
+	// overflowClear coalesces deadline-missed overflow acknowledgements into
+	// one cancellable worker per session. It is separate from attentionSeqMu:
+	// the worker may wait on bus publication without blocking sequence records.
+	overflowClearMu      sync.Mutex
+	overflowClearPending uint64
+	overflowClearSet     bool
+	overflowClearRunning bool
+	overflowClearDone    chan struct{}
+	runProvider          string
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -381,7 +390,6 @@ func (s *ManagedSession) info() SessionInfo {
 	s.mu.Lock()
 	lastRun := s.lastRunAt
 	cacheTTL := s.cacheTTL
-	runStartedAt := s.runStartedAt
 	info := SessionInfo{
 		ID:             s.ID,
 		Title:          s.Title,
@@ -420,7 +428,7 @@ func (s *ManagedSession) info() SessionInfo {
 	}
 	// Surface the run-start time only while a run is in flight so the client can
 	// show (and keep) an accurate elapsed counter across reconnects.
-	if !runStartedAt.IsZero() && (info.State == StateRunning || info.State == StatePermission) {
+	if runStartedAt := s.runtime.Context().RunStartedAt(); !runStartedAt.IsZero() && (info.State == StateRunning || info.State == StatePermission) {
 		info.RunStartedAt = runStartedAt
 	}
 	return info
@@ -496,11 +504,16 @@ func (m *Manager) forgetUnseen(id string) {
 }
 
 // MarkSessionRead clears a process-local attention marker when the caller has
-// observed that occurrence or a newer one. It intentionally does not save the
+// observed that occurrence or a newer one. A supplied server instance scopes
+// the acknowledgement to its generation namespace. Omitting it preserves the
+// legacy unscoped endpoint contract. It intentionally does not save the
 // session: a Moa restart resets this transient UI state.
-func (m *Manager) MarkSessionRead(id string, gen uint64) error {
+func (m *Manager) MarkSessionRead(id string, gen uint64, instances ...string) error {
 	if _, ok := m.Get(id); !ok {
 		return ErrNotFound
+	}
+	if len(instances) > 0 && instances[0] != "" && instances[0] != m.serverInstance {
+		return nil
 	}
 	m.unseenMu.Lock()
 	if gen == 0 || gen >= m.unseenGen[id] {
@@ -538,8 +551,9 @@ type Manager struct {
 	attentionGen       uint64
 	attentionSeqMu     sync.Mutex
 	attentionSeq       map[attentionSequenceKey]uint64
-	attentionSeqOrder  []attentionSequenceKey
+	attentionSeqOrder  map[*ManagedSession][]attentionSequenceKey
 	attentionSeqLatest map[*ManagedSession]uint64
+	attentionSeqPruned map[*ManagedSession]uint64
 	attentionSeqWake   chan struct{}
 	serverInstance     string
 	baseCtx            context.Context
@@ -597,7 +611,10 @@ type Manager struct {
 	automationMu sync.Mutex
 }
 
-const maxAttentionSequenceRecords = 512
+const (
+	maxAttentionSequenceRecords = 512 // per active session; released on session teardown
+	attentionSequenceWait       = 100 * time.Millisecond
+)
 
 type attentionSequenceKey struct {
 	session *ManagedSession
@@ -613,18 +630,26 @@ func (m *Manager) recordAttentionSequence(sess *ManagedSession, seq, gen uint64)
 	if m.attentionSeq == nil {
 		m.attentionSeq = make(map[attentionSequenceKey]uint64)
 	}
+	if m.attentionSeqOrder == nil {
+		m.attentionSeqOrder = make(map[*ManagedSession][]attentionSequenceKey)
+	}
 	key := attentionSequenceKey{session: sess, seq: seq}
 	m.attentionSeq[key] = gen
 	if m.attentionSeqLatest == nil {
 		m.attentionSeqLatest = make(map[*ManagedSession]uint64)
 	}
 	m.attentionSeqLatest[sess] = seq
-	m.attentionSeqOrder = append(m.attentionSeqOrder, key)
-	if len(m.attentionSeqOrder) > maxAttentionSequenceRecords {
-		old := m.attentionSeqOrder[0]
-		m.attentionSeqOrder = m.attentionSeqOrder[1:]
+	order := append(m.attentionSeqOrder[sess], key)
+	if len(order) > maxAttentionSequenceRecords {
+		old := order[0]
+		order = order[1:]
 		delete(m.attentionSeq, old)
+		if m.attentionSeqPruned == nil {
+			m.attentionSeqPruned = make(map[*ManagedSession]uint64)
+		}
+		m.attentionSeqPruned[sess] = old.seq
 	}
+	m.attentionSeqOrder[sess] = order
 	if m.attentionSeqWake != nil {
 		close(m.attentionSeqWake)
 	}
@@ -632,27 +657,266 @@ func (m *Manager) recordAttentionSequence(sess *ManagedSession, seq, gen uint64)
 	m.attentionSeqMu.Unlock()
 }
 
-// attentionGenerationForSequence waits for the unread subscriber to record a
-// relevant bus event before its websocket representation is emitted. This makes
-// an occurrence ID available end-to-end and prevents /read racing ahead of the
-// server-side marker.
+// attentionGenerationForSequence resolves an attention event's occurrence ID.
+// The tracker only queues attention events, so streaming deltas cannot starve
+// it. Its wait remains bounded as a last-resort safety net for teardown races.
 func (m *Manager) attentionGenerationForSequence(sess *ManagedSession, seq uint64) uint64 {
+	return m.attentionGenerationForSequenceContext(sess.infra.sessionCtx, sess, seq)
+}
+
+func (m *Manager) attentionGenerationForSequenceContext(ctx context.Context, sess *ManagedSession, seq uint64) uint64 {
+	if seq == 0 {
+		// Bus sequences are ordinary uint64 counters. Wrapping is not plausible
+		// in a process lifetime (and JSON numbers stop being exact much earlier),
+		// so the zero wrap value fails closed: the reactor reconnects rather than
+		// publishing an acknowledgement with an unprovable occurrence ID.
+		return 0
+	}
+	timer := time.NewTimer(attentionSequenceWait)
+	defer timer.Stop()
+	retry := time.NewTicker(time.Millisecond)
+	defer retry.Stop()
+	var ctxDone <-chan struct{}
+	if ctx != nil {
+		ctxDone = ctx.Done()
+	}
+	var trackerDone <-chan struct{}
+	if sess.attentionSeqSub != nil {
+		trackerDone = sess.attentionSeqSub.Done()
+	}
 	for {
-		m.attentionSeqMu.Lock()
-		gen, ok := m.attentionSeq[attentionSequenceKey{session: sess, seq: seq}]
-		latest := m.attentionSeqLatest[sess]
-		wake := m.attentionSeqWake
-		m.attentionSeqMu.Unlock()
-		if ok {
-			return gen
+		var wake <-chan struct{}
+		// A contended recorder lock used to defeat the 100ms deadline because
+		// Lock itself was unbounded. Poll TryLock under the same deadline: a
+		// live frame that cannot obtain its occurrence ID must reconnect rather
+		// than serializing a generation 0.
+		if m.attentionSeqMu.TryLock() {
+			gen, ok := m.attentionSeq[attentionSequenceKey{session: sess, seq: seq}]
+			latest := m.attentionSeqLatest[sess]
+			wake = m.attentionSeqWake
+			m.attentionSeqMu.Unlock()
+			if ok {
+				return gen
+			}
+			if sess.attentionClosed.Load() {
+				return 0
+			}
+			// See the seq==0 guard above: ordinary ordering intentionally relies
+			// on the process-lifetime no-wrap assumption shared by every bus-seq
+			// consumer. Overflow versions are different serial numbers and do use
+			// modular ordering in pkg/bus.
+			if latest >= seq {
+				return 0 // pruned stale event; do not wait forever
+			}
+			// A recorded occurrence is always authoritative. Only an unrecorded
+			// one is abandoned early when the bounded rare-event queue overflowed:
+			// waiting for a record that was dropped can only end in the same zero,
+			// and the reactor turns that into an explicit reconnect.
+			if sess.attentionSeqSub != nil && sess.attentionSeqSub.Overflowed() {
+				return 0
+			}
 		}
-		if sess.attentionClosed.Load() {
+		select {
+		case <-wake:
+		case <-retry.C:
+		case <-ctxDone:
+			return 0
+		case <-trackerDone:
+			return 0
+		case <-timer.C:
 			return 0
 		}
-		if latest >= seq {
-			return 0 // pruned stale event; do not wait forever
+	}
+}
+
+// attentionGenerationAtCut returns the newest attention occurrence represented
+// by cut. A fence is queued after the cut's publication boundary, so every
+// earlier attention event has run before the sequence history is inspected.
+// A missing bound is explicit: callers must omit unseen_gen rather than risk
+// acknowledging content outside (or inside but beyond) the snapshot.
+func (m *Manager) attentionGenerationAtCut(ctx context.Context, sess *ManagedSession, cut uint64) (uint64, bool) {
+	sub := sess.attentionSeqSub
+	if sub == nil {
+		return 0, false
+	}
+	// This compatibility helper is used by tests and non-init callers. The WS
+	// init path uses attentionGenerationAtCutWithOverflow with the watermarks
+	// captured atomically alongside its snapshot cut.
+	_, overflow, cleared, ok := sub.CaptureCut()
+	if !ok {
+		return 0, false
+	}
+	return m.attentionGenerationAtCutWithOverflow(ctx, sess, cut, overflow, cleared)
+}
+
+func (m *Manager) attentionGenerationAtCutWithOverflow(ctx context.Context, sess *ManagedSession, cut, overflowAtCut, clearedAtCut uint64) (uint64, bool) {
+	return m.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, false, time.Now().Add(attentionSequenceWait))
+}
+
+// attentionGenerationAtCutWithOverflowBefore uses one deadline from the
+// snapshot's publication cut through the final lookup. The hard bound applies
+// to waits on publishMu, the tracker fence, tracker mutex, and overflow clear;
+// it does not claim to bound scheduling, JSON/socket writes, or streamMu while
+// assembling the independently consistent transcript snapshot.
+func (m *Manager) attentionGenerationAtCutWithOverflowBefore(ctx context.Context, sess *ManagedSession, cut, overflowAtCut, clearedAtCut uint64, initialCut bool, deadline time.Time) (uint64, bool) {
+	if cut == 0 && !initialCut {
+		// Zero after sequence wrap is ambiguous. Only LocalBus's atomically
+		// captured pristine state can establish that this is the initial empty
+		// bus, where generation zero means there is nothing to acknowledge.
+		return 0, false
+	}
+	sub := sess.attentionSeqSub
+	if sub == nil {
+		return 0, false
+	}
+	// One deadline covers capture through waiting for the FIFO fence and
+	// acquiring the recorder after it. No init can wait a second unbounded
+	// interval merely because the recorder became contended just after its fence
+	// completed.
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	fence, _, ok := sub.FenceBefore(deadline)
+	if !ok {
+		return 0, false
+	}
+	if !time.Now().Before(deadline) {
+		return 0, false
+	}
+	var requestDone, sessionDone <-chan struct{}
+	if ctx != nil {
+		requestDone = ctx.Done()
+	}
+	if sess.infra.sessionCtx != nil {
+		sessionDone = sess.infra.sessionCtx.Done()
+	}
+	select {
+	case <-fence:
+	case <-requestDone:
+		return 0, false
+	case <-sessionDone:
+		return 0, false
+	case <-sub.Done():
+		select {
+		case <-fence:
+		default:
+			return 0, false
 		}
-		<-wake
+	case <-timer.C:
+		return 0, false
+	}
+	if !time.Now().Before(deadline) {
+		return 0, false
+	}
+	// The overflow watermark belongs to the snapshot cut, not to this later
+	// fence. Clearing only what this cut already contained means a concurrent
+	// init whose cut includes a newly dropped occurrence keeps seeing it even if
+	// this init reaches its fence first.
+	if overflowAtCut != clearedAtCut {
+		// Init may not wait past its deadline to acknowledge this overflow. If
+		// the bounded clear misses it, an independent worker clears exactly this
+		// captured watermark after publication contention subsides. This lets the
+		// next reconnect converge without relying on another lucky bounded try.
+		if !sub.ClearOverflowThroughBefore(overflowAtCut, deadline) {
+			m.scheduleOverflowClear(sess, sub, overflowAtCut)
+		}
+		return 0, false
+	}
+
+	// Fence completion is not the end of the deadline: the final history lookup
+	// must not turn a bounded init into an unbounded lock wait.
+	retry := time.NewTicker(time.Millisecond)
+	defer retry.Stop()
+	for {
+		if m.attentionSeqMu.TryLock() {
+			if !time.Now().Before(deadline) {
+				m.attentionSeqMu.Unlock()
+				return 0, false
+			}
+			break
+		}
+		select {
+		case <-requestDone:
+			return 0, false
+		case <-sessionDone:
+			return 0, false
+		case <-sub.Done():
+			return 0, false
+		case <-timer.C:
+			return 0, false
+		case <-retry.C:
+		}
+	}
+	defer m.attentionSeqMu.Unlock()
+	if sess.attentionClosed.Load() {
+		return 0, false
+	}
+	for order := m.attentionSeqOrder[sess]; len(order) > 0; order = order[:len(order)-1] {
+		key := order[len(order)-1]
+		// Bus sequence ordering intentionally assumes no process-lifetime wrap;
+		// the ambiguous cut==0 case failed closed above.
+		if key.seq <= cut {
+			return m.attentionSeq[key], true
+		}
+	}
+	if m.attentionSeqPruned[sess] != 0 && m.attentionSeqPruned[sess] <= cut {
+		return 0, false
+	}
+	return 0, true
+}
+
+func (m *Manager) scheduleOverflowClear(sess *ManagedSession, sub bus.SeqFenceSubscription, watermark uint64) {
+	sess.overflowClearMu.Lock()
+	if !sess.overflowClearSet || int64(watermark-sess.overflowClearPending) >= 0 {
+		sess.overflowClearPending = watermark
+		sess.overflowClearSet = true
+	}
+	if sess.overflowClearRunning {
+		sess.overflowClearMu.Unlock()
+		return
+	}
+	sess.overflowClearRunning = true
+	sess.overflowClearDone = make(chan struct{})
+	done := sess.overflowClearDone
+	sess.overflowClearMu.Unlock()
+
+	go func() {
+		ctx := sess.infra.sessionCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		for {
+			sess.overflowClearMu.Lock()
+			if !sess.overflowClearSet {
+				sess.overflowClearRunning = false
+				close(done)
+				sess.overflowClearMu.Unlock()
+				return
+			}
+			watermark := sess.overflowClearPending
+			sess.overflowClearSet = false
+			sess.overflowClearMu.Unlock()
+			if !sub.ClearOverflowThroughContext(ctx, watermark) {
+				sess.finishOverflowClear(done)
+				return
+			}
+		}
+	}()
+}
+
+func (s *ManagedSession) finishOverflowClear(done chan struct{}) {
+	s.overflowClearMu.Lock()
+	s.overflowClearRunning = false
+	close(done)
+	s.overflowClearMu.Unlock()
+}
+
+func (s *ManagedSession) waitOverflowClear() {
+	s.overflowClearMu.Lock()
+	done := s.overflowClearDone
+	running := s.overflowClearRunning
+	s.overflowClearMu.Unlock()
+	if running && done != nil {
+		<-done
 	}
 }
 
@@ -664,14 +928,9 @@ func (m *Manager) forgetAttentionSequences(sess *ManagedSession) {
 			delete(m.attentionSeq, key)
 		}
 	}
-	kept := m.attentionSeqOrder[:0]
-	for _, key := range m.attentionSeqOrder {
-		if key.session != sess {
-			kept = append(kept, key)
-		}
-	}
-	m.attentionSeqOrder = kept
+	delete(m.attentionSeqOrder, sess)
 	delete(m.attentionSeqLatest, sess)
+	delete(m.attentionSeqPruned, sess)
 	if m.attentionSeqWake != nil {
 		close(m.attentionSeqWake)
 	}

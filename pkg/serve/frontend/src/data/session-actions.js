@@ -1,6 +1,6 @@
 // session-actions.js — API-backed session operations
 
-import { api } from './api.js';
+import { api, retryHistoryHydration } from './api.js';
 import { normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
 import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
@@ -53,9 +53,12 @@ export async function loadSessions() {
     const prev = state.sessions;
     const visible = new Set(visibleSessionIds(state));
     const sessions = {};
+	const restartedVisibleSessions = [];
 	let sessionsChanged = Object.keys(prev).length !== list.length;
     for (const info of list) {
       const existing = prev[info.id];
+		const serverRestarted = !!existing?.serverInstance && !!info.server_instance
+			&& existing.serverInstance !== info.server_instance;
       // A visible session has a live WS connection that owns its live-tracked
       // fields (state, config, context, plan). This poll response may already
       // be stale relative to WS events that arrived while the request was in
@@ -88,6 +91,21 @@ export async function loadSessions() {
         // it reflects the manager's live state, refreshed on each poll.
         mcp: info.mcp || null,
         messages: existing ? existing.messages : [],
+        // A socket's init snapshot is the authority for retained cached
+        // messages. Polling has no history, so it must never clear this visual
+        // boundary while that snapshot is still in flight.
+        historyPending: serverRestarted ? false : (existing ? !!existing.historyPending : false),
+        // The roster has no transcript authority. Preserve both a failed
+        // hydration boundary and proof that a later init did render one. A
+        // process change invalidates that proof: for a displayed transcript we
+        // make the boundary visible, then replace its socket below. A hidden
+        // transcript is simply no longer authoritative; it need not raise an
+        // alarm until the user opens it.
+        historyStale: serverRestarted ? visible.has(info.id) : (existing ? !!existing.historyStale : false),
+        historyHydrated: serverRestarted ? false : (existing ? !!existing.historyHydrated : false),
+        historyShownGen: serverRestarted ? 0 : (existing ? existing.historyShownGen || 0 : 0),
+        historyShownInstance: serverRestarted ? '' : (existing ? existing.historyShownInstance || '' : ''),
+        historyTruncated: existing ? !!existing.historyTruncated : false,
         contextPercent: wsOwns ? existing.contextPercent : (info.context_percent ?? (existing ? existing.contextPercent : -1)),
         contextWindow: wsOwns ? existing.contextWindow : (info.context_window || (existing ? existing.contextWindow : 0)),
         compactAt: wsOwns ? existing.compactAt : (info.compact_at || (existing ? existing.compactAt : 0)),
@@ -98,6 +116,8 @@ export async function loadSessions() {
         pendingSteers: existing ? existing.pendingSteers : null,
         streamingText: existing ? existing.streamingText : null,
         thinkingText: existing ? existing.thinkingText : null,
+        runningTool: existing ? existing.runningTool : null,
+        flash: existing ? existing.flash : null,
         subagentCount: existing ? existing.subagentCount : 0,
         // Live subagent transcripts are WS-only state (fed by subagent_start/
         // event/end); the poll response knows nothing about them, so always
@@ -112,6 +132,8 @@ export async function loadSessions() {
         // viewingSubagent, so switching sessions and back doesn't reset it.
         dockOpen: existing ? existing.dockOpen : false,
         autoVerifying: existing ? existing.autoVerifying : false,
+        verifyDir: existing ? existing.verifyDir : null,
+        verifyManual: existing ? existing.verifyManual : false,
         compacting: existing ? existing.compacting : false,
         onOverage: existing ? existing.onOverage : false,
         // Per-request rate-limit percents remain as an old-server fallback;
@@ -129,6 +151,16 @@ export async function loadSessions() {
         // in-flight send would misread "nothing happened meanwhile".
         runEpoch: existing ? existing.runEpoch : 0,
         tasks: existing ? existing.tasks : [],
+        // Goal lifecycle and the MCP refresh counter are socket-owned. The
+        // roster doesn't expose either, so keep them through its replacement.
+        goalActive: existing ? existing.goalActive : false,
+        goalObjective: existing ? existing.goalObjective : null,
+        goalWorkDir: existing ? existing.goalWorkDir : null,
+        goalIteration: existing ? existing.goalIteration : 0,
+        goalStalled: existing ? existing.goalStalled : 0,
+        goalVerifying: existing ? existing.goalVerifying : false,
+        mcpTick: existing ? existing.mcpTick : 0,
+        lastSeq: existing ? existing.lastSeq : 0,
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
@@ -137,6 +169,11 @@ export async function loadSessions() {
         serverUnseenGen: info.unseen_gen || 0,
         serverUnseenInstance: info.server_instance || '',
         serverInstance: info.server_instance || (existing ? existing.serverInstance : ''),
+		// A generation namespace belongs to one server process. Keep the local
+		// read high-water across stale roster replacements, but discard it when
+		// the server process changes so its fresh generations can be acknowledged.
+		lastAckedUnseenGen: serverRestarted ? 0 : (existing ? existing.lastAckedUnseenGen || 0 : 0),
+		lastAckedUnseenInstance: serverRestarted ? '' : (existing ? existing.lastAckedUnseenInstance || '' : ''),
         // One global client arrival sequence covers every session. Repeating
         // the same server-instance occurrence after a poll returns its original value.
         attentionArrival: info.unseen
@@ -156,6 +193,9 @@ export async function loadSessions() {
 			sessions[info.id] = next;
 			sessionsChanged = true;
 		}
+		if (serverRestarted && visible.has(info.id) && existing.state !== 'saved') {
+			restartedVisibleSessions.push(info.id);
+		}
     }
     // Detect attention transitions (hidden sessions only)
     for (const [id, sess] of Object.entries(sessions)) {
@@ -171,6 +211,10 @@ export async function loadSessions() {
 		if (sessionsChanged) {
 			setState({ sessions });
 		}
+		// An existing socket belongs to the old process and cannot restore the
+		// transcript authority that its roster just revoked. Replace it rather
+		// than waiting for the old transport to notice the restart.
+		for (const id of restartedVisibleSessions) retryHistoryHydration(id);
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     retainAttentionArrivals(validIds);
@@ -281,7 +325,11 @@ export async function closeSession(id) {
   }
   // Reflect immediately so the UI updates without waiting for the next poll
   // (which can lag up to ~15s on mobile). The server already committed above.
-  updateSession(id, { state: 'saved' });
+  updateSession(id, {
+    state: 'saved',
+    lastAckedUnseenGen: 0,
+    lastAckedUnseenInstance: '',
+  });
   const state = store.get();
   const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;

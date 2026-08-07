@@ -73,14 +73,22 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 		}
 	}
 
+	hasAttentionResolver := len(attentionGeneration) > 0 && attentionGeneration[0] != nil
 	resolver := func(uint64) uint64 { return 0 }
-	if len(attentionGeneration) > 0 && attentionGeneration[0] != nil {
+	if hasAttentionResolver {
 		resolver = attentionGeneration[0]
 	}
 	r.unsubs = append(r.unsubs, b.SubscribeAllSeq(func(seq uint64, event any) {
 		attentionGen := uint64(0)
 		if isAttentionEvent(event) {
 			attentionGen = resolver(seq)
+			if hasAttentionResolver && attentionGen == 0 {
+				// Never serialize an attention occurrence with generation 0: the
+				// client cannot acknowledge it, which would strand its roster dot.
+				// Closing forces the explicit init attention_bound recovery path.
+				r.cleanup()
+				return
+			}
 		}
 		if wsEvent, ok := wsEventFromBus(event, attentionGen); ok {
 			wsEvent.Seq = seq
@@ -459,6 +467,10 @@ func (r *wsReactor) cleanup() {
 // here, so in-flight state can't be both seeded into the snapshot and replayed
 // live after the cut.
 func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall) InitData {
+	return buildInitDataAtAttentionGen(sess, streaming, liveTools, sess.attentionGen.Load())
+}
+
+func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
@@ -487,6 +499,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
 		ServerInstance:    sess.serverInstance,
+		UnseenGen:         unseenGen,
 		Messages:          msgs,
 		HistoryTruncated:  historyTruncated,
 		State:             state,
@@ -506,12 +519,10 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		LiveTools:         liveToolInitData(liveTools),
 	}
 
-	// Anchor the client's elapsed counter to the server-side run-start time so
-	// it stays correct across reconnects instead of restarting at zero. Only
-	// while a run is in flight.
-	sess.mu.Lock()
-	runStartedAt := sess.runStartedAt
-	sess.mu.Unlock()
+	// Read the run anchor from the runtime's synchronous state. The cache-clock
+	// subscriber is asynchronous, so using its copy here could omit an anchor
+	// for a RunStarted already included by this snapshot's sequence cut.
+	runStartedAt := sess.runtime.Context().RunStartedAt()
 	if !runStartedAt.IsZero() && (state == string(StateRunning) || state == string(StatePermission)) {
 		data.RunStartedAtMs = runStartedAt.UnixMilli()
 	}
@@ -594,7 +605,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		}
 	}
 
-	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending, sess.attentionGen.Load())
+	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending, unseenGen)
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile

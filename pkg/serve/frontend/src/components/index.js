@@ -22,6 +22,7 @@ export { DelegationBlock } from "./DelegationBlock/DelegationBlock.jsx";
 export { BackgroundJob } from "./BackgroundJob/BackgroundJob.jsx";
 export { BashJobLog } from "./BashJobLog/BashJobLog.jsx";
 export { StreamingSkeleton, TypingDots } from "./StreamingSkeleton/StreamingSkeleton.jsx";
+export { HistoryHydrationTail, historyHydrationTailVisible } from "./HistoryHydrationTail/HistoryHydrationTail.jsx";
 export { ToolTicker } from "./ToolTicker/ToolTicker.jsx";
 export { FileSuggestions } from "./FileSuggestions/FileSuggestions.jsx";
 export { CommandPalette } from "./CommandPalette/CommandPalette.jsx";

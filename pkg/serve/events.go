@@ -21,7 +21,15 @@ type InitData struct {
 	// ServerInstance scopes process-local attention occurrence generations.
 	// Reconnecting to the same process preserves client deduplication; a restart
 	// starts a new generation namespace.
-	ServerInstance    string              `json:"server_instance"`
+	ServerInstance string `json:"server_instance"`
+	// UnseenGen is the latest attention generation represented by this init
+	// snapshot. Clients bind a read acknowledgement to it rather than borrowing
+	// a potentially newer roster generation.
+	UnseenGen uint64 `json:"unseen_gen,omitempty"`
+	// AttentionBound says whether UnseenGen is safe to use. A false value is an
+	// explicit retry signal: UnseenGen is omitted rather than risking an ack
+	// outside the snapshot's causal boundary.
+	AttentionBound    bool                `json:"attention_bound"`
 	Messages          []core.AgentMessage `json:"messages"`
 	State             string              `json:"state"`
 	ContextPercent    int                 `json:"context_percent"`

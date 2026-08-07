@@ -2,11 +2,209 @@ package bus
 
 import (
 	"errors"
+	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestProjectedFilteredSubscriptionBoundsOverflowAndDiscardsOnTeardown(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	subscription := b.SubscribeAttentionSeq(
+		func(_ uint64, event AttentionSequenceEvent) {
+			if calls.Add(1) == 1 {
+				close(entered)
+				<-release
+			}
+		},
+	)
+	sub := subscription.(*seqFenceSubscription).sub
+
+	b.Publish(PermissionRequested{ID: "first"})
+	<-entered
+	// Each publication has a large backing string, but the queued projection is
+	// only AttentionSequenceEvent. A stuck handler cannot retain final output.
+	for i := 0; i < correctnessSubscriberBuffer+20; i++ {
+		b.Publish(RunEnded{FinalText: string(make([]byte, 1<<20))})
+	}
+	if !subscription.Overflowed() {
+		t.Fatal("bounded correctness queue did not report overflow")
+	}
+	sub.mu.Lock()
+	queued := append([]queuedEvent(nil), sub.queue...)
+	sub.mu.Unlock()
+	if len(queued) > correctnessSubscriberBuffer {
+		t.Fatalf("queued events = %d, want at most %d", len(queued), correctnessSubscriberBuffer)
+	}
+	for _, event := range queued {
+		if _, ok := event.event.(AttentionSequenceEvent); !ok {
+			t.Fatalf("retained projected event has type %T, want AttentionSequenceEvent", event.event)
+		}
+	}
+
+	subscription.Unsubscribe()
+	sub.mu.Lock()
+	remaining := len(sub.queue)
+	sub.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("teardown retained %d queued events", remaining)
+	}
+	close(release)
+	b.Drain(time.Second)
+	runtime.GC()
+}
+
+func TestAttentionSubscriptionHandlerCanUseBusOperations(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	done := make(chan struct{})
+	var subscription SeqFenceSubscription
+	subscription = b.SubscribeAttentionSeq(func(_ uint64, _ AttentionSequenceEvent) {
+		// The fixed projection is delivered asynchronously, after Publish has
+		// released its locks, so these operations cannot recurse into a
+		// publisher-held callback.
+		b.Publish(testEvent{Value: "from attention handler"})
+		if _, _, ok := subscription.Fence(); !ok {
+			t.Error("handler could not place a fence")
+		}
+		unsubscribe := b.Subscribe(func(testEvent) {})
+		unsubscribe()
+		subscription.Unsubscribe()
+		close(done)
+	})
+	b.Publish(PermissionRequested{ID: "p1"})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("attention handler deadlocked using bus operations")
+	}
+}
+
+func TestAttentionCutAndOverflowClearRespectDeadline(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	subscription := b.SubscribeAttentionSeq(func(uint64, AttentionSequenceEvent) {})
+
+	b.publishMu.Lock()
+	cutDone := make(chan bool, 1)
+	go func() {
+		_, _, _, ok := subscription.CaptureCutBefore(time.Now().Add(25 * time.Millisecond))
+		cutDone <- ok
+	}()
+	select {
+	case ok := <-cutDone:
+		if ok {
+			t.Fatal("CaptureCutBefore succeeded while publication lock was held")
+		}
+	case <-time.After(time.Second):
+		b.publishMu.Unlock()
+		t.Fatal("CaptureCutBefore waited for publication lock past its deadline")
+	}
+
+	clearDone := make(chan bool, 1)
+	go func() {
+		clearDone <- subscription.ClearOverflowThroughBefore(1, time.Now().Add(25*time.Millisecond))
+	}()
+	select {
+	case ok := <-clearDone:
+		if ok {
+			t.Fatal("ClearOverflowThroughBefore succeeded while publication lock was held")
+		}
+	case <-time.After(time.Second):
+		b.publishMu.Unlock()
+		t.Fatal("ClearOverflowThroughBefore waited for publication lock past its deadline")
+	}
+	b.publishMu.Unlock()
+}
+
+func TestAttentionCutInitialZeroIsNotWrappedZero(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	subscription := b.SubscribeAttentionSeq(func(uint64, AttentionSequenceEvent) {})
+	capturer, ok := subscription.(initialCutCapturer)
+	if !ok {
+		t.Fatal("LocalBus attention subscription cannot report initial cuts")
+	}
+	cut, _, _, initial, captured := capturer.CaptureCutWithInitial()
+	if !captured || cut != 0 || !initial {
+		t.Fatalf("fresh capture = (cut:%d initial:%v captured:%v), want (0, true, true)", cut, initial, captured)
+	}
+
+	// Model the state immediately after uint64 sequence wrap. A zero sequence
+	// alone must never be interpreted as the pristine no-event boundary.
+	b.publishMu.Lock()
+	b.seq.Store(0)
+	b.published.Store(true)
+	b.publishMu.Unlock()
+	cut, _, _, initial, captured = capturer.CaptureCutWithInitial()
+	if !captured || cut != 0 || initial {
+		t.Fatalf("wrapped capture = (cut:%d initial:%v captured:%v), want (0, false, true)", cut, initial, captured)
+	}
+}
+
+func TestStoppedAttentionSubscriptionFailsClosed(t *testing.T) {
+	b := NewLocalBus()
+	subscription := b.SubscribeAttentionSeq(func(uint64, AttentionSequenceEvent) {})
+	subscription.Unsubscribe()
+	if !subscription.Overflowed() {
+		t.Fatal("unsubscribed correctness subscription did not fail closed")
+	}
+
+	b = NewLocalBus()
+	subscription = b.SubscribeAttentionSeq(func(uint64, AttentionSequenceEvent) {})
+	b.Close()
+	if !subscription.Overflowed() {
+		t.Fatal("closed correctness subscription did not fail closed")
+	}
+}
+
+func TestAttentionOverflowRemainsPendingAcrossUint64Wrap(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	subscription := b.SubscribeAttentionSeq(func(uint64, AttentionSequenceEvent) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+	})
+	sub := subscription.(*seqFenceSubscription).sub
+	// Start one increment before the boundary with no pending overflow. The
+	// next two dropped occurrences produce MaxUint64 then zero.
+	sub.overflow.Store(math.MaxUint64 - 1)
+	sub.clearedOverflow.Store(math.MaxUint64 - 1)
+	b.Publish(PermissionRequested{ID: "block"})
+	<-entered
+	for i := 0; i < correctnessSubscriberBuffer+1; i++ {
+		b.Publish(PermissionRequested{ID: "max"})
+	}
+	if !subscription.Overflowed() {
+		t.Fatal("overflow at MaxUint64 was not pending")
+	}
+	subscription.ClearOverflowThrough(math.MaxUint64)
+	if subscription.Overflowed() {
+		t.Fatal("clearing MaxUint64 did not settle its overflow")
+	}
+	b.Publish(PermissionRequested{ID: "wrapped"})
+	if sub.overflow.Load() != 0 {
+		t.Fatalf("overflow version = %d, want wrapped zero", sub.overflow.Load())
+	}
+	if !subscription.Overflowed() {
+		t.Fatal("overflow after uint64 wrap was treated as cleared")
+	}
+	close(release)
+}
 
 // ---------------------------------------------------------------------------
 // Test helpers — tiny event/command/query types local to tests
@@ -64,6 +262,103 @@ func TestSubscribeAllSeq_OrdersPublicationsAndReportsBoundary(t *testing.T) {
 		if e != want {
 			t.Fatalf("event = %#v, want %#v", e, want)
 		}
+	}
+}
+
+func TestSubscribeAllSeqHandlerCanPublishAndCaptureSequence(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	var captured atomic.Uint64
+	done := make(chan struct{})
+	b.SubscribeAllSeq(func(_ uint64, event any) {
+		if event.(testEvent).Value != "first" {
+			return
+		}
+		captured.Store(b.CaptureSeq())
+		b.Publish(testEvent{Value: "second"})
+		close(done)
+	})
+	b.Publish(testEvent{Value: "first"})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sequence subscriber deadlocked while publishing")
+	}
+	b.Drain(time.Second)
+	if got := captured.Load(); got != 1 {
+		t.Fatalf("captured sequence = %d, want 1", got)
+	}
+	if got := b.LastSeq(); got != 2 {
+		t.Fatalf("last sequence = %d, want 2", got)
+	}
+}
+
+func TestAttentionGenerationCaptureDrainsTheSampleCutInterleaving(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	var attentionGen atomic.Uint64
+	var pending atomic.Bool
+	var eventSeq atomic.Uint64
+	var seqMu sync.Mutex
+	seqGens := make(map[uint64]uint64)
+	b.SubscribeAllSeq(func(seq uint64, event any) {
+		switch event {
+		case testEvent{Value: "attention-before"}:
+			attentionGen.Store(1)
+			eventSeq.Store(seq)
+			seqMu.Lock()
+			seqGens[seq] = 1
+			seqMu.Unlock()
+		case testEvent{Value: "attention-after"}:
+			attentionGen.Store(2)
+			seqMu.Lock()
+			seqGens[seq] = 2
+			seqMu.Unlock()
+		}
+	})
+
+	// Reproduce the old window: the pending request is installed and its event
+	// is accepted after a stale generation sample but before the old LastSeq
+	// cut. Holding publishMu lets the test place those two operations exactly.
+	b.publishMu.Lock()
+	staleGen := attentionGen.Load()
+	pending.Store(true)
+	published := make(chan struct{})
+	go func() {
+		b.Publish(testEvent{Value: "attention-before"})
+		close(published)
+	}()
+	b.publishMu.Unlock()
+	<-published
+
+	var snapshotShowsPending bool
+	var initGen, cut uint64
+	cut = b.LastSeq()
+	// A newer occurrence after the cut must not leak into init's bound.
+	b.Publish(testEvent{Value: "attention-after"})
+	b.Drain(time.Second)
+	snapshotShowsPending = pending.Load()
+	seqMu.Lock()
+	for seq, gen := range seqGens {
+		if seq <= cut && seq >= eventSeq.Load() {
+			initGen = gen
+		}
+	}
+	seqMu.Unlock()
+
+	if staleGen != 0 {
+		t.Fatalf("stale generation = %d, want 0", staleGen)
+	}
+	if !snapshotShowsPending || eventSeq.Load() > cut {
+		t.Fatalf("test did not place the attention event in the snapshot boundary: pending=%v seq=%d cut=%d", snapshotShowsPending, eventSeq.Load(), cut)
+	}
+	if initGen != 1 {
+		t.Fatalf("init unseen generation = %d, want generation 1 for pending attention at seq %d", initGen, eventSeq.Load())
+	}
+	if attentionGen.Load() != 2 {
+		t.Fatalf("latest generation = %d, want post-cut generation 2", attentionGen.Load())
 	}
 }
 

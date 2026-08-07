@@ -1,6 +1,6 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
-import { api, syncConnections } from './api.js';
+import { acknowledgeVisibleAttention, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
@@ -248,42 +248,38 @@ export function afterVisibilityChange() {
   let state = store.get();
   let visible = visibleSessionIds(state);
 
-  // Clear the unread badge for sessions the user can now see (only when the
-  // tab is actually in the foreground — a background visibility shuffle
-  // shouldn't mark things read).
-  if (typeof document === 'undefined' || !document.hidden) {
-    for (const id of visible) {
-      const sess = state.sessions[id];
-      if (sess && sess.unseen) {
-        updateSession(id, { unseen: false });
-        // Unread results belong to the serve process, not this React instance:
-        // acknowledge them when the user actually opens the session.
-        api('POST', `/api/sessions/${id}/read?unseen_gen=${sess.unseenGen || 0}`).catch(() => {});
-      }
-    }
-  }
-
   if (!booted) {
     booted = true;
     releaseStaleSaved();
     state = store.get();
     visible = visibleSessionIds(state);
-    syncConnections(visible.filter(id => state.sessions[id]?.state !== 'saved'));
-    return;
-  }
-
-  for (const id of visible) {
-    const sess = state.sessions[id];
-    if (sess?.state === 'saved' && !resumingIds.has(id)) {
-      resumingIds.add(id);
-      getResumeSession().then(resume =>
-        resume(id)
-          .catch(e => console.error('Auto-resume failed for', id, e))
-          .finally(() => resumingIds.delete(id))
-      );
+  } else {
+    for (const id of visible) {
+      const sess = state.sessions[id];
+      if (sess?.state === 'saved' && !resumingIds.has(id)) {
+        resumingIds.add(id);
+        getResumeSession().then(resume =>
+          resume(id)
+            .catch(e => console.error('Auto-resume failed for', id, e))
+            .finally(() => resumingIds.delete(id))
+        );
+      }
     }
   }
 
   const connectable = visible.filter(id => state.sessions[id]?.state !== 'saved');
+  // Opening a socket synchronously marks its retained history pending. Do that
+  // before considering an unread badge: tapping a stale transcript must not
+  // acknowledge the result until init makes the history authoritative.
   syncConnections(connectable);
+
+  if (typeof document === 'undefined' || !document.hidden) {
+    const current = store.get();
+    for (const id of visibleSessionIds(current)) {
+      const sess = current.sessions[id];
+      if (sess?.unseen && sess.historyHydrated) {
+        acknowledgeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance);
+      }
+    }
+  }
 }

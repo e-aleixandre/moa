@@ -45,7 +45,7 @@ func (m *appModel) acceptSessionScopedAsyncEvent(seq uint64, event any) bool {
 		// A start published before the switch may still be waiting in Bubble
 		// Tea's queue. It belongs to the old session, not whichever session is
 		// active when the queue is eventually consumed.
-		if seq <= m.s.sessionEventFloor {
+		if !sessionEventAfterFloor(seq, m.s.sessionEventFloor) {
 			return false
 		}
 		m.s.subagentEpoch[e.JobID] = m.s.sessionEpoch
@@ -59,7 +59,7 @@ func (m *appModel) acceptSessionScopedAsyncEvent(seq uint64, event any) bool {
 	case bus.BashCompleted:
 		return owner(e.JobID)
 	case bus.BashJobStarted:
-		if seq <= m.s.sessionEventFloor {
+		if !sessionEventAfterFloor(seq, m.s.sessionEventFloor) {
 			return false
 		}
 		m.s.subagentEpoch[e.JobID] = m.s.sessionEpoch
@@ -71,6 +71,15 @@ func (m *appModel) acceptSessionScopedAsyncEvent(seq uint64, event any) bool {
 	default:
 		return true
 	}
+}
+
+// sessionEventAfterFloor intentionally uses ordinary uint64 ordering. A bus
+// sequence cannot plausibly wrap during a process lifetime (and the web
+// protocol cannot exactly represent values near that point either). The one
+// ambiguous wrap value, zero, fails closed so a late old-session event cannot
+// be attributed to the newly selected transcript.
+func sessionEventAfterFloor(seq, floor uint64) bool {
+	return seq != 0 && seq > floor
 }
 
 func (m *appModel) refreshAsyncSubagentCount() {

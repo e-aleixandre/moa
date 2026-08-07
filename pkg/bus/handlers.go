@@ -2314,6 +2314,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 				_ = sctx.State.Transition(StateIdle)
 			}
 		}
+		sctx.clearRunStartedAt(gen)
 
 		// Controllers used by integrations may return messages without emitting
 		// lifecycle events. Keep text/edit compatibility fallbacks only; cost

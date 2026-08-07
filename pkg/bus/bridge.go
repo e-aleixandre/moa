@@ -192,6 +192,10 @@ type SessionContext struct {
 	// Stamped on agent-lifecycle events by the bridge. Written by startRun
 	// (under runMu), read atomically by the bridge.
 	RunGenAtomic atomic.Uint64
+	// runStartedAnchor is written synchronously with reserving a run, before
+	// RunStarted is published. The immutable pair lets a finishing generation
+	// clear only its own anchor without racing a newly reserved run.
+	runStartedAnchor atomic.Pointer[runStartAnchor]
 
 	// sessionCost accumulates the session's USD spend (main run cost from
 	// RunEnded plus each subagent's cost from SubagentEnded). Reset to 0 on
@@ -454,13 +458,57 @@ func (sctx *SessionContext) StreamingAggregate() (text, thinking, msgID string) 
 func (sctx *SessionContext) SnapshotInFlightWithCut() (StreamingAggregate, []LiveToolCall, uint64) {
 	sctx.streamMu.Lock()
 	defer sctx.streamMu.Unlock()
-	return StreamingAggregate{
-			Text:     sctx.streamText,
-			Thinking: sctx.streamThinking,
-			MsgID:    sctx.streamMsgID,
-		},
-		sctx.liveToolsSnapshotLocked(),
-		sctx.Bus.LastSeq()
+	aggregate := StreamingAggregate{
+		Text:     sctx.streamText,
+		Thinking: sctx.streamThinking,
+		MsgID:    sctx.streamMsgID,
+	}
+	liveTools := sctx.liveToolsSnapshotLocked()
+	cut := sctx.Bus.CaptureSeq()
+	return aggregate, liveTools, cut
+}
+
+// SnapshotInFlightWithAttentionCut additionally captures the attention
+// tracker's overflow watermarks at the same publication cut. This is the only
+// safe way to decide whether an init snapshot can acknowledge attention:
+// another init may clear a later-observed overflow while this snapshot waits
+// on its fence.
+func (sctx *SessionContext) SnapshotInFlightWithAttentionCut(sub SeqFenceSubscription) (StreamingAggregate, []LiveToolCall, uint64, uint64, uint64, bool, bool) {
+	return sctx.snapshotInFlightWithAttentionCut(sub, time.Time{})
+}
+
+// SnapshotInFlightWithAttentionCutBefore is the init form. Its deadline is
+// established before it can acquire publishMu, so publication contention
+// produces an explicitly unbound attention snapshot instead of extending the
+// attention-bound attempt.
+func (sctx *SessionContext) SnapshotInFlightWithAttentionCutBefore(sub SeqFenceSubscription, deadline time.Time) (StreamingAggregate, []LiveToolCall, uint64, uint64, uint64, bool, bool) {
+	return sctx.snapshotInFlightWithAttentionCut(sub, deadline)
+}
+
+func (sctx *SessionContext) snapshotInFlightWithAttentionCut(sub SeqFenceSubscription, deadline time.Time) (StreamingAggregate, []LiveToolCall, uint64, uint64, uint64, bool, bool) {
+	sctx.streamMu.Lock()
+	defer sctx.streamMu.Unlock()
+	aggregate := StreamingAggregate{
+		Text:     sctx.streamText,
+		Thinking: sctx.streamThinking,
+		MsgID:    sctx.streamMsgID,
+	}
+	liveTools := sctx.liveToolsSnapshotLocked()
+	initialCut, supportsInitialCut := sub.(initialCutCapturer)
+	if deadline.IsZero() {
+		if supportsInitialCut {
+			cut, overflow, cleared, initial, ok := initialCut.CaptureCutWithInitial()
+			return aggregate, liveTools, cut, overflow, cleared, initial, ok
+		}
+		cut, overflow, cleared, ok := sub.CaptureCut()
+		return aggregate, liveTools, cut, overflow, cleared, false, ok
+	}
+	if supportsInitialCut {
+		cut, overflow, cleared, initial, ok := initialCut.CaptureCutWithInitialBefore(deadline)
+		return aggregate, liveTools, cut, overflow, cleared, initial, ok
+	}
+	cut, overflow, cleared, ok := sub.CaptureCutBefore(deadline)
+	return aggregate, liveTools, cut, overflow, cleared, false, ok
 }
 
 // LiveTools returns the tool calls currently generating arguments or executing.
@@ -624,10 +672,38 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	sctx.runCancel = cancel
 	sctx.runGen++
 	sctx.RunGenAtomic.Store(sctx.runGen)
+	sctx.runStartedAnchor.Store(&runStartAnchor{gen: sctx.runGen, at: time.Now()})
 	sctx.runStatsMu.Lock()
 	sctx.runStats = runStats{gen: sctx.runGen}
 	sctx.runStatsMu.Unlock()
 	return ctx, sctx.runGen
+}
+
+// RunStartedAt returns the authoritative start anchor for the current run.
+// It is zero once that generation has settled.
+func (sctx *SessionContext) RunStartedAt() time.Time {
+	anchor := sctx.runStartedAnchor.Load()
+	if anchor == nil {
+		return time.Time{}
+	}
+	return anchor.at
+}
+
+func (sctx *SessionContext) clearRunStartedAt(gen uint64) {
+	for {
+		anchor := sctx.runStartedAnchor.Load()
+		if anchor == nil || anchor.gen != gen {
+			return
+		}
+		if sctx.runStartedAnchor.CompareAndSwap(anchor, nil) {
+			return
+		}
+	}
+}
+
+type runStartAnchor struct {
+	gen uint64
+	at  time.Time
 }
 
 func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
@@ -719,6 +795,7 @@ func (sctx *SessionContext) clearRunCancel(gen uint64) {
 	if sctx.runGen == gen {
 		sctx.runCancel = nil
 	}
+	sctx.clearRunStartedAt(gen)
 }
 
 // settleRunCancel atomically closes the AbortRun window for gen and reports

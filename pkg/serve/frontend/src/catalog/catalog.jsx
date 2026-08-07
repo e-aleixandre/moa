@@ -5,6 +5,7 @@ import { ConversationGallery } from "./conversation-gallery.jsx";
 import { ResponsiveLab } from "./responsive-lab.jsx";
 import { TitleAttentionLab } from "./title-attention-lab.jsx";
 import { SecretInputLab } from "./secret-input-lab.jsx";
+import { HydrationLab } from "./hydration-lab.jsx";
 import "./catalog.css";
 
 // All values are READ from tokens.css at runtime (getComputedStyle), not
@@ -239,6 +240,7 @@ export function Catalog() {
       <ResponsiveLab />
       <TitleAttentionLab />
       <SecretInputLab />
+      <HydrationLab />
     </div>
   );
 }

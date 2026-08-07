@@ -1,8 +1,9 @@
 // ws-handlers.js — WebSocket event handlers and streaming delta batching
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
-import { api } from './api.js';
+import { api, acknowledgeVisibleAttention } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
+import { finishHistoryHydration } from './history-hydration.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 import { truncateText } from './util/format.js';
 import { attentionArrival } from './attention-arrivals.js';
@@ -407,7 +408,7 @@ function nextRunEpoch(id) {
   return (store.get().sessions[id]?.runEpoch || 0) + 1;
 }
 
-export function handleWsInit(id, data) {
+export function handleWsInit(id, data, { trustedForAck = true } = {}) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
@@ -451,6 +452,10 @@ export function handleWsInit(id, data) {
     serverInstance,
     serverUnseenInstance: serverRestarted ? serverInstance : (prev.serverUnseenInstance || serverInstance),
     serverUnseenGen: serverRestarted ? 0 : (prev.serverUnseenGen || 0),
+	// A restarted server restarts the attention-generation namespace, so old
+	// local acknowledgements must not suppress the new process's first event.
+	lastAckedUnseenGen: serverRestarted ? 0 : (prev.lastAckedUnseenGen || 0),
+	lastAckedUnseenInstance: serverRestarted ? '' : (prev.lastAckedUnseenInstance || ''),
     messages,
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
@@ -509,16 +514,19 @@ export function handleWsInit(id, data) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
-  acknowledgeVisiblePendingInit(id, data);
+  acknowledgeVisiblePendingInit(id, data, { trustedForAck });
 }
 
-function acknowledgeVisiblePendingInit(id, data) {
-  const hidden = typeof document !== 'undefined' && document.hidden;
-  if (hidden || !visibleSessionIds(store.get()).includes(id)) return;
-  const generation = data.pending_permission?.unseen_gen || data.pending_ask?.unseen_gen || 0;
-  if (!generation) return;
-  updateSession(id, { unseen: false, unseenGen: generation });
-  api('POST', `/api/sessions/${id}/read?unseen_gen=${generation}`).catch(() => {});
+function acknowledgeVisiblePendingInit(id, data, { trustedForAck }) {
+  const generation = data.unseen_gen || 0;
+  const serverInstance = data.server_instance || '';
+  // init has replaced the cached transcript with the authoritative snapshot,
+  // so this is the first safe point to acknowledge roster attention. The
+  // snapshot's generation is retained with that proof; a roster response that
+  // lands before this queued handler runs cannot be mistaken for rendered
+  // history.
+  finishHistoryHydration(id, { shown: true, shownGeneration: generation, shownInstance: serverInstance });
+  if (trustedForAck) acknowledgeVisibleAttention(id, generation, serverInstance);
 }
 
 // withLiveTools appends the tool calls that were in flight when the snapshot
@@ -960,7 +968,7 @@ export function handleWsStateChange(id, data) {
       // the terminal attention event (its run_end reuses that same ID).
       if (data.state === 'error' && data.unseen_gen) {
         markUnseen(id, data.unseen_gen, true);
-        acknowledgeVisibleAttention(id, data.unseen_gen);
+        acknowledgeVisibleLiveAttention(id, data.unseen_gen);
       }
       // Surface the reason for an error end so it's visible even when the tile
       // isn't focused — parity with the TUI's run-end error block. A usage/quota
@@ -998,7 +1006,7 @@ export function handleWsAskUser(id, data) {
     if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
   }
   markUnseen(id, data.unseen_gen, true);
-  acknowledgeVisibleAttention(id, data.unseen_gen);
+  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
 }
 
 export function handleWsPermissionRequest(id, data) {
@@ -1019,14 +1027,12 @@ export function handleWsPermissionRequest(id, data) {
     if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
   }
   markUnseen(id, data.unseen_gen, true);
-  acknowledgeVisibleAttention(id, data.unseen_gen);
+  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
 }
 
-function acknowledgeVisibleAttention(id, runGen) {
-  const hidden = typeof document !== 'undefined' && document.hidden;
-  if (!hidden && visibleSessionIds(store.get()).includes(id) && runGen) {
-    api('POST', `/api/sessions/${id}/read?unseen_gen=${runGen}`).catch(() => {});
-  }
+function acknowledgeVisibleLiveAttention(id, runGen) {
+  const serverInstance = store.get().sessions[id]?.serverInstance || '';
+  acknowledgeVisibleAttention(id, runGen, serverInstance, { renderedLive: true });
 }
 
 // Another client (or a run abort) resolved the permission — clear the modal
@@ -1594,7 +1600,7 @@ export function handleWsRunEnd(id, data = {}) {
     updateSession(id, { streamingText: null, thinkingText: null, runningTool: null, compacting: false });
   }
   if (!data.unseen_gen) return; // cancelled/non-attention terminal run
-  acknowledgeVisibleAttention(id, data.unseen_gen);
+  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
   // Error state_change already announced this terminal occurrence. A normal
   // completion after a permission/ask is a new occurrence and must restart
   // the title-chip arrival treatment even though the session was already unseen.
