@@ -139,16 +139,13 @@ model — only the directory path and aliases.
 
 In the web or terminal UI, use `/secret alias1 alias2` to enter a masked value
 for each alias, or `/secret` to add aliases one at a time. Type **only names,
-never values**, after `/secret`. To limit the chance that a pasted value is
-mistaken for a name, the command accepts at most three aliases; add further
-names in the masked form. Values are deliberately not accepted on that command
-line. Moa refuses and discards every recognized `/secret` command before it can
-enter its composer history, local draft, dispatch, or transcript. Your browser,
-terminal, keyboard, or OS may still retain text you typed outside Moa's draft
-store; if you accidentally type a value there, rotate that credential. The same boundary
-applies: only the directory path and aliases reach the model from Moa; the
-agent can nevertheless read a staged file, and any
-value it reads or prints enters context and the transcript as tool output.
+never values**, after `/secret`: values are deliberately not accepted on that
+command line, and the command takes at most three aliases so a pasted value is
+less likely to be read as a name — add further names in the masked form. Moa
+refuses and discards every recognized `/secret` command before it can enter its
+composer history, local draft, dispatch, or transcript. Your browser, terminal,
+keyboard, or OS may still retain what you typed, so if you accidentally type a
+value there, rotate that credential.
 
 ## Queued commands and mid-run messages
 

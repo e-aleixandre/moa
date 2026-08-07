@@ -37,13 +37,13 @@ Type `/` to open the command palette, or type a command directly:
 
 Use `/secret alias1 alias2` to enter a masked value for each alias. With no
 aliases, `/secret` asks for an alias and value, then offers to add another.
-Type **only names, never values**, after `/secret`. To limit the chance that a
-pasted value is mistaken for a name, the command accepts at most three aliases;
-add further names in the masked prompt. Values are never accepted on the
-command line. Moa refuses and discards every recognized `/secret` command
-before it can enter its input history, local draft, dispatch, or transcript.
-Your terminal, keyboard, or OS may still retain text you typed outside Moa's
-input state; if you accidentally type a value there, rotate that credential.
+Type **only names, never values**, after `/secret`: values are never accepted
+on the command line, and the command takes at most three aliases so a pasted
+value is less likely to be read as a name — add further names in the masked
+prompt. Moa refuses and discards every recognized `/secret` command before it
+can enter its input history, local draft, dispatch, or transcript. Your
+terminal, keyboard, or OS may still retain what you typed, so if you
+accidentally type a value there, rotate that credential.
 
 Moa writes each value to a short-lived `0600` file in a private `0700`
 directory and tells the agent only the directory path and aliases. Batches are
