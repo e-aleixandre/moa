@@ -756,12 +756,24 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		if captured {
 			unseenGen, attentionBound = mgr.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, initialAttentionCut, attentionDeadline)
 		}
+		initStarted := time.Now()
 		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen)
 		initData.AttentionBound = attentionBound
 		if !attentionBound {
 			initData.UnseenGen = 0
 		}
 		initData.LastSeq = cut
+		if r.URL.Query().Get("debug_init") == "1" {
+			metrics := &InitMetrics{
+				AssemblyMS:   float64(time.Since(initStarted).Microseconds()) / 1000,
+				MessageCount: len(initData.Messages),
+			}
+			initData.InitMetrics = metrics
+			if encoded, err := json.Marshal(Event{Type: "init", Data: initData, Seq: cut}); err == nil {
+				metrics.PayloadBytes = len(encoded)
+			}
+			slog.Debug("websocket init", "session", sess.ID, "assembly_ms", metrics.AssemblyMS, "payload_bytes", metrics.PayloadBytes, "messages", metrics.MessageCount)
+		}
 		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
 			return
 		}

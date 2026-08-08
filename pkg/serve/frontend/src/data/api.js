@@ -109,6 +109,38 @@ const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 let attentionInstanceRefresh = null;
 const MAX_BACKOFF = 16000;
 
+// Set localStorage.moaDebugSessionSwitch = '1' and reconnect a session to
+// inspect its complete init path. This remains outside normal UI chrome and
+// costs nothing unless explicitly enabled.
+function switchDebugEnabled() {
+  try { return localStorage.getItem('moaDebugSessionSwitch') === '1'; } catch (_) { return false; }
+}
+
+function switchMark(sessionId, phase) {
+  if (!switchDebugEnabled() || typeof performance === 'undefined') return;
+  performance.mark(`moa:session-switch:${sessionId}:${phase}`);
+}
+
+function switchMeasure(sessionId, from, to) {
+  if (!switchDebugEnabled() || typeof performance === 'undefined') return null;
+  const name = `moa:session-switch:${sessionId}:${from}→${to}`;
+  performance.measure(name, `moa:session-switch:${sessionId}:${from}`, `moa:session-switch:${sessionId}:${to}`);
+  const entries = performance.getEntriesByName(name);
+  return entries[entries.length - 1]?.duration;
+}
+
+function reportSwitchTiming(sessionId, metrics) {
+  if (!switchDebugEnabled()) return;
+  const phases = [
+    ['tap', 'constructed'], ['constructed', 'open'], ['open', 'first-init'],
+    ['first-init', 'parsed'], ['parsed', 'handled'], ['handled', 'paint'],
+  ].map(([from, to]) => ({ phase: `${from} → ${to}`, ms: switchMeasure(sessionId, from, to)?.toFixed(1) }));
+  console.groupCollapsed(`[moa] session init ${sessionId}`);
+  console.table(phases);
+  console.log('init payload', metrics);
+  console.groupEnd();
+}
+
 // Several visible prompts can discover the same restart at once. Share one
 // roster round-trip; loadSessions replaces affected sockets, whose fresh init
 // supplies the new prompt/instance before a receipt can retry. Dynamic import
@@ -301,9 +333,12 @@ function openWs(sessionId, initialBackoff) {
   pendingTimers.delete(sessionId);
   beginHistoryHydration(sessionId);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+	  switchMark(sessionId, 'tap');
   let ws;
   try {
-    ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws`);
+    const debugQuery = switchDebugEnabled() ? '?debug_init=1' : '';
+    ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${debugQuery}`);
+    switchMark(sessionId, 'constructed');
   } catch (_) {
     failHistoryHydration(sessionId);
     scheduleReconnect(sessionId, { backoff: initialBackoff });
@@ -328,7 +363,9 @@ function openWs(sessionId, initialBackoff) {
 
   ws.onmessage = (e) => {
     if (connections.get(sessionId)?.ws !== ws) return;
+    switchMark(sessionId, 'first-init');
     const evt = JSON.parse(e.data);
+    switchMark(sessionId, 'parsed');
     if (evt.type === 'init') {
       const currentInstance = store.get().sessions[sessionId]?.serverInstance || '';
       const initInstance = evt.data?.server_instance || '';
@@ -352,6 +389,19 @@ function openWs(sessionId, initialBackoff) {
       entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
       clearHistoryHydrationTimer(sessionId);
       routeEvent(sessionId, evt, { ackProven });
+		  switchMark(sessionId, 'handled');
+		  if (switchDebugEnabled()) {
+			  requestAnimationFrame(() => requestAnimationFrame(() => {
+				  switchMark(sessionId, 'paint');
+				  const payloadBytes = typeof e.data === 'string'
+					  ? new TextEncoder().encode(e.data).byteLength : e.data?.size;
+				  reportSwitchTiming(sessionId, {
+					  payloadBytes,
+					  messageCount: evt.data?.messages?.length || 0,
+					  server: evt.data?.init_metrics,
+				  });
+			  }));
+		  }
       // A missing bound is intentionally not acknowledged: it means the server
       // could not prove which attention occurrence this snapshot contains.
       // Keep the rendered snapshot, close this socket, and retry through the
@@ -414,6 +464,8 @@ function openWs(sessionId, initialBackoff) {
   ws.onerror = () => {
     ws.close(); // triggers onclose → reconnect
   };
+
+  ws.onopen = () => switchMark(sessionId, 'open');
 }
 
 function routeEvent(sessionId, evt, { ackProven = true } = {}) {

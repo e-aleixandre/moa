@@ -66,6 +66,17 @@ type InitData struct {
 	BashJobs         []BashJobInitData `json:"bash_jobs,omitempty"`
 	LastSeq          uint64            `json:"last_seq,omitempty"`
 	HistoryTruncated bool              `json:"history_truncated,omitempty"`
+	// InitMetrics is emitted only when the client requests debug_init=1. It is
+	// intentionally diagnostic-only, so it never participates in client state.
+	InitMetrics *InitMetrics `json:"init_metrics,omitempty"`
+}
+
+// InitMetrics attributes the server side of a reconnect snapshot. PayloadBytes
+// is the encoded WebSocket event size, including its envelope.
+type InitMetrics struct {
+	AssemblyMS   float64 `json:"assembly_ms"`
+	PayloadBytes int     `json:"payload_bytes"`
+	MessageCount int     `json:"message_count"`
 }
 
 // PendingSteerData is one queued (not yet delivered) item in the unified queue
