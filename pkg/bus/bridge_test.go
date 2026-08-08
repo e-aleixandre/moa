@@ -303,6 +303,7 @@ func (f *fakeAgent) Reset() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resetCalled = true
+	f.messages = nil
 	return nil
 }
 

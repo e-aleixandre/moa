@@ -64,6 +64,32 @@ test('handleWsInit appends a validated delta without replacing the prefix array'
   expect(prefix.map(message => message._msg_id)).toEqual(['one', 'two']);
 });
 
+test('handleWsInit rejects a delta whose base is not the durable local tail', () => {
+  const base = { role: 'user', _msg_id: 'base', content: [{ type: 'text', text: 'base' }] };
+  const marker = { _type: 'system', text: '✂ Context compacted' };
+  setState({ sessions: { s1: { id: 's1', messages: [base, marker], subagents: {} } } });
+
+  // Another client rewound the server tree to base. An empty delta is valid
+  // server-side, but retaining the local marker would display a false path.
+  handleWsInit('s1', {
+    delta_base: 'base', messages: [], subagents: [], server_instance: 'instance-a', attention_bound: true,
+  });
+
+  expect(store.get().sessions.s1.messages).toEqual([]);
+});
+
+test('handleWsInit rejects a delta after any unidentifiable local row', () => {
+  const base = { role: 'assistant', _msg_id: 'base', content: [{ type: 'text', text: 'base' }] };
+  const local = { _type: 'tool_start', tool_call_id: 'live-tool', status: 'running' };
+  setState({ sessions: { s1: { id: 's1', messages: [base, local], subagents: {} } } });
+
+  handleWsInit('s1', {
+    delta_base: 'base', messages: [], subagents: [], server_instance: 'instance-a', attention_bound: true,
+  });
+
+  expect(store.get().sessions.s1.messages).toEqual([]);
+});
+
 test('normalizeConversationProjection preserves persisted tool activity', async () => {
   const [tool] = normalizeConversationProjection([{
     id: 'tool:child:0', role: 'tool', tool: 'bash', action: 'bash',

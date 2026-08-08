@@ -300,8 +300,20 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd ClearSession) error {
-		if err := sctx.Agent.Reset(); err != nil {
-			return err
+		if sctx.treeSyncer != nil {
+			if err := sctx.treeSyncer.ResetAndClear(); err != nil {
+				return err
+			}
+		} else {
+			sctx.historyMu.Lock()
+			if err := sctx.Agent.Reset(); err != nil {
+				sctx.historyMu.Unlock()
+				return err
+			}
+			if sctx.Tree != nil {
+				sctx.Tree.Clear()
+			}
+			sctx.historyMu.Unlock()
 		}
 		// If we were in error state, transition back to idle.
 		if sctx.State != nil && sctx.State.Current() == StateError {
@@ -1291,6 +1303,8 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.treeSyncer != nil {
 			return sctx.treeSyncer.DisplayMessages(), nil
 		}
+		sctx.historyMu.RLock()
+		defer sctx.historyMu.RUnlock()
 		if sctx.Tree != nil {
 			if msgs := sctx.Tree.AllMessages(); len(msgs) > 0 {
 				return msgs, nil
@@ -1304,6 +1318,8 @@ func RegisterHandlers(sctx *SessionContext) {
 			messages, valid := sctx.treeSyncer.DisplayMessagesSince(q.EntryID)
 			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil
 		}
+		sctx.historyMu.RLock()
+		defer sctx.historyMu.RUnlock()
 		if sctx.Tree != nil {
 			messages, valid := sctx.Tree.DisplayMessagesSince(q.EntryID)
 			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil

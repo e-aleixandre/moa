@@ -113,17 +113,17 @@ const MAX_BACKOFF = 16000;
 // Set localStorage.moaDebugSessionSwitch = '1' and reconnect a session to
 // inspect its complete init path. This remains outside normal UI chrome and
 // costs nothing unless explicitly enabled.
-function switchDebugEnabled() {
+const switchDebugEnabled = (() => {
   try { return localStorage.getItem('moaDebugSessionSwitch') === '1'; } catch (_) { return false; }
-}
+})();
 
 function switchMark(sessionId, phase) {
-  if (!switchDebugEnabled() || typeof performance === 'undefined') return;
+  if (!switchDebugEnabled || typeof performance === 'undefined') return;
   performance.mark(`moa:session-switch:${sessionId}:${phase}`);
 }
 
 function switchMeasure(sessionId, from, to) {
-  if (!switchDebugEnabled() || typeof performance === 'undefined') return null;
+  if (!switchDebugEnabled || typeof performance === 'undefined') return null;
   const name = `moa:session-switch:${sessionId}:${from}→${to}`;
   performance.measure(name, `moa:session-switch:${sessionId}:${from}`, `moa:session-switch:${sessionId}:${to}`);
   const entries = performance.getEntriesByName(name);
@@ -131,7 +131,7 @@ function switchMeasure(sessionId, from, to) {
 }
 
 function reportSwitchTiming(sessionId, metrics) {
-  if (!switchDebugEnabled()) return;
+  if (!switchDebugEnabled) return;
   const phases = [
     ['tap', 'constructed'], ['constructed', 'open'], ['open', 'first-init'],
     ['first-init', 'parsed'], ['parsed', 'handled'], ['handled', 'paint'],
@@ -338,9 +338,9 @@ function openWs(sessionId, initialBackoff) {
   let ws;
   try {
     const params = new URLSearchParams();
-    if (switchDebugEnabled()) params.set('debug_init', '1');
+    if (switchDebugEnabled) params.set('debug_init', '1');
     const cached = store.get().sessions[sessionId]?.messages || [];
-    const cachedBase = [...cached].reverse().find(message => message?._msg_id)?._msg_id;
+    const cachedBase = cached.at(-1)?._msg_id;
     if (!forceFullInit.delete(sessionId) && cachedBase) params.set('since_msg', cachedBase);
     const query = params.size > 0 ? `?${params}` : '';
     ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${query}`);
@@ -376,9 +376,7 @@ function openWs(sessionId, initialBackoff) {
 		  // A server only emits delta_base after validating its tree path, but a
 		  // client may have evicted or locally rewritten that prefix. Never append
 		  // a suffix to a different transcript: retry once without a resume token.
-		  if (evt.data?.delta_base && !store.get().sessions[sessionId]?.messages?.some(
-			  message => message?._msg_id === evt.data.delta_base
-		  )) {
+		  if (evt.data?.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== evt.data.delta_base) {
 			  forceFullInit.add(sessionId);
 			  ws.close();
 			  return;
@@ -406,7 +404,7 @@ function openWs(sessionId, initialBackoff) {
       clearHistoryHydrationTimer(sessionId);
       routeEvent(sessionId, evt, { ackProven });
 		  switchMark(sessionId, 'handled');
-		  if (switchDebugEnabled()) {
+		  if (switchDebugEnabled) {
 			  requestAnimationFrame(() => requestAnimationFrame(() => {
 				  switchMark(sessionId, 'paint');
 				  const payloadBytes = typeof e.data === 'string'

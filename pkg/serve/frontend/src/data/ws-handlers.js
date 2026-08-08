@@ -487,7 +487,11 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
     ? { [viewingBash]: prev.subagents[viewingBash] }
     : null;
-	const canAppendDelta = !!data.delta_base && prev.messages?.some(message => message?._msg_id === data.delta_base);
+	// A delta token only proves the cached history when it names its durable
+	// tail. Finding it earlier in the array would retain local rows after the
+	// token (for example a compaction marker) that may no longer be on the
+	// server's current branch.
+	const canAppendDelta = !!data.delta_base && prev.messages?.at(-1)?._msg_id === data.delta_base;
 	let messages = canAppendDelta
 	  ? withLiveToolsInPlace(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents), data.live_tools)
 	  : withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);

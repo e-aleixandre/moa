@@ -59,10 +59,10 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 		case CommandExecuted:
 			switch e.Command {
 			case "clear":
-				ts.mu.Lock()
-				ts.tree.Clear()
-				ts.synced = make(map[string]struct{})
-				ts.mu.Unlock()
+				// ClearSession resets the agent and tree synchronously through
+				// ResetAndClear below. Keeping this event case as a no-op preserves
+				// the TreeSynced notification without leaving a window where a
+				// reconnect can validate a token against the pre-clear tree.
 			case "compact", "prepare-compact", "prepare-compact-noop":
 				// CompactionEnded records the compacted tree state.
 			default:
@@ -74,6 +74,23 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 	})
 
 	return ts
+}
+
+// ResetAndClear resets the agent and clears its display tree as one history
+// mutation. DisplayMessages and DisplayMessagesSince hold this same mutex while
+// reading both stores, so a resume token can observe either the complete old
+// history or the complete cleared history, never the reset agent with the old
+// tree still accepting a stale token.
+func (ts *TreeSyncer) ResetAndClear() error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	if err := ts.sctx.Agent.Reset(); err != nil {
+		return err
+	}
+	ts.tree.Clear()
+	ts.synced = make(map[string]struct{})
+	return nil
 }
 
 // DisplayMessages returns the full display history: the messages already synced

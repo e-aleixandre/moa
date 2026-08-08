@@ -756,14 +756,24 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		if captured {
 			unseenGen, attentionBound = mgr.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, initialAttentionCut, attentionDeadline)
 		}
-		initStarted := time.Now()
-		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, r.URL.Query().Get("since_msg"))
+		var sinceMsg string
+		debugInit := false
+		if r.URL.RawQuery != "" {
+			query := r.URL.Query()
+			sinceMsg = query.Get("since_msg")
+			debugInit = query.Get("debug_init") == "1"
+		}
+		var initStarted time.Time
+		if debugInit {
+			initStarted = time.Now()
+		}
+		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, sinceMsg)
 		initData.AttentionBound = attentionBound
 		if !attentionBound {
 			initData.UnseenGen = 0
 		}
 		initData.LastSeq = cut
-		if r.URL.Query().Get("debug_init") == "1" {
+		if debugInit {
 			metrics := &InitMetrics{
 				AssemblyMS:   float64(time.Since(initStarted).Microseconds()) / 1000,
 				MessageCount: len(initData.Messages),

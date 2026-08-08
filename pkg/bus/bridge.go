@@ -188,6 +188,10 @@ type SessionContext struct {
 	// complete.
 	treeSyncer *TreeSyncer
 
+	// historyMu protects the legacy no-TreeSyncer history path. TreeSyncer has
+	// its own mutex because it also protects its sync baseline.
+	historyMu sync.RWMutex
+
 	// RunGenAtomic is the current run generation, readable without locks.
 	// Stamped on agent-lifecycle events by the bridge. Written by startRun
 	// (under runMu), read atomically by the bridge.

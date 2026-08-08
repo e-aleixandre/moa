@@ -51,6 +51,16 @@ test('socket resume token is sent only for a cached durable transcript', () => {
     syncConnections(['s1']);
     expect(TestWebSocket.instances[1].url).toContain('since_msg=durable-base');
     syncConnections([]);
+
+    setState({ sessions: { s1: {
+      id: 's1', messages: [
+        { role: 'user', _msg_id: 'durable-base' },
+        { _type: 'system', text: '✂ Context compacted' },
+      ], subagents: {},
+    } } });
+    syncConnections(['s1']);
+    expect(TestWebSocket.instances[2].url).not.toContain('since_msg');
+    syncConnections([]);
   } finally {
     globalThis.WebSocket = originalWebSocket;
     globalThis.location = originalLocation;
