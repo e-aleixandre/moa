@@ -160,12 +160,6 @@ test('finished read rows retain their full path as an input line', () => {
   expect(row.body).toBe('contents');
 });
 
-test('finished tool rows retain large output for the detail panel', () => {
-  const output = 'x'.repeat(256 * 1024);
-  const row = projectStream(session([tool('t1', 'bash', { command: 'cat large.txt' }, 'done', output)]))[0].blocks[0].rows[0];
-  expect(row.body).toBe(output);
-});
-
 test('an answered ask_user row retains its raw Q&A data without a generic body', () => {
   const questions = [{ question: 'Use TypeScript?', options: ['Yes', 'No'] }];
   const row = projectStream(session([

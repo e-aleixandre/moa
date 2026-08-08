@@ -99,13 +99,6 @@ export function getVersion() {
   return api('GET', '/api/version', null, { cache: 'no-store' });
 }
 
-export function getCapabilities() {
-  return api('GET', '/api/capabilities', null, { cache: 'no-store' }).then((caps) => {
-    setMuxSupport(caps?.ws_mux === 1);
-    return caps;
-  });
-}
-
 // --- Centralized WS Manager ---
 
 const connections = new Map();    // sessionId → { ws, backoff, timer }
@@ -116,71 +109,6 @@ const forceFullInit = new Set();  // session IDs whose cached delta base was abs
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 let attentionInstanceRefresh = null;
 const MAX_BACKOFF = 16000;
-
-// A new client optimistically uses the mux endpoint: old servers reject that
-// upgrade and immediately fall back to the long-standing per-session rail.
-// capabilities advertises the feature for intermediaries and future clients,
-// but an upgrade failure remains the authoritative compatibility check.
-let muxSupported = false;
-let muxConnection = null;
-let muxBackoff = 1000;
-let muxRetryTimer = null;
-const muxLastSeq = new Map();
-const muxResyncTimers = new Map();
-const muxResyncBackoffs = new Map();
-const muxRecovering = new Set();
-
-function retireLegacyRail(sessionId, { settle = true } = {}) {
-  const timer = pendingTimers.get(sessionId);
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    pendingTimers.delete(sessionId);
-  }
-  const entry = connections.get(sessionId);
-  if (!entry) return;
-  // Delete before close: a superseded legacy rail must never schedule itself
-  // back into a session which mux now owns.
-  connections.delete(sessionId);
-  clearHistoryHydrationTimer(sessionId);
-  if (settle) finishHistoryHydration(sessionId);
-  try { entry.ws.close(); } catch (_) { /* ownership was already released */ }
-}
-
-function clearMuxResync(sessionId) {
-  const timer = muxResyncTimers.get(sessionId);
-  if (timer !== undefined) clearTimeout(timer);
-  muxResyncTimers.delete(sessionId);
-  muxResyncBackoffs.delete(sessionId);
-  muxRecovering.delete(sessionId);
-}
-
-// Called by the shared capabilities probe once it has positively identified a
-// mux-capable server. Keeping the legacy rail until that response arrives is
-// the compatibility fallback for a fresh PWA against an older server.
-export function setMuxSupport(supported) {
-  if (!supported || muxSupported) return;
-  muxSupported = true;
-  const ids = [...wantedIds];
-  for (const id of [...connections.keys(), ...pendingTimers.keys()]) retireLegacyRail(id);
-  openMux(ids);
-}
-
-// Test isolation for the transport manager. Production code deliberately has
-// no way to downgrade a positively negotiated server.
-export function __resetMuxForTests() {
-  if (muxRetryTimer) clearTimeout(muxRetryTimer);
-  muxRetryTimer = null;
-  if (muxConnection) {
-    try { muxConnection.ws.close(); } catch (_) { /* test reset */ }
-  }
-  muxConnection = null;
-  muxSupported = false;
-  muxBackoff = 1000;
-  muxLastSeq.clear();
-  for (const id of new Set([...muxResyncTimers.keys(), ...muxResyncBackoffs.keys(), ...muxRecovering])) clearMuxResync(id);
-  for (const id of [...connections.keys(), ...pendingTimers.keys()]) retireLegacyRail(id);
-  wantedIds.clear();
-}
 
 // Set localStorage.moaDebugSessionSwitch = '1' and reconnect a session to
 // inspect its complete init path. This remains outside normal UI chrome and
@@ -227,10 +155,6 @@ export function refreshAttentionInstances() {
 }
 
 export function syncConnections(visibleIds) {
-  if (muxSupported) {
-    syncMuxConnections(visibleIds);
-    return;
-  }
   wantedIds.clear();
   for (const id of visibleIds) wantedIds.add(id);
 
@@ -264,19 +188,6 @@ export function syncConnections(visibleIds) {
 // event ever fired), so the normal onclose→backoff path would never trigger and
 // the session would sit frozen until a manual reload.
 export function reconnectAll() {
-  if (muxSupported) {
-    const ids = [...wantedIds];
-    if (muxRetryTimer) clearTimeout(muxRetryTimer);
-    muxRetryTimer = null;
-    if (muxConnection) {
-      const ws = muxConnection.ws;
-      muxConnection = null;
-      try { ws.close(); } catch (_) { /* replacement below is sufficient */ }
-    }
-    for (const id of new Set([...muxResyncTimers.keys(), ...muxResyncBackoffs.keys(), ...muxRecovering])) clearMuxResync(id);
-    openMux(ids);
-    return;
-  }
   const ids = [...wantedIds];
   for (const [id, entry] of connections) {
     // Remove ownership before close so its asynchronous onclose cannot schedule
@@ -291,249 +202,6 @@ export function reconnectAll() {
   for (const [, timer] of pendingTimers) clearTimeout(timer);
   pendingTimers.clear();
   for (const id of ids) openWs(id, 1000);
-}
-
-function muxResumeSubscription(sessionId) {
-  const cached = store.get().sessions[sessionId]?.messages || [];
-  const base = cached.at(-1)?._msg_id;
-  const useDeltaResume = !forceFullInit.has(sessionId) && !!base;
-  return { session: sessionId, mode: 'visible', ...(useDeltaResume ? { since_msg: base } : {}) };
-}
-
-// A mux socket can exist while CONNECTING. Rebuild subscription frames from
-// wantedIds in onopen instead of retaining a stale frame queue: visibility may
-// change several times before the handshake completes. A send only commits
-// local subscription state after the browser accepted it.
-function sendMuxFrame(entry, frame) {
-  const open = typeof WebSocket !== 'undefined' && typeof WebSocket.OPEN === 'number' ? WebSocket.OPEN : 1;
-  if (muxConnection !== entry || !entry.open ||
-      (entry.ws.readyState !== undefined && entry.ws.readyState !== open)) return false;
-  try {
-    entry.ws.send(JSON.stringify(frame));
-    return true;
-  } catch (_) {
-    entry.open = false;
-    try { entry.ws.close(); } catch (_) { /* close wakes the normal reconnect path */ }
-    return false;
-  }
-}
-
-function settleMuxRemoved(sessionId) {
-  clearMuxResync(sessionId);
-  clearHistoryHydrationTimer(sessionId);
-  finishHistoryHydration(sessionId);
-}
-
-function syncMuxConnections(visibleIds) {
-  const previouslyWanted = [...wantedIds];
-  wantedIds.clear();
-  for (const id of visibleIds) wantedIds.add(id);
-  // Capability negotiation can race a legacy retry. Mux ownership is
-  // exclusive, including pending legacy reconnects, not merely live sockets.
-  for (const id of [...connections.keys(), ...pendingTimers.keys()]) retireLegacyRail(id);
-  const entry = muxConnection;
-  if (!entry) {
-    if (visibleIds.length === 0) return;
-    if (!muxRetryTimer) openMux(visibleIds);
-    return;
-  }
-  if (wantedIds.size === 0) {
-    for (const id of previouslyWanted) {
-      clearHistoryHydrationTimer(id);
-      finishHistoryHydration(id);
-    }
-    muxConnection = null;
-    for (const id of new Set([...muxResyncTimers.keys(), ...muxResyncBackoffs.keys(), ...muxRecovering])) clearMuxResync(id);
-    try { entry.ws.close(); } catch (_) { /* nothing remains to hydrate */ }
-    return;
-  }
-  // A CONNECTING socket has received no frames. Treat wantedIds as the durable
-  // desired set and let onopen send exactly its latest value.
-  for (const id of previouslyWanted) {
-    if (!wantedIds.has(id)) settleMuxRemoved(id);
-  }
-  if (!entry.open) {
-    for (const id of visibleIds) {
-      if (!previouslyWanted.includes(id)) {
-        beginHistoryHydration(id, { deltaResume: !!muxResumeSubscription(id).since_msg });
-      }
-    }
-    return;
-  }
-
-  const previous = entry.subscribed;
-  const removed = [...previous].filter(id => !wantedIds.has(id));
-  if (removed.length) {
-    if (!sendMuxFrame(entry, { type: 'unsub', sessions: removed })) return;
-    for (const id of removed) {
-      previous.delete(id);
-      entry.initialized.delete(id);
-    }
-  }
-  const added = visibleIds.filter(id => !previous.has(id));
-  if (added.length) {
-    const subs = added.map(muxResumeSubscription);
-    if (!sendMuxFrame(entry, { type: 'sub', subs })) return;
-    for (const sub of subs) {
-      beginHistoryHydration(sub.session, { deltaResume: !!sub.since_msg });
-      previous.add(sub.session);
-      entry.initialized.delete(sub.session);
-    }
-  }
-}
-
-function scheduleMuxReconnect() {
-  if (muxRetryTimer || wantedIds.size === 0) return;
-  const delay = muxBackoff;
-  muxBackoff = Math.min(muxBackoff * 2, MAX_BACKOFF);
-  muxRetryTimer = setTimeout(() => {
-    muxRetryTimer = null;
-    openMux([...wantedIds]);
-  }, delay);
-}
-
-function openMux(ids) {
-  if (!muxSupported || muxConnection) return;
-  wantedIds.clear();
-  for (const id of ids) wantedIds.add(id);
-  if (wantedIds.size === 0) return;
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let ws;
-  try {
-    ws = new WebSocket(`${proto}//${location.host}/api/ws`);
-  } catch (_) {
-    muxSupported = false;
-    syncConnections([...wantedIds]);
-    return;
-  }
-  const entry = { ws, subscribed: new Set(), initialized: new Set(), hello: false, open: false };
-  muxConnection = entry;
-  for (const sub of [...wantedIds].map(muxResumeSubscription)) {
-    beginHistoryHydration(sub.session, { deltaResume: !!sub.since_msg });
-  }
-  ws.onopen = () => {
-    if (muxConnection !== entry) return;
-    entry.open = true;
-    syncMuxConnections([...wantedIds]);
-  };
-  ws.onmessage = (e) => {
-    if (muxConnection !== entry) return;
-    const frame = JSON.parse(e.data);
-    if (frame.type === 'hello') {
-      entry.hello = true;
-      // The server instance scopes every session sequence namespace.
-      if (entry.serverInstance && entry.serverInstance !== frame.server_instance) muxLastSeq.clear();
-      entry.serverInstance = frame.server_instance || '';
-      return;
-    }
-    const id = frame.session;
-    if (!id || !wantedIds.has(id)) return;
-    if (frame.type === 'init') {
-      handleMuxInit(entry, id, frame);
-      return;
-    }
-    if (frame.type === 'event') {
-      // An init is the cut which makes live events safe to apply. In
-      // particular, do not let events from a replacement server mutate a
-      // transcript whose old-server init was deliberately rejected.
-      if (!entry.initialized.has(id)) return;
-      const evt = frame.data || {};
-      if (frame.seq === 0 || evt.seq === 0) { ws.close(); return; }
-      const seq = frame.seq || evt.seq;
-      const last = muxLastSeq.get(id) || 0;
-      if (seq <= last) return;
-      muxLastSeq.set(id, seq);
-      routeEvent(id, evt);
-      return;
-    }
-    if (frame.type === 'resync' || frame.type === 'sub_err') {
-      requestMuxResubscription(entry, id);
-    }
-  };
-  ws.onclose = () => {
-    if (muxConnection !== entry) return;
-    entry.open = false;
-    muxConnection = null;
-    for (const id of new Set([...muxResyncTimers.keys(), ...muxResyncBackoffs.keys(), ...muxRecovering])) clearMuxResync(id);
-    // A pre-hello close is an old server (or proxy) which has no mux route.
-    if (!entry.hello) {
-      muxSupported = false;
-      syncConnections([...wantedIds]);
-      return;
-    }
-    for (const id of entry.subscribed) failHistoryHydration(id);
-    scheduleMuxReconnect();
-  };
-  ws.onerror = () => ws.close();
-}
-
-function handleMuxInit(entry, sessionId, frame) {
-  const data = frame.data || {};
-  if (data.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== data.delta_base) {
-    forceFullInit.add(sessionId);
-    entry.initialized.delete(sessionId);
-    sendMuxFrame(entry, { type: 'mode', session: sessionId, mode: 'visible' });
-    return;
-  }
-  const currentInstance = store.get().sessions[sessionId]?.serverInstance || '';
-  const initInstance = data.server_instance || '';
-  const trustedForAck = !!initInstance && (!currentInstance || initInstance === currentInstance);
-  if (currentInstance && initInstance !== currentInstance) {
-    entry.initialized.delete(sessionId);
-    failHistoryHydration(sessionId);
-    // A reconnect can discover a replacement server before the next (15s on
-    // mobile) roster poll. Refresh now; loadSessions detects the instance
-    // transition and asks this mux subscription for a fenced resnapshot.
-    refreshAttentionInstances().catch(() => {});
-    return;
-  }
-  muxLastSeq.set(sessionId, data.last_seq ?? frame.seq ?? 0);
-  clearMuxResync(sessionId);
-  clearHistoryHydrationTimer(sessionId);
-  entry.initialized.add(sessionId);
-  routeEvent(sessionId, { type: 'init', data }, {
-    ackProven: trustedForAck && data.attention_bound !== false,
-  });
-  if (data.attention_bound === false || !trustedForAck) {
-    // Preserve the rendered authority boundary, but request a fresh cut for
-    // the acknowledgement proof without paying another TCP/WebSocket setup.
-    sendMuxFrame(entry, { type: 'mode', session: sessionId, mode: 'visible' });
-  } else {
-    muxBackoff = 1000;
-  }
-}
-
-function sendMuxSubscription(entry, sessionId) {
-  if (muxConnection !== entry || !wantedIds.has(sessionId)) return false;
-  const sub = muxResumeSubscription(sessionId);
-  if (!sendMuxFrame(entry, { type: 'sub', subs: [sub] })) return false;
-  beginHistoryHydration(sessionId, { deltaResume: !!sub.since_msg });
-  entry.subscribed.add(sessionId);
-  entry.initialized.delete(sessionId);
-  return true;
-}
-
-// The first resync is immediate: a visible conversation must not wait for the
-// roster poll. If the replacement itself repeatedly overflows/fails before an
-// init, use the same bounded backoff discipline as reconnects rather than
-// spinning a shared socket forever.
-function requestMuxResubscription(entry, sessionId) {
-  failHistoryHydration(sessionId);
-  entry.subscribed.delete(sessionId);
-  entry.initialized.delete(sessionId);
-  if (!wantedIds.has(sessionId) || muxConnection !== entry) return;
-  if (!muxRecovering.has(sessionId)) {
-    muxRecovering.add(sessionId);
-    sendMuxSubscription(entry, sessionId);
-    return;
-  }
-  if (muxResyncTimers.has(sessionId)) return;
-  const delay = muxResyncBackoffs.get(sessionId) || 1000;
-  muxResyncBackoffs.set(sessionId, Math.min(delay * 2, MAX_BACKOFF));
-  muxResyncTimers.set(sessionId, setTimeout(() => {
-    muxResyncTimers.delete(sessionId);
-    sendMuxSubscription(entry, sessionId);
-  }, delay));
 }
 
 // acknowledgeVisibleAttention is intentionally the single path that clears a
@@ -644,26 +312,6 @@ function scheduleReconnect(sessionId, entry) {
 // harmless: its handlers no longer own the entry in connections.
 export function retryHistoryHydration(sessionId) {
   if (!wantedIds.has(sessionId)) return false;
-  if (muxSupported) {
-    const entry = muxConnection;
-    if (!entry) {
-      if (!muxRetryTimer) openMux([...wantedIds]);
-      return true;
-    }
-    clearMuxResync(sessionId);
-    clearHistoryHydrationTimer(sessionId);
-    finishHistoryHydration(sessionId);
-    // A mode resnapshot keeps the same server-side subscription (and its
-    // wsConns reference), so no legacy /sessions/{id}/ws rail can overlap it.
-    if (entry.subscribed.has(sessionId)) {
-      entry.initialized.delete(sessionId);
-      beginHistoryHydration(sessionId, { deltaResume: !!muxResumeSubscription(sessionId).since_msg });
-      sendMuxFrame(entry, { type: 'mode', session: sessionId, mode: 'visible' });
-    } else {
-      sendMuxSubscription(entry, sessionId);
-    }
-    return true;
-  }
   const timer = pendingTimers.get(sessionId);
   if (timer !== undefined) {
     clearTimeout(timer);
@@ -683,10 +331,6 @@ export function retryHistoryHydration(sessionId) {
 }
 
 function openWs(sessionId, initialBackoff) {
-  if (muxSupported) {
-    syncMuxConnections([...wantedIds]);
-    return;
-  }
   pendingTimers.delete(sessionId);
   const cached = store.get().sessions[sessionId]?.messages || [];
   const cachedBase = cached.at(-1)?._msg_id;

@@ -253,21 +253,6 @@ func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
 	}
 }
 
-func TestWsEventFromBus_ToolResultIsWholeForEveryWebSocketRail(t *testing.T) {
-	resultWant := strings.Repeat("x", 4*historyContentMaxBytes)
-	ev, ok := wsEventFromBus(bus.ToolExecEnded{SessionID: "s1", ToolCallID: "tool-1", ToolName: "bash", Result: resultWant})
-	if !ok || ev.Type != "tool_end" {
-		t.Fatalf("Type = %q ok=%v, want tool_end", ev.Type, ok)
-	}
-	data, ok := ev.Data.(ToolEndData)
-	if !ok {
-		t.Fatalf("Data type = %T, want ToolEndData", ev.Data)
-	}
-	if data.Result != resultWant {
-		t.Fatalf("tool result length = %d, want %d", len(data.Result), len(resultWant))
-	}
-}
-
 func TestWsEventFromBus_MCPChanged(t *testing.T) {
 	ev, ok := wsEventFromBus(bus.MCPChanged{
 		SessionID: "s1", Total: 3, Ready: 1, Disabled: 1, Unhealthy: 1, Pending: 1,

@@ -5,7 +5,7 @@ import {
 } from './history-hydration.js';
 import { handleWsInit } from './ws-handlers.js';
 import {
-  __resetMuxForTests, HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, reconnectAll, retryHistoryHydration, setMuxSupport, syncConnections,
+  HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, reconnectAll, syncConnections,
 } from './api.js';
 import { deleteSession, loadSessions } from './session-actions.js';
 import { __resetBootForTests, afterVisibilityChange } from './tile-actions.js';
@@ -16,7 +16,6 @@ import { StreamingSkeleton } from '../components/StreamingSkeleton/StreamingSkel
 import { Spinner } from '../primitives/index.js';
 
 beforeEach(() => {
-  __resetMuxForTests();
   setState({ sessions: {}, activeSession: null, isMobile: false });
 });
 
@@ -30,25 +29,21 @@ test('history hydration starts on socket open and ends at init', () => {
   expect(store.get().sessions.s1.historyPending).toBe(false);
 });
 
-test('a requested delta resume keeps the tail until the server confirms its base', () => {
+test('a proven delta resume keeps its hydration boundary without showing a tail', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
-    unseen: true, unseenGen: 2, historyCacheGen: 1,
-    serverInstance: 'instance-a', historyCacheInstance: 'instance-a', serverUnseenInstance: 'instance-a',
   } } });
 
   beginHistoryHydration('s1', { deltaResume: true });
 
   expect(store.get().sessions.s1).toMatchObject({
-    historyPending: true, historyTailNeeded: true, historyHydrated: false,
+    historyPending: true, historyTailNeeded: false, historyHydrated: false,
   });
 });
 
 test('a full-init hydration still reserves the catching-up tail', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
-    unseen: true, unseenGen: 2, historyCacheGen: 1,
-    serverInstance: 'instance-a', historyCacheInstance: 'instance-a', serverUnseenInstance: 'instance-a',
   } } });
 
   beginHistoryHydration('s1');
@@ -56,144 +51,6 @@ test('a full-init hydration still reserves the catching-up tail', () => {
   expect(store.get().sessions.s1).toMatchObject({
     historyPending: true, historyTailNeeded: true,
   });
-});
-
-test('a mux delta subscription keeps the cached transcript authoritative without a visual tail', () => {
-  const originalWebSocket = globalThis.WebSocket;
-  const originalLocation = globalThis.location;
-  class TestWebSocket {
-    constructor(url) { this.url = url; this.sent = []; TestWebSocket.instances.push(this); }
-    send(message) { this.sent.push(JSON.parse(message)); }
-    close() { this.onclose?.(); }
-  }
-  TestWebSocket.instances = [];
-  globalThis.WebSocket = TestWebSocket;
-  globalThis.location = { protocol: 'http:', host: 'localhost' };
-  try {
-    setState({ sessions: { s1: {
-      id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
-    } } });
-    setMuxSupport(true);
-    syncConnections(['s1']);
-    const ws = TestWebSocket.instances[0];
-    expect(ws.url).toBe('ws://localhost/api/ws');
-    expect(store.get().sessions.s1).toMatchObject({ historyPending: true, historyTailNeeded: false });
-    ws.onopen();
-    expect(ws.sent[0]).toEqual({ type: 'sub', subs: [{ session: 's1', mode: 'visible', since_msg: 'durable-base' }] });
-    ws.onmessage({ data: JSON.stringify({ type: 'hello', proto: 1, server_instance: 'instance-a' }) });
-    ws.onmessage({ data: JSON.stringify({
-      type: 'init', session: 's1', seq: 4,
-      data: { messages: [], subagents: [], server_instance: 'instance-a', attention_bound: true, last_seq: 4, delta_base: 'durable-base' },
-    }) });
-    expect(store.get().sessions.s1).toMatchObject({ historyPending: false, historyHydrated: true, historyStale: false });
-    syncConnections([]);
-  } finally {
-    globalThis.WebSocket = originalWebSocket;
-    globalThis.location = originalLocation;
-  }
-});
-
-test('mux uses the latest visibility set when it opens after rapid switching', () => {
-  const originalWebSocket = globalThis.WebSocket;
-  const originalLocation = globalThis.location;
-  class TestWebSocket {
-    static OPEN = 1;
-    constructor(url) {
-      this.url = url;
-      this.readyState = 0; // CONNECTING
-      this.sent = [];
-      TestWebSocket.instances.push(this);
-    }
-    send(message) {
-      if (this.readyState !== TestWebSocket.OPEN) throw new Error('sent before open');
-      this.sent.push(JSON.parse(message));
-    }
-    close() { this.closed = true; this.onclose?.(); }
-  }
-  TestWebSocket.instances = [];
-  globalThis.WebSocket = TestWebSocket;
-  globalThis.location = { protocol: 'http:', host: 'localhost' };
-  try {
-    setState({ sessions: {
-      first: { id: 'first', messages: [], subagents: {} },
-      second: { id: 'second', messages: [], subagents: {} },
-    } });
-    setMuxSupport(true);
-    syncConnections(['first']);
-    const ws = TestWebSocket.instances[0];
-    // A phone can change tile visibility before the handshake completes. No
-    // frame is sent while CONNECTING, so first cannot become a ghost sub.
-    syncConnections(['second']);
-    expect(ws.sent).toEqual([]);
-    ws.readyState = TestWebSocket.OPEN;
-    ws.onopen();
-    expect(ws.sent).toEqual([{ type: 'sub', subs: [{ session: 'second', mode: 'visible' }] }]);
-    syncConnections([]);
-  } finally {
-    globalThis.WebSocket = originalWebSocket;
-    globalThis.location = originalLocation;
-  }
-});
-
-test('mux resync immediately re-subscribes the visible session without opening a legacy rail', () => {
-  const originalWebSocket = globalThis.WebSocket;
-  const originalLocation = globalThis.location;
-  class TestWebSocket {
-    constructor(url) { this.url = url; this.sent = []; TestWebSocket.instances.push(this); }
-    send(message) { this.sent.push(JSON.parse(message)); }
-    close() { this.closed = true; this.onclose?.(); }
-  }
-  TestWebSocket.instances = [];
-  globalThis.WebSocket = TestWebSocket;
-  globalThis.location = { protocol: 'http:', host: 'localhost' };
-  try {
-    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {} } } });
-    setMuxSupport(true);
-    syncConnections(['s1']);
-    const ws = TestWebSocket.instances[0];
-    ws.onopen();
-    ws.onmessage({ data: JSON.stringify({ type: 'hello', proto: 1, server_instance: 'instance-a' }) });
-    ws.onmessage({ data: JSON.stringify({
-      type: 'resync', session: 's1', reason: 'overflow',
-    }) });
-    expect(ws.sent.at(-1)).toEqual({ type: 'sub', subs: [{ session: 's1', mode: 'visible' }] });
-    expect(TestWebSocket.instances).toHaveLength(1);
-    syncConnections([]);
-  } finally {
-    globalThis.WebSocket = originalWebSocket;
-    globalThis.location = originalLocation;
-  }
-});
-
-test('mux owns restart hydration and never leaves a legacy session socket behind', () => {
-  const originalWebSocket = globalThis.WebSocket;
-  const originalLocation = globalThis.location;
-  class TestWebSocket {
-    constructor(url) { this.url = url; this.sent = []; TestWebSocket.instances.push(this); }
-    send(message) { this.sent.push(JSON.parse(message)); }
-    close() { this.closed = true; this.onclose?.(); }
-  }
-  TestWebSocket.instances = [];
-  globalThis.WebSocket = TestWebSocket;
-  globalThis.location = { protocol: 'http:', host: 'localhost' };
-  try {
-    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {} } } });
-    // Start on the compatibility rail, then negotiate mux while it is live.
-    syncConnections(['s1']);
-    const legacy = TestWebSocket.instances[0];
-    setMuxSupport(true);
-    const mux = TestWebSocket.instances[1];
-    expect(legacy.url).toContain('/api/sessions/s1/ws');
-    expect(legacy.closed).toBe(true);
-    mux.onopen();
-    retryHistoryHydration('s1');
-    expect(mux.sent.at(-1)).toEqual({ type: 'mode', session: 's1', mode: 'visible' });
-    expect(TestWebSocket.instances).toHaveLength(2);
-    syncConnections([]);
-  } finally {
-    globalThis.WebSocket = originalWebSocket;
-    globalThis.location = originalLocation;
-  }
 });
 
 test('socket resume token is sent only for a cached durable transcript', () => {

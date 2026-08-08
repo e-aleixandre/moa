@@ -23,6 +23,7 @@ const (
 	defaultConversationPageSize     = 50
 	maxConversationPageSize         = 100
 	maxConversationTextBytes        = 12 << 10
+	maxConversationToolDetailBytes  = 16 << 10
 	maxConversationToolSummaryBytes = 512
 )
 
@@ -411,11 +412,13 @@ func conversationToolStatus(result core.AgentMessage) string {
 }
 
 func conversationToolDetailFromResult(result core.AgentMessage) conversationToolDetail {
-	return conversationToolDetail{output: conversationToolResult(result.Content)}
+	output, truncated := conversationToolResultTail(result.Content, maxConversationToolDetailBytes)
+	return conversationToolDetail{output: output, truncated: truncated}
 }
 
-func conversationToolResult(content []core.Content) string {
+func conversationToolResultTail(content []core.Content, maxBytes int) (string, bool) {
 	var output string
+	truncated := false
 	for _, block := range content {
 		if block.Type != "text" {
 			continue
@@ -424,9 +427,32 @@ func conversationToolResult(content []core.Content) string {
 		if output != "" {
 			part = "\n" + part
 		}
-		output += part
+		var wasTruncated bool
+		output, wasTruncated = appendConversationTail(output, part, maxBytes)
+		truncated = truncated || wasTruncated
 	}
-	return output
+	return output, truncated
+}
+
+func appendConversationTail(current, part string, maxBytes int) (string, bool) {
+	if maxBytes <= 0 {
+		return "", current != "" || part != ""
+	}
+	if len(part) > maxBytes {
+		return conversationTail(part, maxBytes), true
+	}
+	if len(current)+len(part) <= maxBytes {
+		return current + part, false
+	}
+	return conversationTail(current+part, maxBytes), true
+}
+
+func conversationTail(value string, maxBytes int) string {
+	start := len(value) - maxBytes
+	for start < len(value) && !utf8.RuneStart(value[start]) {
+		start++
+	}
+	return value[start:]
 }
 
 // conversationToolActivity exposes a bounded description of every tool's

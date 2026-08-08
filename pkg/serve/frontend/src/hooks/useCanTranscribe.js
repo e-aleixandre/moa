@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'preact/hooks';
-import { setMuxSupport } from '../data/api.js';
 
 // useCanTranscribe — whether the backend has speech-to-text configured.
 //
@@ -16,7 +15,6 @@ function loadCapability() {
     inFlight = fetch('/api/capabilities', { headers: { 'X-Moa-Request': '1' } })
       .then((r) => r.json())
       .then((caps) => {
-        setMuxSupport(caps.ws_mux === 1);
         cached = !!caps.transcribe;
         return cached;
       })

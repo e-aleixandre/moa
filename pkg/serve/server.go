@@ -147,7 +147,6 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("HEAD /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
-	mux.HandleFunc("GET /api/ws", handleMuxWebSocket(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
@@ -723,25 +722,6 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		})
 		defer reactor.cleanup()
 
-		debugInit := r.URL.Query().Get("debug_init") == "1"
-		initStarted := time.Now()
-		initData, cut := buildWebSocketInit(ctx, mgr, sess, r.URL.Query().Get("since_msg"))
-		if debugInit {
-			metrics := &InitMetrics{AssemblyMS: float64(time.Since(initStarted).Microseconds()) / 1000, MessageCount: len(initData.Messages)}
-			initData.InitMetrics = metrics
-			for range 3 {
-				encoded, err := json.Marshal(Event{Type: "init", Data: initData, Seq: cut})
-				if err != nil || metrics.PayloadBytes == len(encoded) {
-					break
-				}
-				metrics.PayloadBytes = len(encoded)
-			}
-			slog.Debug("websocket init", "session", sess.ID, "assembly_ms", metrics.AssemblyMS, "payload_bytes", metrics.PayloadBytes, "messages", metrics.MessageCount)
-		}
-		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
-			return
-		}
-
 		// The sequence cut and the in-flight state (streaming aggregate + live
 		// tool calls) are captured TOGETHER under the session's streamMu
 		// (SnapshotInFlightWithCut), so an accumulative streamed delta is either
@@ -761,6 +741,59 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// unsafe acknowledgement. This is not a wall-clock bound on assembling or
 		// writing the rest of init (streamMu, scheduling, and socket I/O remain
 		// outside that narrow guarantee).
+		var streaming bus.StreamingAggregate
+		var liveTools []bus.LiveToolCall
+		var cut, overflowAtCut, clearedAtCut uint64
+		initialAttentionCut := false
+		captured := false
+		attentionDeadline := time.Now().Add(attentionSequenceWait)
+		if sess.attentionSeqSub != nil {
+			streaming, liveTools, cut, overflowAtCut, clearedAtCut, initialAttentionCut, captured = sess.runtime.Context().SnapshotInFlightWithAttentionCutBefore(sess.attentionSeqSub, attentionDeadline)
+		} else {
+			streaming, liveTools, cut = sess.runtime.Context().SnapshotInFlightWithCut()
+		}
+		unseenGen, attentionBound := uint64(0), false
+		if captured {
+			unseenGen, attentionBound = mgr.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, initialAttentionCut, attentionDeadline)
+		}
+		var sinceMsg string
+		debugInit := false
+		if r.URL.RawQuery != "" {
+			query := r.URL.Query()
+			sinceMsg = query.Get("since_msg")
+			debugInit = query.Get("debug_init") == "1"
+		}
+		var initStarted time.Time
+		if debugInit {
+			initStarted = time.Now()
+		}
+		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, sinceMsg)
+		initData.AttentionBound = attentionBound
+		if !attentionBound {
+			initData.UnseenGen = 0
+		}
+		initData.LastSeq = cut
+		if debugInit {
+			metrics := &InitMetrics{
+				AssemblyMS:   float64(time.Since(initStarted).Microseconds()) / 1000,
+				MessageCount: len(initData.Messages),
+			}
+			initData.InitMetrics = metrics
+			// payload_bytes is part of the envelope it describes, so serialize
+			// until its decimal width stabilizes (normally two passes).
+			for range 3 {
+				encoded, err := json.Marshal(Event{Type: "init", Data: initData, Seq: cut})
+				if err != nil || metrics.PayloadBytes == len(encoded) {
+					break
+				}
+				metrics.PayloadBytes = len(encoded)
+			}
+			slog.Debug("websocket init", "session", sess.ID, "assembly_ms", metrics.AssemblyMS, "payload_bytes", metrics.PayloadBytes, "messages", metrics.MessageCount)
+		}
+		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
+			return
+		}
+
 		// Invalidate file scanner cache on successful file edits.
 		editToolUnsub := sess.runtime.Bus.Subscribe(func(e bus.ToolExecEnded) {
 			if !e.IsError && !e.Rejected {
@@ -817,33 +850,6 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			}
 		}
 	}
-}
-
-// buildWebSocketInit is the sole init-cut path for both the legacy and
-// multiplexed transports. Keeping the attention fence here prevents a newer
-// transport from accidentally weakening the receipt proof.
-func buildWebSocketInit(ctx context.Context, mgr *Manager, sess *ManagedSession, sinceMsg string) (InitData, uint64) {
-	attentionDeadline := time.Now().Add(attentionSequenceWait)
-	var streaming bus.StreamingAggregate
-	var liveTools []bus.LiveToolCall
-	var cut, overflowAtCut, clearedAtCut uint64
-	var initialAttentionCut, captured bool
-	if sess.attentionSeqSub != nil {
-		streaming, liveTools, cut, overflowAtCut, clearedAtCut, initialAttentionCut, captured = sess.runtime.Context().SnapshotInFlightWithAttentionCutBefore(sess.attentionSeqSub, attentionDeadline)
-	} else {
-		streaming, liveTools, cut = sess.runtime.Context().SnapshotInFlightWithCut()
-	}
-	unseenGen, attentionBound := uint64(0), false
-	if captured {
-		unseenGen, attentionBound = mgr.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, initialAttentionCut, attentionDeadline)
-	}
-	initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, sinceMsg)
-	initData.AttentionBound = attentionBound
-	if !attentionBound {
-		initData.UnseenGen = 0
-	}
-	initData.LastSeq = cut
-	return initData, cut
 }
 
 func handleTrustMCP(mgr *Manager) http.HandlerFunc {
@@ -1196,7 +1202,6 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 		}
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
-			"ws_mux":        1,
 			"workspaceRoot": mgr.workspaceRoot,
 			"homeDir":       userHomeDir(),
 			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),

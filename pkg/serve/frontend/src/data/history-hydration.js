@@ -38,15 +38,14 @@ function cachedTranscriptMayBeBehind(session) {
 // A roster entry retains its last rendered messages while its socket is away.
 // Mark the brief interval from opening that socket through its init snapshot so
 // the stream can distinguish a useful cached view from authoritative history.
-export function beginHistoryHydration(id, { deltaResume: _deltaResume = false } = {}) {
+export function beginHistoryHydration(id, { deltaResume = false } = {}) {
   const session = store.get().sessions[id];
   if (!session || session.historyPending) return false;
   clearTailTimer(id);
-  // since_msg is only a request. A server may reject its base and send a full
-  // init, so hiding a possibly missing tail before init confirms delta_base
-  // would present stale cached history as current. A successful delta init
-  // settles before this grace period in the usual case and clears the tail.
-  const historyTailNeeded = cachedTranscriptMayBeBehind(session);
+  // A validated delta resume can only append after the durable row we already
+  // render. Keep the authority boundary exactly as strict, but do not flash a
+  // speculative visual tail for the normally one-frame suffix path.
+  const historyTailNeeded = !deltaResume && cachedTranscriptMayBeBehind(session);
   updateSession(id, {
     historyPending: true,
     historyStale: false,

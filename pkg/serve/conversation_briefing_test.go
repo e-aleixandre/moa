@@ -248,7 +248,7 @@ func TestConversationMessagesToolDetailRequiresItemAndReturnsUTF8Tail(t *testing
 		t.Fatal(err)
 	}
 	appendConversationTestMessage(sess, "assistant-tool", "assistant", "", nil, core.ToolCallContent("read-call", "read", map[string]any{"path": "large.txt"}))
-	output := "begin\n" + strings.Repeat("é", 16<<10) + "\nEND"
+	output := "begin\n" + strings.Repeat("é", maxConversationToolDetailBytes) + "\nEND"
 	appendConversationToolResult(sess, "result-tool", "read-call", "read", output, false, nil)
 	handler := NewServer(mgr)
 	request := func(path string) *httptest.ResponseRecorder {
@@ -277,8 +277,8 @@ func TestConversationMessagesToolDetailRequiresItemAndReturnsUTF8Tail(t *testing
 	if err := json.NewDecoder(rec.Body).Decode(&detail); err != nil {
 		t.Fatal(err)
 	}
-	if detail.Truncated || detail.Output != output || !utf8.ValidString(detail.Output) {
-		t.Fatalf("full detail = %#v", detail)
+	if !detail.Truncated || len(detail.Output) > maxConversationToolDetailBytes || !utf8.ValidString(detail.Output) || !strings.HasSuffix(detail.Output, "\nEND") || strings.Contains(detail.Output, "begin\n") {
+		t.Fatalf("bounded detail = %#v", detail)
 	}
 }
 

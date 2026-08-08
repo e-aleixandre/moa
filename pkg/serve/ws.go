@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -24,12 +23,10 @@ import (
 // important for streaming UI state: text_delta, tool_call_start, message_end,
 // tool_end, state_change, and run_end must not overtake one another.
 type wsReactor struct {
-	ch       chan Event
-	ready    chan struct{} // coalesced wakeup for schedulers which do not poll
-	done     chan struct{} // closed on cleanup; guards sends to ch
-	once     sync.Once
-	unsubs   []func()
-	priority atomic.Bool
+	ch     chan Event
+	done   chan struct{} // closed on cleanup; guards sends to ch
+	once   sync.Once
+	unsubs []func()
 }
 
 const wsReactorBuffer = 512 // per-WS event channel capacity
@@ -49,9 +46,8 @@ const (
 // Returns the reactor and a read-only channel for the WS writer loop.
 func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attentionGeneration ...func(uint64) uint64) *wsReactor {
 	r := &wsReactor{
-		ch:    make(chan Event, wsReactorBuffer),
-		ready: make(chan struct{}, 1),
-		done:  make(chan struct{}),
+		ch:   make(chan Event, wsReactorBuffer),
+		done: make(chan struct{}),
 	}
 
 	// Helper: try-send with done-channel guard (prevents send-on-closed panic).
@@ -66,10 +62,6 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 		}
 		select {
 		case r.ch <- e:
-			select {
-			case r.ready <- struct{}{}:
-			default:
-			}
 		case <-r.done:
 			return
 		default:
@@ -100,11 +92,7 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 		}
 		if wsEvent, ok := wsEventFromBus(event, attentionGen); ok {
 			wsEvent.Seq = seq
-			wsEvent = enrichEditToolStart(wsEvent, cwd)
-			if isPriorityWsEvent(wsEvent) {
-				r.priority.Store(true)
-			}
-			send(wsEvent)
+			send(enrichEditToolStart(wsEvent, cwd))
 		}
 	}))
 
@@ -134,20 +122,6 @@ func isAttentionEvent(event any) bool {
 		return false
 	}
 }
-
-func isPriorityWsEvent(e Event) bool {
-	switch e.Type {
-	case "permission_request", "ask_user", "permission_resolved", "ask_resolved", "state_change", "run_end":
-		return true
-	default:
-		return false
-	}
-}
-
-func (r *wsReactor) hasPriority() bool      { return r.priority.Load() }
-func (r *wsReactor) clearPriority()         { r.priority.Store(false) }
-func (r *wsReactor) Ready() <-chan struct{} { return r.ready }
-func (r *wsReactor) hasEvents() bool        { return len(r.ch) > 0 }
 
 // enrichEditToolStart adds the real 1-based starting line number to edit
 // tool_start events, so the frontend diff preview numbers lines like the
@@ -204,7 +178,7 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 			outputTok = e.Message.Usage.Output
 		}
 		return Event{Type: "message_end", Data: MessageEndData{
-			Text: e.FullText, MsgID: e.Message.MsgID,
+			Text: truncateHistoryString(e.FullText), MsgID: e.Message.MsgID,
 			InputTokens: inputTok, OutputTokens: outputTok,
 		}}, true
 	case bus.ToolCallStreaming:
