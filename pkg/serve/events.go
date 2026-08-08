@@ -66,6 +66,9 @@ type InitData struct {
 	BashJobs         []BashJobInitData `json:"bash_jobs,omitempty"`
 	LastSeq          uint64            `json:"last_seq,omitempty"`
 	HistoryTruncated bool              `json:"history_truncated,omitempty"`
+	// DeltaBase is the validated tree entry requested by since_msg. When set,
+	// Messages is a complete suffix after this entry and clients append it.
+	DeltaBase string `json:"delta_base,omitempty"`
 	// InitMetrics is emitted only when the client requests debug_init=1. It is
 	// intentionally diagnostic-only, so it never participates in client state.
 	InitMetrics *InitMetrics `json:"init_metrics,omitempty"`

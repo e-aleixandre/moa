@@ -103,6 +103,73 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 	}
 }
 
+func TestBuildInitData_DeltaMessages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "one", Content: []core.Content{core.TextContent("one")}})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "two", Content: []core.Content{core.TextContent("two")}})})
+
+	data := buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, "one")
+	if data.DeltaBase != "one" || len(data.Messages) != 1 || data.Messages[0].MsgID != "two" {
+		t.Fatalf("delta init = %+v", data)
+	}
+
+	data = buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, "two")
+	if data.DeltaBase != "two" || len(data.Messages) != 0 {
+		t.Fatalf("empty delta init = %+v", data)
+	}
+}
+
+func TestBuildInitData_InvalidDeltaFallsBackToFull(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	base := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
+	offPath := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "old", Content: []core.Content{core.TextContent("old")}})})
+	if err := tree.Branch(base); err != nil {
+		t.Fatal(err)
+	}
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "new", Content: []core.Content{core.TextContent("new")}})})
+
+	data := buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, offPath)
+	if data.DeltaBase != "" || len(data.Messages) != 2 || data.Messages[1].MsgID != "new" {
+		t.Fatalf("off-path fallback = %+v", data)
+	}
+	tree.Clear()
+	data = buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, base)
+	if data.DeltaBase != "" || len(data.Messages) != 0 {
+		t.Fatalf("clear fallback = %+v", data)
+	}
+}
+
+func TestBuildInitData_DeltaIncludesCompactionMarker(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	base := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
+	tree.Append(session.Entry{Type: session.EntryCompaction, Compaction: session.CompactionData{Summary: "summary", FirstKeptEntryID: base, TokensBefore: 4000}})
+	data := buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, base)
+	if data.DeltaBase != base || len(data.Messages) != 1 || data.Messages[0].Role != "session_event" {
+		t.Fatalf("compaction delta = %+v", data)
+	}
+}
+
 func TestWsEventFromBus_SubagentUsage(t *testing.T) {
 	t.Run("with usage", func(t *testing.T) {
 		ev, ok := wsEventFromBus(bus.SubagentUsage{

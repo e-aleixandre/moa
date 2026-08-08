@@ -470,11 +470,25 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	return buildInitDataAtAttentionGen(sess, streaming, liveTools, sess.attentionGen.Load())
 }
 
-func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64) InitData {
+func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64, sinceMsg ...string) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
-	msgs, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
+	// A validated delta is used only when its entire suffix fits the same mobile
+	// bounds as a normal init. Truncating a suffix would silently leave a hole in
+	// the cached transcript, so it deliberately fails closed to a full snapshot.
+	msgs := []core.AgentMessage(nil)
+	deltaBase := ""
+	if len(sinceMsg) > 0 && sinceMsg[0] != "" {
+		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg[0]}); err == nil && delta.Valid {
+			if bounded, truncated := limitInitHistory(delta.Messages); !truncated {
+				msgs, deltaBase = bounded, sinceMsg[0]
+			}
+		}
+	}
+	if deltaBase == "" {
+		msgs, _ = bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
+	}
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	ctxPct, _ := bus.QueryTyped[bus.GetContextUsage, int](b, bus.GetContextUsage{})
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
@@ -502,6 +516,7 @@ func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAg
 		UnseenGen:         unseenGen,
 		Messages:          msgs,
 		HistoryTruncated:  historyTruncated,
+		DeltaBase:         deltaBase,
 		State:             state,
 		ContextPercent:    ctxPct,
 		ContextWindow:     initModel.MaxInput,

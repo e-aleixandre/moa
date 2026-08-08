@@ -105,6 +105,7 @@ const connections = new Map();    // sessionId → { ws, backoff, timer }
 const pendingTimers = new Map();  // sessionId → timeoutId (for reconnects awaiting retry)
 const hydrationTimers = new Map(); // sessionId → timeoutId (waiting for WS init)
 const wantedIds = new Set();      // sessions that should have a connection
+const forceFullInit = new Set();  // session IDs whose cached delta base was absent
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 let attentionInstanceRefresh = null;
 const MAX_BACKOFF = 16000;
@@ -336,8 +337,13 @@ function openWs(sessionId, initialBackoff) {
 	  switchMark(sessionId, 'tap');
   let ws;
   try {
-    const debugQuery = switchDebugEnabled() ? '?debug_init=1' : '';
-    ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${debugQuery}`);
+    const params = new URLSearchParams();
+    if (switchDebugEnabled()) params.set('debug_init', '1');
+    const cached = store.get().sessions[sessionId]?.messages || [];
+    const cachedBase = [...cached].reverse().find(message => message?._msg_id)?._msg_id;
+    if (!forceFullInit.delete(sessionId) && cachedBase) params.set('since_msg', cachedBase);
+    const query = params.size > 0 ? `?${params}` : '';
+    ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${query}`);
     switchMark(sessionId, 'constructed');
   } catch (_) {
     failHistoryHydration(sessionId);
@@ -367,6 +373,16 @@ function openWs(sessionId, initialBackoff) {
     const evt = JSON.parse(e.data);
     switchMark(sessionId, 'parsed');
     if (evt.type === 'init') {
+		  // A server only emits delta_base after validating its tree path, but a
+		  // client may have evicted or locally rewritten that prefix. Never append
+		  // a suffix to a different transcript: retry once without a resume token.
+		  if (evt.data?.delta_base && !store.get().sessions[sessionId]?.messages?.some(
+			  message => message?._msg_id === evt.data.delta_base
+		  )) {
+			  forceFullInit.add(sessionId);
+			  ws.close();
+			  return;
+		  }
       const currentInstance = store.get().sessions[sessionId]?.serverInstance || '';
       const initInstance = evt.data?.server_instance || '';
       const initMatchesCurrent = !!initInstance && !!currentInstance && initInstance === currentInstance;

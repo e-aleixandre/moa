@@ -102,6 +102,26 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	return out
 }
 
+// DisplayMessagesSince returns the durable tree suffix after entryID plus the
+// current in-flight tail. It validates the token against the tree, rather than
+// the lossy event stream, so it remains correct across reconnects and restarts.
+func (ts *TreeSyncer) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	msgs, valid := ts.tree.DisplayMessagesSince(entryID)
+	if !valid {
+		return nil, false
+	}
+	for i, msg := range ts.sctx.Agent.Messages() {
+		if _, ok := ts.synced[messageSyncID(msg, i)]; ok || isHiddenInternalPrompt(msg) {
+			continue
+		}
+		msgs = append(msgs, msg)
+	}
+	return msgs, true
+}
+
 // HasMsgID reports whether this ID belongs to a message that exists anywhere in
 // the session tree (any branch, not just the current path) or in the in-flight
 // turn not synced to the tree yet. Unlike DisplayMessages, which projects the

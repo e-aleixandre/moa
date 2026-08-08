@@ -29,6 +29,34 @@ test('history hydration starts on socket open and ends at init', () => {
   expect(store.get().sessions.s1.historyPending).toBe(false);
 });
 
+test('socket resume token is sent only for a cached durable transcript', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  class TestWebSocket {
+    constructor(url) { this.url = url; TestWebSocket.instances.push(this); }
+    close() { this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  try {
+    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {} } } });
+    syncConnections(['s1']);
+    expect(TestWebSocket.instances[0].url).not.toContain('since_msg');
+    syncConnections([]);
+
+    setState({ sessions: { s1: {
+      id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+    } } });
+    syncConnections(['s1']);
+    expect(TestWebSocket.instances[1].url).toContain('since_msg=durable-base');
+    syncConnections([]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.location = originalLocation;
+  }
+});
+
 test('socket close and init timeout settle hydration', () => {
   const originalWebSocket = globalThis.WebSocket;
   const originalLocation = globalThis.location;

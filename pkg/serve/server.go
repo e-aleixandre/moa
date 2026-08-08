@@ -757,7 +757,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			unseenGen, attentionBound = mgr.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, initialAttentionCut, attentionDeadline)
 		}
 		initStarted := time.Now()
-		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen)
+		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, r.URL.Query().Get("since_msg"))
 		initData.AttentionBound = attentionBound
 		if !attentionBound {
 			initData.UnseenGen = 0
@@ -769,7 +769,13 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 				MessageCount: len(initData.Messages),
 			}
 			initData.InitMetrics = metrics
-			if encoded, err := json.Marshal(Event{Type: "init", Data: initData, Seq: cut}); err == nil {
+			// payload_bytes is part of the envelope it describes, so serialize
+			// until its decimal width stabilizes (normally two passes).
+			for range 3 {
+				encoded, err := json.Marshal(Event{Type: "init", Data: initData, Seq: cut})
+				if err != nil || metrics.PayloadBytes == len(encoded) {
+					break
+				}
 				metrics.PayloadBytes = len(encoded)
 			}
 			slog.Debug("websocket init", "session", sess.ID, "assembly_ms", metrics.AssemblyMS, "payload_bytes", metrics.PayloadBytes, "messages", metrics.MessageCount)

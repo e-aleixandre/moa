@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -30,6 +30,38 @@ beforeEach(() => {
     drawerOpen: false, paletteOpen: false, conversationObscuringOverlayCount: 0,
   });
   __resetAttentionArrivalsForTests();
+});
+
+test('delta init appends while preserving the cached prefix array and rows', () => {
+  const first = { role: 'user', _msg_id: 'one', content: [{ type: 'text', text: 'one' }] };
+  const prefix = [first];
+  const got = appendNormalizedHistoryDelta(prefix, [{
+    role: 'assistant', msg_id: 'two', content: [{ type: 'text', text: 'two' }],
+  }]);
+  expect(got).toBe(prefix);
+  expect(got[0]).toBe(first);
+  expect(got).toHaveLength(2);
+  expect(got[1]._msg_id).toBe('two');
+});
+
+test('delta init completes a tool whose call is in the cached prefix', () => {
+  const prefix = [{ _type: 'tool_start', _msg_id: 'call-message', tool_call_id: 'tool-1', status: 'running', result: null }];
+  appendNormalizedHistoryDelta(prefix, [{
+    role: 'tool_result', tool_call_id: 'tool-1', content: [{ type: 'text', text: 'done' }],
+  }]);
+  expect(prefix[0]).toMatchObject({ status: 'done', result: 'done' });
+});
+
+test('handleWsInit appends a validated delta without replacing the prefix array', () => {
+  const prefix = [{ role: 'user', _msg_id: 'one', content: [{ type: 'text', text: 'one' }] }];
+  setState({ sessions: { s1: { id: 's1', messages: prefix, subagents: {} } } });
+  handleWsInit('s1', {
+    delta_base: 'one', messages: [{
+      role: 'assistant', msg_id: 'two', content: [{ type: 'text', text: 'two' }],
+    }], subagents: [], server_instance: 'instance-a', attention_bound: true,
+  });
+  expect(store.get().sessions.s1.messages).toBe(prefix);
+  expect(prefix.map(message => message._msg_id)).toEqual(['one', 'two']);
 });
 
 test('normalizeConversationProjection preserves persisted tool activity', async () => {

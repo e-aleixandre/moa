@@ -1299,6 +1299,18 @@ func RegisterHandlers(sctx *SessionContext) {
 		return sctx.Agent.Messages(), nil
 	})
 
+	b.OnQuery(func(q GetDisplayMessagesSince) (DisplayMessagesSince, error) {
+		if sctx.treeSyncer != nil {
+			messages, valid := sctx.treeSyncer.DisplayMessagesSince(q.EntryID)
+			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil
+		}
+		if sctx.Tree != nil {
+			messages, valid := sctx.Tree.DisplayMessagesSince(q.EntryID)
+			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil
+		}
+		return DisplayMessagesSince{}, nil
+	})
+
 	b.OnQuery(func(q MsgIDInUse) (bool, error) {
 		if q.MsgID == "" {
 			return false, nil

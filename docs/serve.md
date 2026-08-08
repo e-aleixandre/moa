@@ -237,6 +237,22 @@ Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, 
 xAI login and plan-usage support do not change this security model or expose a
 new Serve authentication route.
 
+## Session WebSocket resume
+
+`GET /api/sessions/{id}/ws` sends an `init` event before live events. A client
+with a retained transcript may pass `since_msg=<durable message ID>` to request
+a smaller init: if that entry is still on the session's current tree path, the
+init includes `delta_base` with that ID and `messages` contains only the suffix
+after it. Clients append that suffix only when they still have the named base.
+
+The server falls back to the ordinary full, bounded history snapshot when the
+token is absent, stale, from another branch, removed by `/clear`, or when the
+suffix itself cannot fit the reconnect history limit. A resume token is an
+optimization, not an event replay cursor: clients must continue using the
+normal `server_instance`, `last_seq`, `unseen_gen`, and `attention_bound`
+semantics from every init. Unknown query parameters are ignored, so clients and
+servers can be upgraded independently.
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:

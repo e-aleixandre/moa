@@ -476,6 +476,38 @@ func TestWebSocket_Init(t *testing.T) {
 	}
 }
 
+func TestWebSocket_InitDeltaSinceMessage(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "ws-delta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "suffix", Content: []core.Content{core.TextContent("suffix")}})})
+
+	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer wsCancel()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws?since_msg=base", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var evt Event
+	if err := wsjson.Read(ctx, conn, &evt); err != nil {
+		t.Fatal(err)
+	}
+	data := evt.Data.(map[string]any)
+	if data["delta_base"] != "base" {
+		t.Fatalf("delta_base = %v, want base", data["delta_base"])
+	}
+	messages, ok := data["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v, want one suffix", data["messages"])
+	}
+}
+
 func TestWebSocketInit_EmptySessionBindsInitialZeroAndStaysConnected(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

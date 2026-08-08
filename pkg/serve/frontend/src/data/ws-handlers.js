@@ -46,6 +46,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           }
           result.push({
             _type: 'tool_start',
+			_msg_id: msg.msg_id,
             tool_call_id: c.tool_call_id,
             tool_name: c.tool_name,
             args: c.arguments || {},
@@ -68,6 +69,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
       const { command, output } = parseShellBody(text);
       result.push({
         _type: 'tool_start',
+		_msg_id: msg.msg_id,
         tool_call_id: 'shell_' + result.length,
         tool_name: 'bash',
         args: { command },
@@ -78,7 +80,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
       // Persistent goal-lifecycle marker (start / iteration verdict / end).
       // Rendered as a system line, matching the live goal event styling.
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
-      result.push({ _type: 'system', text });
+		result.push({ _type: 'system', _msg_id: msg.msg_id, text });
     } else if (msg.role === 'user') {
       if (msg.custom?.source === 'secret_batch') {
         result.push({
@@ -97,6 +99,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           legacySubagentJobIds.get(subagentTaskIdentity(msg.custom.subagent_task));
         result.push({
           _type: 'tool_start',
+			_msg_id: msg.msg_id,
           tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
           tool_name: 'subagent',
           args: { task: msg.custom.subagent_task || '' },
@@ -112,6 +115,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
         const bashText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
         result.push({
           _type: 'tool_start',
+			_msg_id: msg.msg_id,
           tool_call_id: 'bash_complete_' + result.length,
           tool_name: 'bash',
           args: { command: msg.custom.bash_command || '' },
@@ -127,6 +131,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           const jobId = subagent.jobId || legacySubagentJobIds.get(subagentTaskIdentity(subagent.task));
           result.push({
             _type: 'tool_start',
+			_msg_id: msg.msg_id,
             tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
             subagentJobId: jobId || undefined,
             tool_name: 'subagent',
@@ -139,6 +144,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           if (bash) {
             result.push({
               _type: 'tool_start',
+			_msg_id: msg.msg_id,
               tool_call_id: 'bash_complete_' + result.length,
               tool_name: 'bash',
               args: { command: bash.command },
@@ -156,6 +162,42 @@ export function normalizeHistory(raw, liveSubagents = []) {
     }
   }
   return result;
+}
+
+// A delta init is a suffix of the durable tree, not a replay stream. Append it
+// in place so the cached prefix keeps both its array and row identities; this
+// lets stream projection memoization retain the expensive already-rendered
+// history. Tool results are special: their matching assistant call may be in
+// that prefix, while normalizeHistory normally sees both at once.
+export function appendNormalizedHistoryDelta(prefix, raw, liveSubagents = []) {
+  const toolResults = new Map();
+  for (const msg of raw) {
+    if (msg?.role !== 'tool_result' || !msg.tool_call_id) continue;
+    const result = (msg.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    toolResults.set(msg.tool_call_id, {
+      result,
+      status: msg.custom?.rejected === true ? 'rejected' : msg.is_error ? 'error' : 'done',
+      timestamp: msg.timestamp,
+    });
+  }
+  for (let i = 0; i < prefix.length; i++) {
+    const row = prefix[i];
+    const update = row?._type === 'tool_start' && toolResults.get(row.tool_call_id);
+    if (!update) continue;
+    prefix[i] = {
+      ...row, ...update,
+      note: extractToolNote(update.result, update.status === 'rejected'),
+      timestamp: update.timestamp || row.timestamp,
+    };
+  }
+
+  for (const row of normalizeHistory(raw, liveSubagents)) {
+    const duplicate = row._type === 'tool_start'
+      ? prefix.some(existing => existing?._type === 'tool_start' && existing.tool_call_id === row.tool_call_id)
+      : row._msg_id && prefix.some(existing => existing?._type !== 'tool_start' && existing._msg_id === row._msg_id);
+    if (!duplicate) prefix.push(row);
+  }
+  return prefix;
 }
 
 // Match an old terminal card to a snapshot job only when the task identifies
@@ -445,7 +487,10 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
     ? { [viewingBash]: prev.subagents[viewingBash] }
     : null;
-  let messages = withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);
+	const canAppendDelta = !!data.delta_base && prev.messages?.some(message => message?._msg_id === data.delta_base);
+	let messages = canAppendDelta
+	  ? withLiveToolsInPlace(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents), data.live_tools)
+	  : withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);
   // The live init snapshot cannot contain terminal jobs, so restore their
   // persisted lifecycle cards separately. Upserting by job ID also upgrades
   // old notification-derived cards to the real terminal result/error.
@@ -608,6 +653,12 @@ function withLiveTools(messages, liveTools) {
   });
   for (const t of byId.values()) out.push(liveToolRow(t));
   return out;
+}
+
+function withLiveToolsInPlace(messages, liveTools) {
+	const reconciled = withLiveTools(messages, liveTools);
+	if (reconciled !== messages) messages.splice(0, messages.length, ...reconciled);
+	return messages;
 }
 
 function liveToolRow(t) {
