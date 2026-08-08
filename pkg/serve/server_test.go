@@ -630,6 +630,192 @@ func TestMuxWebSocket_InitEncodingFailureDegradesOnlyThatSubscription(t *testing
 	}
 }
 
+func TestMuxWebSocket_SlowSessionWriteDegradesOnlyThatSubscription(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	slow, err := mgr.CreateSession(CreateOpts{Title: "slow-mux-write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy, err := mgr.CreateSession(CreateOpts{Title: "healthy-mux-write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var frame muxServerFrame
+	if err := wsjson.Read(ctx, conn, &frame); err != nil { // hello
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{
+		{Session: slow.ID, Mode: "visible"}, {Session: healthy.ID, Mode: "visible"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := wsjson.Read(ctx, conn, &frame); err != nil { // inits
+			t.Fatal(err)
+		}
+	}
+
+	originalWrite := muxWriteJSON
+	muxWriteJSON = func(writeCtx context.Context, writeConn *websocket.Conn, value any) error { //nolint:staticcheck // test models one session's write timing out
+		if event, ok := value.(muxServerFrame); ok && event.Type == "event" && event.Session == slow.ID {
+			<-writeCtx.Done()
+			return writeCtx.Err()
+		}
+		return originalWrite(writeCtx, writeConn, value)
+	}
+	defer func() { muxWriteJSON = originalWrite }()
+
+	slow.runtime.Bus.Publish(bus.MessageStarted{SessionID: slow.ID})
+	healthy.runtime.Bus.Publish(bus.MessageStarted{SessionID: healthy.ID})
+	slow.runtime.Bus.Drain(time.Second)
+	healthy.runtime.Bus.Drain(time.Second)
+
+	gotResync, gotHealthy := false, false
+	for !gotResync || !gotHealthy {
+		if err := wsjson.Read(ctx, conn, &frame); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case frame.Type == "resync" && frame.Session == slow.ID:
+			if frame.Reason != "write_timeout" {
+				t.Fatalf("slow resync reason = %q, want write_timeout", frame.Reason)
+			}
+			gotResync = true
+		case frame.Type == "event" && frame.Session == healthy.ID:
+			gotHealthy = true
+		case frame.Type == "resync" && frame.Session == healthy.ID:
+			t.Fatalf("healthy session was degraded: %#v", frame)
+		}
+	}
+	pollUntil(t, time.Second, "slow mux viewer release", func() bool { return slow.wsConns.Load() == 0 })
+	if got := healthy.wsConns.Load(); got != 1 {
+		t.Fatalf("healthy subscription viewers = %d, want 1", got)
+	}
+}
+
+func TestMuxWebSocket_OversizedToolResultIsBounded(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "large-tool-result"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	conn.SetReadLimit(muxEventMaxBytes + 1)             //nolint:staticcheck // test must receive the deliberately bounded large frame
+	var frame muxServerFrame
+	if err := wsjson.Read(ctx, conn, &frame); err != nil { // hello
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{{Session: sess.ID, Mode: "visible"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, conn, &frame); err != nil || frame.Type != "init" {
+		t.Fatalf("init = %#v, err=%v", frame, err)
+	}
+
+	sess.runtime.Bus.Publish(bus.ToolExecEnded{
+		SessionID: sess.ID, ToolCallID: "large", ToolName: "bash", Result: strings.Repeat("x", 4*historyContentMaxBytes),
+	})
+	sess.runtime.Bus.Drain(time.Second)
+	if err := wsjson.Read(ctx, conn, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame.Type != "event" || frame.Session != sess.ID {
+		t.Fatalf("tool result frame = %#v", frame)
+	}
+	event, ok := frame.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("event data = %T, want object", frame.Data)
+	}
+	data, ok := event["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool result data = %#v, want object", event["data"])
+	}
+	result, ok := data["result"].(string)
+	if !ok || len(result) <= historyContentMaxBytes || !strings.Contains(result, "truncated on this device") {
+		t.Fatalf("bounded tool result = %q", result)
+	}
+	encoded, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > muxEventMaxBytes {
+		t.Fatalf("mux event = %d bytes, want <= %d", len(encoded), muxEventMaxBytes)
+	}
+	if got := sess.wsConns.Load(); got != 1 {
+		t.Fatalf("oversized result degraded session: viewers = %d, want 1", got)
+	}
+}
+
+func TestMuxWebSocket_DeadTransportTearsDownAllSubscriptions(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	first, err := mgr.CreateSession(CreateOpts{Title: "dead-transport-first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := mgr.CreateSession(CreateOpts{Title: "dead-transport-second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var frame muxServerFrame
+	if err := wsjson.Read(ctx, conn, &frame); err != nil { // hello
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{
+		{Session: first.ID, Mode: "visible"}, {Session: second.ID, Mode: "visible"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := wsjson.Read(ctx, conn, &frame); err != nil { // inits
+			t.Fatal(err)
+		}
+	}
+
+	originalWrite := muxWriteJSON
+	dead := make(chan struct{})
+	muxWriteJSON = func(writeCtx context.Context, writeConn *websocket.Conn, value any) error { //nolint:staticcheck // test models a shared transport failure
+		select {
+		case <-dead:
+			return errors.New("broken pipe")
+		default:
+			return originalWrite(writeCtx, writeConn, value)
+		}
+	}
+	defer func() { muxWriteJSON = originalWrite }()
+	close(dead)
+	first.runtime.Bus.Publish(bus.MessageStarted{SessionID: first.ID})
+	first.runtime.Bus.Drain(time.Second)
+	pollUntil(t, time.Second, "dead mux transport cleanup", func() bool {
+		return first.wsConns.Load() == 0 && second.wsConns.Load() == 0
+	})
+}
+
 func TestMuxWebSocket_SchedulerPreservesPerSessionEventOrdering(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

@@ -253,6 +253,22 @@ func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
 	}
 }
 
+func TestWsEventFromBus_ToolResultIsBoundedForEveryWebSocketRail(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.ToolExecEnded{
+		SessionID: "s1", ToolCallID: "tool-1", ToolName: "bash", Result: strings.Repeat("x", 4*historyContentMaxBytes),
+	})
+	if !ok || ev.Type != "tool_end" {
+		t.Fatalf("Type = %q ok=%v, want tool_end", ev.Type, ok)
+	}
+	data, ok := ev.Data.(ToolEndData)
+	if !ok {
+		t.Fatalf("Data type = %T, want ToolEndData", ev.Data)
+	}
+	if len(data.Result) <= historyContentMaxBytes || !strings.Contains(data.Result, "truncated on this device") {
+		t.Fatalf("bounded tool result = %q", data.Result)
+	}
+}
+
 func TestWsEventFromBus_MCPChanged(t *testing.T) {
 	ev, ok := wsEventFromBus(bus.MCPChanged{
 		SessionID: "s1", Total: 3, Ready: 1, Disabled: 1, Unhealthy: 1, Pending: 1,

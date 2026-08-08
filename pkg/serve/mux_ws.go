@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -12,6 +14,11 @@ import (
 const (
 	muxProtocolVersion = 1
 	muxEventsPerCycle  = 32
+	// A shared socket must never spend the legacy 30-second write timeout on
+	// one session. All normal live projections are bounded below; this is the
+	// final mux-only guard for a future projection that accidentally is not.
+	muxEventMaxBytes       = 128 << 10
+	muxSessionWriteTimeout = time.Second
 )
 
 // Kept as a seam so the session-isolation behavior can be tested with the
@@ -206,7 +213,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 			registered = true
 			order = append(order, request.Session)
 			watchReactor(reactor)
-			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: request.Session, Seq: cut, Data: init}) != nil {
+			if muxWriteSessionJSON(ctx, conn, muxServerFrame{Type: "init", Session: request.Session, Seq: cut, Data: init}) != nil {
 				return degrade(request.Session, "init_failed")
 			}
 			return true
@@ -238,7 +245,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 			sub.reactor, sub.cut = reactor, cut
 			replaced = true
 			watchReactor(reactor)
-			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: id, Seq: cut, Data: init}) != nil {
+			if muxWriteSessionJSON(ctx, conn, muxServerFrame{Type: "init", Session: id, Seq: cut, Data: init}) != nil {
 				return degrade(id, "init_failed")
 			}
 			return true
@@ -277,9 +284,8 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 				// in-session order while giving it priority over token-heavy peers.
 				for _, id := range append([]string(nil), order...) {
 					sub := subs[id]
-					if sub != nil && sub.reactor.hasPriority() && !writeMuxSession(ctx, conn, id, sub, true) {
-						unsubscribe(id)
-						if muxWriteJSON(ctx, conn, muxServerFrame{Type: "resync", Session: id, Reason: "overflow"}) != nil {
+					if sub != nil && sub.reactor.hasPriority() {
+						if reason := writeMuxSession(ctx, conn, id, sub, true); reason != "" && !degrade(id, reason) {
 							return
 						}
 					}
@@ -291,9 +297,8 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 				for n := 0; n < len(order); n++ {
 					id := order[(start+n)%len(order)]
 					sub := subs[id]
-					if sub != nil && !writeMuxSession(ctx, conn, id, sub, false) {
-						unsubscribe(id)
-						if muxWriteJSON(ctx, conn, muxServerFrame{Type: "resync", Session: id, Reason: "overflow"}) != nil {
+					if sub != nil {
+						if reason := writeMuxSession(ctx, conn, id, sub, false); reason != "" && !degrade(id, reason) {
 							return
 						}
 					}
@@ -327,42 +332,67 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 // consumes from another reactor, so a stream's 512-slot loss policy remains
 // isolated. priority drains through the queued attention event, even if that
 // requires exceeding the ordinary budget.
-func writeMuxSession(ctx context.Context, conn *websocket.Conn, id string, sub *muxSessionSubscription, priority bool) (ok bool) { //nolint:staticcheck // existing Serve WebSocket transport
-	ok = true
+func writeMuxSession(ctx context.Context, conn *websocket.Conn, id string, sub *muxSessionSubscription, priority bool) (reason string) { //nolint:staticcheck // existing Serve WebSocket transport
 	defer func() {
 		// A session's projection may contain an unexpected value supplied by a
 		// tool/provider. It must be degraded like an encoding failure, never take
 		// every other subscription down with the shared mux writer.
 		if recover() != nil {
-			ok = false
+			reason = "session_failure"
 		}
 	}()
 	for sent := 0; sent < muxEventsPerCycle || priority; sent++ {
 		select {
 		case <-sub.reactor.Done():
-			return false
+			return "overflow"
 		default:
 		}
 		select {
 		case event := <-sub.reactor.Events():
 			if event.Seq == 0 {
-				return false
+				return "overflow"
 			}
 			if event.Seq <= sub.cut {
 				continue
 			}
-			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "event", Session: id, Seq: event.Seq, Data: event}) != nil {
-				return false
+			frame := muxServerFrame{Type: "event", Session: id, Seq: event.Seq, Data: event}
+			encoded, err := json.Marshal(frame)
+			if err != nil {
+				return "encoding_failed"
+			}
+			if len(encoded) > muxEventMaxBytes {
+				return "payload_too_large"
+			}
+			// The writer is shared, but this deadline is deliberately per session:
+			// one stalled projection gets an explicit resync while other queues
+			// resume on the next scheduler turn. A failed resync still proves that
+			// the transport itself is dead and tears the mux down.
+			err = muxWriteSessionJSON(ctx, conn, frame)
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					return "write_timeout"
+				}
+				return "write_failed"
 			}
 			if isPriorityWsEvent(event) {
 				sub.reactor.clearPriority()
 				if priority {
-					return true
+					return ""
 				}
 			}
 		default:
-			return true
+			return ""
 		}
 	}
-	return true
+	return ""
+}
+
+// muxWriteSessionJSON prevents an init or live event from monopolizing the
+// shared mux writer. Control writes are deliberately not routed through this:
+// after a session write failure, their result tells the caller whether the
+// connection itself is dead or only that subscription needs a fresh snapshot.
+func muxWriteSessionJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck // existing Serve WebSocket transport
+	writeCtx, cancel := context.WithTimeout(ctx, muxSessionWriteTimeout)
+	defer cancel()
+	return muxWriteJSON(writeCtx, conn, v)
 }

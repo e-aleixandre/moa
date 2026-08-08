@@ -192,9 +192,9 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	case bus.MessageStarted:
 		return Event{Type: "message_start"}, true
 	case bus.TextDelta:
-		return Event{Type: "text_delta", Data: DeltaData{Delta: e.Delta}}, true
+		return Event{Type: "text_delta", Data: DeltaData{Delta: truncateHistoryString(e.Delta)}}, true
 	case bus.ThinkingDelta:
-		return Event{Type: "thinking_delta", Data: DeltaData{Delta: e.Delta}}, true
+		return Event{Type: "thinking_delta", Data: DeltaData{Delta: truncateHistoryString(e.Delta)}}, true
 	case bus.MessageEnded:
 		var inputTok, outputTok int
 		if e.Message.Usage != nil {
@@ -213,25 +213,25 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 		}}, true
 	case bus.ToolCallDelta:
 		return Event{Type: "tool_call_delta", Data: ToolCallDeltaData{
-			ToolCallID: e.ToolCallID, Args: e.Args,
+			ToolCallID: e.ToolCallID, Args: boundedHistoryMap(e.Args),
 		}}, true
 	case bus.ToolExecStarted:
 		return Event{Type: "tool_start", Data: ToolStartData{
-			ToolCallID: e.ToolCallID, ToolName: e.ToolName, Args: e.Args,
+			ToolCallID: e.ToolCallID, ToolName: e.ToolName, Args: boundedHistoryMap(e.Args),
 		}}, true
 	case bus.ToolExecUpdate:
 		return Event{Type: "tool_update", Data: ToolUpdateData{
-			ToolCallID: e.ToolCallID, Delta: e.Delta,
+			ToolCallID: e.ToolCallID, Delta: truncateHistoryString(e.Delta),
 		}}, true
 	case bus.ToolExecEnded:
 		return Event{Type: "tool_end", Data: ToolEndData{
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
-			IsError: e.IsError, Rejected: e.Rejected, Result: e.Result,
+			IsError: e.IsError, Rejected: e.Rejected, Result: truncateHistoryString(e.Result),
 		}}, true
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
 	case bus.RunEnded:
-		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText, RunGen: e.RunGen, UnseenGen: attentionGen}}, true
+		return Event{Type: "run_end", Data: RunEndData{Text: truncateHistoryString(e.FinalText), RunGen: e.RunGen, UnseenGen: attentionGen}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
 	case bus.MCPChanged:
@@ -324,7 +324,7 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 		return Event{Type: "auto_verify_end", Data: data}, true
 	case bus.PermissionRequested:
 		return Event{Type: "permission_request", Data: PermissionData{
-			ID: e.ID, RunGen: e.RunGen, UnseenGen: attentionGen, ToolName: e.ToolName, Args: e.Args,
+			ID: e.ID, RunGen: e.RunGen, UnseenGen: attentionGen, ToolName: e.ToolName, Args: boundedHistoryMap(e.Args),
 			AllowPattern: e.AllowPattern,
 		}}, true
 	case bus.PermissionResolved:
@@ -386,12 +386,12 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	case bus.BashJobStarted:
 		return Event{Type: "bash_job_start", Data: BashJobStartData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Command: e.Command, CWD: e.CWD}}, true
 	case bus.BashJobOutput:
-		return Event{Type: "bash_job_output", Data: BashJobOutputData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Delta: e.Delta}}, true
+		return Event{Type: "bash_job_output", Data: BashJobOutputData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Delta: truncateHistoryString(e.Delta)}}, true
 	case bus.BashJobEnded:
-		return Event{Type: "bash_job_end", Data: BashJobEndData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Status: e.Status, Output: e.Output}}, true
+		return Event{Type: "bash_job_end", Data: BashJobEndData{JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Status: e.Status, Output: truncateHistoryString(e.Output)}}, true
 	case bus.BashCompleted:
 		return Event{Type: "bash_complete", Data: BashCompleteData{
-			JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Command: e.Command, Status: e.Status, Text: e.Text,
+			JobID: e.JobID, OwnerAgentID: e.OwnerAgentID, Command: e.Command, Status: e.Status, Text: truncateHistoryString(e.Text),
 		}}, true
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
