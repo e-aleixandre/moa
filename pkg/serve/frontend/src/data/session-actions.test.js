@@ -9,10 +9,15 @@ import { test, expect, beforeEach, mock } from 'bun:test';
 // Mock only the network call, keeping api.js's other exports intact (other
 // modules transitively import syncConnections/reconnectAll/etc. from it).
 let apiResponse = [];
+const apiCalls = [];
 const realApi = await import('./api.js');
 mock.module('./api.js', () => ({
   ...realApi,
-  api: async () => apiResponse,
+  api: async (...args) => {
+    apiCalls.push(args);
+    if (apiResponse instanceof Error) throw apiResponse;
+    return apiResponse;
+  },
 }));
 
 const { store, setState } = await import('./store.js');
@@ -21,7 +26,21 @@ const { handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.j
 const { rememberPendingAttention, rememberedPendingAttention } = await import('./attention-receipt-store.js');
 
 beforeEach(() => {
+  apiCalls.length = 0;
   setState({ sessions: {}, tileTree: null, activeSession: null });
+});
+
+test('sendMessage reuses caller-held IDs after a lost response', async () => {
+  setState({ sessions: { s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] } } });
+  const operation = { msgId: 'c-msg-retry', steerId: 'c-steer-retry' };
+  apiResponse = new Error('network lost response');
+  await expect(sendMessage('s1', 'once', [], operation)).rejects.toThrow('network lost response');
+  apiResponse = { action: 'send', msg_id: operation.msgId };
+  await sendMessage('s1', 'once', [], operation);
+  expect(apiCalls.map((call) => call[2])).toEqual([
+    expect.objectContaining({ msg_id: operation.msgId, steer_id: operation.steerId }),
+    expect.objectContaining({ msg_id: operation.msgId, steer_id: operation.steerId }),
+  ]);
 });
 
 test('loadSessions preserves OpenAI rate-limit percents across a poll', async () => {

@@ -594,12 +594,19 @@ export async function sendMessage(id, text, attachments = [], operation = null) 
   }
 
   try {
+    // A 64 MiB decoded attachment can legitimately take minutes on a weak
+    // mobile uplink. Keep a bounded watchdog, but budget a conservative
+    // 128 KiB/s plus setup time (capped at twelve minutes); retries are safe
+    // because the stable IDs above converge on the server's first outcome.
+    const attachmentBytes = attachments.reduce((total, a) => total + Math.floor((a.data?.length || 0) * 3 / 4), 0);
+    const timeoutMs = Math.min(12 * 60_000, Math.max(120_000, 30_000 + Math.ceil(attachmentBytes / (128 * 1024)) * 1000));
     const res = await api('POST', `/api/sessions/${id}/send`, {
       text,
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
       steer_id: steerId,
       msg_id: msgId,
-    }, { timeoutMs: 0 });
+      server_instance: serverInstance,
+    }, { timeoutMs });
     // The response is authoritative about WHICH rail took the message: our
     // local prediction can be wrong in both directions (a run started between
     // our snapshot and the request, or the run we thought was live had ended).
@@ -639,6 +646,11 @@ export async function sendMessage(id, text, attachments = [], operation = null) 
     }
     return action;
   } catch (e) {
+    // A process fence rejects a retry that belongs to an older runtime. Refresh
+    // so the next user retry mints a pair for the current server instance.
+    if (String(e?.message || e).startsWith('409') && serverInstance) {
+      void loadSessions();
+    }
     // Roll back the optimistic echo so a rejected send (e.g. 400 on a bad
     // attachment) doesn't leave a phantom message stuck in "running". Remove
     // exactly the message we appended (by reference), leaving any events that

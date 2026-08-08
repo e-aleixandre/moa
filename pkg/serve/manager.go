@@ -69,6 +69,10 @@ type ManagedSession struct {
 	// attachMu serializes per-session attachment processing so the on-disk
 	// quota check is atomic against concurrent /send requests.
 	attachMu sync.Mutex
+	// sendMu serializes idempotency admission with attachment ingestion and bus
+	// admission. The identity itself lives in the runtime's history/queue, not
+	// in a bounded retry cache.
+	sendMu sync.Mutex
 
 	// Mutable under mu.
 	mu            sync.Mutex
@@ -1168,10 +1172,49 @@ func (m *Manager) resolveAuxiliaryModel(spec, sessionID, feature string) (core.M
 // send — so the caller can reconcile its optimistic view by identity even when
 // the server re-minted it.
 func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID string) (action, id string, descriptors []attachment.Descriptor, err error) {
+	return m.send(sessionID, text, atts, steerID, msgID, "")
+}
+
+// SendForInstance fences a browser retry to the process that first accepted
+// it. A replacement process may not yet have restored a live runtime, so the
+// browser refreshes before retrying against its durable session state.
+func (m *Manager) SendForInstance(sessionID, text string, atts []Attachment, steerID, msgID, serverInstance string) (action, id string, descriptors []attachment.Descriptor, err error) {
+	if serverInstance != "" && serverInstance != m.serverInstance {
+		return "", "", nil, ErrStaleServerInstance
+	}
+	return m.send(sessionID, text, atts, steerID, msgID, serverInstance)
+}
+
+func (m *Manager) send(sessionID, text string, atts []Attachment, steerID, msgID, _ string) (action, id string, descriptors []attachment.Descriptor, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", "", nil, ErrNotFound
 	}
+	// Idempotency is a pair, not two independent aliases. Requests without a
+	// complete valid pair are still delivered (with server-minted IDs) but have
+	// no retry contract.
+	requestSteerID, requestMsgID := sanitizeClientMsgID(steerID), sanitizeClientMsgID(msgID)
+	cacheable := requestSteerID != "" && requestMsgID != ""
+	steerID, msgID = requestSteerID, requestMsgID
+	sess.sendMu.Lock()
+	if cacheable {
+		state, queryErr := bus.QueryTyped[bus.GetClientSend, bus.ClientSendState](sess.runtime.Bus, bus.GetClientSend{SteerID: requestSteerID, MsgID: requestMsgID})
+		if queryErr != nil {
+			sess.sendMu.Unlock()
+			return "", "", nil, queryErr
+		}
+		if state.Found {
+			sess.sendMu.Unlock()
+			return state.Action, state.ID, m.attachmentDescriptors(sessionID, state.Content), nil
+		}
+		if state.Collision {
+			sess.sendMu.Unlock()
+			return "", "", nil, ErrSendIDCollision
+		}
+	}
+	defer func() {
+		sess.sendMu.Unlock()
+	}()
 	// Hold the lifecycle read lock for the whole send: a close cannot be
 	// admitted while this runs, so the quiescence check it makes and the run
 	// this may start cannot interleave. `closing` is then a stable read.
@@ -1316,6 +1359,22 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 		return "steer", acceptedSteer, descriptors, nil
 	}
 	return "send", accepted, descriptors, nil
+}
+
+func (m *Manager) attachmentDescriptors(sessionID string, content []core.Content) []attachment.Descriptor {
+	if m.attachStore == nil {
+		return nil
+	}
+	var descriptors []attachment.Descriptor
+	for _, block := range content {
+		if block.AttachmentID == "" {
+			continue
+		}
+		if descriptor, ok := m.attachStore.Lookup(sessionID, block.AttachmentID); ok {
+			descriptors = append(descriptors, descriptor)
+		}
+	}
+	return descriptors
 }
 
 func (m *Manager) releaseAttachmentRefs(sessionID string, descriptors []attachment.Descriptor) {

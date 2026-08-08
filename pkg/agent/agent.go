@@ -498,7 +498,7 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 // It also announces the prompt (AgentEventUserMessage) from the append point,
 // so subscribers only learn about it once it is genuinely in history — see
 // announceUserMessage.
-func (a *Agent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
+func (a *Agent) SendWithMsgID(ctx context.Context, prompt, msgID string, clientSteerID ...string) ([]core.AgentMessage, error) {
 	var appended *core.AgentMessage
 	msgs, err := a.executeAnnounced(ctx, func() {
 		if a.state.Model.ID == "" {
@@ -509,6 +509,9 @@ func (a *Agent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core
 			msg.MsgID = msgID
 		} else {
 			msg.EnsureMsgID()
+		}
+		if len(clientSteerID) > 0 && clientSteerID[0] != "" {
+			msg.Custom = map[string]any{"client_steer_id": clientSteerID[0]}
 		}
 		a.state.Messages = append(a.state.Messages, msg)
 		appended = &msg
@@ -611,11 +614,11 @@ func (a *Agent) SendWithContentMsgID(ctx context.Context, content []core.Content
 // SendWithContentAnnounced is SendWithContentMsgID that also announces the
 // prompt (AgentEventUserMessage) from the append point. Only the user-initiated
 // ingress paths announce: internal producers render themselves.
-func (a *Agent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
-	return a.sendWithContentMsgID(ctx, content, msgID, true)
+func (a *Agent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string, clientSteerID ...string) ([]core.AgentMessage, error) {
+	return a.sendWithContentMsgID(ctx, content, msgID, true, clientSteerID...)
 }
 
-func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content, msgID string, announce bool) ([]core.AgentMessage, error) {
+func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content, msgID string, announce bool, clientSteerID ...string) ([]core.AgentMessage, error) {
 	cc := core.CloneContent(content)
 	// The SendPromptWithContent handler reserved these native bytes in the
 	// inflight ledger before this run's goroutine started (see
@@ -634,6 +637,9 @@ func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content
 			msg.MsgID = msgID
 		} else {
 			msg.EnsureMsgID()
+		}
+		if len(clientSteerID) > 0 && clientSteerID[0] != "" {
+			msg.Custom = map[string]any{"client_steer_id": clientSteerID[0]}
 		}
 		a.state.Messages = append(a.state.Messages, msg)
 		a.steers.subInflight(n) // under a.mu, atomic with the append

@@ -604,6 +604,8 @@ var (
 	ErrInvalidThinking       = errors.New("invalid thinking level")
 	ErrInvalidPermissionMode = errors.New("invalid permission mode")
 	ErrNoMCP                 = errors.New("session has no MCP servers")
+	ErrStaleServerInstance   = errors.New("server instance changed; refresh before retrying")
+	ErrSendIDCollision       = errors.New("send IDs conflict with a prior message; retry with new IDs")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.

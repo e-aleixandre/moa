@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/attention"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -1661,7 +1662,7 @@ func TestSend_ClientMsgID_RemintedWhenInvalidOrHuge(t *testing.T) {
 	}
 }
 
-func TestSend_ClientMsgID_RemintedWhenAlreadyInHistory(t *testing.T) {
+func TestSend_ClientMsgID_ReplayReturnsOriginalOutcome(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply"), simpleResponseHandler("reply2")))
@@ -1670,21 +1671,181 @@ func TestSend_ClientMsgID_RemintedWhenAlreadyInHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := sendAndWaitIdle(t, mgr, sess, "primero", "c-reused")
+	firstAction, first, firstDescriptors, err := mgr.Send(sess.ID, "primero", []Attachment{{
+		Name: "retry.txt", Mime: "text/plain", Data: "cmV0cnk=",
+	}}, "c-reused-steer", "c-reused")
+	if err != nil || firstAction != "send" {
+		t.Fatalf("first send = (%q, %q, %v), want send", firstAction, first, err)
+	}
 	if first != "c-reused" {
 		t.Fatalf("first msg ID = %q, want c-reused", first)
 	}
 
-	// Replaying the same ID must not make the second message invisible: every
-	// client dedups by ID, so reusing one would suppress the new message
-	// everywhere. The server re-mints instead, and the prompt still lands.
-	second := sendAndWaitIdle(t, mgr, sess, "segundo", "c-reused")
-	if second == "c-reused" {
-		t.Fatal("a msg_id already present in history was reused")
+	// A retry can race the first run and must return every part of its original
+	// response, including durable attachment descriptors, without admitting its
+	// different retry body.
+	secondAction, second, secondDescriptors, err := mgr.Send(sess.ID, "segundo", nil, "c-reused-steer", "c-reused")
+	if err != nil || secondAction != firstAction || second != first || !sameAttachmentDescriptors(secondDescriptors, firstDescriptors) {
+		t.Fatalf("replay = (%q, %q, %+v, %v), want (%q, %q, %+v, nil)", secondAction, second, secondDescriptors, err, firstAction, first, firstDescriptors)
 	}
+	pollUntil(t, 5*time.Second, "run settles", func() bool { return sessState(sess) == StateIdle })
 	ids := historyMsgIDs(sess)
-	if len(ids) != 2 || ids[0] != first || ids[1] != second {
-		t.Fatalf("history user msg IDs = %v, want [%s %s]", ids, first, second)
+	if len(ids) != 1 || ids[0] != first {
+		t.Fatalf("history user msg IDs = %v, want [%s]", ids, first)
+	}
+}
+
+func TestSend_ClientIDPairCollisionIsRefused(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "reply")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "first", nil, "c-steer-one", "c-msg-one"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ids := range [][2]string{{"c-steer-two", "c-msg-one"}, {"c-steer-one", "c-msg-two"}} {
+		if _, _, _, err := mgr.Send(sess.ID, "must not disappear", nil, ids[0], ids[1]); !errors.Is(err, ErrSendIDCollision) {
+			t.Fatalf("Send(%q, %q) error = %v, want ErrSendIDCollision", ids[0], ids[1], err)
+		}
+	}
+}
+
+func TestSend_ConcurrentPairReplayReturnsAttachmentDescriptors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(100*time.Millisecond, "reply")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var start, done sync.WaitGroup
+	start.Add(1)
+	type result struct {
+		action      string
+		id          string
+		descriptors []attachment.Descriptor
+		err         error
+	}
+	results := make([]result, 2)
+	for i := range results {
+		done.Add(1)
+		go func(i int) {
+			defer done.Done()
+			start.Wait()
+			results[i].action, results[i].id, results[i].descriptors, results[i].err = mgr.Send(sess.ID, "with attachment", []Attachment{{
+				Name: "race.txt", Mime: "text/plain", Data: "cmFjZQ==",
+			}}, "c-race-steer", "c-race-msg")
+		}(i)
+	}
+	start.Done()
+	done.Wait()
+	for i, got := range results {
+		if got.err != nil || got.action != "send" || got.id != "c-race-msg" || len(got.descriptors) != 1 {
+			t.Fatalf("result %d = (%q, %q, %+v, %v), want original accepted outcome", i, got.action, got.id, got.descriptors, got.err)
+		}
+	}
+	if !sameAttachmentDescriptors(results[0].descriptors, results[1].descriptors) {
+		t.Fatalf("replay descriptors differ: %+v != %+v", results[0].descriptors, results[1].descriptors)
+	}
+	pollUntil(t, 5*time.Second, "run settles", func() bool { return sessState(sess) == StateIdle })
+	if ids := historyMsgIDs(sess); len(ids) != 1 || ids[0] != "c-race-msg" {
+		t.Fatalf("history user msg IDs = %v, want one c-race-msg", ids)
+	}
+}
+
+func sameAttachmentDescriptors(a, b []attachment.Descriptor) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID || a[i].SHA256 != b[i].SHA256 || a[i].Name != b[i].Name ||
+			a[i].Mime != b[i].Mime || a[i].Size != b[i].Size || a[i].Kind != b[i].Kind ||
+			a[i].Width != b[i].Width || a[i].Height != b[i].Height || !a[i].CreatedAt.Equal(b[i].CreatedAt) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestSendIdempotencyLivesInHistoryNotABoundedCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply")))
+	live, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 257; i++ {
+		msgID := fmt.Sprintf("c-msg-%d", i)
+		steerID := fmt.Sprintf("c-steer-%d", i)
+		action, got, _, sendErr := mgr.Send(live.ID, fmt.Sprintf("message %d", i), nil, steerID, msgID)
+		if sendErr != nil || action != "send" || got != msgID {
+			t.Fatalf("send %d ID = %q, want %q", i, got, msgID)
+		}
+		pollUntil(t, 5*time.Second, "run settles", func() bool { return sessState(live) == StateIdle })
+	}
+	// The first acceptance remains discoverable after more than the old cache
+	// capacity. A retry cannot turn into a 258th delivery.
+	action, id, _, err := mgr.Send(live.ID, "retry must not deliver", nil, "c-steer-0", "c-msg-0")
+	if err != nil || action != "send" || id != "c-msg-0" {
+		t.Fatalf("old retry = (%q, %q, %v), want (send, c-msg-0, nil)", action, id, err)
+	}
+	if ids := historyMsgIDs(live); len(ids) != 257 {
+		t.Fatalf("history user messages = %d, want 257", len(ids))
+	}
+
+	// An invalid pair remains deliverable but never becomes an unbounded retry
+	// identity in runtime state.
+	if _, _, _, err := mgr.Send(live.ID, "still delivered", nil, strings.Repeat("x", 100_000), "c-valid"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSendForInstanceRejectsRetryAfterInstanceChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldInstance := mgr.serverInstance
+	mgr.serverInstance = "replacement-instance"
+	if _, _, _, err := mgr.SendForInstance(sess.ID, "retry", nil, "c-steer", "c-msg", oldInstance); !errors.Is(err, ErrStaleServerInstance) {
+		t.Fatalf("SendForInstance old process fence error = %v, want ErrStaleServerInstance", err)
+	}
+}
+
+func TestSend_ClientPairReplaySurvivesCloseAndResume(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("reply")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const steerID, msgID = "c-resume-steer", "c-resume-msg"
+	if action, got, _, err := mgr.Send(sess.ID, "one durable delivery", nil, steerID, msgID); err != nil || action != "send" || got != msgID {
+		t.Fatalf("first send = (%q, %q, %v)", action, got, err)
+	}
+	pollUntil(t, 5*time.Second, "run settles", func() bool { return sessState(sess) == StateIdle })
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := mgr.ResumeSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, got, _, err := mgr.Send(resumed.ID, "must not deliver twice", nil, steerID, msgID)
+	if err != nil || action != "send" || got != msgID {
+		t.Fatalf("resumed replay = (%q, %q, %v), want (send, %q, nil)", action, got, err, msgID)
+	}
+	if ids := historyMsgIDs(resumed); len(ids) != 1 || ids[0] != msgID {
+		t.Fatalf("resumed history IDs = %v, want [%s]", ids, msgID)
 	}
 }
 
@@ -1714,7 +1875,7 @@ func TestSend_ConcurrentSameClientMsgID(t *testing.T) {
 			start.Wait()
 			// An error is a legitimate outcome for the loser of the race (e.g.
 			// it lost the run slot); a duplicated identity is not.
-			actions[i], accepted[i], _, _ = mgr.Send(sess.ID, "hola", nil, "", "c-race")
+			actions[i], accepted[i], _, _ = mgr.Send(sess.ID, "hola", nil, "c-race-steer", "c-race")
 		}()
 	}
 	start.Done()

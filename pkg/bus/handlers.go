@@ -92,6 +92,9 @@ func RegisterHandlers(sctx *SessionContext) {
 		// crossed into history is not returned here, so clients must not restore
 		// and send it a second time after Stop.
 		discarded := sctx.Agent.CancelSteer()
+		for _, steer := range discarded {
+			sctx.releaseMsgID(steer.MsgID)
+		}
 		if discardedOut != nil {
 			*discardedOut = discarded
 		}
@@ -211,6 +214,9 @@ func RegisterHandlers(sctx *SessionContext) {
 
 	b.OnCommand(func(cmd CancelSteer) error {
 		discarded := sctx.Agent.CancelSteer()
+		for _, steer := range discarded {
+			sctx.releaseMsgID(steer.MsgID)
+		}
 		// Broadcast the invalidation so every client of this session clears its
 		// queued chips (the queue is shared/authoritative).
 		sctx.Bus.Publish(SteersCanceled{
@@ -711,7 +717,10 @@ func RegisterHandlers(sctx *SessionContext) {
 			if id == "" {
 				id = core.NewSteerID()
 			}
-			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom}) {
+			msgID := sctx.reserveMsgID(cmd.MsgID)
+			sctx.setReservedClientSend(msgID, id, "steer", []core.Content{core.TextContent(cmd.Text)})
+			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text, MsgID: msgID, Custom: cmd.Custom}) {
+				sctx.releaseMsgID(msgID)
 				return ErrSteerQueueFull
 			}
 			// Report the identity on the STEER rail: a chip ID must never be
@@ -758,6 +767,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		msgID := cmd.MsgID
 		if cmd.Custom == nil {
 			msgID = sctx.reserveMsgID(msgID)
+			sctx.setReservedClientSend(msgID, cmd.SteerID, "send", []core.Content{core.TextContent(cmd.Text)})
 			if cmd.AcceptedMsgID != nil {
 				*cmd.AcceptedMsgID = msgID
 			}
@@ -770,7 +780,7 @@ func RegisterHandlers(sctx *SessionContext) {
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
 			}
 			if msgID != "" {
-				return sctx.Agent.SendWithMsgID(ctx, cmd.Text, msgID)
+				return sctx.Agent.SendWithMsgID(ctx, cmd.Text, msgID, cmd.SteerID)
 			}
 			return sctx.Agent.Send(ctx, cmd.Text)
 		}); err != nil {
@@ -798,7 +808,10 @@ func RegisterHandlers(sctx *SessionContext) {
 			// Carry the plain text alongside the content blocks: the Steered
 			// event (and every client rendering it) shows Text, so a queued
 			// send with attachments would otherwise surface as an empty chip.
-			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content}) {
+			msgID := sctx.reserveMsgID(cmd.MsgID)
+			sctx.setReservedClientSend(msgID, id, "steer", cmd.Content)
+			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: contentText(cmd.Content), MsgID: msgID, Content: cmd.Content}) {
+				sctx.releaseMsgID(msgID)
 				return ErrSteerQueueFull
 			}
 			if cmd.AcceptedSteerID != nil {
@@ -833,11 +846,12 @@ func RegisterHandlers(sctx *SessionContext) {
 		// Claim the message identity atomically with accepting the run — see
 		// the SendPrompt handler.
 		msgID := sctx.reserveMsgID(cmd.MsgID)
+		sctx.setReservedClientSend(msgID, cmd.SteerID, "send", cmd.Content)
 		if cmd.AcceptedMsgID != nil {
 			*cmd.AcceptedMsgID = msgID
 		}
 		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
-			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID)
+			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID, cmd.SteerID)
 		}); err != nil {
 			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)
 			sctx.releaseMsgID(msgID)
@@ -1300,6 +1314,57 @@ func RegisterHandlers(sctx *SessionContext) {
 			return true, nil
 		}
 		return sctx.msgIDInHistory(q.MsgID), nil
+	})
+
+	b.OnQuery(func(q GetClientSend) (ClientSendState, error) {
+		if q.SteerID == "" || q.MsgID == "" {
+			return ClientSendState{}, nil
+		}
+		// A queued item is authoritative until its message is materialized. Its
+		// own MsgID survives that transition, and its ID is carried into the
+		// durable user-message custom metadata below.
+		for _, steer := range sctx.Agent.PendingSteers() {
+			if steer.ID != q.SteerID && steer.MsgID != q.MsgID {
+				continue
+			}
+			if steer.ID == q.SteerID && steer.MsgID == q.MsgID {
+				return ClientSendState{Action: "steer", ID: steer.ID, Found: true, Content: core.CloneContent(steer.Content)}, nil
+			}
+			return ClientSendState{Collision: true}, nil
+		}
+		messages := sctx.Agent.Messages()
+		if sctx.Tree != nil {
+			messages = append(sctx.Tree.AllMessages(), messages...)
+		}
+		for _, msg := range messages {
+			if msg.Role != "user" {
+				continue
+			}
+			storedSteerID, _ := msg.Custom["client_steer_id"].(string)
+			if msg.MsgID != q.MsgID && storedSteerID != q.SteerID {
+				continue
+			}
+			if msg.MsgID == q.MsgID && storedSteerID == q.SteerID {
+				return ClientSendState{Action: "send", ID: msg.MsgID, Found: true, Content: core.CloneContent(msg.Content)}, nil
+			}
+			return ClientSendState{Collision: true}, nil
+		}
+		sctx.msgIDMu.Lock()
+		defer sctx.msgIDMu.Unlock()
+		for msgID, reservation := range sctx.reservedMsgID {
+			if msgID != q.MsgID && reservation.steerID != q.SteerID {
+				continue
+			}
+			if msgID != q.MsgID || reservation.steerID != q.SteerID {
+				return ClientSendState{Collision: true}, nil
+			}
+			id := msgID
+			if reservation.action == "steer" {
+				id = reservation.steerID
+			}
+			return ClientSendState{Action: reservation.action, ID: id, Found: true, Content: core.CloneContent(reservation.content)}, nil
+		}
+		return ClientSendState{}, nil
 	})
 
 	b.OnQuery(func(q GetBranchPoints) ([]BranchPoint, error) {
