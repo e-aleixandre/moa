@@ -332,15 +332,16 @@ export function retryHistoryHydration(sessionId) {
 
 function openWs(sessionId, initialBackoff) {
   pendingTimers.delete(sessionId);
-  beginHistoryHydration(sessionId);
+  const cached = store.get().sessions[sessionId]?.messages || [];
+  const cachedBase = cached.at(-1)?._msg_id;
+  const useDeltaResume = !forceFullInit.has(sessionId) && !!cachedBase;
+  beginHistoryHydration(sessionId, { deltaResume: useDeltaResume });
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 	  switchMark(sessionId, 'tap');
   let ws;
   try {
     const params = new URLSearchParams();
     if (switchDebugEnabled) params.set('debug_init', '1');
-    const cached = store.get().sessions[sessionId]?.messages || [];
-    const cachedBase = cached.at(-1)?._msg_id;
     if (!forceFullInit.delete(sessionId) && cachedBase) params.set('since_msg', cachedBase);
     const query = params.size > 0 ? `?${params}` : '';
     ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${query}`);

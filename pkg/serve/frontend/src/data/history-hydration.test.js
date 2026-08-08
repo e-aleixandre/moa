@@ -29,6 +29,30 @@ test('history hydration starts on socket open and ends at init', () => {
   expect(store.get().sessions.s1.historyPending).toBe(false);
 });
 
+test('a proven delta resume keeps its hydration boundary without showing a tail', () => {
+  setState({ sessions: { s1: {
+    id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+  } } });
+
+  beginHistoryHydration('s1', { deltaResume: true });
+
+  expect(store.get().sessions.s1).toMatchObject({
+    historyPending: true, historyTailNeeded: false, historyHydrated: false,
+  });
+});
+
+test('a full-init hydration still reserves the catching-up tail', () => {
+  setState({ sessions: { s1: {
+    id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+  } } });
+
+  beginHistoryHydration('s1');
+
+  expect(store.get().sessions.s1).toMatchObject({
+    historyPending: true, historyTailNeeded: true,
+  });
+});
+
 test('socket resume token is sent only for a cached durable transcript', () => {
   const originalWebSocket = globalThis.WebSocket;
   const originalLocation = globalThis.location;
